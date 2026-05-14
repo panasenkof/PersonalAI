@@ -1,0 +1,10 @@
+{
+  "expo": {
+    "name": "PIA Agent",
+    "slug": "pia-agent",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "platforms": ["ios", "android"],
+    "sdkVersion": "51.0.0"
+  }
+}

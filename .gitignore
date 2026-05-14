@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.db
+test_pia_agent.db
+pia.db
+data/
+test_blobs/
+.env
+node_modules/
+.expo/
+dist/
