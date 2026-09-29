@@ -31,6 +31,11 @@ class Settings(BaseSettings):
     slack_bot_token: str = ""
     slack_signing_secret: str = ""
 
+    # Speech-to-text (OpenAI-compatible /audio/transcriptions; empty = stub)
+    stt_base_url: str = ""
+    stt_api_key: str = ""
+    stt_model: str = "whisper-1"
+
     # Observability: "text" or "json" logs
     log_format: str = "text"
     log_level: str = "INFO"

@@ -25,3 +25,7 @@ jobs:
         run: mypy app
       - name: Tests (pytest)
         run: pytest tests/ -q
+      - name: Alembic smoke (fresh DB from scratch)
+        run: |
+          rm -f /tmp/ci_mig.db
+          DATABASE_URL="sqlite+aiosqlite:////tmp/ci_mig.db" alembic upgrade head

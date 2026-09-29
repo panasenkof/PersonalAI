@@ -4,8 +4,8 @@ import logging
 
 from app.db import SessionLocal
 from app.ingestion.pipeline import process_envelope
-from app.ingestion.schemas import IngestionEnvelope
-from app.models import IngestionJob
+from app.ingestion.schemas import IngestionEnvelope, utcnow
+from app.models import IngestionJob, JobStatus
 from app.queue.events import bus
 
 logger = logging.getLogger(__name__)
@@ -16,7 +16,28 @@ async def execute_job(job_id: str) -> dict:
 
     Used by the queue path: opens its own DB session, streams token/tool events
     on the EventBus for SSE subscribers, then dispatches the channel reply.
+    Any crash outside process_envelope's own handler marks the job failed so
+    SSE subscribers and pollers terminate instead of hanging forever.
     """
+    try:
+        return await _execute_job_inner(job_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("job %s crashed", job_id)
+        async with SessionLocal() as session:
+            job = await session.get(IngestionJob, job_id)
+            if job is not None and job.status not in (
+                JobStatus.completed.value,
+                JobStatus.failed.value,
+            ):
+                job.status = JobStatus.failed.value
+                job.error = str(exc)
+                job.updated_at = utcnow()
+                await session.commit()
+        await bus.publish(job_id, {"type": "error", "text": str(exc)})
+        return {"assistant_text": "", "error": str(exc), "failed": True}
+
+
+async def _execute_job_inner(job_id: str) -> dict:
     async with SessionLocal() as session:
         job = await session.get(IngestionJob, job_id)
         if job is None:

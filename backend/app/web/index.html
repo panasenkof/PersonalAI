@@ -5,41 +5,54 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PIA Agent</title>
 <style>
-  :root { --bg:#0f1115; --panel:#171a21; --line:#262b36; --text:#e6e9ef; --muted:#8b93a5; --accent:#4f8cff; --ok:#3ecf8e; }
+  :root { --bg:#0f1115; --panel:#171a21; --line:#262b36; --text:#e6e9ef; --muted:#8b93a5; --accent:#4f8cff; --ok:#3ecf8e; --err:#ff7b7b; }
   * { box-sizing: border-box; }
   body { margin:0; font:15px/1.45 system-ui, sans-serif; background:var(--bg); color:var(--text); height:100vh; display:flex; flex-direction:column; }
   header { display:flex; align-items:center; gap:12px; padding:10px 16px; background:var(--panel); border-bottom:1px solid var(--line); }
   header b { font-size:16px; } header .spacer { flex:1; }
   button { background:var(--accent); color:#fff; border:0; border-radius:8px; padding:8px 14px; cursor:pointer; font:inherit; }
   button.ghost { background:transparent; border:1px solid var(--line); color:var(--text); }
+  button.danger { background:#7b2d2d; }
   button:disabled { opacity:.5; cursor:default; }
   main { flex:1; display:flex; min-height:0; }
   aside { width:240px; background:var(--panel); border-right:1px solid var(--line); overflow:auto; padding:10px; }
-  aside .conv { padding:8px 10px; border-radius:8px; cursor:pointer; color:var(--muted); margin-bottom:4px; }
+  aside .conv { padding:8px 10px; border-radius:8px; cursor:pointer; color:var(--muted); margin-bottom:4px; display:flex; align-items:center; gap:6px; }
   aside .conv:hover { background:#1e2330; }
   aside .conv.active { background:#232a3a; color:var(--text); }
+  aside .conv span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; }
   section.chat { flex:1; display:flex; flex-direction:column; min-width:0; }
+  #chatbar { display:flex; align-items:center; gap:10px; padding:8px 16px; border-bottom:1px solid var(--line); background:#12151c; }
+  #chatTitle { flex:1; color:var(--muted); font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   #msgs { flex:1; overflow:auto; padding:20px; display:flex; flex-direction:column; gap:10px; }
   .msg { max-width:760px; padding:10px 14px; border-radius:12px; white-space:pre-wrap; word-break:break-word; }
   .msg.user { background:#27406e; align-self:flex-end; }
   .msg.assistant { background:var(--panel); border:1px solid var(--line); align-self:flex-start; }
-  .msg.meta { align-self:center; color:var(--muted); font-size:12px; background:none; border:0; }
+  .msg.meta { align-self:center; color:var(--muted); font-size:12px; background:none; border:0; text-align:center; }
+  .msg code { background:#0c0e12; padding:1px 5px; border-radius:4px; font-family:ui-monospace,monospace; font-size:.92em; }
+  .msg strong { color:#ffd479; }
+  .msg em { color:#9ecbff; }
+  .ts { display:block; text-align:right; font-size:10px; color:var(--muted); margin-top:4px; }
+  .thinking::after { content:"…"; animation: dots 1.2s steps(4) infinite; }
+  @keyframes dots { 0%{content:""} 25%{content:"."} 50%{content:".."} 75%{content:"..."} }
   #composer { display:flex; gap:8px; padding:14px; border-top:1px solid var(--line); }
   #composer textarea { flex:1; resize:none; height:52px; background:var(--panel); color:var(--text); border:1px solid var(--line); border-radius:10px; padding:10px; font:inherit; }
+  textarea:focus, input:focus, select:focus { outline:1px solid var(--accent); }
   .overlay { position:fixed; inset:0; background:rgba(0,0,0,.6); display:flex; align-items:center; justify-content:center; z-index:10; }
-  .card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:24px; width:360px; display:flex; flex-direction:column; gap:10px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:24px; width:380px; max-height:90vh; overflow:auto; display:flex; flex-direction:column; gap:10px; }
   .card h2 { margin:0 0 6px; font-size:18px; }
   input, select { background:#12151c; color:var(--text); border:1px solid var(--line); border-radius:8px; padding:9px 10px; font:inherit; width:100%; }
   .hidden { display:none !important; }
   .tool-chip { font-size:12px; color:var(--muted); border:1px dashed var(--line); border-radius:20px; padding:2px 10px; align-self:flex-start; }
-  #settings .row { display:flex; flex-direction:column; gap:4px; margin-bottom:8px; }
+  #settings .row { display:flex; flex-direction:column; gap:4px; }
   #settings label { font-size:12px; color:var(--muted); }
+  #setStats { font-size:12px; color:var(--muted); border-top:1px dashed var(--line); padding-top:8px; line-height:1.7; }
+  .err { color:var(--err); font-size:13px; }
+  .ok { color:var(--ok); font-size:13px; }
 </style>
 </head>
 <body>
 <header>
   <b>PIA Agent</b>
-  <span id="who" style="color:var(--muted);font-size:13px"></span>
   <span class="spacer"></span>
   <button class="ghost" id="btnSettings">Настройки LLM</button>
   <button class="ghost" id="btnLogout">Выйти</button>
@@ -50,6 +63,10 @@
     <div id="convList"></div>
   </aside>
   <section class="chat">
+    <div id="chatbar">
+      <span id="chatTitle">Новый чат</span>
+      <button class="ghost danger hidden" id="btnDelete">🗑 Удалить чат</button>
+    </div>
     <div id="msgs"></div>
     <div id="composer">
       <textarea id="input" placeholder="Спросите или попросите запомнить… (Enter — отправить, Shift+Enter — новая строка)"></textarea>
@@ -66,7 +83,7 @@
     <input id="password" type="password" placeholder="пароль (мин. 8)" autocomplete="current-password">
     <button id="btnLogin">Войти</button>
     <button class="ghost" id="btnRegister">Зарегистрироваться</button>
-    <div id="authErr" style="color:#ff7b7b;font-size:13px"></div>
+    <div id="authErr" class="err"></div>
   </div>
 </div>
 
@@ -84,32 +101,63 @@
       <button id="btnSaveSettings">Сохранить</button>
       <button class="ghost" id="btnCloseSettings">Закрыть</button>
     </div>
-    <div id="setMsg" style="font-size:13px;color:var(--ok)"></div>
+    <div id="setMsg"></div>
+    <div id="setStats"></div>
   </div>
 </div>
 
 <script>
 const $ = (id) => document.getElementById(id);
+const AUTH_PATHS = new Set(["/v1/auth/token", "/v1/auth/register", "/v1/auth/refresh"]);
 let token = localStorage.getItem("pia_token") || "";
 let conversations = [];
 let currentConv = null;
 let busy = false;
 
-const api = async (path, opts = {}) => {
-  opts.headers = Object.assign({}, opts.headers);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function logout() {
+  token = "";
+  localStorage.removeItem("pia_token");
+  localStorage.removeItem("pia_refresh");
+  $("authView").classList.remove("hidden");
+}
+
+async function tryRefresh() {
+  const rt = localStorage.getItem("pia_refresh");
+  if (!rt) return false;
+  try {
+    const r = await fetch("/v1/auth/refresh", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: rt }),
+    });
+    if (!r.ok) return false;
+    const j = await r.json();
+    token = j.access_token;
+    localStorage.setItem("pia_token", token);
+    if (j.refresh_token) localStorage.setItem("pia_refresh", j.refresh_token);
+    return true;
+  } catch (e) { return false; }
+}
+
+async function api(path, opts = {}, allowRefresh = true) {
+  opts = { ...opts, headers: { ...(opts.headers || {}) } };
   if (token) opts.headers["Authorization"] = "Bearer " + token;
   if (opts.body && typeof opts.body !== "string") {
     opts.headers["Content-Type"] = "application/json";
     opts.body = JSON.stringify(opts.body);
   }
   const r = await fetch(path, opts);
-  if (r.status === 401 && path !== "/v1/auth/token" && path !== "/v1/auth/register") { logout(); throw new Error("unauthorized"); }
+  if (r.status === 401 && allowRefresh && !AUTH_PATHS.has(path)) {
+    if (await tryRefresh()) return api(path, opts, false);
+    logout();
+    throw new Error("сессия истекла — войдите снова");
+  }
   const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(data.detail ? JSON.stringify(data.detail) : r.status);
+  if (!r.ok) throw new Error(data.detail ? JSON.stringify(data.detail) : ("HTTP " + r.status));
   return data;
-};
-
-function logout() { token = ""; localStorage.removeItem("pia_token"); $("authView").classList.remove("hidden"); }
+}
 
 async function loginOrRegister(register) {
   $("authErr").textContent = "";
@@ -118,25 +166,58 @@ async function loginOrRegister(register) {
     const data = await api(path, { method: "POST", body: { email: $("email").value.trim(), password: $("password").value } });
     token = data.access_token;
     localStorage.setItem("pia_token", token);
+    if (data.refresh_token) localStorage.setItem("pia_refresh", data.refresh_token);
     $("authView").classList.add("hidden");
     await boot();
   } catch (e) { $("authErr").textContent = String(e.message || e); }
 }
 
-async function boot() {
-  try { await api("/v1/settings/llm"); } catch (e) {}
-  await loadConversations();
-  if (!currentConv) newChat();
+// ---------- rendering ----------
+function renderRich(text) {
+  // escape first, then apply a tiny markdown subset (**bold** `code` *italic*)
+  const esc = String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return esc
+    .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/`([^`\n]+)`/g, "<code>$1</code>")
+    .replace(/(^|[\s(])\*([^*\n]+)\*(?=[\s).,;:!?]|$)/g, "$1<em>$2</em>");
 }
 
+function addMsg(role, text, when) {
+  const d = document.createElement("div");
+  d.className = "msg " + role;
+  if (role === "meta") {
+    d.textContent = text;
+  } else {
+    d.innerHTML = renderRich(text);
+    const ts = document.createElement("span");
+    ts.className = "ts";
+    ts.textContent = new Date(when || Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    d.appendChild(ts);
+    d.title = new Date(when || Date.now()).toLocaleString();
+  }
+  $("msgs").appendChild(d);
+  $("msgs").scrollTop = $("msgs").scrollHeight;
+  return d;
+}
+function addMeta(text) { return addMsg("meta", text); }
+
+function setChatbar() {
+  $("chatTitle").textContent = currentConv ? (currentConv.title || "Чат") : "Новый чат";
+  $("btnDelete").classList.toggle("hidden", !currentConv);
+}
+
+// ---------- conversations ----------
 async function loadConversations() {
   conversations = await api("/v1/conversations");
   const box = $("convList");
   box.innerHTML = "";
-  conversations.forEach(c => {
+  conversations.forEach((c) => {
     const d = document.createElement("div");
     d.className = "conv" + (currentConv && currentConv.id === c.id ? " active" : "");
-    d.textContent = c.title || "Без названия";
+    const s = document.createElement("span");
+    s.textContent = c.title || "Без названия";
+    d.appendChild(s);
+    d.title = c.title || "";
     d.onclick = () => openConversation(c);
     box.appendChild(d);
   });
@@ -146,26 +227,45 @@ function newChat() {
   currentConv = null;
   $("msgs").innerHTML = "";
   addMeta("Новый чат — история сохраняется автоматически");
+  setChatbar();
   loadConversations();
 }
 
 async function openConversation(c) {
   currentConv = c;
   $("msgs").innerHTML = "";
+  setChatbar();
   const turns = await api(`/v1/conversations/${c.id}/messages`);
-  turns.forEach(t => addMsg(t.role, t.content));
+  turns.forEach((t) => addMsg(t.role, t.content, t.created_at));
   await loadConversations();
 }
 
-function addMsg(role, text) {
+async function deleteCurrent() {
+  if (!currentConv) return;
+  if (!confirm("Удалить чат «" + (currentConv.title || "Без названия") + "»?")) return;
+  try {
+    await api(`/v1/conversations/${currentConv.id}`, { method: "DELETE" });
+    newChat();
+  } catch (e) { addMeta("Ошибка удаления: " + (e.message || e)); }
+}
+
+async function boot() {
+  try { await api("/v1/settings/llm"); } catch (e) {}
+  await loadConversations();
+  newChat();
+}
+
+// ---------- sending + streaming ----------
+function showThinking() {
   const d = document.createElement("div");
-  d.className = "msg " + role;
-  d.textContent = text;
+  d.className = "msg meta thinking";
+  d.id = "thinking";
+  d.textContent = "думаю";
   $("msgs").appendChild(d);
   $("msgs").scrollTop = $("msgs").scrollHeight;
   return d;
 }
-function addMeta(text) { return addMsg("meta", text); }
+function hideThinking() { const t = $("thinking"); if (t) t.remove(); }
 
 async function send() {
   if (busy) return;
@@ -174,58 +274,119 @@ async function send() {
   busy = true; $("btnSend").disabled = true;
   $("input").value = "";
   addMsg("user", text);
+  const thinking = showThinking();
   try {
     const body = { text, channel: "mobile" };
     if (currentConv) body.conversation_id = currentConv.id;
     const res = await api("/v1/messages", { method: "POST", body });
     if (res.conversation_id && (!currentConv || currentConv.id !== res.conversation_id)) {
       currentConv = { id: res.conversation_id, title: text.slice(0, 80) };
+      setChatbar();
       loadConversations();
     }
     if (res.assistant_text) {
+      hideThinking();
       addMsg("assistant", res.assistant_text);
     } else if (res.job_id) {
+      hideThinking();
       await streamJob(res.job_id);
     }
   } catch (e) {
-    addMsg("meta", "Ошибка: " + (e.message || e));
+    hideThinking();
+    addMeta("Ошибка: " + (e.message || e));
   } finally {
+    hideThinking();
     busy = false; $("btnSend").disabled = false;
     $("input").focus();
   }
 }
 
+async function pollJob(jobId, bubble) {
+  // Fallback when SSE drops: poll the job until it reaches a terminal state.
+  if (!bubble.textContent) bubble.textContent = "(соединение прервано — переключаюсь на опрос…)";
+  for (let i = 0; i < 180; i++) {
+    await sleep(1000);
+    let job;
+    try { job = await api(`/v1/jobs/${jobId}`); } catch (e) { continue; }
+    if (job.status === "completed") {
+      const text = job.result && job.result.assistant_text;
+      if (text) bubble.innerHTML = renderRich(text) + bubble.querySelector(".ts")?.outerHTML;
+      return;
+    }
+    if (job.status === "failed") {
+      bubble.textContent = "Ошибка: " + (job.error || "задача не удалась");
+      return;
+    }
+  }
+  if (!bubble.textContent || bubble.textContent.includes("опрос")) {
+    bubble.textContent = "Таймаут: ответ не пришёл за 3 минуты";
+  }
+}
+
 function streamJob(jobId) {
   return new Promise((resolve) => {
+    let settled = false;
     const bubble = addMsg("assistant", "");
-    let toolChip = null;
-    const es = new EventSource(`/v1/jobs/${jobId}/events?access_token=${encodeURIComponent(token)}`);
-    const finish = () => { es.close(); resolve(); };
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      try { es.close(); } catch (e) {}
+      resolve();
+    };
+    let es;
+    try {
+      es = new EventSource(`/v1/jobs/${jobId}/events?access_token=${encodeURIComponent(token)}`);
+    } catch (e) {
+      pollJob(jobId, bubble).then(finish);
+      return;
+    }
     es.addEventListener("token", (ev) => {
-      const d = JSON.parse(ev.data);
-      bubble.textContent += d.content || "";
+      if (settled) return;
+      let d; try { d = JSON.parse(ev.data); } catch (e) { return; }
+      // keep the timestamp span last
+      const ts = bubble.querySelector(".ts");
+      const textNode = document.createTextNode(d.content || "");
+      bubble.insertBefore(textNode, ts);
       $("msgs").scrollTop = $("msgs").scrollHeight;
     });
     es.addEventListener("tool", (ev) => {
-      const d = JSON.parse(ev.data);
-      if (!toolChip) { toolChip = document.createElement("div"); toolChip.className = "tool-chip"; $("msgs").appendChild(toolChip); }
-      toolChip.textContent = "⚙ " + d.name;
+      if (settled) return;
+      let d; try { d = JSON.parse(ev.data); } catch (e) { return; }
+      let chip = bubble.nextElementSibling;
+      if (!chip || !chip.classList.contains("tool-chip")) {
+        chip = document.createElement("div");
+        chip.className = "tool-chip";
+        bubble.after(chip);
+      }
+      chip.textContent = "⚙ " + d.name;
       $("msgs").scrollTop = $("msgs").scrollHeight;
     });
     es.addEventListener("done", (ev) => {
-      const d = JSON.parse(ev.data);
-      if (d.text && !bubble.textContent) bubble.textContent = d.text;
+      if (settled) return;
+      let d; try { d = JSON.parse(ev.data); } catch (e) { d = {}; }
+      if (d.text && !bubble.textContent.replace(/\s*\d{2}:\d{2}$/, "")) {
+        const ts = bubble.querySelector(".ts");
+        bubble.insertBefore(document.createTextNode(d.text), ts);
+      }
       finish();
     });
     es.addEventListener("error", (ev) => {
+      if (settled) return;
       if (ev.data) {
-        try { bubble.textContent = "Ошибка: " + (JSON.parse(ev.data).text || ""); } catch (e) {}
+        // server-sent error event (has payload)
+        let d; try { d = JSON.parse(ev.data); } catch (e) { d = {}; }
+        bubble.textContent = "Ошибка: " + (d.text || "неизвестная ошибка");
+        finish();
+        return;
       }
-      finish();
+      // native connection error / stream EOF → poll as a fallback
+      try { es.close(); } catch (e) {}
+      pollJob(jobId, bubble).then(finish);
     });
   });
 }
 
+// ---------- settings ----------
 async function loadSettings() {
   try {
     const s = await api("/v1/settings/llm");
@@ -234,10 +395,22 @@ async function loadSettings() {
     $("sModel").value = s.default_model;
     $("sEmb").value = s.embedding_model || "";
   } catch (e) {}
+  try {
+    const st = await api("/v1/stats");
+    const u = st.usage_tokens || {};
+    $("setStats").innerHTML =
+      "📊 Статистика: джобов — <b>" + Object.values(st.jobs || {}).reduce((a, b) => a + b, 0) +
+      "</b>, чатов — <b>" + st.conversations +
+      "</b>, сообщений — <b>" + st.chat_turns +
+      "</b>, сущностей — <b>" + st.entities +
+      "</b>, наблюдений — <b>" + st.observations +
+      "</b><br>Токены: prompt <b>" + u.prompt + "</b> / completion <b>" + u.completion + "</b>";
+  } catch (e) { $("setStats").textContent = ""; }
 }
 
 async function saveSettings() {
-  $("setMsg").textContent = "";
+  const msg = $("setMsg");
+  msg.className = ""; msg.textContent = "";
   const body = {
     provider_kind: $("sProvider").value,
     base_url: $("sBase").value.trim(),
@@ -248,18 +421,21 @@ async function saveSettings() {
   if (key) body.api_key = key;
   try {
     await api("/v1/settings/llm", { method: "PATCH", body });
-    $("setMsg").textContent = "Сохранено ✔";
+    msg.className = "ok";
+    msg.textContent = "Сохранено ✔";
     $("sKey").value = "";
-  } catch (e) { $("setMsg").style.color = "#ff7b7b"; $("setMsg").textContent = String(e.message || e); }
+    loadSettings();
+  } catch (e) { msg.className = "err"; msg.textContent = String(e.message || e); }
 }
 
-// --- wire events ---
+// ---------- wiring ----------
 $("btnLogin").onclick = () => loginOrRegister(false);
 $("btnRegister").onclick = () => loginOrRegister(true);
 $("btnSend").onclick = send;
 $("btnNew").onclick = newChat;
+$("btnDelete").onclick = deleteCurrent;
 $("btnLogout").onclick = logout;
-$("btnSettings").onclick = () => { $("settingsView").classList.remove("hidden"); loadSettings(); $("setMsg").style.color = "var(--ok)"; };
+$("btnSettings").onclick = () => { $("settingsView").classList.remove("hidden"); $("setMsg").className = ""; loadSettings(); };
 $("btnCloseSettings").onclick = () => $("settingsView").classList.add("hidden");
 $("btnSaveSettings").onclick = saveSettings;
 $("input").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } });

@@ -13,14 +13,19 @@ export default function App() {
   const [conversationId, setConversationId] = useState<string | null>(null);
 
   async function register() {
-    const r = await fetch(`${API_BASE}/v1/auth/register`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }),
-    });
-    const j = await r.json();
-    if (!r.ok) throw new Error(JSON.stringify(j));
-    setToken(j.access_token);
+    const attempt = async (path: string) => {
+      const r = await fetch(`${API_BASE}${path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      return { ok: r.ok, status: r.status, body: await r.json() };
+    };
+    // register; if the account already exists — fall back to login
+    let res = await attempt("/v1/auth/register");
+    if (!res.ok && res.status === 409) res = await attempt("/v1/auth/token");
+    if (!res.ok) throw new Error(JSON.stringify(res.body));
+    setToken(res.body.access_token);
     setReply("Вход выполнен.");
   }
 

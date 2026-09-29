@@ -22,10 +22,8 @@ async def store_blob(
         sha256=sha,
         mime=mime,
         size_bytes=size,
+        filename=filename,
     )
-    if filename:
-        # filename kept out of the schema in MVP; mime is enough for routing
-        pass
     session.add(blob)
     await session.flush()
     return blob

@@ -44,11 +44,13 @@ def test_auth_rate_limit(client: TestClient, monkeypatch) -> None:
     monkeypatch.setattr(main_mod, "_settings", _S())
     monkeypatch.setattr(main_mod, "_access_limiter", SlidingWindowLimiter(limit=2))
 
+    import uuid
+
     codes = []
     for i in range(4):
         r = client.post(
             "/v1/auth/register",
-            json={"email": f"rl{i}@example.com", "password": "secret1234"},
+            json={"email": f"rl{i}-{uuid.uuid4().hex[:8]}@example.com", "password": "secret1234"},
         )
         codes.append(r.status_code)
     assert codes[:2] == [200, 200]

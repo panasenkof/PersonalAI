@@ -43,8 +43,17 @@ async def _download_tg_file(file_id: str) -> tuple[bytes, str]:
         data = r.json()
         path = data["result"]["file_path"]
         mime = "image/jpeg"
-        if path.lower().endswith(".png"):
+        lower = path.lower()
+        if lower.endswith(".png"):
             mime = "image/png"
+        elif lower.endswith((".oga", ".ogg", ".opus")):
+            mime = "audio/ogg"
+        elif lower.endswith(".mp3"):
+            mime = "audio/mpeg"
+        elif lower.endswith(".m4a"):
+            mime = "audio/mp4"
+        elif lower.endswith(".txt"):
+            mime = "text/plain"
         fr = await client.get(f"https://api.telegram.org/file/bot{token}/{path}")
         fr.raise_for_status()
         return fr.content, mime
@@ -114,6 +123,13 @@ async def telegram_webhook(
         data, mime = await _download_tg_file(best["file_id"])
         blob = await store_blob(session, user.id, data, mime, filename="telegram_photo.jpg")
         attachments.append(Attachment(mime=mime, storage_key=blob.storage_key, filename="telegram_photo.jpg"))
+    else:
+        audio = msg.get("voice") or msg.get("audio")
+        if audio:
+            # voice notes → audio attachment; pipeline transcribes via STT when configured
+            data, mime = await _download_tg_file(audio["file_id"])
+            blob = await store_blob(session, user.id, data, mime, filename="telegram_voice")
+            attachments.append(Attachment(mime=mime, storage_key=blob.storage_key, filename="telegram_voice"))
     env = IngestionEnvelope(
         text=text or None,
         attachments=attachments,

@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agent.history import get_or_create_conversation, persist_turn
 from app.agent.orchestrator import run_agent
 from app.ingestion.schemas import IngestionEnvelope, utcnow
-from app.ingestion.stt import StubSTTProvider
+from app.ingestion.stt import stt_provider_from_settings
 from app.models import IngestionJob, JobStatus
 
 
@@ -15,7 +15,7 @@ async def build_user_prompt(envelope: IngestionEnvelope) -> str:
     parts: list[str] = []
     if envelope.text:
         parts.append(envelope.text)
-    stt = StubSTTProvider()
+    stt = stt_provider_from_settings()
     for att in envelope.attachments:
         if att.mime.startswith("audio/"):
             tr = await stt.transcribe(storage_key=att.storage_key, mime=att.mime)
