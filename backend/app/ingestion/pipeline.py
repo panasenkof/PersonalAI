@@ -38,6 +38,7 @@ async def process_envelope(
     user_id: str,
     job: IngestionJob,
     envelope: IngestionEnvelope,
+    emit: Any | None = None,
 ) -> dict[str, Any]:
     job.status = JobStatus.processing.value
     job.updated_at = utcnow()
@@ -47,7 +48,13 @@ async def process_envelope(
             session, user_id, envelope.channel.value, conversation_id=envelope.conversation_id
         )
         prompt = await build_user_prompt(envelope)
-        out = await run_agent(session, user_id, prompt, conversation_id=conv.id if conv else None)
+        out = await run_agent(
+            session,
+            user_id,
+            prompt,
+            conversation_id=conv.id if conv else None,
+            emit=emit,
+        )
         if conv is not None and out.get("assistant_text"):
             await persist_turn(session, user_id, conv.id, prompt, out["assistant_text"])
             job.envelope = {**job.envelope, "conversation_id": conv.id}

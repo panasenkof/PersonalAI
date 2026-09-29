@@ -102,14 +102,14 @@ def test_local_fallback_switches_provider(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(orchestrator, "local_fallback_target", fake_target)
 
     async def run():
-        return await orchestrator._chat_with_fallback(
+        return await orchestrator._chat_step(
             BrokenLocal(base_url="http://127.0.0.1:1/v1", api_key=None),
             "local-model",
             [ChatMessage(role="user", content="hi")],
             [],
         )
 
-    provider, model, result = __import__("asyncio").run(run())
+    provider, model, result, _streamed = __import__("asyncio").run(run())
     assert calls.get("target") is True
     assert model == "cloud-model"
     assert result.message.content == "из облака"

@@ -34,6 +34,16 @@ class Settings(BaseSettings):
     # Comma-separated CORS origins; "*" disables credentials (browser security rules)
     cors_origins: str = "*"
 
+    # "sync" = process inside the HTTP request (dev/tests);
+    # "queue" = accept immediately, process in background (production)
+    message_mode: str = "sync"
+    queue_concurrency: int = 4
+
+    # Proactive Telegram reminders (e.g. maintenance due)
+    reminders_enabled: bool = False
+    reminder_check_seconds: int = 300
+    reminder_km_threshold: int = 500
+
     # Auth rate limiting (requests per minute per client IP, 0 = disabled)
     rate_limit_auth_per_minute: int = 10
 

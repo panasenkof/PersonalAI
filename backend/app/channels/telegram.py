@@ -99,7 +99,7 @@ async def telegram_webhook(
                 u.telegram_user_id = tg_id
                 link.consumed_at = utcnow()
                 await session.commit()
-                await _tg_send_message(chat_id=int(msg["chat"]["id"]), text="Аккаунт привязан. Можно отправлять сообщения.")
+                await send_telegram_message(chat_id=int(msg["chat"]["id"]), text="Аккаунт привязан. Можно отправлять сообщения.")
         return {"ok": "true"}
 
     res = await session.execute(select(User).where(User.telegram_user_id == tg_id))
@@ -119,6 +119,7 @@ async def telegram_webhook(
         attachments=attachments,
         channel=Channel.telegram,
         correlation_id=str(msg.get("message_id")),
+        channel_meta={"chat_id": int(msg["chat"]["id"])},
     )
     job = IngestionJob(
         user_id=user.id,
@@ -128,20 +129,27 @@ async def telegram_webhook(
     )
     session.add(job)
     await session.flush()
+    if get_settings().message_mode == "queue":
+        # Acknowledge Telegram immediately; the worker replies when done.
+        await session.commit()
+        from app.queue.runner import get_runner
+
+        get_runner().enqueue(job.id)
+        return {"ok": "true"}
     try:
         out = await process_envelope(session, user.id, job, env)
         await session.commit()
         reply = out.get("assistant_text") or "Готово."
         if out.get("failed"):
             reply = f"Ошибка: {out.get('error')}"
-        await _tg_send_message(chat_id=int(msg["chat"]["id"]), text=str(reply)[:4000])
+        await send_telegram_message(chat_id=int(msg["chat"]["id"]), text=str(reply)[:4000])
     except Exception as exc:  # noqa: BLE001
         await session.rollback()
-        await _tg_send_message(chat_id=int(msg["chat"]["id"]), text=f"Ошибка: {exc}"[:4000])
+        await send_telegram_message(chat_id=int(msg["chat"]["id"]), text=f"Ошибка: {exc}"[:4000])
     return {"ok": "true"}
 
 
-async def _tg_send_message(chat_id: int, text: str) -> None:
+async def send_telegram_message(chat_id: int, text: str) -> None:
     token = get_settings().telegram_bot_token
     if not token:
         return

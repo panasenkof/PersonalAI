@@ -1,7 +1,11 @@
+import asyncio
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.api.v1.auth import router as auth_router
 from app.api.v1.collections import router as collections_router
@@ -16,7 +20,21 @@ from app.db import init_db
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     await init_db()
-    yield
+    stop = asyncio.Event()
+    task: asyncio.Task | None = None
+    if get_settings().reminders_enabled:
+        from app.scheduler.reminders import reminders_loop
+
+        task = asyncio.create_task(reminders_loop(stop))
+    try:
+        yield
+    finally:
+        stop.set()
+        if task is not None:
+            try:
+                await asyncio.wait_for(task, timeout=5)
+            except (TimeoutError, asyncio.CancelledError):
+                task.cancel()
 
 
 app = FastAPI(title="PIA Agent", lifespan=lifespan)
@@ -54,3 +72,12 @@ app.include_router(telegram_router)
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/")
+async def root() -> RedirectResponse:
+    return RedirectResponse("/app/")
+
+
+# Web chat UI (static SPA — talks to the same API via relative URLs)
+app.mount("/app", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "web"), html=True), name="web")

@@ -217,3 +217,19 @@ class ChatTurn(Base):
     role: Mapped[str] = mapped_column(String(16))  # user | assistant
     content: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ReminderNotification(Base):
+    __tablename__ = "reminder_notifications"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id", "entity_id", "item", "sent_on", name="uq_reminder_once_per_day"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    entity_id: Mapped[str] = mapped_column(ForeignKey("entities.id", ondelete="CASCADE"), index=True)
+    item: Mapped[str] = mapped_column(String(128))
+    sent_on: Mapped[str] = mapped_column(String(10))  # YYYY-MM-DD
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

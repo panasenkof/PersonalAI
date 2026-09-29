@@ -25,6 +25,7 @@ class IngestionEnvelope(BaseModel):
     correlation_id: str | None = None
     locale: str | None = None
     conversation_id: str | None = None
+    channel_meta: dict[str, Any] = Field(default_factory=dict)
 
 
 class IngestionJobView(BaseModel):

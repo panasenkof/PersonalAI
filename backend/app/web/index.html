@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PIA Agent</title>
+<style>
+  :root { --bg:#0f1115; --panel:#171a21; --line:#262b36; --text:#e6e9ef; --muted:#8b93a5; --accent:#4f8cff; --ok:#3ecf8e; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:15px/1.45 system-ui, sans-serif; background:var(--bg); color:var(--text); height:100vh; display:flex; flex-direction:column; }
+  header { display:flex; align-items:center; gap:12px; padding:10px 16px; background:var(--panel); border-bottom:1px solid var(--line); }
+  header b { font-size:16px; } header .spacer { flex:1; }
+  button { background:var(--accent); color:#fff; border:0; border-radius:8px; padding:8px 14px; cursor:pointer; font:inherit; }
+  button.ghost { background:transparent; border:1px solid var(--line); color:var(--text); }
+  button:disabled { opacity:.5; cursor:default; }
+  main { flex:1; display:flex; min-height:0; }
+  aside { width:240px; background:var(--panel); border-right:1px solid var(--line); overflow:auto; padding:10px; }
+  aside .conv { padding:8px 10px; border-radius:8px; cursor:pointer; color:var(--muted); margin-bottom:4px; }
+  aside .conv:hover { background:#1e2330; }
+  aside .conv.active { background:#232a3a; color:var(--text); }
+  section.chat { flex:1; display:flex; flex-direction:column; min-width:0; }
+  #msgs { flex:1; overflow:auto; padding:20px; display:flex; flex-direction:column; gap:10px; }
+  .msg { max-width:760px; padding:10px 14px; border-radius:12px; white-space:pre-wrap; word-break:break-word; }
+  .msg.user { background:#27406e; align-self:flex-end; }
+  .msg.assistant { background:var(--panel); border:1px solid var(--line); align-self:flex-start; }
+  .msg.meta { align-self:center; color:var(--muted); font-size:12px; background:none; border:0; }
+  #composer { display:flex; gap:8px; padding:14px; border-top:1px solid var(--line); }
+  #composer textarea { flex:1; resize:none; height:52px; background:var(--panel); color:var(--text); border:1px solid var(--line); border-radius:10px; padding:10px; font:inherit; }
+  .overlay { position:fixed; inset:0; background:rgba(0,0,0,.6); display:flex; align-items:center; justify-content:center; z-index:10; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:24px; width:360px; display:flex; flex-direction:column; gap:10px; }
+  .card h2 { margin:0 0 6px; font-size:18px; }
+  input, select { background:#12151c; color:var(--text); border:1px solid var(--line); border-radius:8px; padding:9px 10px; font:inherit; width:100%; }
+  .hidden { display:none !important; }
+  .tool-chip { font-size:12px; color:var(--muted); border:1px dashed var(--line); border-radius:20px; padding:2px 10px; align-self:flex-start; }
+  #settings .row { display:flex; flex-direction:column; gap:4px; margin-bottom:8px; }
+  #settings label { font-size:12px; color:var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <b>PIA Agent</b>
+  <span id="who" style="color:var(--muted);font-size:13px"></span>
+  <span class="spacer"></span>
+  <button class="ghost" id="btnSettings">Настройки LLM</button>
+  <button class="ghost" id="btnLogout">Выйти</button>
+</header>
+<main>
+  <aside>
+    <button id="btnNew" style="width:100%;margin-bottom:10px">+ Новый чат</button>
+    <div id="convList"></div>
+  </aside>
+  <section class="chat">
+    <div id="msgs"></div>
+    <div id="composer">
+      <textarea id="input" placeholder="Спросите или попросите запомнить… (Enter — отправить, Shift+Enter — новая строка)"></textarea>
+      <button id="btnSend">Отправить</button>
+    </div>
+  </section>
+</main>
+
+<!-- auth -->
+<div class="overlay" id="authView">
+  <div class="card">
+    <h2>Вход в PIA</h2>
+    <input id="email" placeholder="email" autocomplete="username">
+    <input id="password" type="password" placeholder="пароль (мин. 8)" autocomplete="current-password">
+    <button id="btnLogin">Войти</button>
+    <button class="ghost" id="btnRegister">Зарегистрироваться</button>
+    <div id="authErr" style="color:#ff7b7b;font-size:13px"></div>
+  </div>
+</div>
+
+<!-- settings -->
+<div class="overlay hidden" id="settingsView">
+  <div class="card" id="settings">
+    <h2>Настройки LLM</h2>
+    <div class="row"><label>Провайдер</label>
+      <select id="sProvider"><option value="cloud">Облачный</option><option value="local">Локальный</option></select></div>
+    <div class="row"><label>Base URL (OpenAI-compatible)</label><input id="sBase" placeholder="https://api.openai.com/v1"></div>
+    <div class="row"><label>API-ключ (пусто = не менять)</label><input id="sKey" type="password" placeholder="sk-…"></div>
+    <div class="row"><label>Модель</label><input id="sModel" placeholder="gpt-4o-mini"></div>
+    <div class="row"><label>Модель эмбеддингов</label><input id="sEmb" placeholder="text-embedding-3-small"></div>
+    <div style="display:flex;gap:8px">
+      <button id="btnSaveSettings">Сохранить</button>
+      <button class="ghost" id="btnCloseSettings">Закрыть</button>
+    </div>
+    <div id="setMsg" style="font-size:13px;color:var(--ok)"></div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let token = localStorage.getItem("pia_token") || "";
+let conversations = [];
+let currentConv = null;
+let busy = false;
+
+const api = async (path, opts = {}) => {
+  opts.headers = Object.assign({}, opts.headers);
+  if (token) opts.headers["Authorization"] = "Bearer " + token;
+  if (opts.body && typeof opts.body !== "string") {
+    opts.headers["Content-Type"] = "application/json";
+    opts.body = JSON.stringify(opts.body);
+  }
+  const r = await fetch(path, opts);
+  if (r.status === 401 && path !== "/v1/auth/token" && path !== "/v1/auth/register") { logout(); throw new Error("unauthorized"); }
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.detail ? JSON.stringify(data.detail) : r.status);
+  return data;
+};
+
+function logout() { token = ""; localStorage.removeItem("pia_token"); $("authView").classList.remove("hidden"); }
+
+async function loginOrRegister(register) {
+  $("authErr").textContent = "";
+  try {
+    const path = register ? "/v1/auth/register" : "/v1/auth/token";
+    const data = await api(path, { method: "POST", body: { email: $("email").value.trim(), password: $("password").value } });
+    token = data.access_token;
+    localStorage.setItem("pia_token", token);
+    $("authView").classList.add("hidden");
+    await boot();
+  } catch (e) { $("authErr").textContent = String(e.message || e); }
+}
+
+async function boot() {
+  try { await api("/v1/settings/llm"); } catch (e) {}
+  await loadConversations();
+  if (!currentConv) newChat();
+}
+
+async function loadConversations() {
+  conversations = await api("/v1/conversations");
+  const box = $("convList");
+  box.innerHTML = "";
+  conversations.forEach(c => {
+    const d = document.createElement("div");
+    d.className = "conv" + (currentConv && currentConv.id === c.id ? " active" : "");
+    d.textContent = c.title || "Без названия";
+    d.onclick = () => openConversation(c);
+    box.appendChild(d);
+  });
+}
+
+function newChat() {
+  currentConv = null;
+  $("msgs").innerHTML = "";
+  addMeta("Новый чат — история сохраняется автоматически");
+  loadConversations();
+}
+
+async function openConversation(c) {
+  currentConv = c;
+  $("msgs").innerHTML = "";
+  const turns = await api(`/v1/conversations/${c.id}/messages`);
+  turns.forEach(t => addMsg(t.role, t.content));
+  await loadConversations();
+}
+
+function addMsg(role, text) {
+  const d = document.createElement("div");
+  d.className = "msg " + role;
+  d.textContent = text;
+  $("msgs").appendChild(d);
+  $("msgs").scrollTop = $("msgs").scrollHeight;
+  return d;
+}
+function addMeta(text) { return addMsg("meta", text); }
+
+async function send() {
+  if (busy) return;
+  const text = $("input").value.trim();
+  if (!text) return;
+  busy = true; $("btnSend").disabled = true;
+  $("input").value = "";
+  addMsg("user", text);
+  try {
+    const body = { text, channel: "mobile" };
+    if (currentConv) body.conversation_id = currentConv.id;
+    const res = await api("/v1/messages", { method: "POST", body });
+    if (res.conversation_id && (!currentConv || currentConv.id !== res.conversation_id)) {
+      currentConv = { id: res.conversation_id, title: text.slice(0, 80) };
+      loadConversations();
+    }
+    if (res.assistant_text) {
+      addMsg("assistant", res.assistant_text);
+    } else if (res.job_id) {
+      await streamJob(res.job_id);
+    }
+  } catch (e) {
+    addMsg("meta", "Ошибка: " + (e.message || e));
+  } finally {
+    busy = false; $("btnSend").disabled = false;
+    $("input").focus();
+  }
+}
+
+function streamJob(jobId) {
+  return new Promise((resolve) => {
+    const bubble = addMsg("assistant", "");
+    let toolChip = null;
+    const es = new EventSource(`/v1/jobs/${jobId}/events?access_token=${encodeURIComponent(token)}`);
+    const finish = () => { es.close(); resolve(); };
+    es.addEventListener("token", (ev) => {
+      const d = JSON.parse(ev.data);
+      bubble.textContent += d.content || "";
+      $("msgs").scrollTop = $("msgs").scrollHeight;
+    });
+    es.addEventListener("tool", (ev) => {
+      const d = JSON.parse(ev.data);
+      if (!toolChip) { toolChip = document.createElement("div"); toolChip.className = "tool-chip"; $("msgs").appendChild(toolChip); }
+      toolChip.textContent = "⚙ " + d.name;
+      $("msgs").scrollTop = $("msgs").scrollHeight;
+    });
+    es.addEventListener("done", (ev) => {
+      const d = JSON.parse(ev.data);
+      if (d.text && !bubble.textContent) bubble.textContent = d.text;
+      finish();
+    });
+    es.addEventListener("error", (ev) => {
+      if (ev.data) {
+        try { bubble.textContent = "Ошибка: " + (JSON.parse(ev.data).text || ""); } catch (e) {}
+      }
+      finish();
+    });
+  });
+}
+
+async function loadSettings() {
+  try {
+    const s = await api("/v1/settings/llm");
+    $("sProvider").value = s.provider_kind;
+    $("sBase").value = s.base_url;
+    $("sModel").value = s.default_model;
+    $("sEmb").value = s.embedding_model || "";
+  } catch (e) {}
+}
+
+async function saveSettings() {
+  $("setMsg").textContent = "";
+  const body = {
+    provider_kind: $("sProvider").value,
+    base_url: $("sBase").value.trim(),
+    default_model: $("sModel").value.trim(),
+    embedding_model: $("sEmb").value.trim() || null,
+  };
+  const key = $("sKey").value.trim();
+  if (key) body.api_key = key;
+  try {
+    await api("/v1/settings/llm", { method: "PATCH", body });
+    $("setMsg").textContent = "Сохранено ✔";
+    $("sKey").value = "";
+  } catch (e) { $("setMsg").style.color = "#ff7b7b"; $("setMsg").textContent = String(e.message || e); }
+}
+
+// --- wire events ---
+$("btnLogin").onclick = () => loginOrRegister(false);
+$("btnRegister").onclick = () => loginOrRegister(true);
+$("btnSend").onclick = send;
+$("btnNew").onclick = newChat;
+$("btnLogout").onclick = logout;
+$("btnSettings").onclick = () => { $("settingsView").classList.remove("hidden"); loadSettings(); $("setMsg").style.color = "var(--ok)"; };
+$("btnCloseSettings").onclick = () => $("settingsView").classList.add("hidden");
+$("btnSaveSettings").onclick = saveSettings;
+$("input").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } });
+
+if (token) { $("authView").classList.add("hidden"); boot(); }
+</script>
+</body>
+</html>

@@ -37,11 +37,11 @@ def test_telegram_photo_flow_records_blob_and_replies(
         assert file_id == "photo-file-id"
         return b"\x89PNG fake", "image/png"
 
-    async def fake_run(session, user_id: str, user_visible_text: str, conversation_id=None):
+    async def fake_run(session, user_id: str, user_visible_text: str, conversation_id=None, emit=None):
         captured["prompt"] = user_visible_text
         return {"assistant_text": "Фото получил.", "raw_last": {}}
 
-    monkeypatch.setattr(telegram_mod, "_tg_send_message", fake_send)
+    monkeypatch.setattr(telegram_mod, "send_telegram_message", fake_send)
     monkeypatch.setattr(telegram_mod, "_download_tg_file", fake_download)
     monkeypatch.setattr("app.ingestion.pipeline.run_agent", fake_run)
 

@@ -36,6 +36,8 @@ services:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}
       BLOB_STORAGE_DIR: /app/data/blobs
+      MESSAGE_MODE: queue
+      REMINDERS_ENABLED: ${REMINDERS_ENABLED:-true}
     depends_on:
       postgres:
         condition: service_healthy
