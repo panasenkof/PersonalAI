@@ -34,6 +34,7 @@ from app.ingestion.schemas import Attachment, Channel, IngestionEnvelope
 from app.llm.limits import RateLimitExceeded
 from app.models import User
 from app.net.retry import request_json
+from app.security.redact import safe_error
 from app.services.blobs import store_blob
 
 logger = logging.getLogger(__name__)
@@ -201,7 +202,7 @@ async def _handle_message(session: AsyncSession, message: dict[str, Any]) -> Non
     except Exception as exc:  # noqa: BLE001
         await session.rollback()
         logger.warning("whatsapp handling failed: %s", exc)
-        await send_whatsapp_message(wa_id, f"Ошибка: {exc}")
+        await send_whatsapp_message(wa_id, f"Ошибка: {safe_error(exc)}")
 
 
 @router.post("/webhook")

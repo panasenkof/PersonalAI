@@ -433,6 +433,52 @@ async function pollJob(jobId, bubble) {
   bubble.textContent = "Таймаут: ответ не пришёл за 3 минуты";
 }
 
+// EventSource cannot send an Authorization header, and tokens in URLs end up in proxy/access logs.
+// This is a tiny header-authenticated SSE client over fetch() with the same listener API.
+class HeaderEventSource {
+  constructor(url) {
+    this.listeners = {};
+    this.closed = false;
+    this.ctrl = new AbortController();
+    this._run(url);
+  }
+  addEventListener(name, fn) { (this.listeners[name] = this.listeners[name] || []).push(fn); }
+  close() { this.closed = true; this.ctrl.abort(); }
+  _emit(name, data) {
+    if (this.closed) return;
+    for (const fn of this.listeners[name] || []) fn({ data });
+  }
+  async _run(url) {
+    try {
+      const open = () => fetch(url, { headers: { Authorization: "Bearer " + token, Accept: "text/event-stream" }, signal: this.ctrl.signal });
+      let r = await open();
+      if (r.status === 401 && (await tryRefresh())) r = await open();
+      if (!r.ok || !r.body) throw new Error("HTTP " + r.status);
+      const reader = r.body.getReader();
+      const dec = new TextDecoder();
+      let buf = "";
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+        let i;
+        while ((i = buf.indexOf("\n\n")) >= 0) {
+          const frame = buf.slice(0, i);
+          buf = buf.slice(i + 2);
+          let name = "message";
+          const data = [];
+          for (const line of frame.split("\n")) {
+            if (line.startsWith("event:")) name = line.slice(6).trim();
+            else if (line.startsWith("data:")) data.push(line.slice(5).replace(/^ /, ""));
+          }
+          if (data.length) this._emit(name, data.join("\n"));
+        }
+      }
+    } catch (e) { /* network error or abort: fall through */ }
+    this._emit("error", undefined); // stream ended without a terminal event → caller falls back to polling
+  }
+}
+
 function streamJob(jobId) {
   return new Promise((resolve) => {
     let settled = false;
@@ -461,7 +507,7 @@ function streamJob(jobId) {
       return chip;
     };
     try {
-      es = new EventSource(`/v1/jobs/${jobId}/events?access_token=${encodeURIComponent(token)}`);
+      es = new HeaderEventSource(`/v1/jobs/${jobId}/events`);
     } catch (e) {
       pollJob(jobId, bubble).then(finish);
       return;

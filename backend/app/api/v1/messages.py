@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
@@ -20,6 +21,7 @@ from app.queue.events import bus
 from app.queue.jobs import request_job_cancel
 from app.services.blobs import store_blob, user_owns_blob
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1", tags=["messages"])
 
 
@@ -87,7 +89,10 @@ async def post_message(
         await session.commit()
         from app.queue.runner import get_runner
 
-        await get_runner().enqueue(job.id)
+        try:
+            await get_runner().enqueue(job.id)
+        except Exception:  # noqa: BLE001 — the job is persisted; the reaper re-queues it when Redis is back
+            logger.warning("enqueue failed for job %s; it will be picked up by the reaper", job.id, exc_info=True)
         return MessageOut(job_id=job.id, status=job.status, conversation_id=conv.id)
 
     out = await process_envelope(session, user.id, job, env)

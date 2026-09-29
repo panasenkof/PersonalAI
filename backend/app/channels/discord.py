@@ -41,6 +41,7 @@ from app.ingestion.schemas import Attachment, Channel, IngestionEnvelope
 from app.llm.limits import RateLimitExceeded
 from app.models import User
 from app.net.retry import request_json
+from app.security.redact import safe_error
 from app.services.blobs import store_blob
 
 logger = logging.getLogger(__name__)
@@ -172,7 +173,7 @@ async def _process_ask(inter: dict[str, Any], user_id: str, text: str, attach_id
         except Exception as exc:  # noqa: BLE001
             await session.rollback()
             logger.warning("discord processing failed: %s", exc)
-            await _safe_edit(meta, f"Ошибка: {exc}"[:DISCORD_LIMIT])
+            await _safe_edit(meta, f"Ошибка: {safe_error(exc)}"[:DISCORD_LIMIT])
 
 
 async def _safe_edit(meta: dict[str, Any], content: str) -> None:

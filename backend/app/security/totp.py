@@ -43,6 +43,22 @@ def verify_totp(secret: str, code: str, *, window: int = 1, at: float | None = N
     return ok
 
 
+def match_step(secret: str, code: str, *, window: int = 1, at: float | None = None) -> int | None:
+    """Time-step counter that `code` is valid for (current ± window), else None.
+
+    Callers store the returned step and reject any step <= the stored one (RFC 6238 §5.2: an OTP
+    must be accepted only once), so a code shoulder-surfed or intercepted cannot be replayed."""
+    code = (code or "").strip().replace(" ", "")
+    if len(code) != DIGITS or not code.isdigit():
+        return None
+    step = int((time.time() if at is None else at) // STEP_SECONDS)
+    found: int | None = None
+    for delta in range(-window, window + 1):
+        if hmac.compare_digest(_hotp(secret, step + delta), code):
+            found = step + delta
+    return found
+
+
 def provisioning_uri(email: str, secret: str, issuer: str = "PIA Agent") -> str:
     return (
         f"otpauth://totp/{quote(issuer)}:{quote(email)}"
@@ -56,7 +72,8 @@ def _hash_code(code: str) -> str:
 
 def generate_recovery_codes(n: int = 8) -> tuple[list[str], list[str]]:
     """Returns (plain codes to show once, sha256 hashes to store)."""
-    plain = [f"{secrets.token_hex(3)}-{secrets.token_hex(3)}" for _ in range(n)]
+    # 64 bits of entropy: the stored hashes are unsalted SHA-256, so the codes must not be brute-forceable
+    plain = [f"{secrets.token_hex(4)}-{secrets.token_hex(4)}" for _ in range(n)]
     return plain, [_hash_code(c) for c in plain]
 
 

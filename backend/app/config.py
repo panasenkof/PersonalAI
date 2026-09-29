@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     jwt_secret_previous: str = ""
     # Comma-separated e-mails that get the admin role on registration.
     admin_emails: str = ""
+    # Behind a reverse proxy that sets X-Forwarded-For, rate limits use the proxy-appended (last) address.
+    # Off by default: a directly exposed app must not trust a client-supplied header.
+    trust_proxy_headers: bool = False
     login_max_failures: int = 5  # per e-mail within login_lockout_seconds (0 = disabled)
     login_lockout_seconds: int = 900
     jwt_algorithm: str = "HS256"

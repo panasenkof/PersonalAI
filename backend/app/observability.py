@@ -7,6 +7,7 @@ import time
 from typing import Any
 
 from app.config import get_settings
+from app.security.redact import RedactFilter
 
 
 class JsonFormatter(logging.Formatter):
@@ -28,6 +29,7 @@ class JsonFormatter(logging.Formatter):
 def configure_logging() -> None:
     settings = get_settings()
     handler = logging.StreamHandler(sys.stdout)
+    handler.addFilter(RedactFilter())
     if settings.log_format == "json":
         handler.setFormatter(JsonFormatter())
     else:

@@ -167,3 +167,35 @@ async def reindex_user(session: AsyncSession, user_id: str, *, force: bool = Fal
         if o.id not in have_obs:
             n_obs += 1 if await index_observation(session, user_id, o) else 0
     return {"entities": n_entities, "observations": n_obs}
+
+
+async def backfill_vectors(session: AsyncSession, batch: int = 500) -> int:
+    """Postgres: move JSON embeddings whose width matches PGVECTOR_DIMENSIONS into the native column
+    (rows written before pgvector was enabled, or imported). Returns the number of rows converted."""
+    from app.db import USE_PGVECTOR
+
+    if not USE_PGVECTOR:
+        return 0
+    dims = get_settings().pgvector_dimensions
+    moved = 0
+    last_id = ""
+    while True:  # keyset pagination: rows that must stay in JSON (other widths) never block later ones
+        rows = (
+            await session.execute(
+                select(Chunk)
+                .where(Chunk.id > last_id)
+                .where(Chunk.embedding.is_not(None))
+                .where(Chunk.embedding_vec.is_(None))
+                .order_by(Chunk.id)
+                .limit(batch)
+            )
+        ).scalars().all()
+        if not rows:
+            return moved
+        last_id = rows[-1].id
+        for ch in rows:
+            if isinstance(ch.embedding, list) and len(ch.embedding) == dims:
+                ch.embedding_vec = ch.embedding
+                ch.embedding = None
+                moved += 1
+        await session.flush()

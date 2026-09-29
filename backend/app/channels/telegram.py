@@ -29,6 +29,7 @@ from app.ingestion.schemas import Attachment, Channel, IngestionEnvelope
 from app.llm.limits import RateLimitExceeded
 from app.models import User
 from app.net.retry import request_json
+from app.security.redact import safe_error
 from app.services.blobs import store_blob
 
 logger = logging.getLogger(__name__)
@@ -253,5 +254,5 @@ async def telegram_webhook(
     except Exception as exc:  # noqa: BLE001
         await session.rollback()
         if chat_id is not None:
-            await send_telegram_message(chat_id=chat_id, text=f"Ошибка: {exc}"[:TG_MESSAGE_LIMIT])
+            await send_telegram_message(chat_id=chat_id, text=f"Ошибка: {safe_error(exc)}"[:TG_MESSAGE_LIMIT])
     return {"ok": "true"}

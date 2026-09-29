@@ -114,7 +114,8 @@ class FactError(Exception):
 
 async def resolve_fact(session: AsyncSession, user_id: str, fact_id: str, *, confirm: bool) -> dict[str, Any]:
     """Confirm (→ Observation + index) or reject a pending fact. Idempotent per final state."""
-    fact = await session.get(ExtractedFact, fact_id)
+    # row lock (Postgres): two simultaneous presses (web + Telegram) must not both create an observation
+    fact = await session.get(ExtractedFact, fact_id, with_for_update=True)
     if fact is None or fact.user_id != user_id:
         raise FactError("fact_not_found")
     if fact.status != ExtractedFactStatus.pending_user_confirm.value:

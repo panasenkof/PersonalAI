@@ -168,6 +168,12 @@ async def test_reaper_requeues_dead_worker_jobs_and_duplicates_are_harmless(monk
     assert n >= 2
     assert await _status(stale_processing) == "accepted"  # reset so it can be claimed again
 
+    # a second pass (another reaper, or the next tick) must NOT push the same backlog again
+    before = await redis.llen(runner_mod.QUEUE_KEY)
+    again = await runner_mod.requeue_stale_jobs(r, stale_seconds=60)
+    assert again == 0 or await redis.llen(runner_mod.QUEUE_KEY) == before + again
+    assert await redis.llen(runner_mod.QUEUE_KEY) == before
+
 
 @pytest.mark.asyncio
 async def test_inprocess_runner_recovers_unfinished_jobs_on_start(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -196,3 +202,18 @@ async def test_inprocess_runner_recovers_unfinished_jobs_on_start(monkeypatch: p
         rows = (await s.execute(select(IngestionJob.status).where(IngestionJob.id == crashed))).scalar_one()
         assert rows in ("accepted", "processing")
     _ = JobStatus
+
+
+@pytest.mark.asyncio
+async def test_graceful_shutdown_releases_job_without_burning_an_attempt() -> None:
+    from app.queue.jobs import _release_job
+
+    jid = await _make_job(status="processing", attempts=1)
+    await _release_job(jid)
+    async with SessionLocal() as s:
+        row = await s.get(IngestionJob, jid)
+        assert row is not None and row.status == "accepted" and row.attempts == 0
+    redis = fakeredis.FakeAsyncRedis(decode_responses=True)
+    r = runner_mod.RedisRunner(redis, concurrency=1, consume=False)
+    await runner_mod.requeue_stale_jobs(r, stale_seconds=60)
+    assert jid in set(await redis.lrange(runner_mod.QUEUE_KEY, 0, -1))  # picked up by the very next reaper pass

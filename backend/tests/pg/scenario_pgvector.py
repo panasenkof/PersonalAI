@@ -13,9 +13,10 @@ from sqlalchemy import select, text
 
 from app.config import get_settings
 from app.db import USE_PGVECTOR, SessionLocal, engine, init_db
-from app.models import Chunk, Collection, User
-from app.rag.indexing import _index_texts
+from app.models import Chunk, Collection, Entity, ExtractedFact, Observation, User
+from app.rag.indexing import _index_texts, backfill_vectors
 from app.rag.search import hybrid_search
+from app.services.facts import FactError, resolve_fact
 
 DIMS = get_settings().pgvector_dimensions
 
@@ -48,7 +49,8 @@ class FakeProvider:
 
 async def main() -> None:
     assert USE_PGVECTOR, "pgvector must be active"
-    await init_db()
+    # every replica/worker calls init_db() at startup: concurrent first boot must not race on DDL
+    await asyncio.gather(*[init_db() for _ in range(6)])
     async with engine.begin() as conn:
         # indexes created by create_all DDL hooks
         idx = (await conn.execute(text("select indexname from pg_indexes where tablename='chunks'"))).scalars().all()
@@ -119,6 +121,58 @@ async def main() -> None:
         ).one()
         assert emb == [1.0, 0.0, 0.0] and not has_vec
         assert any("short vector" in h["text"] for h in await hybrid_search(s, uid1, "short", k=3))
+
+    # legacy JSON embeddings of the right width are moved into the native column; other widths stay
+    async with SessionLocal() as s:
+        s.add_all(
+            [
+                Chunk(user_id=uid1, text="legacy json full width", embedding=vec(4)),
+                Chunk(user_id=uid1, text="legacy json other width", embedding=[0.5, 0.5]),
+            ]
+        )
+        await s.commit()
+    async with SessionLocal() as s:
+        assert await backfill_vectors(s) == 1
+        await s.commit()
+        rows = dict(
+            (
+                await s.execute(
+                    select(Chunk.text, Chunk.embedding_vec.is_not(None)).where(Chunk.text.like("legacy json%"))
+                )
+            ).all()
+        )
+        assert rows == {"legacy json full width": True, "legacy json other width": False}, rows
+        assert await backfill_vectors(s) == 0  # idempotent
+
+    # two simultaneous confirmations of one fact (web + Telegram): exactly one observation is created
+    async with SessionLocal() as s:
+        coll = (await s.execute(select(Collection).where(Collection.user_id == uid1))).scalars().first()
+        assert coll is not None
+        ent = Entity(user_id=uid1, collection_id=coll.id, domain="automotive", schema_version="1", payload={"type": "vehicle"})
+        s.add(ent)
+        await s.flush()
+        fact = ExtractedFact(
+            user_id=uid1, entity_id=ent.id, payload={"kind": "service_event", "summary": "oil", "observation": {"a": 1}}
+        )
+        s.add(fact)
+        await s.commit()
+        fact_id, ent_id = fact.id, ent.id
+
+    async def press() -> str:
+        async with SessionLocal() as s2:
+            try:
+                await resolve_fact(s2, uid1, fact_id, confirm=True)
+                await s2.commit()
+                return "ok"
+            except FactError as exc:
+                await s2.rollback()
+                return exc.code
+
+    results = await asyncio.gather(*[press() for _ in range(4)])
+    assert results.count("ok") == 1, results
+    async with SessionLocal() as s:
+        n_obs = len((await s.execute(select(Observation.id).where(Observation.entity_id == ent_id))).all())
+        assert n_obs == 1, n_obs
 
     _ = search_mod
     print("OK")

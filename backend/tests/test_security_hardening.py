@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 import uuid
 
 import pytest
@@ -67,8 +68,12 @@ def test_two_factor_flow_end_to_end(client: TestClient, random_email: str) -> No
     r = client.post("/v1/auth/token", json=creds)
     assert r.status_code == 401 and r.json()["detail"] == "otp_required"
     assert client.post("/v1/auth/token", json={**creds, "otp": "111111"}).status_code == 401
-    ok = client.post("/v1/auth/token", json={**creds, "otp": totp.totp_at(secret)})
+    # the code that enabled 2FA is spent (no replay); the next time-step's code is accepted once
+    assert client.post("/v1/auth/token", json={**creds, "otp": totp.totp_at(secret)}).status_code == 401
+    nxt = totp.totp_at(secret, at=time.time() + 30)
+    ok = client.post("/v1/auth/token", json={**creds, "otp": nxt})
     assert ok.status_code == 200
+    assert client.post("/v1/auth/token", json={**creds, "otp": nxt}).status_code == 401
 
     # a recovery code works once
     assert client.post("/v1/auth/token", json={**creds, "otp": recovery[0]}).status_code == 200
@@ -81,7 +86,7 @@ def test_two_factor_flow_end_to_end(client: TestClient, random_email: str) -> No
     bad = client.post("/v1/auth/2fa/disable", json={"password": "wrong", "code": totp.totp_at(secret)},
                       headers=_h(tok))
     assert bad.status_code == 401
-    good = client.post("/v1/auth/2fa/disable", json={"password": "secret1234", "code": totp.totp_at(secret)},
+    good = client.post("/v1/auth/2fa/disable", json={"password": "secret1234", "code": recovery[1]},
                        headers=_h(tok))
     assert good.status_code == 200
     assert client.post("/v1/auth/token", json=creds).status_code == 200
@@ -289,3 +294,82 @@ def test_job_and_fact_payloads_encrypted_and_rekeyed(monkeypatch) -> None:
             assert f is not None and f.payload == {"summary": "гемоглобин 120"}
 
     asyncio.run(scenario())
+
+
+def test_auth_ip_limit_ignores_spoofed_forwarded_for(client, monkeypatch) -> None:
+    import app.main as main_mod
+    from app.security.ratelimit import SlidingWindowLimiter
+
+    monkeypatch.setattr(main_mod._settings, "rate_limit_auth_per_minute", 2)
+    monkeypatch.setattr(main_mod, "_access_limiter", SlidingWindowLimiter(limit=2))
+
+    def reg(xff: str) -> int:
+        return client.post(
+            "/v1/auth/register",
+            json={"email": f"x{uuid.uuid4().hex[:8]}@t.dev", "password": "secret1234"},
+            headers={"X-Forwarded-For": xff},
+        ).status_code
+
+    # header not trusted: rotating the value must not reset the counter
+    assert [reg("1.1.1.1"), reg("2.2.2.2"), reg("3.3.3.3")] == [200, 200, 429]
+
+    # behind a trusted proxy the proxy-appended (last) hop is the key; the spoofed prefix is ignored
+    monkeypatch.setattr(get_settings(), "trust_proxy_headers", True)
+    monkeypatch.setattr(main_mod, "_access_limiter", SlidingWindowLimiter(limit=2))
+    assert [reg("9.9.9.1, 10.0.0.7"), reg("9.9.9.2, 10.0.0.7"), reg("9.9.9.3, 10.0.0.7")] == [200, 200, 429]
+    assert reg("9.9.9.1, 10.0.0.8") == 200  # a different real client is unaffected
+
+
+def test_ready_does_not_leak_error_details(client, monkeypatch) -> None:
+    import app.db as db_mod
+
+    class _Boom:
+        def connect(self):
+            raise RuntimeError("postgresql://user:secret@internal-host/db unreachable")
+
+    monkeypatch.setattr(db_mod, "engine", _Boom())
+    r = client.get("/ready")
+    assert r.status_code == 503
+    assert "secret" not in r.text and "internal-host" not in r.text
+
+
+def test_totp_code_cannot_be_replayed_and_recovery_codes_are_strong(client, random_email) -> None:
+    from app.security import totp
+
+    tok = client.post("/v1/auth/register", json={"email": random_email, "password": "secret1234"}).json()
+    h = _h(tok["access_token"])
+    secret = client.post("/v1/auth/2fa/setup", headers=h).json()["secret"]
+    step = int(time.time() // 30)
+    enable_code = totp.totp_at(secret, at=step * 30)
+    assert client.post("/v1/auth/2fa/enable", headers=h, json={"code": enable_code}).status_code == 200
+
+    def login(code: str) -> int:
+        return client.post(
+            "/v1/auth/token", json={"email": random_email, "password": "secret1234", "otp": code}
+        ).status_code
+
+    assert login(enable_code) == 401  # the code that enabled 2FA is already spent
+    nxt = totp.totp_at(secret, at=(step + 1) * 30)  # within the ±1 step window
+    assert login(nxt) == 200
+    assert login(nxt) == 401  # replay of the same code is rejected
+    plain, _ = totp.generate_recovery_codes()
+    assert all(len(c.replace("-", "")) == 16 for c in plain)
+
+
+def test_secrets_are_redacted_from_errors_and_logs(monkeypatch) -> None:
+    import logging
+
+    from app.security.redact import RedactFilter, safe_error
+
+    token = "123456789:AAExampleTelegramTokenValueXYZ_0123456"
+    monkeypatch.setattr(get_settings(), "telegram_bot_token", token)
+    url = f"https://api.telegram.org/bot{token}/getFile"
+    msg = safe_error(RuntimeError(f"Client error '404' for url '{url}'"))
+    assert token not in msg and "<redacted>" in msg
+    assert "hunter22" not in safe_error("postgresql://pia:hunter22@db:5432/pia refused")
+    assert "sk-abcdefghijk" not in safe_error("Authorization: Bearer sk-abcdefghijklmnop rejected")
+
+    # third-party loggers (httpx prints every request URL at INFO) are scrubbed by the handler filter
+    rec = logging.LogRecord("httpx", logging.INFO, __file__, 1, 'HTTP Request: POST %s "200 OK"', (url,), None)
+    assert RedactFilter().filter(rec) is True
+    assert token not in rec.getMessage()

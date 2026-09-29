@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import timedelta
 from typing import Any
 
 from sqlalchemy import update
@@ -13,6 +14,7 @@ from app.ingestion.pipeline import process_envelope
 from app.ingestion.schemas import IngestionEnvelope, utcnow
 from app.models import SETTLED_JOB_STATUSES, IngestionJob, JobStatus
 from app.queue.events import bus
+from app.security.redact import safe_error
 
 logger = logging.getLogger(__name__)
 
@@ -69,18 +71,35 @@ async def execute_job(job_id: str) -> dict:
         if bus.consume_cancel(job_id) or await _is_cancelled(job_id):
             await _finalize_cancel(job_id, state["partial"])
             return {"cancelled": True}
-        raise  # process shutdown: job stays `processing`, the reaper re-queues it
+        await _release_job(job_id)  # process shutdown: hand the job back so another worker takes it
+        raise
     except Exception as exc:  # noqa: BLE001
         logger.exception("job %s crashed", job_id)
         async with SessionLocal() as session:
             row = await session.get(IngestionJob, job_id)
             if row is not None and row.status not in SETTLED_JOB_STATUSES:
                 row.status = JobStatus.failed.value
-                row.error = str(exc)
+                row.error = safe_error(exc)
                 row.updated_at = utcnow()
                 await session.commit()
-        await bus.publish(job_id, {"type": "error", "text": str(exc)})
-        return {"assistant_text": "", "error": str(exc), "failed": True}
+        await bus.publish(job_id, {"type": "error", "text": safe_error(exc)})
+        return {"assistant_text": "", "error": safe_error(exc), "failed": True}
+
+
+async def _release_job(job_id: str) -> None:
+    """Graceful shutdown: processing → accepted without burning an attempt, marked stale so that the
+    next reaper pass (any worker) re-queues it immediately instead of after JOB_STALE_SECONDS."""
+    stale = max(1, get_settings().job_stale_seconds)
+    try:
+        async with SessionLocal() as session:
+            row = await session.get(IngestionJob, job_id)
+            if row is not None and row.status == JobStatus.processing.value:
+                row.status = JobStatus.accepted.value
+                row.attempts = max(0, (row.attempts or 0) - 1)
+                row.updated_at = utcnow() - timedelta(seconds=stale + 1)
+                await session.commit()
+    except Exception:  # noqa: BLE001 — the reaper recovers the job anyway
+        logger.warning("could not release job %s on shutdown", job_id, exc_info=True)
 
 
 async def request_job_cancel(session: Any, job: IngestionJob) -> IngestionJob:

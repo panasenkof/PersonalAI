@@ -85,6 +85,30 @@ app.add_middleware(
 
 _access_limiter = SlidingWindowLimiter(limit=_settings.rate_limit_auth_per_minute)
 _AUTH_PATHS = ("/v1/auth/register", "/v1/auth/token")
+_shared_ip_limiter: tuple[tuple[str, int], object] | None = None
+
+
+def _client_ip(request: Request) -> str:
+    if get_settings().trust_proxy_headers:
+        # the proxy appends the real peer last; anything before it is client-controlled
+        forwarded = [p.strip() for p in request.headers.get("x-forwarded-for", "").split(",") if p.strip()]
+        if forwarded:
+            return forwarded[-1]
+    return request.client.host if request.client else "unknown"
+
+
+async def _auth_ip_allowed(client: str) -> bool:
+    """Per-IP limit for register/login: shared by all replicas through Redis when configured."""
+    global _shared_ip_limiter
+    s = get_settings()
+    if s.redis_url:
+        key = (s.redis_url, s.rate_limit_auth_per_minute)
+        if _shared_ip_limiter is None or _shared_ip_limiter[0] != key:
+            from app.security.ratelimit import build_limiter
+
+            _shared_ip_limiter = (key, build_limiter("auth-ip", s.rate_limit_auth_per_minute))
+        return await _shared_ip_limiter[1].allow(client)  # type: ignore[attr-defined]
+    return _access_limiter.allow(client)
 
 
 @app.middleware("http")
@@ -92,9 +116,7 @@ async def request_context(request: Request, call_next):
     # Correlation id in, echoed back out — grep-able across logs.
     corr = request.headers.get("X-Correlation-Id") or request.headers.get("X-Request-Id")
     if request.url.path in _AUTH_PATHS and _settings.rate_limit_auth_per_minute > 0:
-        client = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
-        client = client or (request.client.host if request.client else "unknown")
-        if not _access_limiter.allow(client):
+        if not await _auth_ip_allowed(_client_ip(request)):
             return JSONResponse(status_code=429, content={"detail": "rate_limited"})
     timer = RequestTimer()
     response = await call_next(request)
@@ -151,7 +173,8 @@ async def ready() -> JSONResponse:
             await conn.execute(text("SELECT 1"))
         checks["database"] = "ok"
     except Exception as exc:  # noqa: BLE001
-        checks["database"] = f"error: {exc}"
+        _logger.warning("readiness: database check failed: %s", exc)
+        checks["database"] = "error"
     if _settings.redis_url:
         try:
             from app.queue.redis_client import get_redis
@@ -159,7 +182,8 @@ async def ready() -> JSONResponse:
             await get_redis().ping()
             checks["redis"] = "ok"
         except Exception as exc:  # noqa: BLE001
-            checks["redis"] = f"error: {exc}"
+            _logger.warning("readiness: redis check failed: %s", exc)
+            checks["redis"] = "error"
     ok = all(v == "ok" for v in checks.values())
     return JSONResponse({"status": "ok" if ok else "degraded", **checks}, status_code=200 if ok else 503)
 

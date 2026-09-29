@@ -11,6 +11,7 @@ from app.domains.medical_labs.schemas import LAB_REPORT_SCHEMA
 from app.llm.router import default_model_for_user, provider_for_user
 from app.models import Collection, Entity, Observation
 from app.rag.indexing import index_entity
+from app.security.redact import safe_error
 from app.services.documents import extract_pdf_text
 from app.services.facts import stage_or_commit_observation
 
@@ -80,7 +81,7 @@ async def labs_record_report(session: AsyncSession, user_id: str, args: dict[str
                     json_schema=LAB_REPORT_SCHEMA,
                 )
             except Exception as exc:  # noqa: BLE001
-                return {"error": "vision_parse_failed", "detail": str(exc)}
+                return {"error": "vision_parse_failed", "detail": safe_error(exc)}
         else:
             text = data.decode("utf-8", errors="replace")
 
@@ -101,7 +102,7 @@ async def labs_record_report(session: AsyncSession, user_id: str, args: dict[str
                 json_schema=LAB_REPORT_SCHEMA,
             )
         except Exception as exc:  # noqa: BLE001
-            return {"error": "extract_failed", "detail": str(exc)}
+            return {"error": "extract_failed", "detail": safe_error(exc)}
 
     occurred_raw = args.get("occurred_at") or structured.get("collected_at")
     try:

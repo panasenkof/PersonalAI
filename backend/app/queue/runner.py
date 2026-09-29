@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
+import socket
 import uuid
 from datetime import timedelta
 from typing import Any, Protocol
@@ -58,17 +58,21 @@ async def requeue_stale_jobs(runner: JobRunner, *, stale_seconds: int | None = N
             cond_processing = cond_processing & (IngestionJob.updated_at < cutoff)
             cond_accepted = cond_accepted & (IngestionJob.updated_at < cutoff)
         rows = (await session.execute(select(IngestionJob.id, IngestionJob.status).where(cond_processing | cond_accepted))).all()
-        ids = [r[0] for r in rows]
-        stuck = [r[0] for r in rows if r[1] == JobStatus.processing.value]
-        if stuck:
-            await session.execute(
-                update(IngestionJob)
-                .where(IngestionJob.id.in_(stuck))
-                .where(IngestionJob.status == JobStatus.processing.value)
-                .values(status=JobStatus.accepted.value, updated_at=utcnow())
+        to_push: list[str] = []
+        for jid, status in rows:
+            # Claim the re-push atomically (compare-and-set on status + updated_at): several reapers may
+            # run at once and a backlog must not be pushed again on every pass, or the queue would
+            # grow without bound while workers are busy.
+            guard = (IngestionJob.id == jid) & (IngestionJob.status == status)
+            if not startup:
+                guard = guard & (IngestionJob.updated_at < cutoff)
+            res = await session.execute(
+                update(IngestionJob).where(guard).values(status=JobStatus.accepted.value, updated_at=utcnow())
             )
+            if res.rowcount == 1:  # type: ignore[attr-defined]
+                to_push.append(jid)
         await session.commit()
-    for jid in ids:
+    for jid in to_push:
         await runner.enqueue(jid)
         n += 1
     if n:
@@ -145,7 +149,7 @@ class RedisRunner:
         self.redis = redis
         self.concurrency = max(1, concurrency)
         self.consume = consume
-        self.worker_id = f"{os.uname().nodename}-{uuid.uuid4().hex[:8]}"
+        self.worker_id = f"{socket.gethostname()}-{uuid.uuid4().hex[:8]}"
         self._tasks: dict[str, asyncio.Task] = {}
         self._loops: list[asyncio.Task] = []
         self._stopping = asyncio.Event()

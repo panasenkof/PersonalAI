@@ -5,6 +5,7 @@ import logging
 from datetime import date
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from app.config import get_settings
 from app.db import SessionLocal
@@ -62,21 +63,28 @@ async def check_reminders_once() -> int:
                     )
                     if exists.scalar_one_or_none() is not None:
                         continue
+                    # Claim first (unique constraint), send second: with several API replicas only one
+                    # of them wins the row and therefore sends the message.
+                    claim = ReminderNotification(user_id=user.id, entity_id=veh.id, item=name, sent_on=today)
+                    session.add(claim)
+                    try:
+                        await session.commit()
+                    except IntegrityError:
+                        await session.rollback()
+                        continue
                     km = int(item.get("km_until_due", 0))
                     car = f"{veh.payload.get('make', '')} {veh.payload.get('model', '')}".strip()
                     when = "просрочено" if km < 0 else f"через {km} км"
                     text = f"🔧 Напоминание ({car}): {name} — {when}."
                     from app.channels.telegram import send_telegram_message
 
-                    await send_telegram_message(chat_id=tg_chat_id, text=text)
-                    session.add(
-                        ReminderNotification(
-                            user_id=user.id,
-                            entity_id=veh.id,
-                            item=name,
-                            sent_on=today,
-                        )
-                    )
+                    try:
+                        await send_telegram_message(chat_id=tg_chat_id, text=text)
+                    except Exception:  # noqa: BLE001 — release the claim so the next cycle retries
+                        logger.warning("reminder delivery failed for user=%s item=%s", user.id, name, exc_info=True)
+                        await session.delete(claim)
+                        await session.commit()
+                        continue
                     sent += 1
             await session.commit()
     return sent

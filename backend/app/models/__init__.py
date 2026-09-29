@@ -8,6 +8,7 @@ from typing import Any, Optional
 from sqlalchemy import (
     DDL,
     JSON,
+    BigInteger,
     Boolean,
     DateTime,
     ForeignKey,
@@ -99,6 +100,8 @@ class User(Base):
     token_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     totp_secret: Mapped[Optional[str]] = mapped_column(EncryptedText, nullable=True)
     totp_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    # last accepted TOTP time-step (replay protection)
+    totp_last_step: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
     recovery_codes: Mapped[Optional[list[str]]] = mapped_column(JSON, nullable=True)  # sha256 hashes
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 

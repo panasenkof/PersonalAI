@@ -9,6 +9,7 @@ from app.agent.orchestrator import run_agent
 from app.ingestion.schemas import IngestionEnvelope, utcnow
 from app.ingestion.stt import stt_provider_from_settings
 from app.models import IngestionJob, JobStatus
+from app.security.redact import safe_error
 from app.services.facts import current_job_id, pending_facts_for_job
 
 
@@ -87,9 +88,9 @@ async def process_envelope(
         return out
     except Exception as exc:  # noqa: BLE001
         job.status = JobStatus.failed.value
-        job.error = str(exc)
+        job.error = safe_error(exc)
         job.updated_at = utcnow()
         await session.flush()
-        return {"assistant_text": "", "error": str(exc), "failed": True}
+        return {"assistant_text": "", "error": safe_error(exc), "failed": True}
     finally:
         current_job_id.reset(job_token)

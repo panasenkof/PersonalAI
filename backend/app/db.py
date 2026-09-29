@@ -19,11 +19,17 @@ SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSe
 
 USE_PGVECTOR = _is_pg and PGVECTOR_AVAILABLE
 
+_INIT_LOCK_ID = 727_274_101  # arbitrary constant: serialises schema creation across replicas/workers
+
+
 async def init_db() -> None:
-    if USE_PGVECTOR:
-        async with engine.begin() as conn:
-            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+    """Create missing tables/extensions. Every API replica and worker calls this at startup, so on
+    Postgres the whole thing runs under an advisory lock (concurrent CREATE TABLE/EXTENSION races)."""
     async with engine.begin() as conn:
+        if _is_pg:
+            await conn.execute(text("SELECT pg_advisory_xact_lock(:id)"), {"id": _INIT_LOCK_ID})
+        if USE_PGVECTOR:
+            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         await conn.run_sync(Base.metadata.create_all)
 
 

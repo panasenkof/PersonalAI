@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domains.automotive.schemas import MAINTENANCE_ITEMS_SCHEMA, SERVICE_RECEIPT_SCHEMA
 from app.llm.router import default_model_for_user, provider_for_user
 from app.models import Entity, Observation, ScheduleCandidate, ScheduleStatus
+from app.security.redact import safe_error
 from app.services.facts import stage_or_commit_observation
 from app.storage.blob import read_bytes
 
@@ -99,7 +100,7 @@ async def auto_parse_service_receipt(session: AsyncSession, user_id: str, args: 
             json_schema=SERVICE_RECEIPT_SCHEMA,
         )
     except Exception as exc:  # noqa: BLE001
-        return {"error": "vision_parse_failed", "detail": str(exc)}
+        return {"error": "vision_parse_failed", "detail": safe_error(exc)}
     e = await session.get(Entity, vehicle_entity_id) if vehicle_entity_id else None
     if not e or e.user_id != user_id:
         return {"parsed": parsed, "note": "No vehicle linked; not persisted as observation."}
@@ -151,7 +152,7 @@ async def auto_fetch_maintenance_schedule(session: AsyncSession, user_id: str, a
             r.raise_for_status()
             data = r.json()
     except Exception as exc:  # noqa: BLE001
-        return {"error": "web_fetch_failed", "detail": str(exc)}
+        return {"error": "web_fetch_failed", "detail": safe_error(exc)}
     abstract = data.get("AbstractText") or ""
     if not abstract:
         rt = data.get("RelatedTopics") or []

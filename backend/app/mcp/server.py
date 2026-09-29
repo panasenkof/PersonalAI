@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse, Response
 from app.agent.universal_tools import UNIVERSAL_TOOL_DEFINITIONS, UNIVERSAL_TOOL_HANDLERS
 from app.db import SessionLocal
 from app.domains.registry import all_plugins, tool_router, tools_openai_format
+from app.security.redact import safe_error
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +121,7 @@ async def _tools_call(req_id: Any, params: dict[str, Any], request: Request) -> 
         except Exception as exc:  # noqa: BLE001 — tool failures are MCP results, not HTTP errors
             logger.warning("mcp tool %s failed: %s", name, exc)
             await session.rollback()
-            out = {"error": "tool_failed", "detail": str(exc)}
+            out = {"error": "tool_failed", "detail": safe_error(exc)}
     return JSONResponse(
         _rpc_result(
             req_id,

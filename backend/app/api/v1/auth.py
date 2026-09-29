@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy import or_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
@@ -37,6 +38,9 @@ def reset_login_limiter() -> None:
     _login_limiter = None
 
 
+_DUMMY_HASH = hash_password("timing-equalizer")
+
+
 def _tokens(user: User) -> TokenOut:
     tv = int(user.token_version or 0)
     return TokenOut(
@@ -55,12 +59,24 @@ async def register(body: RegisterIn, session: AsyncSession = Depends(get_session
     return _tokens(user)
 
 
-def _check_second_factor(user: User, otp: str | None) -> bool:
-    """TOTP first, then a one-time recovery code (which is consumed)."""
+async def _check_second_factor(session: AsyncSession, user: User, otp: str | None) -> bool:
+    """TOTP first (each time-step usable once), then a one-time recovery code (which is consumed)."""
     if not otp:
         return False
-    if user.totp_secret and totp.verify_totp(user.totp_secret, otp):
-        return True
+    if user.totp_secret:
+        step = totp.match_step(user.totp_secret, otp)
+        if step is not None:
+            # compare-and-set: a code that was already accepted (or a concurrent replay) loses
+            res = await session.execute(
+                update(User)
+                .where(User.id == user.id)
+                .where(or_(User.totp_last_step.is_(None), User.totp_last_step < step))
+                .values(totp_last_step=step)
+            )
+            if res.rowcount == 1:  # type: ignore[attr-defined]
+                user.totp_last_step = step
+                return True
+            return False
     remaining = totp.consume_recovery_code(user.recovery_codes, otp)
     if remaining is not None:
         user.recovery_codes = remaining
@@ -81,12 +97,14 @@ async def login(body: LoginIn, session: AsyncSession = Depends(get_session)) -> 
         await limiter.allow(email)  # records a failure for this account
         return HTTPException(401, detail=detail)
 
-    if not user or not verify_password(body.password, user.password_hash) or not user.is_active:
+    # always run one bcrypt verification so response time does not reveal whether the e-mail exists
+    password_ok = verify_password(body.password, user.password_hash if user else _DUMMY_HASH)
+    if not user or not password_ok or not user.is_active:
         raise await fail("invalid_credentials")
     if user.totp_enabled:
         if not body.otp:
             raise HTTPException(401, detail="otp_required")  # not a failure: the client just asks for the code
-        if not _check_second_factor(user, body.otp):
+        if not await _check_second_factor(session, user, body.otp):
             raise await fail("invalid_otp")
         await session.commit()  # persists a consumed recovery code
     await limiter.reset(email)
@@ -137,7 +155,7 @@ async def change_password(
     """Changing the password revokes every previously issued token."""
     if not verify_password(body.current_password, user.password_hash):
         raise HTTPException(401, detail="invalid_credentials")
-    if user.totp_enabled and not _check_second_factor(user, body.otp):
+    if user.totp_enabled and not await _check_second_factor(session, user, body.otp):
         raise HTTPException(401, detail="invalid_otp")
     user.password_hash = hash_password(body.new_password)
     user.token_version = int(user.token_version or 0) + 1
@@ -188,8 +206,10 @@ async def twofa_enable(
     """Step 2: confirm with a valid code; returns one-time recovery codes (store them safely)."""
     if user.totp_enabled:
         raise HTTPException(409, detail="2fa_already_enabled")
-    if not user.totp_secret or not totp.verify_totp(user.totp_secret, body.code):
+    step = totp.match_step(user.totp_secret, body.code) if user.totp_secret else None
+    if step is None:
         raise HTTPException(401, detail="invalid_otp")
+    user.totp_last_step = step  # the code that proved possession cannot be replayed for a login
     plain, hashes = totp.generate_recovery_codes()
     user.totp_enabled = True
     user.recovery_codes = hashes
@@ -207,7 +227,7 @@ async def twofa_disable(
         raise HTTPException(409, detail="2fa_not_enabled")
     if not verify_password(body.password, user.password_hash):
         raise HTTPException(401, detail="invalid_credentials")
-    if not _check_second_factor(user, body.code):
+    if not await _check_second_factor(session, user, body.code):
         raise HTTPException(401, detail="invalid_otp")
     user.totp_enabled = False
     user.totp_secret = None

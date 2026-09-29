@@ -33,6 +33,7 @@ from app.ingestion.schemas import Attachment, Channel, IngestionEnvelope
 from app.llm.limits import RateLimitExceeded
 from app.models import User
 from app.net.retry import request_json
+from app.security.redact import safe_error
 from app.services.blobs import store_blob
 
 logger = logging.getLogger(__name__)
@@ -282,7 +283,7 @@ async def slack_events(
         await send_slack_message(channel, RATE_LIMITED_TEXT)
     except Exception as exc:  # noqa: BLE001
         await session.rollback()
-        await send_slack_message(channel, f"Ошибка: {exc}")
+        await send_slack_message(channel, f"Ошибка: {safe_error(exc)}")
     return {"ok": True}
 
 

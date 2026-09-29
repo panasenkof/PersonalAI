@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -21,6 +22,7 @@ from app.models import (
     TelegramLinkCode,
     User,
 )
+from app.security.ratelimit import AsyncLimiter, build_limiter
 from app.services.facts import FactError, resolve_fact
 
 RATE_LIMITED_TEXT = "Слишком много запросов, попробуйте через минуту."
@@ -55,11 +57,41 @@ async def issue_link_code(session: AsyncSession, user: User) -> tuple[str, datet
     return code, exp
 
 
+PAIR_MAX_FAILURES = 5
+PAIR_WINDOW_SECONDS = 15 * 60
+_pair_limiter: AsyncLimiter | None = None
+
+
+def _pair_guard() -> AsyncLimiter:
+    global _pair_limiter
+    if _pair_limiter is None:
+        _pair_limiter = build_limiter("pair-fail", PAIR_MAX_FAILURES, PAIR_WINDOW_SECONDS)
+    return _pair_limiter
+
+
+def reset_pair_limiter() -> None:
+    global _pair_limiter
+    _pair_limiter = None
+
+
 async def pair_account(session: AsyncSession, code: str, field: str, external_id: str) -> User | None:
     """Consume a link code and bind `external_id` to the code's user (`field` = users column).
 
     An external account belongs to one user: re-pairing takes it over from the previous owner.
     """
+    # Link codes are short: an external account that keeps guessing gets locked out for a while.
+    guard, guard_key = _pair_guard(), f"{field}:{external_id}"
+    if await guard.count(guard_key) >= PAIR_MAX_FAILURES:
+        return None
+    user = await _pair_account(session, code, field, external_id)
+    if user is None:
+        await guard.allow(guard_key)  # records one failed attempt
+    else:
+        await guard.reset(guard_key)
+    return user
+
+
+async def _pair_account(session: AsyncSession, code: str, field: str, external_id: str) -> User | None:
     code = code.strip().upper()
     res = await session.execute(
         select(TelegramLinkCode).where(TelegramLinkCode.code == code).where(TelegramLinkCode.consumed_at.is_(None))
@@ -119,7 +151,10 @@ async def submit_envelope(session: AsyncSession, user: User, env: IngestionEnvel
         await session.commit()
         from app.queue.runner import get_runner
 
-        await get_runner().enqueue(job.id)
+        try:
+            await get_runner().enqueue(job.id)
+        except Exception:  # noqa: BLE001 — job is persisted; the reaper re-queues it when Redis recovers
+            logging.getLogger(__name__).warning("enqueue failed for job %s; reaper will retry", job.id, exc_info=True)
         return None
     out = await process_envelope(session, user.id, job, env)
     await session.commit()
