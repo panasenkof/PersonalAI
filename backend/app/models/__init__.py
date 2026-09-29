@@ -191,3 +191,29 @@ class ScheduleCandidate(Base):
     fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     structured: Mapped[dict[str, Any]] = mapped_column(JSON)
     status: Mapped[str] = mapped_column(String(32), default=ScheduleStatus.draft.value)
+
+
+class Conversation(Base):
+    __tablename__ = "conversations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    channel: Mapped[str] = mapped_column(String(16), default="mobile")
+    title: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    user: Mapped["User"] = relationship()  # noqa: F821
+
+
+class ChatTurn(Base):
+    __tablename__ = "chat_turns"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    conversation_id: Mapped[str] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"), index=True
+    )
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    role: Mapped[str] = mapped_column(String(16))  # user | assistant
+    content: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

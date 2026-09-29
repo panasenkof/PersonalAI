@@ -24,6 +24,7 @@ class IngestionEnvelope(BaseModel):
     channel: Channel = Channel.mobile
     correlation_id: str | None = None
     locale: str | None = None
+    conversation_id: str | None = None
 
 
 class IngestionJobView(BaseModel):

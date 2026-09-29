@@ -3,26 +3,19 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from sqlalchemy import String, cast, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Collection, Entity, Observation
+from app.models import Collection, Entity
+from app.rag.search import hybrid_search
 
 
 async def kb_search(session: AsyncSession, user_id: str, args: dict[str, Any]) -> dict[str, Any]:
+    """Hybrid retrieval: semantic embeddings + substring over entities/observations."""
     q = (args.get("query") or "").strip()
     if not q:
         return {"hits": []}
-    like = f"%{q}%"
-    stmt = select(Entity).where(Entity.user_id == user_id)
-    stmt = stmt.where(cast(Entity.payload, String).ilike(like))
-    res = await session.execute(stmt)
-    entities = list(res.scalars().all())
-    hits = [{"kind": "entity", "id": e.id, "domain": e.domain, "payload": e.payload} for e in entities[:20]]
-    stmt2 = select(Observation).where(Observation.user_id == user_id).where(cast(Observation.payload, String).ilike(like))
-    res2 = await session.execute(stmt2)
-    obs = list(res2.scalars().all())
-    hits.extend([{"kind": "observation", "id": o.id, "entity_id": o.entity_id, "payload": o.payload} for o in obs[:20]])
+    hits = await hybrid_search(session, user_id, q, k=15)
     return {"hits": hits[:30]}
 
 
@@ -53,6 +46,9 @@ async def kb_create_entity(session: AsyncSession, user_id: str, args: dict[str, 
     )
     session.add(e)
     await session.flush()
+    from app.rag.indexing import index_entity
+
+    await index_entity(session, user_id, e)
     return {"entity_id": e.id, "status": "created"}
 
 
@@ -61,7 +57,7 @@ UNIVERSAL_TOOL_DEFINITIONS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "kb_search",
-            "description": "Search user's knowledge base (entities and observations) by substring.",
+            "description": "Search the user's knowledge base (entities, observations, text chunks) — semantic + substring.",
             "parameters": {
                 "type": "object",
                 "properties": {"query": {"type": "string"}},

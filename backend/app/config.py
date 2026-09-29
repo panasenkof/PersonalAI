@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     telegram_webhook_secret: str = ""
 
     default_embedding_dimensions: int = 384
+    agent_history_window: int = 20
     default_embedding_model: str = "text-embedding-3-small"
 
     # Comma-separated CORS origins; "*" disables credentials (browser security rules)

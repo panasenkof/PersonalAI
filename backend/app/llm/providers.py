@@ -63,6 +63,11 @@ class LLMProvider(ABC):
     ) -> dict[str, Any]:
         raise NotImplementedError
 
+    @abstractmethod
+    async def embed(self, texts: list[str], *, model: str) -> list[list[float]]:
+        """Embed texts via the provider's /embeddings endpoint."""
+        raise NotImplementedError
+
 
 class OpenAICompatibleProvider(LLMProvider):
     def __init__(self, base_url: str, api_key: str | None) -> None:
@@ -184,6 +189,22 @@ class OpenAICompatibleProvider(LLMProvider):
             data = r.json()
         content = data["choices"][0]["message"]["content"]
         return json.loads(content)
+
+
+    async def embed(self, texts: list[str], *, model: str) -> list[list[float]]:
+        if not texts:
+            return []
+        payload = {"model": model, "input": texts}
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            r = await client.post(
+                f"{self.base_url}/embeddings",
+                headers=self._headers(),
+                json=payload,
+            )
+            r.raise_for_status()
+            data = r.json()
+        items = sorted(data["data"], key=lambda d: d.get("index", 0))
+        return [list(it["embedding"]) for it in items]
 
 
 class CloudLLMProvider(OpenAICompatibleProvider):

@@ -37,7 +37,7 @@ def test_telegram_photo_flow_records_blob_and_replies(
         assert file_id == "photo-file-id"
         return b"\x89PNG fake", "image/png"
 
-    async def fake_run(session, user_id: str, user_visible_text: str):
+    async def fake_run(session, user_id: str, user_visible_text: str, conversation_id=None):
         captured["prompt"] = user_visible_text
         return {"assistant_text": "Фото получил.", "raw_last": {}}
 

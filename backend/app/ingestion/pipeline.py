@@ -4,6 +4,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agent.history import get_or_create_conversation, persist_turn
 from app.agent.orchestrator import run_agent
 from app.ingestion.schemas import IngestionEnvelope, utcnow
 from app.ingestion.stt import StubSTTProvider
@@ -42,8 +43,14 @@ async def process_envelope(
     job.updated_at = utcnow()
     await session.flush()
     try:
+        conv = await get_or_create_conversation(
+            session, user_id, envelope.channel.value, conversation_id=envelope.conversation_id
+        )
         prompt = await build_user_prompt(envelope)
-        out = await run_agent(session, user_id, prompt)
+        out = await run_agent(session, user_id, prompt, conversation_id=conv.id if conv else None)
+        if conv is not None and out.get("assistant_text"):
+            await persist_turn(session, user_id, conv.id, prompt, out["assistant_text"])
+            job.envelope = {**job.envelope, "conversation_id": conv.id}
         job.status = JobStatus.completed.value
         job.result = out
         job.updated_at = utcnow()

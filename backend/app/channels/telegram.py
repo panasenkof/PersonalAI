@@ -87,6 +87,15 @@ async def telegram_webhook(
         if link and _aware(link.expires_at) >= utcnow():
             u = await session.get(User, link.user_id)
             if u:
+                # A Telegram account may be linked to only one user: take it over
+                # from any previous owner so re-pairing always works.
+                res_prev = await session.execute(
+                    select(User).where(User.telegram_user_id == tg_id)
+                )
+                prev = res_prev.scalar_one_or_none()
+                if prev is not None and prev.id != u.id:
+                    prev.telegram_user_id = None
+                    await session.flush()  # clear UNIQUE before assigning the new owner
                 u.telegram_user_id = tg_id
                 link.consumed_at = utcnow()
                 await session.commit()

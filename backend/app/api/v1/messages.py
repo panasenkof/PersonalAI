@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agent.history import get_or_create_conversation
 from app.api.deps import get_current_user
 from app.api.schemas import JobOut, MessageIn, MessageOut
 from app.config import get_settings
@@ -45,11 +46,18 @@ async def post_message(
     for att in body.attachments:
         if not await user_owns_blob(session, user.id, att.storage_key):
             raise HTTPException(status_code=422, detail="unknown_storage_key")
+    if body.conversation_id:
+        existing = await get_or_create_conversation(
+            session, user.id, body.channel.value, conversation_id=body.conversation_id
+        )
+        if existing is None:
+            raise HTTPException(status_code=404, detail="conversation_not_found")
     env = IngestionEnvelope(
         text=body.text,
         attachments=body.attachments,
         channel=body.channel,
         correlation_id=body.correlation_id,
+        conversation_id=body.conversation_id,
     )
     job = IngestionJob(
         user_id=user.id,
@@ -66,6 +74,7 @@ async def post_message(
         status=job.status,
         assistant_text=out.get("assistant_text"),
         error=out.get("error") if out.get("failed") else None,
+        conversation_id=(job.envelope or {}).get("conversation_id") or body.conversation_id,
     )
 
 

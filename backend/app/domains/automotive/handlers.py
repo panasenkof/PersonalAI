@@ -68,6 +68,9 @@ async def auto_add_service_event(session: AsyncSession, user_id: str, args: dict
     )
     session.add(obs)
     await session.flush()
+    from app.rag.indexing import index_observation
+
+    await index_observation(session, user_id, obs)
     return {"observation_id": obs.id, "status": "created"}
 
 
@@ -121,6 +124,9 @@ async def auto_parse_service_receipt(session: AsyncSession, user_id: str, args: 
     )
     session.add(obs)
     await session.flush()
+    from app.rag.indexing import index_observation
+
+    await index_observation(session, user_id, obs)
     return {"observation_id": obs.id, "parsed": parsed, "status": "saved_to_observations"}
 
 

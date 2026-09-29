@@ -20,8 +20,8 @@ def test_register_and_login(client: TestClient, random_email: str) -> None:
 
 
 def test_message_with_mocked_agent(client: TestClient, random_email: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    async def fake_run(session, user_id: str, user_visible_text: str):
-        _ = (session, user_id, user_visible_text)
+    async def fake_run(session, user_id: str, user_visible_text: str, conversation_id=None):
+        _ = (session, user_id, user_visible_text, conversation_id)
         return {"assistant_text": "Сохранено (тест).", "raw_last": {}}
 
     monkeypatch.setattr("app.ingestion.pipeline.run_agent", fake_run)

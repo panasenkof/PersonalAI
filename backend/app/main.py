@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.auth import router as auth_router
 from app.api.v1.collections import router as collections_router
+from app.api.v1.conversations import router as conversations_router
 from app.api.v1.messages import router as messages_router
 from app.api.v1.settings_llm import router as settings_router
 from app.channels.telegram import router as telegram_router
@@ -46,6 +47,7 @@ app.include_router(auth_router)
 app.include_router(settings_router)
 app.include_router(messages_router)
 app.include_router(collections_router)
+app.include_router(conversations_router)
 app.include_router(telegram_router)
 
 

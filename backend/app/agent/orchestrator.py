@@ -6,6 +6,7 @@ from typing import Any
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agent.history import load_history_messages
 from app.agent.universal_tools import UNIVERSAL_TOOL_DEFINITIONS, UNIVERSAL_TOOL_HANDLERS, parse_tool_arguments
 from app.domains.registry import all_plugins, tool_router, tools_openai_format
 from app.llm.providers import ChatMessage, LLMProvider, LocalLLMProvider
@@ -45,6 +46,7 @@ async def run_agent(
     session: AsyncSession,
     user_id: str,
     user_visible_text: str,
+    conversation_id: str | None = None,
 ) -> dict[str, Any]:
     plugins = all_plugins()
     tools = UNIVERSAL_TOOL_DEFINITIONS + tools_openai_format(plugins)
@@ -53,10 +55,10 @@ async def run_agent(
     provider = await provider_for_user(session, user_id)
     model = await default_model_for_user(session, user_id)
 
-    messages: list[ChatMessage] = [
-        ChatMessage(role="system", content=SYSTEM_PROMPT),
-        ChatMessage(role="user", content=user_visible_text),
-    ]
+    messages: list[ChatMessage] = [ChatMessage(role="system", content=SYSTEM_PROMPT)]
+    if conversation_id:
+        messages.extend(await load_history_messages(session, user_id, conversation_id))
+    messages.append(ChatMessage(role="user", content=user_visible_text))
 
     for _ in range(10):
         provider, model, result = await _chat_with_fallback(provider, model, messages, tools)
