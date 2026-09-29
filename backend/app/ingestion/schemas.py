@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 class Channel(str, Enum):
     mobile = "mobile"
     telegram = "telegram"
+    slack = "slack"
 
 
 class Attachment(BaseModel):
@@ -24,6 +25,8 @@ class IngestionEnvelope(BaseModel):
     channel: Channel = Channel.mobile
     correlation_id: str | None = None
     locale: str | None = None
+    conversation_id: str | None = None
+    channel_meta: dict[str, Any] = Field(default_factory=dict)
 
 
 class IngestionJobView(BaseModel):

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, EmailStr, Field
@@ -15,6 +16,7 @@ class RegisterIn(BaseModel):
 class TokenOut(BaseModel):
     access_token: str
     token_type: str = "bearer"
+    refresh_token: str | None = None
 
 
 class LoginIn(BaseModel):
@@ -44,6 +46,7 @@ class MessageIn(BaseModel):
     channel: Channel = Channel.mobile
     correlation_id: str | None = None
     attachments: list[Attachment] = []
+    conversation_id: str | None = None
 
 
 class MessageOut(BaseModel):
@@ -51,6 +54,21 @@ class MessageOut(BaseModel):
     status: str
     assistant_text: str | None = None
     error: str | None = None
+    conversation_id: str | None = None
+
+
+class ConversationOut(BaseModel):
+    id: str
+    channel: str
+    title: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ChatTurnOut(BaseModel):
+    role: str
+    content: str
+    created_at: datetime
 
 
 class JobOut(BaseModel):

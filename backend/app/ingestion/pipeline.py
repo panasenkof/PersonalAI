@@ -4,18 +4,18 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agent.history import get_or_create_conversation, persist_turn
 from app.agent.orchestrator import run_agent
 from app.ingestion.schemas import IngestionEnvelope, utcnow
-from app.ingestion.stt import StubSTTProvider
+from app.ingestion.stt import stt_provider_from_settings
 from app.models import IngestionJob, JobStatus
-from app.storage.blob import read_bytes
 
 
 async def build_user_prompt(envelope: IngestionEnvelope) -> str:
     parts: list[str] = []
     if envelope.text:
         parts.append(envelope.text)
-    stt = StubSTTProvider()
+    stt = stt_provider_from_settings()
     for att in envelope.attachments:
         if att.mime.startswith("audio/"):
             tr = await stt.transcribe(storage_key=att.storage_key, mime=att.mime)
@@ -38,13 +38,29 @@ async def process_envelope(
     user_id: str,
     job: IngestionJob,
     envelope: IngestionEnvelope,
+    emit: Any | None = None,
 ) -> dict[str, Any]:
     job.status = JobStatus.processing.value
     job.updated_at = utcnow()
     await session.flush()
     try:
+        conv = await get_or_create_conversation(
+            session, user_id, envelope.channel.value, conversation_id=envelope.conversation_id
+        )
         prompt = await build_user_prompt(envelope)
-        out = await run_agent(session, user_id, prompt)
+        out = await run_agent(
+            session,
+            user_id,
+            prompt,
+            conversation_id=conv.id if conv else None,
+            emit=emit,
+        )
+        if conv is not None and out.get("assistant_text"):
+            await persist_turn(session, user_id, conv.id, prompt, out["assistant_text"])
+            job.envelope = {**job.envelope, "conversation_id": conv.id}
+        usage = (out.get("raw_last") or {}).get("usage")
+        if usage:
+            out["usage"] = usage  # surfaced via GET /v1/stats for cost visibility
         job.status = JobStatus.completed.value
         job.result = out
         job.updated_at = utcnow()
