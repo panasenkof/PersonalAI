@@ -11,7 +11,12 @@ Automotive is the first product domain plugin; medical labs is a stub for future
 | Channel | Auth | Notes |
 |---------|------|--------|
 | Mobile | JWT bearer (`Authorization: Bearer`) | Same `/v1/messages` API |
-| Telegram | Webhook + linked `telegram_user_id` | Deep link / link code pairs chat to user |
+| Telegram | Webhook secret + linked `telegram_user_id` | Link code pairs chat to user; photos, documents/PDF, voice, inline confirm buttons |
+| Slack | HMAC signature + linked `slack_user_id` | Files, threads (conversation per thread), Block Kit confirm buttons |
+| WhatsApp | Cloud API webhook, `X-Hub-Signature-256` | Media, reply buttons |
+| Discord | Interactions endpoint, Ed25519 | Slash commands `/ask` `/link` `/stop` `/new`, buttons |
+
+See [CHANNELS.md](CHANNELS.md). Scaling/queue/search: [SCALING.md](SCALING.md). Security: [SECURITY.md](SECURITY.md).
 
 All channels normalize to `IngestionEnvelope` (text, attachments with MIME and storage ref, `channel`, `correlation_id`, optional `locale`).
 
@@ -19,9 +24,10 @@ All channels normalize to `IngestionEnvelope` (text, attachments with MIME and s
 
 1. **Accepted** — API returns `job_id`.
 2. **Processing** — STT for audio, optional vision/OCR for images, then agent.
-3. **Awaiting_confirm** — extracted facts need user confirmation (optional flow).
+3. **Awaiting_confirm** — facts extracted from photos/PDF wait for the user's confirm/reject (`CONFIRM_EXTRACTED_FACTS`); buttons in every channel, `POST /v1/facts/{id}/confirm|reject`.
 4. **Completed** — final assistant message + side effects (KB commit) recorded.
-5. **Failed** — error code and safe message.
+5. **Failed** — error code and safe message (after `JOB_MAX_ATTEMPTS`; jobs interrupted by a restart are re-queued, not failed).
+6. **Cancelled** — user pressed Stop (`POST /v1/jobs/{id}/cancel`, `/stop` in messengers); the partial answer is kept.
 
 ## LLM settings (per user)
 
@@ -40,7 +46,7 @@ Fallback cloud when local fails: **disabled by default** (`LLM_ALLOW_LOCAL_FALLB
 - **Observation** — time-bound event linked to entity (service visit, lab upload).
 - **Blob** — object storage key, checksum, mime.
 - **ExtractedFact** — LLM draft JSON, status `pending_user_confirm` | `committed`.
-- **Chunk** — text chunk + embedding vector for RAG (optional; pgvector when enabled).
+- **Chunk** — text chunk + embedding for RAG; `embedding_vec vector(N)` with an HNSW index on Postgres (pgvector), JSON embedding on SQLite.
 
 RAG retrieval uses only **committed** facts and entity payloads unless tool explicitly queries drafts.
 
@@ -55,9 +61,10 @@ RAG retrieval uses only **committed** facts and entity payloads unless tool expl
 - `POST /v1/auth/register` — create user + returns token
 - `POST /v1/auth/token` — login
 - `GET/PATCH /v1/settings/llm` — LLM configuration
-- `POST /v1/messages` — submit envelope (sync processing in MVP for simplicity; async field reserved)
-- `GET /v1/jobs/{job_id}` — job status (stub compatible with future queue)
-- `POST /v1/channels/telegram/link` — issue link code for Telegram pairing
+- `POST /v1/messages` — submit envelope (`MESSAGE_MODE=queue`: returns `job_id`; `sync`: answer inline)
+- `GET /v1/jobs/{job_id}` · `GET /v1/jobs/{job_id}/events` (SSE) · `POST /v1/jobs/{job_id}/cancel`
+- `GET /v1/facts`, `POST /v1/facts/{id}/confirm|reject`
+- `POST /v1/channels/{telegram|slack|whatsapp|discord}/link-code` — issue link code for pairing
 - `POST /v1/channels/telegram/webhook` — Telegram webhook (configure `TELEGRAM_WEBHOOK_SECRET`)
 - CRUD under `/v1/collections`, `/v1/entities`, `/v1/observations` for clients
 

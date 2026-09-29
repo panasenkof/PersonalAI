@@ -52,6 +52,45 @@ async def kb_create_entity(session: AsyncSession, user_id: str, args: dict[str, 
     return {"entity_id": e.id, "status": "created"}
 
 
+async def kb_ingest_document(session: AsyncSession, user_id: str, args: dict[str, Any]) -> dict[str, Any]:
+    """Store an uploaded PDF/text file as a searchable note: text is extracted, chunked and embedded."""
+    from app.services.blobs import get_blob
+    from app.services.documents import extract_document_text
+    from app.storage.blob import read_bytes
+
+    storage_key = args.get("storage_key")
+    if not storage_key:
+        return {"error": "no_storage_key"}
+    blob = await get_blob(session, user_id, storage_key)
+    if blob is None:
+        return {"error": "unknown_storage_key"}
+    text = extract_document_text(await read_bytes(storage_key), args.get("mime") or blob.mime, blob.filename)
+    if not text.strip():
+        return {"error": "no_extractable_text", "message": "Scanned image or unsupported format."}
+    slug = args.get("collection_slug") or "garage"
+    res = await session.execute(
+        select(Collection).where(Collection.user_id == user_id).where(Collection.slug == slug)
+    )
+    col = res.scalar_one_or_none()
+    if col is None:
+        return {"error": f"collection_not_found:{slug}"}
+    title = str(args.get("title") or blob.filename or "Документ")[:200]
+    e = Entity(
+        user_id=user_id,
+        collection_id=col.id,
+        domain="documents",
+        payload={"type": "document", "title": title, "filename": blob.filename, "storage_key": storage_key,
+                 "chars": len(text)},
+    )
+    session.add(e)
+    await session.flush()
+    from app.rag.indexing import index_entity, index_text
+
+    await index_entity(session, user_id, e)
+    chunks = await index_text(session, user_id, text, entity_id=e.id)
+    return {"entity_id": e.id, "title": title, "chars": len(text), "chunks": chunks, "status": "ingested"}
+
+
 UNIVERSAL_TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
@@ -97,6 +136,27 @@ UNIVERSAL_TOOL_DEFINITIONS: list[dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "kb_ingest_document",
+            "description": (
+                "Save an attached PDF/text document into the knowledge base (extracts text, makes it "
+                "searchable). Use for documents that are not lab reports."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "storage_key": {"type": "string"},
+                    "mime": {"type": "string"},
+                    "title": {"type": "string"},
+                    "collection_slug": {"type": "string"},
+                },
+                "required": ["storage_key"],
+                "additionalProperties": False,
+            },
+        },
+    },
 ]
 
 
@@ -104,6 +164,7 @@ UNIVERSAL_TOOL_HANDLERS = {
     "kb_search": kb_search,
     "kb_list_entities": kb_list_entities,
     "kb_create_entity": kb_create_entity,
+    "kb_ingest_document": kb_ingest_document,
 }
 
 

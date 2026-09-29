@@ -8,6 +8,12 @@ from typing import Any, Awaitable, Callable, Literal
 import httpx
 from pydantic import BaseModel, Field
 
+from app.llm.limits import llm_slot
+from app.net.retry import with_retry
+
+# on_tool_delta(index, tool_name, arguments_fragment): live tool-call construction
+ToolDeltaFn = Callable[[int, str, str], Awaitable[None] | None]
+
 
 class ChatMessage(BaseModel):
     role: Literal["system", "user", "assistant", "tool"]
@@ -78,6 +84,7 @@ class LLMProvider(ABC):
         tool_choice: str | None = "auto",
         temperature: float = 0.2,
         on_token: Callable[[str], Awaitable[None] | None] | None = None,
+        on_tool_delta: ToolDeltaFn | None = None,
     ) -> LLMCompletionResult:
         """Streaming chat; raises NotImplementedError when unsupported."""
         raise NotImplementedError
@@ -93,6 +100,18 @@ class OpenAICompatibleProvider(LLMProvider):
         if self.api_key:
             h["Authorization"] = f"Bearer {self.api_key}"
         return h
+
+    async def _post_json(self, path: str, payload: dict[str, Any], timeout: float) -> dict[str, Any]:
+        """POST with bounded concurrency and retry/backoff on transient failures."""
+
+        async def _once() -> dict[str, Any]:
+            async with llm_slot():
+                async with httpx.AsyncClient(timeout=timeout) as client:
+                    r = await client.post(f"{self.base_url}{path}", headers=self._headers(), json=payload)
+                    r.raise_for_status()
+                    return r.json()
+
+        return await with_retry(_once, label=f"llm{path}")
 
     async def chat(
         self,
@@ -111,14 +130,7 @@ class OpenAICompatibleProvider(LLMProvider):
         if tools:
             payload["tools"] = tools
             payload["tool_choice"] = tool_choice or "auto"
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            r = await client.post(
-                f"{self.base_url}/chat/completions",
-                headers=self._headers(),
-                json=payload,
-            )
-            r.raise_for_status()
-            data = r.json()
+        data = await self._post_json("/chat/completions", payload, 120.0)
         choice = data["choices"][0]["message"]
         msg = ChatMessage(
             role=choice.get("role", "assistant"),
@@ -161,14 +173,7 @@ class OpenAICompatibleProvider(LLMProvider):
             },
             "temperature": 0.1,
         }
-        async with httpx.AsyncClient(timeout=180.0) as client:
-            r = await client.post(
-                f"{self.base_url}/chat/completions",
-                headers=self._headers(),
-                json=payload,
-            )
-            r.raise_for_status()
-            data = r.json()
+        data = await self._post_json("/chat/completions", payload, 180.0)
         content = data["choices"][0]["message"]["content"]
         return json.loads(content)
 
@@ -193,30 +198,15 @@ class OpenAICompatibleProvider(LLMProvider):
             },
             "temperature": 0.1,
         }
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            r = await client.post(
-                f"{self.base_url}/chat/completions",
-                headers=self._headers(),
-                json=payload,
-            )
-            r.raise_for_status()
-            data = r.json()
+        data = await self._post_json("/chat/completions", payload, 120.0)
         content = data["choices"][0]["message"]["content"]
         return json.loads(content)
-
 
     async def embed(self, texts: list[str], *, model: str) -> list[list[float]]:
         if not texts:
             return []
         payload = {"model": model, "input": texts}
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            r = await client.post(
-                f"{self.base_url}/embeddings",
-                headers=self._headers(),
-                json=payload,
-            )
-            r.raise_for_status()
-            data = r.json()
+        data = await self._post_json("/embeddings", payload, 60.0)
         items = sorted(data["data"], key=lambda d: d.get("index", 0))
         return [list(it["embedding"]) for it in items]
 
@@ -230,8 +220,14 @@ class OpenAICompatibleProvider(LLMProvider):
         tool_choice: str | None = "auto",
         temperature: float = 0.2,
         on_token: Callable[[str], Awaitable[None] | None] | None = None,
+        on_tool_delta: ToolDeltaFn | None = None,
     ) -> LLMCompletionResult:
-        """SSE streaming with delta accumulation (content + tool calls)."""
+        """SSE streaming with delta accumulation (content + tool calls).
+
+        Connection-level failures (before the first byte is consumed) are retried with
+        backoff; once output has been delivered to the consumer the error is propagated
+        so the caller can reset the UI and fall back.
+        """
         payload: dict[str, Any] = {
             "model": model,
             "messages": [m.model_dump(exclude_none=True) for m in messages],
@@ -242,56 +238,82 @@ class OpenAICompatibleProvider(LLMProvider):
             payload["tools"] = tools
             payload["tool_choice"] = tool_choice or "auto"
 
-        content_parts: list[str] = []
-        tool_acc: dict[int, dict[str, Any]] = {}
-        usage: dict[str, Any] = {}
+        async def _emit(fn: Callable[..., Awaitable[None] | None] | None, *args: Any) -> None:
+            if fn is None:
+                return
+            res = fn(*args)
+            if inspect.isawaitable(res):
+                await res
 
-        async with httpx.AsyncClient(timeout=180.0) as client:
-            async with client.stream(
-                "POST",
-                f"{self.base_url}/chat/completions",
-                headers=self._headers(),
-                json=payload,
-            ) as resp:
-                resp.raise_for_status()
-                async for line in resp.aiter_lines():
-                    if not line.startswith("data:"):
-                        continue
-                    data = line[5:].strip()
-                    if data == "[DONE]":
-                        break
-                    try:
-                        chunk = json.loads(data)
-                    except json.JSONDecodeError:
-                        continue
-                    if chunk.get("usage"):
-                        usage = chunk["usage"]
-                    for choice in chunk.get("choices") or []:
-                        delta = choice.get("delta") or {}
-                        piece = delta.get("content")
-                        if piece:
-                            content_parts.append(piece)
-                            if on_token is not None:
-                                res = on_token(piece)
-                                if inspect.isawaitable(res):
-                                    await res
-                        for tc in delta.get("tool_calls") or []:
-                            idx = int(tc.get("index") or 0)
-                            acc = tool_acc.setdefault(
-                                idx,
-                                {
-                                    "id": "",
-                                    "type": "function",
-                                    "function": {"name": "", "arguments": ""},
-                                },
-                            )
-                            if tc.get("id"):
-                                acc["id"] = tc["id"]
-                            fn = tc.get("function") or {}
-                            if fn.get("name"):
-                                acc["function"]["name"] = fn["name"]
-                            if fn.get("arguments"):
-                                acc["function"]["arguments"] += fn["arguments"]
+        class _Started(Exception):
+            """Raised internally to mark that output already reached the consumer."""
+
+        async def _attempt() -> tuple[list[str], dict[int, dict[str, Any]], dict[str, Any]]:
+            content_parts: list[str] = []
+            tool_acc: dict[int, dict[str, Any]] = {}
+            usage: dict[str, Any] = {}
+            delivered = False
+            async with llm_slot():
+                try:
+                    async with httpx.AsyncClient(timeout=180.0) as client:
+                        async with client.stream(
+                            "POST",
+                            f"{self.base_url}/chat/completions",
+                            headers=self._headers(),
+                            json=payload,
+                        ) as resp:
+                            resp.raise_for_status()
+                            async for line in resp.aiter_lines():
+                                if not line.startswith("data:"):
+                                    continue
+                                data = line[5:].strip()
+                                if data == "[DONE]":
+                                    break
+                                try:
+                                    chunk = json.loads(data)
+                                except json.JSONDecodeError:
+                                    continue
+                                if chunk.get("usage"):
+                                    usage = chunk["usage"]
+                                for choice in chunk.get("choices") or []:
+                                    delta = choice.get("delta") or {}
+                                    piece = delta.get("content")
+                                    if piece:
+                                        content_parts.append(piece)
+                                        delivered = True
+                                        await _emit(on_token, piece)
+                                    for tc in delta.get("tool_calls") or []:
+                                        idx = int(tc.get("index") or 0)
+                                        acc = tool_acc.setdefault(
+                                            idx,
+                                            {
+                                                "id": "",
+                                                "type": "function",
+                                                "function": {"name": "", "arguments": ""},
+                                            },
+                                        )
+                                        if tc.get("id"):
+                                            acc["id"] = tc["id"]
+                                        fn = tc.get("function") or {}
+                                        if fn.get("name"):
+                                            acc["function"]["name"] = fn["name"]
+                                        frag = fn.get("arguments") or ""
+                                        if frag:
+                                            acc["function"]["arguments"] += frag
+                                        if fn.get("name") or frag:
+                                            delivered = True
+                                            await _emit(on_tool_delta, idx, acc["function"]["name"], frag)
+                except (httpx.TransportError, httpx.HTTPStatusError) as exc:
+                    if delivered:
+                        raise _Started() from exc
+                    raise
+            return content_parts, tool_acc, usage
+
+        try:
+            content_parts, tool_acc, usage = await with_retry(_attempt, label="llm/stream")
+        except _Started as started:
+            cause = started.__cause__
+            raise cause if cause is not None else started  # let the caller decide (reset + fallback)
 
         tool_calls = [tool_acc[i] for i in sorted(tool_acc)] or None
         msg = ChatMessage(

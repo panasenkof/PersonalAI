@@ -8,27 +8,45 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.api.v1.admin import router as admin_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.collections import router as collections_router
 from app.api.v1.conversations import router as conversations_router
+from app.api.v1.facts import router as facts_router
 from app.api.v1.messages import router as messages_router
 from app.api.v1.settings_llm import router as settings_router
 from app.api.v1.stats import router as stats_router
+from app.channels.discord import router as discord_router
 from app.channels.slack import router as slack_router
 from app.channels.telegram import router as telegram_router
-from app.config import get_settings
+from app.channels.whatsapp import router as whatsapp_router
+from app.config import get_settings, production_problems
 from app.db import init_db
 from app.mcp.server import router as mcp_router
 from app.observability import RequestTimer, configure_logging, log_event
 from app.security.ratelimit import SlidingWindowLimiter
 
+_logger = logging.getLogger("pia.http")
+
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    settings = get_settings()
+    problems = production_problems(settings)
+    if settings.is_production and problems:
+        raise RuntimeError("Refusing to start in production: " + "; ".join(problems))
+    for p in problems:
+        _logger.warning("config: %s", p)
     await init_db()
+
+    from app.queue.runner import get_runner
+
+    runner = get_runner()
+    if settings.message_mode == "queue" or settings.queue_backend == "redis":
+        await runner.start()
     stop = asyncio.Event()
     task: asyncio.Task | None = None
-    if get_settings().reminders_enabled:
+    if settings.reminders_enabled:
         from app.scheduler.reminders import reminders_loop
 
         task = asyncio.create_task(reminders_loop(stop))
@@ -41,6 +59,12 @@ async def lifespan(_: FastAPI):
                 await asyncio.wait_for(task, timeout=5)
             except (TimeoutError, asyncio.CancelledError):
                 task.cancel()
+        if settings.message_mode == "queue" or settings.queue_backend == "redis":
+            await runner.stop()
+        if settings.redis_url:
+            from app.queue.redis_client import close_redis
+
+            await close_redis()
 
 
 configure_logging()
@@ -61,7 +85,6 @@ app.add_middleware(
 
 _access_limiter = SlidingWindowLimiter(limit=_settings.rate_limit_auth_per_minute)
 _AUTH_PATHS = ("/v1/auth/register", "/v1/auth/token")
-_logger = logging.getLogger("pia.http")
 
 
 @app.middleware("http")
@@ -77,6 +100,12 @@ async def request_context(request: Request, call_next):
     response = await call_next(request)
     if corr:
         response.headers["X-Correlation-Id"] = corr
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    if not request.url.path.startswith("/app"):
+        response.headers.setdefault("X-Frame-Options", "DENY")
+    if get_settings().is_production:
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
     log_event(
         _logger,
         "request",
@@ -95,6 +124,10 @@ app.include_router(messages_router)
 app.include_router(collections_router)
 app.include_router(conversations_router)
 app.include_router(stats_router)
+app.include_router(facts_router)
+app.include_router(admin_router)
+app.include_router(whatsapp_router)
+app.include_router(discord_router)
 app.include_router(telegram_router)
 app.include_router(slack_router)
 app.include_router(mcp_router)
@@ -103,6 +136,32 @@ app.include_router(mcp_router)
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/ready")
+async def ready() -> JSONResponse:
+    """Readiness: database (and Redis when configured) must answer."""
+    from sqlalchemy import text
+
+    from app.db import engine
+
+    checks: dict[str, str] = {}
+    try:
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        checks["database"] = "ok"
+    except Exception as exc:  # noqa: BLE001
+        checks["database"] = f"error: {exc}"
+    if _settings.redis_url:
+        try:
+            from app.queue.redis_client import get_redis
+
+            await get_redis().ping()
+            checks["redis"] = "ok"
+        except Exception as exc:  # noqa: BLE001
+            checks["redis"] = f"error: {exc}"
+    ok = all(v == "ok" for v in checks.values())
+    return JSONResponse({"status": "ok" if ok else "degraded", **checks}, status_code=200 if ok else 503)
 
 
 @app.get("/")

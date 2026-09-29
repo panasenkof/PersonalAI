@@ -89,11 +89,13 @@ async def _tools_call(req_id: Any, params: dict[str, Any], request: Request) -> 
     auth = request.headers.get("authorization") or ""
     if not auth.startswith("Bearer "):
         return JSONResponse(_rpc_error(req_id, -32602, "Missing bearer token"), status_code=401)
-    from app.security.auth import decode_token
+    from app.services.users import authenticate_token
 
-    uid = decode_token(auth.removeprefix("Bearer ").strip())
-    if not uid:
+    async with SessionLocal() as auth_session:
+        auth_user = await authenticate_token(auth_session, auth.removeprefix("Bearer ").strip())
+    if auth_user is None:
         return JSONResponse(_rpc_error(req_id, -32602, "Invalid token"), status_code=401)
+    uid = auth_user.id
 
     name = params.get("name")
     if not isinstance(name, str) or not name:

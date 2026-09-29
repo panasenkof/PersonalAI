@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domains.automotive.schemas import MAINTENANCE_ITEMS_SCHEMA, SERVICE_RECEIPT_SCHEMA
 from app.llm.router import default_model_for_user, provider_for_user
 from app.models import Entity, Observation, ScheduleCandidate, ScheduleStatus
+from app.services.facts import stage_or_commit_observation
 from app.storage.blob import read_bytes
 
 
@@ -109,25 +110,32 @@ async def auto_parse_service_receipt(session: AsyncSession, user_id: str, args: 
             occurred = occurred.replace(tzinfo=timezone.utc)
     except Exception:
         occurred = datetime.now(timezone.utc)
-    obs = Observation(
-        user_id=user_id,
-        entity_id=e.id,
-        occurred_at=occurred,
-        kind="service_event",
-        payload={
-            "type": "service_event",
-            "odometer_km": parsed.get("odometer_km"),
-            "work_items": parsed.get("work_items") or [],
-            "vendor": parsed.get("vendor"),
-            "source": "receipt_image",
-        },
+    work_items: list[Any] = list(parsed.get("work_items") or [])
+    payload: dict[str, Any] = {
+        "type": "service_event",
+        "odometer_km": parsed.get("odometer_km"),
+        "work_items": work_items,
+        "vendor": parsed.get("vendor"),
+        "source": "receipt_image",
+    }
+    items = ", ".join(str((w.get("name") if isinstance(w, dict) else w) or "") for w in work_items)
+    summary = (
+        f"Сервисное событие {occurred.date().isoformat()}: пробег {payload['odometer_km']} км, "
+        f"{payload['vendor'] or 'сервис не указан'}; работы: {items or '—'}"
     )
-    session.add(obs)
-    await session.flush()
-    from app.rag.indexing import index_observation
-
-    await index_observation(session, user_id, obs)
-    return {"observation_id": obs.id, "parsed": parsed, "status": "saved_to_observations"}
+    staged = await stage_or_commit_observation(
+        session,
+        user_id,
+        entity_id=e.id,
+        kind="service_event",
+        occurred_at=occurred,
+        payload=payload,
+        summary=summary,
+        needs_confirmation=True,  # values were read from a photo by a vision model
+    )
+    if staged["status"] == "saved":
+        return {"observation_id": staged["observation_id"], "parsed": parsed, "status": "saved_to_observations"}
+    return {**staged, "parsed": parsed, "note": "Awaiting user confirmation; tell the user to confirm or reject the record."}
 
 
 async def auto_fetch_maintenance_schedule(session: AsyncSession, user_id: str, args: dict[str, Any]) -> dict[str, Any]:

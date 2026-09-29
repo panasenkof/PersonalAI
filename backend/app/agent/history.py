@@ -17,7 +17,11 @@ async def get_or_create_conversation(
     user_id: str,
     channel: str,
     conversation_id: str | None = None,
+    external_ref: str | None = None,
 ) -> Conversation | None:
+    """Explicit id → that conversation (or None if not yours). Otherwise, with an ``external_ref``
+    (a chat/thread of a messenger) reuse its latest conversation so context persists across messages;
+    without either, start a new conversation."""
     if conversation_id:
         res = await session.execute(
             select(Conversation)
@@ -25,7 +29,18 @@ async def get_or_create_conversation(
             .where(Conversation.user_id == user_id)
         )
         return res.scalar_one_or_none()
-    conv = Conversation(user_id=user_id, channel=channel)
+    if external_ref:
+        res2 = await session.execute(
+            select(Conversation)
+            .where(Conversation.user_id == user_id)
+            .where(Conversation.external_ref == external_ref)
+            .order_by(Conversation.updated_at.desc())
+            .limit(1)
+        )
+        existing = res2.scalar_one_or_none()
+        if existing is not None:
+            return existing
+    conv = Conversation(user_id=user_id, channel=channel, external_ref=external_ref)
     session.add(conv)
     await session.flush()
     return conv

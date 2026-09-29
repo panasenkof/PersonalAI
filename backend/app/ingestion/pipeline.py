@@ -9,6 +9,7 @@ from app.agent.orchestrator import run_agent
 from app.ingestion.schemas import IngestionEnvelope, utcnow
 from app.ingestion.stt import stt_provider_from_settings
 from app.models import IngestionJob, JobStatus
+from app.services.facts import current_job_id, pending_facts_for_job
 
 
 async def build_user_prompt(envelope: IngestionEnvelope) -> str:
@@ -28,8 +29,17 @@ async def build_user_prompt(envelope: IngestionEnvelope) -> str:
                 f"[image] storage_key={att.storage_key} mime={att.mime}. "
                 "If this is a service receipt, call auto_parse_service_receipt with this storage_key and mime when vehicle_entity_id is known."
             )
+        elif att.mime == "application/pdf" or (att.filename or "").lower().endswith(".pdf"):
+            parts.append(
+                f"[pdf document filename={att.filename or '-'} storage_key={att.storage_key} mime=application/pdf]. "
+                "If it is a lab report call labs_record_report with this storage_key and mime; "
+                "otherwise call kb_ingest_document to save it to the knowledge base."
+            )
         else:
-            parts.append(f"[file attachment storage_key={att.storage_key} mime={att.mime}]")
+            parts.append(
+                f"[file attachment filename={att.filename or '-'} storage_key={att.storage_key} mime={att.mime}]. "
+                "Text-like files can be saved with kb_ingest_document."
+            )
     return "\n\n".join(parts) if parts else "(empty message)"
 
 
@@ -40,12 +50,18 @@ async def process_envelope(
     envelope: IngestionEnvelope,
     emit: Any | None = None,
 ) -> dict[str, Any]:
-    job.status = JobStatus.processing.value
-    job.updated_at = utcnow()
-    await session.flush()
+    if job.status != JobStatus.processing.value:  # queue workers already claimed it (no write lock held)
+        job.status = JobStatus.processing.value
+        job.updated_at = utcnow()
+        await session.flush()
+    job_token = current_job_id.set(job.id)  # lets tool handlers stage facts for confirmation
     try:
         conv = await get_or_create_conversation(
-            session, user_id, envelope.channel.value, conversation_id=envelope.conversation_id
+            session,
+            user_id,
+            envelope.channel.value,
+            conversation_id=envelope.conversation_id,
+            external_ref=envelope.external_ref,
         )
         prompt = await build_user_prompt(envelope)
         out = await run_agent(
@@ -61,7 +77,10 @@ async def process_envelope(
         usage = (out.get("raw_last") or {}).get("usage")
         if usage:
             out["usage"] = usage  # surfaced via GET /v1/stats for cost visibility
-        job.status = JobStatus.completed.value
+        pending = await pending_facts_for_job(session, job.id)
+        if pending:
+            out["pending_facts"] = pending  # job waits for the user's confirm/reject decision
+        job.status = JobStatus.awaiting_confirm.value if pending else JobStatus.completed.value
         job.result = out
         job.updated_at = utcnow()
         await session.flush()
@@ -72,3 +91,5 @@ async def process_envelope(
         job.updated_at = utcnow()
         await session.flush()
         return {"assistant_text": "", "error": str(exc), "failed": True}
+    finally:
+        current_job_id.reset(job_token)
