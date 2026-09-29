@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from sqlalchemy import Select, cast, select, String
+from sqlalchemy import String, cast, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Collection, Entity, Observation
@@ -14,7 +14,7 @@ async def kb_search(session: AsyncSession, user_id: str, args: dict[str, Any]) -
     if not q:
         return {"hits": []}
     like = f"%{q}%"
-    stmt: Select[tuple[Entity]] = select(Entity).where(Entity.user_id == user_id)
+    stmt = select(Entity).where(Entity.user_id == user_id)
     stmt = stmt.where(cast(Entity.payload, String).ilike(like))
     res = await session.execute(stmt)
     entities = list(res.scalars().all())

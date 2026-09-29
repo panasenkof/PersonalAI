@@ -5,11 +5,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.api.schemas import JobOut, MessageIn, MessageOut
+from app.config import get_settings
 from app.db import get_session
 from app.ingestion.pipeline import process_envelope
 from app.ingestion.schemas import IngestionEnvelope
 from app.models import IngestionJob, JobStatus, User
-from app.storage.blob import save_bytes
+from app.services.blobs import store_blob, user_owns_blob
 
 router = APIRouter(prefix="/v1", tags=["messages"])
 
@@ -20,11 +21,19 @@ async def upload_blob(
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ) -> dict[str, str]:
-    _ = user
-    data = await file.read()
+    limit = get_settings().max_upload_bytes
+    data = await file.read(limit + 1)
+    if len(data) > limit:
+        raise HTTPException(status_code=413, detail="file_too_large")
     mime = file.content_type or "application/octet-stream"
-    key, sha, size = await save_bytes(data, mime)
-    return {"storage_key": key, "sha256": sha, "size_bytes": size, "mime": mime}
+    blob = await store_blob(session, user.id, data, mime, filename=file.filename)
+    await session.commit()
+    return {
+        "storage_key": blob.storage_key,
+        "sha256": blob.sha256,
+        "size_bytes": str(blob.size_bytes),
+        "mime": blob.mime,
+    }
 
 
 @router.post("/messages", response_model=MessageOut)
@@ -33,6 +42,9 @@ async def post_message(
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ) -> MessageOut:
+    for att in body.attachments:
+        if not await user_owns_blob(session, user.id, att.storage_key):
+            raise HTTPException(status_code=422, detail="unknown_storage_key")
     env = IngestionEnvelope(
         text=body.text,
         attachments=body.attachments,

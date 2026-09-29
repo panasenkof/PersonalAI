@@ -11,17 +11,34 @@ class Settings(BaseSettings):
     jwt_secret: str = "change-me-in-production-use-long-random"
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60 * 24 * 7
+    refresh_token_expire_days: int = 30
 
     # Fernet key (urlsafe base64 32-byte) for encrypting LLM API keys at rest; empty = store plaintext (dev only)
     pia_agent_secret: str = ""
 
     blob_storage_dir: str = "./data/blobs"
+    max_upload_bytes: int = 20 * 1024 * 1024  # 20 MB
     llm_allow_local_fallback: bool = False
+    # Cloud fallback target when local LLM fails (used only when llm_allow_local_fallback=true)
+    fallback_base_url: str = ""
+    fallback_api_key: str = ""
+    fallback_model: str = "gpt-4o-mini"
 
     telegram_bot_token: str = ""
     telegram_webhook_secret: str = ""
 
     default_embedding_dimensions: int = 384
+    default_embedding_model: str = "text-embedding-3-small"
+
+    # Comma-separated CORS origins; "*" disables credentials (browser security rules)
+    cors_origins: str = "*"
+
+    # Auth rate limiting (requests per minute per client IP, 0 = disabled)
+    rate_limit_auth_per_minute: int = 10
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
 
 @lru_cache

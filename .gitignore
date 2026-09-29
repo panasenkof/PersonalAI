@@ -10,3 +10,6 @@ test_blobs/
 node_modules/
 .expo/
 dist/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/

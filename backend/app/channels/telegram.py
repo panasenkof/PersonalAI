@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import secrets
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
@@ -15,8 +15,14 @@ from app.db import get_session
 from app.ingestion.pipeline import process_envelope
 from app.ingestion.schemas import Attachment, Channel, IngestionEnvelope, utcnow
 from app.models import IngestionJob, JobStatus, TelegramLinkCode, User
+from app.services.blobs import store_blob
 
 router = APIRouter(prefix="/v1/channels/telegram", tags=["telegram"])
+
+
+def _aware(dt: datetime) -> datetime:
+    """SQLite returns naive datetimes; normalize to UTC before comparing."""
+    return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
 
 
 def _verify_webhook_secret(x_secret: str | None) -> None:
@@ -78,7 +84,7 @@ async def telegram_webhook(
             .where(TelegramLinkCode.consumed_at.is_(None))
         )
         link = res.scalar_one_or_none()
-        if link and link.expires_at >= utcnow():
+        if link and _aware(link.expires_at) >= utcnow():
             u = await session.get(User, link.user_id)
             if u:
                 u.telegram_user_id = tg_id
@@ -97,8 +103,8 @@ async def telegram_webhook(
         photos = msg["photo"]
         best = photos[-1]
         data, mime = await _download_tg_file(best["file_id"])
-        key, _, _ = await save_bytes(data, mime)
-        attachments.append(Attachment(mime=mime, storage_key=key, filename="telegram_photo.jpg"))
+        blob = await store_blob(session, user.id, data, mime, filename="telegram_photo.jpg")
+        attachments.append(Attachment(mime=mime, storage_key=blob.storage_key, filename="telegram_photo.jpg"))
     env = IngestionEnvelope(
         text=text or None,
         attachments=attachments,

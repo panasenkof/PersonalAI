@@ -8,7 +8,6 @@ from app.agent.orchestrator import run_agent
 from app.ingestion.schemas import IngestionEnvelope, utcnow
 from app.ingestion.stt import StubSTTProvider
 from app.models import IngestionJob, JobStatus
-from app.storage.blob import read_bytes
 
 
 async def build_user_prompt(envelope: IngestionEnvelope) -> str:

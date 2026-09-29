@@ -28,3 +28,19 @@ async def bootstrap_user(session: AsyncSession, email: str, password_hash: str) 
 async def get_user_by_email(session: AsyncSession, email: str) -> User | None:
     res = await session.execute(select(User).where(User.email == email))
     return res.scalar_one_or_none()
+
+
+async def get_or_create_llm_settings(session: AsyncSession, user_id: str) -> LLMSettings:
+    row = await session.get(LLMSettings, user_id)
+    if row is not None:
+        return row
+    row = LLMSettings(
+        user_id=user_id,
+        provider_kind="cloud",
+        base_url="https://api.openai.com/v1",
+        default_model="gpt-4o-mini",
+        supports_vision=True,
+    )
+    session.add(row)
+    await session.flush()
+    return row

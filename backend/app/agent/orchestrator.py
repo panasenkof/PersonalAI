@@ -3,13 +3,13 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.universal_tools import UNIVERSAL_TOOL_DEFINITIONS, UNIVERSAL_TOOL_HANDLERS, parse_tool_arguments
-from app.domains.registry import all_plugins, tools_openai_format, tool_router
-from app.llm.providers import ChatMessage
-from app.llm.router import default_model_for_user, provider_for_user
-
+from app.domains.registry import all_plugins, tool_router, tools_openai_format
+from app.llm.providers import ChatMessage, LLMProvider, LocalLLMProvider
+from app.llm.router import default_model_for_user, local_fallback_target, provider_for_user
 
 SYSTEM_PROMPT = """You are PIA, a personal assistant with tools over the user's private knowledge base and domain plugins (automotive, medical stub).
 Rules:
@@ -19,6 +19,26 @@ Rules:
 - Do not claim medical diagnosis. Automotive guidance is informational only.
 - If the user attached images described in the message, use auto_parse_service_receipt when it is a service document and a vehicle_entity_id is known; otherwise ask which vehicle to attach.
 - Match the user's language (e.g. Russian)."""
+
+
+async def _chat_with_fallback(
+    provider: LLMProvider,
+    model: str,
+    messages: list[ChatMessage],
+    tools: list[dict[str, Any]],
+) -> tuple[LLMProvider, str, Any]:
+    """Call provider.chat; if a *local* provider fails and fallback is enabled, switch to cloud."""
+    try:
+        result = await provider.chat(messages, model=model, tools=tools, tool_choice="auto")
+        return provider, model, result
+    except (httpx.HTTPError, httpx.TimeoutException, json.JSONDecodeError):
+        if isinstance(provider, LocalLLMProvider):
+            target = local_fallback_target()
+            if target is not None:
+                fb_provider, fb_model = target
+                result = await fb_provider.chat(messages, model=fb_model, tools=tools, tool_choice="auto")
+                return fb_provider, fb_model, result
+        raise
 
 
 async def run_agent(
@@ -39,7 +59,7 @@ async def run_agent(
     ]
 
     for _ in range(10):
-        result = await provider.chat(messages, model=model, tools=tools, tool_choice="auto")
+        provider, model, result = await _chat_with_fallback(provider, model, messages, tools)
         msg = result.message
         if msg.tool_calls:
             messages.append(ChatMessage(role="assistant", content=msg.content, tool_calls=msg.tool_calls))
