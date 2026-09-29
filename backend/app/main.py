@@ -102,11 +102,12 @@ async def _auth_ip_allowed(client: str) -> bool:
     global _shared_ip_limiter
     s = get_settings()
     if s.redis_url:
-        key = (s.redis_url, s.rate_limit_auth_per_minute)
+        limit = _settings.rate_limit_auth_per_minute  # same value that switched the check on
+        key = (s.redis_url, limit)
         if _shared_ip_limiter is None or _shared_ip_limiter[0] != key:
             from app.security.ratelimit import build_limiter
 
-            _shared_ip_limiter = (key, build_limiter("auth-ip", s.rate_limit_auth_per_minute))
+            _shared_ip_limiter = (key, build_limiter("auth-ip", limit))
         return await _shared_ip_limiter[1].allow(client)  # type: ignore[attr-defined]
     return _access_limiter.allow(client)
 

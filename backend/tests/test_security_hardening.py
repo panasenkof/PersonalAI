@@ -301,6 +301,7 @@ def test_auth_ip_limit_ignores_spoofed_forwarded_for(client, monkeypatch) -> Non
     from app.security.ratelimit import SlidingWindowLimiter
 
     monkeypatch.setattr(main_mod._settings, "rate_limit_auth_per_minute", 2)
+    monkeypatch.setattr(get_settings(), "redis_url", "")  # in-process path even when CI has Redis
     monkeypatch.setattr(main_mod, "_access_limiter", SlidingWindowLimiter(limit=2))
 
     def reg(xff: str) -> int:
