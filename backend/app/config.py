@@ -27,6 +27,14 @@ class Settings(BaseSettings):
     telegram_bot_token: str = ""
     telegram_webhook_secret: str = ""
 
+    # Slack (Events API) channel
+    slack_bot_token: str = ""
+    slack_signing_secret: str = ""
+
+    # Observability: "text" or "json" logs
+    log_format: str = "text"
+    log_level: str = "INFO"
+
     default_embedding_dimensions: int = 384
     agent_history_window: int = 20
     default_embedding_model: str = "text-embedding-3-small"
@@ -44,8 +52,8 @@ class Settings(BaseSettings):
     reminder_check_seconds: int = 300
     reminder_km_threshold: int = 500
 
-    # Auth rate limiting (requests per minute per client IP, 0 = disabled)
-    rate_limit_auth_per_minute: int = 10
+    # Auth rate limiting (requests per minute per client IP, 0 = disabled; prod sets 10)
+    rate_limit_auth_per_minute: int = 0
 
     @property
     def cors_origin_list(self) -> list[str]:

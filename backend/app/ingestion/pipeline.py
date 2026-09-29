@@ -58,6 +58,9 @@ async def process_envelope(
         if conv is not None and out.get("assistant_text"):
             await persist_turn(session, user_id, conv.id, prompt, out["assistant_text"])
             job.envelope = {**job.envelope, "conversation_id": conv.id}
+        usage = (out.get("raw_last") or {}).get("usage")
+        if usage:
+            out["usage"] = usage  # surfaced via GET /v1/stats for cost visibility
         job.status = JobStatus.completed.value
         job.result = out
         job.updated_at = utcnow()

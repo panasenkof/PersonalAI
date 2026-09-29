@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 class Channel(str, Enum):
     mobile = "mobile"
     telegram = "telegram"
+    slack = "slack"
 
 
 class Attachment(BaseModel):

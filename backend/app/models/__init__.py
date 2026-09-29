@@ -57,6 +57,7 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(255))
     telegram_user_id: Mapped[Optional[str]] = mapped_column(String(64), unique=True, nullable=True)
+    slack_user_id: Mapped[Optional[str]] = mapped_column(String(64), unique=True, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     llm_settings: Mapped["LLMSettings"] = relationship(back_populates="user", uselist=False)
