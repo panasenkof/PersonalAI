@@ -21,6 +21,7 @@ GOLDEN: list[dict] = [
             {"final": "Добавил Toyota Camry 2020 в гараж."},
         ],
         "expect_tools": ["auto_add_vehicle"],
+        "answer_any": ["camry", "toyota", "тойот"],
         "check": "vehicle_exists",
     },
     {
@@ -31,6 +32,7 @@ GOLDEN: list[dict] = [
             {"final": "В базе есть запись про Toyota Camry."},
         ],
         "expect_tools": ["kb_search"],
+        "answer_any": ["camry"],
         "check": "kb_search_called",
     },
     {
@@ -48,6 +50,7 @@ GOLDEN: list[dict] = [
             {"final": "Запомнил: пароль от гаража 1234."},
         ],
         "expect_tools": ["kb_create_entity"],
+        "answer_any": ["1234", "запомн"],
         "check": "note_entity_exists",
     },
     {
@@ -64,6 +67,7 @@ GOLDEN: list[dict] = [
             {"final": "Анализ сохранён: 2 показателя."},
         ],
         "expect_tools": ["labs_record_report"],
+        "answer_any": ["глюкоз", "показател", "анализ"],
         "check": "lab_observation_exists",
     },
     {
@@ -78,6 +82,16 @@ GOLDEN: list[dict] = [
             {"final": "Глюкоза: 01.08 — 5.1 ммоль/л."},
         ],
         "expect_tools": ["labs_record_report", "labs_get_trends"],
+        "answer_any": ["глюкоз", "5.1", "5,1"],
         "check": "lab_trend_series",
+    },
+    {
+        # small talk must not touch the knowledge base (guards against over-eager tool use)
+        "name": "greeting_uses_no_tools",
+        "user_text": "Привет! Как дела?",
+        "script": [{"final": "Привет! Всё хорошо, чем могу помочь?"}],
+        "expect_tools": [],
+        "forbid_tools": ["kb_create_entity", "auto_add_vehicle", "labs_record_report"],
+        "check": "nothing_written",
     },
 ]

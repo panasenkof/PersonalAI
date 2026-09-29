@@ -35,6 +35,7 @@ def test_refresh_token_flow(client: TestClient, random_email: str) -> None:
 
 def test_auth_rate_limit(client: TestClient, monkeypatch) -> None:
     import app.main as main_mod
+    from app.config import get_settings
     from app.security.ratelimit import SlidingWindowLimiter
 
     class _S:
@@ -43,6 +44,7 @@ def test_auth_rate_limit(client: TestClient, monkeypatch) -> None:
 
     monkeypatch.setattr(main_mod, "_settings", _S())
     monkeypatch.setattr(main_mod, "_access_limiter", SlidingWindowLimiter(limit=2))
+    monkeypatch.setattr(get_settings(), "redis_url", "")  # exercise the in-process limiter even when CI has Redis
 
     import uuid
 

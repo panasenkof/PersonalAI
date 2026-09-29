@@ -46,6 +46,17 @@
   #settings .row { display:flex; flex-direction:column; gap:4px; }
   #settings label { font-size:12px; color:var(--muted); }
   #setStats { font-size:12px; color:var(--muted); border-top:1px dashed var(--line); padding-top:8px; line-height:1.7; }
+  .tool-chip.run { color:var(--accent); border-color:var(--accent); }
+  .tool-chip.ok { color:var(--ok); border-style:solid; }
+  .tool-chip.bad { color:var(--err); border-style:solid; }
+  .tool-chip small { opacity:.7; margin-left:4px; }
+  .fact { align-self:flex-start; max-width:760px; border:1px solid #6b5a1f; background:#2a2412; border-radius:12px; padding:10px 14px; display:flex; flex-direction:column; gap:8px; }
+  .fact .actions { display:flex; gap:8px; }
+  .fact .state { font-size:13px; color:var(--muted); }
+  #btnSend.stop { background:#b03a3a; }
+  .sec { border-top:1px dashed var(--line); padding-top:10px; display:flex; flex-direction:column; gap:8px; }
+  .sec h3 { margin:0; font-size:14px; }
+  .sec pre { margin:0; background:#0c0e12; padding:8px; border-radius:8px; font-size:12px; white-space:pre-wrap; word-break:break-all; }
   .err { color:var(--err); font-size:13px; }
   .ok { color:var(--ok); font-size:13px; }
 </style>
@@ -81,6 +92,7 @@
     <h2>Вход в PIA</h2>
     <input id="email" placeholder="email" autocomplete="username">
     <input id="password" type="password" placeholder="пароль (мин. 8)" autocomplete="current-password">
+    <input id="otp" class="hidden" placeholder="код 2FA (или резервный код)" autocomplete="one-time-code" inputmode="numeric">
     <button id="btnLogin">Войти</button>
     <button class="ghost" id="btnRegister">Зарегистрироваться</button>
     <div id="authErr" class="err"></div>
@@ -103,6 +115,32 @@
     </div>
     <div id="setMsg"></div>
     <div id="setStats"></div>
+    <div class="sec" id="secBox">
+      <h3>Безопасность</h3>
+      <div id="secStatus" class="ok"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="ghost" id="btn2faSetup">Включить 2FA</button>
+        <button class="ghost" id="btnLogoutAll">Выйти на всех устройствах</button>
+      </div>
+      <div id="twofaBox" class="hidden" style="display:flex;flex-direction:column;gap:8px">
+        <div>Добавьте секрет в приложение-аутентификатор и введите код:</div>
+        <pre id="twofaSecret"></pre>
+        <input id="twofaCode" placeholder="6-значный код" inputmode="numeric">
+        <button id="btn2faEnable">Подтвердить</button>
+      </div>
+      <div id="twofaOff" class="hidden" style="display:flex;flex-direction:column;gap:8px">
+        <input id="offPass" type="password" placeholder="пароль">
+        <input id="offCode" placeholder="код 2FA">
+        <button class="danger" id="btn2faDisable">Отключить 2FA</button>
+      </div>
+      <pre id="recoveryBox" class="hidden"></pre>
+      <h3>Мессенджеры</h3>
+      <div style="display:flex;gap:8px">
+        <select id="chSel"><option>telegram</option><option>slack</option><option>whatsapp</option><option>discord</option></select>
+        <button class="ghost" id="btnLinkCode">Код привязки</button>
+      </div>
+      <pre id="linkBox" class="hidden"></pre>
+    </div>
   </div>
 </div>
 
@@ -163,13 +201,24 @@ async function loginOrRegister(register) {
   $("authErr").textContent = "";
   try {
     const path = register ? "/v1/auth/register" : "/v1/auth/token";
-    const data = await api(path, { method: "POST", body: { email: $("email").value.trim(), password: $("password").value } });
+    const body = { email: $("email").value.trim(), password: $("password").value };
+    if (!$("otp").classList.contains("hidden") && $("otp").value.trim()) body.otp = $("otp").value.trim();
+    const data = await api(path, { method: "POST", body });
     token = data.access_token;
     localStorage.setItem("pia_token", token);
     if (data.refresh_token) localStorage.setItem("pia_refresh", data.refresh_token);
     $("authView").classList.add("hidden");
+    $("otp").value = ""; $("otp").classList.add("hidden");
     await boot();
-  } catch (e) { $("authErr").textContent = String(e.message || e); }
+  } catch (e) {
+    const m = String(e.message || e);
+    if (m.includes("otp_required")) {
+      $("otp").classList.remove("hidden"); $("otp").focus();
+      $("authErr").textContent = "Введите код двухфакторной аутентификации";
+    } else if (m.includes("too_many_failed_attempts")) {
+      $("authErr").textContent = "Слишком много неудачных попыток — попробуйте позже";
+    } else { $("authErr").textContent = m; }
+  }
 }
 
 // ---------- rendering ----------
@@ -253,6 +302,10 @@ async function boot() {
   try { await api("/v1/settings/llm"); } catch (e) {}
   await loadConversations();
   newChat();
+  try {
+    const f = await api("/v1/facts");
+    if (f.facts && f.facts.length) { addMeta("Ожидают вашего подтверждения:"); renderFacts(f.facts); }
+  } catch (e) {}
 }
 
 // ---------- sending + streaming ----------
@@ -267,14 +320,61 @@ function showThinking() {
 }
 function hideThinking() { const t = $("thinking"); if (t) t.remove(); }
 
+let activeJob = null;
+
+function setBusy(on, jobId) {
+  busy = on;
+  activeJob = on ? (jobId || activeJob) : null;
+  const b = $("btnSend");
+  if (on && activeJob) { b.textContent = "⏹ Стоп"; b.classList.add("stop"); b.disabled = false; }
+  else { b.textContent = "Отправить"; b.classList.remove("stop"); b.disabled = on; }
+}
+
+async function stopGeneration() {
+  if (!activeJob) return;
+  const id = activeJob;
+  $("btnSend").disabled = true;
+  try { await api(`/v1/jobs/${id}/cancel`, { method: "POST" }); } catch (e) { addMeta("Не удалось остановить: " + (e.message || e)); }
+}
+
+function renderFacts(facts) {
+  (facts || []).forEach((f) => {
+    const box = document.createElement("div");
+    box.className = "fact";
+    const t = document.createElement("div");
+    t.innerHTML = "📝 <b>Проверьте распознанные данные</b><br>" + renderRich(f.summary || f.kind || "");
+    const actions = document.createElement("div");
+    actions.className = "actions";
+    const state = document.createElement("div");
+    state.className = "state";
+    const act = async (kind) => {
+      actions.querySelectorAll("button").forEach((b) => (b.disabled = true));
+      try {
+        await api(`/v1/facts/${f.id}/${kind}`, { method: "POST" });
+        actions.remove();
+        state.textContent = kind === "confirm" ? "✅ Сохранено в базе знаний" : "❌ Отклонено";
+      } catch (e) {
+        actions.querySelectorAll("button").forEach((b) => (b.disabled = false));
+        state.textContent = "Ошибка: " + (e.message || e);
+      }
+    };
+    const ok = document.createElement("button"); ok.textContent = "✅ Подтвердить"; ok.onclick = () => act("confirm");
+    const no = document.createElement("button"); no.className = "ghost"; no.textContent = "❌ Отклонить"; no.onclick = () => act("reject");
+    actions.append(ok, no);
+    box.append(t, actions, state);
+    $("msgs").appendChild(box);
+  });
+  $("msgs").scrollTop = $("msgs").scrollHeight;
+}
+
 async function send() {
-  if (busy) return;
+  if (busy) { stopGeneration(); return; }
   const text = $("input").value.trim();
   if (!text) return;
-  busy = true; $("btnSend").disabled = true;
+  setBusy(true);
   $("input").value = "";
   addMsg("user", text);
-  const thinking = showThinking();
+  showThinking();
   try {
     const body = { text, channel: "mobile" };
     if (currentConv) body.conversation_id = currentConv.id;
@@ -287,39 +387,95 @@ async function send() {
     if (res.assistant_text) {
       hideThinking();
       addMsg("assistant", res.assistant_text);
+      renderFacts(res.pending_facts);
     } else if (res.job_id) {
       hideThinking();
+      setBusy(true, res.job_id);
       await streamJob(res.job_id);
     }
   } catch (e) {
     hideThinking();
-    addMeta("Ошибка: " + (e.message || e));
+    const m = String(e.message || e);
+    addMeta(m.includes("rate_limited") ? "Слишком много запросов — подождите минуту" : "Ошибка: " + m);
   } finally {
     hideThinking();
-    busy = false; $("btnSend").disabled = false;
+    setBusy(false);
     $("input").focus();
   }
 }
 
+function bubbleText(bubble) {
+  return Array.from(bubble.childNodes).filter((n) => n.nodeType === 3).map((n) => n.textContent).join("");
+}
+function clearBubble(bubble) {
+  Array.from(bubble.childNodes).forEach((n) => { if (n.nodeType === 3) n.remove(); });
+}
+
 async function pollJob(jobId, bubble) {
   // Fallback when SSE drops: poll the job until it reaches a terminal state.
-  if (!bubble.textContent) bubble.textContent = "(соединение прервано — переключаюсь на опрос…)";
+  if (!bubbleText(bubble)) clearBubble(bubble), bubble.insertBefore(document.createTextNode("(соединение прервано — переключаюсь на опрос…)"), bubble.querySelector(".ts"));
   for (let i = 0; i < 180; i++) {
     await sleep(1000);
     let job;
     try { job = await api(`/v1/jobs/${jobId}`); } catch (e) { continue; }
-    if (job.status === "completed") {
+    if (job.status === "completed" || job.status === "awaiting_confirm") {
       const text = job.result && job.result.assistant_text;
-      if (text) bubble.innerHTML = renderRich(text) + bubble.querySelector(".ts")?.outerHTML;
+      if (text) { clearBubble(bubble); bubble.insertBefore(document.createTextNode(text), bubble.querySelector(".ts")); }
+      renderFacts(job.pending_facts);
       return;
     }
+    if (job.status === "cancelled") { addMeta("Остановлено"); return; }
     if (job.status === "failed") {
       bubble.textContent = "Ошибка: " + (job.error || "задача не удалась");
       return;
     }
   }
-  if (!bubble.textContent || bubble.textContent.includes("опрос")) {
-    bubble.textContent = "Таймаут: ответ не пришёл за 3 минуты";
+  bubble.textContent = "Таймаут: ответ не пришёл за 3 минуты";
+}
+
+// EventSource cannot send an Authorization header, and tokens in URLs end up in proxy/access logs.
+// This is a tiny header-authenticated SSE client over fetch() with the same listener API.
+class HeaderEventSource {
+  constructor(url) {
+    this.listeners = {};
+    this.closed = false;
+    this.ctrl = new AbortController();
+    this._run(url);
+  }
+  addEventListener(name, fn) { (this.listeners[name] = this.listeners[name] || []).push(fn); }
+  close() { this.closed = true; this.ctrl.abort(); }
+  _emit(name, data) {
+    if (this.closed) return;
+    for (const fn of this.listeners[name] || []) fn({ data });
+  }
+  async _run(url) {
+    try {
+      const open = () => fetch(url, { headers: { Authorization: "Bearer " + token, Accept: "text/event-stream" }, signal: this.ctrl.signal });
+      let r = await open();
+      if (r.status === 401 && (await tryRefresh())) r = await open();
+      if (!r.ok || !r.body) throw new Error("HTTP " + r.status);
+      const reader = r.body.getReader();
+      const dec = new TextDecoder();
+      let buf = "";
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+        let i;
+        while ((i = buf.indexOf("\n\n")) >= 0) {
+          const frame = buf.slice(0, i);
+          buf = buf.slice(i + 2);
+          let name = "message";
+          const data = [];
+          for (const line of frame.split("\n")) {
+            if (line.startsWith("event:")) name = line.slice(6).trim();
+            else if (line.startsWith("data:")) data.push(line.slice(5).replace(/^ /, ""));
+          }
+          if (data.length) this._emit(name, data.join("\n"));
+        }
+      }
+    } catch (e) { /* network error or abort: fall through */ }
+    this._emit("error", undefined); // stream ended without a terminal event → caller falls back to polling
   }
 }
 
@@ -327,55 +483,94 @@ function streamJob(jobId) {
   return new Promise((resolve) => {
     let settled = false;
     const bubble = addMsg("assistant", "");
+    const chips = {}; // index/name → chip element (live tool-call construction)
+    let lastChip = null;
     const finish = () => {
       if (settled) return;
       settled = true;
       try { es.close(); } catch (e) {}
+      if (!bubbleText(bubble).trim() && !bubble.classList.contains("err")) bubble.remove();
       resolve();
     };
     let es;
+    const parse = (ev) => { try { return JSON.parse(ev.data); } catch (e) { return {}; } };
+    const scroll = () => { $("msgs").scrollTop = $("msgs").scrollHeight; };
+    const chipFor = (key) => {
+      let chip = chips[key];
+      if (!chip) {
+        chip = document.createElement("div");
+        chip.className = "tool-chip run";
+        (lastChip || bubble).after(chip);
+        lastChip = chip;
+        chips[key] = chip;
+      }
+      return chip;
+    };
     try {
-      es = new EventSource(`/v1/jobs/${jobId}/events?access_token=${encodeURIComponent(token)}`);
+      es = new HeaderEventSource(`/v1/jobs/${jobId}/events`);
     } catch (e) {
       pollJob(jobId, bubble).then(finish);
       return;
     }
     es.addEventListener("token", (ev) => {
       if (settled) return;
-      let d; try { d = JSON.parse(ev.data); } catch (e) { return; }
-      // keep the timestamp span last
-      const ts = bubble.querySelector(".ts");
-      const textNode = document.createTextNode(d.content || "");
-      bubble.insertBefore(textNode, ts);
-      $("msgs").scrollTop = $("msgs").scrollHeight;
+      bubble.insertBefore(document.createTextNode(parse(ev).content || ""), bubble.querySelector(".ts"));
+      scroll();
+    });
+    es.addEventListener("reset", () => clearBubble(bubble));
+    // the model is composing a tool call: name + arguments appear while they stream in
+    const args = {};
+    es.addEventListener("tool_call", (ev) => {
+      if (settled) return;
+      const d = parse(ev);
+      const key = "call" + d.index;
+      args[key] = (args[key] || "") + (d.arguments_delta || "");
+      const chip = chipFor(key);
+      chip.textContent = "⚙ " + (d.name || "…") + " " + args[key].slice(0, 80);
+      scroll();
+    });
+    es.addEventListener("tool_start", (ev) => {
+      if (settled) return;
+      const d = parse(ev);
+      clearBubble(bubble); // text before a tool call is a preamble; the final answer follows
+      // reuse the chip created from streamed deltas, otherwise create a new one
+      const key = Object.keys(chips).find((k) => chips[k].dataset.name === undefined && chips[k].textContent.includes(d.name)) || ("t" + Date.now() + Math.random());
+      const chip = chipFor(key);
+      chip.dataset.name = d.name;
+      chip.dataset.key = key;
+      chip.className = "tool-chip run";
+      chip.textContent = "⏳ " + d.name + " " + (d.arguments || "").slice(0, 80);
+      scroll();
     });
     es.addEventListener("tool", (ev) => {
       if (settled) return;
-      let d; try { d = JSON.parse(ev.data); } catch (e) { return; }
-      let chip = bubble.nextElementSibling;
-      if (!chip || !chip.classList.contains("tool-chip")) {
-        chip = document.createElement("div");
-        chip.className = "tool-chip";
-        bubble.after(chip);
-      }
-      chip.textContent = "⚙ " + d.name;
-      $("msgs").scrollTop = $("msgs").scrollHeight;
+      const d = parse(ev);
+      const running = Object.values(chips).find((c) => c.dataset.name === d.name && c.classList.contains("run"));
+      const chip = running || chipFor("done" + Date.now() + Math.random());
+      chip.className = "tool-chip " + (d.ok === false ? "bad" : "ok");
+      chip.innerHTML = "";
+      chip.append((d.ok === false ? "✖ " : "✔ ") + d.name + (d.summary ? " — " + d.summary : ""));
+      if (d.ms != null) { const m = document.createElement("small"); m.textContent = d.ms + " мс"; chip.append(m); }
+      scroll();
     });
     es.addEventListener("done", (ev) => {
       if (settled) return;
-      let d; try { d = JSON.parse(ev.data); } catch (e) { d = {}; }
-      if (d.text && !bubble.textContent.replace(/\s*\d{2}:\d{2}$/, "")) {
-        const ts = bubble.querySelector(".ts");
-        bubble.insertBefore(document.createTextNode(d.text), ts);
-      }
+      const d = parse(ev);
+      if (d.text && !bubbleText(bubble).trim()) bubble.insertBefore(document.createTextNode(d.text), bubble.querySelector(".ts"));
+      renderFacts(d.pending_facts);
+      finish();
+    });
+    es.addEventListener("cancelled", () => {
+      if (settled) return;
+      addMeta("⏹ Остановлено" + (bubbleText(bubble).trim() ? " — частичный ответ сохранён" : ""));
       finish();
     });
     es.addEventListener("error", (ev) => {
       if (settled) return;
       if (ev.data) {
         // server-sent error event (has payload)
-        let d; try { d = JSON.parse(ev.data); } catch (e) { d = {}; }
-        bubble.textContent = "Ошибка: " + (d.text || "неизвестная ошибка");
+        bubble.textContent = "Ошибка: " + (parse(ev).text || "неизвестная ошибка");
+        bubble.classList.add("err");
         finish();
         return;
       }
@@ -408,6 +603,52 @@ async function loadSettings() {
   } catch (e) { $("setStats").textContent = ""; }
 }
 
+async function loadSecurity() {
+  try {
+    const me = await api("/v1/auth/me");
+    $("secStatus").textContent = "2FA: " + (me.totp_enabled ? "включена" : "выключена") + " · роль: " + me.role;
+    $("btn2faSetup").classList.toggle("hidden", me.totp_enabled);
+    $("twofaOff").classList.toggle("hidden", !me.totp_enabled);
+    $("twofaBox").classList.add("hidden");
+  } catch (e) {}
+}
+async function twofaSetup() {
+  try {
+    const r = await api("/v1/auth/2fa/setup", { method: "POST" });
+    $("twofaSecret").textContent = r.secret + "\n" + r.otpauth_uri;
+    $("twofaBox").classList.remove("hidden");
+  } catch (e) { $("setMsg").className = "err"; $("setMsg").textContent = String(e.message || e); }
+}
+async function twofaEnable() {
+  try {
+    const r = await api("/v1/auth/2fa/enable", { method: "POST", body: { code: $("twofaCode").value.trim() } });
+    $("recoveryBox").textContent = "Резервные коды (сохраните, каждый работает один раз):\n" + r.recovery_codes.join("\n");
+    $("recoveryBox").classList.remove("hidden");
+    $("twofaCode").value = "";
+    await loadSecurity();
+  } catch (e) { $("setMsg").className = "err"; $("setMsg").textContent = String(e.message || e); }
+}
+async function twofaDisable() {
+  try {
+    await api("/v1/auth/2fa/disable", { method: "POST", body: { password: $("offPass").value, code: $("offCode").value.trim() } });
+    $("offPass").value = ""; $("offCode").value = "";
+    $("recoveryBox").classList.add("hidden");
+    await loadSecurity();
+  } catch (e) { $("setMsg").className = "err"; $("setMsg").textContent = String(e.message || e); }
+}
+async function logoutAll() {
+  try { await api("/v1/auth/logout-all", { method: "POST" }); } catch (e) {}
+  logout();
+  $("settingsView").classList.add("hidden");
+}
+async function linkCode() {
+  try {
+    const r = await api(`/v1/channels/${$("chSel").value}/link-code`, { method: "POST" });
+    $("linkBox").textContent = r.code + "\n" + (r.instructions || "");
+    $("linkBox").classList.remove("hidden");
+  } catch (e) { $("setMsg").className = "err"; $("setMsg").textContent = String(e.message || e); }
+}
+
 async function saveSettings() {
   const msg = $("setMsg");
   msg.className = ""; msg.textContent = "";
@@ -435,7 +676,12 @@ $("btnSend").onclick = send;
 $("btnNew").onclick = newChat;
 $("btnDelete").onclick = deleteCurrent;
 $("btnLogout").onclick = logout;
-$("btnSettings").onclick = () => { $("settingsView").classList.remove("hidden"); $("setMsg").className = ""; loadSettings(); };
+$("btnSettings").onclick = () => { $("settingsView").classList.remove("hidden"); $("setMsg").className = ""; loadSettings(); loadSecurity(); };
+$("btn2faSetup").onclick = twofaSetup;
+$("btn2faEnable").onclick = twofaEnable;
+$("btn2faDisable").onclick = twofaDisable;
+$("btnLogoutAll").onclick = logoutAll;
+$("btnLinkCode").onclick = linkCode;
 $("btnCloseSettings").onclick = () => $("settingsView").classList.add("hidden");
 $("btnSaveSettings").onclick = saveSettings;
 $("input").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } });

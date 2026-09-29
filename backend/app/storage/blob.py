@@ -5,6 +5,7 @@ import os
 import uuid
 
 from app.config import get_settings
+from app.security.crypto import decrypt_bytes, encrypt_bytes
 
 
 class InvalidStorageKey(ValueError):
@@ -42,14 +43,14 @@ def save_bytes(data: bytes, mime: str) -> tuple[str, str, int]:
     path = resolve_storage_path(key)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "wb") as f:
-        f.write(data)
+        f.write(encrypt_bytes(data))  # encrypted at rest when PIA_AGENT_SECRET is set
     return key, sha, len(data)
 
 
 async def read_bytes(storage_key: str) -> bytes:
     path = resolve_storage_path(storage_key)
     with open(path, "rb") as f:
-        return f.read()
+        return decrypt_bytes(f.read())
 
 
 def file_url_for_model(storage_key: str) -> str:

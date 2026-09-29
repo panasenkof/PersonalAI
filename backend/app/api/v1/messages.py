@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
@@ -14,10 +15,13 @@ from app.config import get_settings
 from app.db import SessionLocal, get_session
 from app.ingestion.pipeline import process_envelope
 from app.ingestion.schemas import IngestionEnvelope
-from app.models import IngestionJob, JobStatus, User
+from app.llm.limits import RateLimitExceeded, check_user_quota
+from app.models import SETTLED_JOB_STATUSES, IngestionJob, JobStatus, User
 from app.queue.events import bus
+from app.queue.jobs import request_job_cancel
 from app.services.blobs import store_blob, user_owns_blob
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1", tags=["messages"])
 
 
@@ -51,6 +55,12 @@ async def post_message(
     for att in body.attachments:
         if not await user_owns_blob(session, user.id, att.storage_key):
             raise HTTPException(status_code=422, detail="unknown_storage_key")
+    try:
+        await check_user_quota(user.id)
+    except RateLimitExceeded as exc:
+        raise HTTPException(
+            status_code=429, detail="rate_limited", headers={"Retry-After": str(exc.retry_after)}
+        ) from None
 
     conv = await get_or_create_conversation(
         session, user.id, body.channel.value, conversation_id=body.conversation_id
@@ -79,7 +89,10 @@ async def post_message(
         await session.commit()
         from app.queue.runner import get_runner
 
-        get_runner().enqueue(job.id)
+        try:
+            await get_runner().enqueue(job.id)
+        except Exception:  # noqa: BLE001 — the job is persisted; the reaper re-queues it when Redis is back
+            logger.warning("enqueue failed for job %s; it will be picked up by the reaper", job.id, exc_info=True)
         return MessageOut(job_id=job.id, status=job.status, conversation_id=conv.id)
 
     out = await process_envelope(session, user.id, job, env)
@@ -90,6 +103,7 @@ async def post_message(
         assistant_text=out.get("assistant_text"),
         error=out.get("error") if out.get("failed") else None,
         conversation_id=conv.id,
+        pending_facts=out.get("pending_facts") or [],
     )
 
 
@@ -102,11 +116,50 @@ async def get_job(
     job = await session.get(IngestionJob, job_id)
     if not job or job.user_id != user.id:
         raise HTTPException(404, detail="job_not_found")
-    return JobOut(id=job.id, status=job.status, result=job.result, error=job.error)
+    return JobOut(
+        id=job.id,
+        status=job.status,
+        result=job.result,
+        error=job.error,
+        pending_facts=(job.result or {}).get("pending_facts") or [],
+    )
+
+
+@router.post("/jobs/{job_id}/cancel", response_model=JobOut)
+async def cancel_job(
+    job_id: str,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> JobOut:
+    """Stop a queued or running job ("Stop" button). The run is rolled back; any partial
+    answer that was already streamed stays in the conversation."""
+    job = await session.get(IngestionJob, job_id)
+    if not job or job.user_id != user.id:
+        raise HTTPException(404, detail="job_not_found")
+    if job.status in SETTLED_JOB_STATUSES:
+        return JobOut(id=job.id, status=job.status, result=job.result, error=job.error)
+    job = await request_job_cancel(session, job)
+    return JobOut(id=job.id, status=job.status)
 
 
 def _sse(event: dict) -> str:
     return f"event: {event.get('type', 'message')}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+
+def _settled_event(row: IngestionJob) -> dict:
+    """Terminal SSE payload derived from persisted state (late subscribers / out-of-process workers)."""
+    result = row.result or {}
+    if row.status == JobStatus.failed.value:
+        return {"type": "error", "text": row.error or "failed"}
+    if row.status == JobStatus.cancelled.value:
+        return {"type": "cancelled", "text": ""}
+    return {
+        "type": "done",
+        "text": result.get("assistant_text") or "",
+        "pending_facts": result.get("pending_facts") or [],
+        "status": row.status,
+        "conversation_id": (row.envelope or {}).get("conversation_id"),
+    }
 
 
 @router.get("/jobs/{job_id}/events")
@@ -116,7 +169,7 @@ async def job_events(
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user_flexible),
 ) -> StreamingResponse:
-    """SSE stream: status → token/tool events → done/error.
+    """SSE stream: status → token / tool_call / tool_start / tool events → done | error | cancelled.
 
     `access_token` query param exists because EventSource cannot set headers.
     """
@@ -126,12 +179,8 @@ async def job_events(
         raise HTTPException(404, detail="job_not_found")
 
     async def gen():
-        if job.status in (JobStatus.completed.value, JobStatus.failed.value):
-            text = (job.result or {}).get("assistant_text") or ""
-            if job.status == JobStatus.failed.value:
-                yield _sse({"type": "error", "text": job.error or "failed"})
-            else:
-                yield _sse({"type": "done", "text": text})
+        if job.status in SETTLED_JOB_STATUSES:
+            yield _sse(_settled_event(job))
             return
 
         yield _sse({"type": "status", "status": job.status})
@@ -141,22 +190,18 @@ async def job_events(
                 try:
                     event = await asyncio.wait_for(q.get(), timeout=1.0)
                 except TimeoutError:
-                    # fallback: refresh from DB (covers out-of-process workers)
+                    # fallback: refresh from DB (covers out-of-process workers / lost events)
                     async with SessionLocal() as fresh:
                         row = await fresh.get(IngestionJob, job_id)
                         if row is None:
                             yield _sse({"type": "error", "text": "job disappeared"})
                             return
-                        if row.status == JobStatus.completed.value:
-                            text = (row.result or {}).get("assistant_text") or ""
-                            yield _sse({"type": "done", "text": text})
-                            return
-                        if row.status == JobStatus.failed.value:
-                            yield _sse({"type": "error", "text": row.error or "failed"})
+                        if row.status in SETTLED_JOB_STATUSES:
+                            yield _sse(_settled_event(row))
                             return
                     continue
                 yield _sse(event)
-                if event.get("type") in ("done", "error"):
+                if event.get("type") in ("done", "error", "cancelled"):
                     return
         finally:
             bus.unsubscribe(job_id, q)

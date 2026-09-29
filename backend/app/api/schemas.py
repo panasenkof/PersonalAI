@@ -22,6 +22,7 @@ class TokenOut(BaseModel):
 class LoginIn(BaseModel):
     email: EmailStr
     password: str
+    otp: str | None = None  # TOTP code or a recovery code when 2FA is enabled
 
 
 class LLMSettingsIn(BaseModel):
@@ -55,6 +56,7 @@ class MessageOut(BaseModel):
     assistant_text: str | None = None
     error: str | None = None
     conversation_id: str | None = None
+    pending_facts: list[dict] = []
 
 
 class ConversationOut(BaseModel):
@@ -76,3 +78,4 @@ class JobOut(BaseModel):
     status: str
     result: dict | None = None
     error: str | None = None
+    pending_facts: list[dict] = []

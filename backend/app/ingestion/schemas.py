@@ -11,6 +11,9 @@ class Channel(str, Enum):
     mobile = "mobile"
     telegram = "telegram"
     slack = "slack"
+    whatsapp = "whatsapp"
+    discord = "discord"
+    web = "web"
 
 
 class Attachment(BaseModel):
@@ -26,6 +29,8 @@ class IngestionEnvelope(BaseModel):
     correlation_id: str | None = None
     locale: str | None = None
     conversation_id: str | None = None
+    # Stable messenger thread id (telegram:<chat>, slack:<channel>[:<thread>], ...) → conversation memory
+    external_ref: str | None = None
     channel_meta: dict[str, Any] = Field(default_factory=dict)
 
 

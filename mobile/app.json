@@ -2,9 +2,15 @@
   "expo": {
     "name": "PIA Agent",
     "slug": "pia-agent",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
     "platforms": ["ios", "android"],
-    "sdkVersion": "51.0.0"
+    "sdkVersion": "51.0.0",
+    "plugins": [
+      "expo-secure-store",
+      ["expo-image-picker", { "photosPermission": "Разрешите доступ к фото, чтобы отправлять чеки и документы агенту.", "cameraPermission": "Разрешите доступ к камере, чтобы фотографировать чеки." }]
+    ],
+    "extra": { "apiBase": "http://localhost:8000" }
   }
 }

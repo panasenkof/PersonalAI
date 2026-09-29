@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import io
 import logging
 from datetime import datetime, timezone
 from typing import Any
@@ -11,22 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domains.medical_labs.schemas import LAB_REPORT_SCHEMA
 from app.llm.router import default_model_for_user, provider_for_user
 from app.models import Collection, Entity, Observation
-from app.rag.indexing import index_entity, index_observation
+from app.rag.indexing import index_entity
+from app.security.redact import safe_error
+from app.services.documents import extract_pdf_text
+from app.services.facts import stage_or_commit_observation
 
 logger = logging.getLogger(__name__)
-
-
-def extract_pdf_text(data: bytes) -> str:
-    from pypdf import PdfReader
-
-    reader = PdfReader(io.BytesIO(data))
-    parts: list[str] = []
-    for page in reader.pages:
-        try:
-            parts.append(page.extract_text() or "")
-        except Exception:  # noqa: BLE001 — skip broken pages
-            logger.warning("pdf page extraction failed")
-    return "\n".join(parts).strip()
 
 
 async def _find_or_create_profile(session: AsyncSession, user_id: str) -> Entity:
@@ -67,6 +56,7 @@ async def labs_record_report(session: AsyncSession, user_id: str, args: dict[str
     structured: dict[str, Any] | None = None
     storage_key = args.get("storage_key")
     mime = (args.get("mime") or "").lower()
+    from_file = bool(storage_key)  # values read from a file/photo need user confirmation
 
     if storage_key:
         if not await user_owns_blob(session, user_id, storage_key):
@@ -91,7 +81,7 @@ async def labs_record_report(session: AsyncSession, user_id: str, args: dict[str
                     json_schema=LAB_REPORT_SCHEMA,
                 )
             except Exception as exc:  # noqa: BLE001
-                return {"error": "vision_parse_failed", "detail": str(exc)}
+                return {"error": "vision_parse_failed", "detail": safe_error(exc)}
         else:
             text = data.decode("utf-8", errors="replace")
 
@@ -112,7 +102,7 @@ async def labs_record_report(session: AsyncSession, user_id: str, args: dict[str
                 json_schema=LAB_REPORT_SCHEMA,
             )
         except Exception as exc:  # noqa: BLE001
-            return {"error": "extract_failed", "detail": str(exc)}
+            return {"error": "extract_failed", "detail": safe_error(exc)}
 
     occurred_raw = args.get("occurred_at") or structured.get("collected_at")
     try:
@@ -127,26 +117,36 @@ async def labs_record_report(session: AsyncSession, user_id: str, args: dict[str
         occurred = datetime.now(timezone.utc)
 
     profile = await _find_or_create_profile(session, user_id)
-    obs = Observation(
-        user_id=user_id,
-        entity_id=profile.id,
-        occurred_at=occurred,
-        kind="lab_report",
-        payload={
-            "type": "lab_report",
-            "panel_name": structured.get("panel_name"),
-            "lab_name": structured.get("lab_name"),
-            "analytes": structured.get("analytes") or [],
-            "disclaimer": "Informational only; not a substitute for a clinician.",
-        },
+    analytes: list[dict[str, Any]] = list(structured.get("analytes") or [])
+    payload: dict[str, Any] = {
+        "type": "lab_report",
+        "panel_name": structured.get("panel_name"),
+        "lab_name": structured.get("lab_name"),
+        "analytes": analytes,
+        "disclaimer": "Informational only; not a substitute for a clinician.",
+    }
+    lines = []
+    for a in analytes[:12]:
+        lines.append(f"{a.get('name')}: {a.get('value')} {a.get('unit') or ''}".strip())
+    summary = f"Анализы {occurred.date().isoformat()} ({payload['panel_name'] or 'панель'}): " + (
+        "; ".join(lines) or "показатели не распознаны"
     )
-    session.add(obs)
-    await session.flush()
-    await index_observation(session, user_id, obs)
+    staged = await stage_or_commit_observation(
+        session,
+        user_id,
+        entity_id=profile.id,
+        kind="lab_report",
+        occurred_at=occurred,
+        payload=payload,
+        summary=summary,
+        needs_confirmation=from_file,
+    )
+    if staged["status"] != "saved":
+        return {**staged, "analytes_count": len(analytes), "note": "Awaiting user confirmation."}
     return {
-        "observation_id": obs.id,
-        "panel_name": obs.payload.get("panel_name"),
-        "analytes_count": len(obs.payload.get("analytes") or []),
+        "observation_id": staged["observation_id"],
+        "panel_name": payload.get("panel_name"),
+        "analytes_count": len(analytes),
         "status": "saved",
     }
 

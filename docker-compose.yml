@@ -1,12 +1,46 @@
+x-app-env: &app-env
+  APP_ENV: ${APP_ENV:-production}
+  DATABASE_URL: postgresql+asyncpg://pia:pia@postgres:5432/pia
+  REDIS_URL: redis://redis:6379/0
+  QUEUE_BACKEND: redis
+  MESSAGE_MODE: queue
+  QUEUE_CONCURRENCY: ${QUEUE_CONCURRENCY:-4}
+  PGVECTOR_DIMENSIONS: ${PGVECTOR_DIMENSIONS:-1536}
+  DEFAULT_EMBEDDING_MODEL: ${DEFAULT_EMBEDDING_MODEL:-text-embedding-3-small}
+  FALLBACK_API_KEY: ${FALLBACK_API_KEY:-}
+  LLM_ALLOW_LOCAL_FALLBACK: ${LLM_ALLOW_LOCAL_FALLBACK:-false}
+  JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET (>= 32 random chars) in .env}
+  JWT_SECRET_PREVIOUS: ${JWT_SECRET_PREVIOUS:-}
+  PIA_AGENT_SECRET: ${PIA_AGENT_SECRET:?set PIA_AGENT_SECRET (Fernet key) in .env}
+  ADMIN_EMAILS: ${ADMIN_EMAILS:-}
+  CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8000}
+  BLOB_STORAGE_DIR: /app/data/blobs
+  RATE_LIMIT_AUTH_PER_MINUTE: ${RATE_LIMIT_AUTH_PER_MINUTE:-10}
+  TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-false}
+  RATE_LIMIT_LLM_PER_MINUTE: ${RATE_LIMIT_LLM_PER_MINUTE:-30}
+  TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+  TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}
+  SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
+  SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET:-}
+  WHATSAPP_ACCESS_TOKEN: ${WHATSAPP_ACCESS_TOKEN:-}
+  WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-}
+  WHATSAPP_VERIFY_TOKEN: ${WHATSAPP_VERIFY_TOKEN:-}
+  WHATSAPP_APP_SECRET: ${WHATSAPP_APP_SECRET:-}
+  DISCORD_APPLICATION_ID: ${DISCORD_APPLICATION_ID:-}
+  DISCORD_PUBLIC_KEY: ${DISCORD_PUBLIC_KEY:-}
+  DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN:-}
+  STT_BASE_URL: ${STT_BASE_URL:-}
+  STT_API_KEY: ${STT_API_KEY:-}
+
 services:
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16   # Postgres + pgvector (HNSW vector search)
     environment:
       POSTGRES_USER: pia
-      POSTGRES_PASSWORD: pia
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pia}
       POSTGRES_DB: pia
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -17,30 +51,43 @@ services:
 
   redis:
     image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]   # jobs survive a Redis restart too
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redisdata:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 10
 
+  # API replicas: accept requests, stream SSE, enqueue jobs. Scale with `--scale app=N`.
   app:
     build: ./backend
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL: postgresql+asyncpg://pia:pia@postgres:5432/pia
-      JWT_SECRET: ${JWT_SECRET:-change-me-in-production-use-long-random}
-      PIA_AGENT_SECRET: ${PIA_AGENT_SECRET:-}
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
-      TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}
-      BLOB_STORAGE_DIR: /app/data/blobs
-      MESSAGE_MODE: queue
-      RATE_LIMIT_AUTH_PER_MINUTE: ${RATE_LIMIT_AUTH_PER_MINUTE:-10}
-      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
-      SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET:-}
+      <<: *app-env
+      EMBEDDED_WORKER: "false"        # jobs are executed by the dedicated workers below
       REMINDERS_ENABLED: ${REMINDERS_ENABLED:-true}
+    volumes:
+      - blobs:/app/data/blobs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # Queue workers: run agent jobs. Scale independently with `--scale worker=N`.
+  worker:
+    build: ./backend
+    command: ["python", "-m", "app.worker"]
+    environment:
+      <<: *app-env
+      REMINDERS_ENABLED: "false"
+    volumes:
+      - blobs:/app/data/blobs
     depends_on:
       postgres:
         condition: service_healthy
@@ -49,3 +96,5 @@ services:
 
 volumes:
   pgdata:
+  redisdata:
+  blobs:
