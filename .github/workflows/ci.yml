@@ -27,6 +27,8 @@ jobs:
         run: pip install -r requirements.lock -r requirements-dev.lock
       - name: Lint (ruff)
         run: ruff check .
+      - name: Local pilot configuration regression
+        run: python ../scripts/test_configure_local_pilot.py
       - name: Type check (mypy)
         run: mypy app
       - name: Tests (pytest)

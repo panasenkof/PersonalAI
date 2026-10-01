@@ -31,6 +31,8 @@
 
 ## Быстрый старт
 
+Для первого закрытого запуска на компьютере: [локальный пилот](docs/LOCAL_PILOT.md). `python scripts/configure-local-pilot.py` создаёт `.env` со случайными ключами, сохраняя существующую установку.
+
 ### Docker (продакшн-режим: Postgres+pgvector, Redis, API, воркеры)
 
 ```bash
