@@ -7,9 +7,11 @@ from typing import Any
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response
 
+from app.agent.orchestrator import _run_tool
 from app.agent.universal_tools import UNIVERSAL_TOOL_DEFINITIONS, UNIVERSAL_TOOL_HANDLERS
 from app.db import SessionLocal
 from app.domains.registry import all_plugins, tool_router, tools_openai_format
+from app.llm.limits import RateLimitExceeded, check_user_quota
 from app.security.redact import safe_error
 
 logger = logging.getLogger(__name__)
@@ -65,6 +67,9 @@ async def mcp_endpoint(request: Request) -> Response:
     method = payload.get("method")
     params = payload.get("params") or {}
 
+    if not isinstance(params, dict):
+        return JSONResponse(_rpc_error(req_id, -32602, "Invalid params"), status_code=400)
+
     if method == "initialize":
         return JSONResponse(
             _rpc_result(
@@ -101,7 +106,9 @@ async def _tools_call(req_id: Any, params: dict[str, Any], request: Request) -> 
     name = params.get("name")
     if not isinstance(name, str) or not name:
         return JSONResponse(_rpc_error(req_id, -32602, "Missing tool name"), status_code=400)
-    args = params.get("arguments") or {}
+    args = params.get("arguments", {})
+    if not isinstance(args, dict):
+        return JSONResponse(_rpc_error(req_id, -32602, "Arguments must be an object"), status_code=400)
     router_map = {**UNIVERSAL_TOOL_HANDLERS, **tool_router(all_plugins())}
     handler = router_map.get(name)
     if handler is None:
@@ -114,9 +121,14 @@ async def _tools_call(req_id: Any, params: dict[str, Any], request: Request) -> 
                 },
             )
         )
+    try:
+        await check_user_quota(uid)
+    except RateLimitExceeded as exc:
+        return JSONResponse(_rpc_error(req_id, -32000, "rate_limited"), status_code=429,
+                            headers={"Retry-After": str(exc.retry_after)})
     async with SessionLocal() as session:
         try:
-            out = await handler(session, uid, args)
+            out = await _run_tool(handler, session, uid, name, args)
             await session.commit()
         except Exception as exc:  # noqa: BLE001 — tool failures are MCP results, not HTTP errors
             logger.warning("mcp tool %s failed: %s", name, exc)

@@ -217,8 +217,7 @@ async def slack_events(
 
     if payload.get("type") == "url_verification":
         return {"challenge": payload.get("challenge", "")}
-    if x_slack_retry_num:  # Slack re-sends when we were slower than 3 s; the first delivery is being handled
-        return {"ok": True}
+    # Retries must reach the durable dedupe check; the first delivery may have crashed.
 
     event = payload.get("event") or {}
     etype = event.get("type")

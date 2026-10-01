@@ -218,6 +218,7 @@ class Chunk(Base):
         ForeignKey("observations.id", ondelete="CASCADE"), nullable=True, index=True
     )
     text: Mapped[str] = mapped_column(Text)
+    embedding_space: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     # Portable storage (SQLite, or embeddings whose width differs from PGVECTOR_DIMENSIONS)
     embedding: Mapped[Optional[list[float]]] = mapped_column(JSON(none_as_null=True), nullable=True)
     # Native pgvector column (Postgres): indexed with HNSW for cosine ANN search
@@ -227,10 +228,12 @@ class Chunk(Base):
 
 class IngestionJob(Base):
     __tablename__ = "ingestion_jobs"
+    __table_args__ = (UniqueConstraint("user_id", "delivery_key", name="uq_job_delivery"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     status: Mapped[str] = mapped_column(String(32), default=JobStatus.accepted.value)
+    delivery_key: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     correlation_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     envelope: Mapped[dict[str, Any]] = mapped_column(EncryptedJSON)
     result: Mapped[Optional[dict[str, Any]]] = mapped_column(EncryptedJSON, nullable=True)

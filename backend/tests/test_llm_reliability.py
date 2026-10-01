@@ -151,11 +151,11 @@ async def test_orchestrator_emits_tool_events(monkeypatch: pytest.MonkeyPatch) -
         async def stream_chat(self, messages, *, on_token=None, on_tool_delta=None, **kw):  # type: ignore[override]
             self.turn += 1
             if self.turn == 1:
-                await on_tool_delta(0, "kb_list_entities", '{"limit": 3}')  # type: ignore[misc]
+                await on_tool_delta(0, "kb_list_entities", '{}')  # type: ignore[misc]
                 msg = ChatMessage(
                     role="assistant",
                     tool_calls=[{"id": "1", "type": "function",
-                                 "function": {"name": "kb_list_entities", "arguments": '{"limit": 3}'}}],
+                                 "function": {"name": "kb_list_entities", "arguments": '{}'}}],
                 )
             else:
                 await on_token("Готово")  # type: ignore[misc]

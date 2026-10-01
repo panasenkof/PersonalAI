@@ -84,25 +84,28 @@ async def post_message(
     session.add(job)
     await session.flush()
 
+    conv_id = conv.id
+    uid = user.id
+    await session.commit()  # durable job before processing; failures roll back only the agent work
+
     if get_settings().message_mode == "queue":
-        # Fast accept: persist the job, process in background, stream via SSE.
-        await session.commit()
+        # The job is already durable; process in background and stream via SSE.
         from app.queue.runner import get_runner
 
         try:
             await get_runner().enqueue(job.id)
         except Exception:  # noqa: BLE001 — the job is persisted; the reaper re-queues it when Redis is back
             logger.warning("enqueue failed for job %s; it will be picked up by the reaper", job.id, exc_info=True)
-        return MessageOut(job_id=job.id, status=job.status, conversation_id=conv.id)
+        return MessageOut(job_id=job.id, status=job.status, conversation_id=conv_id)
 
-    out = await process_envelope(session, user.id, job, env)
+    out = await process_envelope(session, uid, job, env)
     await session.commit()
     return MessageOut(
         job_id=job.id,
         status=job.status,
         assistant_text=out.get("assistant_text"),
         error=out.get("error") if out.get("failed") else None,
-        conversation_id=conv.id,
+        conversation_id=conv_id,
         pending_facts=out.get("pending_facts") or [],
     )
 

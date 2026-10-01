@@ -22,6 +22,11 @@ MAINTENANCE_ITEMS_SCHEMA: dict = {
                 "type": "object",
                 "properties": {
                     "name": {"type": "string"},
+                    "item_id": {"type": "string"},
+                    "aliases": {"type": "array", "items": {"type": "string"}},
+                    "basis": {"enum": ["since_last_service", "fixed_milestones"]},
+                    "baseline_odometer_km": {"type": "integer", "minimum": 0},
+                    "origin_odometer_km": {"type": "integer", "minimum": 0},
                     "interval_km": {"type": "integer"},
                     "interval_months": {"type": "integer"},
                 },

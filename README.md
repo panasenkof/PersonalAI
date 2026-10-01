@@ -30,7 +30,7 @@
 ### Docker (продакшн-режим: Postgres+pgvector, Redis, API, воркеры)
 
 ```bash
-cp .env.example .env        # обязательно: JWT_SECRET (>=32 симв.), PIA_AGENT_SECRET (Fernet-ключ)
+cp .env.example .env        # заполните JWT_SECRET, PIA_AGENT_SECRET, POSTGRES_PASSWORD
 docker compose up -d --build --scale worker=2
 open http://localhost:8000/app/    # web-чат
 ```
@@ -43,10 +43,12 @@ open http://localhost:8000/app/    # web-чат
 ```bash
 cd backend
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt -r requirements-dev.txt
+pip install -r requirements.lock -r requirements-dev.lock
 export JWT_SECRET=dev-secret
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
+
+Первый администратор: `python -m app.security.admin admin@example.com` (в Docker: `docker compose exec app python -m app.security.admin admin@example.com`). Публичная регистрация всегда создаёт обычного пользователя.
 
 Миграции: `alembic upgrade head` (свежая SQLite создаётся и через `create_all` при старте).
 
@@ -65,7 +67,7 @@ EVAL_LLM_API_KEY=sk-... python -m evals.runner --live --runs 3 --min-pass-rate 0
 
 ```bash
 cd mobile
-npm install
+npm ci
 export EXPO_PUBLIC_API_BASE=http://YOUR_LAN_IP:8000   # можно сменить и в Настройках приложения
 npx expo start
 npm run typecheck && npm test                         # tsc + jest
@@ -108,7 +110,7 @@ FastAPI (N реплик) ──► IngestionEnvelope ──► submit_envelope �
 
 ## Переменные окружения
 
-Смотрите [.env.example](.env.example): `JWT_SECRET`, `DATABASE_URL`, `PIA_AGENT_SECRET` (Fernet-ключ), `MESSAGE_MODE`, `QUEUE_BACKEND`/`REDIS_URL`/`EMBEDDED_WORKER`, `TELEGRAM_*`, `SLACK_*`, `WHATSAPP_*`, `DISCORD_*`, `STT_*`, `REMINDERS_*`, `LLM_ALLOW_LOCAL_FALLBACK` + `FALLBACK_*`, `RATE_LIMIT_AUTH_PER_MINUTE`/`RATE_LIMIT_LLM_PER_MINUTE`, `ADMIN_EMAILS`, `JWT_SECRET_PREVIOUS`, `EVAL_LLM_*`, `LOG_FORMAT=json`.
+Смотрите [.env.example](.env.example): `JWT_SECRET`, `DATABASE_URL`, `PIA_AGENT_SECRET` (Fernet-ключ), `MESSAGE_MODE`, `QUEUE_BACKEND`/`REDIS_URL`/`EMBEDDED_WORKER`, `TELEGRAM_*`, `SLACK_*`, `WHATSAPP_*`, `DISCORD_*`, `STT_*`, `REMINDERS_*`, `LLM_ALLOW_LOCAL_FALLBACK` + `FALLBACK_*`, `RATE_LIMIT_AUTH_PER_MINUTE`/`RATE_LIMIT_LLM_PER_MINUTE`, `LLM_ALLOWED_BASE_URLS`, `JWT_SECRET_PREVIOUS`, `EVAL_LLM_*`, `LOG_FORMAT=json`.
 
 ## Статус и roadmap
 

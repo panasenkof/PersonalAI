@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from typing import Any
 
 from cryptography.exceptions import InvalidSignature
@@ -61,6 +62,8 @@ def verify_signature(public_key_hex: str, signature_hex: str | None, timestamp: 
     if not (public_key_hex and signature_hex and timestamp):
         return False
     try:
+        if abs(time.time() - int(timestamp)) > 300:
+            return False
         Ed25519PublicKey.from_public_bytes(bytes.fromhex(public_key_hex)).verify(
             bytes.fromhex(signature_hex), timestamp.encode() + body
         )

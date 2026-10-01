@@ -46,7 +46,10 @@ def automotive_plugin() -> DomainPlugin:
                         "vehicle_entity_id": {"type": "string"},
                         "occurred_at": {"type": "string"},
                         "odometer_km": {"type": "integer"},
-                        "work_items": {"type": "array", "items": {"type": "string"}},
+                        "work_items": {"type": "array", "items": {"anyOf": [
+                            {"type": "string"}, {"type": "object", "properties": {
+                                "name": {"type": "string"}, "item_id": {"type": "string"}},
+                                "required": ["name"], "additionalProperties": False}]}},
                         "notes": {"type": "string"},
                     },
                     "required": ["vehicle_entity_id", "occurred_at"],

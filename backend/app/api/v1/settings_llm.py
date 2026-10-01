@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
@@ -8,6 +8,7 @@ from app.api.schemas import LLMSettingsIn, LLMSettingsOut
 from app.db import get_session
 from app.models import User
 from app.security.crypto import encrypt_api_key
+from app.security.endpoints import validate_llm_endpoint
 from app.services.users import get_or_create_llm_settings
 
 router = APIRouter(prefix="/v1/settings", tags=["settings"])
@@ -40,8 +41,12 @@ async def patch_llm(
     user: User = Depends(get_current_user),
 ) -> LLMSettingsOut:
     row = await get_or_create_llm_settings(session, user.id)
+    try:
+        endpoint = validate_llm_endpoint(body.base_url)
+    except ValueError as exc:
+        raise HTTPException(422, detail=str(exc)) from None
     row.provider_kind = body.provider_kind
-    row.base_url = body.base_url
+    row.base_url = endpoint
     row.default_model = body.default_model
     row.embedding_model = body.embedding_model
     row.supports_vision = body.supports_vision

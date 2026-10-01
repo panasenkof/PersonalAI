@@ -24,10 +24,18 @@ from app.security.crypto import (
     encrypt_api_key,
     encrypt_bytes,
     encryption_enabled,
+    require_decryption,
 )
 
 
 async def rekey_database() -> dict[str, int]:
+    if not encryption_enabled():
+        raise RuntimeError("PIA_AGENT_SECRET is required for rekey")
+    with require_decryption():
+        return await _rekey_database()
+
+
+async def _rekey_database() -> dict[str, int]:
     counts = {"chat_turns": 0, "totp_secrets": 0, "llm_keys": 0, "jobs": 0, "facts": 0}
     async with SessionLocal() as session:
         # EncryptedText decrypts on load and encrypts on flush: marking the attribute dirty rewrites it.

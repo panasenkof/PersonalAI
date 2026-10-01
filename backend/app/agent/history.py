@@ -75,7 +75,11 @@ async def load_history_messages(
 ) -> list[ChatMessage]:
     """Recent turns as ChatMessages; older turns compacted into one system note."""
     window = window or DEFAULT_HISTORY_WINDOW
-    turns = await get_conversation_messages(session, user_id, conversation_id)
+    rows = await session.execute(
+        select(ChatTurn).where(ChatTurn.user_id == user_id).where(ChatTurn.conversation_id == conversation_id)
+        .order_by(ChatTurn.created_at.desc(), ChatTurn.id.desc()).limit(window + 10)
+    )
+    turns = list(reversed(list(rows.scalars())))
     if not turns:
         return []
     recent = turns[-window:]

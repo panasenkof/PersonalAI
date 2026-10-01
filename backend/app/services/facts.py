@@ -1,6 +1,6 @@
 """Extracted facts awaiting user confirmation (photos / PDFs → structured records).
 
-Handlers call ``stage_or_commit_observation``; when the request runs inside an ingestion job and
+Handlers call ``stage_or_commit_observation``; when
 CONFIRM_EXTRACTED_FACTS is on, the observation is parked as an ExtractedFact and the job ends in
 ``awaiting_confirm``. The user confirms/rejects from any channel (inline buttons, REST) and only then
 does the record enter the knowledge base and search index.
@@ -51,7 +51,7 @@ async def stage_or_commit_observation(
 ) -> dict[str, Any]:
     """Create the observation now, or stage it as a pending fact (see module docstring)."""
     job_id = current_job_id.get()
-    if needs_confirmation and get_settings().confirm_extracted_facts and job_id:
+    if needs_confirmation and get_settings().confirm_extracted_facts:
         fact = ExtractedFact(
             user_id=user_id,
             job_id=job_id,

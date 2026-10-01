@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings as _real_get_settings
@@ -102,13 +104,20 @@ async def _pair_account(session: AsyncSession, code: str, field: str, external_i
     user = await session.get(User, link.user_id)
     if user is None or not user.is_active:
         return None
+    claimed = await session.execute(
+        update(TelegramLinkCode).where(TelegramLinkCode.id == link.id)
+        .where(TelegramLinkCode.consumed_at.is_(None)).where(TelegramLinkCode.expires_at > utcnow())
+        .values(consumed_at=utcnow()).execution_options(synchronize_session=False)
+    )
+    if claimed.rowcount != 1:  # type: ignore[attr-defined]
+        await session.rollback()
+        return None
     column = getattr(User, field)
     prev = (await session.execute(select(User).where(column == external_id))).scalar_one_or_none()
     if prev is not None and prev.id != user.id:
         setattr(prev, field, None)
         await session.flush()  # clear UNIQUE before assigning the new owner
     setattr(user, field, external_id)
-    link.consumed_at = utcnow()
     await session.commit()
     return user
 
@@ -143,10 +152,19 @@ async def submit_envelope(session: AsyncSession, user: User, env: IngestionEnvel
         user_id=user.id,
         status=JobStatus.accepted.value,
         correlation_id=env.correlation_id,
+        delivery_key=hashlib.sha256(f"{env.channel.value}:{env.correlation_id}".encode()).hexdigest() if env.correlation_id else None,
         envelope=env.model_dump(mode="json"),
     )
+    uid, key = user.id, job.delivery_key
     session.add(job)
-    await session.flush()
+    try:
+        await session.flush()
+    except IntegrityError:
+        await session.rollback()
+        duplicate = await session.scalar(select(IngestionJob.id).where(IngestionJob.user_id == uid).where(IngestionJob.delivery_key == key))
+        if key and duplicate:
+            raise DuplicateDelivery(env.correlation_id) from None
+        raise
     if _channel_settings().message_mode == "queue":
         await session.commit()
         from app.queue.runner import get_runner
@@ -156,7 +174,9 @@ async def submit_envelope(session: AsyncSession, user: User, env: IngestionEnvel
         except Exception:  # noqa: BLE001 — job is persisted; the reaper re-queues it when Redis recovers
             logging.getLogger(__name__).warning("enqueue failed for job %s; reaper will retry", job.id, exc_info=True)
         return None
-    out = await process_envelope(session, user.id, job, env)
+    uid = user.id
+    await session.commit()
+    out = await process_envelope(session, uid, job, env)
     await session.commit()
     return out
 

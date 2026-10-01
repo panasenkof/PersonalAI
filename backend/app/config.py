@@ -1,6 +1,8 @@
 from functools import lru_cache
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import URL
 
 
 class Settings(BaseSettings):
@@ -11,11 +13,26 @@ class Settings(BaseSettings):
     # channel webhooks without a configured secret are rejected.
     app_env: str = "development"
     database_url: str = "sqlite+aiosqlite:///./pia.db"
+    postgres_host: str = ""
+    postgres_port: int = 5432
+    postgres_user: str = "pia"
+    postgres_password: str = ""
+    postgres_db: str = "pia"
+
+    @model_validator(mode="after")
+    def postgres_dsn(self) -> "Settings":
+        if self.postgres_host:
+            self.database_url = URL.create(
+                "postgresql+asyncpg", username=self.postgres_user, password=self.postgres_password,
+                host=self.postgres_host, port=self.postgres_port, database=self.postgres_db,
+            ).render_as_string(hide_password=False)
+        return self
+
     db_null_pool: bool = False  # Postgres: no connection pooling (tests that mix event loops, pgbouncer setups)
     jwt_secret: str = "change-me-in-production-use-long-random"
     # Comma-separated previous secrets: still accepted for verification (zero-downtime rotation).
     jwt_secret_previous: str = ""
-    # Comma-separated e-mails that get the admin role on registration.
+    # Deprecated; ignored. Provision administrators with python -m app.security.admin.
     admin_emails: str = ""
     # Behind a reverse proxy that sets X-Forwarded-For, rate limits use the proxy-appended (last) address.
     # Off by default: a directly exposed app must not trust a client-supplied header.
@@ -34,6 +51,8 @@ class Settings(BaseSettings):
 
     blob_storage_dir: str = "./data/blobs"
     max_upload_bytes: int = 20 * 1024 * 1024  # 20 MB
+    embedding_revision: str = "1"  # bump after replacing a model behind an unchanged model name
+    llm_allowed_base_urls: str = "https://api.openai.com/v1"
     llm_allow_local_fallback: bool = False
     # Cloud fallback target when local LLM fails (used only when llm_allow_local_fallback=true)
     fallback_base_url: str = ""

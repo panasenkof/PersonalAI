@@ -284,12 +284,14 @@ def test_slack_threads_files_bots_and_retries(client: TestClient, monkeypatch, s
     n = len(agent.prompts)
     _slack_post(client, ev)  # same message again (e.g. app_mention + message)
     assert len(agent.prompts) == n
-    # Slack retry header and bot messages are ignored
+    # A retry must run when its first delivery was lost; bot messages are ignored
     ev2 = {"type": "event_callback", "event": {"type": "message", "user": su, "channel": "D2", "text": "x", "ts": "9.9"}}
     _slack_post(client, ev2, {"X-Slack-Retry-Num": "1"})
     _slack_post(client, {"type": "event_callback", "event": {"type": "message", "bot_id": "B1", "user": su,
                                                              "channel": "D2", "text": "x", "ts": "9.8"}})
-    assert len(agent.prompts) == n
+    assert len(agent.prompts) == n + 1
+    _slack_post(client, ev2, {"X-Slack-Retry-Num": "2"})
+    assert len(agent.prompts) == n + 1
     # different threads = different conversations
     _slack_post(client, {"type": "event_callback", "event": {"type": "message", "user": su, "channel": "C9",
                                                             "text": "t2", "ts": "200.2", "thread_ts": "200.0"}})

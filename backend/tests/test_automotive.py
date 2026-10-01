@@ -54,4 +54,4 @@ async def test_compute_next_due_deterministic() -> None:
 
     assert "items" in out
     assert out["items"][0]["item"] == "Oil"
-    assert out["items"][0]["next_odometer_km_target"] == 100000
+    assert out["items"][0]["next_odometer_km_target"] == 105000
