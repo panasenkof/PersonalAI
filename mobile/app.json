@@ -2,14 +2,13 @@
   "expo": {
     "name": "PIA Agent",
     "slug": "pia-agent",
-    "version": "0.2.0",
+    "version": "0.3.0",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "platforms": [
       "ios",
       "android"
     ],
-    "sdkVersion": "51.0.0",
     "plugins": [
       "expo-secure-store",
       [

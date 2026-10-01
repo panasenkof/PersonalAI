@@ -7,6 +7,9 @@ from app.models import Collection, LLMSettings, User, UserRole
 
 
 async def bootstrap_user(session: AsyncSession, email: str, password_hash: str) -> User:
+    from app.config import get_settings
+
+    settings = get_settings()
     role = UserRole.user.value  # public registration never grants administrative privileges
     user = User(email=email, password_hash=password_hash, role=role)
     session.add(user)
@@ -17,8 +20,9 @@ async def bootstrap_user(session: AsyncSession, email: str, password_hash: str) 
         LLMSettings(
             user_id=user.id,
             provider_kind="cloud",
-            base_url="https://api.openai.com/v1",
-            default_model="gpt-4o-mini",
+            base_url=settings.default_llm_base_url,
+            default_model=settings.default_llm_model,
+            embedding_model=settings.default_embedding_model if settings.default_llm_api_key else None,
             supports_vision=True,
         )
     )
@@ -35,11 +39,14 @@ async def get_or_create_llm_settings(session: AsyncSession, user_id: str) -> LLM
     row = await session.get(LLMSettings, user_id)
     if row is not None:
         return row
+    from app.config import get_settings
+    settings = get_settings()
     row = LLMSettings(
         user_id=user_id,
         provider_kind="cloud",
-        base_url="https://api.openai.com/v1",
-        default_model="gpt-4o-mini",
+        base_url=settings.default_llm_base_url,
+        default_model=settings.default_llm_model,
+        embedding_model=settings.default_embedding_model if settings.default_llm_api_key else None,
         supports_vision=True,
     )
     session.add(row)
@@ -55,7 +62,9 @@ async def authenticate_token(session: AsyncSession, token: str, expected_type: s
     if not claims or not claims.get("sub"):
         return None
     user = await session.get(User, str(claims["sub"]))
-    if user is None or not user.is_active:
+    from app.config import get_settings
+
+    if user is None or not user.is_active or (get_settings().require_verified_email and not user.email_verified):
         return None
     if int(claims.get("tv", 0)) != int(user.token_version or 0):
         return None

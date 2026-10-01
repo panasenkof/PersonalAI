@@ -1,6 +1,6 @@
 export function normalizeServer(raw: string): string {
   const value = raw.trim().replace(/\/+$/, "");
-  // React Native 0.74 does not fully implement the WHATWG URL API.
+  // Validate explicitly so server input behaves consistently on both native platforms.
   const match = /^(https?):\/\/(\[[0-9a-f:]+\]|[a-z0-9.-]+)(?::([0-9]{1,5}))?$/i.exec(value);
   if (!match || (match[3] && (+match[3] < 1 || +match[3] > 65535))) {
     throw new Error("Укажите адрес сервера без /app, параметров и пароля");
@@ -16,6 +16,11 @@ export function normalizeServer(raw: string): string {
 }
 export function authError(detail: string): string {
   const messages: Record<string,string> = {
+    email_not_verified: 'Подтвердите email по письму, затем войдите. Повторное письмо можно запросить через «Восстановить доступ».',
+    email_service_unavailable: 'Почтовый сервис пока не настроен. Обратитесь к владельцу сервера.',
+    invalid_or_expired_code: 'Код недействителен или истёк. Запросите новое письмо.',
+    stop_active_jobs_before_deleting: 'Остановите все незавершённые задачи, прежде чем удалять аккаунт.',
+    type_email_to_confirm_deletion: 'Введите email аккаунта для подтверждения удаления.',
     invalid_credentials: 'Неверный email или пароль', invalid_otp: 'Неверный код подтверждения',
     email_taken: 'Этот email уже зарегистрирован. Нажмите «Войти».',
     too_many_failed_attempts: 'Слишком много попыток. Попробуйте позже.',

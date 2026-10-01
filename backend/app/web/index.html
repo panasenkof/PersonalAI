@@ -57,8 +57,9 @@
     <input aria-label="Код 2FA или резервный код" id="otp" class="hidden" placeholder="код 2FA (или резервный код)" autocomplete="one-time-code">
     <button id="btnLogin">Войти</button>
     <button class="ghost" id="btnRegister">Зарегистрироваться</button>
+    <a href="access.html">Забыли пароль? Подтвердить email</a>
     <div id="authErr" class="err" role="alert"></div>
-    <p class="intro">Первый раз? Создайте аккаунт, затем настройте модель в «Настройках». <a href="help.html" target="_blank" rel="noopener">Как начать и установить</a></p>
+    <p class="intro">Первый раз? Создайте аккаунт, затем настройте модель в «Настройках». <a href="start.html">О продукте</a> · <a href="help.html" target="_blank" rel="noopener">Как начать и установить</a></p>
   </div>
 </div>
 
@@ -74,6 +75,7 @@
     <div class="row"><label>Модель</label><input id="sModel" placeholder="gpt-4o-mini"></div>
     <div class="row"><label for="sVision">Модель понимает изображения</label><input id="sVision" type="checkbox"></div>
     <div class="row"><label>Модель эмбеддингов</label><input id="sEmb" placeholder="text-embedding-3-small"></div>
+    <button class="ghost" id="btnTestModel">Проверить подключение модели (возможна плата провайдера)</button>
     <div style="display:flex;gap:8px">
       <button id="btnSaveSettings">Сохранить</button>
       <button class="ghost" id="btnCloseSettings">Закрыть</button>
@@ -85,7 +87,7 @@
       <label for="currentPass">Текущий пароль</label><input id="currentPass" type="password" autocomplete="current-password">
       <label for="newPass">Новый пароль (от 8 символов)</label><input id="newPass" type="password" autocomplete="new-password">
       <label for="passwordOtp">Код 2FA или резервный код, если 2FA включена</label><input id="passwordOtp" autocomplete="one-time-code">
-      <p class="intro">Остальные устройства выйдут из аккаунта. Восстановление забытого пароля пока требует обращения к владельцу сервера.</p>
+      <p class="intro">Остальные устройства выйдут из аккаунта. Забытый пароль можно сбросить через письмо на экране «Восстановить доступ».</p>
       <button id="btnChangePassword">Сменить пароль</button>
       <h3>Безопасность</h3>
       <div id="secStatus" class="ok"></div>
@@ -105,6 +107,18 @@
         <button class="danger" id="btn2faDisable">Отключить 2FA</button>
       </div>
       <pre id="recoveryBox" class="hidden"></pre>
+      <h3>Ваши данные</h3>
+      <p class="intro">Экспорт содержит историю, базу знаний и загруженные файлы. Ключи API, пароли и секреты 2FA в архив не входят.</p>
+      <label for="dataPass">Пароль для подтверждения</label><input id="dataPass" type="password" autocomplete="current-password">
+      <label for="dataOtp">Код 2FA или резервный код, если включена 2FA</label><input id="dataOtp" autocomplete="one-time-code">
+      <button class="ghost" id="btnExport">Скачать мои данные (ZIP)</button>
+      <label for="deleteEmail">Для удаления введите email аккаунта</label><input id="deleteEmail" type="email" autocomplete="off">
+      <button class="danger" id="btnDeleteAccount">Удалить аккаунт и данные</button>
+      <p class="intro">Удаление необратимо. Сначала остановите незавершённые задачи и скачайте нужные данные. При недоступности хранилища удаление файлов будет повторено автоматически.</p>
+      <h3>О сервисе и помощь</h3>
+      <div id="serviceInfo"></div>
+      <a href="service.html" target="_blank" rel="noopener">Данные, условия и поддержка</a>
+      <button class="ghost" id="btnDiagnostics">Скачать диагностику без секретов</button>
       <h3>Мессенджеры</h3>
       <div style="display:flex;gap:8px">
         <select id="chSel"><option>telegram</option><option>slack</option><option>whatsapp</option><option>discord</option></select>

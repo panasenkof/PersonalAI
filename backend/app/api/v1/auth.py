@@ -47,6 +47,7 @@ _DUMMY_HASH = hash_password("timing-equalizer")
 def _tokens(user: User) -> TokenOut:
     tv = int(user.token_version or 0)
     return TokenOut(
+        email_verification_required=get_settings().require_verified_email and not user.email_verified,
         access_token=create_access_token(user.id, tv),
         refresh_token=create_refresh_token(user.id, tv),
     )
@@ -55,9 +56,18 @@ def _tokens(user: User) -> TokenOut:
 @router.post("/register", response_model=TokenOut)
 async def register(body: RegisterIn, session: AsyncSession = Depends(get_session)) -> TokenOut:
     email = body.email.lower()
+    if get_settings().require_verified_email:
+        from app.services.mail import mail_configured
+
+        if not mail_configured():
+            raise HTTPException(503, detail="email_service_unavailable")
     if await get_user_by_email(session, email):
         raise HTTPException(409, detail="email_taken")
     user = await bootstrap_user(session, email, hash_password(body.password))
+    if get_settings().require_verified_email:
+        from app.api.v1.email_actions import queue_action
+
+        await queue_action(session, user, "verify")
     await session.commit()
     return _tokens(user)
 
@@ -111,6 +121,8 @@ async def login(body: LoginIn, session: AsyncSession = Depends(get_session)) -> 
     password_ok = verify_password(body.password, user.password_hash if user else _DUMMY_HASH)
     if not user or not password_ok or not user.is_active:
         raise await fail("invalid_credentials")
+    if s.require_verified_email and not user.email_verified:
+        raise HTTPException(403, detail="email_not_verified")
     if user.totp_enabled:
         if not body.otp:
             raise HTTPException(401, detail="otp_required")  # not a failure: the client just asks for the code
@@ -141,6 +153,7 @@ async def me(user: User = Depends(get_current_user)) -> dict:
         "email": user.email,
         "role": user.role,
         "totp_enabled": bool(user.totp_enabled),
+        "email_verified": bool(user.email_verified),
         "channels": {
             "telegram": bool(user.telegram_user_id),
             "slack": bool(user.slack_user_id),

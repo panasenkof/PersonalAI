@@ -82,7 +82,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setMe(await api.me());
       },
       register: async (email, password) => {
-        await setTokens(await api.register(email, password));
+        const registered = await api.register(email, password);
+        if (registered.email_verification_required) throw new ApiError(403, "email_not_verified");
+        await setTokens(registered);
         setMe(await api.me());
       },
       changePassword: async (current, next, otp) => { await setTokens(await api.changePassword(current, next, otp)); },

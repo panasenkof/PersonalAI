@@ -9,6 +9,28 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     app_name: str = "PIA Agent"
+    app_version: str = "0.3.0"
+    public_launch: bool = False
+    public_base_url: str = ""
+    operator_name: str = ""
+    support_email: str = ""
+    privacy_url: str = ""
+    terms_url: str = ""
+    deletion_journal_path: str = ""
+    backup_retention_days: int = 30
+    require_verified_email: bool = False
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    smtp_starttls: bool = True
+    smtp_ssl: bool = False
+    email_action_requests_per_hour: int = 3
+    account_export_max_bytes: int = 100 * 1024 * 1024
+    default_llm_base_url: str = "https://api.openai.com/v1"
+    default_llm_api_key: str = ""
+    default_llm_model: str = "gpt-4o-mini"
     # "development" | "production". Production fails closed: weak secrets abort startup and
     # channel webhooks without a configured secret are rejected.
     app_env: str = "development"
@@ -186,4 +208,23 @@ def production_problems(s: Settings) -> list[str]:
         problems.append("QUEUE_BACKEND=redis requires REDIS_URL")
     if s.cors_origins.strip() == "*":
         problems.append("CORS_ORIGINS must list explicit origins (not *)")
+    if s.public_launch:
+        if not s.deletion_journal_path:
+            problems.append("Public launch requires DELETION_JOURNAL_PATH on a separate durable volume")
+        from urllib.parse import urlsplit
+
+        for name, value in (("PUBLIC_BASE_URL", s.public_base_url), ("PRIVACY_URL", s.privacy_url), ("TERMS_URL", s.terms_url)):
+            parsed = urlsplit(value)
+            if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+                problems.append(f"{name} must be an HTTPS URL")
+        if not s.default_llm_api_key or not s.default_llm_model:
+            problems.append("Public launch requires a configured default model and DEFAULT_LLM_API_KEY")
+        if not s.operator_name or not s.support_email:
+            problems.append("OPERATOR_NAME and SUPPORT_EMAIL are required for public launch")
+        if not s.smtp_host or not s.smtp_from or not (s.smtp_starttls or s.smtp_ssl):
+            problems.append("Public launch requires SMTP with TLS and SMTP_FROM")
+        if not s.require_verified_email:
+            problems.append("Public launch requires REQUIRE_VERIFIED_EMAIL=true")
+        if s.rate_limit_auth_per_minute <= 0 or s.rate_limit_llm_per_minute <= 0:
+            problems.append("Public launch requires positive auth and LLM rate limits")
     return problems

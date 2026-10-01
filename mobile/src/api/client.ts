@@ -1,5 +1,5 @@
 import type {
-  Attachment, ChatTurn, Conversation, Fact, JobOut, LLMSettings, Me, MessageOut, Tokens,
+  ServiceInfo, Attachment, ChatTurn, Conversation, Fact, JobOut, LLMSettings, Me, MessageOut, Tokens,
 } from "../types";
 
 export class ApiError extends Error {
@@ -58,9 +58,9 @@ async function refreshTokens(): Promise<boolean> {
   return refreshing;
 }
 
-const AUTH_PATHS = ["/v1/auth/token", "/v1/auth/register", "/v1/auth/refresh", "/v1/auth/password", "/v1/auth/2fa/disable"];
+const AUTH_PATHS = ["/v1/auth/token", "/v1/auth/register", "/v1/auth/refresh", "/v1/auth/password", "/v1/auth/2fa/disable", "/v1/auth/password/request", "/v1/auth/password/reset", "/v1/auth/email/request", "/v1/auth/email/verify"];
 
-export async function request<T>(path: string, init: RequestInit & { json?: unknown } = {}, retry = true): Promise<T> {
+export async function request<T>(path: string, init: RequestInit & { json?: unknown; binary?: boolean } = {}, retry = true): Promise<T> {
   const headers: Record<string, string> = { ...((init.headers as Record<string, string>) || {}) };
   const tokens = h().getTokens();
   if (tokens) headers.Authorization = `Bearer ${tokens.access_token}`;
@@ -76,12 +76,20 @@ export async function request<T>(path: string, init: RequestInit & { json?: unkn
     throw new ApiError(401, "session_expired");
   }
   if (r.status === 204) return undefined as T;
+  if (r.ok && init.binary) return new Uint8Array(await r.arrayBuffer()) as T;
   const data: unknown = await r.json().catch(() => null);
   if (!r.ok) throw new ApiError(r.status, detailOf(data, r.status));
   return data as T;
 }
 
 export const api = {
+  serviceInfo: () => request<ServiceInfo>("/v1/service/info"),
+  diagnostics: () => request<Record<string, unknown>>("/v1/service/diagnostics"),
+  testModel: () => request<{ message: string }>("/v1/settings/llm/test", { method: "POST" }),
+  requestAccess: (email: string, purpose: "reset" | "verify") => request<{message:string}>(purpose === "reset" ? "/v1/auth/password/request" : "/v1/auth/email/request", {method:"POST",json:{email}}),
+  finishAccess: (token: string, purpose: "reset" | "verify", new_password?: string, otp?: string) => request<{message:string}>(purpose === "reset" ? "/v1/auth/password/reset" : "/v1/auth/email/verify", {method:"POST",json:{token,new_password,otp:otp || undefined}}),
+  exportAccount: (password: string, otp?: string) => request<Uint8Array>("/v1/account/export", {method:"POST",binary:true,json:{password,otp:otp || undefined}}),
+  deleteAccount: (password: string, confirmation: string, otp?: string) => request<{message:string}>("/v1/account/delete", {method:"POST",json:{password,confirmation,otp:otp || undefined}}),
   login: (email: string, password: string, otp?: string) =>
     request<Tokens>("/v1/auth/token", { method: "POST", json: { email, password, otp: otp || undefined } }),
   register: (email: string, password: string) =>

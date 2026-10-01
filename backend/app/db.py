@@ -1,7 +1,7 @@
 import logging
 from collections.abc import AsyncGenerator
 
-from sqlalchemy import text
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -15,6 +15,13 @@ settings = get_settings()
 _is_pg = settings.database_url.startswith("postgresql")
 _pg_args: dict = {"poolclass": NullPool} if settings.db_null_pool else {"pool_pre_ping": True, "pool_size": 10, "max_overflow": 20}
 engine = create_async_engine(settings.database_url, echo=False, **(_pg_args if _is_pg else ({"poolclass": NullPool} if settings.db_null_pool else {})))
+if not _is_pg:
+    @event.listens_for(engine.sync_engine, "connect")
+    def _sqlite_foreign_keys(connection, _record):
+        cursor = connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 USE_PGVECTOR = _is_pg and PGVECTOR_AVAILABLE

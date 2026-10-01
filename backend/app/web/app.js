@@ -1,6 +1,6 @@
 
 const $ = (id) => document.getElementById(id);
-const AUTH_PATHS = new Set(["/v1/auth/token", "/v1/auth/register", "/v1/auth/refresh", "/v1/auth/password", "/v1/auth/2fa/disable"]);
+const AUTH_PATHS = new Set(["/v1/auth/token", "/v1/auth/register", "/v1/auth/refresh", "/v1/auth/password", "/v1/auth/2fa/disable", "/v1/auth/password/request", "/v1/auth/password/reset", "/v1/auth/email/request", "/v1/auth/email/verify"]);
 let token = localStorage.getItem("pia_token") || "";
 let conversations = [];
 let currentConv = null;
@@ -20,7 +20,7 @@ function logout() {
   $("settingsView").classList.add("hidden");
   $("msgs").replaceChildren(); $("convList").replaceChildren();
   $("password").value = ""; $("otp").value = "";
-  for (const id of ["currentPass","newPass","passwordOtp","sKey","offPass","offCode","twofaCode"]) $(id).value = "";
+  for (const id of ["currentPass","newPass","passwordOtp","sKey","offPass","offCode","twofaCode","dataPass","dataOtp","deleteEmail"]) $(id).value = "";
   for (const id of ["recoveryBox","twofaSecret","linkBox"]) { $(id).textContent = ""; }
   $("input").value = "";
   currentConv = null;
@@ -65,6 +65,11 @@ async function api(path, opts = {}, allowRefresh = true) {
 }
 
 function friendlyError(message) {
+  if (message.includes("email_not_verified")) return "Подтвердите email по ссылке из письма. Повторно запросить письмо можно через «Подтвердить email».";
+  if (message.includes("email_service_unavailable")) return "Почтовый сервис пока не настроен. Обратитесь к владельцу сервера.";
+  if (message.includes("stop_active_jobs")) return "Сначала остановите или дождитесь завершения всех задач аккаунта.";
+  if (message.includes("type_email_to_confirm")) return "Для удаления введите email своего аккаунта.";
+  if (message.includes("export_too_large")) return "Архив слишком большой для самостоятельного экспорта. Обратитесь в поддержку.";
   if (message.includes("file_too_large")) return "Файл слишком большой. Уменьшите его размер или уточните лимит у владельца сервера.";
   if (message.includes("invalid_credentials")) return "Неверный email или пароль";
   if (message.includes("invalid_otp")) return "Неверный код подтверждения";
@@ -90,6 +95,10 @@ async function loginOrRegister(register) {
     const body = { email: $("email").value.trim(), password: $("password").value };
     if (!$("otp").classList.contains("hidden") && $("otp").value.trim()) body.otp = $("otp").value.trim();
     const data = await api(path, { method: "POST", body });
+    if (data.email_verification_required) {
+      $("authErr").textContent = "Письмо для подтверждения email отправлено. Подтвердите адрес, затем войдите.";
+      return;
+    }
     token = data.access_token;
     localStorage.setItem("pia_token", token);
     if (data.refresh_token) localStorage.setItem("pia_refresh", data.refresh_token);
@@ -629,7 +638,7 @@ $("btn2faEnable").onclick = twofaEnable;
 $("btn2faDisable").onclick = twofaDisable;
 $("btnLogoutAll").onclick = logoutAll;
 $("btnLinkCode").onclick = linkCode;
-$("btnCloseSettings").onclick = () => { $("settingsView").classList.add("hidden"); for (const id of ["sKey","currentPass","newPass","passwordOtp","offPass","offCode","twofaCode"]) $(id).value = ""; $("btnSettings").focus(); };
+$("btnCloseSettings").onclick = () => { $("settingsView").classList.add("hidden"); for (const id of ["sKey","currentPass","newPass","passwordOtp","offPass","offCode","twofaCode","dataPass","dataOtp","deleteEmail"]) $(id).value = ""; $("btnSettings").focus(); };
 $("btnSaveSettings").onclick = saveSettings;
 $("input").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); } });
 
@@ -659,3 +668,42 @@ document.addEventListener("keydown", e => {
   if (e.shiftKey && (document.activeElement === first || !overlay.contains(document.activeElement))) { e.preventDefault(); last?.focus(); }
   else if (!e.shiftKey && (document.activeElement === last || !overlay.contains(document.activeElement))) { e.preventDefault(); first?.focus(); }
 });
+
+
+function downloadFile(content, filename, type) {
+  const url = URL.createObjectURL(new Blob([content], {type}));
+  const link = document.createElement("a"); link.href=url; link.download=filename; link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+async function accountAction(path, body, isExport) {
+  const request = () => fetch(path, {method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify(body)});
+  let response = await request();
+  if (response.status === 401 && await tryRefresh()) response = await request();
+  if (!response.ok) { const error=await response.json().catch(()=>({})); throw new Error(error.detail || "HTTP "+response.status); }
+  if (isExport) downloadFile(await response.blob(), "pia-account.zip", "application/zip");
+  return response;
+}
+let dataBusy=false;
+async function handleDataAction(remove) {
+  if (dataBusy || busy || uploading) return;
+  if (!$("dataPass").value) { $("setMsg").textContent="Укажите пароль для подтверждения."; return; }
+  if (remove && !confirm("Удалить аккаунт, историю, знания и файлы без возможности восстановления?")) return;
+  dataBusy=true; $("btnExport").disabled=$("btnDeleteAccount").disabled=true;
+  try {
+    await accountAction(remove ? "/v1/account/delete" : "/v1/account/export", {password:$("dataPass").value,otp:$("dataOtp").value || undefined,...(remove?{confirmation:$("deleteEmail").value.trim()}: {})}, !remove);
+    $("dataPass").value=$("dataOtp").value="";
+    if(remove) logout(); else { $("setMsg").className="ok";$("setMsg").textContent="Архив скачан. Храните его в безопасном месте."; }
+  } catch(e) {$("setMsg").className="err";$("setMsg").textContent=friendlyError(e.message);}
+  finally {dataBusy=false;$("btnExport").disabled=$("btnDeleteAccount").disabled=false;}
+}
+$("btnExport").onclick=()=>handleDataAction(false);
+$("btnDeleteAccount").onclick=()=>handleDataAction(true);
+$("btnDiagnostics").onclick=async()=>{try{const data=await api("/v1/service/diagnostics");downloadFile(JSON.stringify(data,null,2),"pia-diagnostics.json","application/json");}catch(e){$("setMsg").textContent=friendlyError(e.message);}};
+$("btnTestModel").onclick=async()=>{
+  const button=$("btnTestModel");if(button.disabled)return;button.disabled=true;
+  $("setMsg").textContent="Проверяем сохранённые настройки модели…";
+  try{const result=await api("/v1/settings/llm/test",{method:"POST"});$("setMsg").className="ok";$("setMsg").textContent=result.message;}
+  catch(e){$("setMsg").className="err";$("setMsg").textContent=friendlyError(e.message);}
+  finally{button.disabled=false;}
+};
+api("/v1/service/info").then(info=>{$("serviceInfo").textContent="Версия "+info.version+(info.support_email?" · Поддержка: "+info.support_email:"");}).catch(()=>{});

@@ -13,6 +13,10 @@ async def provider_for_user(session: AsyncSession, user_id: str, settings: Setti
     settings = settings or get_settings()
     row = await get_or_create_llm_settings(session, user_id)
     api_key = decrypt_api_key(row.api_key_ciphertext, row.api_key_plain)
+    if not api_key and row.base_url == settings.default_llm_base_url:
+        if settings.default_llm_api_key and (row.default_model != settings.default_llm_model or row.embedding_model not in (None, settings.default_embedding_model)):
+            raise ValueError("Use the operator's configured models or provide your own API key")
+        api_key = settings.default_llm_api_key or None
     base = row.base_url or "https://api.openai.com/v1"
     if row.provider_kind == "local":
         return LocalLLMProvider(base_url=base, api_key=api_key)
