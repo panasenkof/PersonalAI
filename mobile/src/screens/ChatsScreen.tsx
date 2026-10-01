@@ -3,6 +3,7 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import React, { useCallback, useState } from "react";
 import { Alert, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
 
+import { authError } from "../ux";
 import { api } from "../api/client";
 import { useTheme } from "../theme";
 import type { Conversation } from "../types";
@@ -36,7 +37,7 @@ export function ChatsScreen() {
       setPending(facts.facts.length);
       setError("");
     } catch (e) {
-      setError(String((e as Error).message));
+      setError(authError(String((e as Error).message)));
     } finally {
       setRefreshing(false);
     }
@@ -51,7 +52,7 @@ export function ChatsScreen() {
         text: "Удалить",
         style: "destructive",
         onPress: async () => {
-          await api.deleteConversation(c.id).catch((e) => setError(String((e as Error).message)));
+          await api.deleteConversation(c.id).catch((e) => setError(authError(String((e as Error).message))));
           void load();
         },
       },
@@ -65,13 +66,18 @@ export function ChatsScreen() {
           <Text style={{ color: t.text }}>📝 Ждут подтверждения: {pending}. Откройте чат, чтобы проверить.</Text>
         </Pressable>
       ) : null}
-      {error ? <Text style={{ color: t.err, padding: 12 }}>{error}</Text> : null}
+      {error ? <View style={{ padding: 16, gap: 8 }}><Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text><Pressable accessibilityRole="button" onPress={load} style={{ minHeight: 44, justifyContent: "center" }}><Text style={{ color: t.accent }}>Повторить загрузку</Text></Pressable></View> : null}
       <FlatList
         data={items}
         keyExtractor={(c) => c.id}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={load} tintColor={t.accent} />}
         contentContainerStyle={items.length ? undefined : { flexGrow: 1, justifyContent: "center" }}
-        ListEmptyComponent={<Text style={{ color: t.muted, textAlign: "center" }}>Пока нет чатов. Нажмите «＋», чтобы начать.</Text>}
+        ListEmptyComponent={refreshing || error ? null : <View style={{ padding: 28, gap: 16 }}>
+          <Text style={{ color: t.text, fontSize: 26, fontWeight: "700" }}>С чего начнём?</Text>
+          <Text style={{ color: t.muted }}>Задайте вопрос, сохраните заметку или прикрепите документ. Распознанные факты попадут в базу знаний после вашего подтверждения.</Text>
+          <Pressable accessibilityRole="button" style={{ backgroundColor: t.accent, borderRadius: 12, padding: 16 }} onPress={() => navigation.navigate("Chat", {})}><Text style={{ color: "white", fontWeight: "600" }}>Начать первый чат</Text></Pressable>
+          <View style={{ minHeight: 44 }}><Text style={{ color: t.muted }}>Настройте модель во вкладке «Настройки», если владелец сервера не настроил её заранее. Ответы ИИ могут содержать ошибки.</Text></View>
+        </View>}
         ItemSeparatorComponent={() => <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: t.line }} />}
         renderItem={({ item }) => (
           <Pressable
@@ -88,7 +94,7 @@ export function ChatsScreen() {
           </Pressable>
         )}
       />
-      <Pressable style={[styles.fab, { backgroundColor: t.accent }]} onPress={() => navigation.navigate("Chat", {})}>
+      <Pressable accessibilityRole="button" accessibilityLabel="Новый чат" style={[styles.fab, { backgroundColor: t.accent }]} onPress={() => navigation.navigate("Chat", {})}>
         <Text style={{ color: "#fff", fontSize: 28, marginTop: -2 }}>＋</Text>
       </Pressable>
     </View>

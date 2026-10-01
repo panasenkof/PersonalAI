@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Alert, ScrollView, StyleSheet, Switch, Text, TextInput, Pressable, View } from "react-native";
 
+import { authError } from "../ux";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { useTheme } from "../theme";
@@ -10,7 +11,7 @@ const CHANNELS = ["telegram", "slack", "whatsapp", "discord"] as const;
 
 export function SettingsScreen() {
   const t = useTheme();
-  const { me, refreshMe, logout, apiBase, setApiBase } = useAuth();
+  const { me, refreshMe, logout, apiBase, setApiBase, changePassword } = useAuth();
   const [llm, setLlm] = useState<LLMSettings | null>(null);
   const [apiKey, setApiKey] = useState("");
   const [server, setServer] = useState(apiBase);
@@ -20,6 +21,10 @@ export function SettingsScreen() {
   const [recovery, setRecovery] = useState<string[]>([]);
   const [offPassword, setOffPassword] = useState("");
   const [offCode, setOffCode] = useState("");
+  const [currentPass, setCurrentPass] = useState("");
+  const [newPass, setNewPass] = useState("");
+  const [passwordOtp, setPasswordOtp] = useState("");
+  const [busy, setBusy] = useState(false);
   const [links, setLinks] = useState<Record<string, string>>({});
 
   useEffect(() => {
@@ -27,14 +32,16 @@ export function SettingsScreen() {
   }, []);
 
   const guard = useCallback(async (fn: () => Promise<void>, ok?: string) => {
+    if (busy) return;
+    setBusy(true);
     setMsg("");
     try {
       await fn();
       if (ok) setMsg(ok);
     } catch (e) {
-      setMsg(String((e as Error).message));
-    }
-  }, []);
+      setMsg(authError(String((e as Error).message)));
+    } finally { setBusy(false); }
+  }, [busy]);
 
   const input = [styles.input, { borderColor: t.line, color: t.text, backgroundColor: t.panel }];
   const label = { color: t.muted, fontSize: 12, marginTop: 6 } as const;
@@ -72,6 +79,14 @@ export function SettingsScreen() {
         </>
       ) : null}
 
+      <Text style={[styles.h, { color: t.text }]}>Сменить пароль</Text>
+      <Text style={{ color: t.muted }}>После смены пароля остальные устройства выйдут из аккаунта. Восстановление забытого пароля пока доступно только через владельца сервера.</Text>
+      <TextInput style={input} accessibilityLabel="Текущий пароль" secureTextEntry value={currentPass} onChangeText={setCurrentPass} placeholder="Текущий пароль" placeholderTextColor={t.muted} />
+      <TextInput style={input} accessibilityLabel="Новый пароль" secureTextEntry value={newPass} onChangeText={setNewPass} placeholder="Новый пароль (от 8 символов)" placeholderTextColor={t.muted} />
+      {me?.totp_enabled ? <TextInput style={input} accessibilityLabel="Код подтверждения смены пароля" autoCapitalize="none" value={passwordOtp} onChangeText={setPasswordOtp} placeholder="Код 2FA или резервный код" placeholderTextColor={t.muted} /> : null}
+      <Pressable disabled={busy || !currentPass || newPass.length < 8} style={btn(t.accent)} onPress={() => guard(async () => {
+        await changePassword(currentPass, newPass, passwordOtp); setCurrentPass(""); setNewPass(""); setPasswordOtp("");
+      }, "Пароль изменён ✔")}><Text style={styles.btnText}>Сменить пароль</Text></Pressable>
       <Text style={[styles.h, { color: t.text }]}>Безопасность</Text>
       <Text style={{ color: me?.totp_enabled ? t.ok : t.muted }}>
         Двухфакторная аутентификация: {me?.totp_enabled ? "включена" : "выключена"}
@@ -146,12 +161,13 @@ export function SettingsScreen() {
       ))}
 
       <Text style={[styles.h, { color: t.text }]}>Сервер</Text>
-      <TextInput style={input} autoCapitalize="none" value={server} onChangeText={setServer} />
-      <Pressable style={btn(t.muted)} onPress={() => guard(() => setApiBase(server), "Адрес сервера сохранён")}>
+      <Text style={{ color: t.muted }}>Смена сервера завершает текущую сессию. Нужен адрес HTTPS без /app.</Text>
+      <TextInput accessibilityLabel="Адрес сервера" style={input} autoCapitalize="none" value={server} onChangeText={setServer} />
+      <Pressable disabled={busy} style={btn(t.muted)} onPress={() => Alert.alert("Сменить сервер?", "Для нового сервера потребуется войти заново.", [{ text: "Отмена", style: "cancel" }, { text: "Сменить", onPress: () => guard(() => setApiBase(server)) }])}>
         <Text style={styles.btnText}>Сохранить адрес</Text>
       </Pressable>
 
-      {msg ? <Text style={{ color: msg.includes("✔") || msg.includes("сохранён") ? t.ok : t.err }}>{msg}</Text> : null}
+      {msg ? <Text accessibilityRole="alert" style={{ color: msg.includes("✔") || msg.includes("сохранён") ? t.ok : t.err }}>{msg}</Text> : null}
       <Pressable style={btn(t.err)} onPress={() => logout()}>
         <Text style={styles.btnText}>Выйти</Text>
       </Pressable>

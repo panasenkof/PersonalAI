@@ -25,6 +25,10 @@
 | **Безопасность** | **2FA (TOTP + recovery-коды)**, **роли user/admin**, отзыв токенов (`token_version`, logout-all), **ротация JWT-секрета** (`JWT_SECRET_PREVIOUS`), шифрование at rest (ключи LLM, история, TOTP, джобы, файлы; ротация MultiFernet + `rekey`), **fail-closed в production** (слабые секреты и вебхуки без секрета → отказ), защита логина от перебора, path traversal, лимит загрузки, CORS — подробно в [docs/SECURITY.md](docs/SECURITY.md) |
 | **Evals** | Золотой набор (6 сценариев): `python -m evals.runner` — scripted LLM на каждый PR; **`--live` — реальная LLM, автозапуск в CI** (`evals-live.yml`: ночью, при изменении агента/промптов, вручную; N прогонов, порог pass-rate, отчёт в Job Summary) |
 
+## Готовность продукта и установка
+
+Текущие доработки интерфейсов, ограничения выпуска и критерии пилота: [docs/PRODUCT_READINESS.md](docs/PRODUCT_READINESS.md). Пользовательская инструкция доступна на `/app/help.html`. Веб можно добавить на домашний экран в поддерживающем браузере при HTTPS. Нативные сборки ещё требуют обновления Expo SDK и проверки на устройствах; Expo Go не является способом распространения готового продукта.
+
 ## Быстрый старт
 
 ### Docker (продакшн-режим: Postgres+pgvector, Redis, API, воркеры)

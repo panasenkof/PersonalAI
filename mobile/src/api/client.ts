@@ -58,7 +58,7 @@ async function refreshTokens(): Promise<boolean> {
   return refreshing;
 }
 
-const AUTH_PATHS = ["/v1/auth/token", "/v1/auth/register", "/v1/auth/refresh"];
+const AUTH_PATHS = ["/v1/auth/token", "/v1/auth/register", "/v1/auth/refresh", "/v1/auth/password", "/v1/auth/2fa/disable"];
 
 export async function request<T>(path: string, init: RequestInit & { json?: unknown } = {}, retry = true): Promise<T> {
   const headers: Record<string, string> = { ...((init.headers as Record<string, string>) || {}) };
@@ -86,6 +86,8 @@ export const api = {
     request<Tokens>("/v1/auth/token", { method: "POST", json: { email, password, otp: otp || undefined } }),
   register: (email: string, password: string) =>
     request<Tokens>("/v1/auth/register", { method: "POST", json: { email, password } }),
+  changePassword: (current_password: string, new_password: string, otp?: string) =>
+    request<Tokens>("/v1/auth/password", { method: "POST", json: { current_password, new_password, otp: otp || undefined } }),
   me: () => request<Me>("/v1/auth/me"),
   logoutAll: () => request<void>("/v1/auth/logout-all", { method: "POST" }),
   twofaSetup: () => request<{ secret: string; otpauth_uri: string }>("/v1/auth/2fa/setup", { method: "POST" }),

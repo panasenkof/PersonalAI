@@ -5,12 +5,39 @@
     "version": "0.2.0",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
-    "platforms": ["ios", "android"],
+    "platforms": [
+      "ios",
+      "android"
+    ],
     "sdkVersion": "51.0.0",
     "plugins": [
       "expo-secure-store",
-      ["expo-image-picker", { "photosPermission": "Разрешите доступ к фото, чтобы отправлять чеки и документы агенту.", "cameraPermission": "Разрешите доступ к камере, чтобы фотографировать чеки." }]
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Разрешите доступ к фото, чтобы отправлять чеки и документы агенту.",
+          "cameraPermission": "Разрешите доступ к камере, чтобы фотографировать чеки."
+        }
+      ]
     ],
-    "extra": { "apiBase": "http://localhost:8000" }
+    "extra": {
+      "apiBase": "http://localhost:8000"
+    },
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#2458d3"
+    },
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#2458d3"
+      }
+    },
+    "description": "Ваш помощник для диалогов, документов и личной базы знаний"
   }
 }
