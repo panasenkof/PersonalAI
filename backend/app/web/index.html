@@ -4,17 +4,26 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PIA Agent</title>
+<meta name="theme-color" content="#2458d3">
+<meta name="description" content="PIA Agent — ваши диалоги, документы и личная база знаний.">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 <header>
+  <button class="ghost mobile-only" id="btnChats" aria-controls="sidebar" aria-expanded="false">Чаты</button>
+  <img src="favicon.svg" width="32" height="32" alt="">
   <b>PIA Agent</b>
   <span class="spacer"></span>
-  <button class="ghost" id="btnSettings">Настройки LLM</button>
+  <button class="ghost hidden" id="btnInstall">Установить</button>
+  <a class="help-link" href="help.html" target="_blank" rel="noopener">Помощь</a>
+  <button class="ghost" id="btnSettings">Настройки</button>
   <button class="ghost" id="btnLogout">Выйти</button>
 </header>
 <main>
-  <aside>
+  <aside id="sidebar" aria-label="Список чатов">
     <button id="btnNew" style="width:100%;margin-bottom:10px">+ Новый чат</button>
     <div id="convList"></div>
   </aside>
@@ -23,9 +32,12 @@
       <span id="chatTitle">Новый чат</span>
       <button class="ghost danger hidden" id="btnDelete">🗑 Удалить чат</button>
     </div>
-    <div id="msgs"></div>
+    <div id="msgs" role="log" aria-label="Сообщения"></div>
+    <div id="attachmentBar" class="hidden"><span id="attachmentName"></span><button class="ghost" id="btnRemoveFile" aria-label="Убрать вложение">Убрать</button></div>
     <div id="composer">
-      <textarea id="input" placeholder="Спросите или попросите запомнить… (Enter — отправить, Shift+Enter — новая строка)"></textarea>
+      <button class="ghost" id="btnAttach" aria-label="Прикрепить документ или фото">＋</button>
+      <input type="file" id="fileInput" class="hidden" accept="image/*,application/pdf,text/plain">
+      <textarea aria-label="Сообщение" id="input" placeholder="Спросите или попросите запомнить… (Enter — отправить, Shift+Enter — новая строка)"></textarea>
       <button id="btnSend">Отправить</button>
     </div>
   </section>
@@ -33,34 +45,48 @@
 
 <!-- auth -->
 <div class="overlay" id="authView">
-  <div class="card">
-    <h2>Вход в PIA</h2>
-    <input id="email" placeholder="email" autocomplete="username">
+  <div class="card" role="dialog" aria-modal="true" aria-label="Вход в PIA">
+    <img src="favicon.svg" width="64" height="64" alt="" class="auth-logo">
+    <h2>Добро пожаловать в PIA</h2>
+    <p class="intro">Ваш помощник для диалогов, документов и личной базы знаний.</p>
+    <label for="email">Email</label>
+    <input id="email" type="email" placeholder="you@example.com" autocomplete="username">
+    <label for="password">Пароль</label>
     <input id="password" type="password" placeholder="пароль (мин. 8)" autocomplete="current-password">
-    <input id="otp" class="hidden" placeholder="код 2FA (или резервный код)" autocomplete="one-time-code" inputmode="numeric">
+    <button class="ghost" id="btnPassword" aria-pressed="false">Показать пароль</button>
+    <input aria-label="Код 2FA или резервный код" id="otp" class="hidden" placeholder="код 2FA (или резервный код)" autocomplete="one-time-code">
     <button id="btnLogin">Войти</button>
     <button class="ghost" id="btnRegister">Зарегистрироваться</button>
-    <div id="authErr" class="err"></div>
+    <div id="authErr" class="err" role="alert"></div>
+    <p class="intro">Первый раз? Создайте аккаунт, затем настройте модель в «Настройках». <a href="help.html" target="_blank" rel="noopener">Как начать и установить</a></p>
   </div>
 </div>
 
 <!-- settings -->
 <div class="overlay hidden" id="settingsView">
-  <div class="card" id="settings">
-    <h2>Настройки LLM</h2>
+  <div class="card" id="settings" role="dialog" aria-modal="true" aria-label="Настройки">
+    <h2>Настройки помощника</h2>
+    <p class="intro">Владелец сервера может настроить модель заранее. Если ответы не приходят, уточните адрес модели и ключ доступа. Облачный провайдер может взимать плату.</p>
     <div class="row"><label>Провайдер</label>
       <select id="sProvider"><option value="cloud">Облачный</option><option value="local">Локальный</option></select></div>
     <div class="row"><label>Base URL (OpenAI-compatible)</label><input id="sBase" placeholder="https://api.openai.com/v1"></div>
     <div class="row"><label>API-ключ (пусто = не менять)</label><input id="sKey" type="password" placeholder="sk-…"></div>
     <div class="row"><label>Модель</label><input id="sModel" placeholder="gpt-4o-mini"></div>
+    <div class="row"><label for="sVision">Модель понимает изображения</label><input id="sVision" type="checkbox"></div>
     <div class="row"><label>Модель эмбеддингов</label><input id="sEmb" placeholder="text-embedding-3-small"></div>
     <div style="display:flex;gap:8px">
       <button id="btnSaveSettings">Сохранить</button>
       <button class="ghost" id="btnCloseSettings">Закрыть</button>
     </div>
-    <div id="setMsg"></div>
+    <div role="status" id="setMsg"></div>
     <div id="setStats"></div>
     <div class="sec" id="secBox">
+      <h3>Сменить пароль</h3>
+      <label for="currentPass">Текущий пароль</label><input id="currentPass" type="password" autocomplete="current-password">
+      <label for="newPass">Новый пароль (от 8 символов)</label><input id="newPass" type="password" autocomplete="new-password">
+      <label for="passwordOtp">Код 2FA или резервный код, если 2FA включена</label><input id="passwordOtp" autocomplete="one-time-code">
+      <p class="intro">Остальные устройства выйдут из аккаунта. Восстановление забытого пароля пока требует обращения к владельцу сервера.</p>
+      <button id="btnChangePassword">Сменить пароль</button>
       <h3>Безопасность</h3>
       <div id="secStatus" class="ok"></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">

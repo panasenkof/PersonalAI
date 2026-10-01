@@ -87,7 +87,7 @@ jobs:
         run: python -m tests.redis_smoke
 
   mobile:
-    name: Mobile (typecheck + unit tests)
+    name: Web and mobile (typecheck + regression tests)
     runs-on: ubuntu-latest
     defaults:
       run:

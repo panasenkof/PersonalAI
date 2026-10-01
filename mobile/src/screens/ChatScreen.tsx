@@ -6,6 +6,8 @@ import {
   ActivityIndicator, FlatList, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View,
 } from "react-native";
 
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { authError } from "../ux";
 import { api } from "../api/client";
 import { emptyRun, followJob, RunState } from "../api/stream";
 import { FactCard } from "../components/FactCard";
@@ -25,6 +27,7 @@ const uid = () => `r${++seq}`;
 
 export function ChatScreen({ route, navigation }: NativeStackScreenProps<RootStackParams, "Chat">) {
   const t = useTheme();
+  const insets = useSafeAreaInsets();
   const [conversationId, setConversationId] = useState<string | null>(route.params?.conversationId ?? null);
   const [rows, setRows] = useState<Row[]>([]);
   const [text, setText] = useState("");
@@ -74,6 +77,10 @@ export function ChatScreen({ route, navigation }: NativeStackScreenProps<RootSta
         const f = r.assets[0];
         setAttachment(await api.upload(f.uri, f.name, f.mimeType ?? "application/octet-stream"));
       } else {
+        if (kind === "camera") {
+          const permission = await ImagePicker.requestCameraPermissionsAsync();
+          if (!permission.granted) throw new Error("Разрешите доступ к камере в настройках телефона или выберите готовый файл.");
+        }
         const opts: ImagePicker.ImagePickerOptions = { mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.8 };
         const r = kind === "camera" ? await ImagePicker.launchCameraAsync(opts) : await ImagePicker.launchImageLibraryAsync(opts);
         if (r.canceled) return;
@@ -89,16 +96,19 @@ export function ChatScreen({ route, navigation }: NativeStackScreenProps<RootSta
 
   async function send() {
     const body = text.trim();
-    if ((!body && !attachment) || busy) return;
+    if ((!body && !attachment) || busy || uploading) return;
     const files = attachment ? [attachment] : [];
     setText("");
     setAttachment(null);
     setBusy(true);
-    setRows((r) => [...r, { id: uid(), kind: "msg", role: "user", text: body || `📎 ${files[0]?.filename ?? "файл"}` }]);
+    const sentRowId = uid();
+    let accepted = false;
+    setRows((r) => [...r, { id: sentRowId, kind: "msg", role: "user", text: body || `📎 ${files[0]?.filename ?? "файл"}` }]);
     setRun(emptyRun());
     scrollDown();
     try {
       const res = await api.sendMessage(body, conversationId, files);
+      accepted = true;
       if (!mounted.current) return;
       if (res.conversation_id && res.conversation_id !== conversationId) {
         setConversationId(res.conversation_id);
@@ -133,7 +143,12 @@ export function ChatScreen({ route, navigation }: NativeStackScreenProps<RootSta
     } catch (e) {
       if (!mounted.current) return;
       setRun(null);
-      const m = String((e as Error).message);
+      if (!accepted) {
+        setText(previous => previous || body);
+        setAttachment(files[0] ?? null);
+        setRows(previous => previous.filter(row => row.id !== sentRowId));
+      }
+      const m = authError(String((e as Error).message));
       setRows((r) => [...r, { id: uid(), kind: "note", text: m.includes("rate_limited") ? "Слишком много запросов — подождите минуту" : `Ошибка: ${m}` }]);
     } finally {
       if (mounted.current) {
@@ -180,14 +195,14 @@ export function ChatScreen({ route, navigation }: NativeStackScreenProps<RootSta
           <Pressable onPress={() => setAttachment(null)}><Text style={{ color: t.err }}>✕</Text></Pressable>
         </View>
       ) : null}
-      <View style={[styles.composer, { backgroundColor: t.panel, borderColor: t.line }]}>
+      <View style={[styles.composer, { paddingBottom: Math.max(insets.bottom, 8), backgroundColor: t.panel, borderColor: t.line }]}>
         {uploading ? (
           <ActivityIndicator style={styles.clip} />
         ) : (
           <>
-            <Pressable style={styles.clip} onPress={() => pick("camera")}><Text style={styles.clipText}>📷</Text></Pressable>
-            <Pressable style={styles.clip} onPress={() => pick("photo")}><Text style={styles.clipText}>🖼</Text></Pressable>
-            <Pressable style={styles.clip} onPress={() => pick("file")}><Text style={styles.clipText}>📎</Text></Pressable>
+            <Pressable accessibilityLabel="Сделать фото" disabled={busy} style={styles.clip} onPress={() => pick("camera")}><Text style={styles.clipText}>📷</Text></Pressable>
+            <Pressable accessibilityLabel="Выбрать фото" disabled={busy} style={styles.clip} onPress={() => pick("photo")}><Text style={styles.clipText}>🖼</Text></Pressable>
+            <Pressable accessibilityLabel="Прикрепить файл" disabled={busy} style={styles.clip} onPress={() => pick("file")}><Text style={styles.clipText}>📎</Text></Pressable>
           </>
         )}
         <TextInput
@@ -201,7 +216,7 @@ export function ChatScreen({ route, navigation }: NativeStackScreenProps<RootSta
         {busy && jobId ? (
           <Pressable style={[styles.send, { backgroundColor: t.err }]} onPress={stop}><Text style={styles.sendText}>⏹</Text></Pressable>
         ) : (
-          <Pressable disabled={busy} style={[styles.send, { backgroundColor: t.accent, opacity: busy ? 0.5 : 1 }]} onPress={send}>
+          <Pressable disabled={busy || uploading || (!text.trim() && !attachment)} accessibilityLabel="Отправить сообщение" style={[styles.send, { backgroundColor: t.accent, opacity: busy || uploading || (!text.trim() && !attachment) ? 0.5 : 1 }]} onPress={send}>
             <Text style={styles.sendText}>➤</Text>
           </Pressable>
         )}
@@ -213,9 +228,9 @@ export function ChatScreen({ route, navigation }: NativeStackScreenProps<RootSta
 const styles = StyleSheet.create({
   composer: { flexDirection: "row", alignItems: "flex-end", gap: 6, padding: 8, borderTopWidth: StyleSheet.hairlineWidth },
   input: { flex: 1, borderWidth: 1, borderRadius: 18, paddingHorizontal: 12, paddingVertical: 8, maxHeight: 120, fontSize: 16 },
-  send: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
+  send: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
   sendText: { color: "#fff", fontSize: 18 },
-  clip: { width: 34, height: 40, alignItems: "center", justifyContent: "center" },
+  clip: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
   clipText: { fontSize: 20 },
   attach: { flexDirection: "row", padding: 8, marginHorizontal: 8, borderWidth: 1, borderRadius: 10, gap: 8 },
 });

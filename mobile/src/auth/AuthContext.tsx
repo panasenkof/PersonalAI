@@ -2,6 +2,7 @@ import * as SecureStore from "expo-secure-store";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
 import { api, ApiError, configureApi } from "../api/client";
+import { normalizeServer } from "../ux";
 import { DEFAULT_API_BASE } from "../config";
 import type { Me, Tokens } from "../types";
 
@@ -16,6 +17,7 @@ type Ctx = {
   /** Throws ApiError("otp_required") when the account has 2FA and no code was supplied. */
   login: (email: string, password: string, otp?: string) => Promise<void>;
   register: (email: string, password: string) => Promise<void>;
+  changePassword: (current: string, next: string, otp?: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshMe: () => Promise<void>;
 };
@@ -48,7 +50,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       const raw = await SecureStore.getItemAsync(TOKENS_KEY);
       if (raw) {
-        tokens.current = JSON.parse(raw) as Tokens;
+        try { tokens.current = JSON.parse(raw) as Tokens; }
+        catch { await setTokens(null); }
         try {
           setMe(await api.me());
         } catch (e) {
@@ -57,7 +60,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       }
       setReady(true);
-    })();
+    })().catch(() => setReady(true));
   }, [setTokens]);
 
   const refreshMe = useCallback(async () => setMe(await api.me()), []);
@@ -68,7 +71,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       me,
       apiBase,
       setApiBase: async (url) => {
-        const clean = url.trim().replace(/\/$/, "");
+        const clean = normalizeServer(url);
         if (clean !== base.current) await setTokens(null);
         base.current = clean;
         setBase(clean);
@@ -82,6 +85,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         await setTokens(await api.register(email, password));
         setMe(await api.me());
       },
+      changePassword: async (current, next, otp) => { await setTokens(await api.changePassword(current, next, otp)); },
       logout: async () => setTokens(null),
       refreshMe,
     }),

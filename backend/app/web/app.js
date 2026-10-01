@@ -1,10 +1,13 @@
 
 const $ = (id) => document.getElementById(id);
-const AUTH_PATHS = new Set(["/v1/auth/token", "/v1/auth/register", "/v1/auth/refresh"]);
+const AUTH_PATHS = new Set(["/v1/auth/token", "/v1/auth/register", "/v1/auth/refresh", "/v1/auth/password", "/v1/auth/2fa/disable"]);
 let token = localStorage.getItem("pia_token") || "";
 let conversations = [];
 let currentConv = null;
 let busy = false;
+let authBusy = false;
+let attachment = null;
+let uploading = false;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -12,7 +15,17 @@ function logout() {
   token = "";
   localStorage.removeItem("pia_token");
   localStorage.removeItem("pia_refresh");
+  document.querySelector("main").inert = document.querySelector("header").inert = true;
   $("authView").classList.remove("hidden");
+  $("settingsView").classList.add("hidden");
+  $("msgs").replaceChildren(); $("convList").replaceChildren();
+  $("password").value = ""; $("otp").value = "";
+  for (const id of ["currentPass","newPass","passwordOtp","sKey","offPass","offCode","twofaCode"]) $(id).value = "";
+  for (const id of ["recoveryBox","twofaSecret","linkBox"]) { $(id).textContent = ""; }
+  $("input").value = "";
+  currentConv = null;
+  clearAttachment();
+  closeChats();
 }
 
 async function tryRefresh() {
@@ -36,7 +49,7 @@ async function tryRefresh() {
 async function api(path, opts = {}, allowRefresh = true) {
   opts = { ...opts, headers: { ...(opts.headers || {}) } };
   if (token) opts.headers["Authorization"] = "Bearer " + token;
-  if (opts.body && typeof opts.body !== "string") {
+  if (opts.body && typeof opts.body !== "string" && !(opts.body instanceof FormData)) {
     opts.headers["Content-Type"] = "application/json";
     opts.body = JSON.stringify(opts.body);
   }
@@ -51,7 +64,26 @@ async function api(path, opts = {}, allowRefresh = true) {
   return data;
 }
 
+function friendlyError(message) {
+  if (message.includes("file_too_large")) return "Файл слишком большой. Уменьшите его размер или уточните лимит у владельца сервера.";
+  if (message.includes("invalid_credentials")) return "Неверный email или пароль";
+  if (message.includes("invalid_otp")) return "Неверный код подтверждения";
+  if (message.includes("email_taken")) return "Этот email уже зарегистрирован. Нажмите «Войти».";
+  if (/fetch|network|offline/i.test(message)) return "Не удалось связаться с сервером. Проверьте интернет и повторите.";
+  if (/value_error|string_too|422/.test(message)) return "Проверьте email и пароль. Для регистрации нужно минимум 8 символов.";
+  return message;
+}
+function closeChats() {
+  document.body.classList.remove("chats-open");
+  $("btnChats").setAttribute("aria-expanded", "false");
+}
 async function loginOrRegister(register) {
+  if (authBusy) return;
+  if (!$("email").checkValidity() || !$("email").value || !$("password").value || (register && $("password").value.length < 8)) {
+    $("authErr").textContent = "Укажите корректный email и пароль. Для регистрации нужно минимум 8 символов."; return;
+  }
+  authBusy = true;
+  $("btnLogin").disabled = $("btnRegister").disabled = true;
   $("authErr").textContent = "";
   try {
     const path = register ? "/v1/auth/register" : "/v1/auth/token";
@@ -61,8 +93,10 @@ async function loginOrRegister(register) {
     token = data.access_token;
     localStorage.setItem("pia_token", token);
     if (data.refresh_token) localStorage.setItem("pia_refresh", data.refresh_token);
+    document.querySelector("main").inert = document.querySelector("header").inert = false;
     $("authView").classList.add("hidden");
     $("otp").value = ""; $("otp").classList.add("hidden");
+    $("password").value = "";
     await boot();
   } catch (e) {
     const m = String(e.message || e);
@@ -71,8 +105,9 @@ async function loginOrRegister(register) {
       $("authErr").textContent = "Введите код двухфакторной аутентификации";
     } else if (m.includes("too_many_failed_attempts")) {
       $("authErr").textContent = "Слишком много неудачных попыток — попробуйте позже";
-    } else { $("authErr").textContent = m; }
+    } else { $("authErr").textContent = friendlyError(m); }
   }
+  finally { authBusy = false; $("btnLogin").disabled = $("btnRegister").disabled = false; }
 }
 
 // ---------- rendering ----------
@@ -115,26 +150,36 @@ async function loadConversations() {
   const box = $("convList");
   box.innerHTML = "";
   conversations.forEach((c) => {
-    const d = document.createElement("div");
-    d.className = "conv" + (currentConv && currentConv.id === c.id ? " active" : "");
+    const d = document.createElement("button");
+    d.className = "conv ghost" + (currentConv && currentConv.id === c.id ? " active" : "");
     const s = document.createElement("span");
     s.textContent = c.title || "Без названия";
     d.appendChild(s);
     d.title = c.title || "";
-    d.onclick = () => openConversation(c);
+    d.onclick = () => openConversation(c).catch(e => addMeta(friendlyError(e.message)));
     box.appendChild(d);
   });
 }
 
 function newChat() {
+  if (busy) return;
   currentConv = null;
   $("msgs").innerHTML = "";
-  addMeta("Новый чат — история сохраняется автоматически");
+  closeChats();
+  const welcome = document.createElement("div"); welcome.className = "welcome"; welcome.id = "welcome";
+  welcome.innerHTML = '<h1>С чего начнём?</h1><p>Задайте вопрос или сохраните заметку. История чатов сохраняется автоматически.</p><div class="examples"></div><p>Перед первым сообщением проверьте модель в «Настройках». Ответы ИИ могут содержать ошибки.</p>';
+  for (const example of ["Что ты умеешь?", "Запомни: я предпочитаю краткие ответы", "Найди мои сохранённые заметки"]) {
+    const button = document.createElement("button"); button.className = "ghost"; button.textContent = example;
+    button.onclick = () => { $("input").value = example; $("input").focus(); }; welcome.querySelector(".examples").append(button);
+  }
+  $("msgs").append(welcome);
   setChatbar();
-  loadConversations();
+  loadConversations().catch(e => addMeta(friendlyError(e.message)));
 }
 
 async function openConversation(c) {
+  if (busy) return;
+  closeChats();
   currentConv = c;
   $("msgs").innerHTML = "";
   setChatbar();
@@ -178,6 +223,8 @@ let activeJob = null;
 
 function setBusy(on, jobId) {
   busy = on;
+  $("btnNew").disabled = $("btnDelete").disabled = $("btnLogout").disabled = on;
+  $("btnAttach").disabled = on || uploading;
   activeJob = on ? (jobId || activeJob) : null;
   const b = $("btnSend");
   if (on && activeJob) { b.textContent = "⏹ Стоп"; b.classList.add("stop"); b.disabled = false; }
@@ -222,19 +269,25 @@ function renderFacts(facts) {
 }
 
 async function send() {
+  if (uploading) return;
   if (busy) { stopGeneration(); return; }
   const text = $("input").value.trim();
-  if (!text) return;
+  if (!text && !attachment) return;
+  $("welcome")?.remove();
   setBusy(true);
   $("input").value = "";
-  addMsg("user", text);
+  const file = attachment;
+  clearAttachment();
+  const userBubble = addMsg("user", text || "📎 " + file.filename);
+  let accepted = false;
   showThinking();
   try {
-    const body = { text, channel: "mobile" };
+    const body = { text, channel: "web", attachments: file ? [file] : [] };
     if (currentConv) body.conversation_id = currentConv.id;
     const res = await api("/v1/messages", { method: "POST", body });
+    accepted = true;
     if (res.conversation_id && (!currentConv || currentConv.id !== res.conversation_id)) {
-      currentConv = { id: res.conversation_id, title: text.slice(0, 80) };
+      currentConv = { id: res.conversation_id, title: (text || file?.filename || "Документ").slice(0, 80) };
       setChatbar();
       loadConversations();
     }
@@ -250,7 +303,12 @@ async function send() {
   } catch (e) {
     hideThinking();
     const m = String(e.message || e);
-    addMeta(m.includes("rate_limited") ? "Слишком много запросов — подождите минуту" : "Ошибка: " + m);
+    if (!accepted) {
+      userBubble.remove();
+      if (!$("input").value) $("input").value = text;
+      if (file) showAttachment(file);
+    }
+    addMeta(m.includes("rate_limited") ? "Слишком много запросов — подождите минуту" : "Ошибка: " + friendlyError(m));
   } finally {
     hideThinking();
     setBusy(false);
@@ -439,6 +497,7 @@ function streamJob(jobId) {
 async function loadSettings() {
   try {
     const s = await api("/v1/settings/llm");
+    $("sVision").checked = s.supports_vision;
     $("sProvider").value = s.provider_kind;
     $("sBase").value = s.base_url;
     $("sModel").value = s.default_model;
@@ -491,6 +550,7 @@ async function twofaDisable() {
   } catch (e) { $("setMsg").className = "err"; $("setMsg").textContent = String(e.message || e); }
 }
 async function logoutAll() {
+  if (busy || uploading) { $("setMsg").textContent = "Дождитесь завершения отправки или остановите генерацию перед выходом."; return; }
   try { await api("/v1/auth/logout-all", { method: "POST" }); } catch (e) {}
   logout();
   $("settingsView").classList.add("hidden");
@@ -511,6 +571,7 @@ async function saveSettings() {
     base_url: $("sBase").value.trim(),
     default_model: $("sModel").value.trim(),
     embedding_model: $("sEmb").value.trim() || null,
+    supports_vision: $("sVision").checked,
   };
   const key = $("sKey").value.trim();
   if (key) body.api_key = key;
@@ -523,21 +584,78 @@ async function saveSettings() {
   } catch (e) { msg.className = "err"; msg.textContent = String(e.message || e); }
 }
 
+function clearAttachment() {
+  attachment = null; $("fileInput").value = ""; $("attachmentBar").classList.add("hidden");
+}
+function showAttachment(file) {
+  attachment = file; $("attachmentName").textContent = file.filename; $("attachmentBar").classList.remove("hidden");
+}
+$("btnAttach").onclick = () => $("fileInput").click();
+$("btnRemoveFile").onclick = clearAttachment;
+$("fileInput").onchange = async () => {
+  const file = $("fileInput").files[0]; if (!file || busy || uploading) return;
+  uploading = true; $("btnAttach").disabled = $("btnSend").disabled = $("btnLogout").disabled = true;
+  try {
+    const form = new FormData(); form.append("file", file);
+    const result = await api("/v1/blobs", { method: "POST", body: form });
+    showAttachment({ storage_key: result.storage_key, mime: result.mime, filename: file.name });
+  } catch(e) { addMeta(friendlyError(e.message)); }
+  finally { uploading = false; $("btnAttach").disabled = $("btnSend").disabled = $("btnLogout").disabled = false; $("fileInput").value = ""; }
+};
+
 // ---------- wiring ----------
+$("btnChangePassword").onclick = async () => {
+  const button = $("btnChangePassword"); if (button.disabled) return;
+  if (!$("currentPass").value || $("newPass").value.length < 8) { $("setMsg").textContent = "Введите текущий пароль и новый пароль (от 8 символов)."; return; }
+  button.disabled = true;
+  try {
+    const result = await api("/v1/auth/password", {method:"POST",body:{current_password:$("currentPass").value,new_password:$("newPass").value,otp:$("passwordOtp").value || undefined}});
+    token = result.access_token; localStorage.setItem("pia_token",token);
+    if (result.refresh_token) localStorage.setItem("pia_refresh",result.refresh_token); else localStorage.removeItem("pia_refresh");
+    $("currentPass").value = $("newPass").value = $("passwordOtp").value = "";
+    $("setMsg").className = "ok"; $("setMsg").textContent = "Пароль изменён. Остальные устройства вышли из аккаунта.";
+  } catch(e) { $("setMsg").className="err"; $("setMsg").textContent=friendlyError(e.message); }
+  finally { button.disabled=false; }
+};
 $("btnLogin").onclick = () => loginOrRegister(false);
 $("btnRegister").onclick = () => loginOrRegister(true);
 $("btnSend").onclick = send;
 $("btnNew").onclick = newChat;
 $("btnDelete").onclick = deleteCurrent;
 $("btnLogout").onclick = logout;
-$("btnSettings").onclick = () => { $("settingsView").classList.remove("hidden"); $("setMsg").className = ""; loadSettings(); loadSecurity(); };
+$("btnSettings").onclick = () => { $("settingsView").classList.remove("hidden"); $("setMsg").className = ""; $("btnCloseSettings").focus(); loadSettings(); loadSecurity(); };
 $("btn2faSetup").onclick = twofaSetup;
 $("btn2faEnable").onclick = twofaEnable;
 $("btn2faDisable").onclick = twofaDisable;
 $("btnLogoutAll").onclick = logoutAll;
 $("btnLinkCode").onclick = linkCode;
-$("btnCloseSettings").onclick = () => $("settingsView").classList.add("hidden");
+$("btnCloseSettings").onclick = () => { $("settingsView").classList.add("hidden"); for (const id of ["sKey","currentPass","newPass","passwordOtp","offPass","offCode","twofaCode"]) $(id).value = ""; $("btnSettings").focus(); };
 $("btnSaveSettings").onclick = saveSettings;
-$("input").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } });
+$("input").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); } });
 
-if (token) { $("authView").classList.add("hidden"); boot(); }
+$("btnChats").onclick = () => { const open = document.body.classList.toggle("chats-open"); $("btnChats").setAttribute("aria-expanded", String(open)); };
+$("btnPassword").onclick = () => {
+  const visible = $("password").type === "password";
+  $("password").type = visible ? "text" : "password";
+  $("btnPassword").textContent = visible ? "Скрыть пароль" : "Показать пароль";
+  $("btnPassword").setAttribute("aria-pressed", String(visible));
+};
+for (const id of ["email", "password", "otp"]) $(id).addEventListener("keydown", e => { if (e.key === "Enter") loginOrRegister(false); });
+let installPrompt = null;
+window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); installPrompt = e; $("btnInstall").classList.remove("hidden"); });
+$("btnInstall").onclick = async () => { if (installPrompt) { await installPrompt.prompt(); installPrompt = null; $("btnInstall").classList.add("hidden"); } };
+window.addEventListener("appinstalled", () => { installPrompt = null; $("btnInstall").classList.add("hidden"); });
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+if (token) { $("authView").classList.add("hidden"); boot().catch(e => addMeta(friendlyError(e.message))); }
+
+document.querySelector("main").inert = document.querySelector("header").inert = !token;
+document.addEventListener("keydown", e => {
+  const overlay = !$("authView").classList.contains("hidden") ? $("authView") : !$("settingsView").classList.contains("hidden") ? $("settingsView") : null;
+  if (!overlay) return;
+  if (e.key === "Escape" && overlay.id === "settingsView") { $("btnCloseSettings").click(); return; }
+  if (e.key !== "Tab") return;
+  const controls = Array.from(overlay.querySelectorAll('button, input, select, a[href]')).filter(element => !element.disabled && !element.classList.contains('hidden') && !element.closest('.hidden'));
+  const first = controls[0], last = controls[controls.length - 1];
+  if (e.shiftKey && (document.activeElement === first || !overlay.contains(document.activeElement))) { e.preventDefault(); last?.focus(); }
+  else if (!e.shiftKey && (document.activeElement === last || !overlay.contains(document.activeElement))) { e.preventDefault(); first?.focus(); }
+});
