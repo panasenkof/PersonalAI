@@ -8,12 +8,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.api.v1.account import router as account_router
 from app.api.v1.admin import router as admin_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.collections import router as collections_router
 from app.api.v1.conversations import router as conversations_router
+from app.api.v1.email_actions import router as email_router
 from app.api.v1.facts import router as facts_router
 from app.api.v1.messages import router as messages_router
+from app.api.v1.service import router as service_router
 from app.api.v1.settings_llm import router as settings_router
 from app.api.v1.stats import router as stats_router
 from app.channels.discord import router as discord_router
@@ -45,6 +48,9 @@ async def lifespan(_: FastAPI):
     if settings.message_mode == "queue" or settings.queue_backend == "redis":
         await runner.start()
     stop = asyncio.Event()
+    from app.services.mail import maintenance_loop
+
+    maintenance = asyncio.create_task(maintenance_loop(stop))
     task: asyncio.Task | None = None
     if settings.reminders_enabled:
         from app.scheduler.reminders import reminders_loop
@@ -54,11 +60,17 @@ async def lifespan(_: FastAPI):
         yield
     finally:
         stop.set()
+        try:
+            await asyncio.wait_for(maintenance, timeout=5)
+        except (TimeoutError, asyncio.CancelledError):
+            maintenance.cancel()
+            await asyncio.gather(maintenance, return_exceptions=True)
         if task is not None:
             try:
                 await asyncio.wait_for(task, timeout=5)
             except (TimeoutError, asyncio.CancelledError):
                 task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
         if settings.message_mode == "queue" or settings.queue_backend == "redis":
             await runner.stop()
         if settings.redis_url:
@@ -84,7 +96,7 @@ app.add_middleware(
 
 
 _access_limiter = SlidingWindowLimiter(limit=_settings.rate_limit_auth_per_minute)
-_AUTH_PATHS = ("/v1/auth/register", "/v1/auth/token")
+_AUTH_PATHS = ("/v1/auth/register", "/v1/auth/token", "/v1/auth/password/request", "/v1/auth/email/request", "/v1/auth/password/reset", "/v1/auth/email/verify")
 _shared_ip_limiter: tuple[tuple[str, int], object] | None = None
 
 
@@ -142,6 +154,9 @@ async def request_context(request: Request, call_next):
 
 
 app.include_router(auth_router)
+app.include_router(email_router)
+app.include_router(account_router)
+app.include_router(service_router)
 app.include_router(settings_router)
 app.include_router(messages_router)
 app.include_router(collections_router)

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import os
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Blob
-from app.storage.blob import save_bytes
+from app.models import Blob, User
+from app.storage.blob import resolve_storage_path, save_bytes
 
 
 async def store_blob(
@@ -15,6 +17,11 @@ async def store_blob(
     filename: str | None = None,
 ) -> Blob:
     """Persist file bytes and record ownership so later access can be checked."""
+    # Lock before writing bytes so account deletion cannot miss a concurrent upload.
+    owner = await session.scalar(select(User.id).where(User.id == user_id).with_for_update(key_share=True, read=True))
+    if owner is None:
+        from fastapi import HTTPException
+        raise HTTPException(401, detail="session_expired")
     key, sha, size = save_bytes(data, mime)
     blob = Blob(
         user_id=user_id,
@@ -25,7 +32,11 @@ async def store_blob(
         filename=filename,
     )
     session.add(blob)
-    await session.flush()
+    try:
+        await session.flush()
+    except Exception:
+        os.unlink(resolve_storage_path(key))
+        raise
     return blob
 
 

@@ -9,7 +9,7 @@ beforeEach(() => {
   dom = new JSDOM(fs.readFileSync(path.join(web,'index.html'),'utf8'), {url:'https://pia.example.com/app/',runScripts:'outside-only'});
   win=dom.window;
   fetchMock=jest.fn(async(url:string)=>ok(url==='/v1/conversations'?[]:url==='/v1/facts'?{facts:[]}:{}));
-  win.fetch=fetchMock; win.eval(fs.readFileSync(path.join(web,'app.js'),'utf8'));
+  win.fetch=fetchMock; win.eval(fs.readFileSync(path.join(web,'app.js'),'utf8')); fetchMock.mockClear();
 });
 afterEach(()=>dom.window.close());
 const el=(id:string)=>win.document.getElementById(id);

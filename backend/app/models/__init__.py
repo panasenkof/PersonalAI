@@ -89,6 +89,7 @@ class User(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    email_verified: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     password_hash: Mapped[str] = mapped_column(String(255))
     telegram_user_id: Mapped[Optional[str]] = mapped_column(String(64), unique=True, nullable=True)
     slack_user_id: Mapped[Optional[str]] = mapped_column(String(64), unique=True, nullable=True)
@@ -107,6 +108,35 @@ class User(Base):
 
     llm_settings: Mapped["LLMSettings"] = relationship(back_populates="user", uselist=False)
     collections: Mapped[list["Collection"]] = relationship(back_populates="user")
+
+
+class EmailAction(Base):
+    __tablename__ = "email_actions"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)  # only SHA256 of random token
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    purpose: Mapped[str] = mapped_column(String(16))
+    token_version: Mapped[int] = mapped_column(Integer)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class MailOutbox(Base):
+    __tablename__ = "mail_outbox"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    recipient: Mapped[str] = mapped_column(String(255))
+    subject: Mapped[str] = mapped_column(String(255))
+    body: Mapped[str] = mapped_column(EncryptedText)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class BlobDeletion(Base):
+    __tablename__ = "blob_deletions"
+    # Survives account deletion so failed physical cleanup can be retried.
+    storage_key: Mapped[str] = mapped_column(String(512), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class TelegramLinkCode(Base):

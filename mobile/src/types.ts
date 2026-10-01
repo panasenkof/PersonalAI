@@ -1,10 +1,11 @@
-export type Tokens = { access_token: string; refresh_token?: string | null };
+export type Tokens = { email_verification_required?: boolean; access_token: string; refresh_token?: string | null };
 
 export type Me = {
   id: string;
   email: string;
   role: "user" | "admin";
   totp_enabled: boolean;
+  email_verified?: boolean;
   channels: Record<"telegram" | "slack" | "whatsapp" | "discord", boolean>;
 };
 
@@ -72,3 +73,5 @@ export type StreamEvent =
   | { type: "error"; text: string };
 
 export type Attachment = { mime: string; storage_key: string; filename?: string };
+
+export type ServiceInfo = { name: string; version: string; operator: string; support_email: string; privacy_url: string; terms_url: string; email_enabled: boolean; backup_retention_days: number };

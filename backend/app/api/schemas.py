@@ -15,6 +15,7 @@ class RegisterIn(BaseModel):
 
 class TokenOut(BaseModel):
     access_token: str
+    email_verification_required: bool = False
     token_type: str = "bearer"
     refresh_token: str | None = None
 
@@ -35,6 +36,7 @@ class LLMSettingsIn(BaseModel):
 
 
 class LLMSettingsOut(BaseModel):
+    api_key_configured: bool = False
     provider_kind: str
     base_url: str
     default_model: str

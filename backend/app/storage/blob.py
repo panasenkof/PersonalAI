@@ -14,8 +14,8 @@ class InvalidStorageKey(ValueError):
 
 def resolve_storage_path(storage_key: str) -> str:
     """Resolve storage_key inside the blob dir, rejecting path traversal."""
-    base = os.path.abspath(get_settings().blob_storage_dir)
-    path = os.path.abspath(os.path.join(base, storage_key))
+    base = os.path.realpath(get_settings().blob_storage_dir)
+    path = os.path.realpath(os.path.join(base, storage_key))
     if path != base and not path.startswith(base + os.sep):
         raise InvalidStorageKey(storage_key)
     return path

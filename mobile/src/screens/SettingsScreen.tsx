@@ -1,17 +1,23 @@
-import React, { useCallback, useEffect, useState } from "react";
-import { Alert, ScrollView, StyleSheet, Switch, Text, TextInput, Pressable, View } from "react-native";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { Alert, KeyboardAvoidingView, Platform, Linking, ScrollView, StyleSheet, Switch, Text, TextInput, Pressable, View } from "react-native";
 
 import { authError } from "../ux";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { useTheme } from "../theme";
-import type { LLMSettings } from "../types";
+import { sharePrivateFile } from "../share";
+import type { LLMSettings, ServiceInfo } from "../types";
 
 const CHANNELS = ["telegram", "slack", "whatsapp", "discord"] as const;
 
 export function SettingsScreen() {
   const t = useTheme();
   const { me, refreshMe, logout, apiBase, setApiBase, changePassword } = useAuth();
+  const pending = useRef(false);
+  const [service, setService] = useState<ServiceInfo | null>(null);
+  const [dataPassword, setDataPassword] = useState("");
+  const [dataOtp, setDataOtp] = useState("");
+  const [deleteEmail, setDeleteEmail] = useState("");
   const [llm, setLlm] = useState<LLMSettings | null>(null);
   const [apiKey, setApiKey] = useState("");
   const [server, setServer] = useState(apiBase);
@@ -28,11 +34,13 @@ export function SettingsScreen() {
   const [links, setLinks] = useState<Record<string, string>>({});
 
   useEffect(() => {
+    api.serviceInfo().then(setService).catch(() => setMsg("Не удалось загрузить сведения о сервисе. Попробуйте открыть настройки снова."));
     api.llmSettings().then(setLlm).catch((e) => setMsg(String((e as Error).message)));
   }, []);
 
   const guard = useCallback(async (fn: () => Promise<void>, ok?: string) => {
-    if (busy) return;
+    if (pending.current) return;
+    pending.current = true;
     setBusy(true);
     setMsg("");
     try {
@@ -40,14 +48,15 @@ export function SettingsScreen() {
       if (ok) setMsg(ok);
     } catch (e) {
       setMsg(authError(String((e as Error).message)));
-    } finally { setBusy(false); }
-  }, [busy]);
+    } finally { pending.current = false; setBusy(false); }
+  }, []);
 
   const input = [styles.input, { borderColor: t.line, color: t.text, backgroundColor: t.panel }];
   const label = { color: t.muted, fontSize: 12, marginTop: 6 } as const;
   const btn = (bg: string) => [styles.btn, { backgroundColor: bg }];
 
   return (
+    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: t.bg }} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={90}>
     <ScrollView style={{ backgroundColor: t.bg }} contentContainerStyle={styles.wrap} keyboardShouldPersistTaps="handled">
       <Text style={[styles.h, { color: t.text }]}>Аккаунт</Text>
       <Text style={{ color: t.text }}>{me?.email} · роль: {me?.role}</Text>
@@ -79,8 +88,10 @@ export function SettingsScreen() {
         </>
       ) : null}
 
+      <Text style={{ color: t.muted }}>Проверка использует сохранённые настройки и делает короткие платные запросы к провайдеру.</Text>
+      <Pressable disabled={busy || !llm} accessibilityRole="button" style={btn(t.accent)} onPress={() => guard(async () => { setMsg((await api.testModel()).message); })}><Text style={styles.btnText}>Проверить модель и поиск</Text></Pressable>
       <Text style={[styles.h, { color: t.text }]}>Сменить пароль</Text>
-      <Text style={{ color: t.muted }}>После смены пароля остальные устройства выйдут из аккаунта. Восстановление забытого пароля пока доступно только через владельца сервера.</Text>
+      <Text style={{ color: t.muted }}>После смены пароля остальные устройства выйдут из аккаунта. Для забытого пароля используйте «Восстановить доступ» на экране входа.</Text>
       <TextInput style={input} accessibilityLabel="Текущий пароль" secureTextEntry value={currentPass} onChangeText={setCurrentPass} placeholder="Текущий пароль" placeholderTextColor={t.muted} />
       <TextInput style={input} accessibilityLabel="Новый пароль" secureTextEntry value={newPass} onChangeText={setNewPass} placeholder="Новый пароль (от 8 символов)" placeholderTextColor={t.muted} />
       {me?.totp_enabled ? <TextInput style={input} accessibilityLabel="Код подтверждения смены пароля" autoCapitalize="none" value={passwordOtp} onChangeText={setPasswordOtp} placeholder="Код 2FA или резервный код" placeholderTextColor={t.muted} /> : null}
@@ -160,6 +171,25 @@ export function SettingsScreen() {
         </View>
       ))}
 
+      <Text style={[styles.h, { color: t.text }]}>Мои данные</Text>
+      <Text style={{ color: t.muted }}>Экспорт содержит историю, факты и исходные файлы. Храните его в безопасном месте. Для экспорта и удаления повторно введите пароль и, если включён, код 2FA.</Text>
+      <TextInput accessibilityLabel="Пароль для операций с данными" style={input} secureTextEntry value={dataPassword} onChangeText={setDataPassword} placeholder="Пароль" placeholderTextColor={t.muted} />
+      {me?.totp_enabled ? <TextInput accessibilityLabel="Код 2FA для операций с данными" style={input} value={dataOtp} autoCapitalize="none" onChangeText={setDataOtp} placeholder="Код 2FA или резервный код" placeholderTextColor={t.muted} /> : null}
+      <Pressable disabled={busy || !dataPassword} accessibilityRole="button" style={btn(t.accent)} onPress={() => guard(async () => {
+        await sharePrivateFile("pia-account.zip", await api.exportAccount(dataPassword, dataOtp), "application/zip");
+        setDataPassword(""); setDataOtp("");
+      }, "Экспорт подготовлен ✔. Сохраните файл через меню устройства.")}><Text style={styles.btnText}>Экспортировать мои данные</Text></Pressable>
+      <Text style={{ color: t.muted }}>Удаление необратимо: аккаунт, история и файлы будут удалены с активного сервера. Резервные копии хранятся до {service?.backup_retention_days ?? "установленного оператором количества"} дней. Сначала сохраните экспорт.</Text>
+      <TextInput accessibilityLabel="Email для подтверждения удаления" style={input} value={deleteEmail} autoCapitalize="none" keyboardType="email-address" onChangeText={setDeleteEmail} placeholder="Введите email аккаунта для удаления" placeholderTextColor={t.muted} />
+      <Pressable disabled={busy || !dataPassword || deleteEmail.trim() !== me?.email} accessibilityRole="button" style={btn(t.err)} onPress={() => Alert.alert("Удалить аккаунт навсегда?", "Все данные на активном сервере будут удалены. Это действие нельзя отменить.", [
+        { text: "Отмена", style: "cancel" }, { text: "Удалить навсегда", style: "destructive", onPress: () => guard(async () => { await api.deleteAccount(dataPassword, deleteEmail.trim(), dataOtp); await logout(); }) },
+      ])}><Text style={styles.btnText}>Удалить аккаунт</Text></Pressable>
+      <Text style={[styles.h, { color: t.text }]}>О сервисе и помощь</Text>
+      <Text selectable style={{ color: t.muted }}>PIA Agent {service?.version ?? "—"} · {service?.operator || "Оператор не указан"}</Text>
+      <Text style={{ color: t.muted }}>Напоминания приходят через привязанный Telegram. Нативные push пока не поддерживаются. Оплату и лимиты модели устанавливают провайдер и оператор.</Text>
+      {service?.support_email ? <Pressable accessibilityRole="link" style={styles.small} onPress={() => guard(async () => { await Linking.openURL(`mailto:${encodeURIComponent(service.support_email)}`); })}><Text style={{ color: t.accent }}>Написать в поддержку: {service.support_email}</Text></Pressable> : null}
+      {[["Политика конфиденциальности", service?.privacy_url], ["Условия использования", service?.terms_url]].map(([title, url]) => url?.startsWith("https://") ? <Pressable key={title} accessibilityRole="link" style={styles.small} onPress={() => guard(async () => { await Linking.openURL(url); })}><Text style={{ color: t.accent }}>{title}</Text></Pressable> : null)}
+      <Pressable disabled={busy} accessibilityRole="button" style={btn(t.muted)} onPress={() => guard(async () => { const info = await api.diagnostics(); await sharePrivateFile("pia-diagnostics.json", JSON.stringify(info, null, 2), "application/json"); }, "Диагностика подготовлена ✔")}><Text style={styles.btnText}>Поделиться диагностикой без личных данных</Text></Pressable>
       <Text style={[styles.h, { color: t.text }]}>Сервер</Text>
       <Text style={{ color: t.muted }}>Смена сервера завершает текущую сессию. Нужен адрес HTTPS без /app.</Text>
       <TextInput accessibilityLabel="Адрес сервера" style={input} autoCapitalize="none" value={server} onChangeText={setServer} />
@@ -172,6 +202,7 @@ export function SettingsScreen() {
         <Text style={styles.btnText}>Выйти</Text>
       </Pressable>
     </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -182,6 +213,6 @@ const styles = StyleSheet.create({
   input: { borderWidth: 1, borderRadius: 10, padding: 10, fontSize: 15 },
   btn: { borderRadius: 10, padding: 12, alignItems: "center", marginTop: 6 },
   btnText: { color: "#fff", fontWeight: "600" },
-  small: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
+  small: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 10, minHeight: 44 },
   mono: { fontFamily: "Courier", padding: 8, borderRadius: 8 },
 });

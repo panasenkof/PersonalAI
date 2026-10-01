@@ -12,7 +12,7 @@ COPY app ./app
 COPY alembic.ini .
 COPY alembic ./alembic
 
-RUN useradd --create-home pia && mkdir -p /app/data/blobs && chown -R pia /app/data
+RUN useradd --create-home pia && mkdir -p /app/data/blobs /app/data/deletions && chown -R pia /app/data
 USER pia
 
 EXPOSE 8000

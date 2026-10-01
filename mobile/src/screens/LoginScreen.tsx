@@ -3,6 +3,7 @@ import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, StyleShee
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { authError } from "../ux";
+import { AccessScreen } from "./AccessScreen";
 import { ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { useTheme } from "../theme";
@@ -10,6 +11,7 @@ import { useTheme } from "../theme";
 export function LoginScreen() {
   const t = useTheme();
   const { login, register, apiBase, setApiBase } = useAuth();
+  const [showAccess, setShowAccess] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [otp, setOtp] = useState("");
@@ -45,6 +47,7 @@ export function LoginScreen() {
     }
   }
 
+  if (showAccess) return <AccessScreen onClose={() => setShowAccess(false)} />;
   const input = [styles.input, { borderColor: t.line, color: t.text, backgroundColor: t.panel }];
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
@@ -66,6 +69,7 @@ export function LoginScreen() {
         <Pressable disabled={busy} style={[styles.btn, { borderColor: t.line, borderWidth: 1 }]} onPress={() => submit("register")}>
           <Text style={{ color: t.text, fontWeight: "600" }}>Зарегистрироваться</Text>
         </Pressable>
+        <Pressable accessibilityRole="button" style={{ minHeight: 44, justifyContent: "center" }} onPress={async () => { try { if (server.trim() !== apiBase) await setApiBase(server); setShowAccess(true); } catch(e) { setError(authError((e as Error).message)); } }}><Text style={{ color: t.accent }}>Забыли пароль? Подтвердить email</Text></Pressable>
         <Text style={{ color: t.muted, fontSize: 13 }}>Для первого входа нужен адрес сервера от владельца вашей установки. Пароль хранится на сервере; токены входа — в защищённом хранилище устройства.</Text>
         <Pressable style={{ minHeight: 44, justifyContent: "center" }} onPress={() => setShowServer((v) => !v)}>
           <Text style={{ color: t.muted, textAlign: "center" }}>Сервер: {apiBase}</Text>
