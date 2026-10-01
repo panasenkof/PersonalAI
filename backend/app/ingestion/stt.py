@@ -25,22 +25,19 @@ class WhisperApiSTTProvider(STTProvider):
         self.model = model
 
     async def transcribe(self, *, storage_key: str, mime: str) -> str:
-        import httpx
-
+        from app.net.retry import request_json
         from app.storage.blob import read_bytes
 
         data = await read_bytes(storage_key)
         ext = "ogg" if ("ogg" in mime or "opus" in mime) else ("mp3" if "mp3" in mime or "mpeg" in mime else "wav")
         headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            r = await client.post(
-                f"{self.base_url}/audio/transcriptions",
-                headers=headers,
-                files={"file": (f"audio.{ext}", data, mime or f"audio/{ext}")},
-                data={"model": self.model},
-            )
-            r.raise_for_status()
-            return str(r.json().get("text") or "").strip()
+        r = await request_json(
+            "POST", f"{self.base_url}/audio/transcriptions", timeout=120.0,
+            headers=headers, files={"file": (f"audio.{ext}", data, mime or f"audio/{ext}")},
+            data={"model": self.model}, label="stt/transcriptions",
+        )
+        return str(r.json().get("text") or "").strip()
+
 
 
 def stt_provider_from_settings():

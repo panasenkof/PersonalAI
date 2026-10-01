@@ -33,8 +33,8 @@ async def conv_messages(
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ) -> list[ChatTurnOut]:
-    convs = await list_conversations(session, user.id)
-    if conversation_id not in {c.id for c in convs}:
+    conv = await session.get(Conversation, conversation_id)
+    if conv is None or conv.user_id != user.id:
         raise HTTPException(status_code=404, detail="conversation_not_found")
     turns = await get_conversation_messages(session, user.id, conversation_id)
     return [ChatTurnOut(role=t.role, content=t.content, created_at=t.created_at) for t in turns]

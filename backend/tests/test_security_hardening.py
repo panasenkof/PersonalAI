@@ -142,6 +142,16 @@ def test_roles_and_admin_api(client: TestClient, random_email: str, monkeypatch)
     monkeypatch.setattr(get_settings(), "admin_emails", admin_email.upper())
     admin = _register(client, admin_email)["access_token"]
     user = _register(client, random_email)["access_token"]
+    assert client.get("/v1/auth/me", headers=_h(admin)).json()["role"] == "user"
+    # Elevation is available only to a trusted server-side provisioning command.
+    from app.db import SessionLocal
+    from app.security.admin import grant_admin
+    admin_id = client.get("/v1/auth/me", headers=_h(admin)).json()["id"]
+    async def provision():
+        async with SessionLocal() as s:
+            await grant_admin(s, admin_id)
+            await s.commit()
+    asyncio.run(provision())
     assert client.get("/v1/auth/me", headers=_h(admin)).json()["role"] == "admin"
     assert client.get("/v1/auth/me", headers=_h(user)).json()["role"] == "user"
 
@@ -260,15 +270,22 @@ def test_security_headers_present(client: TestClient) -> None:
     assert client.get("/ready").json()["database"] == "ok"
 
 
-def test_job_and_fact_payloads_encrypted_and_rekeyed(monkeypatch) -> None:
-    from app.db import SessionLocal, init_db
+def test_job_and_fact_payloads_encrypted_and_rekeyed(monkeypatch, tmp_path) -> None:
     from app.models import ExtractedFact, IngestionJob, User
     from app.security.rekey import rekey_database
 
     monkeypatch.setattr(get_settings(), "pia_agent_secret", "")
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from sqlalchemy.pool import NullPool
+
+    from app.models import Base
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'rekey.db'}", poolclass=NullPool)
+    SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+    monkeypatch.setattr("app.security.rekey.SessionLocal", SessionLocal)
 
     async def scenario() -> None:
-        await init_db()
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
         async with SessionLocal() as s:
             u = User(email=f"j{uuid.uuid4().hex[:6]}@t.dev", password_hash="x")
             s.add(u)

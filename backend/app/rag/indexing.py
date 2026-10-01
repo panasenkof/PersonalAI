@@ -86,6 +86,9 @@ async def _index_texts(
     chunks = [c for t in texts for c in split_text(t)]
     if not chunks:
         return 0
+    from app.rag.identity import embedding_space
+
+    space = await embedding_space(session, user_id)
     embeddings = await _embed_texts(session, user_id, chunks)
     for i, text in enumerate(chunks):
         emb = embeddings[i] if embeddings is not None and i < len(embeddings) else None
@@ -96,6 +99,7 @@ async def _index_texts(
             text=text,
             created_at=utcnow(),
         )
+        chunk.embedding_space = space if emb is not None else None
         set_chunk_embedding(chunk, emb)
         session.add(chunk)
     await session.flush()
@@ -129,7 +133,25 @@ async def reindex_entity(session: AsyncSession, user_id: str, entity: Entity) ->
         .where(Chunk.entity_id == entity.id)
         .where(Chunk.observation_id.is_(None))
     )
-    return await index_entity(session, user_id, entity)
+    return await _rebuild_entity(session, user_id, entity)
+
+
+async def _rebuild_entity(session: AsyncSession, user_id: str, entity: Entity) -> int:
+    n = await index_entity(session, user_id, entity)
+    if entity.domain == "documents" and (entity.payload or {}).get("type") == "document":
+        from app.services.blobs import get_blob
+        from app.services.documents import extract_document_text
+        from app.storage.blob import read_bytes
+
+        key = entity.payload.get("storage_key")
+        blob = await get_blob(session, user_id, key) if key else None
+        if blob is None:
+            raise ValueError("document_source_missing")  # rollback preserves the previous index
+        text = extract_document_text(await read_bytes(blob.storage_key), blob.mime, blob.filename)
+        if not text.strip():
+            raise ValueError("document_source_not_extractable")
+        n += await index_text(session, user_id, text, entity_id=entity.id)
+    return n
 
 
 async def reindex_user(session: AsyncSession, user_id: str, *, force: bool = False) -> dict[str, int]:
@@ -162,7 +184,7 @@ async def reindex_user(session: AsyncSession, user_id: str, *, force: bool = Fal
     n_entities = n_obs = 0
     for e in (await session.execute(select(Entity).where(Entity.user_id == user_id))).scalars():
         if e.id not in have_entity:
-            n_entities += 1 if await index_entity(session, user_id, e) else 0
+            n_entities += 1 if await _rebuild_entity(session, user_id, e) else 0
     for o in (await session.execute(select(Observation).where(Observation.user_id == user_id))).scalars():
         if o.id not in have_obs:
             n_obs += 1 if await index_observation(session, user_id, o) else 0

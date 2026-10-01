@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import json
 import logging
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any
 
 from cryptography.fernet import Fernet, InvalidToken, MultiFernet
@@ -22,6 +24,18 @@ from sqlalchemy.types import TypeDecorator
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+_strict_decryption: ContextVar[bool] = ContextVar("strict_decryption", default=False)
+
+
+@contextmanager
+def require_decryption():
+    token = _strict_decryption.set(True)
+    try:
+        yield
+    finally:
+        _strict_decryption.reset(token)
+
 
 TEXT_PREFIX = "enc1:"
 BLOB_MAGIC = b"PIAENC1\n"
@@ -64,10 +78,14 @@ def decrypt_api_key(ciphertext: bytes | None, plain_fallback: str | None) -> str
         return None
     f = _fernet()
     if f is None:
+        if _strict_decryption.get():
+            raise InvalidToken("encryption key missing")
         return None
     try:
         return f.decrypt(ciphertext).decode()
     except InvalidToken:
+        if _strict_decryption.get():
+            raise
         return None
 
 
@@ -87,11 +105,15 @@ def decrypt_text(value: str | None) -> str | None:
     f = _fernet()
     if f is None:
         logger.error("encrypted value found but PIA_AGENT_SECRET is not configured")
+        if _strict_decryption.get():
+            raise InvalidToken("encryption key missing")
         return "[encrypted: key not configured]"
     try:
         return f.decrypt(value[len(TEXT_PREFIX) :].encode("ascii")).decode("utf-8")
     except InvalidToken:
         logger.error("could not decrypt a stored value (wrong key?)")
+        if _strict_decryption.get():
+            raise
         return "[encrypted: undecryptable]"
 
 

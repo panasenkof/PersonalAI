@@ -6,6 +6,7 @@ import time
 from typing import Any, Awaitable, Callable
 
 import httpx
+from jsonschema import ValidationError, validate
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -133,7 +134,25 @@ async def _run_tool(
 ) -> dict[str, Any]:
     """Execute one tool; argument mistakes by the model become tool errors it can correct."""
     try:
-        return await handler(session, user_id, args)
+        definitions = UNIVERSAL_TOOL_DEFINITIONS + tools_openai_format(all_plugins())
+        definition = next((d["function"] for d in definitions if d["function"]["name"] == name), None)
+        if definition is not None:
+            validate(args, definition["parameters"])
+        # SQLite legacy transaction mode does not BEGIN for SELECT/SAVEPOINT.
+        # Ensure releasing a savepoint cannot accidentally commit the outer job.
+        connection = await session.connection()
+        if connection.dialect.name == "sqlite":
+            raw = await connection.get_raw_connection()
+            driver = raw.driver_connection
+            if driver is not None and not driver.in_transaction:
+                await connection.exec_driver_sql("BEGIN")
+        async with session.begin_nested() as transaction:
+            result = await handler(session, user_id, args)
+            if result.get("error"):
+                await transaction.rollback()
+            return result
+    except ValidationError as exc:
+        return {"error": "invalid_arguments", "detail": exc.message}
     except SQLAlchemyError:
         raise  # broken transaction: fail the job rather than continue on a poisoned session
     except (KeyError, TypeError, ValueError) as exc:
@@ -161,8 +180,11 @@ async def run_agent(
         messages.extend(await load_history_messages(session, user_id, conversation_id, window=window))
     messages.append(ChatMessage(role="user", content=user_visible_text))
 
+    usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
     for _ in range(max(1, get_settings().agent_max_iterations)):
         provider, model, result, streamed = await _chat_step(provider, model, messages, tools, emit)
+        for key in usage:
+            usage[key] += int((result.raw.get("usage") or {}).get(key) or 0)
         msg = result.message
         if msg.tool_calls:
             messages.append(ChatMessage(role="assistant", content=msg.content, tool_calls=msg.tool_calls))
@@ -202,6 +224,6 @@ async def run_agent(
                     )
                 )
             continue
-        return {"assistant_text": msg.content or "", "raw_last": result.raw}
+        return {"assistant_text": msg.content or "", "raw_last": result.raw, "usage": usage}
 
-    return {"assistant_text": "Stopped after tool iteration limit.", "raw_last": {}}
+    return {"assistant_text": "Stopped after tool iteration limit.", "raw_last": {}, "usage": usage}

@@ -214,6 +214,7 @@ class RedisRunner:
                 await asyncio.sleep(1.0)
                 continue
             if not job_id:
+                await asyncio.sleep(0.01)  # yield even for transports that return immediately
                 continue
             if isinstance(job_id, bytes):
                 job_id = job_id.decode()

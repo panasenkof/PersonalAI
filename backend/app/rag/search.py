@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.models import Chunk, Entity, Observation
+from app.rag.identity import embedding_space
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +79,7 @@ async def _pg_vector_hits(
     session: AsyncSession, user_id: str, query_vec: list[float], k: int
 ) -> list[dict[str, Any]]:
     """Native pgvector cosine ANN (HNSW) restricted to the user's rows."""
+    space = await embedding_space(session, user_id)
     dist = Chunk.embedding_vec.cosine_distance(query_vec)
 
     def stmt() -> Select:
@@ -85,6 +87,7 @@ async def _pg_vector_hits(
             select(Chunk, (1 - dist).label("score"))
             .where(Chunk.user_id == user_id)
             .where(Chunk.embedding_vec.is_not(None))
+            .where(Chunk.embedding_space == space)
             .order_by(dist)
             .limit(k)
         )
@@ -114,9 +117,11 @@ async def _json_vector_hits(
     session: AsyncSession, user_id: str, query_vec: list[float], k: int
 ) -> list[dict[str, Any]]:
     """Portable path: cosine in Python over JSON embeddings (SQLite / odd widths)."""
+    space = await embedding_space(session, user_id)
     res = await session.execute(
         select(Chunk)
         .where(Chunk.user_id == user_id)
+        .where(Chunk.embedding_space == space)
         .where(Chunk.embedding.is_not(None))
         .order_by(Chunk.created_at.desc())
         .limit(MAX_VECTOR_CANDIDATES)

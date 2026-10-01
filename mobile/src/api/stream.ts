@@ -16,35 +16,48 @@ const EVENTS: Custom[] = ["status", "token", "reset", "tool_call", "tool_start",
 export function followJob(jobId: string, onUpdate: (s: RunState) => void): { promise: Promise<RunState>; close: () => void } {
   let state = emptyRun();
   let closed = false;
+  let settled = false;
+  let polling = false;
+  let settle: (() => void) | null = null;
   let es: EventSource<Custom> | null = null;
   const push = (next: RunState) => {
+    if (closed || settled) return;
     state = next;
     if (!closed) onUpdate(state);
   };
 
   const promise = new Promise<RunState>((resolve) => {
     const finish = () => {
+      if (settled) return;
+      settled = true;
       es?.close();
       resolve(state);
     };
 
+    settle = finish;
     const poll = async () => {
+      if (polling || settled || closed) return;
+      polling = true;
       for (let i = 0; i < 180 && !closed; i++) {
         await new Promise((r) => setTimeout(r, 1000));
+        if (closed || settled) return;
         let job: JobOut;
         try {
           job = await api.job(jobId);
         } catch {
           continue;
         }
+        if (closed || settled) return;
         if (job.status === "completed" || job.status === "awaiting_confirm") {
           push({ ...state, text: job.result?.assistant_text ?? state.text, facts: job.pending_facts, finished: "done" });
           return finish();
         }
+        if (closed || settled) return;
         if (job.status === "cancelled") {
           push({ ...state, finished: "cancelled" });
           return finish();
         }
+        if (closed || settled) return;
         if (job.status === "failed") {
           push({ ...state, finished: "error", error: job.error ?? "failed" });
           return finish();
@@ -59,6 +72,7 @@ export function followJob(jobId: string, onUpdate: (s: RunState) => void): { pro
     });
     for (const name of EVENTS) {
       es.addEventListener(name, (e) => {
+        if (closed || settled || polling) return;
         const data = (e as { data?: string | null }).data;
         if (!data) return;
         try {
@@ -83,6 +97,7 @@ export function followJob(jobId: string, onUpdate: (s: RunState) => void): { pro
     close: () => {
       closed = true;
       es?.close();
+      settle?.();
     },
   };
 }

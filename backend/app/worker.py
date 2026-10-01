@@ -33,6 +33,8 @@ async def run() -> None:
     runner = RedisRunner(get_redis(), concurrency=settings.queue_concurrency, consume=True)
     set_runner(runner)
     await runner.start()
+    from pathlib import Path
+    Path("/tmp/pia-worker-id").write_text(runner.worker_id)
     logger.info("worker %s started (concurrency=%d)", runner.worker_id, settings.queue_concurrency)
 
     stop = asyncio.Event()

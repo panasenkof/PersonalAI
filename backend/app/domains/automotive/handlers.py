@@ -162,7 +162,7 @@ async def auto_fetch_maintenance_schedule(session: AsyncSession, user_id: str, a
         abstract = str(data.get("Answer") or "") or "No abstract returned; refine query manually."
     provider = await provider_for_user(session, user_id)
     model = await default_model_for_user(session, user_id)
-    user_prompt = f"Source search summary (may be incomplete):\n{abstract}\n\nInfer typical OEM-style interval items; if unknown use conservative estimates and say so in source_summary."
+    user_prompt = f"Source search summary (may be incomplete):\n{abstract}\n\nExtract only intervals explicitly present in the source. Never infer missing intervals; return empty items if unsupported."
     try:
         structured = await provider.text_json_schema(
             model=model,
@@ -212,18 +212,44 @@ async def auto_compute_next_due(session: AsyncSession, user_id: str, args: dict[
         .where(Observation.kind == "service_event")
         .order_by(Observation.occurred_at.desc())
     )
-    last = res.scalars().first()
-    last_km = (last.payload or {}).get("odometer_km") if last else e.payload.get("odometer_km")
-    last_km = int(last_km or 0)
-    current = int(e.payload.get("odometer_km") or last_km or 0)
+    events = list(res.scalars())
+    reported = [int(o.payload["odometer_km"]) for o in events if (o.payload or {}).get("odometer_km") is not None]
+    if e.payload.get("odometer_km") is not None:
+        reported.append(int(e.payload["odometer_km"]))
+    current = max(reported) if reported else None
     out = []
     for it in items:
-        name = it.get("name")
+        name = str(it.get("name") or "").strip()
         interval = int(it.get("interval_km") or 0)
-        if interval <= 0:
+        if not name or interval <= 0:
             continue
-        base = last_km if last_km else current
-        next_at = ((base // interval) + 1) * interval
-        due_km = max(0, next_at - current)
-        out.append({"item": name, "next_odometer_km_target": next_at, "km_until_due": due_km})
+        item_id = it.get("item_id")
+        aliases = {str(n).strip().casefold() for n in [name, *it.get("aliases", [])]}
+        last_km = None
+        for event in events:
+            work = (event.payload or {}).get("work_items") or []
+            def matches(value: Any) -> bool:
+                if isinstance(value, dict):
+                    if item_id and value.get("item_id"):
+                        return value["item_id"] == item_id
+                    value = value.get("name") or ""
+                return str(value).strip().casefold() in aliases
+            if any(matches(value) for value in work):
+                value = (event.payload or {}).get("odometer_km")
+                # Latest matching service with unknown mileage invalidates the baseline.
+                last_km = int(value) if value is not None else None
+                break
+        basis = it.get("basis", "since_last_service")
+        baseline = last_km if last_km is not None else it.get("baseline_odometer_km")
+        next_at = None
+        if basis == "since_last_service" and baseline is not None:
+            next_at = int(baseline) + interval
+        elif basis == "fixed_milestones" and baseline is not None:
+            origin = int(it.get("origin_odometer_km") or 0)
+            next_at = origin + max(1, (int(baseline) - origin) // interval + 1) * interval
+        remaining = next_at - current if next_at is not None and current is not None else None
+        status = "unknown_history" if next_at is None else "unknown_odometer" if current is None else "overdue" if remaining is not None and remaining < 0 else "due" if remaining == 0 else "scheduled"
+        out.append({"item": name, "item_id": item_id, "basis": basis, "status": status,
+                    "next_odometer_km_target": next_at, "km_until_due": remaining,
+                    "last_service_odometer_km": last_km})
     return {"vehicle_entity_id": e.id, "current_odometer_km": current, "items": out}

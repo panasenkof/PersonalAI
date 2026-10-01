@@ -3,12 +3,11 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import get_settings
 from app.models import Collection, LLMSettings, User, UserRole
 
 
 async def bootstrap_user(session: AsyncSession, email: str, password_hash: str) -> User:
-    role = UserRole.admin.value if email.lower() in get_settings().admin_email_set else UserRole.user.value
+    role = UserRole.user.value  # public registration never grants administrative privileges
     user = User(email=email, password_hash=password_hash, role=role)
     session.add(user)
     await session.flush()

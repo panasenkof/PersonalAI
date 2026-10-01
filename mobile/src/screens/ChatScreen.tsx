@@ -35,6 +35,7 @@ export function ChatScreen({ route, navigation }: NativeStackScreenProps<RootSta
   const [busy, setBusy] = useState(false);
   const list = useRef<FlatList<Row>>(null);
   const detach = useRef<(() => void) | null>(null);
+  const mounted = useRef(true);
 
   useEffect(() => {
     navigation.setOptions({ title: route.params?.title ?? "Новый чат" });
@@ -43,6 +44,7 @@ export function ChatScreen({ route, navigation }: NativeStackScreenProps<RootSta
   // history + facts still waiting for a decision
   useEffect(() => {
     let alive = true;
+    mounted.current = true;
     (async () => {
       const next: Row[] = [];
       if (conversationId) {
@@ -55,6 +57,7 @@ export function ChatScreen({ route, navigation }: NativeStackScreenProps<RootSta
     })();
     return () => {
       alive = false;
+      mounted.current = false;
       detach.current?.();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -96,6 +99,7 @@ export function ChatScreen({ route, navigation }: NativeStackScreenProps<RootSta
     scrollDown();
     try {
       const res = await api.sendMessage(body, conversationId, files);
+      if (!mounted.current) return;
       if (res.conversation_id && res.conversation_id !== conversationId) {
         setConversationId(res.conversation_id);
         navigation.setOptions({ title: body.slice(0, 40) || "Чат" });
@@ -113,6 +117,7 @@ export function ChatScreen({ route, navigation }: NativeStackScreenProps<RootSta
         const follow = followJob(res.job_id, setRun);
         detach.current = follow.close;
         const final = await follow.promise;
+        if (!mounted.current) return;
         setRun(null);
         setRows((r) => {
           const out = [...r];
@@ -126,13 +131,16 @@ export function ChatScreen({ route, navigation }: NativeStackScreenProps<RootSta
         });
       }
     } catch (e) {
+      if (!mounted.current) return;
       setRun(null);
       const m = String((e as Error).message);
       setRows((r) => [...r, { id: uid(), kind: "note", text: m.includes("rate_limited") ? "Слишком много запросов — подождите минуту" : `Ошибка: ${m}` }]);
     } finally {
-      setBusy(false);
-      setJobId(null);
-      scrollDown();
+      if (mounted.current) {
+        setBusy(false);
+        setJobId(null);
+        scrollDown();
+      }
     }
   }
 

@@ -69,6 +69,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       apiBase,
       setApiBase: async (url) => {
         const clean = url.trim().replace(/\/$/, "");
+        if (clean !== base.current) await setTokens(null);
         base.current = clean;
         setBase(clean);
         await SecureStore.setItemAsync(BASE_KEY, clean);

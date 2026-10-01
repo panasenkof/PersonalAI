@@ -123,7 +123,7 @@ export function SettingsScreen() {
         style={btn(t.muted)}
         onPress={() => Alert.alert("Выйти на всех устройствах?", "Все сессии будут завершены.", [
           { text: "Отмена", style: "cancel" },
-          { text: "Выйти", style: "destructive", onPress: () => guard(async () => { await api.logoutAll().catch(() => undefined); await logout(); }) },
+          { text: "Выйти", style: "destructive", onPress: () => guard(async () => { await api.logoutAll(); await logout(); }) },
         ])}
       >
         <Text style={styles.btnText}>Выйти на всех устройствах</Text>

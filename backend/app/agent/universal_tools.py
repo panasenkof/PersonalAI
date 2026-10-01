@@ -172,6 +172,7 @@ def parse_tool_arguments(arguments: str | None) -> dict[str, Any]:
     if not arguments:
         return {}
     try:
-        return json.loads(arguments)
-    except json.JSONDecodeError:
+        parsed = json.loads(arguments)
+        return parsed if isinstance(parsed, dict) else {}
+    except (json.JSONDecodeError, TypeError):
         return {}

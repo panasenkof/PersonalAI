@@ -28,10 +28,10 @@ async def user_stats(
 
     prompt_tokens = 0
     completion_tokens = 0
-    res = await session.execute(
-        select(IngestionJob.result).where(IngestionJob.user_id == user.id).limit(1000)
+    res = await session.stream(
+        select(IngestionJob.result).where(IngestionJob.user_id == user.id).execution_options(yield_per=100)
     )
-    for (result,) in res.all():
+    async for (result,) in res:
         usage = (result or {}).get("usage") or (result or {}).get("raw_last", {}).get("usage") or {}
         prompt_tokens += int(usage.get("prompt_tokens") or 0)
         completion_tokens += int(usage.get("completion_tokens") or 0)

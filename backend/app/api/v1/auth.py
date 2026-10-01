@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import or_, update
+from sqlalchemy import Text, cast, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import set_committed_value
 
 from app.api.deps import get_current_user
 from app.api.schemas import LoginIn, RegisterIn, TokenOut
@@ -77,9 +80,16 @@ async def _check_second_factor(session: AsyncSession, user: User, otp: str | Non
                 user.totp_last_step = step
                 return True
             return False
-    remaining = totp.consume_recovery_code(user.recovery_codes, otp)
+    raw_codes = await session.scalar(select(cast(User.recovery_codes, Text)).where(User.id == user.id))
+    remaining = totp.consume_recovery_code(json.loads(raw_codes) if raw_codes else None, otp)
     if remaining is not None:
-        user.recovery_codes = remaining
+        res = await session.execute(
+            update(User).where(User.id == user.id).where(cast(User.recovery_codes, Text) == raw_codes)
+            .values(recovery_codes=remaining).execution_options(synchronize_session=False)
+        )
+        if res.rowcount != 1:  # type: ignore[attr-defined]
+            return False
+        set_committed_value(user, "recovery_codes", remaining)
         return True
     return False
 

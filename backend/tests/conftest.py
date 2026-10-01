@@ -19,6 +19,7 @@ if os.path.exists(_TEST_DB):
 os.environ.setdefault("JWT_SECRET", "test-jwt-secret-test-jwt-secret-12")
 os.environ.setdefault("DATABASE_URL", f"sqlite+aiosqlite:///{_TEST_DB}")
 os.environ.setdefault("BLOB_STORAGE_DIR", _TEST_BLOBS)
+os.environ.setdefault("DB_NULL_POOL", "true")
 os.environ.setdefault("HTTP_RETRY_BASE_DELAY", "0")  # tests must not sleep through retry backoff
 
 from app.db import init_db  # noqa: E402

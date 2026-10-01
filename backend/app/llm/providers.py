@@ -92,7 +92,9 @@ class LLMProvider(ABC):
 
 class OpenAICompatibleProvider(LLMProvider):
     def __init__(self, base_url: str, api_key: str | None) -> None:
-        self.base_url = base_url.rstrip("/")
+        from app.security.endpoints import validate_llm_endpoint
+
+        self.base_url = validate_llm_endpoint(base_url)
         self.api_key = api_key
 
     def _headers(self) -> dict[str, str]:
@@ -233,6 +235,7 @@ class OpenAICompatibleProvider(LLMProvider):
             "messages": [m.model_dump(exclude_none=True) for m in messages],
             "temperature": temperature,
             "stream": True,
+            "stream_options": {"include_usage": True},
         }
         if tools:
             payload["tools"] = tools

@@ -1,22 +1,26 @@
 x-app-env: &app-env
-  APP_ENV: ${APP_ENV:-production}
-  DATABASE_URL: postgresql+asyncpg://pia:pia@postgres:5432/pia
+  APP_ENV: production
+  POSTGRES_HOST: postgres
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
   REDIS_URL: redis://redis:6379/0
   QUEUE_BACKEND: redis
   MESSAGE_MODE: queue
   QUEUE_CONCURRENCY: ${QUEUE_CONCURRENCY:-4}
   PGVECTOR_DIMENSIONS: ${PGVECTOR_DIMENSIONS:-1536}
+  EMBEDDING_REVISION: ${EMBEDDING_REVISION:-1}
   DEFAULT_EMBEDDING_MODEL: ${DEFAULT_EMBEDDING_MODEL:-text-embedding-3-small}
   FALLBACK_API_KEY: ${FALLBACK_API_KEY:-}
   LLM_ALLOW_LOCAL_FALLBACK: ${LLM_ALLOW_LOCAL_FALLBACK:-false}
   JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET (>= 32 random chars) in .env}
   JWT_SECRET_PREVIOUS: ${JWT_SECRET_PREVIOUS:-}
   PIA_AGENT_SECRET: ${PIA_AGENT_SECRET:?set PIA_AGENT_SECRET (Fernet key) in .env}
-  ADMIN_EMAILS: ${ADMIN_EMAILS:-}
+  LLM_ALLOWED_BASE_URLS: ${LLM_ALLOWED_BASE_URLS:-https://api.openai.com/v1}
+  FALLBACK_BASE_URL: ${FALLBACK_BASE_URL:-https://api.openai.com/v1}
+  FALLBACK_MODEL: ${FALLBACK_MODEL:-gpt-4o-mini}
   CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8000}
   BLOB_STORAGE_DIR: /app/data/blobs
   RATE_LIMIT_AUTH_PER_MINUTE: ${RATE_LIMIT_AUTH_PER_MINUTE:-10}
-  TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-false}
+  TRUST_PROXY_HEADERS: "true"  # only the proxy exposes an HTTP port and replaces X-Forwarded-For
   RATE_LIMIT_LLM_PER_MINUTE: ${RATE_LIMIT_LLM_PER_MINUTE:-30}
   TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
   TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}
@@ -33,11 +37,32 @@ x-app-env: &app-env
   STT_API_KEY: ${STT_API_KEY:-}
 
 services:
+  migrate:
+    build: ./backend
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      <<: *app-env
+    healthcheck:
+      disable: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  proxy:
+    image: nginx:1.28-alpine
+    ports:
+      - "8000:80"
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      app:
+        condition: service_healthy
+
   postgres:
     image: pgvector/pgvector:pg16   # Postgres + pgvector (HNSW vector search)
     environment:
       POSTGRES_USER: pia
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pia}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: pia
     ports:
       - "127.0.0.1:5432:5432"
@@ -65,8 +90,8 @@ services:
   # API replicas: accept requests, stream SSE, enqueue jobs. Scale with `--scale app=N`.
   app:
     build: ./backend
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
     environment:
       <<: *app-env
       EMBEDDED_WORKER: "false"        # jobs are executed by the dedicated workers below
@@ -74,6 +99,8 @@ services:
     volumes:
       - blobs:/app/data/blobs
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
@@ -83,12 +110,20 @@ services:
   worker:
     build: ./backend
     command: ["python", "-m", "app.worker"]
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.queue.health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
     environment:
       <<: *app-env
       REMINDERS_ENABLED: "false"
     volumes:
       - blobs:/app/data/blobs
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:

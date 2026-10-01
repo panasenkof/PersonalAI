@@ -75,7 +75,7 @@ async def process_envelope(
         if conv is not None and out.get("assistant_text"):
             await persist_turn(session, user_id, conv.id, prompt, out["assistant_text"])
             job.envelope = {**job.envelope, "conversation_id": conv.id}
-        usage = (out.get("raw_last") or {}).get("usage")
+        usage = out.get("usage") or (out.get("raw_last") or {}).get("usage")
         if usage:
             out["usage"] = usage  # surfaced via GET /v1/stats for cost visibility
         pending = await pending_facts_for_job(session, job.id)
@@ -87,6 +87,10 @@ async def process_envelope(
         await session.flush()
         return out
     except Exception as exc:  # noqa: BLE001
+        # Roll back every tool write, including a failed SQLAlchemy flush. The job
+        # was committed by the submitter, so it can be refreshed in a new transaction.
+        await session.rollback()
+        await session.refresh(job)
         job.status = JobStatus.failed.value
         job.error = safe_error(exc)
         job.updated_at = utcnow()
