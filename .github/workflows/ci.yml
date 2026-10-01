@@ -110,9 +110,7 @@ jobs:
       - name: Browser acceptance
         run: |
           npx playwright install --with-deps chromium
-          python3 -m http.server 8765 --directory ../backend/app > /tmp/pia-web-server.log 2>&1 &
-          server_pid=$!
-          trap 'kill "$server_pid"' EXIT
+          node --test ../scripts/web-test-server.test.cjs
           NODE_PATH="$PWD/node_modules" node ../scripts/verify-web.cjs
 
   docker-smoke:
