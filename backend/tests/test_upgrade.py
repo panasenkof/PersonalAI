@@ -45,3 +45,23 @@ def test_upgrade_preserves_existing_jobs_and_claims_one_delivery(tmp_path, diale
             assert (await c.execute(text("SELECT max_user_id FROM users WHERE id='upgrade-user'"))).scalar() is None
         await engine.dispose()
     asyncio.run(verify())
+
+
+@pytest.mark.parametrize("previous", ["i0f5c1d3e004", "j0f5c1d3e004"])
+def test_upgrade_max_and_daily_usage_branches_converge(tmp_path, previous):
+    url = f"sqlite+aiosqlite:///{tmp_path / 'merge.db'}"
+    env = {**os.environ, "DATABASE_URL": url, "POSTGRES_HOST": ""}
+    backend = Path(__file__).resolve().parents[1]
+    for revision in (previous, "head"):
+        subprocess.run([sys.executable, "-m", "alembic", "upgrade", revision], cwd=backend, env=env, check=True, capture_output=True)
+    async def verify():
+        engine = create_async_engine(url)
+        async with engine.connect() as c:
+            versions = (await c.execute(text("SELECT version_num FROM alembic_version"))).scalars().all()
+            assert versions == ["k1a6d2e4f005"]
+            columns = await c.run_sync(lambda conn: inspect(conn).get_columns("users"))
+            assert "max_user_id" in {column["name"] for column in columns}
+            tables = await c.run_sync(lambda conn: inspect(conn).get_table_names())
+            assert "user_daily_usage" in tables
+        await engine.dispose()
+    asyncio.run(verify())

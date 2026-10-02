@@ -15,6 +15,7 @@ from app.config import get_settings
 from app.db import SessionLocal, get_session
 from app.ingestion.pipeline import process_envelope
 from app.ingestion.schemas import IngestionEnvelope
+from app.llm.admission import reserve_request
 from app.llm.limits import RateLimitExceeded, check_user_quota
 from app.models import SETTLED_JOB_STATUSES, IngestionJob, JobStatus, User
 from app.queue.events import bus
@@ -57,9 +58,10 @@ async def post_message(
             raise HTTPException(status_code=422, detail="unknown_storage_key")
     try:
         await check_user_quota(user.id)
+        await reserve_request(session, user.id)
     except RateLimitExceeded as exc:
         raise HTTPException(
-            status_code=429, detail="rate_limited", headers={"Retry-After": str(exc.retry_after)}
+            status_code=429, detail=exc.reason, headers={"Retry-After": str(exc.retry_after)}
         ) from None
 
     conv = await get_or_create_conversation(

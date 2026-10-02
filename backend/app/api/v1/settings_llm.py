@@ -70,6 +70,7 @@ async def patch_llm(
 async def test_connection(session: AsyncSession = Depends(get_session), user: User = Depends(get_current_user)) -> dict:
     import asyncio
 
+    from app.llm.admission import reserve_request
     from app.llm.limits import RateLimitExceeded, check_user_quota
     from app.llm.providers import ChatMessage
     from app.llm.router import provider_for_user
@@ -77,6 +78,8 @@ async def test_connection(session: AsyncSession = Depends(get_session), user: Us
     row = await get_or_create_llm_settings(session, user.id)
     try:
         await check_user_quota(user.id)
+        await reserve_request(session, user.id, job=False)
+        await session.commit()
         provider = await provider_for_user(session, user.id)
         async with asyncio.timeout(25):
             await provider.chat([ChatMessage(role='user', content='Reply with OK only.')], model=row.default_model, tools=None)
@@ -87,7 +90,7 @@ async def test_connection(session: AsyncSession = Depends(get_session), user: Us
                 if not embeddings:
                     raise ValueError('empty embeddings')
     except RateLimitExceeded as exc:
-        raise HTTPException(429, detail='rate_limited', headers={'Retry-After': str(exc.retry_after)}) from None
+        raise HTTPException(429, detail=exc.reason, headers={'Retry-After': str(exc.retry_after)}) from None
     except Exception:  # noqa: BLE001 — provider errors can contain credentials; do not return them
         raise HTTPException(502, detail='Проверка не прошла. Проверьте модель, адрес, ключ и лимиты провайдера.') from None
     await session.commit()

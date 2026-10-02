@@ -8,6 +8,7 @@ from typing import Any, Awaitable, Callable, Literal
 import httpx
 from pydantic import BaseModel, Field
 
+from app.config import get_settings
 from app.llm.limits import llm_slot
 from app.net.retry import with_retry
 
@@ -105,6 +106,9 @@ class OpenAICompatibleProvider(LLMProvider):
 
     async def _post_json(self, path: str, payload: dict[str, Any], timeout: float) -> dict[str, Any]:
         """POST with bounded concurrency and retry/backoff on transient failures."""
+
+        if path == "/chat/completions":
+            payload = {**payload, "max_tokens": get_settings().llm_max_output_tokens}
 
         async def _once() -> dict[str, Any]:
             async with llm_slot():
@@ -235,6 +239,7 @@ class OpenAICompatibleProvider(LLMProvider):
             "messages": [m.model_dump(exclude_none=True) for m in messages],
             "temperature": temperature,
             "stream": True,
+            "max_tokens": get_settings().llm_max_output_tokens,
             "stream_options": {"include_usage": True},
         }
         if tools:
