@@ -1,0 +1,10 @@
+# Use with: docker compose -f docker-compose.yml -f deploy/compose.ngrok.yml up -d --wait
+# Keep proxy host binding 127.0.0.1:8000 and do not enable the public HTTPS profile.
+services:
+  app:
+    environment:
+      TRUST_PROXY_HEADERS: "true"
+      TRUSTED_PROXY_HOPS: "2"
+  proxy:
+    volumes:
+      - ./deploy/nginx.ngrok.conf:/etc/nginx/conf.d/default.conf:ro

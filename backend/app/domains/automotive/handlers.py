@@ -196,6 +196,9 @@ async def auto_approve_schedule(session: AsyncSession, user_id: str, args: dict[
         merged["approved_maintenance_schedule"] = cand.structured
         merged["schedule_candidate_id"] = cand.id
         e.payload = merged
+        from app.rag.indexing import reindex_entity
+
+        await reindex_entity(session, user_id, e)
     await session.flush()
     return {"status": "approved", "vehicle_entity_id": cand.vehicle_entity_id}
 

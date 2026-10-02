@@ -17,14 +17,14 @@ class Channel(str, Enum):
 
 
 class Attachment(BaseModel):
-    mime: str
-    storage_key: str
-    filename: str | None = None
+    mime: str = Field(max_length=255)
+    storage_key: str = Field(max_length=512)
+    filename: str | None = Field(default=None, max_length=255)
 
 
 class IngestionEnvelope(BaseModel):
-    text: str | None = None
-    attachments: list[Attachment] = Field(default_factory=list)
+    text: str | None = Field(default=None, max_length=20_000)
+    attachments: list[Attachment] = Field(default_factory=list, max_length=10)
     channel: Channel = Channel.mobile
     correlation_id: str | None = None
     locale: str | None = None

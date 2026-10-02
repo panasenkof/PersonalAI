@@ -18,6 +18,7 @@ from app.security.auth import (
     create_access_token,
     create_refresh_token,
     hash_password,
+    password_needs_rehash,
     verify_password,
 )
 from app.security.ratelimit import AsyncLimiter, build_limiter
@@ -56,6 +57,10 @@ def _tokens(user: User) -> TokenOut:
 @router.post("/register", response_model=TokenOut)
 async def register(body: RegisterIn, session: AsyncSession = Depends(get_session)) -> TokenOut:
     email = body.email.lower()
+    settings = get_settings()
+    allowed = {value.strip().lower() for value in settings.registration_allowed_emails.split(",") if value.strip()}
+    if not settings.registration_enabled or (allowed and email not in allowed):
+        raise HTTPException(403, detail="registration_closed")
     if get_settings().require_verified_email:
         from app.services.mail import mail_configured
 
@@ -129,6 +134,9 @@ async def login(body: LoginIn, session: AsyncSession = Depends(get_session)) -> 
         if not await _check_second_factor(session, user, body.otp):
             raise await fail("invalid_otp")
         await session.commit()  # persists a consumed recovery code
+    if password_needs_rehash(user.password_hash):
+        user.password_hash = hash_password(body.password)
+        await session.commit()
     await limiter.reset(email)
     return _tokens(user)
 

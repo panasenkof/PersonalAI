@@ -44,7 +44,12 @@ async def run() -> None:
             loop.add_signal_handler(sig, stop.set)
         except NotImplementedError:  # pragma: no cover (Windows)
             pass
+    from app.queue.delivery import delivery_loop
+
+    delivery = asyncio.create_task(delivery_loop(stop))
     await stop.wait()
+    delivery.cancel()
+    await asyncio.gather(delivery, return_exceptions=True)
     logger.info("worker shutting down (finishing running jobs)")
     await runner.stop()
     await close_redis()

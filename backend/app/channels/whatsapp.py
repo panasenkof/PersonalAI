@@ -22,7 +22,6 @@ from app.channels.common import (
     issue_link_code,
     pair_account,
     parse_fact_callback,
-    reply_text_for,
     require_webhook_secret,
     start_new_conversation,
     submit_envelope,
@@ -193,7 +192,9 @@ async def _handle_message(session: AsyncSession, message: dict[str, Any]) -> Non
         )
         out = await submit_envelope(session, user, env)
         if out is not None:
-            await reply(env, reply_text_for(out), out.get("pending_facts") or [])
+            from app.queue.delivery import deliver_reply
+
+            await deliver_reply(out["_delivery_job_id"])
     except DuplicateDelivery:
         await session.rollback()
     except RateLimitExceeded:

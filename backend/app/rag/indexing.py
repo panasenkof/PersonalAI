@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from sqlalchemy import delete, select
@@ -147,7 +148,7 @@ async def _rebuild_entity(session: AsyncSession, user_id: str, entity: Entity) -
         blob = await get_blob(session, user_id, key) if key else None
         if blob is None:
             raise ValueError("document_source_missing")  # rollback preserves the previous index
-        text = extract_document_text(await read_bytes(blob.storage_key), blob.mime, blob.filename)
+        text = await asyncio.to_thread(extract_document_text, await read_bytes(blob.storage_key), blob.mime, blob.filename)
         if not text.strip():
             raise ValueError("document_source_not_extractable")
         n += await index_text(session, user_id, text, entity_id=entity.id)

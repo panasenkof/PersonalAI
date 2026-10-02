@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -11,19 +12,29 @@ from jose.exceptions import JWTClaimsError
 
 from app.config import get_settings
 
-# bcrypt processes at most 72 bytes per the algorithm itself; longer secrets are truncated.
-_BCRYPT_MAX_BYTES = 72
+# Versioned prehashing keeps bcrypt input below 72 bytes without losing password suffixes.
+_PASSWORD_PREFIX = "$pia-bcrypt-sha256$"
+
+
+def _password_input(password: str) -> bytes:
+    return base64.b64encode(hashlib.sha256(password.encode("utf-8")).digest())
 
 
 def hash_password(password: str) -> str:
-    raw = password.encode("utf-8")[:_BCRYPT_MAX_BYTES]
-    return bcrypt.hashpw(raw, bcrypt.gensalt()).decode("utf-8")
+    return _PASSWORD_PREFIX + bcrypt.hashpw(_password_input(password), bcrypt.gensalt()).decode("ascii")
+
+
+def password_needs_rehash(hashed: str) -> bool:
+    return not hashed.startswith(_PASSWORD_PREFIX)
 
 
 def verify_password(password: str, hashed: str) -> bool:
     try:
-        return bcrypt.checkpw(password.encode("utf-8")[:_BCRYPT_MAX_BYTES], hashed.encode("utf-8"))
-    except ValueError:
+        if hashed.startswith(_PASSWORD_PREFIX):
+            return bcrypt.checkpw(_password_input(password), hashed.removeprefix(_PASSWORD_PREFIX).encode("ascii"))
+        # Compatibility with existing accounts. Successful login upgrades this legacy hash.
+        return bcrypt.checkpw(password.encode("utf-8")[:72], hashed.encode("ascii"))
+    except (ValueError, UnicodeError):
         return False
 
 

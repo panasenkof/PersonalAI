@@ -19,6 +19,7 @@ class PilotConfigurationTest(unittest.TestCase):
             values = dict(line.split("=", 1) for line in original.decode().splitlines()
                           if line and not line.startswith("#") and "=" in line)
             self.assertEqual(values["PUBLIC_LAUNCH"], "false")
+            self.assertEqual(values["REGISTRATION_ENABLED"], "false")
             self.assertEqual(values["REQUIRE_VERIFIED_EMAIL"], "false")
             self.assertGreaterEqual(len(values["JWT_SECRET"]), 32)
             self.assertTrue(values["POSTGRES_PASSWORD"])

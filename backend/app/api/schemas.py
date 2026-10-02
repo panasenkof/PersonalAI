@@ -45,10 +45,10 @@ class LLMSettingsOut(BaseModel):
 
 
 class MessageIn(BaseModel):
-    text: str | None = None
+    text: str | None = Field(default=None, max_length=20_000)
     channel: Channel = Channel.mobile
-    correlation_id: str | None = None
-    attachments: list[Attachment] = []
+    correlation_id: str | None = Field(default=None, max_length=64)
+    attachments: list[Attachment] = Field(default_factory=list, max_length=10)
     conversation_id: str | None = None
 
 

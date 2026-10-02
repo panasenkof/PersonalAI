@@ -21,7 +21,6 @@ from app.channels.common import (
     issue_link_code,
     pair_account,
     parse_fact_callback,
-    reply_text_for,
     require_webhook_secret,
     start_new_conversation,
     submit_envelope,
@@ -78,19 +77,22 @@ async def send_slack_message(
 ) -> None:
     token = get_settings().slack_bot_token
     if not token:
-        return
+        raise RuntimeError("slack_bot_token_not_configured")
     payload: dict[str, Any] = {"channel": channel, "text": text[:SLACK_TEXT_LIMIT]}
     if thread_ts:
         payload["thread_ts"] = thread_ts
     if blocks:
         payload["blocks"] = blocks
-    await request_json(
+    response = await request_json(
         "POST",
         "https://slack.com/api/chat.postMessage",
         headers={"Authorization": f"Bearer {token}"},
         json=payload,
         label="slack/postMessage",
     )
+
+    if response.json().get("ok") is not True:
+        raise RuntimeError("slack_message_rejected")
 
 
 def _chunks(text: str, limit: int = SLACK_TEXT_LIMIT) -> list[str]:
@@ -274,7 +276,9 @@ async def slack_events(
     try:
         out = await submit_envelope(session, user, env)
         if out is not None:
-            await reply(env, reply_text_for(out), out.get("pending_facts") or [])
+            from app.queue.delivery import deliver_reply
+
+            await deliver_reply(out["_delivery_job_id"])
     except DuplicateDelivery:
         await session.rollback()
     except RateLimitExceeded:

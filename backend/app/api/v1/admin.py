@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_admin
 from app.db import get_session
-from app.models import Chunk, IngestionJob, User
+from app.models import ChannelDelivery, Chunk, IngestionJob, User
 
 router = APIRouter(prefix="/v1/admin", tags=["admin"])
 
@@ -69,9 +69,11 @@ async def global_stats(
     chunks = (await session.execute(select(func.count()).select_from(Chunk))).scalar_one()
     from app.queue.runner import get_runner
 
+    deliveries = await session.scalar(select(func.count()).select_from(ChannelDelivery).where(ChannelDelivery.sent_at.is_(None)))
     return {
         "users": users,
         "chunks": chunks,
         "jobs": {status: n for status, n in jobs},
         "queue": await get_runner().stats(),
+        "pending_channel_deliveries": deliveries,
     }

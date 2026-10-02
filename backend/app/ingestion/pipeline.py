@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.history import get_or_create_conversation, persist_turn
 from app.agent.orchestrator import run_agent
+from app.domains.registry import tool_router
 from app.ingestion.schemas import IngestionEnvelope, utcnow
 from app.ingestion.stt import stt_provider_from_settings
 from app.models import IngestionJob, JobStatus
@@ -18,6 +19,7 @@ async def build_user_prompt(envelope: IngestionEnvelope) -> str:
     if envelope.text:
         parts.append(envelope.text)
     stt = stt_provider_from_settings()
+    enabled_tools = tool_router()
     for att in envelope.attachments:
         if att.mime.startswith("audio/"):
             tr = await stt.transcribe(storage_key=att.storage_key, mime=att.mime)
@@ -28,13 +30,13 @@ async def build_user_prompt(envelope: IngestionEnvelope) -> str:
         elif att.mime.startswith("image/"):
             parts.append(
                 f"[image] storage_key={att.storage_key} mime={att.mime}. "
-                "If this is a service receipt, call auto_parse_service_receipt with this storage_key and mime when vehicle_entity_id is known."
+                + ("Call auto_parse_service_receipt when vehicle_entity_id is known." if "auto_parse_service_receipt" in enabled_tools else "Describe the image or ask the user for text.")
             )
         elif att.mime == "application/pdf" or (att.filename or "").lower().endswith(".pdf"):
             parts.append(
                 f"[pdf document filename={att.filename or '-'} storage_key={att.storage_key} mime=application/pdf]. "
-                "If it is a lab report call labs_record_report with this storage_key and mime; "
-                "otherwise call kb_ingest_document to save it to the knowledge base."
+                + ("For a lab report call labs_record_report; otherwise " if "labs_record_report" in enabled_tools else "")
+                + "call kb_ingest_document to save it to the knowledge base."
             )
         else:
             parts.append(
