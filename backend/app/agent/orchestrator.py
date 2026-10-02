@@ -19,18 +19,26 @@ from app.llm.router import default_model_for_user, local_fallback_target, provid
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are PIA, a personal assistant with tools over the user's private knowledge base and domain plugins (automotive, medical labs).
+SYSTEM_PROMPT = """You are PIA, a personal assistant with tools over the user's private knowledge base.
 Rules:
 - Prefer tools over guessing. For factual recall, use kb_search or kb_list_entities.
-- When the user asks to remember or log information, persist via kb_create_entity or domain-specific tools, then reply with a short confirmation including record identifiers when available.
-- For questions, retrieve from KB first when appropriate.
-- Do not claim medical diagnosis. For lab reports: ingest with labs_record_report and
-show values with reference ranges only; trends via labs_get_trends — interpretation is
-the clinician's job. Automotive guidance is informational only.
-- If the user attached a PDF/text document that is not a lab report, call kb_ingest_document with its storage_key.
-- Data extracted from photos/documents may need the user's confirmation: when a tool returns status pending_user_confirm, say the record is awaiting confirmation (do not claim it is saved).
-- If the user attached images described in the message, use auto_parse_service_receipt when it is a service document and a vehicle_entity_id is known; otherwise ask which vehicle to attach.
+- When asked to remember information, persist it with an available tool and confirm the record identifier.
+- Use only the tools provided in this request; disabled domains are unavailable.
+- Do not claim medical diagnosis; interpretation belongs to a clinician.
+- PDF/text documents can be saved using kb_ingest_document with their storage_key.
+- If a tool returns pending_user_confirm, say it awaits confirmation; do not claim it is saved.
+- If a tool reports extraction limits or failure, explain the problem; never claim complete extraction.
 - Match the user's language (e.g. Russian)."""
+
+
+def system_prompt(plugins: list[Any]) -> str:
+    prompt = SYSTEM_PROMPT
+    domains = {plugin.domain_id for plugin in plugins}
+    if "medical_labs" in domains:
+        prompt += "\n- For lab reports use labs_record_report; for trends use labs_get_trends. Show values and ranges without diagnosis."
+    if "automotive" in domains:
+        prompt += "\n- Service receipt images can be ingested with auto_parse_service_receipt when the vehicle is known; otherwise ask which vehicle. Automotive guidance is informational."
+    return prompt
 
 EmitFn = Callable[[dict[str, Any]], Awaitable[None]]
 
@@ -174,7 +182,7 @@ async def run_agent(
     provider = await provider_for_user(session, user_id)
     model = await default_model_for_user(session, user_id)
 
-    messages: list[ChatMessage] = [ChatMessage(role="system", content=SYSTEM_PROMPT)]
+    messages: list[ChatMessage] = [ChatMessage(role="system", content=system_prompt(plugins))]
     if conversation_id:
         window = get_settings().agent_history_window
         messages.extend(await load_history_messages(session, user_id, conversation_id, window=window))
@@ -182,6 +190,8 @@ async def run_agent(
 
     usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
     for _ in range(max(1, get_settings().agent_max_iterations)):
+        if sum(len(message.content or "") + len(json.dumps(message.tool_calls or [])) for message in messages) > get_settings().agent_context_max_chars:
+            raise ValueError("agent_context_budget_exceeded")
         provider, model, result, streamed = await _chat_step(provider, model, messages, tools, emit)
         for key in usage:
             usage[key] += int((result.raw.get("usage") or {}).get(key) or 0)

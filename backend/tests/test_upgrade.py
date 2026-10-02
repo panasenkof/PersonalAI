@@ -36,5 +36,9 @@ def test_upgrade_preserves_existing_jobs_and_claims_one_delivery(tmp_path, diale
             assert (await c.execute(text("SELECT count(delivery_key) FROM ingestion_jobs WHERE id LIKE 'upgrade-job-%'"))).scalar() == 1
             columns = await c.run_sync(lambda conn: inspect(conn).get_columns("chunks"))
             assert "embedding_space" in {column["name"] for column in columns}
+            indexes = await c.run_sync(lambda conn: inspect(conn).get_indexes("ingestion_jobs"))
+            assert "ix_ingestion_jobs_status_updated" in {index["name"] for index in indexes}
+            delivery_columns = await c.run_sync(lambda conn: inspect(conn).get_columns("channel_deliveries"))
+            assert {"job_id", "user_id", "attempts", "lease_until", "lease_token", "sent_at"} <= {column["name"] for column in delivery_columns}
         await engine.dispose()
     asyncio.run(verify())

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
@@ -24,9 +25,12 @@ async def kb_list_entities(session: AsyncSession, user_id: str, args: dict[str, 
     stmt = select(Entity).where(Entity.user_id == user_id)
     if domain:
         stmt = stmt.where(Entity.domain == domain)
-    res = await session.execute(stmt)
+    limit = min(100, max(1, int(args.get("limit", 50))))
+    offset = max(0, int(args.get("offset", 0)))
+    res = await session.execute(stmt.order_by(Entity.created_at, Entity.id).offset(offset).limit(limit + 1))
     rows = list(res.scalars().all())
-    return {"entities": [{"id": e.id, "domain": e.domain, "payload": e.payload} for e in rows[:50]]}
+    return {"entities": [{"id": e.id, "domain": e.domain, "payload": e.payload} for e in rows[:limit]],
+            "next_offset": offset + limit if len(rows) > limit else None}
 
 
 async def kb_create_entity(session: AsyncSession, user_id: str, args: dict[str, Any]) -> dict[str, Any]:
@@ -64,7 +68,7 @@ async def kb_ingest_document(session: AsyncSession, user_id: str, args: dict[str
     blob = await get_blob(session, user_id, storage_key)
     if blob is None:
         return {"error": "unknown_storage_key"}
-    text = extract_document_text(await read_bytes(storage_key), args.get("mime") or blob.mime, blob.filename)
+    text = await asyncio.to_thread(extract_document_text, await read_bytes(storage_key), args.get("mime") or blob.mime, blob.filename)
     if not text.strip():
         return {"error": "no_extractable_text", "message": "Scanned image or unsupported format."}
     slug = args.get("collection_slug") or "garage"
@@ -112,7 +116,11 @@ UNIVERSAL_TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "description": "List entities for the user, optionally filtered by domain id.",
             "parameters": {
                 "type": "object",
-                "properties": {"domain": {"type": "string"}},
+                "properties": {
+                    "domain": {"type": "string"},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+                    "offset": {"type": "integer", "minimum": 0},
+                },
                 "required": [],
                 "additionalProperties": False,
             },

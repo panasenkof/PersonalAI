@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Any
@@ -63,7 +64,7 @@ async def labs_record_report(session: AsyncSession, user_id: str, args: dict[str
             return {"error": "unknown_storage_key"}
         data = await read_bytes(storage_key)
         if "pdf" in mime or storage_key.lower().endswith(".pdf"):
-            text = extract_pdf_text(data)
+            text = await asyncio.to_thread(extract_pdf_text, data)
         elif mime.startswith("image/"):
             provider = await provider_for_user(session, user_id)
             model = await default_model_for_user(session, user_id)
@@ -88,6 +89,8 @@ async def labs_record_report(session: AsyncSession, user_id: str, args: dict[str
     if structured is None:
         if not text or not text.strip():
             return {"error": "no_input", "message": "Provide text or a storage_key."}
+        if len(text) > 12_000:
+            return {"error": "lab_report_too_long", "message": "Отчёт превышает 12 000 символов. Разделите его на части: показатели не сохранены."}
         provider = await provider_for_user(session, user_id)
         model = await default_model_for_user(session, user_id)
         try:
@@ -97,7 +100,7 @@ async def labs_record_report(session: AsyncSession, user_id: str, args: dict[str
                     "Extract lab analytes exactly as printed. Values are strings. "
                     "Never diagnose, never comment — extraction only."
                 ),
-                user=text[:12000],
+                user=text,
                 json_schema_name="lab_report",
                 json_schema=LAB_REPORT_SCHEMA,
             )

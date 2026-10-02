@@ -12,6 +12,7 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     LargeBinary,
     String,
@@ -258,7 +259,10 @@ class Chunk(Base):
 
 class IngestionJob(Base):
     __tablename__ = "ingestion_jobs"
-    __table_args__ = (UniqueConstraint("user_id", "delivery_key", name="uq_job_delivery"),)
+    __table_args__ = (
+        UniqueConstraint("user_id", "delivery_key", name="uq_job_delivery"),
+        Index("ix_ingestion_jobs_status_updated", "status", "updated_at"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
@@ -271,6 +275,19 @@ class IngestionJob(Base):
     attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class ChannelDelivery(Base):
+    __tablename__ = "channel_deliveries"
+
+    job_id: Mapped[str] = mapped_column(ForeignKey("ingestion_jobs.id", ondelete="CASCADE"), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    lease_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    lease_token: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
 
 class ScheduleCandidate(Base):

@@ -12,6 +12,7 @@ def configure(destination: Path, template: Path) -> None:
         "PIA_AGENT_SECRET": base64.urlsafe_b64encode(secrets.token_bytes(32)).decode(),
         "BACKUP_ENCRYPTION_KEY": base64.urlsafe_b64encode(secrets.token_bytes(32)).decode(),
         "PUBLIC_LAUNCH": "false",
+        "REGISTRATION_ENABLED": "false",
         "REQUIRE_VERIFIED_EMAIL": "false",
         "RATE_LIMIT_LLM_PER_MINUTE": "30",
     }

@@ -51,6 +51,9 @@ async def lifespan(_: FastAPI):
     from app.services.mail import maintenance_loop
 
     maintenance = asyncio.create_task(maintenance_loop(stop))
+    from app.queue.delivery import delivery_loop
+
+    delivery = asyncio.create_task(delivery_loop(stop))
     task: asyncio.Task | None = None
     if settings.reminders_enabled:
         from app.scheduler.reminders import reminders_loop
@@ -60,6 +63,8 @@ async def lifespan(_: FastAPI):
         yield
     finally:
         stop.set()
+        delivery.cancel()
+        await asyncio.gather(delivery, return_exceptions=True)
         try:
             await asyncio.wait_for(maintenance, timeout=5)
         except (TimeoutError, asyncio.CancelledError):
@@ -101,11 +106,18 @@ _shared_ip_limiter: tuple[tuple[str, int], object] | None = None
 
 
 def _client_ip(request: Request) -> str:
-    if get_settings().trust_proxy_headers:
-        # the proxy appends the real peer last; anything before it is client-controlled
+    settings = get_settings()
+    if settings.trust_proxy_headers:
+        # Select from the right across the configured, known proxy chain.
         forwarded = [p.strip() for p in request.headers.get("x-forwarded-for", "").split(",") if p.strip()]
-        if forwarded:
-            return forwarded[-1]
+        hops = max(1, settings.trusted_proxy_hops)
+        if len(forwarded) >= hops:
+            from ipaddress import ip_address
+
+            try:
+                return str(ip_address(forwarded[-hops]))
+            except ValueError:
+                pass
     return request.client.host if request.client else "unknown"
 
 

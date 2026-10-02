@@ -177,8 +177,11 @@ async def submit_envelope(session: AsyncSession, user: User, env: IngestionEnvel
     uid = user.id
     await session.commit()
     out = await process_envelope(session, uid, job, env)
+    from app.queue.delivery import stage_reply
+
+    stage_reply(session, job)
     await session.commit()
-    return out
+    return {**out, "_delivery_job_id": job.id}
 
 
 def _channel_settings():

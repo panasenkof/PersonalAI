@@ -172,6 +172,9 @@ async def _execute_job_inner(job_id: str, state: dict[str, Any]) -> dict:
             return {}
         env = IngestionEnvelope(**(job.envelope or {}))
         out = await process_envelope(session, job.user_id, job, env, emit=emit)
+        from app.queue.delivery import stage_reply
+
+        stage_reply(session, job)
         await session.commit()
         final_text = out.get("assistant_text") or ""
         if out.get("failed"):
@@ -187,14 +190,7 @@ async def _execute_job_inner(job_id: str, state: dict[str, Any]) -> dict:
                 "status": job.status,
             },
         )
-        await _channel_reply(env, final_text, pending)
+        from app.queue.delivery import deliver_reply
+
+        await deliver_reply(job_id)
         return out
-
-
-async def _channel_reply(env: IngestionEnvelope, text: str, pending_facts: list[dict[str, Any]] | None = None) -> None:
-    from app.channels.dispatch import send_reply  # local import: avoids cycle
-
-    try:
-        await send_reply(env, str(text), pending_facts or [])
-    except Exception as exc:  # noqa: BLE001 — reply failures must not lose the job result
-        logger.warning("%s reply failed: %s", env.channel.value, exc)

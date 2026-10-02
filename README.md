@@ -21,7 +21,7 @@
 | **Automotive** | Техпаспорт авто, сервисные события, парсинг чека vision-моделью, регламент ТО (web+LLM), детерминированный `compute_next_due` |
 | **Medical labs** | `labs_record_report` (текст/PDF/изображение → наблюдение), `labs_get_trends` (динамика показателя), только извлечение — без диагнозов |
 | **Напоминания** | Планировщик: ТО «через N км» → в Telegram, одна запись на пункт/день (уникальный констрейнт) |
-| **Надёжность** | ~100 тестов (SQLite и реальный Postgres+pgvector в CI), ruff + mypy, Alembic, Docker (app + worker + Postgres/pgvector + Redis), **retry с backoff+jitter и `Retry-After` для всех внешних API**, лимит параллельных LLM-вызовов, **rate limit LLM на пользователя** (Redis — общий для реплик), `/ready`, structured logs + correlation-id, `/v1/stats` |
+| **Надёжность** | регрессионные тесты (SQLite и реальный Postgres+pgvector в CI), ruff + mypy, Alembic, Docker (app + worker + Postgres/pgvector + Redis), **retry с backoff+jitter и `Retry-After` для всех внешних API**, лимит параллельных LLM-вызовов, **rate limit LLM на пользователя** (Redis — общий для реплик), `/ready`, structured logs + correlation-id, `/v1/stats` |
 | **Безопасность** | **2FA (TOTP + recovery-коды)**, **роли user/admin**, отзыв токенов (`token_version`, logout-all), **ротация JWT-секрета** (`JWT_SECRET_PREVIOUS`), шифрование at rest (ключи LLM, история, TOTP, джобы, файлы; ротация MultiFernet + `rekey`), **fail-closed в production** (слабые секреты и вебхуки без секрета → отказ), защита логина от перебора, path traversal, лимит загрузки, CORS — подробно в [docs/SECURITY.md](docs/SECURITY.md) |
 | **Evals** | Золотой набор (6 сценариев): `python -m evals.runner` — scripted LLM на каждый PR; **`--live` — реальная LLM, автозапуск в CI** (`evals-live.yml`: ночью, при изменении агента/промптов, вручную; N прогонов, порог pass-rate, отчёт в Job Summary) |
 
@@ -62,7 +62,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 ```bash
 cd backend
-pytest tests/ -q          # ~100 тестов, включая golden-set evals (fakeredis вместо Redis)
+pytest tests/ -q          # регрессионные тесты, включая golden-set evals (fakeredis вместо Redis)
 ruff check . && mypy app
 python -m evals.runner    # детерминированная проверка агента (офлайн)
 # live-evals с настоящей LLM:
@@ -134,7 +134,7 @@ FastAPI (N реплик) ──► IngestionEnvelope ──► submit_envelope �
 - **Семантика доставки** — at-least-once: после падения воркера агент может повторить работу (записи в БД откатываются вместе с транзакцией, но внешние побочные эффекты — например ответ в мессенджер — возможны дважды).
 - **Поисковый индекс** (`chunks.text`, payload) не шифруется приложением — см. [docs/SECURITY.md](docs/SECURITY.md).
 - Refresh-токены не ротируются по одному (отзыв — `logout-all`); блокировка логина по e-mail может использоваться для DoS конкретной учётки.
-- Live-evals и мобильное приложение проверены только на моках/типах; нужны прогон с реальной LLM и тест на устройстве.
+- CI проверяет мобильные типы, Jest, зависимости Expo и Android/iOS-бандлы; браузерная приёмка использует тестовый API. Для выпуска нужны live-evals с реальной LLM и приёмка подписанных сборок на устройствах.
 
 ## Автор
 

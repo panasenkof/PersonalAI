@@ -11,6 +11,10 @@ class Settings(BaseSettings):
     app_name: str = "PIA Agent"
     app_version: str = "0.3.0"
     public_launch: bool = False
+    registration_enabled: bool = True
+    registration_allowed_emails: str = ""
+    enabled_domains: str = "automotive,medical_labs"
+    agent_context_max_chars: int = 100_000
     public_base_url: str = ""
     operator_name: str = ""
     support_email: str = ""
@@ -42,6 +46,15 @@ class Settings(BaseSettings):
     postgres_db: str = "pia"
 
     @model_validator(mode="after")
+    def validate_budgets(self) -> "Settings":
+        if self.trusted_proxy_hops < 1 or self.agent_context_max_chars < 1:
+            raise ValueError("Proxy hop count and context budget must be positive")
+        enabled = {value.strip() for value in self.enabled_domains.split(",") if value.strip()}
+        if enabled - {"automotive", "medical_labs"}:
+            raise ValueError("ENABLED_DOMAINS contains an unknown domain")
+        return self
+
+    @model_validator(mode="after")
     def postgres_dsn(self) -> "Settings":
         if self.postgres_host:
             self.database_url = URL.create(
@@ -59,6 +72,7 @@ class Settings(BaseSettings):
     # Behind a reverse proxy that sets X-Forwarded-For, rate limits use the proxy-appended (last) address.
     # Off by default: a directly exposed app must not trust a client-supplied header.
     trust_proxy_headers: bool = False
+    trusted_proxy_hops: int = 1
     login_max_failures: int = 5  # per e-mail within login_lockout_seconds (0 = disabled)
     login_lockout_seconds: int = 900
     jwt_algorithm: str = "HS256"

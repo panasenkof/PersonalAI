@@ -10,6 +10,11 @@ from app.ingestion.schemas import IngestionEnvelope
 async def send_reply(env: IngestionEnvelope, text: str, pending_facts: list[dict[str, Any]] | None = None) -> None:
     facts = pending_facts or []
     channel = env.channel.value
+    meta = env.channel_meta or {}
+    if channel in {"telegram", "slack", "whatsapp"} and not meta.get("chat_id"):
+        raise ValueError("channel_reply_destination_missing")
+    if channel == "discord" and not (meta.get("interaction_token") and meta.get("application_id")):
+        raise ValueError("discord_reply_destination_missing")
     if channel == "telegram":
         from app.channels import telegram as m
     elif channel == "slack":

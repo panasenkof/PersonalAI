@@ -52,7 +52,12 @@ jobs:
         id: creds
         run: |
           if [ -n "$EVAL_LLM_API_KEY" ]; then echo "have_key=true" >> "$GITHUB_OUTPUT"
-          else echo "have_key=false" >> "$GITHUB_OUTPUT"; echo "::notice::EVAL_LLM_API_KEY is not set — live evals skipped"; fi
+          else
+            echo "have_key=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::EVAL_LLM_API_KEY is not set — live evals NOT VERIFIED"
+            echo "## Live model validation: NOT VERIFIED (missing EVAL_LLM_API_KEY)" >> "$GITHUB_STEP_SUMMARY"
+            if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then exit 1; fi
+          fi
       - uses: actions/setup-python@v5
         if: steps.creds.outputs.have_key == 'true'
         with:

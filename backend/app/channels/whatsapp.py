@@ -22,7 +22,6 @@ from app.channels.common import (
     issue_link_code,
     pair_account,
     parse_fact_callback,
-    reply_text_for,
     require_webhook_secret,
     start_new_conversation,
     submit_envelope,
@@ -56,7 +55,7 @@ def verify_signature(body: bytes, signature: str | None, app_secret: str) -> boo
 async def _post_message(to: str, payload: dict[str, Any]) -> None:
     s = get_settings()
     if not s.whatsapp_access_token or not s.whatsapp_phone_number_id:
-        return
+        raise RuntimeError("whatsapp_not_configured")
     body = {"messaging_product": "whatsapp", "to": to, **payload}
     await request_json(
         "POST",
@@ -193,7 +192,9 @@ async def _handle_message(session: AsyncSession, message: dict[str, Any]) -> Non
         )
         out = await submit_envelope(session, user, env)
         if out is not None:
-            await reply(env, reply_text_for(out), out.get("pending_facts") or [])
+            from app.queue.delivery import deliver_reply
+
+            await deliver_reply(out["_delivery_job_id"])
     except DuplicateDelivery:
         await session.rollback()
     except RateLimitExceeded:
