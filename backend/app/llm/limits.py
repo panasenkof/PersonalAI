@@ -16,8 +16,9 @@ logger = logging.getLogger(__name__)
 class RateLimitExceeded(Exception):
     """Raised when a user exceeded the LLM message quota."""
 
-    def __init__(self, retry_after: int = 60) -> None:
-        super().__init__("rate_limited")
+    def __init__(self, retry_after: int = 60, reason: str = "rate_limited") -> None:
+        super().__init__(reason)
+        self.reason = reason
         self.retry_after = retry_after
 
 

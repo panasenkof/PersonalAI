@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import fcntl
 import io
 import json
 import os
@@ -33,11 +32,13 @@ from app.models import (
     ReminderNotification,
     ScheduleCandidate,
     User,
+    UserDailyUsage,
 )
 from app.security.crypto import require_decryption
+from app.security.journal import append_deletion
 from app.storage.blob import read_bytes, resolve_storage_path
 
-_EXPORT_MODELS = [Collection, Entity, Observation, ExtractedFact, Conversation, ChatTurn, ScheduleCandidate, ReminderNotification, IngestionJob, Blob, Chunk]
+_EXPORT_MODELS = [Collection, Entity, Observation, ExtractedFact, Conversation, ChatTurn, ScheduleCandidate, ReminderNotification, IngestionJob, Blob, Chunk, UserDailyUsage]
 _EXCLUDE = {'embedding', 'embedding_vec'}
 
 
@@ -92,14 +93,7 @@ async def delete_account(session: AsyncSession, user: User) -> None:
     journal = get_settings().deletion_journal_path
     if journal:
         try:
-            path = Path(journal)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with path.open('a') as file:
-                os.chmod(path, 0o600)
-                fcntl.flock(file, fcntl.LOCK_EX)
-                file.write(user.id + '\n')
-                file.flush()
-                os.fsync(file.fileno())
+            append_deletion(Path(journal), user.id)
         except OSError:
             await session.rollback()
             raise HTTPException(503, detail='deletion_journal_unavailable_retry_later') from None

@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     registration_allowed_emails: str = ""
     enabled_domains: str = "automotive,medical_labs"
     agent_context_max_chars: int = 100_000
+    llm_max_output_tokens: int = 4096
+    max_active_jobs_per_user: int = 4
+    llm_requests_per_day: int = 200
     public_base_url: str = ""
     operator_name: str = ""
     support_email: str = ""
@@ -47,6 +50,8 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_budgets(self) -> "Settings":
+        if self.llm_max_output_tokens < 1 or self.max_active_jobs_per_user < 0 or self.llm_requests_per_day < 0:
+            raise ValueError("Output token budget must be positive; request limits cannot be negative")
         if self.trusted_proxy_hops < 1 or self.agent_context_max_chars < 1:
             raise ValueError("Proxy hop count and context budget must be positive")
         enabled = {value.strip() for value in self.enabled_domains.split(",") if value.strip()}

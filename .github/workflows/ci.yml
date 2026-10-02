@@ -40,6 +40,24 @@ jobs:
           rm -f /tmp/ci_mig.db
           DATABASE_URL="sqlite+aiosqlite:////tmp/ci_mig.db" alembic upgrade head
 
+  backend-windows:
+    name: Backend Windows portability
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements*.lock
+      - name: Install dependencies
+        run: pip install -r requirements.lock -r requirements-dev.lock
+      - name: Windows import, journal and admission regressions
+        run: pytest tests/test_neighbor_review.py -q
+
   backend-postgres:
     name: Backend (Postgres + pgvector + Redis)
     runs-on: ubuntu-latest

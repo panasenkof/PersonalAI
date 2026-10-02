@@ -46,11 +46,10 @@ async function refreshTokens(): Promise<boolean> {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ refresh_token: rt }),
       });
-      if (!r.ok) return false;
+      if (r.status === 401 || r.status === 403) return false;
+      if (!r.ok) throw new ApiError(r.status, "refresh_temporarily_unavailable");
       await h().setTokens((await r.json()) as Tokens);
       return true;
-    } catch {
-      return false;
     } finally {
       setTimeout(() => (refreshing = null), 0);
     }
