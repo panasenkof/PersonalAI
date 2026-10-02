@@ -4,8 +4,9 @@ import logging
 import re
 from typing import Any
 
-from sqlalchemy import Select, or_, select, text
+from sqlalchemy import Select, case, literal, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.config import get_settings
 from app.models import Chunk, Entity, Observation
@@ -158,20 +159,18 @@ async def _text_hits(session: AsyncSession, user_id: str, query: str, k: int) ->
     if not terms:
         return []
     conds = [Chunk.text.ilike(f"%{_like_escape(t)}%", escape="\\") for t in terms]
-    res = await session.execute(
-        select(Chunk)
+    matched: ColumnElement[int] = literal(0)
+    for condition in conds:
+        matched = matched + case((condition, 1), else_=0)
+    phrase = case((conds[0], 1), else_=0)
+    rows = (await session.execute(
+        select(Chunk, matched.label("matched"))
         .where(Chunk.user_id == user_id)
         .where(or_(*conds))
-        .order_by(Chunk.created_at.desc())
-        .limit(max(k * 5, 50))
-    )
-    scored: list[tuple[float, Chunk]] = []
-    for ch in res.scalars().all():
-        low = ch.text.lower()
-        matched = sum(1 for t in terms if t in low)
-        scored.append((matched / len(terms), ch))
-    scored.sort(key=lambda p: p[0], reverse=True)
-    return [_chunk_row(ch, score, "text") for score, ch in scored[:k]]
+        .order_by(phrase.desc(), matched.desc(), Chunk.created_at.desc(), Chunk.id)
+        .limit(k)
+    )).all()
+    return [_chunk_row(chunk, count / len(terms), "text") for chunk, count in rows]
 
 
 async def _hydrate(session: AsyncSession, user_id: str, hits: list[dict[str, Any]]) -> None:

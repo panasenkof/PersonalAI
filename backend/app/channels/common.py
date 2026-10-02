@@ -148,6 +148,9 @@ async def submit_envelope(session: AsyncSession, user: User, env: IngestionEnvel
         if dup.scalar_one_or_none() is not None:
             raise DuplicateDelivery(env.correlation_id)
     await check_user_quota(user.id)
+    from app.llm.admission import reserve_request
+
+    await reserve_request(session, user.id)
     job = IngestionJob(
         user_id=user.id,
         status=JobStatus.accepted.value,

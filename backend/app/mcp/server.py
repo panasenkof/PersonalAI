@@ -123,8 +123,13 @@ async def _tools_call(req_id: Any, params: dict[str, Any], request: Request) -> 
         )
     try:
         await check_user_quota(uid)
+        from app.llm.admission import reserve_request
+
+        async with SessionLocal() as quota_session:
+            await reserve_request(quota_session, uid, job=False)
+            await quota_session.commit()
     except RateLimitExceeded as exc:
-        return JSONResponse(_rpc_error(req_id, -32000, "rate_limited"), status_code=429,
+        return JSONResponse(_rpc_error(req_id, -32000, exc.reason), status_code=429,
                             headers={"Retry-After": str(exc.retry_after)})
     async with SessionLocal() as session:
         try:

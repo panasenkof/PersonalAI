@@ -277,6 +277,14 @@ class IngestionJob(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
 
+class UserDailyUsage(Base):
+    __tablename__ = "user_daily_usage"
+
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    period: Mapped[str] = mapped_column(String(10), primary_key=True)
+    requests: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+
+
 class ChannelDelivery(Base):
     __tablename__ = "channel_deliveries"
 
