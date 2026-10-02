@@ -163,6 +163,7 @@ async def me(user: User = Depends(get_current_user)) -> dict:
         "totp_enabled": bool(user.totp_enabled),
         "email_verified": bool(user.email_verified),
         "channels": {
+            "max": bool(user.max_user_id),
             "telegram": bool(user.telegram_user_id),
             "slack": bool(user.slack_user_id),
             "whatsapp": bool(user.whatsapp_user_id),

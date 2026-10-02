@@ -92,6 +92,7 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     email_verified: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     password_hash: Mapped[str] = mapped_column(String(255))
+    max_user_id: Mapped[Optional[str]] = mapped_column(String(64), unique=True, nullable=True)
     telegram_user_id: Mapped[Optional[str]] = mapped_column(String(64), unique=True, nullable=True)
     slack_user_id: Mapped[Optional[str]] = mapped_column(String(64), unique=True, nullable=True)
     whatsapp_user_id: Mapped[Optional[str]] = mapped_column(String(64), unique=True, nullable=True)

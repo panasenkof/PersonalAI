@@ -20,7 +20,7 @@ from app.ingestion.schemas import IngestionEnvelope, utcnow
 from app.models import ChannelDelivery, IngestionJob
 
 logger = logging.getLogger(__name__)
-MESSENGERS = {"telegram", "slack", "whatsapp", "discord"}
+MESSENGERS = {"max", "telegram", "slack", "whatsapp", "discord"}
 
 
 def stage_reply(session: AsyncSession, job: IngestionJob) -> None:

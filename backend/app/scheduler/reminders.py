@@ -4,7 +4,7 @@ import asyncio
 import logging
 from datetime import date
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 
 from app.config import get_settings
@@ -24,19 +24,19 @@ def select_due_items(
 
 
 async def check_reminders_once() -> int:
-    """Scan users' vehicles for due maintenance; send one Telegram reminder per item per day."""
+    """Scan users' vehicles for due maintenance; send one messenger reminder per item per day."""
     settings = get_settings()
-    if not settings.telegram_bot_token:
+    if not (settings.telegram_bot_token or settings.max_bot_token):
         return 0
     sent = 0
     today = date.today().isoformat()
     async with SessionLocal() as session:
-        res = await session.execute(select(User).where(User.telegram_user_id.is_not(None)))
+        res = await session.execute(select(User).where(User.is_active.is_(True)).where(or_(User.telegram_user_id.is_not(None), User.max_user_id.is_not(None))))
         users = list(res.scalars().all())
         for user in users:
-            if not user.telegram_user_id:
+            use_telegram = bool(settings.telegram_bot_token and user.telegram_user_id)
+            if not use_telegram and not (settings.max_bot_token and user.max_user_id):
                 continue
-            tg_chat_id = int(user.telegram_user_id)
             res_v = await session.execute(
                 select(Entity)
                 .where(Entity.user_id == user.id)
@@ -79,7 +79,12 @@ async def check_reminders_once() -> int:
                     from app.channels.telegram import send_telegram_message
 
                     try:
-                        await send_telegram_message(chat_id=tg_chat_id, text=text)
+                        if use_telegram:
+                            await send_telegram_message(chat_id=int(user.telegram_user_id or "0"), text=text)
+                        else:
+                            from app.channels.max import send_max_message
+
+                            await send_max_message(user_id=int(user.max_user_id or "0"), text=text)
                     except Exception:  # noqa: BLE001 — release the claim so the next cycle retries
                         logger.warning("reminder delivery failed for user=%s item=%s", user.id, name, exc_info=True)
                         await session.delete(claim)

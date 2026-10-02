@@ -14,7 +14,7 @@ router = APIRouter(prefix='/v1/service', tags=['service information'])
 async def information(response: Response) -> dict:
     s = get_settings()
     response.headers['Cache-Control'] = 'no-store'
-    return {'name': s.app_name, 'version': s.app_version, 'operator': s.operator_name, 'support_email': s.support_email, 'privacy_url': s.privacy_url, 'terms_url': s.terms_url, 'email_enabled': mail_configured(), 'email_verification_required': s.require_verified_email, 'backup_retention_days': s.backup_retention_days, 'reminder_channel': 'telegram' if s.reminders_enabled else None, 'max_upload_bytes': s.max_upload_bytes}
+    return {'name': s.app_name, 'version': s.app_version, 'operator': s.operator_name, 'support_email': s.support_email, 'privacy_url': s.privacy_url, 'terms_url': s.terms_url, 'email_enabled': mail_configured(), 'email_verification_required': s.require_verified_email, 'backup_retention_days': s.backup_retention_days, 'reminder_channel': ('telegram' if s.telegram_bot_token else 'max' if s.max_bot_token else None) if s.reminders_enabled else None, 'max_upload_bytes': s.max_upload_bytes}
 
 
 @router.get('/diagnostics')

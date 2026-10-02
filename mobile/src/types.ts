@@ -6,7 +6,7 @@ export type Me = {
   role: "user" | "admin";
   totp_enabled: boolean;
   email_verified?: boolean;
-  channels: Record<"telegram" | "slack" | "whatsapp" | "discord", boolean>;
+  channels: Record<"telegram" | "max" | "slack" | "whatsapp" | "discord", boolean>;
 };
 
 export type Conversation = {
