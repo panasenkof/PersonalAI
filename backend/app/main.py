@@ -20,6 +20,7 @@ from app.api.v1.service import router as service_router
 from app.api.v1.settings_llm import router as settings_router
 from app.api.v1.stats import router as stats_router
 from app.channels.discord import router as discord_router
+from app.channels.max import router as max_router
 from app.channels.slack import router as slack_router
 from app.channels.telegram import router as telegram_router
 from app.channels.whatsapp import router as whatsapp_router
@@ -178,6 +179,7 @@ app.include_router(facts_router)
 app.include_router(admin_router)
 app.include_router(whatsapp_router)
 app.include_router(discord_router)
+app.include_router(max_router)
 app.include_router(telegram_router)
 app.include_router(slack_router)
 app.include_router(mcp_router)

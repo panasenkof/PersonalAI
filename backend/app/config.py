@@ -95,6 +95,11 @@ class Settings(BaseSettings):
     fallback_api_key: str = ""
     fallback_model: str = "gpt-4o-mini"
 
+    max_bot_token: str = ""
+    max_webhook_secret: str = ""
+    max_api_base_url: str = "https://platform-api2.max.ru"
+    max_media_allowed_hosts: str = "max.ru,ok.ru,userapi.com"
+
     telegram_bot_token: str = ""
     telegram_webhook_secret: str = ""
 
@@ -210,6 +215,8 @@ def production_problems(s: Settings) -> list[str]:
             except Exception:  # noqa: BLE001
                 problems.append("PIA_AGENT_SECRET contains an invalid Fernet key")
                 break
+    if s.max_bot_token and not s.max_webhook_secret:
+        problems.append("MAX_WEBHOOK_SECRET is required when MAX_BOT_TOKEN is set")
     if s.telegram_bot_token and not s.telegram_webhook_secret:
         problems.append("TELEGRAM_WEBHOOK_SECRET is required when TELEGRAM_BOT_TOKEN is set")
     if s.slack_bot_token and not s.slack_signing_secret:

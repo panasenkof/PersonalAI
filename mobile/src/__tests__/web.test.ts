@@ -25,3 +25,14 @@ test('worker does not intercept API or POST requests',()=>{const handlers:Record
 
 test('wrong current password leaves the existing session intact', async()=>{win.localStorage.setItem('pia_token','existing');el('currentPass').value='wrong';el('newPass').value='new-password';fetchMock.mockResolvedValueOnce({ok:false,status:401,json:async()=>({detail:'invalid_credentials'})});await el('btnChangePassword').onclick();expect(win.localStorage.getItem('pia_token')).toBe('existing');expect(el('setMsg').textContent).toContain('Неверный');expect(fetchMock).toHaveBeenCalledTimes(1);});
  test('successful password change rotates local credentials and clears fields',async()=>{el('currentPass').value='current';el('newPass').value='new-password';fetchMock.mockResolvedValueOnce(ok({access_token:'new-token',refresh_token:'new-refresh'}));await el('btnChangePassword').onclick();expect(win.localStorage.getItem('pia_token')).toBe('new-token');expect(el('newPass').value).toBe('');});
+
+test('MAX selection requests its link code and shows instructions', async () => {
+  el('chSel').value = 'max';
+  fetchMock.mockResolvedValueOnce(ok({code:'MAX12345',instructions:'Отправьте /start MAX12345 боту MAX'}));
+  await el('btnLinkCode').onclick();
+  expect(fetchMock.mock.calls[0][0]).toBe('/v1/channels/max/link-code');
+  expect(fetchMock.mock.calls[0][1].method).toBe('POST');
+  expect(el('linkBox').textContent).toContain('MAX12345');
+  expect(el('linkBox').textContent).toContain('/start');
+  expect(el('linkBox').classList.contains('hidden')).toBe(false);
+});

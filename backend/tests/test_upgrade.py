@@ -40,5 +40,8 @@ def test_upgrade_preserves_existing_jobs_and_claims_one_delivery(tmp_path, diale
             assert "ix_ingestion_jobs_status_updated" in {index["name"] for index in indexes}
             delivery_columns = await c.run_sync(lambda conn: inspect(conn).get_columns("channel_deliveries"))
             assert {"job_id", "user_id", "attempts", "lease_until", "lease_token", "sent_at"} <= {column["name"] for column in delivery_columns}
+            user_columns = await c.run_sync(lambda conn: inspect(conn).get_columns("users"))
+            assert "max_user_id" in {column["name"] for column in user_columns}
+            assert (await c.execute(text("SELECT max_user_id FROM users WHERE id='upgrade-user'"))).scalar() is None
         await engine.dispose()
     asyncio.run(verify())

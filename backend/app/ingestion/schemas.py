@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 class Channel(str, Enum):
     mobile = "mobile"
+    max = "max"
     telegram = "telegram"
     slack = "slack"
     whatsapp = "whatsapp"

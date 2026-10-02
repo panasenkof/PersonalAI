@@ -139,3 +139,5 @@ FastAPI (N реплик) ──► IngestionEnvelope ──► submit_envelope �
 ## Автор
 
 Panasenkof
+
+MAX: подключение бота, webhook и привязка аккаунта описаны в [docs/CHANNELS.md](docs/CHANNELS.md#max).

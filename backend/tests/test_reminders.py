@@ -78,3 +78,42 @@ def test_reminder_dedupe_unique_day() -> None:
             await s.flush()
 
     asyncio.run(main())
+
+
+@pytest.mark.parametrize("telegram", [False, True])
+def test_max_reminders_and_telegram_preference(monkeypatch, telegram):
+    from app.config import get_settings
+    from app.scheduler import reminders
+    s = get_settings()
+    monkeypatch.setattr(s, "max_bot_token", "max-token")
+    monkeypatch.setattr(s, "telegram_bot_token", "tg-token" if telegram else "")
+    deliveries = []
+    async def send_max(user_id, text):
+        deliveries.append(("max", user_id))
+    async def send_tg(chat_id, text):
+        deliveries.append(("telegram", chat_id))
+    monkeypatch.setattr("app.channels.max.send_max_message", send_max)
+    monkeypatch.setattr("app.channels.telegram.send_telegram_message", send_tg)
+    async def due(*args):
+        return {"items": [{"item": "Масло", "km_until_due": 100}]}
+    monkeypatch.setattr(reminders, "auto_compute_next_due", due)
+    async def main():
+        engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        S = async_sessionmaker(engine, expire_on_commit=False)
+        monkeypatch.setattr(reminders, "SessionLocal", S)
+        async with S() as session:
+            u = User(email="max-reminder@test.dev", password_hash="x", max_user_id="123", telegram_user_id="456")
+            session.add(u)
+            await session.flush()
+            c = Collection(user_id=u.id, name="Garage", slug="garage")
+            session.add(c)
+            await session.flush()
+            session.add(Entity(user_id=u.id, collection_id=c.id, domain="automotive", payload={"type": "vehicle", "approved_maintenance_schedule": True}))
+            await session.commit()
+        assert await reminders.check_reminders_once() == 1
+        assert await reminders.check_reminders_once() == 0
+        assert deliveries == [("telegram", 456)] if telegram else deliveries == [("max", 123)]
+        await engine.dispose()
+    asyncio.run(main())

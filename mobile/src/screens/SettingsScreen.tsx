@@ -8,7 +8,7 @@ import { useTheme } from "../theme";
 import { sharePrivateFile } from "../share";
 import type { LLMSettings, ServiceInfo } from "../types";
 
-const CHANNELS = ["telegram", "slack", "whatsapp", "discord"] as const;
+const CHANNELS = ["telegram", "max", "slack", "whatsapp", "discord"] as const;
 
 export function SettingsScreen() {
   const t = useTheme();
@@ -159,8 +159,8 @@ export function SettingsScreen() {
       {CHANNELS.map((c) => (
         <View key={c} style={{ gap: 4 }}>
           <View style={styles.row}>
-            <Text style={{ color: t.text, textTransform: "capitalize" }}>{c} {me?.channels?.[c] ? "✅ привязан" : ""}</Text>
-            <Pressable style={[styles.small, { borderColor: t.line }]} onPress={() => guard(async () => {
+            <Text style={{ color: t.text, textTransform: "capitalize" }}>{c === "max" ? "MAX" : c} {me?.channels?.[c] ? "✅ привязан" : ""}</Text>
+            <Pressable accessibilityLabel={`Получить код привязки ${c === "max" ? "MAX" : c}`} style={[styles.small, { borderColor: t.line }]} onPress={() => guard(async () => {
               const r = await api.linkCode(c);
               setLinks((l) => ({ ...l, [c]: `${r.code}${r.instructions ? `\n${r.instructions}` : ""}` }));
             })}>
@@ -186,7 +186,7 @@ export function SettingsScreen() {
       ])}><Text style={styles.btnText}>Удалить аккаунт</Text></Pressable>
       <Text style={[styles.h, { color: t.text }]}>О сервисе и помощь</Text>
       <Text selectable style={{ color: t.muted }}>PIA Agent {service?.version ?? "—"} · {service?.operator || "Оператор не указан"}</Text>
-      <Text style={{ color: t.muted }}>Напоминания приходят через привязанный Telegram. Нативные push пока не поддерживаются. Оплату и лимиты модели устанавливают провайдер и оператор.</Text>
+      <Text style={{ color: t.muted }}>Напоминания приходят через привязанный Telegram или MAX. При подключении обоих используется Telegram. Нативные push пока не поддерживаются. Оплату и лимиты модели устанавливают провайдер и оператор.</Text>
       {service?.support_email ? <Pressable accessibilityRole="link" style={styles.small} onPress={() => guard(async () => { await Linking.openURL(`mailto:${encodeURIComponent(service.support_email)}`); })}><Text style={{ color: t.accent }}>Написать в поддержку: {service.support_email}</Text></Pressable> : null}
       {[["Политика конфиденциальности", service?.privacy_url], ["Условия использования", service?.terms_url]].map(([title, url]) => url?.startsWith("https://") ? <Pressable key={title} accessibilityRole="link" style={styles.small} onPress={() => guard(async () => { await Linking.openURL(url); })}><Text style={{ color: t.accent }}>{title}</Text></Pressable> : null)}
       <Pressable disabled={busy} accessibilityRole="button" style={btn(t.muted)} onPress={() => guard(async () => { const info = await api.diagnostics(); await sharePrivateFile("pia-diagnostics.json", JSON.stringify(info, null, 2), "application/json"); }, "Диагностика подготовлена ✔")}><Text style={styles.btnText}>Поделиться диагностикой без личных данных</Text></Pressable>

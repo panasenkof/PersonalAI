@@ -21,6 +21,8 @@ _PATTERNS: list[tuple[re.Pattern[str], str]] = [
 ]
 
 _SECRET_FIELDS = (
+    "max_bot_token",
+    "max_webhook_secret",
     "telegram_bot_token",
     "telegram_webhook_secret",
     "slack_bot_token",
