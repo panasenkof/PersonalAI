@@ -325,3 +325,29 @@ async def test_slack_api_error_with_http_200_is_not_success(monkeypatch):
     monkeypatch.setattr(slack, 'request_json', rejected)
     with pytest.raises(RuntimeError, match='slack_message_rejected'):
         await slack.send_slack_message('channel', 'text')
+
+
+@pytest.mark.asyncio
+async def test_missing_channel_configuration_keeps_reply_pending(monkeypatch):
+    from app.queue.delivery import deliver_reply
+
+    monkeypatch.setattr(get_settings(), 'telegram_bot_token', '')
+    jid = await _seed_delivery()
+    assert not await deliver_reply(jid)
+    async with SessionLocal() as session:
+        row = await session.get(ChannelDelivery, jid)
+        assert row.sent_at is None and row.attempts == 1 and row.error == 'RuntimeError'
+
+
+@pytest.mark.asyncio
+async def test_telegram_api_rejection_with_http_200_is_not_success(monkeypatch):
+    import httpx
+
+    from app.channels import telegram
+
+    monkeypatch.setattr(get_settings(), 'telegram_bot_token', 'test-token')
+    async def rejected(*args, **kwargs):
+        return httpx.Response(200, json={'ok': False, 'description': 'Rejected'})
+    monkeypatch.setattr(telegram, 'request_json', rejected)
+    with pytest.raises(RuntimeError, match='telegram_message_rejected'):
+        await telegram.send_telegram_message(1, 'text')

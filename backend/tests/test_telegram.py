@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from unittest.mock import AsyncMock
 
 from starlette.testclient import TestClient
 
@@ -10,6 +11,7 @@ from app.channels import telegram as telegram_mod
 def test_telegram_photo_flow_records_blob_and_replies(
     client: TestClient, random_email: str, monkeypatch
 ) -> None:
+    monkeypatch.setattr(telegram_mod, "_tg_api", AsyncMock())
     # 1) register + issue link code
     r = client.post("/v1/auth/register", json={"email": random_email, "password": "secret1234"})
     token = r.json()["access_token"]

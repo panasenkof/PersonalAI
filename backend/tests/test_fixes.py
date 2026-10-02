@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from unittest.mock import AsyncMock
 
 from starlette.testclient import TestClient
 
@@ -48,6 +49,7 @@ def test_worker_crash_marks_job_failed(monkeypatch) -> None:
 def test_telegram_voice_message_gets_transcribed(
     client: TestClient, random_email: str, monkeypatch
 ) -> None:
+    monkeypatch.setattr(telegram_mod, "_tg_api", AsyncMock())
     r = client.post("/v1/auth/register", json={"email": random_email, "password": "secret1234"})
     token = r.json()["access_token"]
     r = client.post("/v1/channels/telegram/link-code", headers={"Authorization": f"Bearer {token}"})

@@ -9,6 +9,7 @@ import json
 import time
 import uuid
 from typing import Any
+from unittest.mock import AsyncMock, patch
 from urllib.parse import urlencode
 
 import pytest
@@ -74,10 +75,14 @@ class FakeAgent:
 
 def _tg_pair(client: TestClient, headers: dict[str, str], tg_id: int) -> None:
     code = _pair_code(client, headers, "telegram")
-    client.post(
-        "/v1/channels/telegram/webhook",
-        json={"message": {"from": {"id": tg_id}, "chat": {"id": tg_id}, "text": f"/start {code}"}},
-    )
+    # Pairing sends a welcome message; mock the transport explicitly rather than relying on
+    # an unconfigured bot silently accepting delivery.
+    with patch.object(telegram_mod, "_tg_api", new=AsyncMock()):
+        response = client.post(
+            "/v1/channels/telegram/webhook",
+            json={"message": {"from": {"id": tg_id}, "chat": {"id": tg_id}, "text": f"/start {code}"}},
+        )
+    assert response.status_code == 200
 
 
 def test_telegram_pdf_document_becomes_attachment(client: TestClient, monkeypatch) -> None:

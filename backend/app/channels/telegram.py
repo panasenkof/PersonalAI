@@ -92,8 +92,11 @@ async def create_link_code(
 async def _tg_api(method: str, payload: dict[str, Any]) -> None:
     token = get_settings().telegram_bot_token
     if not token:
-        return
-    await request_json("POST", f"https://api.telegram.org/bot{token}/{method}", json=payload, label=f"telegram/{method}")
+        raise RuntimeError("telegram_bot_token_not_configured")
+    response = await request_json("POST", f"https://api.telegram.org/bot{token}/{method}", json=payload, label=f"telegram/{method}")
+
+    if response.json().get("ok") is not True:
+        raise RuntimeError("telegram_message_rejected")
 
 
 def _chunks(text: str, limit: int = TG_MESSAGE_LIMIT) -> list[str]:

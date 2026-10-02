@@ -55,7 +55,7 @@ def verify_signature(body: bytes, signature: str | None, app_secret: str) -> boo
 async def _post_message(to: str, payload: dict[str, Any]) -> None:
     s = get_settings()
     if not s.whatsapp_access_token or not s.whatsapp_phone_number_id:
-        return
+        raise RuntimeError("whatsapp_not_configured")
     body = {"messaging_product": "whatsapp", "to": to, **payload}
     await request_json(
         "POST",
