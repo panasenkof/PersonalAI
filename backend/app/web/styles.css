@@ -105,3 +105,13 @@ a { color:#9bc2ff; }
 aside .conv { width:100%; text-align:left; }
 
 input[type="checkbox"] { width:24px; height:24px; }
+
+/* Uploaded files remain unclassified until explicitly approved by owner. */
+#attachmentBar { padding:10px 16px; background:var(--panel); border-top:1px solid var(--line); display:flex; flex-direction:column; gap:8px; }
+.attachment-title { display:flex; justify-content:space-between; gap:10px; align-items:center; }
+.attachment-privacy { display:grid; grid-template-columns:minmax(110px,auto) minmax(150px,1fr); gap:7px 10px; align-items:center; }
+.attachment-privacy label { font-size:12px; color:var(--muted); }
+.attachment-privacy select { min-width:0; }
+.attachment-privacy button, .attachment-privacy small { grid-column:1/-1; }
+.attachment-privacy small { color:var(--muted); }
+@media(max-width:650px) { .attachment-privacy { grid-template-columns:1fr; } }

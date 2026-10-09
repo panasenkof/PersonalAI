@@ -700,10 +700,52 @@ async function saveSettings() {
 
 function clearAttachment() {
   attachment = null; $("fileInput").value = ""; $("attachmentBar").classList.add("hidden");
+  $("attachmentPrivacy").classList.add("hidden"); $("attachmentPrivacyStatus").textContent = "";
 }
 function showAttachment(file) {
   attachment = file; $("attachmentName").textContent = file.filename; $("attachmentBar").classList.remove("hidden");
+  $("attachmentPrivacy").classList.toggle("hidden", !file.blob_id);
+  $("attachmentSensitivity").value = "sensitive";
+  $("attachmentCollection").value = "";
+  $("attachmentPrivacyStatus").textContent = "Не классифицирован. Внешняя обработка запрещена.";
 }
+async function loadAttachmentCollections() {
+  try {
+    const rows = await api("/v1/privacy/collections");
+    const select = $("attachmentCollection");
+    select.replaceChildren(new Option("Не выбрана", ""));
+    for (const item of (Array.isArray(rows) ? rows : [])) {
+      if (item.sensitivity === "standard" || item.sensitivity === "sensitive") {
+        select.append(new Option(item.slug === "garage" ? "Автомобиль" : item.slug === "health" ? "Здоровье" : item.slug, item.slug));
+      }
+    }
+  } catch {
+    $("attachmentPrivacyStatus").textContent = "Не удалось загрузить категории. Файл остаётся неклассифицированным.";
+  }
+}
+$("btnClassifyFile").onclick = async () => {
+  const file = attachment;
+  const slug = $("attachmentCollection").value;
+  const sensitivity = $("attachmentSensitivity").value;
+  if (!file?.blob_id || !slug || !["standard", "sensitive", "secret"].includes(sensitivity)) {
+    $("attachmentPrivacyStatus").textContent = "Выберите категорию и чувствительность.";
+    return;
+  }
+  const button = $("btnClassifyFile");
+  button.disabled = true;
+  try {
+    await api("/v1/privacy/blobs/" + encodeURIComponent(file.blob_id), {
+      method: "PUT", body: { collection_slug: slug, sensitivity },
+    });
+    if (attachment?.blob_id !== file.blob_id) return;
+    attachment = { ...file, classification: { collection_slug: slug, sensitivity } };
+    $("attachmentPrivacyStatus").textContent = sensitivity === "standard"
+      ? "Классифицирован. Для внешней обработки нужно отдельное разрешение категории."
+      : "Классифицирован. Внешняя обработка содержимого запрещена.";
+  } catch (err) {
+    $("attachmentPrivacyStatus").textContent = "Не удалось сохранить: " + friendlyError(err.message);
+  } finally { button.disabled = false; }
+};
 $("btnAttach").onclick = () => $("fileInput").click();
 $("btnRemoveFile").onclick = clearAttachment;
 $("fileInput").onchange = async () => {
@@ -712,7 +754,8 @@ $("fileInput").onchange = async () => {
   try {
     const form = new FormData(); form.append("file", file);
     const result = await api("/v1/blobs", { method: "POST", body: form });
-    showAttachment({ storage_key: result.storage_key, mime: result.mime, filename: file.name });
+    showAttachment({ storage_key: result.storage_key, blob_id: result.blob_id, mime: result.mime, filename: file.name });
+    if (result.blob_id) await loadAttachmentCollections();
   } catch(e) { addMeta(friendlyError(e.message)); }
   finally { uploading = false; $("btnAttach").disabled = $("btnSend").disabled = $("btnLogout").disabled = false; $("fileInput").value = ""; }
 };
