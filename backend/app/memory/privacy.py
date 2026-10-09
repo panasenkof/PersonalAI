@@ -140,6 +140,7 @@ async def cloud_tool_allowed(
     """Re-check the exact target at dispatch time, not only at tool schema exposure."""
     if name in {"kb_search", "kb_list_entities"}:
         return bool(allowed)
+    allowed &= await cloud_allowed_collections(session, user_id)
     if not allowed:
         return False
     if name in _CLOUD_COLLECTION_TOOLS:
