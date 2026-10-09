@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from sqlalchemy import inspect, text
+from sqlalchemy import JSON, bindparam, inspect, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 
@@ -96,16 +96,18 @@ def test_memory_v2_migration_preserves_legacy_rows(tmp_path, dialect):
                 "INSERT INTO collections (id,user_id,name,slug) "
                 "VALUES ('memory-collection','memory-user','Garage','garage')"
             ))
-            await conn.execute(text(
-                """INSERT INTO entities (id,user_id,collection_id,domain,schema_version,payload,created_at)
-                VALUES ('memory-entity','memory-user','memory-collection','automotive','1',
-                '{"type":"vehicle","make":"Toyota"}',CURRENT_TIMESTAMP)"""
-            ))
-            await conn.execute(text(
-                """INSERT INTO observations (id,user_id,entity_id,occurred_at,kind,payload,created_at)
-                VALUES ('memory-observation','memory-user','memory-entity',CURRENT_TIMESTAMP,
-                'service_event','{"notes":"old receipt","odometer_km":123}',CURRENT_TIMESTAMP)"""
-            ))
+            await conn.execute(
+                text("""INSERT INTO entities (id,user_id,collection_id,domain,schema_version,payload,created_at)
+                    VALUES ('memory-entity','memory-user','memory-collection','automotive','1',
+                    :payload,CURRENT_TIMESTAMP)""").bindparams(bindparam("payload", type_=JSON())),
+                {"payload": {"type": "vehicle", "make": "Toyota"}},
+            )
+            await conn.execute(
+                text("""INSERT INTO observations (id,user_id,entity_id,occurred_at,kind,payload,created_at)
+                    VALUES ('memory-observation','memory-user','memory-entity',CURRENT_TIMESTAMP,
+                    'service_event',:payload,CURRENT_TIMESTAMP)""").bindparams(bindparam("payload", type_=JSON())),
+                {"payload": {"notes": "old receipt", "odometer_km": 123}},
+            )
         await engine.dispose()
 
     asyncio.run(seed())
