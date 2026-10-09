@@ -12,6 +12,7 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
+    Float,
     Index,
     Integer,
     LargeBinary,
@@ -174,6 +175,9 @@ class Collection(Base):
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     name: Mapped[str] = mapped_column(String(255))
     slug: Mapped[str] = mapped_column(String(64), index=True)
+    # Descriptive metadata only: policy enforcement is a separate phase.
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    sensitivity: Mapped[str] = mapped_column(String(16), default="unclassified", server_default="unclassified")
 
     user: Mapped["User"] = relationship(back_populates="collections")
     entities: Mapped[list["Entity"]] = relationship(back_populates="collection")
@@ -188,7 +192,16 @@ class Entity(Base):
     domain: Mapped[str] = mapped_column(String(64), index=True)
     schema_version: Mapped[str] = mapped_column(String(32), default="1")
     payload: Mapped[dict[str, Any]] = mapped_column(JSON)
+    title: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    # "active" refers to the memory record, not to the current truth of its payload.
+    record_status: Mapped[str] = mapped_column(String(16), default="active", server_default="active")
+    sensitivity: Mapped[str] = mapped_column(String(16), default="inherit", server_default="inherit")
+    valid_from: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    valid_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    source_kind: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    source_ref: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, onupdate=utcnow)
 
     collection: Mapped["Collection"] = relationship(back_populates="entities")
     observations: Mapped[list["Observation"]] = relationship(back_populates="entity")
@@ -203,6 +216,12 @@ class Observation(Base):
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     kind: Mapped[str] = mapped_column(String(64))
     payload: Mapped[dict[str, Any]] = mapped_column(JSON)
+    sensitivity: Mapped[str] = mapped_column(String(16), default="inherit", server_default="inherit")
+    valid_from: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    valid_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    source_kind: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    source_ref: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     entity: Mapped["Entity"] = relationship(back_populates="observations")
