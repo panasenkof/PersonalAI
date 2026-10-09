@@ -16,12 +16,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
+from app.memory.contracts import NewObservation
+from app.memory.sqlalchemy import SqlAlchemyMemoryRepository
 from app.models import (
     ExtractedFact,
     ExtractedFactStatus,
     IngestionJob,
     JobStatus,
-    Observation,
     utcnow,
 )
 from app.rag.indexing import index_observation
@@ -67,11 +68,11 @@ async def stage_or_commit_observation(
         session.add(fact)
         await session.flush()
         return {"fact_id": fact.id, "status": "pending_user_confirm", "summary": summary}
-    obs = Observation(user_id=user_id, entity_id=entity_id, occurred_at=occurred_at, kind=kind, payload=payload)
-    session.add(obs)
-    await session.flush()
-    await index_observation(session, user_id, obs)
-    return {"observation_id": obs.id, "status": "saved"}
+    observation = await SqlAlchemyMemoryRepository(session, user_id).create_observation(NewObservation(
+        entity_id=entity_id, occurred_at=occurred_at, kind=kind, payload=payload,
+    ))
+    await index_observation(session, user_id, observation)
+    return {"observation_id": observation.id, "status": "saved"}
 
 
 def fact_view(f: ExtractedFact) -> dict[str, Any]:
@@ -124,17 +125,14 @@ async def resolve_fact(session: AsyncSession, user_id: str, fact_id: str, *, con
     if confirm:
         if not fact.entity_id:
             raise FactError("entity_missing")
-        obs = Observation(
-            user_id=user_id,
+        observation = await SqlAlchemyMemoryRepository(session, user_id).create_observation(NewObservation(
             entity_id=fact.entity_id,
             occurred_at=_parse_dt(p.get("occurred_at")),
             kind=str(p.get("kind") or "observation"),
             payload=p.get("observation") or {},
-        )
-        session.add(obs)
-        await session.flush()
-        await index_observation(session, user_id, obs)
-        fact.observation_id = obs.id
+        ))
+        await index_observation(session, user_id, observation)
+        fact.observation_id = observation.id
         fact.status = ExtractedFactStatus.committed.value
     else:
         fact.status = ExtractedFactStatus.rejected.value
