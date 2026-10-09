@@ -1,8 +1,6 @@
 """Privacy enforcement: no unauthorized cloud model/tool/embedding egress."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 import httpx
 import pytest
 from sqlalchemy import select
@@ -13,7 +11,6 @@ from app.agent.universal_tools import kb_list_entities, kb_search
 from app.llm.providers import ChatMessage, CloudLLMProvider, LLMCompletionResult, LocalLLMProvider
 from app.memory.privacy import (
     cloud_allowed_collections,
-    filter_cloud_hits,
     is_trusted_local_provider,
     use_cloud_scope,
 )
