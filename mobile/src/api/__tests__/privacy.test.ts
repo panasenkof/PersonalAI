@@ -19,7 +19,7 @@ test("mobile privacy controls roundtrip owner-scoped API and send explicit flags
       }] };
     }
     return { ok: true, status: 200, json: async () => JSON.parse(String((init as RequestInit).body)) };
-  }) as typeof fetch;
+  }) as unknown as typeof fetch;
   try {
     const collections = await api.privacyCollections();
     expect(collections).toHaveLength(1);
