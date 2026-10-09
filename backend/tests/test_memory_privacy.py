@@ -1,6 +1,8 @@
 """Privacy enforcement: no unauthorized cloud model/tool/embedding egress."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import httpx
 import pytest
 from sqlalchemy import select
@@ -14,8 +16,8 @@ from app.memory.privacy import (
     is_trusted_local_provider,
     use_cloud_scope,
 )
-from app.models import Base, Chunk, Collection, Entity, User
-from app.rag.indexing import index_entity
+from app.models import Base, Chunk, Collection, Entity, Observation, User
+from app.rag.indexing import index_entity, index_observation
 
 
 class SpyCloud(CloudLLMProvider):
@@ -118,7 +120,22 @@ async def test_cloud_memory_tools_filter_owner_collection_and_sensitive_record(m
             allowed.allow_remote_embeddings = True
             await session.flush()
             await index_entity(session, alice.id, rows[0])
-            assert cloud.embedding_requests and "ALLOWED_ANCHOR" in cloud.embedding_requests[-1][0]
+            assert len(cloud.embedding_requests) == 1
+            assert "ALLOWED_ANCHOR" in cloud.embedding_requests[-1][0]
+            # Explicit sensitive overrides must block embeddings even under an allowed collection.
+            await index_entity(session, alice.id, rows[1])
+            assert len(cloud.embedding_requests) == 1
+            observation = Observation(
+                user_id=alice.id, entity_id=rows[0].id, kind="note",
+                occurred_at=datetime.now(timezone.utc),
+                payload={"text": "PRIVATE_OBSERVATION"}, sensitivity="sensitive",
+            )
+            session.add(observation)
+            await session.flush()
+            await index_observation(session, alice.id, observation)
+            assert len(cloud.embedding_requests) == 1
+            with use_cloud_scope(grants):
+                assert (await kb_search(session, alice.id, {"query": "PRIVATE_OBSERVATION"}))["hits"] == []
             assert await cloud_allowed_collections(session, alice.id, embeddings=True) == frozenset({allowed.id})
     finally:
         await engine.dispose()
@@ -218,4 +235,9 @@ async def test_local_flag_at_remote_url_and_agent_fallback_do_not_leak(monkeypat
         await _chat_step(
             local, "model", [ChatMessage(role="user", content="private")],
             tools=[{"type": "function", "function": {"name": "kb_search"}}],
+        )
+    # Even a plain chat cannot silently send the prompt to the fallback cloud.
+    with pytest.raises(httpx.ConnectError):
+        await _chat_step(
+            local, "model", [ChatMessage(role="user", content="private")], tools=[],
         )
