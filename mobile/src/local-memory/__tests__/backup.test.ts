@@ -17,16 +17,14 @@ import { withLocalMemoryDatabase } from "../storage";
 import { createRecoveryCode, restoreEncryptedBackup, shareEncryptedBackup } from "../backup";
 
 const code = Array.from({ length: 32 }, (_, i) => i.toString(16).padStart(2, "0")).join("");
-const tx = {
-  getFirstAsync: jest.fn(async (_sql: string): Promise<{ n: number } | null> => ({ n: 0 })),
-  execAsync: jest.fn(async (_sql: string) => {}),
-};
+let mockRestored = false;
+let mockAlreadyContainsMemory = false;
 const mockDb = {
   runAsync: jest.fn(async (_sql: string, _params?: unknown[]) => ({})),
   execAsync: jest.fn(async (_sql: string) => {}),
   getFirstAsync: jest.fn(async (_sql: string): Promise<Record<string, number> | null> => ({})),
   getAllAsync: jest.fn(async (_sql: string): Promise<Array<{ name: string }>> => []),
-  withExclusiveTransactionAsync: jest.fn(async (task: (value: typeof tx) => Promise<void>) => task(tx)),
+  withExclusiveTransactionAsync: jest.fn(async () => { throw new Error("new_connection_forbidden"); }),
 };
 const names = ["memory_collections", "memory_entities", "memory_observations",
   "memory_relations", "memory_revisions", "memory_notes_fts"];
@@ -40,18 +38,25 @@ beforeEach(() => {
   (FS.deleteAsync as jest.Mock).mockResolvedValue(undefined);
   (FS.copyAsync as jest.Mock).mockResolvedValue(undefined);
   (FS.getInfoAsync as jest.Mock).mockResolvedValue({ exists: true, size: 4096, isDirectory: false });
+  mockRestored = false;
+  mockAlreadyContainsMemory = false;
   mockDb.runAsync.mockResolvedValue({});
-  mockDb.execAsync.mockResolvedValue(undefined);
+  mockDb.execAsync.mockImplementation(async (sql: string) => {
+    if (sql === "COMMIT") mockRestored = true;
+  });
   mockDb.getFirstAsync.mockImplementation(async (sql: string): Promise<Record<string, number> | null> => {
     if (sql.includes("pia_import.user_version")) return { user_version: 1 };
     if (sql.includes("pia_import.memory_entities")) return { n: 2 };
+    if (sql === "SELECT count(*) AS n FROM memory_collections") {
+      return { n: mockAlreadyContainsMemory || mockRestored ? 1 : 0 };
+    }
     if (sql.includes("memory_collections")) return { n: 1 };
     if (sql.includes("memory_observations")) return { n: 1 };
+    if (sql.includes("foreign_key_check")) return null;
     return {};
   });
   mockDb.getAllAsync.mockResolvedValue(names.map(name => ({ name })));
-  tx.getFirstAsync.mockImplementation(async sql => sql.includes("foreign_key_check") ? null : { n: 0 });
-  tx.execAsync.mockResolvedValue(undefined);
+
 });
 
 test("generates 256-bit recovery code and refuses invalid codes before filesystem access", async () => {
@@ -86,27 +91,30 @@ test("failed share deletes ciphertext from cache", async () => {
 test("wrong password/corrupted backup cannot mutate the destination", async () => {
   mockDb.getAllAsync.mockRejectedValueOnce(new Error("wrong key"));
   await expect(restoreEncryptedBackup("guest", "file:///bad.db", code)).rejects.toThrow("wrong key");
-  expect(tx.execAsync).not.toHaveBeenCalled();
+  expect(mockDb.execAsync.mock.calls.some(([sql]: string[]) => sql.startsWith("INSERT INTO"))).toBe(false);
   expect(mockDb.execAsync).toHaveBeenCalledWith("DETACH DATABASE pia_import");
   expect(FS.deleteAsync).toHaveBeenCalledTimes(1);
 });
 
 test("restore refuses to overwrite a profile with any existing collection", async () => {
-  tx.getFirstAsync.mockResolvedValueOnce({ n: 1 });
+  mockAlreadyContainsMemory = true;
   await expect(restoreEncryptedBackup("guest", "file:///backup.db", code))
     .rejects.toThrow("restore_requires_empty_memory");
-  expect(tx.execAsync).not.toHaveBeenCalled();
+  expect(mockDb.execAsync.mock.calls.some(([sql]: string[]) => sql.startsWith("INSERT INTO"))).toBe(false);
 });
 
-test("restore imports all six tables and FTS within one exclusive transaction", async () => {
+test("restore imports all six tables and FTS atomically on the unlocked connection", async () => {
   const restored = await restoreEncryptedBackup("guest", "file:///backup.db", code);
   expect(restored).toEqual({ collections: 1, entities: 2, observations: 1 });
   expect(mockDb.runAsync).toHaveBeenCalledWith("ATTACH DATABASE ? AS pia_import KEY ?", [
     "file:///cache/pia-encrypted-random-id.db", code,
   ]);
-  expect(mockDb.withExclusiveTransactionAsync).toHaveBeenCalledTimes(1);
-  expect(tx.execAsync).toHaveBeenCalledTimes(6);
-  expect(tx.execAsync.mock.calls[5][0]).toContain("pia_import.memory_notes_fts");
+  expect(mockDb.withExclusiveTransactionAsync).not.toHaveBeenCalled();
+  const statements = mockDb.execAsync.mock.calls.map(([sql]: string[]) => sql);
+  expect(statements).toContain("BEGIN IMMEDIATE");
+  expect(statements).toContain("COMMIT");
+  expect(statements.filter((sql: string) => sql.startsWith("INSERT INTO"))).toHaveLength(6);
+  expect(statements.some((sql: string) => sql.includes("FROM pia_import.memory_notes_fts"))).toBe(true);
   expect(mockDb.execAsync).toHaveBeenCalledWith("DETACH DATABASE pia_import");
   expect(FS.deleteAsync).toHaveBeenCalledTimes(1);
 });
@@ -115,10 +123,25 @@ test("rejects unknown schema or oversized import before any transaction", async 
   mockDb.getAllAsync.mockResolvedValueOnce([]);
   await expect(restoreEncryptedBackup("guest", "file:///backup.db", code))
     .rejects.toThrow("incompatible_backup_schema");
-  expect(tx.execAsync).not.toHaveBeenCalled();
+  expect(mockDb.execAsync.mock.calls.some(([sql]: string[]) => sql.startsWith("INSERT INTO"))).toBe(false);
   (FS.getInfoAsync as jest.Mock).mockResolvedValueOnce({
     exists: true, size: 200 * 1024 * 1024, isDirectory: false,
   });
   await expect(restoreEncryptedBackup("guest", "file:///huge.db", code))
     .rejects.toThrow("invalid_backup_size");
+});
+
+
+test("partial recovery failure rolls back on the unlocked SQLCipher connection", async () => {
+  mockDb.execAsync.mockImplementation(async (sql: string) => {
+    if (sql.includes("INSERT INTO memory_observations")) throw new Error("disk_full");
+  });
+  await expect(restoreEncryptedBackup("guest", "file:///input.db", code))
+    .rejects.toThrow("disk_full");
+  const commands = mockDb.execAsync.mock.calls.map(([sql]: string[]) => sql);
+  expect(commands).toContain("BEGIN IMMEDIATE");
+  expect(commands).toContain("ROLLBACK");
+  expect(commands).not.toContain("COMMIT");
+  expect(mockDb.withExclusiveTransactionAsync).not.toHaveBeenCalled();
+  expect(FS.deleteAsync).toHaveBeenCalledTimes(1);
 });
