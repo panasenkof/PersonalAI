@@ -166,6 +166,8 @@ class LLMSettings(Base):
     embedding_model: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     supports_vision: Mapped[bool] = mapped_column(Boolean, default=True)
     cloud_history_access: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    allow_remote_stt: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    allow_mcp_access: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
 
     user: Mapped["User"] = relationship(back_populates="llm_settings")
 
@@ -183,6 +185,8 @@ class Collection(Base):
     # Explicit user opt-ins; legacy collections default to no cloud egress.
     allow_cloud_llm: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     allow_remote_embeddings: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    allow_remote_extraction: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    allow_messenger_reminders: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
 
     user: Mapped["User"] = relationship(back_populates="collections")
     entities: Mapped[list["Entity"]] = relationship(back_populates="collection")
