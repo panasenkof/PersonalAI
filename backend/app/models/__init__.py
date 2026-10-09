@@ -165,6 +165,7 @@ class LLMSettings(Base):
     default_model: Mapped[str] = mapped_column(String(128), default="gpt-4o-mini")
     embedding_model: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     supports_vision: Mapped[bool] = mapped_column(Boolean, default=True)
+    cloud_history_access: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
 
     user: Mapped["User"] = relationship(back_populates="llm_settings")
 
@@ -179,6 +180,9 @@ class Collection(Base):
     # Descriptive metadata only: policy enforcement is a separate phase.
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     sensitivity: Mapped[str] = mapped_column(String(16), default="unclassified", server_default="unclassified")
+    # Explicit user opt-ins; legacy collections default to no cloud egress.
+    allow_cloud_llm: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    allow_remote_embeddings: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
 
     user: Mapped["User"] = relationship(back_populates="collections")
     entities: Mapped[list["Entity"]] = relationship(back_populates="collection")
