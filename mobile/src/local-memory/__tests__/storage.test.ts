@@ -12,10 +12,18 @@ jest.mock("expo-crypto", () => ({ getRandomBytes: jest.fn(), randomUUID: jest.fn
 
 import { closeLocalMemory, openLocalMemory } from "../storage";
 
-const db = {
+type TestDatabase = {
+  getFirstAsync: jest.Mock;
+  execAsync: jest.Mock;
+  withExclusiveTransactionAsync: jest.Mock;
+  closeAsync: jest.Mock;
+};
+const db: TestDatabase = {
   getFirstAsync: jest.fn(),
   execAsync: jest.fn(async () => {}),
-  withExclusiveTransactionAsync: jest.fn(async (task: (tx: unknown) => Promise<void>) => task(db)),
+  withExclusiveTransactionAsync: jest.fn(async (task: (tx: TestDatabase) => Promise<void>): Promise<void> => {
+    await task(db);
+  }),
   closeAsync: jest.fn(async () => {}),
 };
 beforeEach(async () => {
