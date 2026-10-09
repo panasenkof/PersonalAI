@@ -9,6 +9,7 @@ import { useAuth } from "../auth/AuthContext";
 import { MemoryConflictError } from "../local-memory/types";
 import type { EntityRecord, ObservationRecord, RelationRecord, RevisionRecord } from "../local-memory/types";
 import { localMemoryRepository, SqliteMemoryRepository } from "../local-memory/repository";
+import { closeLocalMemory } from "../local-memory/storage";
 import { useTheme } from "../theme";
 
 const bodyOf = (e: EntityRecord): string => typeof e.payload.body === "string" ? e.payload.body : "";
@@ -16,7 +17,8 @@ const titleOf = (e: EntityRecord): string => e.title || "Без названия
 
 export function LocalMemoryScreen() {
   const t = useTheme();
-  const { offlineMode, closeOffline } = useAuth();
+  const { offlineMode, closeOffline, me } = useAuth();
+  const profileId = offlineMode ? "guest" : me?.id;
   const [repo, setRepo] = useState<SqliteMemoryRepository | null>(null);
   const [notes, setNotes] = useState<EntityRecord[]>([]);
   const [search, setSearch] = useState("");
@@ -42,8 +44,21 @@ export function LocalMemoryScreen() {
 
   useFocusEffect(useCallback(() => {
     let alive = true;
+    setRepo(null);
+    setNotes([]);
+    setSelected(null);
+    setHistory([]);
+    setEvents([]);
+    setRelations([]);
+    setTitle("");
+    setBody("");
     setLoading(true);
-    void localMemoryRepository().then(async db => {
+    if (!profileId) {
+      setMessage("Для доступа к локальной памяти выберите локальный режим или войдите.");
+      setLoading(false);
+      return () => {};
+    }
+    void localMemoryRepository(profileId).then(async db => {
       if (!alive) return;
       setRepo(db);
       await refresh(db, search, selected?.id);
@@ -51,10 +66,15 @@ export function LocalMemoryScreen() {
     }).catch((e: Error) => {
       if (alive) setMessage(e.message === "sqlcipher_required_native_build"
         ? "Для локального шифрования требуется отдельная сборка с SQLCipher. Expo Go не поддерживается."
-        : "Не удалось открыть зашифрованную базу: " + e.message);
+        : e.message === "local_memory_biometric_required"
+          ? "Для защищённой локальной памяти необходимо настроить биометрию телефона."
+          : "Не удалось разблокировать локальную память: " + e.message);
     }).finally(() => { if (alive) setLoading(false); });
-    return () => { alive = false; };
-  }, [refresh]));
+    return () => {
+      alive = false;
+      void closeLocalMemory();
+    };
+  }, [refresh, profileId]));
 
   const run = async (task: () => Promise<void>) => {
     if (busy || !repo) return;
