@@ -50,7 +50,7 @@ beforeEach(async () => {
   jest.clearAllMocks();
   (Crypto.getRandomBytes as jest.Mock).mockReturnValue(Uint8Array.from({ length: 32 }, (_, i) => i));
   (Crypto.digestStringAsync as jest.Mock).mockImplementation(async (_alg, input: string) =>
-    Array.from(input, ch => ch.charCodeAt(0).toString(16).padStart(2, "0")).join("").padEnd(64, "0"));
+    Array.from(input.slice(-16), ch => ch.charCodeAt(0).toString(16).padStart(2, "0")).join("").padEnd(64, "0"));
   (SecureStore.isAvailableAsync as jest.Mock).mockResolvedValue(true);
   (SecureStore.canUseBiometricAuthentication as jest.Mock).mockReturnValue(true);
   (SecureStore.getItemAsync as jest.Mock).mockImplementation(async (key: string, options?: { requireAuthentication?: boolean }) => {
