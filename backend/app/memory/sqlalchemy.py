@@ -315,16 +315,16 @@ class SqlAlchemyMemoryRepository:
         new_payload = deepcopy(payload)
         # Compare-and-swap runs atomically inside caller's transaction, including
         # simultaneous updates on PostgreSQL. SQLite uses the same version guard.
-        result = await self.session.execute(
+        updated_id = await self.session.scalar(
             update(Entity).where(
                 Entity.id == entity_id, Entity.user_id == self.user_id,
                 Entity.record_version == expected_version,
             ).values(
                 payload=new_payload, record_status=new_status,
                 record_version=expected_version + 1, updated_at=utcnow(),
-            ).execution_options(synchronize_session=False)
+            ).returning(Entity.id).execution_options(synchronize_session=False)
         )
-        if result.rowcount != 1:
+        if updated_id is None:
             raise MemoryConflictError("stale_memory_version")
         await self.session.refresh(row)
         self.session.add(MemoryRevision(
@@ -350,15 +350,15 @@ class SqlAlchemyMemoryRepository:
         if row.record_version != expected_version:
             raise MemoryConflictError("stale_memory_version")
         before = _observation_state(row)
-        result = await self.session.execute(
+        updated_id = await self.session.scalar(
             update(Observation).where(
                 Observation.id == observation_id, Observation.user_id == self.user_id,
                 Observation.record_version == expected_version,
             ).values(
                 payload=deepcopy(payload), record_version=expected_version + 1,
-            ).execution_options(synchronize_session=False)
+            ).returning(Observation.id).execution_options(synchronize_session=False)
         )
-        if result.rowcount != 1:
+        if updated_id is None:
             raise MemoryConflictError("stale_memory_version")
         await self.session.refresh(row)
         self.session.add(MemoryRevision(
