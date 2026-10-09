@@ -36,3 +36,34 @@ test('MAX selection requests its link code and shows instructions', async () => 
   expect(el('linkBox').textContent).toContain('/start');
   expect(el('linkBox').classList.contains('hidden')).toBe(false);
 });
+
+test('uploaded file stays private until owner explicitly classifies it', async () => {
+  Object.defineProperty(el('fileInput'), 'files', { configurable:true, value:[new win.File(['image'], 'lab.png', {type:'image/png'})] });
+  fetchMock.mockResolvedValueOnce(ok({storage_key:'original',blob_id:'blob-123',mime:'image/png'}))
+    .mockResolvedValueOnce(ok([
+      {slug:'garage',sensitivity:'standard'},
+      {slug:'health',sensitivity:'sensitive'},
+      {slug:'secret',sensitivity:'unclassified'},
+    ]));
+  await el('fileInput').onchange();
+  expect(el('attachmentPrivacy').classList.contains('hidden')).toBe(false);
+  expect(el('attachmentCollection').value).toBe('');
+  expect(el('attachmentSensitivity').value).toBe('sensitive');
+  expect(el('attachmentPrivacyStatus').textContent).toContain('Не классифицирован');
+  expect([...el('attachmentCollection').options].map((o:any)=>o.value)).toEqual(['','garage','health']);
+  const before = fetchMock.mock.calls.length;
+  await el('btnClassifyFile').onclick();
+  expect(fetchMock).toHaveBeenCalledTimes(before);
+  el('attachmentCollection').value='health';
+  fetchMock.mockResolvedValueOnce(ok({id:'blob-123',collection_slug:'health',sensitivity:'sensitive'}));
+  await el('btnClassifyFile').onclick();
+  const call=fetchMock.mock.calls[before];
+  expect(call[0]).toBe('/v1/privacy/blobs/blob-123');
+  expect(call[1].method).toBe('PUT');
+  expect(JSON.parse(call[1].body)).toEqual({collection_slug:'health',sensitivity:'sensitive'});
+  expect(el('attachmentPrivacyStatus').textContent).toContain('запрещена');
+  el('attachmentSensitivity').value='standard';
+  fetchMock.mockResolvedValueOnce({ok:false,status:422,json:async()=>({detail:'collection_not_classified'})});
+  await el('btnClassifyFile').onclick();
+  expect(el('attachmentPrivacyStatus').textContent).toContain('Не удалось');
+});
