@@ -6,9 +6,18 @@ import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { useTheme } from "../theme";
 import { sharePrivateFile } from "../share";
-import type { LLMSettings, ServiceInfo } from "../types";
+import type {
+  LLMSettings, PrivacyCollection, PrivacyHistory, PrivacyIntegrations, ServiceInfo,
+} from "../types";
 
 const CHANNELS = ["telegram", "max", "slack", "whatsapp", "discord"] as const;
+const CLASSIFICATIONS: PrivacyCollection["sensitivity"][] = [
+  "unclassified", "standard", "sensitive", "secret",
+];
+const LABELS = {
+  unclassified: "Не определено", standard: "Обычные данные",
+  sensitive: "Чувствительные", secret: "Секретные",
+};
 
 export function SettingsScreen() {
   const t = useTheme();
@@ -19,6 +28,9 @@ export function SettingsScreen() {
   const [dataOtp, setDataOtp] = useState("");
   const [deleteEmail, setDeleteEmail] = useState("");
   const [llm, setLlm] = useState<LLMSettings | null>(null);
+  const [privacyCollections, setPrivacyCollections] = useState<PrivacyCollection[]>([]);
+  const [privacyHistory, setPrivacyHistory] = useState<PrivacyHistory | null>(null);
+  const [privacyIntegrations, setPrivacyIntegrations] = useState<PrivacyIntegrations | null>(null);
   const [apiKey, setApiKey] = useState("");
   const [server, setServer] = useState(apiBase);
   const [msg, setMsg] = useState("");
@@ -36,6 +48,9 @@ export function SettingsScreen() {
   useEffect(() => {
     api.serviceInfo().then(setService).catch(() => setMsg("Не удалось загрузить сведения о сервисе. Попробуйте открыть настройки снова."));
     api.llmSettings().then(setLlm).catch((e) => setMsg(String((e as Error).message)));
+    api.privacyCollections().then(setPrivacyCollections).catch((e) => setMsg(String((e as Error).message)));
+    api.privacyHistory().then(setPrivacyHistory).catch((e) => setMsg(String((e as Error).message)));
+    api.privacyIntegrations().then(setPrivacyIntegrations).catch((e) => setMsg(String((e as Error).message)));
   }, []);
 
   const guard = useCallback(async (fn: () => Promise<void>, ok?: string) => {
@@ -90,6 +105,109 @@ export function SettingsScreen() {
 
       <Text style={{ color: t.muted }}>Проверка использует сохранённые настройки и делает короткие платные запросы к провайдеру.</Text>
       <Pressable disabled={busy || !llm} accessibilityRole="button" style={btn(t.accent)} onPress={() => guard(async () => { setMsg((await api.testModel()).message); })}><Text style={styles.btnText}>Проверить модель и поиск</Text></Pressable>
+      <Text style={[styles.h, { color: t.text }]}>Приватность персональной памяти</Text>
+      <Text style={{ color: t.muted }}>
+        По умолчанию передача знаний, документов и аудио внешним сервисам запрещена.
+        Разрешения действуют для новых запросов. Отзыв не удаляет данные, ранее отправленные третьим сторонам.
+      </Text>
+      {privacyHistory && (
+        <View style={styles.row}>
+          <Text style={{ color: t.text, flex: 1 }}>Передавать историю беседы облачной модели</Text>
+          <Switch
+            accessibilityLabel="Разрешить облачную историю"
+            value={privacyHistory.allow_cloud_history}
+            onValueChange={(v) => guard(async () => {
+              setPrivacyHistory(await api.savePrivacyHistory({ allow_cloud_history: v }));
+            }, "Настройка истории сохранена ✔")}
+          />
+        </View>
+      )}
+      {privacyIntegrations && (
+        <>
+          <View style={styles.row}>
+            <Text style={{ color: t.text, flex: 1 }}>Внешнее распознавание аудио</Text>
+            <Switch
+              accessibilityLabel="Разрешить внешнее распознавание аудио"
+              value={privacyIntegrations.allow_remote_stt}
+              onValueChange={(v) => guard(async () => {
+                setPrivacyIntegrations(await api.savePrivacyIntegrations({
+                  ...privacyIntegrations, allow_remote_stt: v,
+                }));
+              }, "Разрешение распознавания сохранено ✔")}
+            />
+          </View>
+          <View style={styles.row}>
+            <Text style={{ color: t.text, flex: 1 }}>Доступ внешних MCP-клиентов к инструментам</Text>
+            <Switch
+              accessibilityLabel="Разрешить MCP-доступ"
+              value={privacyIntegrations.allow_mcp_access}
+              onValueChange={(v) => guard(async () => {
+                setPrivacyIntegrations(await api.savePrivacyIntegrations({
+                  ...privacyIntegrations, allow_mcp_access: v,
+                }));
+              }, "Разрешение MCP сохранено ✔")}
+            />
+          </View>
+        </>
+      )}
+      {privacyCollections.map((collection) => {
+        const classified = collection.sensitivity === "standard" || collection.sensitivity === "sensitive";
+        const update = (next: PrivacyCollection) => setPrivacyCollections((items) =>
+          items.map((item) => item.slug === collection.slug ? next : item)
+        );
+        return (
+          <View key={collection.slug} style={[styles.privacyBox, { borderColor: t.line }]}>
+            <Text style={{ color: t.text, fontWeight: "700" }}>{collection.slug}</Text>
+            <Text style={label}>Категория чувствительности</Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Категория ${collection.slug}: ${LABELS[collection.sensitivity]}`}
+              style={[styles.small, { borderColor: t.line }]}
+              onPress={() => {
+                const next = CLASSIFICATIONS[(CLASSIFICATIONS.indexOf(collection.sensitivity) + 1) % CLASSIFICATIONS.length];
+                update({
+                  ...collection, sensitivity: next,
+                  ...(next === "unclassified" || next === "secret"
+                    ? { allow_cloud_llm: false, allow_remote_embeddings: false,
+                        allow_remote_extraction: false, allow_messenger_reminders: false }
+                    : {}),
+                });
+              }}
+            >
+              <Text style={{ color: t.text }}>{LABELS[collection.sensitivity]} (нажмите для смены)</Text>
+            </Pressable>
+            {([
+              ["allow_cloud_llm", "Чтение этой коллекции облачной LLM"],
+              ["allow_remote_embeddings", "Внешние эмбеддинги"],
+              ["allow_remote_extraction", "Внешний разбор файлов, изображений и поиск"],
+              ["allow_messenger_reminders", "Напоминания из этой коллекции в мессенджерах"],
+            ] as const).map(([key, title]) => (
+              <View key={key} style={styles.row}>
+                <Text style={{ color: t.text, flex: 1 }}>{title}</Text>
+                <Switch
+                  accessibilityLabel={`${collection.slug}: ${title}`}
+                  disabled={!classified}
+                  value={collection[key]}
+                  onValueChange={(value) => update({ ...collection, [key]: value })}
+                />
+              </View>
+            ))}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Сохранить приватность ${collection.slug}`}
+              disabled={busy}
+              style={btn(t.accent)}
+              onPress={() => guard(async () => {
+                const saved = await api.savePrivacyCollection(collection);
+                update(saved);
+              }, `Приватность ${collection.slug} сохранена ✔`)}
+            >
+              <Text style={styles.btnText}>Сохранить разрешения</Text>
+            </Pressable>
+          </View>
+        );
+      })}
+
       <Text style={[styles.h, { color: t.text }]}>Сменить пароль</Text>
       <Text style={{ color: t.muted }}>После смены пароля остальные устройства выйдут из аккаунта. Для забытого пароля используйте «Восстановить доступ» на экране входа.</Text>
       <TextInput style={input} accessibilityLabel="Текущий пароль" secureTextEntry value={currentPass} onChangeText={setCurrentPass} placeholder="Текущий пароль" placeholderTextColor={t.muted} />
@@ -215,4 +333,5 @@ const styles = StyleSheet.create({
   btnText: { color: "#fff", fontWeight: "600" },
   small: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 10, minHeight: 44 },
   mono: { fontFamily: "Courier", padding: 8, borderRadius: 8 },
+  privacyBox: { borderWidth: 1, borderRadius: 12, padding: 12, gap: 8, marginTop: 8 },
 });

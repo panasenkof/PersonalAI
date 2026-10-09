@@ -75,3 +75,18 @@ export type StreamEvent =
 export type Attachment = { mime: string; storage_key: string; filename?: string };
 
 export type ServiceInfo = { name: string; version: string; operator: string; support_email: string; privacy_url: string; terms_url: string; email_enabled: boolean; backup_retention_days: number };
+
+export type PrivacyCollection = {
+  slug: string;
+  sensitivity: "unclassified" | "standard" | "sensitive" | "secret";
+  allow_cloud_llm: boolean;
+  allow_remote_embeddings: boolean;
+  allow_remote_extraction: boolean;
+  allow_messenger_reminders: boolean;
+};
+
+export type PrivacyHistory = { allow_cloud_history: boolean };
+export type PrivacyIntegrations = {
+  allow_remote_stt: boolean;
+  allow_mcp_access: boolean;
+};

@@ -82,6 +82,17 @@
     </div>
     <div role="status" id="setMsg"></div>
     <div id="setStats"></div>
+    <div class="sec" id="privacyPanel">
+      <h3>Приватность персональной памяти</h3>
+      <p class="intro">Все внешние передачи выключены по умолчанию. Настройки действуют
+      для будущих запросов: ранее отправленные сервисам данные невозможно отозвать с их серверов.</p>
+      <label><input type="checkbox" id="privacyHistory"> Передавать историю разговоров облачной LLM</label>
+      <label><input type="checkbox" id="privacySTT"> Отправлять аудио на внешнее распознавание</label>
+      <label><input type="checkbox" id="privacyMCP"> Разрешить внешним MCP-клиентам инструменты аккаунта</label>
+      <button type="button" id="btnSavePrivacyGlobal">Сохранить общие разрешения</button>
+      <div id="privacyCollections" aria-label="Разрешения по коллекциям"></div>
+      <div id="privacyMessage" role="status"></div>
+    </div>
     <div class="sec" id="secBox">
       <h3>Сменить пароль</h3>
       <label for="currentPass">Текущий пароль</label><input id="currentPass" type="password" autocomplete="current-password">
