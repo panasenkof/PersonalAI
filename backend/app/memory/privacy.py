@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.llm.providers import LLMProvider, LocalLLMProvider
-from app.models import Collection, Entity, Observation
+from app.models import Blob, Collection, Entity, Observation
 
 _CLOUD_MEMORY_SCOPE: ContextVar[frozenset[str] | None] = ContextVar("cloud_memory_scope", default=None)
 _EXTERNAL_SCOPE_KIND: ContextVar[str] = ContextVar("external_memory_scope_kind", default="cloud")
@@ -224,3 +224,34 @@ async def remote_extraction_allowed(
     if entity is not None:
         stmt = stmt.where(Collection.id == entity.collection_id)
     return await session.scalar(stmt) is not None
+
+
+
+async def remote_blob_processing_allowed(
+    session: AsyncSession, user_id: str, storage_key: str, collection_slug: str,
+    *, entity: Entity | None = None, embeddings: bool = False,
+) -> bool:
+    """Blob provenance must match the recipient's collection. Unknown = deny."""
+    blob = await session.scalar(select(Blob).where(
+        Blob.user_id == user_id, Blob.storage_key == storage_key,
+        Blob.sensitivity == "standard",
+    ))
+    if blob is None or blob.collection_id is None:
+        return False
+    if embeddings:
+        allowed = await cloud_allowed_collections(session, user_id, embeddings=True)
+        col = await session.scalar(select(Collection).where(
+            Collection.id == blob.collection_id,
+            Collection.user_id == user_id, Collection.slug == collection_slug,
+        ))
+        return col is not None and col.id in allowed and (
+            entity is None or
+            (entity.user_id == user_id and entity.collection_id == col.id and
+             entity.sensitivity in {"inherit", "standard"})
+        )
+    return await remote_extraction_allowed(session, user_id, collection_slug, entity=entity) and (
+        await session.scalar(select(Collection.id).where(
+            Collection.id == blob.collection_id,
+            Collection.user_id == user_id, Collection.slug == collection_slug,
+        ))
+    ) is not None

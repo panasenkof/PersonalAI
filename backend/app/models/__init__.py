@@ -303,6 +303,10 @@ class Blob(Base):
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     storage_key: Mapped[str] = mapped_column(String(512), unique=True)
     sha256: Mapped[str] = mapped_column(String(64))
+    collection_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("collections.id", ondelete="SET NULL"), nullable=True,
+    )
+    sensitivity: Mapped[str] = mapped_column(String(16), default="unclassified", server_default="unclassified")
     mime: Mapped[str] = mapped_column(String(128))
     filename: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     size_bytes: Mapped[int] = mapped_column(Integer)

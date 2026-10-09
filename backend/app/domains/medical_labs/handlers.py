@@ -10,7 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.medical_labs.schemas import LAB_REPORT_SCHEMA
 from app.llm.router import default_model_for_user, provider_for_user
-from app.memory.privacy import cloud_scope, is_trusted_local_provider, remote_extraction_allowed
+from app.memory.privacy import (
+    cloud_scope, is_trusted_local_provider, remote_blob_processing_allowed, remote_extraction_allowed,
+)
 from app.models import Collection, Entity, Observation
 from app.rag.indexing import index_entity
 from app.security.redact import safe_error
@@ -70,8 +72,8 @@ async def labs_record_report(session: AsyncSession, user_id: str, args: dict[str
             text = await asyncio.to_thread(extract_pdf_text, data)
         elif mime.startswith("image/"):
             provider = await provider_for_user(session, user_id)
-            if not is_trusted_local_provider(provider) and not await remote_extraction_allowed(
-                session, user_id, "health",
+            if not is_trusted_local_provider(provider) and not await remote_blob_processing_allowed(
+                session, user_id, storage_key, "health",
             ):
                 return {"error": "remote_extraction_not_allowed"}
             model = await default_model_for_user(session, user_id)
@@ -99,8 +101,9 @@ async def labs_record_report(session: AsyncSession, user_id: str, args: dict[str
         if len(text) > 12_000:
             return {"error": "lab_report_too_long", "message": "Отчёт превышает 12 000 символов. Разделите его на части: показатели не сохранены."}
         provider = await provider_for_user(session, user_id)
-        if not is_trusted_local_provider(provider) and not await remote_extraction_allowed(
-            session, user_id, "health",
+        if not is_trusted_local_provider(provider) and not (
+            await remote_blob_processing_allowed(session, user_id, storage_key, "health")
+            if storage_key else await remote_extraction_allowed(session, user_id, "health")
         ):
             return {"error": "remote_extraction_not_allowed"}
         model = await default_model_for_user(session, user_id)

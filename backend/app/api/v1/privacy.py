@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.db import get_session
-from app.models import Chunk, Collection, Entity, LLMSettings, User
+from app.models import Blob, Chunk, Collection, Entity, LLMSettings, User
 
 router = APIRouter(prefix="/v1/privacy", tags=["privacy"])
 
@@ -22,6 +22,11 @@ class CollectionPrivacyIn(BaseModel):
     allow_remote_extraction: bool = False
     allow_messenger_reminders: bool = False
     allow_mcp_access: bool = False
+
+
+class BlobPrivacyIn(BaseModel):
+    collection_slug: str
+    sensitivity: Literal["unclassified", "standard", "sensitive", "secret"]
 
 
 class HistoryPrivacyIn(BaseModel):
@@ -140,3 +145,40 @@ async def update_integration_privacy(
     row.allow_mcp_access = body.allow_mcp_access
     await session.commit()
     return {"allow_remote_stt": row.allow_remote_stt, "allow_mcp_access": row.allow_mcp_access}
+
+
+
+@router.put("/blobs/{blob_id}")
+async def classify_blob(
+    blob_id: str, body: BlobPrivacyIn,
+    session: AsyncSession = Depends(get_session), user: User = Depends(get_current_user),
+) -> dict:
+    """Explicitly assign source provenance before any remote extraction/embedding."""
+    blob = await session.scalar(select(Blob).where(Blob.id == blob_id, Blob.user_id == user.id))
+    if blob is None:
+        raise HTTPException(404, detail="blob_not_found")
+    col = await session.scalar(
+        select(Collection).where(Collection.user_id == user.id, Collection.slug == body.collection_slug)
+    )
+    if col is None:
+        raise HTTPException(404, detail="collection_not_found")
+    if body.sensitivity == "standard" and col.sensitivity not in {"standard", "sensitive"}:
+        raise HTTPException(422, detail="collection_not_classified")
+    # Reassigning existing material requires explicit action by its owner.
+    blob.collection_id = col.id
+    blob.sensitivity = body.sensitivity
+    await session.commit()
+    return {"id": blob.id, "collection_slug": col.slug, "sensitivity": blob.sensitivity}
+
+
+@router.get("/blobs/{blob_id}")
+async def get_blob_classification(
+    blob_id: str,
+    session: AsyncSession = Depends(get_session), user: User = Depends(get_current_user),
+) -> dict:
+    blob = await session.scalar(select(Blob).where(Blob.id == blob_id, Blob.user_id == user.id))
+    if blob is None:
+        raise HTTPException(404, detail="blob_not_found")
+    collection = await session.get(Collection, blob.collection_id) if blob.collection_id else None
+    return {"id": blob.id, "collection_slug": collection.slug if collection else None,
+            "sensitivity": blob.sensitivity}
