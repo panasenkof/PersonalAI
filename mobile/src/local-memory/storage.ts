@@ -66,8 +66,8 @@ async function initialize(): Promise<SQLite.SQLiteDatabase> {
   }
   const db = await SQLite.openDatabaseAsync(DB_NAME);
   try {
-    const cipher = await db.getFirstAsync<{ version: string }>("PRAGMA cipher_version");
-    if (!cipher?.version) throw new Error("sqlcipher_required_native_build");
+    const cipher = await db.getFirstAsync<{ cipher_version: string }>("PRAGMA cipher_version");
+    if (!cipher?.cipher_version) throw new Error("sqlcipher_required_native_build");
     let key = await SecureStore.getItemAsync(KEY_NAME);
     if (key !== null && !/^[0-9a-f]{64}$/.test(key)) throw new Error("invalid_local_memory_key");
     if (!key) {
