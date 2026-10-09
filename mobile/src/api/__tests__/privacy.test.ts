@@ -15,7 +15,7 @@ test("mobile privacy controls roundtrip owner-scoped API and send explicit flags
       return { ok: true, status: 200, json: async () => [{
         slug: "garage", sensitivity: "standard", allow_cloud_llm: false,
         allow_remote_embeddings: false, allow_remote_extraction: false,
-        allow_messenger_reminders: false,
+        allow_messenger_reminders: false, allow_mcp_access: false,
       }] };
     }
     return { ok: true, status: 200, json: async () => JSON.parse(String((init as RequestInit).body)) };

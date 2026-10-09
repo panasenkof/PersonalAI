@@ -14,9 +14,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.llm.providers import LLMProvider, LocalLLMProvider
-from app.models import Collection, Entity, Observation
+from app.models import Blob, Collection, Entity, Observation
 
 _CLOUD_MEMORY_SCOPE: ContextVar[frozenset[str] | None] = ContextVar("cloud_memory_scope", default=None)
+_EXTERNAL_SCOPE_KIND: ContextVar[str] = ContextVar("external_memory_scope_kind", default="cloud")
 _LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 _CLASSIFIED = frozenset({"standard", "sensitive"})
 
@@ -32,16 +33,27 @@ def is_trusted_local_provider(provider: LLMProvider) -> bool:
 
 
 def cloud_scope() -> frozenset[str] | None:
-    """None: trusted local or direct authenticated calls. Set: cloud tool context."""
+    """None: trusted local call. Set: external LLM or MCP scoped tool."""
     return _CLOUD_MEMORY_SCOPE.get()
 
 
+async def scoped_allowed_collections(session: AsyncSession, user_id: str) -> frozenset[str]:
+    """Revalidate grant for this integration, including mid-session revocation."""
+    return (await mcp_allowed_collections(session, user_id)
+            if _EXTERNAL_SCOPE_KIND.get() == "mcp"
+            else await cloud_allowed_collections(session, user_id))
+
+
 @contextmanager
-def use_cloud_scope(allowed_collection_ids: frozenset[str] | None):
+def use_cloud_scope(allowed_collection_ids: frozenset[str] | None, *, channel: str = "cloud"):
+    if channel not in {"cloud", "mcp"}:
+        raise ValueError("invalid_memory_egress_channel")
     token = _CLOUD_MEMORY_SCOPE.set(allowed_collection_ids)
+    channel_token = _EXTERNAL_SCOPE_KIND.set(channel)
     try:
         yield
     finally:
+        _EXTERNAL_SCOPE_KIND.reset(channel_token)
         _CLOUD_MEMORY_SCOPE.reset(token)
 
 
@@ -54,6 +66,16 @@ async def cloud_allowed_collections(
             Collection.user_id == user_id,
             Collection.sensitivity.in_(_CLASSIFIED),
             grant.is_(True),
+        )
+    )
+    return frozenset(rows.all())
+
+
+async def mcp_allowed_collections(session: AsyncSession, user_id: str) -> frozenset[str]:
+    rows = await session.scalars(
+        select(Collection.id).where(
+            Collection.user_id == user_id, Collection.sensitivity.in_(_CLASSIFIED),
+            Collection.allow_mcp_access.is_(True),
         )
     )
     return frozenset(rows.all())
@@ -138,11 +160,11 @@ async def cloud_tool_allowed(
     allowed: frozenset[str],
 ) -> bool:
     """Re-check the exact target at dispatch time, not only at tool schema exposure."""
-    if name in {"kb_search", "kb_list_entities"}:
-        return bool(allowed)
-    allowed &= await cloud_allowed_collections(session, user_id)
+    allowed &= await scoped_allowed_collections(session, user_id)
     if not allowed:
         return False
+    if name in {"kb_search", "kb_list_entities"}:
+        return True
     if name in _CLOUD_COLLECTION_TOOLS:
         slug = str(args.get("collection_slug") or "garage")
         row = await session.scalar(
@@ -202,3 +224,34 @@ async def remote_extraction_allowed(
     if entity is not None:
         stmt = stmt.where(Collection.id == entity.collection_id)
     return await session.scalar(stmt) is not None
+
+
+
+async def remote_blob_processing_allowed(
+    session: AsyncSession, user_id: str, storage_key: str, collection_slug: str,
+    *, entity: Entity | None = None, embeddings: bool = False,
+) -> bool:
+    """Blob provenance must match the recipient's collection. Unknown = deny."""
+    blob = await session.scalar(select(Blob).where(
+        Blob.user_id == user_id, Blob.storage_key == storage_key,
+        Blob.sensitivity == "standard",
+    ))
+    if blob is None or blob.collection_id is None:
+        return False
+    if embeddings:
+        allowed = await cloud_allowed_collections(session, user_id, embeddings=True)
+        col = await session.scalar(select(Collection).where(
+            Collection.id == blob.collection_id,
+            Collection.user_id == user_id, Collection.slug == collection_slug,
+        ))
+        return col is not None and col.id in allowed and (
+            entity is None or
+            (entity.user_id == user_id and entity.collection_id == col.id and
+             entity.sensitivity in {"inherit", "standard"})
+        )
+    return await remote_extraction_allowed(session, user_id, collection_slug, entity=entity) and (
+        await session.scalar(select(Collection.id).where(
+            Collection.id == blob.collection_id,
+            Collection.user_id == user_id, Collection.slug == collection_slug,
+        ))
+    ) is not None

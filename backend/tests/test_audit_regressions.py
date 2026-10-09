@@ -223,6 +223,9 @@ def test_mcp_rejects_invalid_tool_schema_before_writes(client):
     assert client.put("/v1/privacy/integrations", headers=headers, json={
         "allow_remote_stt": False, "allow_mcp_access": True,
     }).status_code == 200
+    assert client.put("/v1/privacy/collections/garage", headers=headers, json={
+        "sensitivity": "standard", "allow_mcp_access": True,
+    }).status_code == 200
     response = client.post("/mcp", headers=headers, json={"jsonrpc": "2.0", "id": 1,
         "method": "tools/call", "params": {"name": "kb_create_entity", "arguments": {"payload": []}}})
     assert response.status_code == 200

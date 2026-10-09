@@ -83,6 +83,7 @@ export type PrivacyCollection = {
   allow_remote_embeddings: boolean;
   allow_remote_extraction: boolean;
   allow_messenger_reminders: boolean;
+  allow_mcp_access: boolean;
 };
 
 export type PrivacyHistory = { allow_cloud_history: boolean };

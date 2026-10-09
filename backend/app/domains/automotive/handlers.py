@@ -11,7 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.automotive.schemas import MAINTENANCE_ITEMS_SCHEMA, SERVICE_RECEIPT_SCHEMA
 from app.llm.router import default_model_for_user, provider_for_user
-from app.memory.privacy import is_trusted_local_provider, remote_extraction_allowed
+from app.memory.privacy import (
+    is_trusted_local_provider,
+    remote_blob_processing_allowed,
+    remote_extraction_allowed,
+)
 from app.models import Entity, Observation, ScheduleCandidate, ScheduleStatus
 from app.security.redact import safe_error
 from app.services.facts import stage_or_commit_observation
@@ -87,8 +91,8 @@ async def auto_parse_service_receipt(session: AsyncSession, user_id: str, args: 
     # Check collection and optional vehicle sensitivity *before* decoding the image.
     e = await _get_vehicle(session, user_id, vehicle_entity_id) if vehicle_entity_id else None
     provider = await provider_for_user(session, user_id)
-    if not is_trusted_local_provider(provider) and not await remote_extraction_allowed(
-        session, user_id, "garage", entity=e,
+    if not is_trusted_local_provider(provider) and not await remote_blob_processing_allowed(
+        session, user_id, storage_key, "garage", entity=e,
     ):
         return {"error": "remote_extraction_not_allowed"}
     data = await read_bytes(storage_key)
@@ -139,6 +143,7 @@ async def auto_parse_service_receipt(session: AsyncSession, user_id: str, args: 
         payload=payload,
         summary=summary,
         needs_confirmation=True,  # values were read from a photo by a vision model
+        source_blob_key=storage_key,
     )
     if staged["status"] == "saved":
         return {"observation_id": staged["observation_id"], "parsed": parsed, "status": "saved_to_observations"}

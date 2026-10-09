@@ -9,7 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.llm.router import provider_for_user
 from app.memory.contracts import EntityRecord, ObservationRecord
-from app.memory.privacy import is_trusted_local_provider, remote_embedding_allowed
+from app.memory.privacy import (
+    is_trusted_local_provider,
+    remote_blob_processing_allowed,
+    remote_embedding_allowed,
+)
 from app.models import Chunk, Entity, LLMSettings, Observation, utcnow
 
 logger = logging.getLogger(__name__)
@@ -120,6 +124,16 @@ async def index_entity(session: AsyncSession, user_id: str, entity: Entity | Ent
     text = flatten_payload(entity.payload or {})
     # A sensitive entity overrides any collection-wide remote embedding consent.
     collection_id = entity.collection_id if entity.sensitivity in {"inherit", "standard"} else None
+    # A document entity can include a user-uploaded file. Collection-wide
+    # embedding consent alone is insufficient to export the file's text.
+    if collection_id and (entity.payload or {}).get("storage_key"):
+        from app.models import Collection
+        collection = await session.get(Collection, collection_id)
+        if collection is None or not await remote_blob_processing_allowed(
+            session, user_id, str(entity.payload["storage_key"]), collection.slug,
+            embeddings=True,
+        ):
+            collection_id = None
     return await _index_texts(
         session, user_id, [text], entity_id=entity.id, collection_id=collection_id,
     )
@@ -135,6 +149,13 @@ async def index_observation(session: AsyncSession, user_id: str, observation: Ob
         if entity is not None and entity.sensitivity in {"inherit", "standard"}
         and observation.sensitivity in {"inherit", "standard"} else None
     )
+    if collection_id is not None and observation.source_kind == "blob":
+        from app.models import Collection
+        col = await session.get(Collection, collection_id)
+        if col is None or not observation.source_ref or not await remote_blob_processing_allowed(
+            session, user_id, observation.source_ref, col.slug, embeddings=True,
+        ):
+            collection_id = None
     return await _index_texts(
         session, user_id, [text], entity_id=observation.entity_id,
         observation_id=observation.id, collection_id=collection_id,
@@ -155,6 +176,13 @@ async def index_text(
         entity.collection_id
         if entity is not None and entity.sensitivity in {"inherit", "standard"} else None
     )
+    if entity is not None and entity.payload and entity.payload.get("storage_key"):
+        from app.models import Collection
+        col = await session.get(Collection, collection_id) if collection_id else None
+        if col is None or not await remote_blob_processing_allowed(
+            session, user_id, str(entity.payload["storage_key"]), col.slug, embeddings=True,
+        ):
+            collection_id = None
     return await _index_texts(
         session, user_id, [text], entity_id=entity_id, collection_id=collection_id,
     )

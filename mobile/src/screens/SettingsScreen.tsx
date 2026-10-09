@@ -169,7 +169,8 @@ export function SettingsScreen() {
                   ...collection, sensitivity: next,
                   ...(next === "unclassified" || next === "secret"
                     ? { allow_cloud_llm: false, allow_remote_embeddings: false,
-                        allow_remote_extraction: false, allow_messenger_reminders: false }
+                        allow_remote_extraction: false, allow_messenger_reminders: false,
+                        allow_mcp_access: false }
                     : {}),
                 });
               }}
@@ -181,6 +182,7 @@ export function SettingsScreen() {
               ["allow_remote_embeddings", "Внешние эмбеддинги"],
               ["allow_remote_extraction", "Внешний разбор файлов, изображений и поиск"],
               ["allow_messenger_reminders", "Напоминания из этой коллекции в мессенджерах"],
+              ["allow_mcp_access", "Разрешить MCP-доступ к этой коллекции"],
             ] as const).map(([key, title]) => (
               <View key={key} style={styles.row}>
                 <Text style={{ color: t.text, flex: 1 }}>{title}</Text>

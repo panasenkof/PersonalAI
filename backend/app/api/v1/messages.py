@@ -41,6 +41,7 @@ async def upload_blob(
     await session.commit()
     return {
         "storage_key": blob.storage_key,
+        "blob_id": blob.id,
         "sha256": blob.sha256,
         "size_bytes": str(blob.size_bytes),
         "mime": blob.mime,

@@ -49,6 +49,7 @@ async def stage_or_commit_observation(
     payload: dict[str, Any],
     summary: str,
     needs_confirmation: bool,
+    source_blob_key: str | None = None,
 ) -> dict[str, Any]:
     """Create the observation now, or stage it as a pending fact (see module docstring)."""
     job_id = current_job_id.get()
@@ -63,6 +64,7 @@ async def stage_or_commit_observation(
                 "summary": summary,
                 "occurred_at": occurred_at.isoformat(),
                 "observation": payload,
+                "source_blob_key": source_blob_key,
             },
         )
         session.add(fact)
@@ -70,6 +72,8 @@ async def stage_or_commit_observation(
         return {"fact_id": fact.id, "status": "pending_user_confirm", "summary": summary}
     observation = await SqlAlchemyMemoryRepository(session, user_id).create_observation(NewObservation(
         entity_id=entity_id, occurred_at=occurred_at, kind=kind, payload=payload,
+        source_kind="blob" if source_blob_key else None,
+        source_ref=source_blob_key,
     ))
     await index_observation(session, user_id, observation)
     return {"observation_id": observation.id, "status": "saved"}
@@ -130,6 +134,8 @@ async def resolve_fact(session: AsyncSession, user_id: str, fact_id: str, *, con
             occurred_at=_parse_dt(p.get("occurred_at")),
             kind=str(p.get("kind") or "observation"),
             payload=p.get("observation") or {},
+            source_kind="blob" if p.get("source_blob_key") else None,
+            source_ref=p.get("source_blob_key"),
         ))
         await index_observation(session, user_id, observation)
         fact.observation_id = observation.id
