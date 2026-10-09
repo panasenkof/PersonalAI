@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from sqlalchemy import inspect, text
+from sqlalchemy import JSON, bindparam, inspect, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 
@@ -58,10 +58,89 @@ def test_upgrade_max_and_daily_usage_branches_converge(tmp_path, previous):
         engine = create_async_engine(url)
         async with engine.connect() as c:
             versions = (await c.execute(text("SELECT version_num FROM alembic_version"))).scalars().all()
-            assert versions == ["k1a6d2e4f005"]
+            assert versions == ["m2c7e4f6a008"]
             columns = await c.run_sync(lambda conn: inspect(conn).get_columns("users"))
             assert "max_user_id" in {column["name"] for column in columns}
             tables = await c.run_sync(lambda conn: inspect(conn).get_table_names())
             assert "user_daily_usage" in tables
         await engine.dispose()
+    asyncio.run(verify())
+
+
+
+@pytest.mark.parametrize("dialect", ["sqlite", "postgres"])
+def test_memory_v2_migration_preserves_legacy_rows(tmp_path, dialect):
+    """Do not rewrite old payloads, assume provenance or invent validity dates."""
+    url = os.environ.get("MIGRATION_TEST_DATABASE_URL") if dialect == "postgres" else f"sqlite+aiosqlite:///{tmp_path / 'memory_upgrade.db'}"
+    if not url:
+        pytest.skip("requires dedicated MIGRATION_TEST_DATABASE_URL")
+    env = {**os.environ, "DATABASE_URL": url, "POSTGRES_HOST": ""}
+    backend = Path(__file__).resolve().parents[1]
+
+    def migrate(revision):
+        subprocess.run(
+            [sys.executable, "-m", "alembic", "upgrade", revision],
+            cwd=backend, env=env, check=True, capture_output=True,
+        )
+
+    migrate("k1a6d2e4f005")
+
+    async def seed():
+        engine = create_async_engine(url)
+        async with engine.begin() as conn:
+            await conn.execute(text(
+                "INSERT INTO users (id,email,password_hash,role,is_active,token_version,created_at) "
+                "VALUES ('memory-user','memory-upgrade@example.com','unused','user',true,0,CURRENT_TIMESTAMP)"
+            ))
+            await conn.execute(text(
+                "INSERT INTO collections (id,user_id,name,slug) "
+                "VALUES ('memory-collection','memory-user','Garage','garage')"
+            ))
+            await conn.execute(
+                text("""INSERT INTO entities (id,user_id,collection_id,domain,schema_version,payload,created_at)
+                    VALUES ('memory-entity','memory-user','memory-collection','automotive','1',
+                    :payload,CURRENT_TIMESTAMP)""").bindparams(bindparam("payload", type_=JSON())),
+                {"payload": {"type": "vehicle", "make": "Toyota"}},
+            )
+            await conn.execute(
+                text("""INSERT INTO observations (id,user_id,entity_id,occurred_at,kind,payload,created_at)
+                    VALUES ('memory-observation','memory-user','memory-entity',CURRENT_TIMESTAMP,
+                    'service_event',:payload,CURRENT_TIMESTAMP)""").bindparams(bindparam("payload", type_=JSON())),
+                {"payload": {"notes": "old receipt", "odometer_km": 123}},
+            )
+        await engine.dispose()
+
+    asyncio.run(seed())
+    migrate("head")
+
+    async def verify():
+        engine = create_async_engine(url)
+        async with engine.connect() as conn:
+            collections = await conn.run_sync(lambda c: {v["name"] for v in inspect(c).get_columns("collections")})
+            entities = await conn.run_sync(lambda c: {v["name"] for v in inspect(c).get_columns("entities")})
+            observations = await conn.run_sync(lambda c: {v["name"] for v in inspect(c).get_columns("observations")})
+            assert {"description", "sensitivity"} <= collections
+            assert {"title", "record_status", "sensitivity", "valid_from", "valid_until", "source_kind", "source_ref", "updated_at"} <= entities
+            assert {"sensitivity", "valid_from", "valid_until", "source_kind", "source_ref", "confidence"} <= observations
+            collection = (await conn.execute(text(
+                "SELECT name, slug, sensitivity, description FROM collections WHERE id='memory-collection'"
+            ))).one()
+            assert tuple(collection) == ("Garage", "garage", "unclassified", None)
+            entity = (await conn.execute(text(
+                "SELECT domain, payload, sensitivity, record_status, valid_from, source_ref "
+                "FROM entities WHERE id='memory-entity'"
+            ))).one()
+            assert entity.domain == "automotive"
+            assert "Toyota" in str(entity.payload)
+            assert entity.sensitivity == "inherit" and entity.record_status == "active"
+            assert entity.valid_from is None and entity.source_ref is None
+            observation = (await conn.execute(text(
+                "SELECT kind,payload,sensitivity,confidence,source_kind FROM observations "
+                "WHERE id='memory-observation'"
+            ))).one()
+            assert observation.kind == "service_event" and "old receipt" in str(observation.payload)
+            assert observation.sensitivity == "inherit"
+            assert observation.confidence is None and observation.source_kind is None
+        await engine.dispose()
+
     asyncio.run(verify())

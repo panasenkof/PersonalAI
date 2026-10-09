@@ -14,8 +14,9 @@ async def bootstrap_user(session: AsyncSession, email: str, password_hash: str) 
     user = User(email=email, password_hash=password_hash, role=role)
     session.add(user)
     await session.flush()
-    for name, slug in (("Garage", "garage"), ("Health", "health")):
-        session.add(Collection(user_id=user.id, name=name, slug=slug))
+    # New accounts get explicit labels; migrated legacy collections stay "unclassified".
+    for name, slug, sensitivity in (("Garage", "garage", "standard"), ("Health", "health", "sensitive")):
+        session.add(Collection(user_id=user.id, name=name, slug=slug, sensitivity=sensitivity))
     session.add(
         LLMSettings(
             user_id=user.id,
