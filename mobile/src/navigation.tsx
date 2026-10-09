@@ -8,6 +8,7 @@ import { useAuth } from "./auth/AuthContext";
 import { ChatScreen } from "./screens/ChatScreen";
 import { ChatsScreen } from "./screens/ChatsScreen";
 import { LoginScreen } from "./screens/LoginScreen";
+import { LocalMemoryScreen } from "./screens/LocalMemoryScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
 
 export type RootStackParams = {
@@ -19,20 +20,23 @@ const Stack = createNativeStackNavigator<RootStackParams>();
 const Tab = createBottomTabNavigator();
 
 function Tabs() {
+  const { offlineMode } = useAuth();
   return (
     <Tab.Navigator>
-      <Tab.Screen
+      {!offlineMode && <Tab.Screen
         name="ChatsTab"
         component={ChatsScreen}
         options={{ title: "Чаты", tabBarIcon: () => <Text>💬</Text> }}
-      />
-      <Tab.Screen name="Settings" component={SettingsScreen} options={{ title: "Настройки", tabBarIcon: () => <Text>⚙️</Text> }} />
+      />}
+      <Tab.Screen name="LocalMemory" component={LocalMemoryScreen}
+        options={{ title: "На телефоне", tabBarIcon: () => <Text>🔐</Text> }} />
+      {!offlineMode && <Tab.Screen name="Settings" component={SettingsScreen} options={{ title: "Настройки", tabBarIcon: () => <Text>⚙️</Text> }} />}
     </Tab.Navigator>
   );
 }
 
 export function RootNavigator() {
-  const { ready, me } = useAuth();
+  const { ready, me, offlineMode } = useAuth();
   const dark = useColorScheme() === "dark";
   if (!ready) {
     return (
@@ -41,7 +45,7 @@ export function RootNavigator() {
       </View>
     );
   }
-  if (!me) return <LoginScreen />;
+  if (!me && !offlineMode) return <LoginScreen />;
   return (
     <NavigationContainer theme={dark ? DarkTheme : DefaultTheme}>
       <Stack.Navigator>

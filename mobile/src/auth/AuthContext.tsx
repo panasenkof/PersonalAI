@@ -8,10 +8,14 @@ import type { Me, Tokens } from "../types";
 
 const TOKENS_KEY = "pia.tokens";
 const BASE_KEY = "pia.apiBase";
+const OFFLINE_KEY = "pia.offlineMemoryMode";
 
 type Ctx = {
   ready: boolean;
   me: Me | null;
+  offlineMode: boolean;
+  openOffline: () => Promise<void>;
+  closeOffline: () => Promise<void>;
   apiBase: string;
   setApiBase: (url: string) => Promise<void>;
   /** Throws ApiError("otp_required") when the account has 2FA and no code was supplied. */
@@ -27,6 +31,7 @@ const AuthContext = createContext<Ctx | null>(null);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false);
   const [me, setMe] = useState<Me | null>(null);
+  const [offlineMode, setOfflineMode] = useState(false);
   const [apiBase, setBase] = useState(DEFAULT_API_BASE);
   const tokens = useRef<Tokens | null>(null);
   const base = useRef(DEFAULT_API_BASE);
@@ -48,12 +53,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         base.current = savedBase;
         setBase(savedBase);
       }
+      const offline = await SecureStore.getItemAsync(OFFLINE_KEY);
+      if (offline === "yes") setOfflineMode(true);
       const raw = await SecureStore.getItemAsync(TOKENS_KEY);
       if (raw) {
         try { tokens.current = JSON.parse(raw) as Tokens; }
         catch { await setTokens(null); }
         try {
-          setMe(await api.me());
+          // Offline boot must not attempt API calls even with saved server tokens.
+          if (offline !== "yes") setMe(await api.me());
         } catch (e) {
           // 401 → request() already cleared the session; network errors keep the tokens for a later retry
           if (e instanceof ApiError && e.status !== 401) console.warn("me() failed", e.detail);
@@ -69,6 +77,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     () => ({
       ready,
       me,
+      offlineMode,
+      openOffline: async () => {
+        await SecureStore.setItemAsync(OFFLINE_KEY, "yes");
+        setOfflineMode(true);
+      },
+      closeOffline: async () => {
+        await SecureStore.deleteItemAsync(OFFLINE_KEY);
+        setOfflineMode(false);
+        // The existing login screen is the explicit path back to a server.
+        setMe(null);
+      },
       apiBase,
       setApiBase: async (url) => {
         const clean = normalizeServer(url);
@@ -91,7 +110,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       logout: async () => setTokens(null),
       refreshMe,
     }),
-    [ready, me, apiBase, setTokens, refreshMe],
+    [ready, me, offlineMode, apiBase, setTokens, refreshMe],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

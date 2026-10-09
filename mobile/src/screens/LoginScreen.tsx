@@ -10,7 +10,7 @@ import { useTheme } from "../theme";
 
 export function LoginScreen() {
   const t = useTheme();
-  const { login, register, apiBase, setApiBase } = useAuth();
+  const { login, register, apiBase, setApiBase, openOffline } = useAuth();
   const [showAccess, setShowAccess] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -56,6 +56,15 @@ export function LoginScreen() {
         <Image source={require("../../assets/icon.png")} style={{ width: 72, height: 72, borderRadius: 20, alignSelf: "center" }} accessibilityLabel="Иконка PIA Agent" />
         <Text style={[styles.title, { color: t.text }]}>PIA Agent</Text>
         <Text style={{ color: t.muted, textAlign: "center", marginBottom: 16 }}>Ваши диалоги, документы и знания — в одном месте. Начните с простого вопроса.</Text>
+        <Pressable accessibilityRole="button" accessibilityLabel="Открыть локальную память"
+          style={[styles.btn, { backgroundColor: t.accent }]}
+          onPress={() => void openOffline().catch(e => setError(authError(String(e.message))))}>
+          <Text style={styles.btnText}>🔐 Моя память — без сервера</Text>
+        </Pressable>
+        <Text style={{ color: t.muted, textAlign: "center", fontSize: 13 }}>
+          Локальные заметки хранятся только на устройстве в зашифрованной базе.
+          Для этого режима нужна сборка приложения с SQLCipher (не Expo Go).
+        </Text>
         <TextInput style={input} placeholder="Email" placeholderTextColor={t.muted} autoCapitalize="none" accessibilityLabel="Email" autoComplete="email" keyboardType="email-address" value={email} onChangeText={setEmail} />
         <TextInput style={input} placeholder="Пароль (минимум 8 символов)" placeholderTextColor={t.muted} accessibilityLabel="Пароль" autoComplete="password" secureTextEntry={!showPassword} value={password} onChangeText={setPassword} />
         <Pressable accessibilityRole="button" onPress={() => setShowPassword(v => !v)} style={{ minHeight: 44, justifyContent: "center" }}><Text style={{ color: t.accent }}>{showPassword ? "Скрыть пароль" : "Показать пароль"}</Text></Pressable>
