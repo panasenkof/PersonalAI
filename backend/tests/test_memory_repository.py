@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import uuid
 from datetime import datetime, timezone
 
 import pytest
@@ -14,7 +13,7 @@ from app.db import SessionLocal
 from app.memory.contracts import NewCollection, NewEntity, NewObservation
 from app.memory.repository import MemoryAccessError, MemoryConflictError, MemoryRepository
 from app.memory.sqlalchemy import SqlAlchemyMemoryRepository
-from app.models import Base, Collection, Entity, Observation, User
+from app.models import Base, Entity, Observation, User
 
 
 async def _memory_session():
@@ -40,9 +39,7 @@ async def test_memory_repository_contract_and_owner_isolation():
 
             garage = await owner.create_collection(NewCollection(name="Garage", slug="garage", sensitivity="standard"))
             health = await owner.create_collection(NewCollection(name="Health", slug="health", sensitivity="sensitive"))
-            assert [c.slug for c in await owner.list_collections()] == ["garage", "health"] or {
-                c.slug for c in await owner.list_collections()
-            } == {"garage", "health"}
+            assert {c.slug for c in await owner.list_collections()} == {"garage", "health"}
             assert await outsider.list_collections() == []
             assert await outsider.collection_by_id(garage.id) is None
             assert await outsider.collection_by_slug("garage") is None
@@ -151,9 +148,7 @@ def test_legacy_collections_api_and_agent_tools(client, random_email):
     headers = {"Authorization": f"Bearer {response.json()['access_token']}"}
     collections = client.get("/v1/collections", headers=headers)
     assert collections.status_code == 200
-    assert {"name": "Garage", "slug": "garage"} <= {
-        "name": next(c["name"] for c in collections.json() if c["slug"] == "garage"), "slug": "garage"
-    }
+    assert any(c["name"] == "Garage" and c["slug"] == "garage" for c in collections.json())
     assert all(set(c) == {"id", "name", "slug"} for c in collections.json())
 
     async def seed():
