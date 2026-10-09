@@ -122,3 +122,53 @@ async def filter_cloud_entities(
         stmt.order_by(Entity.created_at, Entity.id).offset(offset).limit(limit + 1)
     )).all()
     return list(rows[:limit]), offset + limit if len(rows) > limit else None
+
+
+# Explicit allowlist only: unreviewed domain tools may query many categories or
+# reach further third-party APIs and are never available to a remote model.
+_CLOUD_COLLECTION_TOOLS = frozenset({
+    "kb_create_entity", "kb_ingest_document", "auto_add_vehicle",
+})
+_CLOUD_ENTITY_TOOLS = frozenset({"auto_add_service_event"})
+_CLOUD_HEALTH_TOOLS = frozenset({"labs_record_report", "labs_get_trends"})
+
+
+async def cloud_tool_allowed(
+    session: AsyncSession, user_id: str, name: str, args: dict,
+    allowed: frozenset[str],
+) -> bool:
+    """Re-check the exact target at dispatch time, not only at tool schema exposure."""
+    if name in {"kb_search", "kb_list_entities"}:
+        return bool(allowed)
+    if not allowed:
+        return False
+    if name in _CLOUD_COLLECTION_TOOLS:
+        slug = str(args.get("collection_slug") or "garage")
+        row = await session.scalar(
+            select(Collection.id).where(
+                Collection.user_id == user_id, Collection.slug == slug,
+                Collection.id.in_(allowed),
+            )
+        )
+        return row is not None
+    if name in _CLOUD_ENTITY_TOOLS:
+        entity_id = args.get("vehicle_entity_id")
+        if not isinstance(entity_id, str):
+            return False
+        row = await session.scalar(
+            select(Entity.id).where(
+                Entity.user_id == user_id, Entity.id == entity_id,
+                Entity.collection_id.in_(allowed),
+                Entity.sensitivity.in_(("inherit", "standard")),
+            )
+        )
+        return row is not None
+    if name in _CLOUD_HEALTH_TOOLS:
+        row = await session.scalar(
+            select(Collection.id).where(
+                Collection.user_id == user_id, Collection.slug == "health",
+                Collection.id.in_(allowed),
+            )
+        )
+        return row is not None
+    return False
