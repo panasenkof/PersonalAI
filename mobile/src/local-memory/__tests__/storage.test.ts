@@ -108,10 +108,10 @@ test("persists device-bound 256-bit key and requires interactive unlock", async 
   expect(vault.get(profile.keyName + ".initialized")).toBe("yes");
   expect((SecureStore.getItemAsync as jest.Mock).mock.calls.some(x => x[0] === profile.keyName &&
     x[1]?.requireAuthentication)).toBe(true);
-  expect(first.execAsync.mock.calls[0][0]).toBe(`PRAGMA key = '${key}';`);
+  expect((first.execAsync as jest.Mock).mock.calls[0][0]).toBe(`PRAGMA key = '${key}';`);
   await closeLocalMemory();
   const second = await openLocalMemory(owner);
-  expect(second.execAsync.mock.calls[0][0]).toBe(`PRAGMA key = '${key}';`);
+  expect((second.execAsync as jest.Mock).mock.calls[0][0]).toBe(`PRAGMA key = '${key}';`);
   expect((SecureStore.setItemAsync as jest.Mock).mock.calls.filter(x => x[0] === profile.keyName)).toHaveLength(1);
 });
 
@@ -120,12 +120,12 @@ test("migrates legacy guest key in place without wiping notes", async () => {
   vault.set("pia.local-memory.sqlcipher.key.v1", legacy);
   const db = await openLocalMemory("guest");
   const guest = await localMemoryIdentity("guest");
-  expect(db.execAsync.mock.calls[0][0]).toBe(`PRAGMA key = '${legacy}';`);
+  expect((db.execAsync as jest.Mock).mock.calls[0][0]).toBe(`PRAGMA key = '${legacy}';`);
   expect(vault.get(guest.keyName)).toBe(legacy);
   expect(vault.has("pia.local-memory.sqlcipher.key.v1")).toBe(false);
   await closeLocalMemory();
   const next = await openLocalMemory("guest");
-  expect(next.execAsync.mock.calls[0][0]).toBe(`PRAGMA key = '${legacy}';`);
+  expect((next.execAsync as jest.Mock).mock.calls[0][0]).toBe(`PRAGMA key = '${legacy}';`);
 });
 
 test("missing previously protected key or cancelled authentication never rotates old encryption", async () => {
