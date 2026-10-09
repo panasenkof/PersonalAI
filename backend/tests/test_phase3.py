@@ -83,7 +83,7 @@ def test_stats_endpoint(client: TestClient, random_email: str, monkeypatch) -> N
 async def test_labs_record_and_trends_unit() -> None:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-    from app.llm.providers import ChatMessage, LLMCompletionResult
+    from app.llm.providers import ChatMessage, LLMCompletionResult, LocalLLMProvider
     from app.models import Base
     from app.services.users import bootstrap_user
 
@@ -92,7 +92,10 @@ async def test_labs_record_and_trends_unit() -> None:
         await conn.run_sync(Base.metadata.create_all)
     S = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
-    class FakeP:
+    class FakeP(LocalLLMProvider):
+        def __init__(self) -> None:
+            self.base_url = "http://127.0.0.1:11434/v1"
+
         async def text_json_schema(self, *, model, system, user, json_schema_name, json_schema):
             import re
 
