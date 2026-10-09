@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.db import get_session
-from app.models import Collection, Entity, User
+from app.memory.sqlalchemy import SqlAlchemyMemoryRepository
+from app.models import User
 
 router = APIRouter(prefix="/v1/collections", tags=["collections"])
 
@@ -16,8 +16,7 @@ async def list_collections(
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ) -> list[dict]:
-    res = await session.execute(select(Collection).where(Collection.user_id == user.id))
-    rows = list(res.scalars().all())
+    rows = await SqlAlchemyMemoryRepository(session, user.id).list_collections()
     return [{"id": c.id, "name": c.name, "slug": c.slug} for c in rows]
 
 
@@ -29,10 +28,9 @@ async def list_entities_by_slug(
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ) -> list[dict]:
-    res = await session.execute(select(Collection).where(Collection.user_id == user.id).where(Collection.slug == slug))
-    col = res.scalar_one_or_none()
-    if not col:
+    repository = SqlAlchemyMemoryRepository(session, user.id)
+    col = await repository.collection_by_slug(slug)
+    if col is None:
         return []
-    res2 = await session.execute(select(Entity).where(Entity.collection_id == col.id, Entity.user_id == user.id).order_by(Entity.created_at, Entity.id).offset(offset).limit(limit))
-    ents = list(res2.scalars().all())
-    return [{"id": e.id, "domain": e.domain, "payload": e.payload} for e in ents]
+    page = await repository.entities(collection_id=col.id, limit=limit, offset=offset)
+    return [{"id": e.id, "domain": e.domain, "payload": e.payload} for e in page.items]

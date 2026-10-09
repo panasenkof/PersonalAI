@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.llm.router import provider_for_user
+from app.memory.contracts import EntityRecord, ObservationRecord
 from app.models import Chunk, Entity, LLMSettings, Observation, utcnow
 
 logger = logging.getLogger(__name__)
@@ -107,12 +108,12 @@ async def _index_texts(
     return len(chunks)
 
 
-async def index_entity(session: AsyncSession, user_id: str, entity: Entity) -> int:
+async def index_entity(session: AsyncSession, user_id: str, entity: Entity | EntityRecord) -> int:
     text = flatten_payload(entity.payload or {})
     return await _index_texts(session, user_id, [text], entity_id=entity.id)
 
 
-async def index_observation(session: AsyncSession, user_id: str, observation: Observation) -> int:
+async def index_observation(session: AsyncSession, user_id: str, observation: Observation | ObservationRecord) -> int:
     text = flatten_payload(observation.payload or {})
     return await _index_texts(
         session, user_id, [text], entity_id=observation.entity_id, observation_id=observation.id

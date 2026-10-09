@@ -4,10 +4,11 @@ import asyncio
 import json
 from typing import Any
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Collection, Entity
+from app.memory.contracts import NewEntity
+from app.memory.repository import MemoryAccessError
+from app.memory.sqlalchemy import SqlAlchemyMemoryRepository
 from app.rag.search import hybrid_search
 
 
@@ -22,38 +23,35 @@ async def kb_search(session: AsyncSession, user_id: str, args: dict[str, Any]) -
 
 async def kb_list_entities(session: AsyncSession, user_id: str, args: dict[str, Any]) -> dict[str, Any]:
     domain = args.get("domain")
-    stmt = select(Entity).where(Entity.user_id == user_id)
-    if domain:
-        stmt = stmt.where(Entity.domain == domain)
     limit = min(100, max(1, int(args.get("limit", 50))))
     offset = max(0, int(args.get("offset", 0)))
-    res = await session.execute(stmt.order_by(Entity.created_at, Entity.id).offset(offset).limit(limit + 1))
-    rows = list(res.scalars().all())
-    return {"entities": [{"id": e.id, "domain": e.domain, "payload": e.payload} for e in rows[:limit]],
-            "next_offset": offset + limit if len(rows) > limit else None}
+    page = await SqlAlchemyMemoryRepository(session, user_id).entities(
+        domain=domain, limit=limit, offset=offset,
+    )
+    return {
+        "entities": [{"id": e.id, "domain": e.domain, "payload": e.payload} for e in page.items],
+        "next_offset": page.next_offset,
+    }
 
 
 async def kb_create_entity(session: AsyncSession, user_id: str, args: dict[str, Any]) -> dict[str, Any]:
     slug = args.get("collection_slug") or "garage"
-    res = await session.execute(
-        select(Collection).where(Collection.user_id == user_id).where(Collection.slug == slug)
-    )
-    col = res.scalar_one_or_none()
+    repository = SqlAlchemyMemoryRepository(session, user_id)
+    col = await repository.collection_by_slug(slug)
     if col is None:
         return {"error": f"collection_not_found:{slug}"}
-    e = Entity(
-        user_id=user_id,
-        collection_id=col.id,
-        domain=args["domain"],
-        schema_version=str(args.get("schema_version") or "1"),
-        payload=args["payload"],
-    )
-    session.add(e)
-    await session.flush()
+    try:
+        entity = await repository.create_entity(NewEntity(
+            collection_id=col.id, domain=args["domain"],
+            schema_version=str(args.get("schema_version") or "1"),
+            payload=args["payload"],
+        ))
+    except MemoryAccessError:
+        return {"error": f"collection_not_found:{slug}"}
     from app.rag.indexing import index_entity
 
-    await index_entity(session, user_id, e)
-    return {"entity_id": e.id, "status": "created"}
+    await index_entity(session, user_id, entity)
+    return {"entity_id": entity.id, "status": "created"}
 
 
 async def kb_ingest_document(session: AsyncSession, user_id: str, args: dict[str, Any]) -> dict[str, Any]:
@@ -72,27 +70,24 @@ async def kb_ingest_document(session: AsyncSession, user_id: str, args: dict[str
     if not text.strip():
         return {"error": "no_extractable_text", "message": "Scanned image or unsupported format."}
     slug = args.get("collection_slug") or "garage"
-    res = await session.execute(
-        select(Collection).where(Collection.user_id == user_id).where(Collection.slug == slug)
-    )
-    col = res.scalar_one_or_none()
+    repository = SqlAlchemyMemoryRepository(session, user_id)
+    col = await repository.collection_by_slug(slug)
     if col is None:
         return {"error": f"collection_not_found:{slug}"}
     title = str(args.get("title") or blob.filename or "Документ")[:200]
-    e = Entity(
-        user_id=user_id,
-        collection_id=col.id,
-        domain="documents",
-        payload={"type": "document", "title": title, "filename": blob.filename, "storage_key": storage_key,
-                 "chars": len(text)},
-    )
-    session.add(e)
-    await session.flush()
+    try:
+        entity = await repository.create_entity(NewEntity(
+            collection_id=col.id, domain="documents",
+            payload={"type": "document", "title": title, "filename": blob.filename, "storage_key": storage_key,
+                     "chars": len(text)},
+        ))
+    except MemoryAccessError:
+        return {"error": f"collection_not_found:{slug}"}
     from app.rag.indexing import index_entity, index_text
 
-    await index_entity(session, user_id, e)
-    chunks = await index_text(session, user_id, text, entity_id=e.id)
-    return {"entity_id": e.id, "title": title, "chars": len(text), "chunks": chunks, "status": "ingested"}
+    await index_entity(session, user_id, entity)
+    chunks = await index_text(session, user_id, text, entity_id=entity.id)
+    return {"entity_id": entity.id, "title": title, "chars": len(text), "chunks": chunks, "status": "ingested"}
 
 
 UNIVERSAL_TOOL_DEFINITIONS: list[dict[str, Any]] = [
