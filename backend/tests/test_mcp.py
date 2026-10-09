@@ -54,6 +54,16 @@ def test_mcp_tools_call_with_jwt(client: TestClient, random_email: str) -> None:
     assert client.put("/v1/privacy/integrations", headers={"Authorization": f"Bearer {token}"}, json={
         "allow_remote_stt": False, "allow_mcp_access": True,
     }).status_code == 200
+    # A global MCP toggle is NOT collection-level consent.
+    denied = client.post("/mcp", headers={"Authorization": f"Bearer {token}"}, json={
+        "jsonrpc": "2.0", "id": 10, "method": "tools/call",
+        "params": {"name": "kb_list_entities", "arguments": {}},
+    })
+    assert denied.status_code == 200 and denied.json()["result"]["isError"]
+    assert "cloud_memory_tool_denied" in str(denied.json())
+    assert client.put("/v1/privacy/collections/garage", headers={"Authorization": f"Bearer {token}"}, json={
+        "sensitivity": "standard", "allow_mcp_access": True,
+    }).status_code == 200
     r2 = client.post(
         "/mcp",
         headers={"Authorization": f"Bearer {token}"},

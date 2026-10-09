@@ -58,7 +58,7 @@ def test_upgrade_max_and_daily_usage_branches_converge(tmp_path, previous):
         engine = create_async_engine(url)
         async with engine.connect() as c:
             versions = (await c.execute(text("SELECT version_num FROM alembic_version"))).scalars().all()
-            assert versions == ["q5f0b7c9d011"]
+            assert versions == ["r6a1c9d2e013"]
             columns = await c.run_sync(lambda conn: inspect(conn).get_columns("users"))
             assert "max_user_id" in {column["name"] for column in columns}
             tables = await c.run_sync(lambda conn: inspect(conn).get_table_names())
@@ -121,7 +121,9 @@ def test_memory_v2_migration_preserves_legacy_rows(tmp_path, dialect):
             entities = await conn.run_sync(lambda c: {v["name"] for v in inspect(c).get_columns("entities")})
             observations = await conn.run_sync(lambda c: {v["name"] for v in inspect(c).get_columns("observations")})
             assert {"description", "sensitivity"} <= collections
-            assert {"allow_cloud_llm", "allow_remote_embeddings", "allow_remote_extraction", "allow_messenger_reminders"} <= collections
+            assert {"allow_cloud_llm", "allow_remote_embeddings", "allow_remote_extraction", "allow_messenger_reminders", "allow_mcp_access"} <= collections
+            blob_columns = await conn.run_sync(lambda c: {v["name"] for v in inspect(c).get_columns("blobs")})
+            assert {"collection_id", "sensitivity"} <= blob_columns
             llm_columns = await conn.run_sync(lambda c: {v["name"] for v in inspect(c).get_columns("llm_settings")})
             assert {"cloud_history_access", "allow_remote_stt", "allow_mcp_access"} <= llm_columns
             assert {"title", "record_status", "sensitivity", "valid_from", "valid_until", "source_kind", "source_ref", "updated_at"} <= entities
