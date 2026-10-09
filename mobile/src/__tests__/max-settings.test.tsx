@@ -6,6 +6,9 @@ import { api } from '../api/client';
 jest.mock('../api/client', () => ({api: {
   serviceInfo: jest.fn(async () => ({})),
   llmSettings: jest.fn(async () => null),
+  privacyCollections: jest.fn(async () => []),
+  privacyHistory: jest.fn(async () => ({ allow_cloud_history: false })),
+  privacyIntegrations: jest.fn(async () => ({ allow_remote_stt: false, allow_mcp_access: false })),
   linkCode: jest.fn(),
 }}));
 jest.mock('../auth/AuthContext', () => ({useAuth: () => ({me:{email:'test@example.com',channels:{max:true}},apiBase:'https://pia.example.com'})}));

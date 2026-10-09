@@ -162,6 +162,9 @@ def test_disabled_domains_are_absent_from_mcp_and_prompt(monkeypatch):
 @pytest.mark.asyncio
 async def test_disabled_tool_cannot_be_called_via_mcp(client, random_email, monkeypatch):
     token = client.post('/v1/auth/register', json={'email': random_email, 'password': 'secret1234'}).json()['access_token']
+    assert client.put('/v1/privacy/integrations', headers={
+        'Authorization': f'Bearer {token}',
+    }, json={'allow_remote_stt': False, 'allow_mcp_access': True}).status_code == 200
     monkeypatch.setattr(get_settings(), 'enabled_domains', '')
     response = client.post('/mcp', headers={'Authorization': f'Bearer {token}'}, json={'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call', 'params': {'name': 'labs_record_report', 'arguments': {'text': 'test'}}})
     assert response.json()['result']['isError']
