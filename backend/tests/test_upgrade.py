@@ -138,7 +138,7 @@ def test_memory_v2_migration_preserves_legacy_rows(tmp_path, dialect):
                 "SELECT kind,payload,sensitivity,confidence,source_kind FROM observations "
                 "WHERE id='memory-observation'"
             ))).one()
-            assert observation.kind == "service_event" and '"old receipt"' in str(observation.payload)
+            assert observation.kind == "service_event" and "old receipt" in str(observation.payload)
             assert observation.sensitivity == "inherit"
             assert observation.confidence is None and observation.source_kind is None
         await engine.dispose()
