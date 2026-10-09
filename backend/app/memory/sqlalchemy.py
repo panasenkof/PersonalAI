@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import datetime, timezone
 from typing import TypeVar
 
 from sqlalchemy import select
@@ -20,6 +21,13 @@ from app.memory.repository import MemoryAccessError, MemoryConflictError
 from app.models import Collection, Entity, Observation
 
 
+def _utc(value: datetime | None) -> datetime | None:
+    """SQLite drops timezone info; contract timestamps are normalized to UTC."""
+    if value is None:
+        return None
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+
+
 def _collection(row: Collection) -> CollectionRecord:
     return CollectionRecord(
         id=row.id, user_id=row.user_id, name=row.name, slug=row.slug,
@@ -31,21 +39,21 @@ def _entity(row: Entity) -> EntityRecord:
     return EntityRecord(
         id=row.id, user_id=row.user_id, collection_id=row.collection_id,
         domain=row.domain, schema_version=row.schema_version,
-        payload=deepcopy(row.payload), created_at=row.created_at,
+        payload=deepcopy(row.payload), created_at=_utc(row.created_at) or row.created_at,
         title=row.title, record_status=row.record_status, sensitivity=row.sensitivity,
-        valid_from=row.valid_from, valid_until=row.valid_until,
+        valid_from=_utc(row.valid_from), valid_until=_utc(row.valid_until),
         source_kind=row.source_kind, source_ref=row.source_ref,
-        updated_at=row.updated_at,
+        updated_at=_utc(row.updated_at),
     )
 
 
 def _observation(row: Observation) -> ObservationRecord:
     return ObservationRecord(
         id=row.id, user_id=row.user_id, entity_id=row.entity_id,
-        occurred_at=row.occurred_at, kind=row.kind,
-        payload=deepcopy(row.payload), created_at=row.created_at,
-        sensitivity=row.sensitivity, valid_from=row.valid_from,
-        valid_until=row.valid_until, source_kind=row.source_kind,
+        occurred_at=_utc(row.occurred_at) or row.occurred_at, kind=row.kind,
+        payload=deepcopy(row.payload), created_at=_utc(row.created_at) or row.created_at,
+        sensitivity=row.sensitivity, valid_from=_utc(row.valid_from),
+        valid_until=_utc(row.valid_until), source_kind=row.source_kind,
         source_ref=row.source_ref, confidence=row.confidence,
     )
 
@@ -135,8 +143,8 @@ class SqlAlchemyMemoryRepository:
             user_id=self.user_id, collection_id=item.collection_id, domain=item.domain,
             schema_version=item.schema_version, payload=deepcopy(item.payload),
             title=item.title, record_status=item.record_status,
-            sensitivity=item.sensitivity, valid_from=item.valid_from,
-            valid_until=item.valid_until, source_kind=item.source_kind,
+            sensitivity=item.sensitivity, valid_from=_utc(item.valid_from),
+            valid_until=_utc(item.valid_until), source_kind=item.source_kind,
             source_ref=item.source_ref,
         )
         self.session.add(row)
@@ -172,9 +180,9 @@ class SqlAlchemyMemoryRepository:
             raise ValueError("invalid_confidence")
         row = Observation(
             user_id=self.user_id, entity_id=item.entity_id,
-            occurred_at=item.occurred_at, kind=item.kind,
+            occurred_at=_utc(item.occurred_at) or item.occurred_at, kind=item.kind,
             payload=deepcopy(item.payload), sensitivity=item.sensitivity,
-            valid_from=item.valid_from, valid_until=item.valid_until,
+            valid_from=_utc(item.valid_from), valid_until=_utc(item.valid_until),
             source_kind=item.source_kind, source_ref=item.source_ref,
             confidence=item.confidence,
         )

@@ -26,8 +26,11 @@ The PersonalAI backend now contains a persistence-independent Python memory cont
    are unchanged. No Alembic migration is needed in this phase.
 5. Legacy memory records with absent v2 metadata are returned with their recorded
    NULL/default values. There is no inferred evidence, date or confidence.
-6. Limit is 1..100; offset >= 0. Sorted paging is stable by timestamps and ID.
-7. Collection slug uniqueness is currently checked in application code only; no
+6. All datetime values returned by the adapter are normalized to UTC. Naive
+   SQLite timestamps are interpreted as UTC, matching the existing utcnow()
+   semantics; the database still stores values in its native format.
+7. Limit is 1..100; offset >= 0. Sorted paging is stable by timestamps and ID.
+8. Collection slug uniqueness is currently checked in application code only; no
    cross-session uniqueness index was added. Do not rely on this for concurrent
    independent collection creation without a future database constraint.
 
