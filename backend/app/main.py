@@ -16,6 +16,7 @@ from app.api.v1.conversations import router as conversations_router
 from app.api.v1.email_actions import router as email_router
 from app.api.v1.facts import router as facts_router
 from app.api.v1.messages import router as messages_router
+from app.api.v1.privacy import router as privacy_router
 from app.api.v1.service import router as service_router
 from app.api.v1.settings_llm import router as settings_router
 from app.api.v1.stats import router as stats_router
@@ -173,6 +174,7 @@ app.include_router(service_router)
 app.include_router(settings_router)
 app.include_router(messages_router)
 app.include_router(collections_router)
+app.include_router(privacy_router)
 app.include_router(conversations_router)
 app.include_router(stats_router)
 app.include_router(facts_router)

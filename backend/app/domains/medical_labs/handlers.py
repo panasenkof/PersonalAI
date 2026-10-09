@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.medical_labs.schemas import LAB_REPORT_SCHEMA
 from app.llm.router import default_model_for_user, provider_for_user
+from app.memory.privacy import cloud_scope
 from app.models import Collection, Entity, Observation
 from app.rag.indexing import index_entity
 from app.security.redact import safe_error
@@ -20,9 +21,11 @@ logger = logging.getLogger(__name__)
 
 
 async def _find_or_create_profile(session: AsyncSession, user_id: str) -> Entity:
-    res = await session.execute(
-        select(Entity).where(Entity.user_id == user_id).where(Entity.domain == "medical_labs")
-    )
+    stmt = select(Entity).where(Entity.user_id == user_id, Entity.domain == "medical_labs")
+    scope = cloud_scope()
+    if scope is not None:
+        stmt = stmt.where(Entity.collection_id.in_(scope), Entity.sensitivity.in_(("inherit", "standard")))
+    res = await session.execute(stmt)
     for e in res.scalars().all():
         if (e.payload or {}).get("type") == "lab_profile":
             return e
@@ -159,12 +162,20 @@ async def labs_get_trends(session: AsyncSession, user_id: str, args: dict[str, A
     query = str(args.get("analyte") or "").strip().lower()
     if not query:
         return {"error": "no_analyte"}
-    res = await session.execute(
-        select(Observation)
-        .where(Observation.user_id == user_id)
-        .where(Observation.kind == "lab_report")
-        .order_by(Observation.occurred_at.asc())
+    stmt = select(Observation).where(
+        Observation.user_id == user_id, Observation.kind == "lab_report",
     )
+    scope = cloud_scope()
+    if scope is not None:
+        # A trend is computed from many rows: exclude every ungranted or
+        # record-level-sensitive observation before calculating its series.
+        stmt = stmt.join(Entity, Entity.id == Observation.entity_id).where(
+            Entity.user_id == user_id,
+            Entity.collection_id.in_(scope),
+            Entity.sensitivity.in_(("inherit", "standard")),
+            Observation.sensitivity.in_(("inherit", "standard")),
+        )
+    res = await session.execute(stmt.order_by(Observation.occurred_at.asc()))
     series: list[dict[str, Any]] = []
     for obs in res.scalars().all():
         for a in (obs.payload or {}).get("analytes") or []:

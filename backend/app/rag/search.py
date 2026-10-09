@@ -55,6 +55,12 @@ async def _query_embedding(session: AsyncSession, user_id: str, query: str) -> l
         from app.models import LLMSettings
 
         provider = await provider_for_user(session, user_id)
+        from app.memory.privacy import is_trusted_local_provider
+
+        # Query terms can themselves reveal health, financial or family facts.
+        # Never send a free-form memory query to a remote embedding endpoint.
+        if not is_trusted_local_provider(provider):
+            return None
         row = await session.get(LLMSettings, user_id)
         emb_model = (row.embedding_model if row else None) or get_settings().default_embedding_model
         vecs = await provider.embed([query], model=emb_model)

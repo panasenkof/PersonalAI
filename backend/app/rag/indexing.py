@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.llm.router import provider_for_user
 from app.memory.contracts import EntityRecord, ObservationRecord
+from app.memory.privacy import is_trusted_local_provider, remote_embedding_allowed
 from app.models import Chunk, Entity, LLMSettings, Observation, utcnow
 
 logger = logging.getLogger(__name__)
@@ -49,12 +50,18 @@ def split_text(text: str) -> list[str]:
     return chunks
 
 
-async def _embed_texts(session: AsyncSession, user_id: str, texts: list[str]) -> list[list[float]] | None:
+async def _embed_texts(
+    session: AsyncSession, user_id: str, texts: list[str], *, collection_id: str | None,
+) -> list[list[float]] | None:
     """Return embeddings or None when the embedding backend is unavailable."""
     if not texts:
         return []
     try:
         provider = await provider_for_user(session, user_id)
+        if not is_trusted_local_provider(provider) and not await remote_embedding_allowed(
+            session, user_id, collection_id,
+        ):
+            return None
         row = await session.get(LLMSettings, user_id)
         emb_model = (row.embedding_model if row else None) or get_settings().default_embedding_model
         return await provider.embed(texts, model=emb_model)
@@ -84,6 +91,7 @@ async def _index_texts(
     *,
     entity_id: str | None = None,
     observation_id: str | None = None,
+    collection_id: str | None = None,
 ) -> int:
     chunks = [c for t in texts for c in split_text(t)]
     if not chunks:
@@ -91,7 +99,7 @@ async def _index_texts(
     from app.rag.identity import embedding_space
 
     space = await embedding_space(session, user_id)
-    embeddings = await _embed_texts(session, user_id, chunks)
+    embeddings = await _embed_texts(session, user_id, chunks, collection_id=collection_id)
     for i, text in enumerate(chunks):
         emb = embeddings[i] if embeddings is not None and i < len(embeddings) else None
         chunk = Chunk(
@@ -110,13 +118,26 @@ async def _index_texts(
 
 async def index_entity(session: AsyncSession, user_id: str, entity: Entity | EntityRecord) -> int:
     text = flatten_payload(entity.payload or {})
-    return await _index_texts(session, user_id, [text], entity_id=entity.id)
+    # A sensitive entity overrides any collection-wide remote embedding consent.
+    collection_id = entity.collection_id if entity.sensitivity in {"inherit", "standard"} else None
+    return await _index_texts(
+        session, user_id, [text], entity_id=entity.id, collection_id=collection_id,
+    )
 
 
 async def index_observation(session: AsyncSession, user_id: str, observation: Observation | ObservationRecord) -> int:
     text = flatten_payload(observation.payload or {})
+    entity = await session.scalar(
+        select(Entity).where(Entity.id == observation.entity_id, Entity.user_id == user_id)
+    )
+    collection_id = (
+        entity.collection_id
+        if entity is not None and entity.sensitivity in {"inherit", "standard"}
+        and observation.sensitivity in {"inherit", "standard"} else None
+    )
     return await _index_texts(
-        session, user_id, [text], entity_id=observation.entity_id, observation_id=observation.id
+        session, user_id, [text], entity_id=observation.entity_id,
+        observation_id=observation.id, collection_id=collection_id,
     )
 
 
@@ -124,7 +145,19 @@ async def index_text(
     session: AsyncSession, user_id: str, text: str, *, entity_id: str | None = None
 ) -> int:
     """Index free text (e.g. an ingested document) attached to an entity."""
-    return await _index_texts(session, user_id, [text], entity_id=entity_id)
+    entity = (
+        await session.scalar(
+            select(Entity).where(Entity.id == entity_id, Entity.user_id == user_id)
+        )
+        if entity_id else None
+    )
+    collection_id = (
+        entity.collection_id
+        if entity is not None and entity.sensitivity in {"inherit", "standard"} else None
+    )
+    return await _index_texts(
+        session, user_id, [text], entity_id=entity_id, collection_id=collection_id,
+    )
 
 
 async def reindex_entity(session: AsyncSession, user_id: str, entity: Entity) -> int:
