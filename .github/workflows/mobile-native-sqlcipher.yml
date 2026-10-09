@@ -29,6 +29,10 @@ jobs:
           distribution: temurin
           java-version: "17"
       - uses: android-actions/setup-android@v3
+        with:
+          # The Android SDK removed the obsolete "tools" package, which this
+          # action still requests by default. Only install supported packages.
+          packages: platform-tools
       - name: Install locked JS and native dependencies
         run: npm ci --no-audit --no-fund
       - name: Generate native Android project including Expo SQLCipher
