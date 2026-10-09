@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 
+import pytest
 from sqlalchemy import select
 
 from app.db import SessionLocal
@@ -109,3 +111,78 @@ def test_blob_provenance_blocks_cross_collection_cloud_export(client, random_ema
     assert client.put("/v1/privacy/blobs/" + blob["blob_id"], headers=stranger, json={
         "collection_slug": "garage", "sensitivity": "standard",
     }).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_fact_observation_keeps_blob_provenance_for_remote_embedding(monkeypatch):
+    """OCR output must not lose the original file's egress classification."""
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+    from app.models import Base, Blob, Observation
+    from app.rag.indexing import index_observation
+    from app.services.facts import stage_or_commit_observation
+
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    forwarded: list[str | None] = []
+
+    async def fake_index(*_args, collection_id=None, **_kwargs):
+        forwarded.append(collection_id)
+        return 1
+
+    monkeypatch.setattr("app.rag.indexing._index_texts", fake_index)
+    try:
+        async with factory() as session:
+            owner = User(email="file-provenance@example.net", password_hash="x")
+            session.add(owner)
+            await session.flush()
+            col = Collection(
+                user_id=owner.id, name="Health", slug="health",
+                sensitivity="sensitive", allow_remote_embeddings=True,
+            )
+            session.add(col)
+            await session.flush()
+            profile = Entity(
+                user_id=owner.id, collection_id=col.id, domain="medical_labs",
+                payload={"type": "profile"},
+            )
+            blob = Blob(
+                user_id=owner.id, storage_key="provenance-image",
+                sha256="e" * 64, mime="image/png", size_bytes=3,
+            )
+            session.add_all([profile, blob])
+            await session.flush()
+            # Initial unclassified blob must not produce remote vectors even
+            # though the whole health collection allows remote embeddings.
+            obs = Observation(
+                user_id=owner.id, entity_id=profile.id,
+                kind="lab_report", occurred_at=datetime.now(timezone.utc),
+                payload={"secret": "from-image"}, source_kind="blob",
+                source_ref=blob.storage_key,
+            )
+            session.add(obs)
+            await session.flush()
+            await index_observation(session, owner.id, obs)
+            assert forwarded == [None]
+
+            result = await stage_or_commit_observation(
+                session, owner.id, entity_id=profile.id, kind="lab_report",
+                occurred_at=datetime.now(timezone.utc),
+                payload={"secret": "from-image"},
+                summary="from-image", needs_confirmation=False,
+                source_blob_key=blob.storage_key,
+            )
+            assert result["status"] == "saved"
+            saved = await session.get(Observation, result["observation_id"])
+            assert saved.source_kind == "blob" and saved.source_ref == blob.storage_key
+            assert forwarded[-1] is None
+
+            blob.sensitivity = "standard"
+            blob.collection_id = col.id
+            await session.flush()
+            await index_observation(session, owner.id, obs)
+            assert forwarded[-1] == col.id
+    finally:
+        await engine.dispose()
