@@ -121,6 +121,9 @@ def test_memory_v2_migration_preserves_legacy_rows(tmp_path, dialect):
             entities = await conn.run_sync(lambda c: {v["name"] for v in inspect(c).get_columns("entities")})
             observations = await conn.run_sync(lambda c: {v["name"] for v in inspect(c).get_columns("observations")})
             assert {"description", "sensitivity"} <= collections
+            assert {"allow_cloud_llm", "allow_remote_embeddings"} <= collections
+            llm_columns = await conn.run_sync(lambda c: {v["name"] for v in inspect(c).get_columns("llm_settings")})
+            assert "cloud_history_access" in llm_columns
             assert {"title", "record_status", "sensitivity", "valid_from", "valid_until", "source_kind", "source_ref", "updated_at"} <= entities
             assert {"sensitivity", "valid_from", "valid_until", "source_kind", "source_ref", "confidence"} <= observations
             assert "record_version" in entities and "record_version" in observations
@@ -133,6 +136,11 @@ def test_memory_v2_migration_preserves_legacy_rows(tmp_path, dialect):
                 "SELECT name, slug, sensitivity, description FROM collections WHERE id='memory-collection'"
             ))).one()
             assert tuple(collection) == ("Garage", "garage", "unclassified", None)
+            grants = (await conn.execute(text(
+                "SELECT allow_cloud_llm, allow_remote_embeddings FROM collections "
+                "WHERE id='memory-collection'"
+            ))).one()
+            assert tuple(grants) == (False, False)
             entity = (await conn.execute(text(
                 "SELECT domain, payload, sensitivity, record_status, valid_from, source_ref "
                 "FROM entities WHERE id='memory-entity'"
