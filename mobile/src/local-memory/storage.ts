@@ -2,6 +2,8 @@ import * as Crypto from "expo-crypto";
 import * as SecureStore from "expo-secure-store";
 import * as SQLite from "expo-sqlite";
 
+import { waitForUnlockedTransaction, withUnlockedTransaction } from "./transaction";
+
 // Guest uses the historical database name so PR #15 notes are preserved.
 const GUEST_DB_NAME = "pia-personal-memory-v1.db";
 const LEGACY_GUEST_KEY = "pia.local-memory.sqlcipher.key.v1";
@@ -147,7 +149,7 @@ async function initialize(profileId: string): Promise<SQLite.SQLiteDatabase> {
     const version = row?.user_version ?? 0;
     if (version > LOCAL_MEMORY_SCHEMA_VERSION) throw new Error("local_memory_schema_too_new");
     if (version === 0) {
-      await db.withExclusiveTransactionAsync(async tx => {
+      await withUnlockedTransaction(db, async tx => {
         await tx.execAsync(SCHEMA_SQL);
         await tx.execAsync("PRAGMA user_version = 1");
       });
@@ -162,25 +164,41 @@ async function initialize(profileId: string): Promise<SQLite.SQLiteDatabase> {
   }
 }
 
-export async function openLocalMemory(profileId: string): Promise<SQLite.SQLiteDatabase> {
+/**
+ * Execute a complete sensitive operation on a locked profile connection.
+ * Profile switches and close operations cannot interrupt an export or restore.
+ * UI callers must avoid simultaneous repository writes while this runs.
+ */
+export async function withLocalMemoryDatabase<T>(
+  profileId: string, work: (db: SQLite.SQLiteDatabase) => Promise<T>,
+): Promise<T> {
   return serialize(async () => {
-    if (current && currentProfile === profileId) return current;
-    if (current) {
+    if (current && currentProfile !== profileId) {
+      await waitForUnlockedTransaction(current);
       await current.closeAsync();
       current = null;
       currentProfile = null;
     }
-    const db = await initialize(profileId);
-    current = db;
-    currentProfile = profileId;
-    return db;
+    if (!current) {
+      const db = await initialize(profileId);
+      current = db;
+      currentProfile = profileId;
+    }
+    return work(current);
   });
+}
+
+export async function openLocalMemory(profileId: string): Promise<SQLite.SQLiteDatabase> {
+  return withLocalMemoryDatabase(profileId, async db => db);
 }
 
 /** Close when switching accounts, going to background or locking the device. */
 export async function closeLocalMemory(): Promise<void> {
   await serialize(async () => {
-    if (current) await current.closeAsync();
+    if (current) {
+      await waitForUnlockedTransaction(current);
+      await current.closeAsync();
+    }
     current = null;
     currentProfile = null;
   });
