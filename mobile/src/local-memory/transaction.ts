@@ -37,3 +37,8 @@ export async function withUnlockedTransaction<T extends UnlockedDatabase>(
     if (fifo.get(db) === next) fifo.delete(db);
   }
 }
+
+/** Wait for repository writes before switching profiles or locking memory. */
+export async function waitForUnlockedTransaction(db: object): Promise<void> {
+  await (fifo.get(db) ?? Promise.resolve());
+}

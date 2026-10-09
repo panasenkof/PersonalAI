@@ -2,7 +2,7 @@ import * as Crypto from "expo-crypto";
 import * as SecureStore from "expo-secure-store";
 import * as SQLite from "expo-sqlite";
 
-import { withUnlockedTransaction } from "./transaction";
+import { waitForUnlockedTransaction, withUnlockedTransaction } from "./transaction";
 
 // Guest uses the historical database name so PR #15 notes are preserved.
 const GUEST_DB_NAME = "pia-personal-memory-v1.db";
@@ -174,6 +174,7 @@ export async function withLocalMemoryDatabase<T>(
 ): Promise<T> {
   return serialize(async () => {
     if (current && currentProfile !== profileId) {
+      await waitForUnlockedTransaction(current);
       await current.closeAsync();
       current = null;
       currentProfile = null;
@@ -194,7 +195,10 @@ export async function openLocalMemory(profileId: string): Promise<SQLite.SQLiteD
 /** Close when switching accounts, going to background or locking the device. */
 export async function closeLocalMemory(): Promise<void> {
   await serialize(async () => {
-    if (current) await current.closeAsync();
+    if (current) {
+      await waitForUnlockedTransaction(current);
+      await current.closeAsync();
+    }
     current = null;
     currentProfile = null;
   });

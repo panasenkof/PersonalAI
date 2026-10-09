@@ -46,3 +46,15 @@ schema require explicit migration support.
 
 The automated Jest tests validate commands and failure paths. They do not
 replace native export/import validation.
+
+## Native SQLCipher connection caveat
+
+Expo SDK 54 `withExclusiveTransactionAsync()` internally creates a **new
+SQLite connection**. SQLCipher's `PRAGMA key` unlocks the *original connection
+only*. Using Expo's exclusive transaction can therefore fail with an encrypted
+database (schema creation, edits, FTS and backup import were affected).
+
+PersonalAI instead runs `BEGIN IMMEDIATE` / `COMMIT` / `ROLLBACK` on the
+same unlocked connection, with FIFO transaction serialization. Closing or
+switching a device profile waits for active writes. This is validated in
+regression tests but still requires native device acceptance.
