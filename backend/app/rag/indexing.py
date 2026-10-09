@@ -118,17 +118,22 @@ async def _index_texts(
 
 async def index_entity(session: AsyncSession, user_id: str, entity: Entity | EntityRecord) -> int:
     text = flatten_payload(entity.payload or {})
+    # A sensitive entity overrides any collection-wide remote embedding consent.
+    collection_id = entity.collection_id if entity.sensitivity in {"inherit", "standard"} else None
     return await _index_texts(
-        session, user_id, [text], entity_id=entity.id, collection_id=entity.collection_id,
+        session, user_id, [text], entity_id=entity.id, collection_id=collection_id,
     )
 
 
 async def index_observation(session: AsyncSession, user_id: str, observation: Observation | ObservationRecord) -> int:
     text = flatten_payload(observation.payload or {})
-    collection_id = await session.scalar(
-        select(Entity.collection_id).where(
-            Entity.id == observation.entity_id, Entity.user_id == user_id,
-        )
+    entity = await session.scalar(
+        select(Entity).where(Entity.id == observation.entity_id, Entity.user_id == user_id)
+    )
+    collection_id = (
+        entity.collection_id
+        if entity is not None and entity.sensitivity in {"inherit", "standard"}
+        and observation.sensitivity in {"inherit", "standard"} else None
     )
     return await _index_texts(
         session, user_id, [text], entity_id=observation.entity_id,
@@ -140,11 +145,15 @@ async def index_text(
     session: AsyncSession, user_id: str, text: str, *, entity_id: str | None = None
 ) -> int:
     """Index free text (e.g. an ingested document) attached to an entity."""
-    collection_id = (
+    entity = (
         await session.scalar(
-            select(Entity.collection_id).where(Entity.id == entity_id, Entity.user_id == user_id)
+            select(Entity).where(Entity.id == entity_id, Entity.user_id == user_id)
         )
         if entity_id else None
+    )
+    collection_id = (
+        entity.collection_id
+        if entity is not None and entity.sensitivity in {"inherit", "standard"} else None
     )
     return await _index_texts(
         session, user_id, [text], entity_id=entity_id, collection_id=collection_id,
