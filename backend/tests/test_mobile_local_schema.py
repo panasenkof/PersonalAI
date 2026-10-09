@@ -46,3 +46,37 @@ def test_offline_schema_foreign_keys_fts_and_history():
     assert connection.execute("SELECT COUNT(*) FROM memory_relations").fetchone()[0] == 0
     assert connection.execute("SELECT COUNT(*) FROM memory_revisions").fetchone()[0] == 0
     assert connection.execute("SELECT COUNT(*) FROM memory_observations").fetchone()[0] == 0
+
+
+def test_offline_fts_returns_distinct_pages_beyond_first_50():
+    """The local note UI must not silently hide records past the old limit."""
+    match = re.search(r"export const SCHEMA_SQL = `(.*?)`;", SCHEMA_SOURCE.read_text(), re.DOTALL)
+    assert match is not None
+    conn = sqlite3.connect(":memory:")
+    conn.executescript(match.group(1))
+    conn.execute(
+        "INSERT INTO memory_collections(id,name,slug,sensitivity,created_at) VALUES (?,?,?,?,?)",
+        ("notes", "Notes", "notes", "standard", "2026"),
+    )
+    for i in range(125):
+        key = f"n-{i:03d}"
+        conn.execute(
+            "INSERT INTO memory_entities(id,collection_id,domain,title,payload_json,created_at,updated_at) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (key, "notes", "notes", f"Travel {i}", '{"body":"travel"}', "2026", "2026"),
+        )
+        conn.execute(
+            "INSERT INTO memory_notes_fts(entity_id,title,body) VALUES(?,?,?)",
+            (key, f"Travel {i}", "travel"),
+        )
+    query = (
+        "SELECT e.id FROM memory_entities e JOIN memory_notes_fts f ON f.entity_id=e.id "
+        "WHERE memory_notes_fts MATCH ? AND e.domain='notes' "
+        "ORDER BY e.updated_at DESC, e.id LIMIT ? OFFSET ?"
+    )
+    pages = [
+        [row[0] for row in conn.execute(query, ('"travel"', 50, offset))]
+        for offset in (0, 50, 100)
+    ]
+    assert [len(page) for page in pages] == [50, 50, 25]
+    assert len(set(item for page in pages for item in page)) == 125
