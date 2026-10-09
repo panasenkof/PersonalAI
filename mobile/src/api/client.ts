@@ -121,6 +121,11 @@ export const api = {
     request<unknown>(`/v1/facts/${id}/${action}`, { method: "POST" }),
 
   privacyCollections: () => request<PrivacyCollection[]>("/v1/privacy/collections"),
+  classifyBlob: (blobId: string, collectionSlug: string, sensitivity: "standard" | "sensitive" | "secret") =>
+    request<{ id: string; collection_slug: string; sensitivity: string }>(
+      `/v1/privacy/blobs/${encodeURIComponent(blobId)}`,
+      { method: "PUT", json: { collection_slug: collectionSlug, sensitivity } },
+    ),
   savePrivacyCollection: (s: PrivacyCollection) =>
     request<PrivacyCollection>(`/v1/privacy/collections/${encodeURIComponent(s.slug)}`, {
       method: "PUT", json: s,
@@ -142,7 +147,7 @@ export const api = {
     const form = new FormData();
     // React Native's FormData accepts {uri,name,type} file descriptors
     form.append("file", { uri, name, type: mime } as unknown as Blob);
-    const out = await request<{ storage_key: string; mime: string }>("/v1/blobs", { method: "POST", body: form });
-    return { storage_key: out.storage_key, mime: out.mime || mime, filename: name };
+    const out = await request<{ storage_key: string; blob_id: string; mime: string }>("/v1/blobs", { method: "POST", body: form });
+    return { storage_key: out.storage_key, blob_id: out.blob_id, mime: out.mime || mime, filename: name };
   },
 };

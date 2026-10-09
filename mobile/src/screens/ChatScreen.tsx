@@ -15,7 +15,7 @@ import { MessageBubble } from "../components/MessageBubble";
 import { ToolChip } from "../components/ToolChip";
 import type { RootStackParams } from "../navigation";
 import { useTheme } from "../theme";
-import type { Attachment, Fact } from "../types";
+import type { Attachment, AttachmentSensitivity, Fact, PrivacyCollection } from "../types";
 
 type Row =
   | { id: string; kind: "msg"; role: "user" | "assistant"; text: string }
@@ -32,6 +32,11 @@ export function ChatScreen({ route, navigation }: NativeStackScreenProps<RootSta
   const [rows, setRows] = useState<Row[]>([]);
   const [text, setText] = useState("");
   const [attachment, setAttachment] = useState<Attachment | null>(null);
+  const [collections, setCollections] = useState<PrivacyCollection[]>([]);
+  const [blobCollection, setBlobCollection] = useState("");
+  const [blobSensitivity, setBlobSensitivity] = useState<AttachmentSensitivity>("sensitive");
+  const [classifying, setClassifying] = useState(false);
+  const [blobMessage, setBlobMessage] = useState("");
   const [uploading, setUploading] = useState(false);
   const [run, setRun] = useState<RunState | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
@@ -68,8 +73,42 @@ export function ChatScreen({ route, navigation }: NativeStackScreenProps<RootSta
 
   const scrollDown = useCallback(() => setTimeout(() => list.current?.scrollToEnd({ animated: true }), 50), []);
 
+  useEffect(() => {
+    let active = true;
+    void api.privacyCollections().then(items => {
+      if (active) setCollections(items);
+    }).catch(() => {
+      if (active) setBlobMessage("Не удалось загрузить категории");
+    });
+    return () => { active = false; };
+  }, []);
+
+  async function classifyAttachment() {
+    if (!attachment?.blob_id || !blobCollection || classifying || busy) {
+      setBlobMessage("Выберите категорию файла");
+      return;
+    }
+    const blobId = attachment.blob_id;
+    setClassifying(true);
+    try {
+      await api.classifyBlob(blobId, blobCollection, blobSensitivity);
+      setAttachment(previous => previous?.blob_id === blobId ? {
+        ...previous, classification: { collection_slug: blobCollection, sensitivity: blobSensitivity },
+      } : previous);
+      setBlobMessage(blobSensitivity === "standard"
+        ? "Классификация сохранена. Облачная обработка требует отдельного разрешения категории."
+        : "Классификация сохранена. Обработка в облаке запрещена.");
+    } catch (e) {
+      setBlobMessage(authError(String((e as Error).message)));
+    } finally { setClassifying(false); }
+  }
+
+
   async function pick(kind: "photo" | "camera" | "file") {
     setUploading(true);
+    setBlobCollection("");
+    setBlobSensitivity("sensitive");
+    setBlobMessage("Не классифицирован — внешняя обработка запрещена.");
     try {
       if (kind === "file") {
         const r = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true });
@@ -96,7 +135,7 @@ export function ChatScreen({ route, navigation }: NativeStackScreenProps<RootSta
 
   async function send() {
     const body = text.trim();
-    if ((!body && !attachment) || busy || uploading) return;
+    if ((!body && !attachment) || busy || uploading || classifying) return;
     const files = attachment ? [attachment] : [];
     setText("");
     setAttachment(null);
@@ -190,9 +229,54 @@ export function ChatScreen({ route, navigation }: NativeStackScreenProps<RootSta
         }}
       />
       {attachment ? (
-        <View style={[styles.attach, { backgroundColor: t.panel, borderColor: t.line }]}>
-          <Text style={{ color: t.text, flex: 1 }} numberOfLines={1}>📎 {attachment.filename}</Text>
-          <Pressable onPress={() => setAttachment(null)}><Text style={{ color: t.err }}>✕</Text></Pressable>
+        <View style={[styles.attach, { backgroundColor: t.panel, borderColor: t.line, flexDirection: "column" }]}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <Text style={{ color: t.text, flex: 1 }} numberOfLines={1}>📎 {attachment.filename}</Text>
+            <Pressable accessibilityRole="button" accessibilityLabel="Убрать вложение"
+              onPress={() => setAttachment(null)}><Text style={{ color: t.err }}>✕</Text></Pressable>
+          </View>
+          {attachment.blob_id && (
+            <>
+              <Text style={{ color: t.muted, fontSize: 12 }}>Категория файла</Text>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+                {collections.filter(c => c.sensitivity === "standard" || c.sensitivity === "sensitive").map(c => (
+                  <Pressable key={c.slug} accessibilityRole="button" accessibilityLabel={"Категория " + c.slug}
+                    onPress={() => {
+                      setBlobCollection(c.slug);
+                      setBlobMessage("Нажмите «Сохранить», чтобы применить изменения.");
+                    }}
+                    style={[styles.privacyChoice, { borderColor: blobCollection === c.slug ? t.accent : t.line }]}>
+                    <Text style={{ color: t.text }}>{c.slug === "garage" ? "Автомобиль" : c.slug === "health" ? "Здоровье" : c.slug}</Text>
+                  </Pressable>
+                ))}
+              </View>
+              <Text style={{ color: t.muted, fontSize: 12 }}>Чувствительность</Text>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+                {(["sensitive", "secret", "standard"] as AttachmentSensitivity[]).map(level => (
+                  <Pressable key={level} accessibilityRole="button" accessibilityLabel={"Уровень " + level}
+                    onPress={() => {
+                      setBlobSensitivity(level);
+                      setBlobMessage("Нажмите «Сохранить», чтобы применить изменения.");
+                    }}
+                    style={[styles.privacyChoice, { borderColor: blobSensitivity === level ? t.accent : t.line }]}>
+                    <Text style={{ color: t.text }}>
+                      {level === "standard" ? "Обычный" : level === "sensitive" ? "Чувствительный" : "Секретный"}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+              <Pressable accessibilityRole="button" accessibilityLabel="Сохранить классификацию файла"
+                disabled={classifying || !blobCollection} onPress={() => void classifyAttachment()}
+                style={[styles.privacyChoice, { borderColor: t.accent, alignItems: "center" }]}>
+                <Text style={{ color: t.text }}>Сохранить классификацию файла</Text>
+              </Pressable>
+              <Text style={{ color: t.muted, fontSize: 12 }}>
+                {blobMessage || (attachment.classification
+                  ? "Сохранено: " + attachment.classification.collection_slug + ", " + attachment.classification.sensitivity
+                  : "Не классифицирован — внешняя обработка запрещена")}
+              </Text>
+            </>
+          )}
         </View>
       ) : null}
       <View style={[styles.composer, { paddingBottom: Math.max(insets.bottom, 8), backgroundColor: t.panel, borderColor: t.line }]}>
@@ -216,7 +300,7 @@ export function ChatScreen({ route, navigation }: NativeStackScreenProps<RootSta
         {busy && jobId ? (
           <Pressable style={[styles.send, { backgroundColor: t.err }]} onPress={stop}><Text style={styles.sendText}>⏹</Text></Pressable>
         ) : (
-          <Pressable disabled={busy || uploading || (!text.trim() && !attachment)} accessibilityLabel="Отправить сообщение" style={[styles.send, { backgroundColor: t.accent, opacity: busy || uploading || (!text.trim() && !attachment) ? 0.5 : 1 }]} onPress={send}>
+          <Pressable disabled={busy || uploading || classifying || (!text.trim() && !attachment)} accessibilityLabel="Отправить сообщение" style={[styles.send, { backgroundColor: t.accent, opacity: busy || uploading || (!text.trim() && !attachment) ? 0.5 : 1 }]} onPress={send}>
             <Text style={styles.sendText}>➤</Text>
           </Pressable>
         )}
@@ -233,4 +317,5 @@ const styles = StyleSheet.create({
   clip: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
   clipText: { fontSize: 20 },
   attach: { flexDirection: "row", padding: 8, marginHorizontal: 8, borderWidth: 1, borderRadius: 10, gap: 8 },
+  privacyChoice: { borderWidth: 1, borderRadius: 8, paddingVertical: 8, paddingHorizontal: 10 },
 });

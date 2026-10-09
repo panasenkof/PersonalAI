@@ -27,15 +27,20 @@ test("mobile privacy controls roundtrip owner-scoped API and send explicit flags
     await api.savePrivacyCollection(changed);
     await api.savePrivacyHistory({ allow_cloud_history: true });
     await api.savePrivacyIntegrations({ allow_remote_stt: true, allow_mcp_access: false });
+    await api.classifyBlob("blob 1", "health", "sensitive");
     expect(seen.map(x => x.url)).toEqual([
       "https://pia.example.com/v1/privacy/collections",
       "https://pia.example.com/v1/privacy/collections/garage",
       "https://pia.example.com/v1/privacy/conversation",
       "https://pia.example.com/v1/privacy/integrations",
+      "https://pia.example.com/v1/privacy/blobs/blob%201",
     ]);
     for (const entry of seen) {
       expect((entry.init.headers as Record<string, string>).Authorization).toBe("Bearer privacy-token");
     }
+    expect(JSON.parse(String(seen[4].init.body))).toEqual({
+      collection_slug: "health", sensitivity: "sensitive",
+    });
     expect(JSON.parse(String(seen[1].init.body))).toMatchObject({
       slug: "garage", allow_cloud_llm: false, allow_remote_extraction: true,
     });

@@ -33,7 +33,21 @@
       <button class="ghost danger hidden" id="btnDelete">🗑 Удалить чат</button>
     </div>
     <div id="msgs" role="log" aria-label="Сообщения"></div>
-    <div id="attachmentBar" class="hidden"><span id="attachmentName"></span><button class="ghost" id="btnRemoveFile" aria-label="Убрать вложение">Убрать</button></div>
+    <div id="attachmentBar" class="hidden">
+      <div class="attachment-title"><span id="attachmentName"></span><button class="ghost" id="btnRemoveFile" aria-label="Убрать вложение">Убрать</button></div>
+      <div id="attachmentPrivacy" class="attachment-privacy hidden">
+        <label for="attachmentCollection">Категория файла</label>
+        <select id="attachmentCollection"><option value="">Не выбрана</option></select>
+        <label for="attachmentSensitivity">Чувствительность файла</label>
+        <select id="attachmentSensitivity">
+          <option value="sensitive" selected>Чувствительный — без облака</option>
+          <option value="secret">Секретный — без облака</option>
+          <option value="standard">Обычный — облако только с отдельным разрешением</option>
+        </select>
+        <button id="btnClassifyFile" class="ghost">Сохранить классификацию</button>
+        <small id="attachmentPrivacyStatus" role="status">Не классифицирован. Внешняя обработка запрещена.</small>
+      </div>
+    </div>
     <div id="composer">
       <button class="ghost" id="btnAttach" aria-label="Прикрепить документ или фото">＋</button>
       <input type="file" id="fileInput" class="hidden" accept="image/*,application/pdf,text/plain">
