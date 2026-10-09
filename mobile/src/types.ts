@@ -72,7 +72,11 @@ export type StreamEvent =
   | { type: "cancelled"; text?: string }
   | { type: "error"; text: string };
 
-export type Attachment = { mime: string; storage_key: string; filename?: string };
+export type Attachment = {
+  mime: string; storage_key: string; filename?: string; blob_id?: string;
+  classification?: { collection_slug: string; sensitivity: "standard" | "sensitive" | "secret" };
+};
+export type AttachmentSensitivity = "standard" | "sensitive" | "secret";
 
 export type ServiceInfo = { name: string; version: string; operator: string; support_email: string; privacy_url: string; terms_url: string; email_enabled: boolean; backup_retention_days: number };
 
