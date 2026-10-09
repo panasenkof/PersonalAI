@@ -117,7 +117,9 @@ async def test_cloud_memory_tools_filter_owner_collection_and_sensitive_record(m
             assert chunks and all(c.embedding is None for c in chunks)
 
             # The owner can explicitly permit remote embeddings, separately from chat access.
-            allowed.allow_remote_embeddings = True
+            current_allowed = await session.get(Collection, allowed.id)
+            assert current_allowed is not None
+            current_allowed.allow_remote_embeddings = True
             await session.flush()
             await index_entity(session, alice.id, rows[0])
             assert len(cloud.embedding_requests) == 1

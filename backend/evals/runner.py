@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.agent.orchestrator import run_agent
 from app.llm.providers import ChatMessage, LLMCompletionResult
-from app.models import Base, Entity, Observation
+from app.models import Base, Collection, Entity, Observation
 from app.services.users import bootstrap_user
 from evals.golden import GOLDEN
 
@@ -226,6 +226,12 @@ async def run_case(case: dict[str, Any], live: bool = False, live_cfg: LiveConfi
     async with Session() as session:
         user = await bootstrap_user(session, f"{case['name']}@evals.local", "x")
         uid = user.id
+        # The golden harness simulates an owner who explicitly opted in.
+        # Actual user collections remain deny-by-default.
+        for collection in (await session.scalars(
+            select(Collection).where(Collection.user_id == uid)
+        )).all():
+            collection.allow_cloud_llm = True
         if live:
             cfg = live_cfg or LiveConfig.from_env()
             if cfg is None:

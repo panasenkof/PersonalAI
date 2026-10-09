@@ -17,18 +17,22 @@ in the PersonalAI agent and RAG egress paths.
   `GET|PUT /v1/privacy/conversation`.
 - Sensitive/secret entity or observation overrides are **not** disclosed to
   cloud models even if their enclosing collection is granted.
-- Cloud agent sessions only expose `kb_search` and `kb_list_entities`,
-  filtered to explicitly granted collections; all domain tools, document
-  ingestion and memory writes are denied in remote-tool sessions for now.
+- Cloud sessions can use `kb_search` and `kb_list_entities` filtered to
+  owner-granted collections. Other reviewed operations (`kb_create_entity`,
+  `kb_ingest_document`, garage creation/service, health lab ingestion/trends)
+  are available only after *explicit* per-collection consent and a second
+  owner/target permission check at dispatch time. Unreviewed domain tools
+  (including web maintenance lookups, images and actions over unclassified
+  records) remain unavailable to cloud sessions.
 - When no collections are granted, no knowledge tools are sent to the cloud
   model. User-authored text is still passed to the **chosen cloud** model.
 - Cloud query embeddings (free-text memory search terms) are always disabled.
   Cloud entity/document indexing embeddings are only allowed where the
   specific collection has `allow_remote_embeddings=True`. Local-loopback
   embeddings continue working without remote consent.
-- Local→cloud fallback is disabled for tool-capable agent turns (where tool
-  result/history could leave the device). This is intentional even when the
-  operator's fallback flag is enabled.
+- Local→cloud fallback is disabled for agent turns by default, including
+  turns without tools. A separate explicit `allow_cloud_fallback=True` argument
+  is required by lower-level callers, with no tool results in the transcript.
 - A model advertising itself as `local` but using a non-loopback endpoint
   is handled like a remote endpoint. Self-hosted LAN/remote models will need
   a separate explicit trust configuration before being treated as local.

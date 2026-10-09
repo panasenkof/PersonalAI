@@ -13,6 +13,7 @@ from sqlalchemy import select, text
 
 from app.config import get_settings
 from app.db import USE_PGVECTOR, SessionLocal, engine, init_db
+from app.llm.providers import LocalLLMProvider
 from app.models import Chunk, Collection, Entity, ExtractedFact, Observation, User
 from app.rag.indexing import _index_texts, backfill_vectors
 from app.rag.search import hybrid_search
@@ -33,10 +34,13 @@ def blend(a: int, b: int, w: float = 0.2) -> list[float]:
     return v
 
 
-class FakeProvider:
+class FakeProvider(LocalLLMProvider):
     """Embeds by keyword → axis; unknown → axis 7."""
 
     AX = {"camry": 0, "oil": 1, "glucose": 2}
+
+    def __init__(self):
+        self.base_url = "http://127.0.0.1:11434/v1"
 
     async def embed(self, texts, *, model):
         out = []
@@ -109,7 +113,10 @@ async def main() -> None:
         assert any("Glucose" in h["text"] for h in t), t
 
         # width mismatch is stored in JSON and still searchable
-        class Short:
+        class Short(LocalLLMProvider):
+            def __init__(self):
+                self.base_url = "http://127.0.0.1:11434/v1"
+
             async def embed(self, texts, *, model):
                 return [[1.0, 0.0, 0.0] for _ in texts]
 

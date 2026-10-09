@@ -23,6 +23,10 @@ def test_multi_turn_history_sent_to_llm(client: TestClient, random_email: str, m
     r = client.post("/v1/auth/register", json={"email": random_email, "password": "secret1234"})
     token = r.json()["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
+    # Simulate explicit owner consent for conversation history in cloud tests.
+    assert client.put("/v1/privacy/conversation", headers=headers, json={
+        "allow_cloud_history": True,
+    }).status_code == 200
 
     fake = RecordingProvider()
 
@@ -107,6 +111,7 @@ def test_local_fallback_switches_provider(monkeypatch: pytest.MonkeyPatch) -> No
             "local-model",
             [ChatMessage(role="user", content="hi")],
             [],
+            allow_cloud_fallback=True,
         )
 
     provider, model, result, _streamed = __import__("asyncio").run(run())
