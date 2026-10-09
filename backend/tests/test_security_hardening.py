@@ -58,8 +58,9 @@ def test_two_factor_flow_end_to_end(client: TestClient, random_email: str) -> No
     secret = setup["secret"]
     assert setup["otpauth_uri"].startswith("otpauth://totp/")
 
-    assert client.post("/v1/auth/2fa/enable", json={"code": "000000"}, headers=_h(tok)).status_code == 401
-    en = client.post("/v1/auth/2fa/enable", json={"code": totp.totp_at(secret)}, headers=_h(tok))
+    assert client.post("/v1/auth/2fa/enable", json={"code": "not-a-code"}, headers=_h(tok)).status_code == 401
+    activation_code = totp.totp_at(secret)
+    en = client.post("/v1/auth/2fa/enable", json={"code": activation_code}, headers=_h(tok))
     assert en.status_code == 200
     recovery = en.json()["recovery_codes"]
     assert len(recovery) >= 4
@@ -67,10 +68,11 @@ def test_two_factor_flow_end_to_end(client: TestClient, random_email: str) -> No
     creds = {"email": random_email, "password": "secret1234"}
     r = client.post("/v1/auth/token", json=creds)
     assert r.status_code == 401 and r.json()["detail"] == "otp_required"
-    assert client.post("/v1/auth/token", json={**creds, "otp": "111111"}).status_code == 401
-    # the code that enabled 2FA is spent (no replay); the next time-step's code is accepted once
-    assert client.post("/v1/auth/token", json={**creds, "otp": totp.totp_at(secret)}).status_code == 401
-    nxt = totp.totp_at(secret, at=time.time() + 30)
+    assert client.post("/v1/auth/token", json={**creds, "otp": "not-a-code"}).status_code == 401
+    # Replay the EXACT code used during enrollment. Recomputing totp_at()
+    # can cross a 30-second boundary and generate a legitimate *new* code.
+    assert client.post("/v1/auth/token", json={**creds, "otp": activation_code}).status_code == 401
+    nxt = totp.totp_at(secret, at=time.time() + totp.STEP_SECONDS)
     ok = client.post("/v1/auth/token", json={**creds, "otp": nxt})
     assert ok.status_code == 200
     assert client.post("/v1/auth/token", json={**creds, "otp": nxt}).status_code == 401

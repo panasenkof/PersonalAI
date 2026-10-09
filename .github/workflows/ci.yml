@@ -158,3 +158,26 @@ jobs:
       - name: Cleanup
         if: always()
         run: docker compose down -v
+
+  required:
+    name: CI required
+    if: ${{ always() }}
+    needs: [backend, backend-windows, backend-postgres, mobile, docker-smoke]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require all CI jobs to pass
+        env:
+          SQLITE: ${{ needs.backend.result }}
+          POSTGRES: ${{ needs.backend-postgres.result }}
+          WINDOWS: ${{ needs.backend-windows.result }}
+          MOBILE: ${{ needs.mobile.result }}
+          PRODUCTION: ${{ needs.docker-smoke.result }}
+        run: |
+          for job in SQLITE POSTGRES WINDOWS MOBILE PRODUCTION; do
+            outcome="${!job}"
+            echo "$job: $outcome"
+            if [ "$outcome" != success ]; then
+              echo "::error::$job check is $outcome (expected success)"
+              exit 1
+            fi
+          done

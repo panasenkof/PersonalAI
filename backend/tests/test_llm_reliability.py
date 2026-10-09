@@ -136,21 +136,31 @@ async def test_stream_error_after_output_is_not_silently_retried(monkeypatch: py
     assert seen["n"] == 1, "must not restart a stream the client already saw"
 
 
+@pytest.mark.parametrize(
+    "allow_cloud_llm", [False, True], ids=["cloud-memory-denied", "cloud-memory-consented"],
+)
 @pytest.mark.asyncio
-async def test_orchestrator_emits_tool_events(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_orchestrator_emits_tool_events(
+    monkeypatch: pytest.MonkeyPatch, allow_cloud_llm: bool,
+) -> None:
     from app.agent import orchestrator
     from app.db import SessionLocal, init_db
     from app.llm.providers import LLMCompletionResult
-    from app.models import User
+    from app.models import Collection, User
 
     class Scripted(OpenAICompatibleProvider):
         def __init__(self) -> None:
             super().__init__("http://x", None)
             self.turn = 0
+            self.offered_tools: list[str] = []
 
         async def stream_chat(self, messages, *, on_token=None, on_tool_delta=None, **kw):  # type: ignore[override]
             self.turn += 1
             if self.turn == 1:
+                # Assert both the exposed schema and runtime dispatch policy.
+                self.offered_tools = [
+                    t["function"]["name"] for t in (kw.get("tools") or [])
+                ]
                 await on_tool_delta(0, "kb_list_entities", '{}')  # type: ignore[misc]
                 msg = ChatMessage(
                     role="assistant",
@@ -181,13 +191,26 @@ async def test_orchestrator_emits_tool_events(monkeypatch: pytest.MonkeyPatch) -
     async with SessionLocal() as s:
         u = User(email=f"o{uuid.uuid4().hex[:6]}@t.dev", password_hash="x")
         s.add(u)
+        await s.flush()
+        # Only an explicit grant permits cloud memory tools. Do not weaken the
+        # production policy to satisfy the legacy happy-path event test.
+        s.add(Collection(
+            user_id=u.id, name="Test memory", slug="test_memory",
+            sensitivity="standard", allow_cloud_llm=allow_cloud_llm,
+        ))
         await s.commit()
         out = await orchestrator.run_agent(s, u.id, "list", emit=emit)
     assert out["assistant_text"] == "Готово"
     types = [e["type"] for e in events]
     assert types == ["tool_call", "tool_start", "tool", "token"]
     tool = events[2]
-    assert tool["name"] == "kb_list_entities" and tool["ok"] is True and "ms" in tool
+    assert tool["name"] == "kb_list_entities" and "ms" in tool
+    assert ("kb_list_entities" in prov.offered_tools) is allow_cloud_llm
+    assert tool["ok"] is allow_cloud_llm
+    if allow_cloud_llm:
+        assert tool["summary"] == "0 записей"
+    else:
+        assert tool["summary"] == "cloud_memory_tool_denied"
 
 
 def test_llm_quota_returns_429_with_retry_after(client: TestClient, random_email: str, monkeypatch: pytest.MonkeyPatch) -> None:
