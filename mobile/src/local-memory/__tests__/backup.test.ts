@@ -10,7 +10,7 @@ jest.mock("expo-file-system/legacy", () => ({
 jest.mock("expo-sharing", () => ({ isAvailableAsync: jest.fn(), shareAsync: jest.fn() }));
 jest.mock("../storage", () => ({
   LOCAL_MEMORY_SCHEMA_VERSION: 1,
-  withLocalMemoryDatabase: jest.fn(async (_id: string, task: (db: unknown) => Promise<unknown>) => task(db)),
+  withLocalMemoryDatabase: jest.fn(async (_id: string, task: (db: unknown) => Promise<unknown>) => task(mockDb)),
 }));
 
 import { withLocalMemoryDatabase } from "../storage";
@@ -21,7 +21,7 @@ const tx = {
   getFirstAsync: jest.fn(async (_sql: string): Promise<{ n: number } | null> => ({ n: 0 })),
   execAsync: jest.fn(async (_sql: string) => {}),
 };
-const db = {
+const mockDb = {
   runAsync: jest.fn(async (_sql: string, _params?: unknown[]) => ({})),
   execAsync: jest.fn(async (_sql: string) => {}),
   getFirstAsync: jest.fn(async (_sql: string): Promise<Record<string, number> | null> => ({})),
@@ -40,16 +40,16 @@ beforeEach(() => {
   (FS.deleteAsync as jest.Mock).mockResolvedValue(undefined);
   (FS.copyAsync as jest.Mock).mockResolvedValue(undefined);
   (FS.getInfoAsync as jest.Mock).mockResolvedValue({ exists: true, size: 4096, isDirectory: false });
-  db.runAsync.mockResolvedValue({});
-  db.execAsync.mockResolvedValue(undefined);
-  db.getFirstAsync.mockImplementation(async (sql: string): Promise<Record<string, number> | null> => {
+  mockDb.runAsync.mockResolvedValue({});
+  mockDb.execAsync.mockResolvedValue(undefined);
+  mockDb.getFirstAsync.mockImplementation(async (sql: string): Promise<Record<string, number> | null> => {
     if (sql.includes("pia_import.user_version")) return { user_version: 1 };
     if (sql.includes("pia_import.memory_entities")) return { n: 2 };
     if (sql.includes("memory_collections")) return { n: 1 };
     if (sql.includes("memory_observations")) return { n: 1 };
     return {};
   });
-  db.getAllAsync.mockResolvedValue(names.map(name => ({ name })));
+  mockDb.getAllAsync.mockResolvedValue(names.map(name => ({ name })));
   tx.getFirstAsync.mockImplementation(async sql => sql.includes("foreign_key_check") ? null : { n: 0 });
   tx.execAsync.mockResolvedValue(undefined);
 });
@@ -65,12 +65,12 @@ test("generates 256-bit recovery code and refuses invalid codes before filesyste
 
 test("export SQLCipher-encrypts a new independent file before sharing and erases temp copy", async () => {
   await shareEncryptedBackup("guest", code);
-  expect(db.runAsync).toHaveBeenCalledWith("ATTACH DATABASE ? AS pia_export KEY ?", [
+  expect(mockDb.runAsync).toHaveBeenCalledWith("ATTACH DATABASE ? AS pia_export KEY ?", [
     "file:///cache/pia-encrypted-random-id.db", code,
   ]);
-  expect(db.getFirstAsync).toHaveBeenCalledWith("SELECT sqlcipher_export('pia_export')");
-  expect(db.execAsync).toHaveBeenCalledWith("PRAGMA pia_export.user_version = 1");
-  expect(db.execAsync).toHaveBeenCalledWith("DETACH DATABASE pia_export");
+  expect(mockDb.getFirstAsync).toHaveBeenCalledWith("SELECT sqlcipher_export('pia_export')");
+  expect(mockDb.execAsync).toHaveBeenCalledWith("PRAGMA pia_export.user_version = 1");
+  expect(mockDb.execAsync).toHaveBeenCalledWith("DETACH DATABASE pia_export");
   expect(Sharing.shareAsync).toHaveBeenCalledTimes(1);
   expect(FS.deleteAsync).toHaveBeenCalledWith("file:///cache/pia-encrypted-random-id.db", {
     idempotent: true,
@@ -84,10 +84,10 @@ test("failed share deletes ciphertext from cache", async () => {
 });
 
 test("wrong password/corrupted backup cannot mutate the destination", async () => {
-  db.getAllAsync.mockRejectedValueOnce(new Error("wrong key"));
+  mockDb.getAllAsync.mockRejectedValueOnce(new Error("wrong key"));
   await expect(restoreEncryptedBackup("guest", "file:///bad.db", code)).rejects.toThrow("wrong key");
   expect(tx.execAsync).not.toHaveBeenCalled();
-  expect(db.execAsync).toHaveBeenCalledWith("DETACH DATABASE pia_import");
+  expect(mockDb.execAsync).toHaveBeenCalledWith("DETACH DATABASE pia_import");
   expect(FS.deleteAsync).toHaveBeenCalledTimes(1);
 });
 
@@ -101,18 +101,18 @@ test("restore refuses to overwrite a profile with any existing collection", asyn
 test("restore imports all six tables and FTS within one exclusive transaction", async () => {
   const restored = await restoreEncryptedBackup("guest", "file:///backup.db", code);
   expect(restored).toEqual({ collections: 1, entities: 2, observations: 1 });
-  expect(db.runAsync).toHaveBeenCalledWith("ATTACH DATABASE ? AS pia_import KEY ?", [
+  expect(mockDb.runAsync).toHaveBeenCalledWith("ATTACH DATABASE ? AS pia_import KEY ?", [
     "file:///cache/pia-encrypted-random-id.db", code,
   ]);
-  expect(db.withExclusiveTransactionAsync).toHaveBeenCalledTimes(1);
+  expect(mockDb.withExclusiveTransactionAsync).toHaveBeenCalledTimes(1);
   expect(tx.execAsync).toHaveBeenCalledTimes(6);
   expect(tx.execAsync.mock.calls[5][0]).toContain("pia_import.memory_notes_fts");
-  expect(db.execAsync).toHaveBeenCalledWith("DETACH DATABASE pia_import");
+  expect(mockDb.execAsync).toHaveBeenCalledWith("DETACH DATABASE pia_import");
   expect(FS.deleteAsync).toHaveBeenCalledTimes(1);
 });
 
 test("rejects unknown schema or oversized import before any transaction", async () => {
-  db.getAllAsync.mockResolvedValueOnce([]);
+  mockDb.getAllAsync.mockResolvedValueOnce([]);
   await expect(restoreEncryptedBackup("guest", "file:///backup.db", code))
     .rejects.toThrow("incompatible_backup_schema");
   expect(tx.execAsync).not.toHaveBeenCalled();
