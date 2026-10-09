@@ -42,7 +42,7 @@ beforeEach(() => {
   (FS.getInfoAsync as jest.Mock).mockResolvedValue({ exists: true, size: 4096, isDirectory: false });
   db.runAsync.mockResolvedValue({});
   db.execAsync.mockResolvedValue(undefined);
-  db.getFirstAsync.mockImplementation(async sql => {
+  db.getFirstAsync.mockImplementation(async (sql: string): Promise<Record<string, number> | null> => {
     if (sql.includes("pia_import.user_version")) return { user_version: 1 };
     if (sql.includes("pia_import.memory_entities")) return { n: 2 };
     if (sql.includes("memory_collections")) return { n: 1 };

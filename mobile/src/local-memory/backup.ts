@@ -84,10 +84,6 @@ export async function shareEncryptedBackup(profileId: string, recoveryCode: stri
       dialogTitle: "Сохранить зашифрованную резервную копию PersonalAI",
     });
   } finally {
-    if (attached) {
-      // A failed detach must not leave an open DB holding a backup file:
-      // the exported data remain encrypted even in this error case.
-    }
     await forgetTemporaryFile(path);
   }
 }
@@ -102,10 +98,8 @@ export async function restoreEncryptedBackup(
   const code = checkedRecoveryCode(recoveryCode);
   if (!sourceUri || !/^(content|file):\/\//.test(sourceUri)) throw new Error("invalid_backup_uri");
   const path = temporaryPath();
-  let copied = false;
   try {
     await FileSystem.copyAsync({ from: sourceUri, to: path });
-    copied = true;
     const info = await FileSystem.getInfoAsync(path);
     if (!info.exists || info.isDirectory || !info.size || info.size > MAX_BACKUP_BYTES) {
       throw new Error("invalid_backup_size");
@@ -163,6 +157,7 @@ export async function restoreEncryptedBackup(
       }
     });
   } finally {
-    if (copied) await forgetTemporaryFile(path);
+    // A cancelled/partial file-manager copy still needs to be cleaned up.
+    await forgetTemporaryFile(path);
   }
 }
