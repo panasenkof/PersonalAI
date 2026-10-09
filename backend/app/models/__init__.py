@@ -10,6 +10,7 @@ from sqlalchemy import (
     JSON,
     BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     Float,
     ForeignKey,
@@ -192,6 +193,7 @@ class Entity(Base):
     domain: Mapped[str] = mapped_column(String(64), index=True)
     schema_version: Mapped[str] = mapped_column(String(32), default="1")
     payload: Mapped[dict[str, Any]] = mapped_column(JSON)
+    record_version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     title: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     # "active" refers to the memory record, not to the current truth of its payload.
     record_status: Mapped[str] = mapped_column(String(16), default="active", server_default="active")
@@ -216,6 +218,7 @@ class Observation(Base):
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     kind: Mapped[str] = mapped_column(String(64))
     payload: Mapped[dict[str, Any]] = mapped_column(JSON)
+    record_version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     sensitivity: Mapped[str] = mapped_column(String(16), default="inherit", server_default="inherit")
     valid_from: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     valid_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -225,6 +228,63 @@ class Observation(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     entity: Mapped["Entity"] = relationship(back_populates="observations")
+
+
+class MemoryRelation(Base):
+    """Directed relation between two entities, including entities in different collections."""
+
+    __tablename__ = "memory_relations"
+    __table_args__ = (
+        UniqueConstraint("source_entity_id", "target_entity_id", "kind", name="uq_memory_relation_edge"),
+        CheckConstraint("source_entity_id <> target_entity_id", name="ck_memory_relation_no_self"),
+        Index("ix_memory_relations_user_source", "user_id", "source_entity_id"),
+        Index("ix_memory_relations_user_target", "user_id", "target_entity_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    source_entity_id: Mapped[str] = mapped_column(ForeignKey("entities.id", ondelete="CASCADE"))
+    target_entity_id: Mapped[str] = mapped_column(ForeignKey("entities.id", ondelete="CASCADE"))
+    kind: Mapped[str] = mapped_column(String(64))
+    source_kind: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    source_ref: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class MemoryRevision(Base):
+    """Immutable snapshots of edits through MemoryRepository (v1 baseline is implicit).
+
+    One nullable FK per subject ensures hard-delete cascades also erase its history.
+    Sensitive snapshots use EncryptedJSON when the operator has configured Fernet.
+    """
+
+    __tablename__ = "memory_revisions"
+    __table_args__ = (
+        UniqueConstraint("entity_id", "version", name="uq_memory_revision_entity_version"),
+        UniqueConstraint("observation_id", "version", name="uq_memory_revision_observation_version"),
+        CheckConstraint(
+            "(entity_id IS NOT NULL AND observation_id IS NULL) OR "
+            "(entity_id IS NULL AND observation_id IS NOT NULL)",
+            name="ck_memory_revision_one_subject",
+        ),
+        Index("ix_memory_revisions_user_entity", "user_id", "entity_id"),
+        Index("ix_memory_revisions_user_observation", "user_id", "observation_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    entity_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("entities.id", ondelete="CASCADE"), nullable=True
+    )
+    observation_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("observations.id", ondelete="CASCADE"), nullable=True
+    )
+    version: Mapped[int] = mapped_column(Integer)
+    reason: Mapped[str] = mapped_column(String(512))
+    actor_kind: Mapped[str] = mapped_column(String(32))
+    before_state: Mapped[dict[str, Any]] = mapped_column(EncryptedJSON)
+    after_state: Mapped[dict[str, Any]] = mapped_column(EncryptedJSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class Blob(Base):

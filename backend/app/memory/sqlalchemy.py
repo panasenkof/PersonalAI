@@ -1,11 +1,12 @@
 """SQLAlchemy adapter for MemoryRepository; no commits or implicit search calls."""
 from __future__ import annotations
 
+import re
 from copy import deepcopy
 from datetime import datetime, timezone
-from typing import TypeVar
+from typing import Any, TypeVar
 
-from sqlalchemy import select
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.memory.contracts import (
@@ -16,9 +17,11 @@ from app.memory.contracts import (
     NewEntity,
     NewObservation,
     ObservationRecord,
+    RelationRecord,
+    RevisionRecord,
 )
 from app.memory.repository import MemoryAccessError, MemoryConflictError
-from app.models import Collection, Entity, Observation
+from app.models import Collection, Entity, MemoryRelation, MemoryRevision, Observation, utcnow
 
 
 def _utc(value: datetime | None) -> datetime | None:
@@ -43,7 +46,7 @@ def _entity(row: Entity) -> EntityRecord:
         title=row.title, record_status=row.record_status, sensitivity=row.sensitivity,
         valid_from=_utc(row.valid_from), valid_until=_utc(row.valid_until),
         source_kind=row.source_kind, source_ref=row.source_ref,
-        updated_at=_utc(row.updated_at),
+        updated_at=_utc(row.updated_at), record_version=row.record_version,
     )
 
 
@@ -54,8 +57,67 @@ def _observation(row: Observation) -> ObservationRecord:
         payload=deepcopy(row.payload), created_at=_utc(row.created_at) or row.created_at,
         sensitivity=row.sensitivity, valid_from=_utc(row.valid_from),
         valid_until=_utc(row.valid_until), source_kind=row.source_kind,
-        source_ref=row.source_ref, confidence=row.confidence,
+        source_ref=row.source_ref, confidence=row.confidence, record_version=row.record_version,
     )
+
+
+
+_RELATION_KIND = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+
+
+def _relation(row: MemoryRelation) -> RelationRecord:
+    return RelationRecord(
+        id=row.id, user_id=row.user_id, source_entity_id=row.source_entity_id,
+        target_entity_id=row.target_entity_id, kind=row.kind,
+        created_at=_utc(row.created_at) or row.created_at,
+        source_kind=row.source_kind, source_ref=row.source_ref,
+    )
+
+
+def _revision(row: MemoryRevision) -> RevisionRecord:
+    record_type = "entity" if row.entity_id is not None else "observation"
+    record_id = row.entity_id if row.entity_id is not None else row.observation_id
+    return RevisionRecord(
+        id=row.id, user_id=row.user_id, record_type=record_type,
+        record_id=record_id or "", version=row.version,
+        reason=row.reason, actor_kind=row.actor_kind,
+        before_state=deepcopy(row.before_state), after_state=deepcopy(row.after_state),
+        created_at=_utc(row.created_at) or row.created_at,
+    )
+
+
+def _time_string(value: datetime | None) -> str | None:
+    normalized = _utc(value)
+    return normalized.isoformat() if normalized is not None else None
+
+
+def _entity_state(row: Entity) -> dict[str, Any]:
+    return {
+        "payload": deepcopy(row.payload), "title": row.title,
+        "record_status": row.record_status, "sensitivity": row.sensitivity,
+        "valid_from": _time_string(row.valid_from), "valid_until": _time_string(row.valid_until),
+        "source_kind": row.source_kind, "source_ref": row.source_ref,
+    }
+
+
+def _observation_state(row: Observation) -> dict[str, Any]:
+    return {
+        "payload": deepcopy(row.payload), "kind": row.kind,
+        "occurred_at": _time_string(row.occurred_at),
+        "sensitivity": row.sensitivity,
+        "valid_from": _time_string(row.valid_from), "valid_until": _time_string(row.valid_until),
+        "source_kind": row.source_kind, "source_ref": row.source_ref,
+        "confidence": row.confidence,
+    }
+
+
+def _validate_correction(expected_version: int, reason: str, actor_kind: str) -> None:
+    if expected_version < 1:
+        raise ValueError("invalid_expected_version")
+    if not reason.strip() or len(reason) > 512:
+        raise ValueError("invalid_reason")
+    if not actor_kind.strip() or len(actor_kind) > 32:
+        raise ValueError("invalid_actor_kind")
 
 
 T = TypeVar("T")
@@ -189,3 +251,138 @@ class SqlAlchemyMemoryRepository:
         self.session.add(row)
         await self.session.flush()
         return _observation(row)
+
+
+    async def link_entities(
+        self, *, source_entity_id: str, target_entity_id: str, kind: str,
+        source_kind: str | None = None, source_ref: str | None = None,
+    ) -> RelationRecord:
+        if source_entity_id == target_entity_id:
+            raise ValueError("self_relation_not_allowed")
+        if _RELATION_KIND.fullmatch(kind) is None:
+            raise ValueError("invalid_relation_kind")
+        if await self.entity(source_entity_id) is None or await self.entity(target_entity_id) is None:
+            raise MemoryAccessError("entity_not_found")
+        existing = await self.session.scalar(
+            select(MemoryRelation).where(
+                MemoryRelation.user_id == self.user_id,
+                MemoryRelation.source_entity_id == source_entity_id,
+                MemoryRelation.target_entity_id == target_entity_id,
+                MemoryRelation.kind == kind,
+            )
+        )
+        if existing is not None:
+            raise MemoryConflictError("relation_exists")
+        row = MemoryRelation(
+            user_id=self.user_id, source_entity_id=source_entity_id,
+            target_entity_id=target_entity_id, kind=kind,
+            source_kind=source_kind, source_ref=source_ref,
+        )
+        self.session.add(row)
+        await self.session.flush()
+        return _relation(row)
+
+    async def relations_for_entity(self, entity_id: str) -> list[RelationRecord]:
+        if await self.entity(entity_id) is None:
+            return []
+        rows = (await self.session.scalars(
+            select(MemoryRelation).where(
+                MemoryRelation.user_id == self.user_id,
+                or_(
+                    MemoryRelation.source_entity_id == entity_id,
+                    MemoryRelation.target_entity_id == entity_id,
+                ),
+            ).order_by(MemoryRelation.created_at, MemoryRelation.id)
+        )).all()
+        return [_relation(row) for row in rows]
+
+    async def revise_entity(
+        self, entity_id: str, *, expected_version: int, payload: dict,
+        reason: str, actor_kind: str = "user", record_status: str | None = None,
+    ) -> EntityRecord:
+        _validate_correction(expected_version, reason, actor_kind)
+        row = await self.session.scalar(
+            select(Entity).where(Entity.id == entity_id, Entity.user_id == self.user_id)
+        )
+        if row is None:
+            raise MemoryAccessError("entity_not_found")
+        if row.record_version != expected_version:
+            raise MemoryConflictError("stale_memory_version")
+        before = _entity_state(row)
+        new_status = row.record_status if record_status is None else record_status
+        if new_status not in ("active", "archived", "superseded"):
+            raise ValueError("invalid_record_status")
+        new_payload = deepcopy(payload)
+        # Compare-and-swap runs atomically inside caller's transaction, including
+        # simultaneous updates on PostgreSQL. SQLite uses the same version guard.
+        updated_id = await self.session.scalar(
+            update(Entity).where(
+                Entity.id == entity_id, Entity.user_id == self.user_id,
+                Entity.record_version == expected_version,
+            ).values(
+                payload=new_payload, record_status=new_status,
+                record_version=expected_version + 1, updated_at=utcnow(),
+            ).returning(Entity.id).execution_options(synchronize_session=False)
+        )
+        if updated_id is None:
+            raise MemoryConflictError("stale_memory_version")
+        await self.session.refresh(row)
+        self.session.add(MemoryRevision(
+            user_id=self.user_id, entity_id=entity_id, observation_id=None,
+            version=expected_version + 1, reason=reason.strip(),
+            actor_kind=actor_kind.strip(), before_state=before, after_state=_entity_state(row),
+        ))
+        await self.session.flush()
+        return _entity(row)
+
+    async def revise_observation(
+        self, observation_id: str, *, expected_version: int, payload: dict,
+        reason: str, actor_kind: str = "user",
+    ) -> ObservationRecord:
+        _validate_correction(expected_version, reason, actor_kind)
+        row = await self.session.scalar(
+            select(Observation).where(
+                Observation.id == observation_id, Observation.user_id == self.user_id,
+            )
+        )
+        if row is None:
+            raise MemoryAccessError("observation_not_found")
+        if row.record_version != expected_version:
+            raise MemoryConflictError("stale_memory_version")
+        before = _observation_state(row)
+        updated_id = await self.session.scalar(
+            update(Observation).where(
+                Observation.id == observation_id, Observation.user_id == self.user_id,
+                Observation.record_version == expected_version,
+            ).values(
+                payload=deepcopy(payload), record_version=expected_version + 1,
+            ).returning(Observation.id).execution_options(synchronize_session=False)
+        )
+        if updated_id is None:
+            raise MemoryConflictError("stale_memory_version")
+        await self.session.refresh(row)
+        self.session.add(MemoryRevision(
+            user_id=self.user_id, entity_id=None, observation_id=observation_id,
+            version=expected_version + 1, reason=reason.strip(),
+            actor_kind=actor_kind.strip(), before_state=before, after_state=_observation_state(row),
+        ))
+        await self.session.flush()
+        return _observation(row)
+
+    async def revisions(self, *, record_type: str, record_id: str) -> list[RevisionRecord]:
+        if record_type == "entity":
+            if await self.entity(record_id) is None:
+                return []
+            condition = MemoryRevision.entity_id == record_id
+        elif record_type == "observation":
+            if await self.observation(record_id) is None:
+                return []
+            condition = MemoryRevision.observation_id == record_id
+        else:
+            raise ValueError("invalid_record_type")
+        rows = (await self.session.scalars(
+            select(MemoryRevision).where(
+                MemoryRevision.user_id == self.user_id, condition,
+            ).order_by(MemoryRevision.version)
+        )).all()
+        return [_revision(row) for row in rows]

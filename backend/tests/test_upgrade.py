@@ -58,11 +58,12 @@ def test_upgrade_max_and_daily_usage_branches_converge(tmp_path, previous):
         engine = create_async_engine(url)
         async with engine.connect() as c:
             versions = (await c.execute(text("SELECT version_num FROM alembic_version"))).scalars().all()
-            assert versions == ["m2c7e4f6a008"]
+            assert versions == ["n3d8f5a7b009"]
             columns = await c.run_sync(lambda conn: inspect(conn).get_columns("users"))
             assert "max_user_id" in {column["name"] for column in columns}
             tables = await c.run_sync(lambda conn: inspect(conn).get_table_names())
             assert "user_daily_usage" in tables
+            assert "memory_relations" in tables and "memory_revisions" in tables
         await engine.dispose()
     asyncio.run(verify())
 
@@ -122,6 +123,12 @@ def test_memory_v2_migration_preserves_legacy_rows(tmp_path, dialect):
             assert {"description", "sensitivity"} <= collections
             assert {"title", "record_status", "sensitivity", "valid_from", "valid_until", "source_kind", "source_ref", "updated_at"} <= entities
             assert {"sensitivity", "valid_from", "valid_until", "source_kind", "source_ref", "confidence"} <= observations
+            assert "record_version" in entities and "record_version" in observations
+            tables = await conn.run_sync(lambda c: inspect(c).get_table_names())
+            assert {"memory_relations", "memory_revisions"} <= set(tables)
+            assert (await conn.execute(text(
+                "SELECT count(*) FROM memory_revisions"
+            ))).scalar() == 0
             collection = (await conn.execute(text(
                 "SELECT name, slug, sensitivity, description FROM collections WHERE id='memory-collection'"
             ))).one()
@@ -134,6 +141,9 @@ def test_memory_v2_migration_preserves_legacy_rows(tmp_path, dialect):
             assert "Toyota" in str(entity.payload)
             assert entity.sensitivity == "inherit" and entity.record_status == "active"
             assert entity.valid_from is None and entity.source_ref is None
+            assert (await conn.execute(text(
+                "SELECT record_version FROM entities WHERE id='memory-entity'"
+            ))).scalar() == 1
             observation = (await conn.execute(text(
                 "SELECT kind,payload,sensitivity,confidence,source_kind FROM observations "
                 "WHERE id='memory-observation'"
@@ -141,6 +151,9 @@ def test_memory_v2_migration_preserves_legacy_rows(tmp_path, dialect):
             assert observation.kind == "service_event" and "old receipt" in str(observation.payload)
             assert observation.sensitivity == "inherit"
             assert observation.confidence is None and observation.source_kind is None
+            assert (await conn.execute(text(
+                "SELECT record_version FROM observations WHERE id='memory-observation'"
+            ))).scalar() == 1
         await engine.dispose()
 
     asyncio.run(verify())
