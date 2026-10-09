@@ -19,6 +19,7 @@ export function LocalMemoryScreen() {
   const { offlineMode, closeOffline } = useAuth();
   const [repo, setRepo] = useState<SqliteMemoryRepository | null>(null);
   const [notes, setNotes] = useState<EntityRecord[]>([]);
+  const [hasMore, setHasMore] = useState(false);
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<EntityRecord | null>(null);
   const [title, setTitle] = useState("");
@@ -32,7 +33,9 @@ export function LocalMemoryScreen() {
   const [busy, setBusy] = useState(false);
 
   const refresh = useCallback(async (db: SqliteMemoryRepository, term: string, entityId?: string) => {
-    setNotes(await db.searchNotes(term));
+    const page = await db.searchNotes(term, 50);
+    setNotes(page);
+    setHasMore(page.length === 50);
     if (entityId) {
       setHistory(await db.revisions("entity", entityId));
       setEvents(await db.observations(entityId));
@@ -64,6 +67,17 @@ export function LocalMemoryScreen() {
       setMessage(e instanceof MemoryConflictError
         ? "Запись была изменена. Откройте её заново, чтобы не потерять изменения."
         : String((e as Error).message));
+    } finally { setBusy(false); }
+  };
+  const loadMore = async () => {
+    if (busy || !repo || !hasMore) return;
+    setBusy(true);
+    try {
+      const next = await repo.searchNotes(search, 50, notes.length);
+      setNotes(previous => [...previous, ...next]);
+      setHasMore(next.length === 50);
+    } catch (e) {
+      setMessage(String((e as Error).message));
     } finally { setBusy(false); }
   };
   const selectNote = async (item: EntityRecord) => {
@@ -158,6 +172,13 @@ export function LocalMemoryScreen() {
                 <Text style={{ color: t.muted }} numberOfLines={2}>{bodyOf(item)}</Text>
               </Pressable>
             ))}
+            {hasMore && (
+              <Pressable accessibilityRole="button" accessibilityLabel="Показать ещё локальные заметки"
+                disabled={busy} style={[styles.button, { borderWidth: 1, borderColor: t.line }]}
+                onPress={() => void loadMore()}>
+                <Text style={{ color: t.text, textAlign: "center" }}>Показать ещё</Text>
+              </Pressable>
+            )}
             <Text style={[styles.heading, { color: t.text }]}>{selected ? "Редактирование" : "Новая заметка"}</Text>
             <TextInput accessibilityLabel="Заголовок заметки" value={title} onChangeText={setTitle}
               placeholder="Заголовок" placeholderTextColor={t.muted} style={input} />
