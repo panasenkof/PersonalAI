@@ -162,19 +162,31 @@ async function initialize(profileId: string): Promise<SQLite.SQLiteDatabase> {
   }
 }
 
-export async function openLocalMemory(profileId: string): Promise<SQLite.SQLiteDatabase> {
+/**
+ * Execute a complete sensitive operation on a locked profile connection.
+ * Profile switches and close operations cannot interrupt an export or restore.
+ * UI callers must avoid simultaneous repository writes while this runs.
+ */
+export async function withLocalMemoryDatabase<T>(
+  profileId: string, work: (db: SQLite.SQLiteDatabase) => Promise<T>,
+): Promise<T> {
   return serialize(async () => {
-    if (current && currentProfile === profileId) return current;
-    if (current) {
+    if (current && currentProfile !== profileId) {
       await current.closeAsync();
       current = null;
       currentProfile = null;
     }
-    const db = await initialize(profileId);
-    current = db;
-    currentProfile = profileId;
-    return db;
+    if (!current) {
+      const db = await initialize(profileId);
+      current = db;
+      currentProfile = profileId;
+    }
+    return work(current);
   });
+}
+
+export async function openLocalMemory(profileId: string): Promise<SQLite.SQLiteDatabase> {
+  return withLocalMemoryDatabase(profileId, async db => db);
 }
 
 /** Close when switching accounts, going to background or locking the device. */
