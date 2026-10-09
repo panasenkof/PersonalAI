@@ -71,6 +71,8 @@ async def _chat_step(
     messages: list[ChatMessage],
     tools: list[dict[str, Any]],
     emit: EmitFn | None = None,
+    *,
+    allow_cloud_fallback: bool = False,
 ) -> tuple[LLMProvider, str, Any, bool]:
     """One LLM turn: streaming when a subscriber listens, fallback chain on errors.
 
@@ -115,7 +117,8 @@ async def _chat_step(
             target = local_fallback_target()
             # A silent fallback must not transmit conversation history, tool results
             # or tool arguments to a new cloud service. Agent sessions have tools.
-            if target is not None and not tools and not any(m.role == "tool" for m in messages):
+            if (allow_cloud_fallback and target is not None and not tools
+                    and not any(m.role == "tool" for m in messages)):
                 fb_provider, fb_model = target
                 if emit is not None and getattr(fb_provider, "stream_chat", None) is not None:
                     try:
