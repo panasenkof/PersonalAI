@@ -1,0 +1,54 @@
+name: Native Android SQLCipher build
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "mobile/**"
+      - ".github/workflows/mobile-native-sqlcipher.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  native-sqlcipher:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+        with:
+          # The Android SDK removed the obsolete "tools" package, which this
+          # action still requests by default. Only install supported packages.
+          packages: platform-tools
+      - name: Install locked JS and native dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Generate native Android project including Expo SQLCipher
+        run: npx expo prebuild --platform android --no-install --clean
+      - name: Compile Android debug APK with native modules
+        run: cd android && ./gradlew :app:assembleDebug --no-daemon --stacktrace
+      - name: Validate native APK archive
+        run: |
+          APK=android/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          unzip -t "$APK" >/dev/null
+          echo "APK generated and archive verified: $APK"
+      - name: Store APK for on-device SQLCipher runtime QA
+        uses: actions/upload-artifact@v4
+        with:
+          name: pia-sqlcipher-debug-apk
+          path: mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7

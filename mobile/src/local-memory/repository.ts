@@ -294,11 +294,12 @@ export class SqliteMemoryRepository implements MemoryRepository {
     }));
   }
 
-  async searchNotes(query: string, limit = 50): Promise<EntityRecord[]> {
+  async searchNotes(query: string, limit = 50, offset = 0): Promise<EntityRecord[]> {
     const count = Math.min(100, Math.max(1, Math.trunc(limit)));
+    const start = Math.max(0, Math.trunc(offset));
     const term = query.trim();
     if (!term) {
-      return (await this.entities({ domain: "notes", limit: count })).items;
+      return (await this.entities({ domain: "notes", limit: count, offset: start })).items;
     }
     // FTS5 MATCH accepts an entire quoted phrase: escape embedded quotes to
     // avoid treating user input as operators or exposing query syntax errors.
@@ -307,8 +308,8 @@ export class SqliteMemoryRepository implements MemoryRepository {
       `SELECT e.* FROM memory_entities e
        JOIN memory_notes_fts f ON f.entity_id=e.id
        WHERE memory_notes_fts MATCH ? AND e.domain='notes'
-       ORDER BY e.updated_at DESC, e.id LIMIT ?`,
-      [phrase, count],
+       ORDER BY e.updated_at DESC, e.id LIMIT ? OFFSET ?`,
+      [phrase, count, start],
     );
     return rows.map(entityFrom);
   }
