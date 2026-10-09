@@ -2,6 +2,8 @@ import * as Crypto from "expo-crypto";
 import * as SecureStore from "expo-secure-store";
 import * as SQLite from "expo-sqlite";
 
+import { withUnlockedTransaction } from "./transaction";
+
 // Guest uses the historical database name so PR #15 notes are preserved.
 const GUEST_DB_NAME = "pia-personal-memory-v1.db";
 const LEGACY_GUEST_KEY = "pia.local-memory.sqlcipher.key.v1";
@@ -147,7 +149,7 @@ async function initialize(profileId: string): Promise<SQLite.SQLiteDatabase> {
     const version = row?.user_version ?? 0;
     if (version > LOCAL_MEMORY_SCHEMA_VERSION) throw new Error("local_memory_schema_too_new");
     if (version === 0) {
-      await db.withExclusiveTransactionAsync(async tx => {
+      await withUnlockedTransaction(db, async tx => {
         await tx.execAsync(SCHEMA_SQL);
         await tx.execAsync("PRAGMA user_version = 1");
       });

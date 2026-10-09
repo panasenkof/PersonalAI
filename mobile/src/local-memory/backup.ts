@@ -13,6 +13,7 @@ import * as Sharing from "expo-sharing";
 import type * as SQLite from "expo-sqlite";
 
 import { LOCAL_MEMORY_SCHEMA_VERSION, withLocalMemoryDatabase } from "./storage";
+import { withUnlockedTransaction } from "./transaction";
 
 const CODE_PATTERN = /^[a-f0-9]{64}$/;
 const BACKUP_TABLES = [
@@ -127,7 +128,9 @@ export async function restoreEncryptedBackup(
         if (!incoming || incoming.n > 100000) throw new Error("invalid_backup_records");
         // Roll back *all* copied records if any table, FK or FTS operation
         // fails. Never replace a profile containing existing memory.
-        await db.withExclusiveTransactionAsync(async tx => {
+        // ATTACH and the SQLCipher key are scoped to this unlocked connection.
+        // Expo's exclusiveTransaction opens a DIFFERENT, still-locked DB.
+        await withUnlockedTransaction(db, async tx => {
           const existing = await tx.getFirstAsync<{ n: number }>(
             "SELECT count(*) AS n FROM memory_collections",
           );
