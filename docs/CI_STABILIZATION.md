@@ -41,3 +41,13 @@ not grant repository-administration access.
   `CI required` check before merging.
 - `Live evals` is separate from the required CI: success can mean the workflow
   skipped genuine third-party LLM calls when credentials are unavailable.
+
+## Preventing time-boundary OTP flakes
+
+The end-to-end 2FA test now replays the **same exact enrollment token**.
+Recomputing `totp_at(secret)` a few HTTP requests later is not a replay:
+the real clock may cross the 30-second TOTP interval and generate a fresh,
+legitimate value. A prior CI failure incorrectly rejected that legitimate code.
+Invalid-code checks use nonnumeric values, not a random six-digit value that
+might accidentally be valid. Production OTP verification and replay prevention
+are unchanged.
