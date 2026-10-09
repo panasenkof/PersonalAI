@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.automotive.schemas import MAINTENANCE_ITEMS_SCHEMA, SERVICE_RECEIPT_SCHEMA
 from app.llm.router import default_model_for_user, provider_for_user
+from app.memory.privacy import is_trusted_local_provider, remote_extraction_allowed
 from app.models import Entity, Observation, ScheduleCandidate, ScheduleStatus
 from app.security.redact import safe_error
 from app.services.facts import stage_or_commit_observation
@@ -83,9 +84,15 @@ async def auto_parse_service_receipt(session: AsyncSession, user_id: str, args: 
 
     if not await user_owns_blob(session, user_id, storage_key):
         return {"error": "unknown_storage_key"}
+    # Check collection and optional vehicle sensitivity *before* decoding the image.
+    e = await _get_vehicle(session, user_id, vehicle_entity_id) if vehicle_entity_id else None
+    provider = await provider_for_user(session, user_id)
+    if not is_trusted_local_provider(provider) and not await remote_extraction_allowed(
+        session, user_id, "garage", entity=e,
+    ):
+        return {"error": "remote_extraction_not_allowed"}
     data = await read_bytes(storage_key)
     b64 = base64.b64encode(data).decode("ascii")
-    provider = await provider_for_user(session, user_id)
     model = await default_model_for_user(session, user_id)
     mime = args.get("mime") or "image/jpeg"
     try:
@@ -101,8 +108,7 @@ async def auto_parse_service_receipt(session: AsyncSession, user_id: str, args: 
         )
     except Exception as exc:  # noqa: BLE001
         return {"error": "vision_parse_failed", "detail": safe_error(exc)}
-    e = await session.get(Entity, vehicle_entity_id) if vehicle_entity_id else None
-    if not e or e.user_id != user_id:
+    if not e:
         return {"parsed": parsed, "note": "No vehicle linked; not persisted as observation."}
     occurred_raw = parsed.get("service_date")
     try:
@@ -143,6 +149,10 @@ async def auto_fetch_maintenance_schedule(session: AsyncSession, user_id: str, a
     e = await _get_vehicle(session, user_id, args["vehicle_entity_id"])
     if not e:
         return {"error": "vehicle_not_found"}
+    # External web search itself discloses vehicle metadata; a local LLM
+    # does not make this DDG query local.
+    if not await remote_extraction_allowed(session, user_id, "garage", entity=e):
+        return {"error": "external_lookup_not_allowed"}
     p = e.payload
     q = f"{p.get('year','')} {p.get('make','')} {p.get('model','')} factory recommended maintenance schedule intervals"
     url = "https://api.duckduckgo.com/"

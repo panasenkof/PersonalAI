@@ -13,6 +13,7 @@ from app.db import SessionLocal
 from app.domains.registry import all_plugins, tool_router, tools_openai_format
 from app.llm.limits import RateLimitExceeded, check_user_quota
 from app.security.redact import safe_error
+from app.models import LLMSettings
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +103,13 @@ async def _tools_call(req_id: Any, params: dict[str, Any], request: Request) -> 
     if auth_user is None:
         return JSONResponse(_rpc_error(req_id, -32602, "Invalid token"), status_code=401)
     uid = auth_user.id
+    async with SessionLocal() as privacy_session:
+        privacy = await privacy_session.get(LLMSettings, uid)
+        if privacy is None or not privacy.allow_mcp_access:
+            return JSONResponse(
+                _rpc_error(req_id, -32003, "mcp_memory_access_not_allowed"),
+                status_code=403,
+            )
 
     name = params.get("name")
     if not isinstance(name, str) or not name:
