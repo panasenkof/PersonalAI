@@ -5,17 +5,18 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.agent.universal_tools import kb_create_entity, kb_search
-from app.llm.providers import ChatMessage, LLMCompletionResult
+from app.llm.providers import ChatMessage, LLMCompletionResult, LocalLLMProvider
 from app.models import Base, Chunk, Collection, User
 from app.rag.indexing import split_text
 from app.rag.search import cosine_similarity, hybrid_search
 
 
-class FakeEmbedProvider:
+class FakeEmbedProvider(LocalLLMProvider):
     """Deterministic embeddings: 'camry' → axis 0, 'oil' → axis 1, other → axis 2."""
 
     def __init__(self, fail: bool = False):
         self.fail = fail
+        self.base_url = "http://127.0.0.1:11434/v1"
 
     def _vec(self, text: str) -> list[float]:
         t = text.lower()

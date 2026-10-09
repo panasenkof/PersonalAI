@@ -58,7 +58,7 @@ def test_upgrade_max_and_daily_usage_branches_converge(tmp_path, previous):
         engine = create_async_engine(url)
         async with engine.connect() as c:
             versions = (await c.execute(text("SELECT version_num FROM alembic_version"))).scalars().all()
-            assert versions == ["n3d8f5a7b009"]
+            assert versions == ["p4e9a6b8c010"]
             columns = await c.run_sync(lambda conn: inspect(conn).get_columns("users"))
             assert "max_user_id" in {column["name"] for column in columns}
             tables = await c.run_sync(lambda conn: inspect(conn).get_table_names())

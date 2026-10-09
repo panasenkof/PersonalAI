@@ -7,6 +7,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.memory.contracts import NewEntity
+from app.memory.privacy import cloud_scope, filter_cloud_entities, filter_cloud_hits
 from app.memory.repository import MemoryAccessError
 from app.memory.sqlalchemy import SqlAlchemyMemoryRepository
 from app.rag.search import hybrid_search
@@ -17,14 +18,29 @@ async def kb_search(session: AsyncSession, user_id: str, args: dict[str, Any]) -
     q = (args.get("query") or "").strip()
     if not q:
         return {"hits": []}
-    hits = await hybrid_search(session, user_id, q, k=15)
-    return {"hits": hits[:30]}
+    scope = cloud_scope()
+    if scope is not None and not scope:
+        return {"hits": []}
+    # Cloud requests never send the query for remote embedding (lexical-only).
+    hits = await hybrid_search(session, user_id, q, k=30 if scope is not None else 15)
+    if scope is not None:
+        hits = await filter_cloud_hits(session, user_id, hits, scope)
+    return {"hits": hits[:15]}
 
 
 async def kb_list_entities(session: AsyncSession, user_id: str, args: dict[str, Any]) -> dict[str, Any]:
     domain = args.get("domain")
     limit = min(100, max(1, int(args.get("limit", 50))))
     offset = max(0, int(args.get("offset", 0)))
+    scope = cloud_scope()
+    if scope is not None:
+        rows, next_offset = await filter_cloud_entities(
+            session, user_id, scope, domain=domain, limit=limit, offset=offset,
+        )
+        return {
+            "entities": [{"id": e.id, "domain": e.domain, "payload": e.payload} for e in rows],
+            "next_offset": next_offset,
+        }
     page = await SqlAlchemyMemoryRepository(session, user_id).entities(
         domain=domain, limit=limit, offset=offset,
     )

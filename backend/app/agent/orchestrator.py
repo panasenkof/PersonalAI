@@ -16,6 +16,7 @@ from app.config import get_settings
 from app.domains.registry import all_plugins, tool_router, tools_openai_format
 from app.llm.providers import ChatMessage, LLMProvider, LocalLLMProvider
 from app.llm.router import default_model_for_user, local_fallback_target, provider_for_user
+from app.memory.privacy import cloud_allowed_collections, cloud_scope, is_trusted_local_provider, use_cloud_scope
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +113,9 @@ async def _chat_step(
     except (httpx.HTTPError, httpx.TimeoutException, json.JSONDecodeError):
         if isinstance(provider, LocalLLMProvider):
             target = local_fallback_target()
-            if target is not None:
+            # A silent fallback must not transmit conversation history, tool results
+            # or tool arguments to a new cloud service. Agent sessions have tools.
+            if target is not None and not tools and not any(m.role == "tool" for m in messages):
                 fb_provider, fb_model = target
                 if emit is not None and getattr(fb_provider, "stream_chat", None) is not None:
                     try:
@@ -141,6 +144,8 @@ async def _run_tool(
     handler: Any, session: AsyncSession, user_id: str, name: str, args: dict[str, Any]
 ) -> dict[str, Any]:
     """Execute one tool; argument mistakes by the model become tool errors it can correct."""
+    if cloud_scope() is not None and name not in {"kb_search", "kb_list_entities"}:
+        return {"error": "cloud_memory_tool_denied"}
     try:
         definitions = UNIVERSAL_TOOL_DEFINITIONS + tools_openai_format(all_plugins())
         definition = next((d["function"] for d in definitions if d["function"]["name"] == name), None)
@@ -176,16 +181,31 @@ async def run_agent(
     emit: EmitFn | None = None,
 ) -> dict[str, Any]:
     plugins = all_plugins()
-    tools = UNIVERSAL_TOOL_DEFINITIONS + tools_openai_format(plugins)
     router = {**UNIVERSAL_TOOL_HANDLERS, **tool_router(plugins)}
 
     provider = await provider_for_user(session, user_id)
     model = await default_model_for_user(session, user_id)
-
-    messages: list[ChatMessage] = [ChatMessage(role="system", content=system_prompt(plugins))]
+    cloud = not is_trusted_local_provider(provider)
+    allowed = await cloud_allowed_collections(session, user_id) if cloud else frozenset()
+    cloud_grants = allowed if cloud else None
+    if cloud:
+        # Only the two owner-scoped, filtered read tools can return memory to a cloud model.
+        tools = [t for t in UNIVERSAL_TOOL_DEFINITIONS
+                 if t["function"]["name"] in {"kb_search", "kb_list_entities"}] if allowed else []
+    else:
+        tools = UNIVERSAL_TOOL_DEFINITIONS + tools_openai_format(plugins)
+    prompt = system_prompt(plugins) if not cloud else (
+        SYSTEM_PROMPT + "\n- Cloud memory policy: use only the provided read tools. "
+        "Do not claim you can write or inspect private memory without permission."
+    )
+    messages: list[ChatMessage] = [ChatMessage(role="system", content=prompt)]
     if conversation_id:
-        window = get_settings().agent_history_window
-        messages.extend(await load_history_messages(session, user_id, conversation_id, window=window))
+        from app.models import LLMSettings
+
+        row = await session.get(LLMSettings, user_id)
+        if not cloud or (row is not None and row.cloud_history_access):
+            window = get_settings().agent_history_window
+            messages.extend(await load_history_messages(session, user_id, conversation_id, window=window))
     messages.append(ChatMessage(role="user", content=user_visible_text))
 
     usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
@@ -212,7 +232,8 @@ async def run_agent(
                 if handler is None:
                     out: dict[str, Any] = {"error": f"unknown_tool:{name}"}
                 else:
-                    out = await _run_tool(handler, session, user_id, name, args)
+                    with use_cloud_scope(cloud_grants):
+                        out = await _run_tool(handler, session, user_id, name, args)
                 tool_payload = json.dumps(out, default=str)
                 if emit is not None:
                     ok, summary = summarize_tool_result(out)
