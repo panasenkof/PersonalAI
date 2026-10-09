@@ -189,16 +189,25 @@ async def auto_approve_schedule(session: AsyncSession, user_id: str, args: dict[
     cand = await session.get(ScheduleCandidate, args["schedule_candidate_id"])
     if not cand or cand.user_id != user_id:
         return {"error": "candidate_not_found"}
-    cand.status = ScheduleStatus.approved.value
+    # An already-approved candidate must not create duplicate history entries.
+    if cand.status == ScheduleStatus.approved.value:
+        return {"status": "approved", "vehicle_entity_id": cand.vehicle_entity_id}
     e = await session.get(Entity, cand.vehicle_entity_id)
-    if e:
-        merged = dict(e.payload)
-        merged["approved_maintenance_schedule"] = cand.structured
-        merged["schedule_candidate_id"] = cand.id
-        e.payload = merged
-        from app.rag.indexing import reindex_entity
+    if e is None or e.user_id != user_id:
+        return {"error": "vehicle_not_found"}
+    merged = dict(e.payload)
+    merged["approved_maintenance_schedule"] = cand.structured
+    merged["schedule_candidate_id"] = cand.id
+    from app.memory.sqlalchemy import SqlAlchemyMemoryRepository
+    from app.rag.indexing import reindex_entity
 
-        await reindex_entity(session, user_id, e)
+    await SqlAlchemyMemoryRepository(session, user_id).revise_entity(
+        e.id, expected_version=e.record_version, payload=merged,
+        reason="approve_maintenance_schedule", actor_kind="tool",
+    )
+    cand.status = ScheduleStatus.approved.value
+    await session.refresh(e)
+    await reindex_entity(session, user_id, e)
     await session.flush()
     return {"status": "approved", "vehicle_entity_id": cand.vehicle_entity_id}
 
