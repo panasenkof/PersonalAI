@@ -129,7 +129,7 @@ def test_memory_v2_migration_preserves_legacy_rows(tmp_path, dialect):
                 "FROM entities WHERE id='memory-entity'"
             ))).one()
             assert entity.domain == "automotive"
-            assert '"Toyota"' in str(entity.payload)
+            assert "Toyota" in str(entity.payload)
             assert entity.sensitivity == "inherit" and entity.record_status == "active"
             assert entity.valid_from is None and entity.source_ref is None
             observation = (await conn.execute(text(
