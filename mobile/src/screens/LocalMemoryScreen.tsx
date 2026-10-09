@@ -1,4 +1,5 @@
 import { useFocusEffect } from "@react-navigation/native";
+import * as DocumentPicker from "expo-document-picker";
 import React, { useCallback, useState } from "react";
 import {
   ActivityIndicator, KeyboardAvoidingView, Platform, Pressable,
@@ -10,6 +11,7 @@ import { MemoryConflictError } from "../local-memory/types";
 import type { EntityRecord, ObservationRecord, RelationRecord, RevisionRecord } from "../local-memory/types";
 import { localMemoryRepository, SqliteMemoryRepository } from "../local-memory/repository";
 import { closeLocalMemory } from "../local-memory/storage";
+import { createRecoveryCode, shareEncryptedBackup, restoreEncryptedBackup } from "../local-memory/backup";
 import { useTheme } from "../theme";
 
 const bodyOf = (e: EntityRecord): string => typeof e.payload.body === "string" ? e.payload.body : "";
@@ -33,6 +35,9 @@ export function LocalMemoryScreen() {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [backupCode, setBackupCode] = useState("");
+  const [savedRecoveryCode, setSavedRecoveryCode] = useState(false);
+  const [restoreCode, setRestoreCode] = useState("");
 
   const refresh = useCallback(async (db: SqliteMemoryRepository, term: string, entityId?: string) => {
     const page = await db.searchNotes(term, 50);
@@ -55,6 +60,9 @@ export function LocalMemoryScreen() {
     setRelations([]);
     setTitle("");
     setBody("");
+    setBackupCode("");
+    setSavedRecoveryCode(false);
+    setRestoreCode("");
     setLoading(true);
     if (!profileId) {
       setMessage("Для доступа к локальной памяти выберите локальный режим или войдите.");
@@ -152,6 +160,31 @@ export function LocalMemoryScreen() {
     setMessage("Записи связаны на телефоне.");
   });
 
+  const exportBackup = () => run(async () => {
+    if (!profileId || !backupCode || !savedRecoveryCode) {
+      throw new Error("Сначала создайте и сохраните код восстановления отдельно от файла.");
+    }
+    await shareEncryptedBackup(profileId, backupCode);
+    setBackupCode("");
+    setSavedRecoveryCode(false);
+    setMessage("Зашифрованная копия передана выбранному приложению. Код сохраните отдельно.");
+  });
+  const restoreBackup = () => run(async () => {
+    if (!profileId || !restoreCode.trim()) {
+      throw new Error("Введите 64-символьный код восстановления.");
+    }
+    const picked = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true });
+    if (picked.canceled || !picked.assets.length) return;
+    const stats = await restoreEncryptedBackup(profileId, picked.assets[0].uri, restoreCode);
+    setRestoreCode("");
+    setSelected(null);
+    setHistory([]);
+    setEvents([]);
+    setRelations([]);
+    await refresh(repo!, search);
+    setMessage(`Восстановлено: коллекций — ${stats.collections}, записей — ${stats.entities}, событий — ${stats.observations}.`);
+  });
+
   const input = [styles.input, { backgroundColor: t.panel, borderColor: t.line, color: t.text }];
   const action = [styles.button, { backgroundColor: t.accent }];
   return (
@@ -240,6 +273,51 @@ export function LocalMemoryScreen() {
                   ))}
               </>
             )}
+            <Text style={[styles.heading, { color: t.text }]}>Резервная копия</Text>
+            <Text style={{ color: t.muted }}>
+              Копия шифруется отдельно от базы телефона. Код восстановления состоит из 64 символов:
+              сохраните его в другом месте. Без него файл невозможно прочитать.
+            </Text>
+            <Pressable accessibilityRole="button" accessibilityLabel="Создать новый код восстановления"
+              style={[styles.button, { borderWidth: 1, borderColor: t.line }]}
+              disabled={busy} onPress={() => {
+                setBackupCode(createRecoveryCode());
+                setSavedRecoveryCode(false);
+              }}>
+              <Text style={{ color: t.text, textAlign: "center" }}>Создать код восстановления</Text>
+            </Pressable>
+            {backupCode ? (
+              <>
+                <Text selectable accessibilityLabel="Код восстановления резервной копии"
+                  style={{ color: t.text, fontFamily: "monospace" }}>{backupCode}</Text>
+                <Pressable accessibilityRole="button" accessibilityLabel="Подтверждаю, что сохранил код отдельно"
+                  onPress={() => setSavedRecoveryCode(value => !value)}
+                  style={[styles.button, { borderWidth: 1, borderColor: t.line }]}>
+                  <Text style={{ color: t.text, textAlign: "center" }}>
+                    {savedRecoveryCode ? "☑" : "☐"} Я сохранил код отдельно от резервной копии
+                  </Text>
+                </Pressable>
+                <Pressable accessibilityRole="button" accessibilityLabel="Экспортировать зашифрованную копию"
+                  disabled={!savedRecoveryCode || busy} style={action} onPress={exportBackup}>
+                  <Text style={styles.white}>Экспортировать зашифрованную копию</Text>
+                </Pressable>
+              </>
+            ) : null}
+            <Text style={[styles.heading, { color: t.text }]}>Восстановление</Text>
+            <Text style={{ color: t.muted }}>
+              Восстановление разрешено только в пустую локальную память.
+              Существующие записи никогда не перезаписываются.
+            </Text>
+            <TextInput accessibilityLabel="Код восстановления для импорта"
+              autoCapitalize="none" autoCorrect={false} secureTextEntry
+              value={restoreCode} onChangeText={setRestoreCode}
+              placeholder="64 символа кода восстановления"
+              placeholderTextColor={t.muted} style={input} />
+            <Pressable accessibilityRole="button" accessibilityLabel="Восстановить зашифрованную копию"
+              disabled={busy || restoreCode.trim().length !== 64}
+              style={action} onPress={restoreBackup}>
+              <Text style={styles.white}>Выбрать файл и восстановить</Text>
+            </Pressable>
           </>
         ) : null}
       </ScrollView>
