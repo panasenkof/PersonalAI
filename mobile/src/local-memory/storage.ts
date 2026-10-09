@@ -108,6 +108,8 @@ async function initialize(profileId: string): Promise<SQLite.SQLiteDatabase> {
   try {
     const cipher = await db.getFirstAsync<{ cipher_version: string }>("PRAGMA cipher_version");
     if (!cipher?.cipher_version) throw new Error("sqlcipher_required_native_build");
+    const marker = identity.keyName + ".initialized";
+    const previouslyInitialized = await SecureStore.getItemAsync(marker);
     let key = await SecureStore.getItemAsync(identity.keyName, BIOMETRIC_OPTIONS);
     if (key !== null && !VALID_KEY.test(key)) throw new Error("invalid_local_memory_key");
     let migratedLegacy = false;
@@ -118,13 +120,22 @@ async function initialize(profileId: string): Promise<SQLite.SQLiteDatabase> {
       if (legacy !== null && !VALID_KEY.test(legacy)) throw new Error("invalid_local_memory_key");
       if (legacy) { key = legacy; migratedLegacy = true; }
     }
+    if (!key && previouslyInitialized) {
+      // Never rotate a lost/cancelled biometric secret; old encrypted data
+      // would become inaccessible. Recovery must be explicit.
+      throw new Error("local_memory_unlock_failed");
+    }
     if (!key) {
       key = Array.from(Crypto.getRandomBytes(32), byte => byte.toString(16).padStart(2, "0")).join("");
     }
-    if (!(await SecureStore.getItemAsync(identity.keyName, BIOMETRIC_OPTIONS))) {
+    if (!previouslyInitialized) {
+      // Persistent marker precedes key creation. On an interrupted upgrade
+      // or failed authenticator we refuse to generate a replacement key.
+      await SecureStore.setItemAsync(marker, "yes", {
+        keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+      });
       await SecureStore.setItemAsync(identity.keyName, key, BIOMETRIC_OPTIONS);
       // Merely writing a protected key does not constitute biometric unlock.
-      // Read it back through the device authenticator before touching memory.
       const validated = await SecureStore.getItemAsync(identity.keyName, BIOMETRIC_OPTIONS);
       if (validated !== key) throw new Error("local_memory_unlock_failed");
     }
