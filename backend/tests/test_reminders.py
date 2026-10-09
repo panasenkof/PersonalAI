@@ -107,10 +107,23 @@ def test_max_reminders_and_telegram_preference(monkeypatch, telegram):
             u = User(email="max-reminder@test.dev", password_hash="x", max_user_id="123", telegram_user_id="456")
             session.add(u)
             await session.flush()
-            c = Collection(user_id=u.id, name="Garage", slug="garage")
+            c = Collection(
+                user_id=u.id, name="Garage", slug="garage",
+                sensitivity="standard", allow_messenger_reminders=True,
+            )
             session.add(c)
             await session.flush()
             session.add(Entity(user_id=u.id, collection_id=c.id, domain="automotive", payload={"type": "vehicle", "approved_maintenance_schedule": True}))
+            await session.commit()
+        # Revocation must suppress the reminder even if a vehicle is due.
+        async with S() as session:
+            col = (await session.scalars(select(Collection))).one()
+            col.allow_messenger_reminders = False
+            await session.commit()
+        assert await reminders.check_reminders_once() == 0
+        async with S() as session:
+            col = (await session.scalars(select(Collection))).one()
+            col.allow_messenger_reminders = True
             await session.commit()
         assert await reminders.check_reminders_once() == 1
         assert await reminders.check_reminders_once() == 0

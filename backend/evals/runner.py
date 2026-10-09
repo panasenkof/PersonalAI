@@ -12,16 +12,17 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.agent.orchestrator import run_agent
-from app.llm.providers import ChatMessage, LLMCompletionResult
+from app.llm.providers import ChatMessage, LLMCompletionResult, LocalLLMProvider
 from app.models import Base, Collection, Entity, Observation
 from app.services.users import bootstrap_user
 from evals.golden import GOLDEN
 
 
-class ScriptedProvider:
+class ScriptedProvider(LocalLLMProvider):
     """Pops one scripted reply per chat() call; records every transcript."""
 
     def __init__(self, script: list[dict[str, Any]]):
+        self.base_url = "http://127.0.0.1:11434/v1"
         self.script = list(script)
         self.transcripts: list[list[ChatMessage]] = []
 

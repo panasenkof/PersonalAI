@@ -140,6 +140,7 @@ async def cloud_tool_allowed(
     """Re-check the exact target at dispatch time, not only at tool schema exposure."""
     if name in {"kb_search", "kb_list_entities"}:
         return bool(allowed)
+    allowed &= await cloud_allowed_collections(session, user_id)
     if not allowed:
         return False
     if name in _CLOUD_COLLECTION_TOOLS:
@@ -172,3 +173,32 @@ async def cloud_tool_allowed(
         )
         return row is not None
     return False
+
+
+
+def is_loopback_url(value: str) -> bool:
+    """Only this machine, not RFC1918 LAN or arbitrary private DNS names."""
+    try:
+        parsed = urlsplit(value)
+        return parsed.scheme in {"http", "https"} and parsed.hostname in _LOCAL_HOSTS
+    except (ValueError, TypeError):
+        return False
+
+
+async def remote_extraction_allowed(
+    session: AsyncSession, user_id: str, collection_slug: str,
+    *, entity: Entity | None = None,
+) -> bool:
+    """An explicit collection opt-in is required for outbound OCR/vision/parsing."""
+    if entity is not None and (
+        entity.user_id != user_id or entity.sensitivity not in {"inherit", "standard"}
+    ):
+        return False
+    stmt = select(Collection.id).where(
+        Collection.user_id == user_id, Collection.slug == collection_slug,
+        Collection.sensitivity.in_(_CLASSIFIED),
+        Collection.allow_remote_extraction.is_(True),
+    )
+    if entity is not None:
+        stmt = stmt.where(Collection.id == entity.collection_id)
+    return await session.scalar(stmt) is not None

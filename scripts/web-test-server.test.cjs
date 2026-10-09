@@ -20,3 +20,20 @@ test('serves the actual login page and its assets at the production mount', asyn
     assert.equal((await fetch(new URL('/v1/auth/me', server.baseURL))).status, 404);
   } finally { await server.close(); }
 });
+
+test('web privacy controls are present and wired to settings', async () => {
+  const server = await startWebTestServer();
+  try {
+    const page = await fetch(server.baseURL);
+    const html = await page.text();
+    for (const id of ['privacyPanel', 'privacyCollections', 'privacyHistory',
+      'privacySTT', 'privacyMCP', 'btnSavePrivacyGlobal']) {
+      assert.match(html, new RegExp('id="' + id + '"'));
+    }
+    const js = await (await fetch(server.baseURL + 'app.js')).text();
+    assert.match(js, /loadPrivacySettings\(\)/);
+    assert.match(js, /saveGlobalPrivacySettings/);
+    assert.match(js, /\/v1\/privacy\/collections/);
+    assert.match(js, /\/v1\/privacy\/integrations/);
+  } finally { await server.close(); }
+});

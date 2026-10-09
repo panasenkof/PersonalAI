@@ -138,6 +138,10 @@ def test_api_daily_and_active_limits_block_before_model(client, random_email, mo
     response = client.post('/v1/messages', headers=headers, json={'text':'second'})
     assert response.status_code == 429 and response.json()['detail'] == 'daily_request_limit'
     assert int(response.headers['Retry-After']) > 0 and len(calls) == 1
+    # The MCP boundary is opt-in; enable it explicitly before verifying quota.
+    assert client.put('/v1/privacy/integrations', headers=headers, json={
+        'allow_remote_stt': False, 'allow_mcp_access': True,
+    }).status_code == 200
     mcp = client.post('/mcp', headers=headers, json={'jsonrpc':'2.0','id':1,'method':'tools/call','params':{'name':'kb_search','arguments':{'query':'test'}}})
     assert mcp.status_code == 429 and 'daily_request_limit' in str(mcp.json())
 

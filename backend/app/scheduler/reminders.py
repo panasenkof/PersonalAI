@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from app.config import get_settings
 from app.db import SessionLocal
 from app.domains.automotive.handlers import auto_compute_next_due
-from app.models import Entity, ReminderNotification, User
+from app.models import Collection, Entity, ReminderNotification, User
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +41,13 @@ async def check_reminders_once() -> int:
                 select(Entity)
                 .where(Entity.user_id == user.id)
                 .where(Entity.domain == "automotive")
+                .where(Entity.sensitivity.in_(("inherit", "standard")))
+                .join(Collection, Collection.id == Entity.collection_id)
+                .where(
+                    Collection.user_id == user.id,
+                    Collection.sensitivity.in_(("standard", "sensitive")),
+                    Collection.allow_messenger_reminders.is_(True),
+                )
             )
             for veh in res_v.scalars().all():
                 if (veh.payload or {}).get("type") != "vehicle":

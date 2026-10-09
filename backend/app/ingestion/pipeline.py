@@ -8,13 +8,16 @@ from app.agent.history import get_or_create_conversation, persist_turn
 from app.agent.orchestrator import run_agent
 from app.domains.registry import tool_router
 from app.ingestion.schemas import IngestionEnvelope, utcnow
-from app.ingestion.stt import stt_provider_from_settings
-from app.models import IngestionJob, JobStatus
+from app.ingestion.stt import WhisperApiSTTProvider, stt_provider_from_settings
+from app.memory.privacy import is_loopback_url
+from app.models import IngestionJob, JobStatus, LLMSettings
 from app.security.redact import safe_error
 from app.services.facts import current_job_id, pending_facts_for_job
 
 
-async def build_user_prompt(envelope: IngestionEnvelope) -> str:
+async def build_user_prompt(
+    envelope: IngestionEnvelope, *, allow_remote_stt: bool = False,
+) -> str:
     parts: list[str] = []
     if envelope.text:
         parts.append(envelope.text)
@@ -22,11 +25,20 @@ async def build_user_prompt(envelope: IngestionEnvelope) -> str:
     enabled_tools = tool_router()
     for att in envelope.attachments:
         if att.mime.startswith("audio/"):
+            # An authenticated upload is not consent to forward audio bytes
+            # to a separately configured external STT provider.
+            remote_stt = (
+                isinstance(stt, WhisperApiSTTProvider)
+                and not is_loopback_url(stt.base_url)
+            )
+            if remote_stt and not allow_remote_stt:
+                parts.append("[audio attachment; external transcription disabled in privacy settings]")
+                continue
             tr = await stt.transcribe(storage_key=att.storage_key, mime=att.mime)
             if tr:
                 parts.append(f"[audio transcript] {tr}")
             else:
-                parts.append(f"[audio attachment {att.storage_key}; transcription not configured]")
+                parts.append("[audio attachment; transcription not configured]")
         elif att.mime.startswith("image/"):
             parts.append(
                 f"[image] storage_key={att.storage_key} mime={att.mime}. "
@@ -66,7 +78,10 @@ async def process_envelope(
             conversation_id=envelope.conversation_id,
             external_ref=envelope.external_ref,
         )
-        prompt = await build_user_prompt(envelope)
+        llm_privacy = await session.get(LLMSettings, user_id)
+        prompt = await build_user_prompt(
+            envelope, allow_remote_stt=bool(llm_privacy and llm_privacy.allow_remote_stt),
+        )
         out = await run_agent(
             session,
             user_id,

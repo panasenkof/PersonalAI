@@ -503,6 +503,110 @@ function streamJob(jobId) {
 }
 
 // ---------- settings ----------
+
+async function loadPrivacySettings() {
+  const msg = $("privacyMessage");
+  try {
+    const [collections, history, integrations] = await Promise.all([
+      api("/v1/privacy/collections"),
+      api("/v1/privacy/conversation"),
+      api("/v1/privacy/integrations"),
+    ]);
+    $("privacyHistory").checked = history.allow_cloud_history;
+    $("privacySTT").checked = integrations.allow_remote_stt;
+    $("privacyMCP").checked = integrations.allow_mcp_access;
+    const host = $("privacyCollections");
+    host.replaceChildren();
+    const controls = [
+      ["allow_cloud_llm", "Чтение знаний облачной LLM"],
+      ["allow_remote_embeddings", "Внешние эмбеддинги"],
+      ["allow_remote_extraction", "Внешний разбор файлов и изображений, поиск"],
+      ["allow_messenger_reminders", "Напоминания в мессенджерах"],
+    ];
+    const categories = [
+      ["unclassified", "Не определено"],
+      ["standard", "Обычные данные"],
+      ["sensitive", "Чувствительные"],
+      ["secret", "Секретные"],
+    ];
+    for (const item of collections) {
+      const section = document.createElement("section");
+      section.className = "sec";
+      const title = document.createElement("h4");
+      title.textContent = item.slug;
+      section.append(title);
+      const select = document.createElement("select");
+      select.setAttribute("aria-label", "Категория " + item.slug);
+      for (const [key, label] of categories) {
+        const opt = document.createElement("option");
+        opt.value = key; opt.textContent = label;
+        select.append(opt);
+      }
+      select.value = item.sensitivity;
+      section.append(select);
+      const switches = {};
+      for (const [key, label] of controls) {
+        const row = document.createElement("label");
+        row.className = "privacy-option";
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox"; checkbox.checked = Boolean(item[key]);
+        checkbox.setAttribute("aria-label", item.slug + ": " + label);
+        switches[key] = checkbox;
+        row.append(checkbox, document.createTextNode(" " + label));
+        section.append(row);
+      }
+      const applyClassification = () => {
+        const locked = ["unclassified", "secret"].includes(select.value);
+        for (const input of Object.values(switches)) {
+          input.disabled = locked;
+          if (locked) input.checked = false;
+        }
+      };
+      select.addEventListener("change", applyClassification);
+      applyClassification();
+      const save = document.createElement("button");
+      save.type = "button"; save.textContent = "Сохранить разрешения " + item.slug;
+      save.addEventListener("click", async () => {
+        save.disabled = true;
+        try {
+          await api("/v1/privacy/collections/" + encodeURIComponent(item.slug), {
+            method: "PUT",
+            body: {
+              sensitivity: select.value,
+              ...Object.fromEntries(controls.map(([key]) => [key, switches[key].checked])),
+            },
+          });
+          msg.className = "ok"; msg.textContent = "Разрешения " + item.slug + " сохранены.";
+        } catch (err) { msg.className = "err"; msg.textContent = friendlyError(err.message); }
+        finally { save.disabled = false; }
+      });
+      section.append(save);
+      host.append(section);
+    }
+    msg.textContent = "";
+  } catch (err) {
+    msg.className = "err"; msg.textContent = friendlyError(err.message);
+  }
+}
+async function saveGlobalPrivacySettings() {
+  const button = $("btnSavePrivacyGlobal");
+  button.disabled = true;
+  try {
+    await api("/v1/privacy/conversation", {
+      method: "PUT", body: { allow_cloud_history: $("privacyHistory").checked },
+    });
+    await api("/v1/privacy/integrations", {
+      method: "PUT", body: {
+        allow_remote_stt: $("privacySTT").checked,
+        allow_mcp_access: $("privacyMCP").checked,
+      },
+    });
+    $("privacyMessage").className = "ok"; $("privacyMessage").textContent = "Общие разрешения сохранены.";
+  } catch (err) {
+    $("privacyMessage").className = "err"; $("privacyMessage").textContent = friendlyError(err.message);
+  } finally { button.disabled = false; }
+}
+
 async function loadSettings() {
   try {
     const s = await api("/v1/settings/llm");
@@ -632,7 +736,7 @@ $("btnSend").onclick = send;
 $("btnNew").onclick = newChat;
 $("btnDelete").onclick = deleteCurrent;
 $("btnLogout").onclick = logout;
-$("btnSettings").onclick = () => { $("settingsView").classList.remove("hidden"); $("setMsg").className = ""; $("btnCloseSettings").focus(); loadSettings(); loadSecurity(); };
+$("btnSettings").onclick = () => { $("settingsView").classList.remove("hidden"); $("setMsg").className = ""; $("btnCloseSettings").focus(); loadSettings(); loadSecurity(); loadPrivacySettings(); };
 $("btn2faSetup").onclick = twofaSetup;
 $("btn2faEnable").onclick = twofaEnable;
 $("btn2faDisable").onclick = twofaDisable;
@@ -640,6 +744,7 @@ $("btnLogoutAll").onclick = logoutAll;
 $("btnLinkCode").onclick = linkCode;
 $("btnCloseSettings").onclick = () => { $("settingsView").classList.add("hidden"); for (const id of ["sKey","currentPass","newPass","passwordOtp","offPass","offCode","twofaCode","dataPass","dataOtp","deleteEmail"]) $(id).value = ""; $("btnSettings").focus(); };
 $("btnSaveSettings").onclick = saveSettings;
+$("btnSavePrivacyGlobal").onclick = saveGlobalPrivacySettings;
 $("input").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); } });
 
 $("btnChats").onclick = () => { const open = document.body.classList.toggle("chats-open"); $("btnChats").setAttribute("aria-expanded", String(open)); };

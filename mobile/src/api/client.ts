@@ -1,5 +1,6 @@
 import type {
   ServiceInfo, Attachment, ChatTurn, Conversation, Fact, JobOut, LLMSettings, Me, MessageOut, Tokens,
+  PrivacyCollection, PrivacyHistory, PrivacyIntegrations,
 } from "../types";
 
 export class ApiError extends Error {
@@ -118,6 +119,18 @@ export const api = {
   facts: () => request<{ facts: Fact[] }>("/v1/facts"),
   resolveFact: (id: string, action: "confirm" | "reject") =>
     request<unknown>(`/v1/facts/${id}/${action}`, { method: "POST" }),
+
+  privacyCollections: () => request<PrivacyCollection[]>("/v1/privacy/collections"),
+  savePrivacyCollection: (s: PrivacyCollection) =>
+    request<PrivacyCollection>(`/v1/privacy/collections/${encodeURIComponent(s.slug)}`, {
+      method: "PUT", json: s,
+    }),
+  privacyHistory: () => request<PrivacyHistory>("/v1/privacy/conversation"),
+  savePrivacyHistory: (s: PrivacyHistory) =>
+    request<PrivacyHistory>("/v1/privacy/conversation", { method: "PUT", json: s }),
+  privacyIntegrations: () => request<PrivacyIntegrations>("/v1/privacy/integrations"),
+  savePrivacyIntegrations: (s: PrivacyIntegrations) =>
+    request<PrivacyIntegrations>("/v1/privacy/integrations", { method: "PUT", json: s }),
 
   llmSettings: () => request<LLMSettings>("/v1/settings/llm"),
   saveLlmSettings: (s: Partial<LLMSettings> & { api_key?: string }) =>

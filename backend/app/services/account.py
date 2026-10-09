@@ -55,7 +55,7 @@ async def export_account(session: AsyncSession, user: User) -> bytes:
             rows = (await session.scalars(select(model).where(model.__table__.c.user_id == user.id))).all()
             data['data'][model.__tablename__] = [{column.name: getattr(row, column.name) for column in model.__table__.columns if column.name not in _EXCLUDE} for row in rows]
         llm = await session.get(LLMSettings, user.id)
-        data['llm'] = {field: getattr(llm, field) for field in ['provider_kind', 'base_url', 'default_model', 'embedding_model', 'supports_vision']} if llm else None
+        data['llm'] = {field: getattr(llm, field) for field in ['provider_kind', 'base_url', 'default_model', 'embedding_model', 'supports_vision', 'cloud_history_access', 'allow_remote_stt', 'allow_mcp_access']} if llm else None
         content = json.dumps(data, ensure_ascii=False, default=lambda value: value.isoformat() if isinstance(value, datetime) else str(value)).encode()
         if len(content) + sum(blob.size_bytes for blob in blobs) > limit:
             raise HTTPException(413, detail='export_too_large_contact_support')

@@ -49,6 +49,21 @@ def test_mcp_tools_call_with_jwt(client: TestClient, random_email: str) -> None:
             "params": {"name": "kb_list_entities", "arguments": {}},
         },
     )
+    assert r2.status_code == 403
+    assert r2.json()["error"]["message"] == "mcp_memory_access_not_allowed"
+    assert client.put("/v1/privacy/integrations", headers={"Authorization": f"Bearer {token}"}, json={
+        "allow_remote_stt": False, "allow_mcp_access": True,
+    }).status_code == 200
+    r2 = client.post(
+        "/mcp",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "jsonrpc": "2.0",
+            "id": 4,
+            "method": "tools/call",
+            "params": {"name": "kb_list_entities", "arguments": {}},
+        },
+    )
     assert r2.status_code == 200
     payload = r2.json()["result"]
     assert payload["isError"] is False
@@ -66,6 +81,15 @@ def test_mcp_tools_call_with_jwt(client: TestClient, random_email: str) -> None:
         },
     )
     assert r3.json()["result"]["isError"] is True
+    assert client.put("/v1/privacy/integrations", headers={"Authorization": f"Bearer {token}"}, json={
+        "allow_remote_stt": False, "allow_mcp_access": False,
+    }).status_code == 200
+    assert client.post(
+        "/mcp",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"jsonrpc": "2.0", "id": 7, "method": "tools/call",
+              "params": {"name": "kb_list_entities", "arguments": {}}},
+    ).status_code == 403
 
 
 def test_mcp_unknown_method(client: TestClient) -> None:
