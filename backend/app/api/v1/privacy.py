@@ -21,6 +21,7 @@ class CollectionPrivacyIn(BaseModel):
     allow_remote_embeddings: bool = False
     allow_remote_extraction: bool = False
     allow_messenger_reminders: bool = False
+    allow_mcp_access: bool = False
 
 
 class HistoryPrivacyIn(BaseModel):
@@ -43,7 +44,8 @@ async def collections_privacy(
         {"slug": c.slug, "sensitivity": c.sensitivity,
          "allow_cloud_llm": c.allow_cloud_llm, "allow_remote_embeddings": c.allow_remote_embeddings,
          "allow_remote_extraction": c.allow_remote_extraction,
-         "allow_messenger_reminders": c.allow_messenger_reminders}
+         "allow_messenger_reminders": c.allow_messenger_reminders,
+         "allow_mcp_access": c.allow_mcp_access}
         for c in rows
     ]
 
@@ -60,7 +62,7 @@ async def update_collection_privacy(
         raise HTTPException(status_code=404, detail="collection_not_found")
     if body.sensitivity in {"unclassified", "secret"} and (
         body.allow_cloud_llm or body.allow_remote_embeddings or body.allow_remote_extraction
-        or body.allow_messenger_reminders
+        or body.allow_messenger_reminders or body.allow_mcp_access
     ):
         raise HTTPException(status_code=422, detail="classify_collection_before_cloud_access")
     # Revoking vector consent also strips stored vectors for this collection,
@@ -81,6 +83,7 @@ async def update_collection_privacy(
     col.allow_remote_embeddings = body.allow_remote_embeddings
     col.allow_remote_extraction = body.allow_remote_extraction
     col.allow_messenger_reminders = body.allow_messenger_reminders
+    col.allow_mcp_access = body.allow_mcp_access
     await session.commit()
     return {
         "slug": col.slug, "sensitivity": col.sensitivity,
@@ -88,6 +91,7 @@ async def update_collection_privacy(
         "allow_remote_embeddings": col.allow_remote_embeddings,
         "allow_remote_extraction": col.allow_remote_extraction,
         "allow_messenger_reminders": col.allow_messenger_reminders,
+        "allow_mcp_access": col.allow_mcp_access,
     }
 
 

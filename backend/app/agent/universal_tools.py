@@ -7,7 +7,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.memory.contracts import NewEntity
-from app.memory.privacy import cloud_allowed_collections, cloud_scope, filter_cloud_entities, filter_cloud_hits
+from app.memory.privacy import cloud_scope, filter_cloud_entities, filter_cloud_hits, scoped_allowed_collections
 from app.memory.repository import MemoryAccessError
 from app.memory.sqlalchemy import SqlAlchemyMemoryRepository
 from app.rag.search import hybrid_search
@@ -20,7 +20,7 @@ async def kb_search(session: AsyncSession, user_id: str, args: dict[str, Any]) -
         return {"hits": []}
     scope = cloud_scope()
     if scope is not None:
-        scope &= await cloud_allowed_collections(session, user_id)
+        scope &= await scoped_allowed_collections(session, user_id)
         if not scope:
             return {"hits": []}
     # Cloud requests never send the query for remote embedding (lexical-only).
@@ -36,7 +36,7 @@ async def kb_list_entities(session: AsyncSession, user_id: str, args: dict[str, 
     offset = max(0, int(args.get("offset", 0)))
     scope = cloud_scope()
     if scope is not None:
-        scope &= await cloud_allowed_collections(session, user_id)
+        scope &= await scoped_allowed_collections(session, user_id)
         rows, next_offset = await filter_cloud_entities(
             session, user_id, scope, domain=domain, limit=limit, offset=offset,
         )

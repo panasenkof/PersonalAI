@@ -187,6 +187,7 @@ class Collection(Base):
     allow_remote_embeddings: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     allow_remote_extraction: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     allow_messenger_reminders: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    allow_mcp_access: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
 
     user: Mapped["User"] = relationship(back_populates="collections")
     entities: Mapped[list["Entity"]] = relationship(back_populates="collection")

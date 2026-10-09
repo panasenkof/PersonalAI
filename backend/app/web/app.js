@@ -522,6 +522,7 @@ async function loadPrivacySettings() {
       ["allow_remote_embeddings", "Внешние эмбеддинги"],
       ["allow_remote_extraction", "Внешний разбор файлов и изображений, поиск"],
       ["allow_messenger_reminders", "Напоминания в мессенджерах"],
+      ["allow_mcp_access", "Доступ MCP к этой коллекции"],
     ];
     const categories = [
       ["unclassified", "Не определено"],
