@@ -56,7 +56,7 @@ class MemoryRepository(Protocol):
     ) -> MemoryPage[ObservationRecord]: ...
 
     async def create_observation(self, item: NewObservation) -> ObservationRecord: ...
- 
+
     async def link_entities(
         self, *, source_entity_id: str, target_entity_id: str, kind: str,
         source_kind: str | None = None, source_ref: str | None = None,

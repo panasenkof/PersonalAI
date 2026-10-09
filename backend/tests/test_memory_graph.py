@@ -4,14 +4,14 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 import pytest
-from sqlalchemy import delete, event, select, text
+from sqlalchemy import delete, event, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.domains.automotive.handlers import auto_approve_schedule
 from app.memory.contracts import NewCollection, NewEntity, NewObservation
 from app.memory.repository import MemoryAccessError, MemoryConflictError
 from app.memory.sqlalchemy import SqlAlchemyMemoryRepository
-from app.models import Base, Entity, MemoryRelation, MemoryRevision, ScheduleCandidate, User
+from app.models import Base, Entity, MemoryRelation, ScheduleCandidate, User
 
 
 async def _db():
