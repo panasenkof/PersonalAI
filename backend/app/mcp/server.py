@@ -12,8 +12,8 @@ from app.agent.universal_tools import UNIVERSAL_TOOL_DEFINITIONS, UNIVERSAL_TOOL
 from app.db import SessionLocal
 from app.domains.registry import all_plugins, tool_router, tools_openai_format
 from app.llm.limits import RateLimitExceeded, check_user_quota
-from app.models import LLMSettings
 from app.memory.privacy import mcp_allowed_collections, use_cloud_scope
+from app.models import LLMSettings
 from app.security.redact import safe_error
 
 logger = logging.getLogger(__name__)

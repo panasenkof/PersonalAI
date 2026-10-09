@@ -12,7 +12,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domains.automotive.schemas import MAINTENANCE_ITEMS_SCHEMA, SERVICE_RECEIPT_SCHEMA
 from app.llm.router import default_model_for_user, provider_for_user
 from app.memory.privacy import (
-    is_trusted_local_provider, remote_blob_processing_allowed, remote_extraction_allowed,
+    is_trusted_local_provider,
+    remote_blob_processing_allowed,
+    remote_extraction_allowed,
 )
 from app.models import Entity, Observation, ScheduleCandidate, ScheduleStatus
 from app.security.redact import safe_error

@@ -11,7 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domains.medical_labs.schemas import LAB_REPORT_SCHEMA
 from app.llm.router import default_model_for_user, provider_for_user
 from app.memory.privacy import (
-    cloud_scope, is_trusted_local_provider, remote_blob_processing_allowed, remote_extraction_allowed,
+    cloud_scope,
+    is_trusted_local_provider,
+    remote_blob_processing_allowed,
+    remote_extraction_allowed,
 )
 from app.models import Collection, Entity, Observation
 from app.rag.indexing import index_entity

@@ -2,12 +2,10 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
-
-from sqlalchemy import select
+ from sqlalchemy import select
 
 from app.db import SessionLocal
-from app.memory.privacy import remote_blob_processing_allowed, use_cloud_scope, scoped_allowed_collections
+from app.memory.privacy import remote_blob_processing_allowed
 from app.models import Collection, Entity, User
 
 

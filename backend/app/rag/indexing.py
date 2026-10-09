@@ -10,7 +10,9 @@ from app.config import get_settings
 from app.llm.router import provider_for_user
 from app.memory.contracts import EntityRecord, ObservationRecord
 from app.memory.privacy import (
-    is_trusted_local_provider, remote_embedding_allowed, remote_blob_processing_allowed,
+    is_trusted_local_provider,
+    remote_blob_processing_allowed,
+    remote_embedding_allowed,
 )
 from app.models import Chunk, Entity, LLMSettings, Observation, utcnow
 
