@@ -160,6 +160,7 @@ async def labs_record_report(session: AsyncSession, user_id: str, args: dict[str
         payload=payload,
         summary=summary,
         needs_confirmation=from_file,
+        source_blob_key=str(storage_key) if storage_key else None,
     )
     if staged["status"] != "saved":
         return {**staged, "analytes_count": len(analytes), "note": "Awaiting user confirmation."}

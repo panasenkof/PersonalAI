@@ -149,6 +149,13 @@ async def index_observation(session: AsyncSession, user_id: str, observation: Ob
         if entity is not None and entity.sensitivity in {"inherit", "standard"}
         and observation.sensitivity in {"inherit", "standard"} else None
     )
+    if collection_id is not None and observation.source_kind == "blob":
+        from app.models import Collection
+        col = await session.get(Collection, collection_id)
+        if col is None or not observation.source_ref or not await remote_blob_processing_allowed(
+            session, user_id, observation.source_ref, col.slug, embeddings=True,
+        ):
+            collection_id = None
     return await _index_texts(
         session, user_id, [text], entity_id=observation.entity_id,
         observation_id=observation.id, collection_id=collection_id,

@@ -143,6 +143,7 @@ async def auto_parse_service_receipt(session: AsyncSession, user_id: str, args: 
         payload=payload,
         summary=summary,
         needs_confirmation=True,  # values were read from a photo by a vision model
+        source_blob_key=storage_key,
     )
     if staged["status"] == "saved":
         return {"observation_id": staged["observation_id"], "parsed": parsed, "status": "saved_to_observations"}
