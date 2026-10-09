@@ -7,6 +7,7 @@ from typing import Any, Awaitable, Callable
 
 import httpx
 from jsonschema import ValidationError, validate
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,7 +17,14 @@ from app.config import get_settings
 from app.domains.registry import all_plugins, tool_router, tools_openai_format
 from app.llm.providers import ChatMessage, LLMProvider, LocalLLMProvider
 from app.llm.router import default_model_for_user, local_fallback_target, provider_for_user
-from app.memory.privacy import cloud_allowed_collections, cloud_scope, is_trusted_local_provider, use_cloud_scope
+from app.memory.privacy import (
+    cloud_allowed_collections,
+    cloud_scope,
+    cloud_tool_allowed,
+    is_trusted_local_provider,
+    use_cloud_scope,
+)
+from app.models import Collection
 
 logger = logging.getLogger(__name__)
 
@@ -147,7 +155,8 @@ async def _run_tool(
     handler: Any, session: AsyncSession, user_id: str, name: str, args: dict[str, Any]
 ) -> dict[str, Any]:
     """Execute one tool; argument mistakes by the model become tool errors it can correct."""
-    if cloud_scope() is not None and name not in {"kb_search", "kb_list_entities"}:
+    scope = cloud_scope()
+    if scope is not None and not await cloud_tool_allowed(session, user_id, name, args, scope):
         return {"error": "cloud_memory_tool_denied"}
     try:
         definitions = UNIVERSAL_TOOL_DEFINITIONS + tools_openai_format(all_plugins())
@@ -192,9 +201,19 @@ async def run_agent(
     allowed = await cloud_allowed_collections(session, user_id) if cloud else frozenset()
     cloud_grants = allowed if cloud else None
     if cloud:
-        # Only the two owner-scoped, filtered read tools can return memory to a cloud model.
-        tools = [t for t in UNIVERSAL_TOOL_DEFINITIONS
-                 if t["function"]["name"] in {"kb_search", "kb_list_entities"}] if allowed else []
+        # Expose only reviewed tools whose target collections were explicitly granted.
+        allowed_slugs = set((await session.scalars(
+            select(Collection.slug).where(Collection.user_id == user_id, Collection.id.in_(allowed))
+        )).all()) if allowed else set()
+        approved = {"kb_search", "kb_list_entities", "kb_create_entity", "kb_ingest_document"} if allowed else set()
+        if "garage" in allowed_slugs:
+            approved.update({"auto_add_vehicle", "auto_add_service_event"})
+        if "health" in allowed_slugs:
+            approved.update({"labs_record_report", "labs_get_trends"})
+        tools = [
+            tool for tool in UNIVERSAL_TOOL_DEFINITIONS + tools_openai_format(plugins)
+            if tool["function"]["name"] in approved
+        ]
     else:
         tools = UNIVERSAL_TOOL_DEFINITIONS + tools_openai_format(plugins)
     prompt = system_prompt(plugins) if not cloud else (
