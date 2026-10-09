@@ -315,6 +315,6 @@ export class SqliteMemoryRepository implements MemoryRepository {
 }
 
 /** Explicitly device-scoped; no server user tokens or remote calls. */
-export async function localMemoryRepository(): Promise<SqliteMemoryRepository> {
-  return new SqliteMemoryRepository(await openLocalMemory());
+export async function localMemoryRepository(profileId: string): Promise<SqliteMemoryRepository> {
+  return new SqliteMemoryRepository(await openLocalMemory(profileId));
 }

@@ -2,8 +2,10 @@ import * as Crypto from "expo-crypto";
 import * as SecureStore from "expo-secure-store";
 import * as SQLite from "expo-sqlite";
 
-const DB_NAME = "pia-personal-memory-v1.db";
-const KEY_NAME = "pia.local-memory.sqlcipher.key.v1";
+// Guest uses the historical database name so PR #15 notes are preserved.
+const GUEST_DB_NAME = "pia-personal-memory-v1.db";
+const LEGACY_GUEST_KEY = "pia.local-memory.sqlcipher.key.v1";
+const PROTECTED_KEY_PREFIX = "pia.local-memory.sqlcipher.biometric.v2.";
 export const LOCAL_MEMORY_SCHEMA_VERSION = 1;
 
 /** All memory (including full-text indexes, revisions, and WAL) is in SQLCipher. */
@@ -57,24 +59,85 @@ CREATE VIRTUAL TABLE IF NOT EXISTS memory_notes_fts USING fts5(entity_id UNINDEX
 /** SQLCipher is only available in custom native builds, never Expo Go.
  * Verify cipher support before writing any sensitive content, fail closed.
  */
-let opening: Promise<SQLite.SQLiteDatabase> | null = null;
 let current: SQLite.SQLiteDatabase | null = null;
+let currentProfile: string | null = null;
+// Serialize profile switches and closing: never reuse an opened guest database
+// for a signed-in account, even if both screens mount concurrently.
+let queue: Promise<void> = Promise.resolve();
+async function serialize<T>(fn: () => Promise<T>): Promise<T> {
+  const previous = queue;
+  let release: () => void = () => {};
+  queue = new Promise<void>(resolve => { release = resolve; });
+  await previous;
+  try { return await fn(); }
+  finally { release(); }
+}
 
-async function initialize(): Promise<SQLite.SQLiteDatabase> {
+export async function localMemoryIdentity(profileId: string): Promise<{
+  databaseName: string; keyName: string; isGuest: boolean;
+}> {
+  if (profileId !== "guest" && !/^[a-f0-9-]{8,64}$/i.test(profileId)) {
+    throw new Error("invalid_local_memory_owner");
+  }
+  const hash = (await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, profileId)).slice(0, 40);
+  const isGuest = profileId === "guest";
+  return {
+    databaseName: isGuest ? GUEST_DB_NAME : `pia-personal-memory-owner-${hash}.db`,
+    keyName: PROTECTED_KEY_PREFIX + (isGuest ? "guest" : hash),
+    isGuest,
+  };
+}
+const VALID_KEY = /^[0-9a-f]{64}$/;
+const BIOMETRIC_OPTIONS = {
+  requireAuthentication: true,
+  authenticationPrompt: "Разблокировать персональную память",
+  keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+};
+
+async function initialize(profileId: string): Promise<SQLite.SQLiteDatabase> {
   if (!(await SecureStore.isAvailableAsync())) {
     throw new Error("secure_storage_unavailable");
   }
-  const db = await SQLite.openDatabaseAsync(DB_NAME);
+  const identity = await localMemoryIdentity(profileId);
+  // Fail closed on a device without enrolled hardware-backed authentication.
+  // There is deliberately no PIN hash or plaintext fallback.
+  if (!SecureStore.canUseBiometricAuthentication()) {
+    throw new Error("local_memory_biometric_required");
+  }
+  const db = await SQLite.openDatabaseAsync(identity.databaseName);
   try {
     const cipher = await db.getFirstAsync<{ cipher_version: string }>("PRAGMA cipher_version");
     if (!cipher?.cipher_version) throw new Error("sqlcipher_required_native_build");
-    let key = await SecureStore.getItemAsync(KEY_NAME);
-    if (key !== null && !/^[0-9a-f]{64}$/.test(key)) throw new Error("invalid_local_memory_key");
+    const marker = identity.keyName + ".initialized";
+    const previouslyInitialized = await SecureStore.getItemAsync(marker);
+    let key = await SecureStore.getItemAsync(identity.keyName, BIOMETRIC_OPTIONS);
+    if (key !== null && !VALID_KEY.test(key)) throw new Error("invalid_local_memory_key");
+    let migratedLegacy = false;
+    if (!key && identity.isGuest) {
+      // PR #15 guest data remains in the same encrypted SQLite database.
+      // Re-wrap its key under biometric access, never copy plaintext rows.
+      const legacy = await SecureStore.getItemAsync(LEGACY_GUEST_KEY);
+      if (legacy !== null && !VALID_KEY.test(legacy)) throw new Error("invalid_local_memory_key");
+      if (legacy) { key = legacy; migratedLegacy = true; }
+    }
+    if (!key && previouslyInitialized) {
+      // Never rotate a lost/cancelled biometric secret; old encrypted data
+      // would become inaccessible. Recovery must be explicit.
+      throw new Error("local_memory_unlock_failed");
+    }
     if (!key) {
       key = Array.from(Crypto.getRandomBytes(32), byte => byte.toString(16).padStart(2, "0")).join("");
-      await SecureStore.setItemAsync(KEY_NAME, key, {
+    }
+    if (!previouslyInitialized) {
+      // Persistent marker precedes key creation. On an interrupted upgrade
+      // or failed authenticator we refuse to generate a replacement key.
+      await SecureStore.setItemAsync(marker, "yes", {
         keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
       });
+      await SecureStore.setItemAsync(identity.keyName, key, BIOMETRIC_OPTIONS);
+      // Merely writing a protected key does not constitute biometric unlock.
+      const validated = await SecureStore.getItemAsync(identity.keyName, BIOMETRIC_OPTIONS);
+      if (validated !== key) throw new Error("local_memory_unlock_failed");
     }
     // Safe interpolation: key is validated hex only, and never logged or exported.
     await db.execAsync(`PRAGMA key = '${key}';`);
@@ -89,7 +152,9 @@ async function initialize(): Promise<SQLite.SQLiteDatabase> {
         await tx.execAsync("PRAGMA user_version = 1");
       });
     }
-    current = db;
+    if (migratedLegacy) {
+      await SecureStore.deleteItemAsync(LEGACY_GUEST_KEY);
+    }
     return db;
   } catch (error) {
     await db.closeAsync();
@@ -97,20 +162,26 @@ async function initialize(): Promise<SQLite.SQLiteDatabase> {
   }
 }
 
-export async function openLocalMemory(): Promise<SQLite.SQLiteDatabase> {
-  if (!opening) {
-    opening = initialize().catch(error => {
-      opening = null;
-      throw error;
-    });
-  }
-  return opening;
+export async function openLocalMemory(profileId: string): Promise<SQLite.SQLiteDatabase> {
+  return serialize(async () => {
+    if (current && currentProfile === profileId) return current;
+    if (current) {
+      await current.closeAsync();
+      current = null;
+      currentProfile = null;
+    }
+    const db = await initialize(profileId);
+    current = db;
+    currentProfile = profileId;
+    return db;
+  });
 }
 
-/** Closing does not erase data or the key. No plaintext fallback. */
+/** Close when switching accounts, going to background or locking the device. */
 export async function closeLocalMemory(): Promise<void> {
-  const old = current;
-  current = null;
-  opening = null;
-  if (old) await old.closeAsync();
+  await serialize(async () => {
+    if (current) await current.closeAsync();
+    current = null;
+    currentProfile = null;
+  });
 }
