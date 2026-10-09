@@ -64,7 +64,7 @@ class FakeSqlite {
     }
     if (sql.includes("UPDATE memory_entities")) {
       const row = this.entities.get(String(params[3]));
-      if (row?.record_version !== params[4]) return { changes: 0 };
+      if (!row || row.record_version !== params[4]) return { changes: 0 };
       row.payload_json = params[0]; row.title = params[1];
       row.updated_at = params[2]; row.record_version = Number(row.record_version) + 1;
       this.updates++;

@@ -118,20 +118,22 @@ export class SqliteMemoryRepository implements MemoryRepository {
       valid_from: null, valid_until: null,
       created_at: timestamp, updated_at: timestamp, record_version: 1,
     };
-    await this.db.runAsync(
-      `INSERT INTO memory_entities(id, collection_id, domain, schema_version, title, payload_json,
-      record_status, sensitivity, source_kind, source_ref, valid_from, valid_until,
-      created_at, updated_at, record_version) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [id, record.collection_id, record.domain, record.schema_version, record.title,
-        validPayload(payload), record.record_status, record.sensitivity,
-        record.source_kind, record.source_ref, null, null, timestamp, timestamp, 1],
-    );
-    if (record.domain === "notes") {
-      await this.db.runAsync(
-        "INSERT INTO memory_notes_fts(entity_id,title,body) VALUES (?,?,?)",
-        [id, record.title ?? "", String(record.payload.body ?? "")],
+    await this.db.withExclusiveTransactionAsync(async tx => {
+      await tx.runAsync(
+        `INSERT INTO memory_entities(id, collection_id, domain, schema_version, title, payload_json,
+          record_status, sensitivity, source_kind, source_ref, valid_from, valid_until,
+          created_at, updated_at, record_version) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [id, record.collection_id, record.domain, record.schema_version, record.title,
+          validPayload(payload), record.record_status, record.sensitivity,
+          record.source_kind, record.source_ref, null, null, timestamp, timestamp, 1],
       );
-    }
+      if (record.domain === "notes") {
+        await tx.runAsync(
+          "INSERT INTO memory_notes_fts(entity_id,title,body) VALUES (?,?,?)",
+          [id, record.title ?? "", String(record.payload.body ?? "")],
+        );
+      }
+    });
     return record;
   }
 
