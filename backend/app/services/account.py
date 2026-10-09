@@ -28,6 +28,8 @@ from app.models import (
     ExtractedFact,
     IngestionJob,
     LLMSettings,
+    MemoryRelation,
+    MemoryRevision,
     Observation,
     ReminderNotification,
     ScheduleCandidate,
@@ -38,7 +40,7 @@ from app.security.crypto import require_decryption
 from app.security.journal import append_deletion
 from app.storage.blob import read_bytes, resolve_storage_path
 
-_EXPORT_MODELS = [Collection, Entity, Observation, ExtractedFact, Conversation, ChatTurn, ScheduleCandidate, ReminderNotification, IngestionJob, Blob, Chunk, UserDailyUsage]
+_EXPORT_MODELS = [Collection, Entity, Observation, MemoryRelation, MemoryRevision, ExtractedFact, Conversation, ChatTurn, ScheduleCandidate, ReminderNotification, IngestionJob, Blob, Chunk, UserDailyUsage]
 _EXCLUDE = {'embedding', 'embedding_vec'}
 
 

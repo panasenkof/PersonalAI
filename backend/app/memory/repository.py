@@ -17,6 +17,8 @@ from app.memory.contracts import (
     NewEntity,
     NewObservation,
     ObservationRecord,
+    RelationRecord,
+    RevisionRecord,
 )
 
 
@@ -54,3 +56,22 @@ class MemoryRepository(Protocol):
     ) -> MemoryPage[ObservationRecord]: ...
 
     async def create_observation(self, item: NewObservation) -> ObservationRecord: ...
+ 
+    async def link_entities(
+        self, *, source_entity_id: str, target_entity_id: str, kind: str,
+        source_kind: str | None = None, source_ref: str | None = None,
+    ) -> RelationRecord: ...
+
+    async def relations_for_entity(self, entity_id: str) -> list[RelationRecord]: ...
+
+    async def revise_entity(
+        self, entity_id: str, *, expected_version: int, payload: dict,
+        reason: str, actor_kind: str = "user", record_status: str | None = None,
+    ) -> EntityRecord: ...
+
+    async def revise_observation(
+        self, observation_id: str, *, expected_version: int, payload: dict,
+        reason: str, actor_kind: str = "user",
+    ) -> ObservationRecord: ...
+
+    async def revisions(self, *, record_type: str, record_id: str) -> list[RevisionRecord]: ...
