@@ -47,10 +47,22 @@ async function detach(db: SQLite.SQLiteDatabase, alias: "pia_export" | "pia_impo
   await db.execAsync("DETACH DATABASE " + alias);
 }
 
-async function attach(db: SQLite.SQLiteDatabase, alias: "pia_export" | "pia_import", path: string, code: string) {
+function nativeSqlitePath(fileUri: string): string {
+  // Expo FileSystem returns file:///... URIs, but Expo SQLite opens native
+  // databases with POSIX filesystem paths. SQLCipher ATTACH must receive
+  // the actual path, not rely on SQLite having URI-filename support enabled.
+  if (!fileUri.startsWith("file:///")) throw new Error("invalid_private_backup_path");
+  const path = decodeURIComponent(fileUri.slice("file://".length));
+  if (!path.startsWith("/") || path.includes("\\0")) {
+    throw new Error("invalid_private_backup_path");
+  }
+  return path;
+}
+
+async function attach(db: SQLite.SQLiteDatabase, alias: "pia_export" | "pia_import", fileUri: string, code: string) {
   // Values are bound to the native statement; never concatenate a user path
   // or recovery code into SQL. Identifiers are fixed literals.
-  await db.runAsync("ATTACH DATABASE ? AS " + alias + " KEY ?", [path, code]);
+  await db.runAsync("ATTACH DATABASE ? AS " + alias + " KEY ?", [nativeSqlitePath(fileUri), code]);
 }
 
 export async function shareEncryptedBackup(profileId: string, recoveryCode: string): Promise<void> {
