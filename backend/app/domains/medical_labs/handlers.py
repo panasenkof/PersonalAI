@@ -16,7 +16,7 @@ from app.memory.privacy import (
     remote_blob_processing_allowed,
     remote_extraction_allowed,
 )
-from app.models import Collection, Entity, Observation
+from app.models import Blob, Collection, Entity, Observation
 from app.rag.indexing import index_entity
 from app.security.redact import safe_error
 from app.services.documents import extract_pdf_text
@@ -191,8 +191,36 @@ async def labs_get_trends(session: AsyncSession, user_id: str, args: dict[str, A
             Observation.sensitivity.in_(("inherit", "standard")),
         )
     res = await session.execute(stmt.order_by(Observation.occurred_at.asc()))
+    observations = list(res.scalars().all())
+    if scope is not None:
+        # File-derived observations may have been indexed before their source
+        # was reclassified. A privacy revocation must hide their values even
+        # from aggregations, not just generic memory search.
+        refs = {
+            obs.source_ref for obs in observations
+            if obs.source_kind == "blob" and obs.source_ref
+        }
+        blobs = {
+            b.storage_key: b for b in (await session.scalars(
+                select(Blob).where(Blob.user_id == user_id, Blob.storage_key.in_(refs))
+            )).all()
+        } if refs else {}
+        entity_ids = {o.entity_id for o in observations if o.source_kind == "blob"}
+        entity_cols = dict((await session.execute(
+            select(Entity.id, Entity.collection_id).where(
+                Entity.user_id == user_id, Entity.id.in_(entity_ids),
+            )
+        )).all()) if entity_ids else {}
+        observations = [
+            obs for obs in observations
+            if obs.source_kind != "blob" or (
+                obs.source_ref in blobs and
+                blobs[obs.source_ref].sensitivity == "standard" and
+                blobs[obs.source_ref].collection_id == entity_cols.get(obs.entity_id)
+            )
+        ]
     series: list[dict[str, Any]] = []
-    for obs in res.scalars().all():
+    for obs in observations:
         for a in (obs.payload or {}).get("analytes") or []:
             name = str(a.get("name") or "")
             if query not in name.lower() and name.lower() not in query:
