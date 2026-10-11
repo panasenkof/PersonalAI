@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 
 import pytest
 from sqlalchemy import select
@@ -9,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.agent.universal_tools import kb_ingest_document
 from app.domains.automotive.handlers import auto_fetch_maintenance_schedule, auto_parse_service_receipt
-from app.domains.medical_labs.handlers import labs_record_report
+from app.domains.medical_labs.handlers import labs_get_trends, labs_record_report
 from app.ingestion.pipeline import build_user_prompt
 from app.ingestion.schemas import Attachment, IngestionEnvelope
 from app.ingestion.stt import WhisperApiSTTProvider
@@ -21,7 +22,7 @@ from app.memory.privacy import (
     remote_extraction_allowed,
     use_cloud_scope,
 )
-from app.models import Base, Blob, Chunk, Collection, Entity, User
+from app.models import Base, Blob, Chunk, Collection, Entity, Observation, User
 
 
 class SpyCloud(CloudLLMProvider):
@@ -423,5 +424,57 @@ async def test_revoked_blob_classification_hides_prior_cloud_and_mcp_index():
             await session.delete(blob)
             await session.flush()
             await assert_visibility(False)
+    finally:
+        await engine.dispose()
+
+
+
+@pytest.mark.asyncio
+async def test_lab_trend_aggregation_revokes_file_derived_values():
+    """Report data must disappear from cloud trend results if its blob was reclassified."""
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    try:
+        async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+            user = User(email="lab-trend-revocation@example.net", password_hash="x")
+            session.add(user)
+            await session.flush()
+            health = Collection(
+                user_id=user.id, slug="health", name="Health",
+                sensitivity="sensitive", allow_cloud_llm=True,
+            )
+            session.add(health)
+            await session.flush()
+            entity = Entity(
+                user_id=user.id, collection_id=health.id, domain="medical_labs",
+                payload={"type": "lab_profile"},
+            )
+            blob = Blob(
+                user_id=user.id, collection_id=health.id,
+                storage_key="report-blob-1", sha256="d" * 64,
+                mime="application/pdf", size_bytes=30, sensitivity="standard",
+            )
+            session.add_all([entity, blob])
+            await session.flush()
+            session.add(Observation(
+                user_id=user.id, entity_id=entity.id, kind="lab_report",
+                occurred_at=datetime.now(timezone.utc),
+                payload={"analytes": [{"name": "Glucose", "value": "5.4", "unit": "mmol/L"}]},
+                source_kind="blob", source_ref=blob.storage_key,
+            ))
+            await session.flush()
+            with use_cloud_scope(frozenset({health.id})):
+                visible = await labs_get_trends(session, user.id, {"analyte": "Glucose"})
+                assert len(visible["series"]) == 1
+                blob.sensitivity = "sensitive"
+                await session.flush()
+                hidden = await labs_get_trends(session, user.id, {"analyte": "Glucose"})
+                assert hidden["series"] == []
+                blob.sensitivity = "standard"
+                blob.collection_id = None
+                await session.flush()
+                orphan = await labs_get_trends(session, user.id, {"analyte": "Glucose"})
+                assert orphan["series"] == []
     finally:
         await engine.dispose()
