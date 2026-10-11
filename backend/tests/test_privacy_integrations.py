@@ -192,7 +192,15 @@ async def test_remote_stt_requires_explicit_opt_in(monkeypatch):
             cross = await build_user_prompt(
                 envelope, allow_remote_stt=True, session=session, user_id=other.id,
             )
-            assert "external transcription requires" in cross
+            assert "source file not owned" in cross
+            assert calls == ["private-audio"]
+            # Even a trusted local STT instance cannot read another user's
+            # blob by a guessed key in an imported messenger job.
+            provider.base_url = "http://127.0.0.1:9000/v1"
+            local_cross = await build_user_prompt(
+                envelope, session=session, user_id=other.id,
+            )
+            assert "source file not owned" in local_cross
             assert calls == ["private-audio"]
     finally:
         await engine.dispose()
