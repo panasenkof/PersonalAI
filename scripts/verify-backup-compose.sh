@@ -24,5 +24,15 @@ count=$(docker compose exec -T postgres psql -U pia -d pia_restore_drill -tAc "S
 test "$count" = 1
 docker compose run --rm --no-deps --user 0:0 -v "$backup_dir:/backups:ro" app \
   python -c 'from pathlib import Path; assert Path("/backups/restored/blobs/restore-drill.bin").read_bytes()==b"restore drill"'
-curl --fail --retry 5 --retry-delay 2 http://localhost:8000/ready
+# After backup/restore the proxy may briefly return 502 while a scaled app
+# worker restarts. Health must recover within 90s, not merely on first request.
+# A persistent unhealthy service still fails CI and exposes diagnostics.
+if ! curl --fail --silent --show-error --retry 30 --retry-all-errors \
+    --retry-connrefused --retry-delay 2 --retry-max-time 90 \
+    --max-time 5 http://localhost:8000/ready; then
+  echo 'ERROR: production services did not become ready after restore drill' >&2
+  docker compose ps >&2
+  docker compose logs --no-color --tail 80 app proxy >&2 || true
+  exit 1
+fi
 echo 'PASS Postgres encrypted backup, isolated restore, files and service restart'

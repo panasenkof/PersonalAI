@@ -2,19 +2,27 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.agent.universal_tools import kb_ingest_document
 from app.domains.automotive.handlers import auto_fetch_maintenance_schedule, auto_parse_service_receipt
-from app.domains.medical_labs.handlers import labs_record_report
+from app.domains.medical_labs.handlers import labs_get_trends, labs_record_report
 from app.ingestion.pipeline import build_user_prompt
 from app.ingestion.schemas import Attachment, IngestionEnvelope
 from app.ingestion.stt import WhisperApiSTTProvider
 from app.llm.providers import CloudLLMProvider
-from app.memory.privacy import remote_extraction_allowed
-from app.models import Base, Chunk, Collection, Entity, User
+from app.memory.privacy import (
+    cloud_tool_allowed,
+    filter_cloud_entities,
+    filter_cloud_hits,
+    remote_extraction_allowed,
+    use_cloud_scope,
+)
+from app.models import Base, Blob, Chunk, Collection, Entity, Observation, User
 
 
 class SpyCloud(CloudLLMProvider):
@@ -124,12 +132,78 @@ async def test_remote_stt_requires_explicit_opt_in(monkeypatch):
     provider = WhisperApiSTTProvider("https://speech.example/v1", None)
     monkeypatch.setattr("app.ingestion.pipeline.stt_provider_from_settings", lambda: provider)
     unconsented = await build_user_prompt(envelope)
-    assert "external transcription disabled" in unconsented
+    assert "external transcription requires" in unconsented
     assert "private voice message" not in unconsented
     assert calls == []
+    # Global consent alone cannot export an unclassified file.
     consented = await build_user_prompt(envelope, allow_remote_stt=True)
-    assert "[audio transcript] private voice message" in consented
-    assert calls == ["private-audio"]
+    assert "external transcription requires" in consented
+    assert calls == []
+
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    try:
+        async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+            user = User(email="stt-owner@example.com", password_hash="x")
+            session.add(user)
+            await session.flush()
+            collection = Collection(
+                user_id=user.id, slug="health", name="Health", sensitivity="sensitive",
+                allow_remote_extraction=True,
+            )
+            session.add(collection)
+            await session.flush()
+            blob = Blob(
+                user_id=user.id, storage_key="private-audio", sha256="a" * 64,
+                mime="audio/ogg", size_bytes=12,
+            )
+            session.add(blob)
+            await session.flush()
+            async def prompt():
+                return await build_user_prompt(
+                    envelope, allow_remote_stt=True, session=session, user_id=user.id,
+                )
+            assert "external transcription requires" in await prompt()
+            assert calls == []
+            blob.collection_id = collection.id
+            blob.sensitivity = "sensitive"
+            await session.flush()
+            assert "external transcription requires" in await prompt()
+            blob.sensitivity = "standard"
+            await session.flush()
+            assert "[audio transcript] private voice message" in await prompt()
+            assert calls == ["private-audio"]
+            collection.allow_remote_extraction = False
+            await session.flush()
+            assert "external transcription requires" in await prompt()
+            assert calls == ["private-audio"]
+            # Relabelled non-audio attachments cannot bypass MIME validation.
+            collection.allow_remote_extraction = True
+            blob.mime = "application/pdf"
+            await session.flush()
+            assert "external transcription requires" in await prompt()
+            assert calls == ["private-audio"]
+            # A separate user's metadata must not enable remote access.
+            blob.mime = "audio/ogg"
+            other = User(email="stt-other@example.com", password_hash="x")
+            session.add(other)
+            await session.flush()
+            cross = await build_user_prompt(
+                envelope, allow_remote_stt=True, session=session, user_id=other.id,
+            )
+            assert "source file not owned" in cross
+            assert calls == ["private-audio"]
+            # Even a trusted local STT instance cannot read another user's
+            # blob by a guessed key in an imported messenger job.
+            provider.base_url = "http://127.0.0.1:9000/v1"
+            local_cross = await build_user_prompt(
+                envelope, session=session, user_id=other.id,
+            )
+            assert "source file not owned" in local_cross
+            assert calls == ["private-audio"]
+    finally:
+        await engine.dispose()
 
     # Local loopback speech servers do not need third-party permission.
     provider.base_url = "http://127.0.0.1:9000/v1"
@@ -219,3 +293,196 @@ def test_privacy_api_revocation_clears_vectors_and_enforces_owner(client, random
 
     asyncio.run(verify())
     assert client.get("/v1/privacy/collections", headers=h2).json()[0]["allow_cloud_llm"] is False
+
+
+
+@pytest.mark.asyncio
+async def test_cloud_and_mcp_document_ingestion_cannot_launder_unclassified_source(monkeypatch):
+    """An external agent cannot ingest hidden bytes then retrieve text via KB search."""
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    reads: list[str] = []
+
+    async def forbidden_blob_read(key: str):
+        reads.append(key)
+        raise AssertionError("unclassified blob bytes must never be read")
+
+    monkeypatch.setattr("app.storage.blob.read_bytes", forbidden_blob_read)
+    try:
+        async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+            owner = User(email="ingest-file-owner@example.net", password_hash="x")
+            session.add(owner)
+            await session.flush()
+            garage = Collection(
+                user_id=owner.id, slug="garage", name="Garage", sensitivity="standard",
+                allow_cloud_llm=True, allow_mcp_access=True,
+            )
+            secret_col = Collection(
+                user_id=owner.id, slug="health", name="Health", sensitivity="sensitive",
+            )
+            session.add_all([garage, secret_col])
+            await session.flush()
+            blob = Blob(
+                user_id=owner.id, storage_key="unclassified-pdf",
+                sha256="b" * 64, size_bytes=21, mime="application/pdf",
+            )
+            session.add(blob)
+            await session.flush()
+            args = {"storage_key": blob.storage_key, "collection_slug": "garage"}
+            grants = frozenset({garage.id})
+            for channel in ("cloud", "mcp"):
+                with use_cloud_scope(grants, channel=channel):
+                    assert not await cloud_tool_allowed(
+                        session, owner.id, "kb_ingest_document", args, grants,
+                    )
+                    result = await kb_ingest_document(session, owner.id, args)
+                    assert result == {"error": "file_memory_access_not_allowed"}
+                    assert reads == []
+
+            # A classified blob in a different (closed) collection stays hidden.
+            blob.collection_id = secret_col.id
+            blob.sensitivity = "standard"
+            await session.flush()
+            with use_cloud_scope(grants):
+                assert not await cloud_tool_allowed(
+                    session, owner.id, "kb_ingest_document", args, grants,
+                )
+                assert (await kb_ingest_document(session, owner.id, args)) == {
+                    "error": "file_memory_access_not_allowed",
+                }
+            assert reads == []
+
+            # Explicit source classification and collection grant permit it.
+            blob.collection_id = garage.id
+            await session.flush()
+            with use_cloud_scope(grants):
+                assert await cloud_tool_allowed(
+                    session, owner.id, "kb_ingest_document", args, grants,
+                )
+            blob.sensitivity = "sensitive"
+            await session.flush()
+            with use_cloud_scope(grants):
+                assert not await cloud_tool_allowed(
+                    session, owner.id, "kb_ingest_document", args, grants,
+                )
+                assert (await kb_ingest_document(session, owner.id, args)) == {
+                    "error": "file_memory_access_not_allowed",
+                }
+            assert reads == []
+    finally:
+        await engine.dispose()
+
+
+
+@pytest.mark.asyncio
+async def test_revoked_blob_classification_hides_prior_cloud_and_mcp_index():
+    """Changing source sensitivity must revoke already-indexed text, not just new ingestion."""
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    try:
+        async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+            owner = User(email="index-revocation@example.net", password_hash="x")
+            session.add(owner)
+            await session.flush()
+            col = Collection(
+                user_id=owner.id, slug="garage", name="Garage", sensitivity="standard",
+                allow_cloud_llm=True, allow_mcp_access=True,
+            )
+            other = Collection(
+                user_id=owner.id, slug="health", name="Health", sensitivity="sensitive",
+            )
+            session.add_all([col, other])
+            await session.flush()
+            blob = Blob(
+                user_id=owner.id, storage_key="linked-file", mime="application/pdf",
+                sha256="c" * 64, size_bytes=15, collection_id=col.id,
+                sensitivity="standard",
+            )
+            entity = Entity(
+                user_id=owner.id, collection_id=col.id, domain="documents",
+                payload={"type": "document", "storage_key": "linked-file"},
+            )
+            session.add_all([blob, entity])
+            await session.flush()
+            grants = frozenset({col.id})
+            hits = [{"entity_id": entity.id, "text": "TOP_SECRET_FROM_PDF"}]
+
+            async def assert_visibility(expected: bool):
+                results = await filter_cloud_hits(session, owner.id, hits, grants)
+                listed, _ = await filter_cloud_entities(
+                    session, owner.id, grants, domain="documents", limit=10, offset=0,
+                )
+                assert bool(results) is expected
+                assert any(item.id == entity.id for item in listed) is expected
+
+            await assert_visibility(True)
+            blob.sensitivity = "sensitive"
+            await session.flush()
+            await assert_visibility(False)
+            blob.sensitivity = "standard"
+            blob.collection_id = other.id
+            await session.flush()
+            await assert_visibility(False)
+            blob.collection_id = col.id
+            await session.flush()
+            await assert_visibility(True)
+            # Source deletion must revoke historical derived exposure.
+            await session.delete(blob)
+            await session.flush()
+            await assert_visibility(False)
+    finally:
+        await engine.dispose()
+
+
+
+@pytest.mark.asyncio
+async def test_lab_trend_aggregation_revokes_file_derived_values():
+    """Report data must disappear from cloud trend results if its blob was reclassified."""
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    try:
+        async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+            user = User(email="lab-trend-revocation@example.net", password_hash="x")
+            session.add(user)
+            await session.flush()
+            health = Collection(
+                user_id=user.id, slug="health", name="Health",
+                sensitivity="sensitive", allow_cloud_llm=True,
+            )
+            session.add(health)
+            await session.flush()
+            entity = Entity(
+                user_id=user.id, collection_id=health.id, domain="medical_labs",
+                payload={"type": "lab_profile"},
+            )
+            blob = Blob(
+                user_id=user.id, collection_id=health.id,
+                storage_key="report-blob-1", sha256="d" * 64,
+                mime="application/pdf", size_bytes=30, sensitivity="standard",
+            )
+            session.add_all([entity, blob])
+            await session.flush()
+            session.add(Observation(
+                user_id=user.id, entity_id=entity.id, kind="lab_report",
+                occurred_at=datetime.now(timezone.utc),
+                payload={"analytes": [{"name": "Glucose", "value": "5.4", "unit": "mmol/L"}]},
+                source_kind="blob", source_ref=blob.storage_key,
+            ))
+            await session.flush()
+            with use_cloud_scope(frozenset({health.id})):
+                visible = await labs_get_trends(session, user.id, {"analyte": "Glucose"})
+                assert len(visible["series"]) == 1
+                blob.sensitivity = "sensitive"
+                await session.flush()
+                hidden = await labs_get_trends(session, user.id, {"analyte": "Glucose"})
+                assert hidden["series"] == []
+                blob.sensitivity = "standard"
+                blob.collection_id = None
+                await session.flush()
+                orphan = await labs_get_trends(session, user.id, {"analyte": "Glucose"})
+                assert orphan["series"] == []
+    finally:
+        await engine.dispose()

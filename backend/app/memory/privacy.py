@@ -89,22 +89,46 @@ async def remote_embedding_allowed(
     return collection_id in await cloud_allowed_collections(session, user_id, embeddings=True)
 
 
+def _source_keys(entity: Entity, observation: Observation | None = None) -> set[str]:
+    keys: set[str] = set()
+    if isinstance(entity.payload, dict):
+        key = entity.payload.get("storage_key")
+        if isinstance(key, str) and key:
+            keys.add(key)
+    if observation is not None and observation.source_kind == "blob" and observation.source_ref:
+        keys.add(observation.source_ref)
+    return keys
+
+
+def _source_permitted(
+    entity: Entity, observation: Observation | None, blobs: dict[str, Blob],
+) -> bool:
+    return all(
+        (blob := blobs.get(key)) is not None
+        and blob.collection_id == entity.collection_id
+        and blob.sensitivity == "standard"
+        for key in _source_keys(entity, observation)
+    )
+
+
 def visible_memory_hit(
     hit: dict, allowed: frozenset[str],
     entities: dict[str, Entity], observations: dict[str, Observation],
+    blobs: dict[str, Blob] | None = None,
 ) -> bool:
     entity = entities.get(hit.get("entity_id") or "")
     if entity is None or entity.collection_id not in allowed:
         return False
     if entity.sensitivity not in {"inherit", "standard"}:
         return False
+    observation = None
     if hit.get("observation_id"):
         observation = observations.get(hit["observation_id"])
         if observation is None or observation.entity_id != entity.id:
             return False
         if observation.sensitivity not in {"inherit", "standard"}:
             return False
-    return True
+    return _source_permitted(entity, observation, blobs or {})
 
 
 async def filter_cloud_hits(
@@ -124,7 +148,19 @@ async def filter_cloud_hits(
             select(Observation).where(Observation.user_id == user_id, Observation.id.in_(observation_ids))
         )).all()
     } if observation_ids else {}
-    return [h for h in hits if visible_memory_hit(h, allowed, entities, observations)]
+    source_keys: set[str] = set()
+    for entity in entities.values():
+        source_keys |= _source_keys(entity)
+    for observation in observations.values():
+        parent_entity = entities.get(observation.entity_id)
+        if parent_entity is not None:
+            source_keys |= _source_keys(parent_entity, observation)
+    blobs = {
+        b.storage_key: b for b in (await session.scalars(
+            select(Blob).where(Blob.user_id == user_id, Blob.storage_key.in_(source_keys))
+        )).all()
+    } if source_keys else {}
+    return [h for h in hits if visible_memory_hit(h, allowed, entities, observations, blobs)]
 
 
 async def filter_cloud_entities(
@@ -143,7 +179,16 @@ async def filter_cloud_entities(
     rows = (await session.scalars(
         stmt.order_by(Entity.created_at, Entity.id).offset(offset).limit(limit + 1)
     )).all()
-    return list(rows[:limit]), offset + limit if len(rows) > limit else None
+    source_keys: set[str] = set()
+    for entity in rows:
+        source_keys |= _source_keys(entity)
+    blobs = {
+        b.storage_key: b for b in (await session.scalars(
+            select(Blob).where(Blob.user_id == user_id, Blob.storage_key.in_(source_keys))
+        )).all()
+    } if source_keys else {}
+    visible = [e for e in rows[:limit] if _source_permitted(e, None, blobs)]
+    return visible, offset + limit if len(rows) > limit else None
 
 
 # Explicit allowlist only: unreviewed domain tools may query many categories or
@@ -173,7 +218,22 @@ async def cloud_tool_allowed(
                 Collection.id.in_(allowed),
             )
         )
-        return row is not None
+        if row is None:
+            return False
+        if name == "kb_ingest_document":
+            key = args.get("storage_key")
+            if not isinstance(key, str) or not key:
+                return False
+            # Ingestion into an exposed collection is an otherwise invisible
+            # route to disclose arbitrary unclassified file text via kb_search.
+            blob = await session.scalar(select(Blob.id).where(
+                Blob.user_id == user_id,
+                Blob.storage_key == key,
+                Blob.collection_id == row,
+                Blob.sensitivity == "standard",
+            ))
+            return blob is not None
+        return True
     if name in _CLOUD_ENTITY_TOOLS:
         entity_id = args.get("vehicle_entity_id")
         if not isinstance(entity_id, str):
@@ -225,6 +285,30 @@ async def remote_extraction_allowed(
         stmt = stmt.where(Collection.id == entity.collection_id)
     return await session.scalar(stmt) is not None
 
+
+
+async def remote_stt_blob_allowed(
+    session: AsyncSession, user_id: str, storage_key: str,
+) -> bool:
+    """Both the global STT opt-in and *source file* classification are required.
+
+    Uploaded metadata is untrusted: an arbitrary PDF must not be sent to
+    transcription merely because the envelope claims audio/ogg.
+    """
+    blob = await session.scalar(select(Blob).where(
+        Blob.user_id == user_id,
+        Blob.storage_key == storage_key,
+        Blob.mime.startswith("audio/"),
+        Blob.sensitivity == "standard",
+    ))
+    if not blob or not blob.collection_id:
+        return False
+    return await session.scalar(select(Collection.id).where(
+        Collection.id == blob.collection_id,
+        Collection.user_id == user_id,
+        Collection.sensitivity.in_(_CLASSIFIED),
+        Collection.allow_remote_extraction.is_(True),
+    )) is not None
 
 
 async def remote_blob_processing_allowed(
