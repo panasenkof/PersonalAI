@@ -14,7 +14,13 @@ from app.ingestion.pipeline import build_user_prompt
 from app.ingestion.schemas import Attachment, IngestionEnvelope
 from app.ingestion.stt import WhisperApiSTTProvider
 from app.llm.providers import CloudLLMProvider
-from app.memory.privacy import cloud_tool_allowed, remote_extraction_allowed, use_cloud_scope
+from app.memory.privacy import (
+    cloud_tool_allowed,
+    filter_cloud_entities,
+    filter_cloud_hits,
+    remote_extraction_allowed,
+    use_cloud_scope,
+)
 from app.models import Base, Blob, Chunk, Collection, Entity, User
 
 
@@ -355,5 +361,67 @@ async def test_cloud_and_mcp_document_ingestion_cannot_launder_unclassified_sour
                     "error": "file_memory_access_not_allowed",
                 }
             assert reads == []
+    finally:
+        await engine.dispose()
+
+
+
+@pytest.mark.asyncio
+async def test_revoked_blob_classification_hides_prior_cloud_and_mcp_index():
+    """Changing source sensitivity must revoke already-indexed text, not just new ingestion."""
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    try:
+        async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+            owner = User(email="index-revocation@example.net", password_hash="x")
+            session.add(owner)
+            await session.flush()
+            col = Collection(
+                user_id=owner.id, slug="garage", name="Garage", sensitivity="standard",
+                allow_cloud_llm=True, allow_mcp_access=True,
+            )
+            other = Collection(
+                user_id=owner.id, slug="health", name="Health", sensitivity="sensitive",
+            )
+            session.add_all([col, other])
+            await session.flush()
+            blob = Blob(
+                user_id=owner.id, storage_key="linked-file", mime="application/pdf",
+                sha256="c" * 64, size_bytes=15, collection_id=col.id,
+                sensitivity="standard",
+            )
+            entity = Entity(
+                user_id=owner.id, collection_id=col.id, domain="documents",
+                payload={"type": "document", "storage_key": "linked-file"},
+            )
+            session.add_all([blob, entity])
+            await session.flush()
+            grants = frozenset({col.id})
+            hits = [{"entity_id": entity.id, "text": "TOP_SECRET_FROM_PDF"}]
+
+            async def assert_visibility(expected: bool):
+                results = await filter_cloud_hits(session, owner.id, hits, grants)
+                listed, _ = await filter_cloud_entities(
+                    session, owner.id, grants, domain="documents", limit=10, offset=0,
+                )
+                assert bool(results) is expected
+                assert any(item.id == entity.id for item in listed) is expected
+
+            await assert_visibility(True)
+            blob.sensitivity = "sensitive"
+            await session.flush()
+            await assert_visibility(False)
+            blob.sensitivity = "standard"
+            blob.collection_id = other.id
+            await session.flush()
+            await assert_visibility(False)
+            blob.collection_id = col.id
+            await session.flush()
+            await assert_visibility(True)
+            # Source deletion must revoke historical derived exposure.
+            await session.delete(blob)
+            await session.flush()
+            await assert_visibility(False)
     finally:
         await engine.dispose()
