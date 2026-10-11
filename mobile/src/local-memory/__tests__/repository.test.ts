@@ -80,8 +80,12 @@ class FakeSqlite {
     }
     throw new Error("Unexpected SQL: " + sql);
   }
-  async withExclusiveTransactionAsync(cb: (tx: FakeSqlite) => Promise<void>): Promise<void> {
-    await cb(this);
+  readonly transactionStatements: string[] = [];
+  async execAsync(sql: string): Promise<void> {
+    if (!["BEGIN IMMEDIATE", "COMMIT", "ROLLBACK"].includes(sql)) {
+      throw new Error("Unexpected transaction SQL: " + sql);
+    }
+    this.transactionStatements.push(sql);
   }
 }
 
@@ -100,6 +104,10 @@ test("creates offline note, edits with CAS, stores immutable history and updates
   );
   expect(updated.record_version).toBe(2);
   expect(fake.updates).toBe(1);
+  // Never open a second connection: SQLCipher keys are connection-local.
+  expect(fake.transactionStatements).toEqual([
+    "BEGIN IMMEDIATE", "COMMIT", "BEGIN IMMEDIATE", "COMMIT",
+  ]);
   expect(await repo.searchNotes("old oil")).toHaveLength(0);
   expect((await repo.searchNotes("new filter"))[0].id).toBe(initial.id);
   const history = await repo.revisions("entity", initial.id);
@@ -127,4 +135,13 @@ test("rejects malformed local input before any database mutation", async () => {
   await expect(repo.linkEntities("same", "same", "related_to")).rejects.toThrow("self_relation_not_allowed");
   await expect(repo.linkEntities("x", "y", "bad type")).rejects.toThrow("invalid_relation_kind");
   expect(fake.updates).toBe(0);
+});
+
+
+test("offline creation uses the already-unlocked SQLCipher connection", async () => {
+  const fake = new FakeSqlite();
+  const repo = new SqliteMemoryRepository(fake as never);
+  const col = await repo.createCollection({ name: "Notes", slug: "notes" });
+  await repo.createEntity({ collection_id: col.id, domain: "notes", payload: { title: "A" } });
+  expect(fake.transactionStatements).toEqual(["BEGIN IMMEDIATE", "COMMIT"]);
 });

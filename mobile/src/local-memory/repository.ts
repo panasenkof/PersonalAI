@@ -2,13 +2,14 @@ import * as Crypto from "expo-crypto";
 import type * as SQLite from "expo-sqlite";
 
 import { openLocalMemory } from "./storage";
+import { withUnlockedTransaction } from "./transaction";
 import type {
   CollectionRecord, EntityRecord, MemoryPage, MemoryRepository, NewEntity, NewObservation,
   ObservationRecord, RelationRecord, RevisionRecord, RecordSensitivity,
 } from "./types";
 import { MemoryAccessError, MemoryConflictError } from "./types";
 
-type SQL = Pick<SQLite.SQLiteDatabase, "getFirstAsync" | "getAllAsync" | "runAsync" | "withExclusiveTransactionAsync">;
+type SQL = Pick<SQLite.SQLiteDatabase, "getFirstAsync" | "getAllAsync" | "runAsync" | "execAsync">;
 type Row = Record<string, unknown>;
 const now = (): string => new Date().toISOString();
 const uid = (): string => Crypto.randomUUID();
@@ -118,7 +119,7 @@ export class SqliteMemoryRepository implements MemoryRepository {
       valid_from: null, valid_until: null,
       created_at: timestamp, updated_at: timestamp, record_version: 1,
     };
-    await this.db.withExclusiveTransactionAsync(async tx => {
+    await withUnlockedTransaction(this.db, async tx => {
       await tx.runAsync(
         `INSERT INTO memory_entities(id, collection_id, domain, schema_version, title, payload_json,
           record_status, sensitivity, source_kind, source_ref, valid_from, valid_until,
@@ -142,7 +143,7 @@ export class SqliteMemoryRepository implements MemoryRepository {
     if (expectedVersion < 1) throw new Error("invalid_expected_version");
     const data = validPayload(payload);
     let updated: EntityRecord | null = null;
-    await this.db.withExclusiveTransactionAsync(async tx => {
+    await withUnlockedTransaction(this.db, async tx => {
       const row = await tx.getFirstAsync<Row>("SELECT * FROM memory_entities WHERE id=?", [id]);
       if (!row) throw new MemoryAccessError("entity_not_found");
       const before = entityFrom(row);
@@ -216,7 +217,7 @@ export class SqliteMemoryRepository implements MemoryRepository {
     if (expectedVersion < 1) throw new Error("invalid_expected_version");
     const data = validPayload(payload);
     let updated: ObservationRecord | null = null;
-    await this.db.withExclusiveTransactionAsync(async tx => {
+    await withUnlockedTransaction(this.db, async tx => {
       const row = await tx.getFirstAsync<Row>("SELECT * FROM memory_observations WHERE id=?", [id]);
       if (!row) throw new MemoryAccessError("observation_not_found");
       const before = obsFrom(row);

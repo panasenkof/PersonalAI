@@ -92,6 +92,10 @@ test("separates guest and owner databases, never reuses the same unlocked connec
   const ownerDb = await openLocalMemory("a0b0c0d0-1111-2222-3333-444455556666");
   expect(ownerDb).not.toBe(guestDb);
   expect(guestDb.closeAsync).toHaveBeenCalledTimes(1);
+  // The initialized SQLCipher key must be visible to schema creation.
+  expect(guestDb.withExclusiveTransactionAsync).not.toHaveBeenCalled();
+  expect(guestDb.execAsync).toHaveBeenCalledWith("BEGIN IMMEDIATE");
+  expect(guestDb.execAsync).toHaveBeenCalledWith("COMMIT");
   const names = (SQLite.openDatabaseAsync as jest.Mock).mock.calls.map(c => c[0]);
   expect(names).toEqual([guest.databaseName, bob.databaseName]);
   expect((SecureStore.setItemAsync as jest.Mock).mock.calls.filter(x => x[2]?.requireAuthentication)).toHaveLength(2);
