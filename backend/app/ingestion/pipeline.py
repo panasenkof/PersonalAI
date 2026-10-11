@@ -26,6 +26,15 @@ async def build_user_prompt(
     enabled_tools = tool_router()
     for att in envelope.attachments:
         if att.mime.startswith("audio/"):
+            # Envelope keys from messengers must also belong to this owner;
+            # direct HTTP uploads are checked before enqueue, but imported
+            # jobs and tool calls may bypass that endpoint.
+            if session is not None and user_id is not None:
+                from app.services.blobs import user_owns_blob
+
+                if not await user_owns_blob(session, user_id, att.storage_key):
+                    parts.append("[audio attachment; source file not owned by account]")
+                    continue
             # An authenticated upload is not consent to forward audio bytes
             # to a separately configured external STT provider.
             remote_stt = (
