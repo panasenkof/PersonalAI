@@ -72,7 +72,7 @@ test("generates 256-bit recovery code and refuses invalid codes before filesyste
 test("export SQLCipher-encrypts a new independent file before sharing and erases temp copy", async () => {
   await shareEncryptedBackup("guest", code);
   expect(mockDb.runAsync).toHaveBeenCalledWith("ATTACH DATABASE ? AS pia_export KEY ?", [
-    "file:///cache/pia-encrypted-random-id.db", code,
+    "/cache/pia-encrypted-random-id.db", code,
   ]);
   expect(mockDb.getFirstAsync).toHaveBeenCalledWith("SELECT sqlcipher_export('pia_export')");
   expect(mockDb.execAsync).toHaveBeenCalledWith("PRAGMA pia_export.user_version = 1");
@@ -108,7 +108,7 @@ test("restore imports all six tables and FTS atomically on the unlocked connecti
   const restored = await restoreEncryptedBackup("guest", "file:///backup.db", code);
   expect(restored).toEqual({ collections: 1, entities: 2, observations: 1 });
   expect(mockDb.runAsync).toHaveBeenCalledWith("ATTACH DATABASE ? AS pia_import KEY ?", [
-    "file:///cache/pia-encrypted-random-id.db", code,
+    "/cache/pia-encrypted-random-id.db", code,
   ]);
   expect(mockDb.withExclusiveTransactionAsync).not.toHaveBeenCalled();
   const statements = mockDb.execAsync.mock.calls.map(([sql]: string[]) => sql);
@@ -157,4 +157,13 @@ test("partial recovery failure rolls back on the unlocked SQLCipher connection",
   expect(commands).not.toContain("COMMIT");
   expect(mockDb.withExclusiveTransactionAsync).not.toHaveBeenCalled();
   expect(FS.deleteAsync).toHaveBeenCalledTimes(4);
+});
+
+
+test("native ATTACH decodes Expo file:// URI and binds the filesystem path", async () => {
+  await shareEncryptedBackup("guest", code);
+  const [sql, params] = mockDb.runAsync.mock.calls[0] as [string, unknown[]];
+  expect(sql).toBe("ATTACH DATABASE ? AS pia_export KEY ?");
+  expect(params[0]).toBe("/cache/pia-encrypted-random-id.db");
+  expect(String(params[0])).not.toContain("file://");
 });
