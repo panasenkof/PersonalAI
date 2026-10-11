@@ -38,7 +38,9 @@ function temporaryPath(): string {
 }
 
 async function forgetTemporaryFile(path: string): Promise<void> {
-  await FileSystem.deleteAsync(path, { idempotent: true });
+  await Promise.all([
+    path, path + "-wal", path + "-shm", path + "-journal",
+  ].map(uri => FileSystem.deleteAsync(uri, { idempotent: true })));
 }
 
 async function detach(db: SQLite.SQLiteDatabase, alias: "pia_export" | "pia_import"): Promise<void> {
@@ -78,6 +80,7 @@ export async function shareEncryptedBackup(profileId: string, recoveryCode: stri
     });
     const info = await FileSystem.getInfoAsync(path);
     if (!info.exists || info.isDirectory || !info.size) throw new Error("backup_file_missing");
+    if (info.size > MAX_BACKUP_BYTES) throw new Error("backup_file_too_large");
     // The shared file is SQLCipher ciphertext; code must be stored
     // separately and never included in the name or exported file.
     await Sharing.shareAsync(path, {
@@ -122,6 +125,14 @@ export async function restoreEncryptedBackup(
         if (version?.user_version !== LOCAL_MEMORY_SCHEMA_VERSION) {
           throw new Error("incompatible_backup_version");
         }
+        // Validate the *source* before any destination writes. A forged
+        // SQLCipher file with the right table names can still have corruption.
+        const integrity = await db.getFirstAsync<{ integrity_check: string }>(
+          "PRAGMA pia_import.integrity_check",
+        );
+        if (integrity?.integrity_check !== "ok") throw new Error("invalid_backup_integrity");
+        const badReference = await db.getFirstAsync("PRAGMA pia_import.foreign_key_check");
+        if (badReference !== null) throw new Error("invalid_backup_references");
         const incoming = await db.getFirstAsync<{ n: number }>(
           "SELECT count(*) AS n FROM pia_import.memory_entities",
         );

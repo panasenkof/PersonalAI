@@ -46,6 +46,7 @@ beforeEach(() => {
   });
   mockDb.getFirstAsync.mockImplementation(async (sql: string): Promise<Record<string, number> | null> => {
     if (sql.includes("pia_import.user_version")) return { user_version: 1 };
+    if (sql.includes("pia_import.integrity_check")) return { integrity_check: "ok" };
     if (sql.includes("pia_import.memory_entities")) return { n: 2 };
     if (sql === "SELECT count(*) AS n FROM memory_collections") {
       return { n: mockAlreadyContainsMemory || mockRestored ? 1 : 0 };
@@ -85,7 +86,7 @@ test("export SQLCipher-encrypts a new independent file before sharing and erases
 test("failed share deletes ciphertext from cache", async () => {
   (Sharing.shareAsync as jest.Mock).mockRejectedValueOnce(new Error("cancelled"));
   await expect(shareEncryptedBackup("guest", code)).rejects.toThrow("cancelled");
-  expect(FS.deleteAsync).toHaveBeenCalledTimes(1);
+  expect(FS.deleteAsync).toHaveBeenCalledTimes(4);
 });
 
 test("wrong password/corrupted backup cannot mutate the destination", async () => {
@@ -93,7 +94,7 @@ test("wrong password/corrupted backup cannot mutate the destination", async () =
   await expect(restoreEncryptedBackup("guest", "file:///bad.db", code)).rejects.toThrow("wrong key");
   expect(mockDb.execAsync.mock.calls.some(([sql]: string[]) => sql.startsWith("INSERT INTO"))).toBe(false);
   expect(mockDb.execAsync).toHaveBeenCalledWith("DETACH DATABASE pia_import");
-  expect(FS.deleteAsync).toHaveBeenCalledTimes(1);
+  expect(FS.deleteAsync).toHaveBeenCalledTimes(4);
 });
 
 test("restore refuses to overwrite a profile with any existing collection", async () => {
@@ -116,7 +117,21 @@ test("restore imports all six tables and FTS atomically on the unlocked connecti
   expect(statements.filter((sql: string) => sql.startsWith("INSERT INTO"))).toHaveLength(6);
   expect(statements.some((sql: string) => sql.includes("FROM pia_import.memory_notes_fts"))).toBe(true);
   expect(mockDb.execAsync).toHaveBeenCalledWith("DETACH DATABASE pia_import");
-  expect(FS.deleteAsync).toHaveBeenCalledTimes(1);
+  expect(FS.deleteAsync).toHaveBeenCalledTimes(4);
+});
+
+test("rejects corrupt backup contents before target transaction", async () => {
+  mockDb.getFirstAsync.mockImplementationOnce(async () => ({ integrity_check: "bad data" }));
+  // The first getFirstAsync call for restore is schema version, so choose
+  // specific PRAGMA matching rather than relying on invocation order.
+  mockDb.getFirstAsync.mockImplementation(async (sql: string) => {
+    if (sql.includes("pia_import.user_version")) return { user_version: 1 };
+    if (sql.includes("pia_import.integrity_check")) return { integrity_check: "corrupt" };
+    return { n: 0 };
+  });
+  await expect(restoreEncryptedBackup("guest", "file:///corrupt.db", code))
+    .rejects.toThrow("invalid_backup_integrity");
+  expect(mockDb.execAsync.mock.calls.some(([sql]: string[]) => sql.startsWith("INSERT INTO"))).toBe(false);
 });
 
 test("rejects unknown schema or oversized import before any transaction", async () => {
@@ -143,5 +158,5 @@ test("partial recovery failure rolls back on the unlocked SQLCipher connection",
   expect(commands).toContain("ROLLBACK");
   expect(commands).not.toContain("COMMIT");
   expect(mockDb.withExclusiveTransactionAsync).not.toHaveBeenCalled();
-  expect(FS.deleteAsync).toHaveBeenCalledTimes(1);
+  expect(FS.deleteAsync).toHaveBeenCalledTimes(4);
 });

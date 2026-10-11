@@ -1,8 +1,8 @@
 import { useFocusEffect } from "@react-navigation/native";
 import * as DocumentPicker from "expo-document-picker";
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator, KeyboardAvoidingView, Platform, Pressable,
+  ActivityIndicator, AppState, KeyboardAvoidingView, Platform, Pressable,
   ScrollView, StyleSheet, Text, TextInput, View,
 } from "react-native";
 
@@ -38,6 +38,46 @@ export function LocalMemoryScreen() {
   const [backupCode, setBackupCode] = useState("");
   const [savedRecoveryCode, setSavedRecoveryCode] = useState(false);
   const [restoreCode, setRestoreCode] = useState("");
+  const [screenLocked, setScreenLocked] = useState(false);
+  const [unlockEpoch, setUnlockEpoch] = useState(0);
+  const locking = useRef<Promise<void>>(Promise.resolve());
+
+  useEffect(() => {
+    let subscribed = true;
+    function lock() {
+      // React state is cleared immediately, before asynchronous SQLite close.
+      setScreenLocked(true);
+      setRepo(null);
+      setNotes([]);
+      setSelected(null);
+      setHistory([]);
+      setEvents([]);
+      setRelations([]);
+      setTitle("");
+      setBody("");
+      setEventText("");
+      setBackupCode("");
+      setRestoreCode("");
+      setSavedRecoveryCode(false);
+      locking.current = closeLocalMemory();
+    }
+    function unlock() {
+      void locking.current.then(() => {
+        if (subscribed && AppState.currentState === "active") {
+          setScreenLocked(false);
+          setUnlockEpoch(value => value + 1);
+        }
+      }).catch(() => setMessage("Не удалось безопасно закрыть память"));
+    }
+    const app = AppState.addEventListener("change", state => {
+      if (state === "active") unlock();
+      else lock();
+    });
+    // Android may blur while the process remains technically active.
+    const blurred = AppState.addEventListener("blur", lock);
+    const focused = AppState.addEventListener("focus", unlock);
+    return () => { subscribed = false; app.remove(); blurred.remove(); focused.remove(); };
+  }, []);
 
   const refresh = useCallback(async (db: SqliteMemoryRepository, term: string, entityId?: string) => {
     const page = await db.searchNotes(term, 50);
@@ -64,13 +104,15 @@ export function LocalMemoryScreen() {
     setSavedRecoveryCode(false);
     setRestoreCode("");
     setLoading(true);
-    if (!profileId) {
-      setMessage("Для доступа к локальной памяти выберите локальный режим или войдите.");
+    if (!profileId || AppState.currentState !== "active") {
+      setMessage(!profileId
+        ? "Для доступа к локальной памяти выберите локальный режим или войдите."
+        : "Память заблокирована, пока приложение неактивно.");
       setLoading(false);
       return () => {};
     }
     void localMemoryRepository(profileId).then(async db => {
-      if (!alive) return;
+      if (!alive || AppState.currentState !== "active") return;
       setRepo(db);
       await refresh(db, search, selected?.id);
       if (alive) setMessage("");
@@ -85,7 +127,7 @@ export function LocalMemoryScreen() {
       alive = false;
       void closeLocalMemory();
     };
-  }, [refresh, profileId]));
+  }, [refresh, profileId, unlockEpoch]));
 
   const run = async (task: () => Promise<void>) => {
     if (busy || !repo) return;
@@ -203,7 +245,7 @@ export function LocalMemoryScreen() {
         )}
         {loading && <ActivityIndicator accessibilityLabel="Открытие локальной базы" />}
         {message ? <Text accessibilityRole="alert" style={{ color: t.muted }}>{message}</Text> : null}
-        {repo ? (
+        {repo && !screenLocked ? (
           <>
             <TextInput accessibilityLabel="Поиск по локальным заметкам" placeholder="Поиск без интернета"
               placeholderTextColor={t.muted} value={search} onChangeText={setSearch}
