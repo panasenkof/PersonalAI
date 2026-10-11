@@ -173,7 +173,22 @@ async def cloud_tool_allowed(
                 Collection.id.in_(allowed),
             )
         )
-        return row is not None
+        if row is None:
+            return False
+        if name == "kb_ingest_document":
+            key = args.get("storage_key")
+            if not isinstance(key, str) or not key:
+                return False
+            # Ingestion into an exposed collection is an otherwise invisible
+            # route to disclose arbitrary unclassified file text via kb_search.
+            blob = await session.scalar(select(Blob.id).where(
+                Blob.user_id == user_id,
+                Blob.storage_key == key,
+                Blob.collection_id == row,
+                Blob.sensitivity == "standard",
+            ))
+            return blob is not None
+        return True
     if name in _CLOUD_ENTITY_TOOLS:
         entity_id = args.get("vehicle_entity_id")
         if not isinstance(entity_id, str):

@@ -22,3 +22,13 @@ old uploaded voice files remain unclassified until explicitly approved.
 
 Test coverage: opt-in absent, global-only, unclassified, sensitive, explicit
 standard grant, revoked grant, MIME forgery, other account, local STT.
+
+## Knowledge-base file ingestion from external agents
+
+MCP and cloud LLM tools previously could call `kb_ingest_document` to
+read an unclassified file, locally index the extracted bytes into an allowed
+collection, and then retrieve their content via `kb_search`. Both tool
+admission and the handler now enforce **source blob == target collection**,
+`standard` file classification, and current scoped permission **before**
+any original blob bytes are read or indexed. Ordinary trusted local tools
+retain the user's existing local ingestion behavior.

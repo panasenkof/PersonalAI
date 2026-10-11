@@ -85,14 +85,25 @@ async def kb_ingest_document(session: AsyncSession, user_id: str, args: dict[str
     blob = await get_blob(session, user_id, storage_key)
     if blob is None:
         return {"error": "unknown_storage_key"}
-    text = await asyncio.to_thread(extract_document_text, await read_bytes(storage_key), args.get("mime") or blob.mime, blob.filename)
-    if not text.strip():
-        return {"error": "no_extractable_text", "message": "Scanned image or unsupported format."}
     slug = args.get("collection_slug") or "garage"
     repository = SqlAlchemyMemoryRepository(session, user_id)
     col = await repository.collection_by_slug(slug)
     if col is None:
         return {"error": f"collection_not_found:{slug}"}
+    scope = cloud_scope()
+    if scope is not None and (
+        col.id not in (scope & await scoped_allowed_collections(session, user_id))
+        or blob.collection_id != col.id
+        or blob.sensitivity != "standard"
+    ):
+        # Crucially: reject BEFORE reading, parsing or indexing bytes.
+        return {"error": "file_memory_access_not_allowed"}
+    text = await asyncio.to_thread(
+        extract_document_text, await read_bytes(storage_key),
+        args.get("mime") or blob.mime, blob.filename,
+    )
+    if not text.strip():
+        return {"error": "no_extractable_text", "message": "Scanned image or unsupported format."}
     title = str(args.get("title") or blob.filename or "Документ")[:200]
     try:
         entity = await repository.create_entity(NewEntity(
