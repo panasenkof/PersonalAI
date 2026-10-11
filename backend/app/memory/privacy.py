@@ -227,6 +227,30 @@ async def remote_extraction_allowed(
 
 
 
+async def remote_stt_blob_allowed(
+    session: AsyncSession, user_id: str, storage_key: str,
+) -> bool:
+    """Both the global STT opt-in and *source file* classification are required.
+
+    Uploaded metadata is untrusted: an arbitrary PDF must not be sent to
+    transcription merely because the envelope claims audio/ogg.
+    """
+    blob = await session.scalar(select(Blob).where(
+        Blob.user_id == user_id,
+        Blob.storage_key == storage_key,
+        Blob.mime.startswith("audio/"),
+        Blob.sensitivity == "standard",
+    ))
+    if not blob or not blob.collection_id:
+        return False
+    return await session.scalar(select(Collection.id).where(
+        Collection.id == blob.collection_id,
+        Collection.user_id == user_id,
+        Collection.sensitivity.in_(_CLASSIFIED),
+        Collection.allow_remote_extraction.is_(True),
+    )) is not None
+
+
 async def remote_blob_processing_allowed(
     session: AsyncSession, user_id: str, storage_key: str, collection_slug: str,
     *, entity: Entity | None = None, embeddings: bool = False,

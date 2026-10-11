@@ -14,7 +14,7 @@ from app.ingestion.schemas import Attachment, IngestionEnvelope
 from app.ingestion.stt import WhisperApiSTTProvider
 from app.llm.providers import CloudLLMProvider
 from app.memory.privacy import remote_extraction_allowed
-from app.models import Base, Chunk, Collection, Entity, User
+from app.models import Base, Blob, Chunk, Collection, Entity, User
 
 
 class SpyCloud(CloudLLMProvider):
@@ -124,12 +124,70 @@ async def test_remote_stt_requires_explicit_opt_in(monkeypatch):
     provider = WhisperApiSTTProvider("https://speech.example/v1", None)
     monkeypatch.setattr("app.ingestion.pipeline.stt_provider_from_settings", lambda: provider)
     unconsented = await build_user_prompt(envelope)
-    assert "external transcription disabled" in unconsented
+    assert "external transcription requires" in unconsented
     assert "private voice message" not in unconsented
     assert calls == []
+    # Global consent alone cannot export an unclassified file.
     consented = await build_user_prompt(envelope, allow_remote_stt=True)
-    assert "[audio transcript] private voice message" in consented
-    assert calls == ["private-audio"]
+    assert "external transcription requires" in consented
+    assert calls == []
+
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    try:
+        async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+            user = User(email="stt-owner@example.com", password_hash="x")
+            session.add(user)
+            await session.flush()
+            collection = Collection(
+                user_id=user.id, slug="health", name="Health", sensitivity="sensitive",
+                allow_remote_extraction=True,
+            )
+            session.add(collection)
+            await session.flush()
+            blob = Blob(
+                user_id=user.id, storage_key="private-audio", sha256="a" * 64,
+                mime="audio/ogg", size_bytes=12,
+            )
+            session.add(blob)
+            await session.flush()
+            async def prompt():
+                return await build_user_prompt(
+                    envelope, allow_remote_stt=True, session=session, user_id=user.id,
+                )
+            assert "external transcription requires" in await prompt()
+            assert calls == []
+            blob.collection_id = collection.id
+            blob.sensitivity = "sensitive"
+            await session.flush()
+            assert "external transcription requires" in await prompt()
+            blob.sensitivity = "standard"
+            await session.flush()
+            assert "[audio transcript] private voice message" in await prompt()
+            assert calls == ["private-audio"]
+            collection.allow_remote_extraction = False
+            await session.flush()
+            assert "external transcription requires" in await prompt()
+            assert calls == ["private-audio"]
+            # Relabelled non-audio attachments cannot bypass MIME validation.
+            collection.allow_remote_extraction = True
+            blob.mime = "application/pdf"
+            await session.flush()
+            assert "external transcription requires" in await prompt()
+            assert calls == ["private-audio"]
+            # A separate user's metadata must not enable remote access.
+            blob.mime = "audio/ogg"
+            other = User(email="stt-other@example.com", password_hash="x")
+            session.add(other)
+            await session.flush()
+            cross = await build_user_prompt(
+                envelope, allow_remote_stt=True, session=session, user_id=other.id,
+            )
+            assert "external transcription requires" in cross
+            assert calls == ["private-audio"]
+    finally:
+        await engine.dispose()
 
     # Local loopback speech servers do not need third-party permission.
     provider.base_url = "http://127.0.0.1:9000/v1"

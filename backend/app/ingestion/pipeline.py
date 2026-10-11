@@ -9,7 +9,7 @@ from app.agent.orchestrator import run_agent
 from app.domains.registry import tool_router
 from app.ingestion.schemas import IngestionEnvelope, utcnow
 from app.ingestion.stt import WhisperApiSTTProvider, stt_provider_from_settings
-from app.memory.privacy import is_loopback_url
+from app.memory.privacy import is_loopback_url, remote_stt_blob_allowed
 from app.models import IngestionJob, JobStatus, LLMSettings
 from app.security.redact import safe_error
 from app.services.facts import current_job_id, pending_facts_for_job
@@ -17,6 +17,7 @@ from app.services.facts import current_job_id, pending_facts_for_job
 
 async def build_user_prompt(
     envelope: IngestionEnvelope, *, allow_remote_stt: bool = False,
+    session: AsyncSession | None = None, user_id: str | None = None,
 ) -> str:
     parts: list[str] = []
     if envelope.text:
@@ -31,8 +32,11 @@ async def build_user_prompt(
                 isinstance(stt, WhisperApiSTTProvider)
                 and not is_loopback_url(stt.base_url)
             )
-            if remote_stt and not allow_remote_stt:
-                parts.append("[audio attachment; external transcription disabled in privacy settings]")
+            if remote_stt and not (
+                allow_remote_stt and session is not None and user_id is not None
+                and await remote_stt_blob_allowed(session, user_id, att.storage_key)
+            ):
+                parts.append("[audio attachment; external transcription requires classified audio and collection consent]")
                 continue
             tr = await stt.transcribe(storage_key=att.storage_key, mime=att.mime)
             if tr:
@@ -81,6 +85,7 @@ async def process_envelope(
         llm_privacy = await session.get(LLMSettings, user_id)
         prompt = await build_user_prompt(
             envelope, allow_remote_stt=bool(llm_privacy and llm_privacy.allow_remote_stt),
+            session=session, user_id=user_id,
         )
         out = await run_agent(
             session,
