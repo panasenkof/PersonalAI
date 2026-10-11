@@ -152,9 +152,9 @@ async def filter_cloud_hits(
     for entity in entities.values():
         source_keys |= _source_keys(entity)
     for observation in observations.values():
-        entity = entities.get(observation.entity_id)
-        if entity is not None:
-            source_keys |= _source_keys(entity, observation)
+        parent_entity = entities.get(observation.entity_id)
+        if parent_entity is not None:
+            source_keys |= _source_keys(parent_entity, observation)
     blobs = {
         b.storage_key: b for b in (await session.scalars(
             select(Blob).where(Blob.user_id == user_id, Blob.storage_key.in_(source_keys))
