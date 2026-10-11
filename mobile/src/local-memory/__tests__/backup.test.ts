@@ -122,7 +122,7 @@ test("restore imports all six tables and FTS atomically on the unlocked connecti
 
 test("rejects corrupt backup contents before target transaction", async () => {
   // Match the source integrity-check pragma regardless of invocation order.
-  mockDb.getFirstAsync.mockImplementation(async (sql: string) => {
+  mockDb.getFirstAsync.mockImplementation(async (sql: string): Promise<Record<string, string | number> | null> => {
     if (sql.includes("pia_import.user_version")) return { user_version: 1 };
     if (sql.includes("pia_import.integrity_check")) return { integrity_check: "corrupt" };
     return { n: 0 };
