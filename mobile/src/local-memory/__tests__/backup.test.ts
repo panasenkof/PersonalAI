@@ -22,7 +22,7 @@ let mockAlreadyContainsMemory = false;
 const mockDb = {
   runAsync: jest.fn(async (_sql: string, _params?: unknown[]) => ({})),
   execAsync: jest.fn(async (_sql: string) => {}),
-  getFirstAsync: jest.fn(async (_sql: string): Promise<Record<string, number> | null> => ({})),
+  getFirstAsync: jest.fn(async (_sql: string): Promise<Record<string, string | number> | null> => ({})),
   getAllAsync: jest.fn(async (_sql: string): Promise<Array<{ name: string }>> => []),
   withExclusiveTransactionAsync: jest.fn(async () => { throw new Error("new_connection_forbidden"); }),
 };
@@ -44,7 +44,7 @@ beforeEach(() => {
   mockDb.execAsync.mockImplementation(async (sql: string) => {
     if (sql === "COMMIT") mockRestored = true;
   });
-  mockDb.getFirstAsync.mockImplementation(async (sql: string): Promise<Record<string, number> | null> => {
+  mockDb.getFirstAsync.mockImplementation(async (sql: string): Promise<Record<string, string | number> | null> => {
     if (sql.includes("pia_import.user_version")) return { user_version: 1 };
     if (sql.includes("pia_import.integrity_check")) return { integrity_check: "ok" };
     if (sql.includes("pia_import.memory_entities")) return { n: 2 };
@@ -121,9 +121,7 @@ test("restore imports all six tables and FTS atomically on the unlocked connecti
 });
 
 test("rejects corrupt backup contents before target transaction", async () => {
-  mockDb.getFirstAsync.mockImplementationOnce(async () => ({ integrity_check: "bad data" }));
-  // The first getFirstAsync call for restore is schema version, so choose
-  // specific PRAGMA matching rather than relying on invocation order.
+  // Match the source integrity-check pragma regardless of invocation order.
   mockDb.getFirstAsync.mockImplementation(async (sql: string) => {
     if (sql.includes("pia_import.user_version")) return { user_version: 1 };
     if (sql.includes("pia_import.integrity_check")) return { integrity_check: "corrupt" };
