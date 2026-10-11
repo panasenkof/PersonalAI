@@ -7,13 +7,14 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.agent.universal_tools import kb_ingest_document
 from app.domains.automotive.handlers import auto_fetch_maintenance_schedule, auto_parse_service_receipt
 from app.domains.medical_labs.handlers import labs_record_report
 from app.ingestion.pipeline import build_user_prompt
 from app.ingestion.schemas import Attachment, IngestionEnvelope
 from app.ingestion.stt import WhisperApiSTTProvider
 from app.llm.providers import CloudLLMProvider
-from app.memory.privacy import remote_extraction_allowed
+from app.memory.privacy import cloud_tool_allowed, remote_extraction_allowed, use_cloud_scope
 from app.models import Base, Blob, Chunk, Collection, Entity, User
 
 
@@ -277,3 +278,82 @@ def test_privacy_api_revocation_clears_vectors_and_enforces_owner(client, random
 
     asyncio.run(verify())
     assert client.get("/v1/privacy/collections", headers=h2).json()[0]["allow_cloud_llm"] is False
+
+
+
+@pytest.mark.asyncio
+async def test_cloud_and_mcp_document_ingestion_cannot_launder_unclassified_source(monkeypatch):
+    """An external agent cannot ingest hidden bytes then retrieve text via KB search."""
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    reads: list[str] = []
+
+    async def forbidden_blob_read(key: str):
+        reads.append(key)
+        raise AssertionError("unclassified blob bytes must never be read")
+
+    monkeypatch.setattr("app.storage.blob.read_bytes", forbidden_blob_read)
+    try:
+        async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+            owner = User(email="ingest-file-owner@example.net", password_hash="x")
+            session.add(owner)
+            await session.flush()
+            garage = Collection(
+                user_id=owner.id, slug="garage", name="Garage", sensitivity="standard",
+                allow_cloud_llm=True, allow_mcp_access=True,
+            )
+            secret_col = Collection(
+                user_id=owner.id, slug="health", name="Health", sensitivity="sensitive",
+            )
+            session.add_all([garage, secret_col])
+            await session.flush()
+            blob = Blob(
+                user_id=owner.id, storage_key="unclassified-pdf",
+                sha256="b" * 64, size_bytes=21, mime="application/pdf",
+            )
+            session.add(blob)
+            await session.flush()
+            args = {"storage_key": blob.storage_key, "collection_slug": "garage"}
+            grants = frozenset({garage.id})
+            for channel in ("cloud", "mcp"):
+                with use_cloud_scope(grants, channel=channel):
+                    assert not await cloud_tool_allowed(
+                        session, owner.id, "kb_ingest_document", args, grants,
+                    )
+                    result = await kb_ingest_document(session, owner.id, args)
+                    assert result == {"error": "file_memory_access_not_allowed"}
+                    assert reads == []
+
+            # A classified blob in a different (closed) collection stays hidden.
+            blob.collection_id = secret_col.id
+            blob.sensitivity = "standard"
+            await session.flush()
+            with use_cloud_scope(grants):
+                assert not await cloud_tool_allowed(
+                    session, owner.id, "kb_ingest_document", args, grants,
+                )
+                assert (await kb_ingest_document(session, owner.id, args)) == {
+                    "error": "file_memory_access_not_allowed",
+                }
+            assert reads == []
+
+            # Explicit source classification and collection grant permit it.
+            blob.collection_id = garage.id
+            await session.flush()
+            with use_cloud_scope(grants):
+                assert await cloud_tool_allowed(
+                    session, owner.id, "kb_ingest_document", args, grants,
+                )
+            blob.sensitivity = "sensitive"
+            await session.flush()
+            with use_cloud_scope(grants):
+                assert not await cloud_tool_allowed(
+                    session, owner.id, "kb_ingest_document", args, grants,
+                )
+                assert (await kb_ingest_document(session, owner.id, args)) == {
+                    "error": "file_memory_access_not_allowed",
+                }
+            assert reads == []
+    finally:
+        await engine.dispose()
