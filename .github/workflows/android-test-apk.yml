@@ -158,6 +158,12 @@ jobs:
         if: steps.changes.outputs.needed == 'true'
         working-directory: mobile/android
         env:
+          # Expo rebuilds the JS bundle during Gradle; retain the same config as prebuild.
+          PIA_ANDROID_RELEASE: 'true'
+          PIA_ANDROID_PACKAGE: ${{ vars.PIA_ANDROID_PACKAGE }}
+          EXPO_PUBLIC_API_BASE: ${{ vars.PIA_ANDROID_API_BASE }}
+          PIA_ANDROID_VERSION_CODE: ${{ steps.version.outputs.code }}
+          PIA_ANDROID_BUILD_SHA: ${{ env.TARGET_SHA }}
           PIA_ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/pia-release.jks
           PIA_ANDROID_KEY_ALIAS: ${{ secrets.PIA_ANDROID_KEY_ALIAS }}
           PIA_ANDROID_STORE_PASSWORD: ${{ secrets.PIA_ANDROID_STORE_PASSWORD }}
