@@ -25,6 +25,10 @@
 | **Безопасность** | **2FA (TOTP + recovery-коды)**, **роли user/admin**, отзыв токенов (`token_version`, logout-all), **ротация JWT-секрета** (`JWT_SECRET_PREVIOUS`), шифрование at rest (ключи LLM, история, TOTP, джобы, файлы; ротация MultiFernet + `rekey`), **fail-closed в production** (слабые секреты и вебхуки без секрета → отказ), защита логина от перебора, path traversal, лимит загрузки, CORS — подробно в [docs/SECURITY.md](docs/SECURITY.md) |
 | **Evals** | Золотой набор (6 сценариев): `python -m evals.runner` — scripted LLM на каждый PR; **`--live` — реальная LLM, автозапуск в CI** (`evals-live.yml`: ночью, при изменении агента/промптов, вручную; N прогонов, порог pass-rate, отчёт в Job Summary) |
 
+## Тестовые APK Android
+
+Подписанные автономные Android-сборки автоматически публикуются после зелёного CI при изменениях mobile: [GitHub Releases](https://github.com/panasenkof/PersonalAI/releases). Для однократной настройки ключа подписи и адреса сервера см. [docs/ANDROID_TEST_APK.md](docs/ANDROID_TEST_APK.md). До настройки Secrets/Variables первый выпуск ещё не состоится.
+
 ## Готовность продукта и установка
 
 Текущие доработки интерфейсов, ограничения выпуска и критерии пилота: [docs/PRODUCT_READINESS.md](docs/PRODUCT_READINESS.md). Инструкция доступна на `/app/help.html`, страница продукта — `/app/start.html`, сведения об операторе — `/app/service.html`. Процесс публичного выпуска и восстановления описан в [docs/LAUNCH_RUNBOOK.md](docs/LAUNCH_RUNBOOK.md). Веб можно добавить на домашний экран в поддерживающем браузере при HTTPS. Мобильное приложение обновлено до Expo SDK 54; подписанные сборки ещё требуют настройки EAS и проверки на устройствах; Expo Go не является способом распространения готового продукта.
