@@ -6,6 +6,8 @@ import { ActivityIndicator, Text, useColorScheme, View } from "react-native";
 
 import { useAuth } from "./auth/AuthContext";
 import { ChatScreen } from "./screens/ChatScreen";
+import { DirectAgentScreen } from "./screens/DirectAgentScreen";
+import { DirectAgentSettingsScreen } from "./screens/DirectAgentSettingsScreen";
 import { ChatsScreen } from "./screens/ChatsScreen";
 import { LoginScreen } from "./screens/LoginScreen";
 import { LocalMemoryScreen } from "./screens/LocalMemoryScreen";
@@ -28,8 +30,12 @@ function Tabs() {
         component={ChatsScreen}
         options={{ title: "Чаты", tabBarIcon: () => <Text>💬</Text> }}
       />}
+      <Tab.Screen name="DirectAgent" component={DirectAgentScreen}
+        options={{ title: "ИИ на телефоне", tabBarLabel: "Мобильный ИИ", tabBarIcon: () => <Text>🤖</Text> }} />
       <Tab.Screen name="LocalMemory" component={LocalMemoryScreen}
         options={{ title: "На телефоне", tabBarIcon: () => <Text>🔐</Text> }} />
+      <Tab.Screen name="DirectAgentSettings" component={DirectAgentSettingsScreen}
+        options={{ title: "Настройки мобильного ИИ", tabBarLabel: "ИИ настройки", tabBarIcon: () => <Text>🔑</Text> }} />
       {!offlineMode && <Tab.Screen name="Settings" component={SettingsScreen} options={{ title: "Настройки", tabBarIcon: () => <Text>⚙️</Text> }} />}
     </Tab.Navigator>
   );
