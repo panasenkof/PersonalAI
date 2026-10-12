@@ -84,7 +84,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for field in PIA_ANDROID_PACKAGE EXPO_PUBLIC_API_BASE PIA_ANDROID_KEYSTORE_B64 PIA_ANDROID_KEY_ALIAS PIA_ANDROID_STORE_PASSWORD PIA_ANDROID_KEY_PASSWORD; do
+          for field in PIA_ANDROID_PACKAGE PIA_ANDROID_KEYSTORE_B64 PIA_ANDROID_KEY_ALIAS PIA_ANDROID_STORE_PASSWORD PIA_ANDROID_KEY_PASSWORD; do
             if [ -z "${!field:-}" ]; then
               echo "::error::Missing $field. See docs/ANDROID_TEST_APK.md."
               exit 1
