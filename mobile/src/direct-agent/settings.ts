@@ -58,6 +58,12 @@ export function validateBaseUrl(raw: string, provider: DirectProvider): string {
   }
   return url.toString().replace(/\/$/, "");
 }
+/** Local OpenAI-compatible servers often require no bearer token (Ollama, LM Studio). */
+export function anonymousLocalAllowed(settings: Pick<DirectAgentPreferences, "provider" | "baseUrl">): boolean {
+  if (settings.provider !== "openai-compatible") return false;
+  try { return validateBaseUrl(settings.baseUrl, settings.provider).startsWith("http://"); }
+  catch { return false; }
+}
 export function validateModel(model: string): string {
   const value = model.trim();
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_.:\/-]{0,199}$/.test(value)) {
