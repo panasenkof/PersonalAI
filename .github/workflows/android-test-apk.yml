@@ -115,6 +115,7 @@ jobs:
         run: |
           npm ci --no-audit --no-fund
           node --test scripts/prepare-android-release.test.cjs
+          node --test scripts/apk-signing-certificate.test.cjs
           npm run typecheck
           npm test -- --runInBand
 
@@ -188,13 +189,16 @@ jobs:
           apksigner="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
           test -x "$apksigner"
           "$apksigner" verify --verbose "$apk"
-          actual="$("$apksigner" verify --print-certs "$apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -n 1 | tr -d '\r')"
+          # Supports both legacy "Signer #1" and new "V2 Signer:" apksigner outputs.
+          # Keep signature verification and certificate equality fail-closed.
+          actual="$("$apksigner" verify --print-certs "$apk" | node scripts/apk-signing-certificate.cjs)"
           expected="$(keytool -exportcert -alias "$PIA_ANDROID_KEY_ALIAS" -keystore "$PIA_ANDROID_KEYSTORE_PATH" \
             -storepass "$PIA_ANDROID_STORE_PASSWORD" | sha256sum | cut -d ' ' -f 1)"
-          test -n "$actual" && test "${actual,,}" = "${expected,,}" || {
-            echo "::error::APK signature does not match the configured release key."
+          if [ "$actual" != "$expected" ]; then
+            echo "::error::APK certificate SHA-256 is ${actual}; configured release keystore certificate SHA-256 is ${expected}. Publishing blocked."
             exit 1
-          }
+          fi
+          echo "APK signing certificate matches the configured release key."
           mkdir -p dist
           tag="android-test-b${GITHUB_RUN_NUMBER}-a${GITHUB_RUN_ATTEMPT}"
           name="PersonalAI-${tag}.apk"

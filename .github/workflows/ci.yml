@@ -124,7 +124,7 @@ jobs:
       - name: Unit tests
         run: npx jest --ci
       - name: Android release configuration tests
-        run: node --test scripts/prepare-android-release.test.cjs
+        run: node --test scripts/prepare-android-release.test.cjs scripts/apk-signing-certificate.test.cjs
       - name: Expo dependency compatibility
         run: npx expo install --check
       - name: Bundle both native platforms
