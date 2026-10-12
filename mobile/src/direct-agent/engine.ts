@@ -19,6 +19,7 @@ type OutputItem = {
   name?: string;
   call_id?: string;
   arguments?: string;
+  action?: { sources?: Array<{ url?: string }> };
   content?: Array<{ type?: string; text?: string; annotations?: Array<{ type?: string; url?: string }> }>;
 };
 type Response = {
@@ -69,6 +70,14 @@ function usableString(value: unknown, cap: number): string {
 function collectSources(output: OutputItem[]): string[] {
   const sources = new Set<string>();
   for (const item of output) {
+    for (const source of item.action?.sources || []) {
+      if (typeof source.url === "string") {
+        try {
+          const url = new URL(source.url);
+          if (url.protocol === "https:") sources.add(url.toString());
+        } catch { /* untrusted external URL */ }
+      }
+    }
     for (const content of item.content || []) {
       for (const ann of content.annotations || []) {
         if (ann.type === "url_citation" && typeof ann.url === "string") {
@@ -126,7 +135,7 @@ export async function runDirectAgent(options: DirectAgentOptions): Promise<Direc
       },
       body: JSON.stringify({
         model: settings.model, input, tools, store: false,
-        include: ["reasoning.encrypted_content"],
+        include: ["reasoning.encrypted_content", "web_search_call.action.sources"],
         max_output_tokens: MAX_DIRECT_REPLY_TOKENS,
       }),
       signal,
