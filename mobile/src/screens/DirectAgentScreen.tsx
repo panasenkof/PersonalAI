@@ -41,11 +41,23 @@ export function DirectAgentScreen() {
     const sub = AppState.addEventListener("change", state => {
       if (state !== "active") {
         controller.current?.abort();
+        // Never leave sensitive answers visible in Android/iOS recent-app previews.
+        setRows([]);
+        setDrafts([]);
+        setQuestion("");
         void closeLocalMemory();
       }
     });
     return () => { mounted.current = false; controller.current?.abort(); sub.remove(); };
   }, []);
+
+  useEffect(() => {
+    // A guest/server profile switch must never expose another profile's chat.
+    controller.current?.abort();
+    setRows([]);
+    setDrafts([]);
+    setQuestion("");
+  }, [profile]);
 
   useFocusEffect(useCallback(() => {
     let alive = true;
@@ -167,6 +179,7 @@ export function DirectAgentScreen() {
           {drafts.map(d => (
             <View key={d.id} style={{ padding: 12, borderWidth: 1, borderColor: t.accent, borderRadius: 10, backgroundColor: t.panel, gap: 6 }}>
               <Text style={{ color: t.text, fontWeight: "700" }}>ИИ предлагает запомнить (не сохранено)</Text>
+              <Text style={{ color: t.muted, fontSize: 12 }}>Это обычная заметка; при разрешённом чтении памяти она может передаваться внешней LLM.</Text>
               <Text selectable style={{ color: t.text }}>{d.title}</Text>
               <Text selectable style={{ color: t.text }}>{d.body}</Text>
               <View style={{ flexDirection: "row", gap: 20 }}>
