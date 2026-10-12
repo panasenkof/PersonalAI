@@ -53,8 +53,8 @@ export function LoginScreen() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.wrap}>
         <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
-        <Image source={require("../../assets/icon.png")} style={{ width: 72, height: 72, borderRadius: 20, alignSelf: "center" }} accessibilityLabel="Иконка PIA Agent" />
-        <Text style={[styles.title, { color: t.text }]}>PIA Agent</Text>
+        <Image source={require("../../assets/icon.png")} style={{ width: 72, height: 72, borderRadius: 20, alignSelf: "center" }} accessibilityLabel="Иконка PersAI" />
+        <Text style={[styles.title, { color: t.text }]}>PersAI</Text>
         <Text style={{ color: t.muted, textAlign: "center", marginBottom: 16 }}>Ваши диалоги, документы и знания — в одном месте. Начните с простого вопроса.</Text>
         <Pressable accessibilityRole="button" accessibilityLabel="Открыть локальную память"
           style={[styles.btn, { backgroundColor: t.accent }]}
