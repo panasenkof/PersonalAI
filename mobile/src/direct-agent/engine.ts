@@ -1,5 +1,5 @@
 import type { DirectAgentSettings } from "./settings";
-import { validateBaseUrl, validateModel } from "./settings";
+import { anonymousLocalAllowed, validateBaseUrl, validateModel } from "./settings";
 import { fetchWebContext, runCompatibleAgent } from "./compatible";
 import type { MemorySnippet, NoteProposal } from "./memory";
 
@@ -112,7 +112,7 @@ function toolArguments(value: unknown): Record<string, unknown> {
  */
 export async function runDirectAgent(options: DirectAgentOptions): Promise<DirectResult> {
   const { settings, lookup, propose, signal, status } = options;
-  if (!settings.apiKey || !settings.model) throw new Error("Сначала настройте API-ключ и модель");
+  if (!settings.model || (!settings.apiKey && !anonymousLocalAllowed(settings))) throw new Error("Сначала настройте API-ключ и модель");
   if (settings.provider !== "openai") return runCompatibleAgent(options);
   const prompt = options.prompt.trim().slice(0, 4000);
   if (!prompt) throw new Error("Введите вопрос");
