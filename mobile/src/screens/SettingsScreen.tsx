@@ -334,7 +334,7 @@ const styles = StyleSheet.create({
   wrap: { padding: 16, gap: 8, paddingBottom: 48 },
   h: { fontSize: 18, fontWeight: "700", marginTop: 16 },
   row: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  input: { borderWidth: 1, borderRadius: 10, padding: 10, fontSize: 15 },
+  input: { borderWidth: 1, borderRadius: 16, padding: 10, fontSize: 15 },
   btn: { borderRadius: 10, padding: 12, alignItems: "center", marginTop: 6 },
   btnText: { color: "#fff", fontWeight: "600" },
   small: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 10, minHeight: 44 },
