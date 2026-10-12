@@ -1,5 +1,5 @@
 {
-  "id": "/app/", "name": "PIA Agent — персональный помощник", "short_name": "PIA Agent",
+  "id": "/app/", "name": "PersAI — персональный помощник", "short_name": "PersAI",
   "lang": "ru", "start_url": "/app/", "scope": "/app/", "display": "standalone",
   "background_color": "#f4f6fb", "theme_color": "#2458d3",
   "icons": [
