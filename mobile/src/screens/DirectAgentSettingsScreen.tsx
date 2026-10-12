@@ -122,7 +122,7 @@ export function DirectAgentSettingsScreen() {
           keyboardType="url" value={prefs.baseUrl}
           onChangeText={baseUrl => setPrefs(p => ({ ...p, baseUrl }))} style={fieldStyle} />
         <Text style={{ color: t.muted, fontSize: 12 }}>
-          Для локальной модели можно указать HTTP-адрес устройства в частной сети.
+          Для локальной OpenAI-совместимой модели можно указать HTTP-адрес устройства в частной сети; API-ключ необязателен.
           При изменении адреса или протокола требуется отдельный API-ключ.
         </Text>
         <Text style={{ color: t.text, fontWeight: "600" }}>API-ключ модели: {hasKey ? "сохранён" : "не задан"}</Text>
