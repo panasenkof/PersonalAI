@@ -59,6 +59,22 @@ test("web search is enabled only with explicit toggle and citations returned", a
   expect(result.sources).toEqual(["https://example.org/source"]);
 });
 
+test("web search sources are surfaced from provider action metadata", async () => {
+  const request = jest.fn().mockResolvedValue({
+    ok: true, status: 200, json: async () => ({
+      status: "completed",
+      output: [
+        { type: "web_search_call", action: { sources: [{ url: "https://example.org/web" }] } },
+        { type: "message", content: [{ type: "output_text", text: "Ответ" }] },
+      ],
+    }),
+  });
+  const result = await start({ allowWeb: true }, request);
+  expect(result.sources).toEqual(["https://example.org/web"]);
+  const body = JSON.parse(request.mock.calls[0][1].body);
+  expect(body.include).toContain("web_search_call.action.sources");
+});
+
 test("local-memory tool uses only approved callback and replays tool output", async () => {
   const request = jest.fn().mockResolvedValueOnce(toolResponse("search_local_notes", { query: "кухня" }))
     .mockResolvedValueOnce(final("Вы любите пасту"));
