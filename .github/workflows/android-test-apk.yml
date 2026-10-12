@@ -1,0 +1,241 @@
+name: Publish Android test APK
+
+# The privileged build only checks out a successful main-branch CI commit.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: android-test-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Signed standalone APK
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      TARGET_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+    steps:
+      - name: Checkout the tested main commit (no persisted credentials)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_SHA }}
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Verify current main and successful CI on this exact commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$TARGET_SHA"
+          main_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')"
+          if [ "$main_sha" != "$TARGET_SHA" ]; then
+            echo "Main has advanced. Skip publishing a stale APK."
+            exit 1
+          fi
+          good_ci="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=main&head_sha=$TARGET_SHA&per_page=30" \
+            --jq '[.workflow_runs[] | select(.head_sha == env.TARGET_SHA and .event == "push" and .status == "completed" and .conclusion == "success")] | length')"
+          if [ "$good_ci" -lt 1 ]; then
+            echo "::error::No successful main CI for $TARGET_SHA. APK will not be published."
+            exit 1
+          fi
+
+      - name: Decide whether Android files changed
+        id: changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+          elif git rev-parse HEAD^ >/dev/null 2>&1 && \
+            git diff --name-only HEAD^ HEAD | grep -Eq '^(mobile/|\.github/workflows/android-test-apk.yml)'; then
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No Android changes in this main commit; no new APK needed."
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Ensure Android release configuration is present
+        if: steps.changes.outputs.needed == 'true'
+        env:
+          PIA_ANDROID_PACKAGE: ${{ vars.PIA_ANDROID_PACKAGE }}
+          EXPO_PUBLIC_API_BASE: ${{ vars.PIA_ANDROID_API_BASE }}
+          PIA_ANDROID_KEYSTORE_B64: ${{ secrets.PIA_ANDROID_KEYSTORE_B64 }}
+          PIA_ANDROID_KEY_ALIAS: ${{ secrets.PIA_ANDROID_KEY_ALIAS }}
+          PIA_ANDROID_STORE_PASSWORD: ${{ secrets.PIA_ANDROID_STORE_PASSWORD }}
+          PIA_ANDROID_KEY_PASSWORD: ${{ secrets.PIA_ANDROID_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for field in PIA_ANDROID_PACKAGE EXPO_PUBLIC_API_BASE PIA_ANDROID_KEYSTORE_B64 PIA_ANDROID_KEY_ALIAS PIA_ANDROID_STORE_PASSWORD PIA_ANDROID_KEY_PASSWORD; do
+            if [ -z "${!field:-}" ]; then
+              echo "::error::Missing $field. See docs/ANDROID_TEST_APK.md."
+              exit 1
+            fi
+          done
+
+      - uses: actions/setup-node@v4
+        if: steps.changes.outputs.needed == 'true'
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - uses: actions/setup-java@v4
+        if: steps.changes.outputs.needed == 'true'
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+        if: steps.changes.outputs.needed == 'true'
+        with:
+          packages: platform-tools
+
+      - name: Install exact JS dependencies and check release tooling
+        if: steps.changes.outputs.needed == 'true'
+        working-directory: mobile
+        run: |
+          npm ci --no-audit --no-fund
+          node --test scripts/prepare-android-release.test.cjs
+          npm run typecheck
+          npm test -- --runInBand
+
+      - name: Compute strictly increasing Android build number
+        if: steps.changes.outputs.needed == 'true'
+        id: version
+        shell: bash
+        run: |
+          code=$((GITHUB_RUN_NUMBER * 100 + GITHUB_RUN_ATTEMPT))
+          if [ "$GITHUB_RUN_ATTEMPT" -ge 100 ] || [ "$code" -gt 2100000000 ]; then
+            echo "::error::Android versionCode limit exceeded."
+            exit 1
+          fi
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+
+      - name: Generate standalone Android project with SQLCipher
+        if: steps.changes.outputs.needed == 'true'
+        working-directory: mobile
+        env:
+          PIA_ANDROID_RELEASE: 'true'
+          PIA_ANDROID_PACKAGE: ${{ vars.PIA_ANDROID_PACKAGE }}
+          EXPO_PUBLIC_API_BASE: ${{ vars.PIA_ANDROID_API_BASE }}
+          PIA_ANDROID_VERSION_CODE: ${{ steps.version.outputs.code }}
+          PIA_ANDROID_BUILD_SHA: ${{ env.TARGET_SHA }}
+        run: |
+          npx expo prebuild --platform android --no-install --clean
+          node scripts/prepare-android-release.cjs
+
+      - name: Restore signing key outside repository
+        if: steps.changes.outputs.needed == 'true'
+        env:
+          PIA_ANDROID_KEYSTORE_B64: ${{ secrets.PIA_ANDROID_KEYSTORE_B64 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s' "$PIA_ANDROID_KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/pia-release.jks"
+          test -s "$RUNNER_TEMP/pia-release.jks"
+
+      - name: Compile and sign standalone release APK
+        if: steps.changes.outputs.needed == 'true'
+        working-directory: mobile/android
+        env:
+          # Expo rebuilds the JS bundle during Gradle; retain the same config as prebuild.
+          PIA_ANDROID_RELEASE: 'true'
+          PIA_ANDROID_PACKAGE: ${{ vars.PIA_ANDROID_PACKAGE }}
+          EXPO_PUBLIC_API_BASE: ${{ vars.PIA_ANDROID_API_BASE }}
+          PIA_ANDROID_VERSION_CODE: ${{ steps.version.outputs.code }}
+          PIA_ANDROID_BUILD_SHA: ${{ env.TARGET_SHA }}
+          PIA_ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/pia-release.jks
+          PIA_ANDROID_KEY_ALIAS: ${{ secrets.PIA_ANDROID_KEY_ALIAS }}
+          PIA_ANDROID_STORE_PASSWORD: ${{ secrets.PIA_ANDROID_STORE_PASSWORD }}
+          PIA_ANDROID_KEY_PASSWORD: ${{ secrets.PIA_ANDROID_KEY_PASSWORD }}
+        run: ./gradlew :app:assembleRelease --no-daemon --stacktrace
+
+      - name: Verify APK, embedded JS and signing certificate
+        if: steps.changes.outputs.needed == 'true'
+        id: artifact
+        working-directory: mobile
+        env:
+          PIA_ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/pia-release.jks
+          PIA_ANDROID_KEY_ALIAS: ${{ secrets.PIA_ANDROID_KEY_ALIAS }}
+          PIA_ANDROID_STORE_PASSWORD: ${{ secrets.PIA_ANDROID_STORE_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk=android/app/build/outputs/apk/release/app-release.apk
+          test -s "$apk"
+          unzip -t "$apk" >/dev/null
+          unzip -Z1 "$apk" | grep -Fx 'assets/index.android.bundle'
+          apksigner="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
+          test -x "$apksigner"
+          "$apksigner" verify --verbose "$apk"
+          actual="$("$apksigner" verify --print-certs "$apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -n 1 | tr -d '\r')"
+          expected="$(keytool -exportcert -alias "$PIA_ANDROID_KEY_ALIAS" -keystore "$PIA_ANDROID_KEYSTORE_PATH" \
+            -storepass "$PIA_ANDROID_STORE_PASSWORD" | sha256sum | cut -d ' ' -f 1)"
+          test -n "$actual" && test "${actual,,}" = "${expected,,}" || {
+            echo "::error::APK signature does not match the configured release key."
+            exit 1
+          }
+          mkdir -p dist
+          tag="android-test-b${GITHUB_RUN_NUMBER}-a${GITHUB_RUN_ATTEMPT}"
+          name="PersonalAI-${tag}.apk"
+          cp "$apk" "dist/$name"
+          (cd dist && sha256sum "$name" > "$name.sha256")
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+      - name: Publish permanent GitHub prerelease
+        if: steps.changes.outputs.needed == 'true'
+        working-directory: mobile
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.artifact.outputs.tag }}
+          APK_NAME: ${{ steps.artifact.outputs.name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The branch may advance during Gradle compilation; never publish stale binaries.
+          current_main="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')"
+          if [ "$current_main" != "$TARGET_SHA" ]; then
+            echo "Main advanced while building; skip stale APK. The next green CI will trigger a fresh build."
+            exit 0
+          fi
+          cat > "$RUNNER_TEMP/apk-notes.md" <<EOF
+          Android test APK built from verified main commit ${TARGET_SHA}.
+
+          - Standalone release APK with native SQLCipher (not Expo Go/debug).
+          - Android package: ${{ vars.PIA_ANDROID_PACKAGE }}
+          - Build number: ${{ steps.version.outputs.code }}
+          - Checksum: see attached .sha256 file.
+          - Upgrade without uninstalling: keep the same signing certificate and package ID.
+          - Test build only. Validate encrypted memory backup/restore on real devices.
+
+          Setup and device QA: docs/ANDROID_TEST_APK.md
+          EOF
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "dist/$APK_NAME" "dist/$APK_NAME.sha256" --clobber
+            gh release edit "$TAG" --notes-file "$RUNNER_TEMP/apk-notes.md"
+          else
+            gh release create "$TAG" "dist/$APK_NAME" "dist/$APK_NAME.sha256" \
+              --title "Android test ${TAG}" --notes-file "$RUNNER_TEMP/apk-notes.md" \
+              --target "$TARGET_SHA" --prerelease
+          fi

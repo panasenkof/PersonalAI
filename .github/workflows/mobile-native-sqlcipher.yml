@@ -39,6 +39,28 @@ jobs:
         run: npx expo prebuild --platform android --no-install --clean
       - name: Compile Android debug APK with native modules
         run: cd android && ./gradlew :app:assembleDebug --no-daemon --stacktrace
+      - name: Compile standalone release APK with an ephemeral CI-only signing key
+        env:
+          PIA_ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/pia-ephemeral-qa.p12
+          PIA_ANDROID_KEY_ALIAS: pia-ci-only
+          PIA_ANDROID_STORE_PASSWORD: ephemeral-ci-password-only
+          PIA_ANDROID_KEY_PASSWORD: ephemeral-ci-password-only
+          EXPO_PUBLIC_API_BASE: https://example.org
+        run: |
+          keytool -genkeypair -noprompt -storetype PKCS12 \
+            -keystore "$PIA_ANDROID_KEYSTORE_PATH" -alias "$PIA_ANDROID_KEY_ALIAS" \
+            -keyalg RSA -keysize 2048 -validity 2 \
+            -storepass "$PIA_ANDROID_STORE_PASSWORD" -keypass "$PIA_ANDROID_KEY_PASSWORD" \
+            -dname 'CN=PersonalAI CI Test,O=Ephemeral QA,C=US'
+          node scripts/prepare-android-release.cjs
+          cd android
+          ./gradlew :app:assembleRelease --no-daemon --stacktrace
+          test -s app/build/outputs/apk/release/app-release.apk
+          unzip -Z1 app/build/outputs/apk/release/app-release.apk | grep -Fx 'assets/index.android.bundle'
+          apksigner="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
+          test -x "$apksigner"
+          "$apksigner" verify --verbose app/build/outputs/apk/release/app-release.apk
+
       - name: Validate native APK archive
         run: |
           APK=android/app/build/outputs/apk/debug/app-debug.apk

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import Constants from "expo-constants";
 import { Alert, KeyboardAvoidingView, Platform, Linking, ScrollView, StyleSheet, Switch, Text, TextInput, Pressable, View } from "react-native";
 
 import { authError } from "../ux";
@@ -306,6 +307,9 @@ export function SettingsScreen() {
       ])}><Text style={styles.btnText}>Удалить аккаунт</Text></Pressable>
       <Text style={[styles.h, { color: t.text }]}>О сервисе и помощь</Text>
       <Text selectable style={{ color: t.muted }}>PIA Agent {service?.version ?? "—"} · {service?.operator || "Оператор не указан"}</Text>
+      <Text selectable style={{ color: t.muted }}>
+        Приложение {Constants.expoConfig?.version ?? "—"} · коммит {String((Constants.expoConfig?.extra as { buildSha?: string } | undefined)?.buildSha || "—").slice(0, 7)}
+      </Text>
       <Text style={{ color: t.muted }}>Напоминания приходят через привязанный Telegram или MAX. При подключении обоих используется Telegram. Нативные push пока не поддерживаются. Оплату и лимиты модели устанавливают провайдер и оператор.</Text>
       {service?.support_email ? <Pressable accessibilityRole="link" style={styles.small} onPress={() => guard(async () => { await Linking.openURL(`mailto:${encodeURIComponent(service.support_email)}`); })}><Text style={{ color: t.accent }}>Написать в поддержку: {service.support_email}</Text></Pressable> : null}
       {[["Политика конфиденциальности", service?.privacy_url], ["Условия использования", service?.terms_url]].map(([title, url]) => url?.startsWith("https://") ? <Pressable key={title} accessibilityRole="link" style={styles.small} onPress={() => guard(async () => { await Linking.openURL(url); })}><Text style={{ color: t.accent }}>{title}</Text></Pressable> : null)}

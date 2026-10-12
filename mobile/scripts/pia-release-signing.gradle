@@ -1,0 +1,29 @@
+// Applied after Expo's generated android {} block. No credentials are committed.
+def requiredSigningEnv = [
+  "PIA_ANDROID_KEYSTORE_PATH", "PIA_ANDROID_STORE_PASSWORD",
+  "PIA_ANDROID_KEY_ALIAS", "PIA_ANDROID_KEY_PASSWORD"
+]
+requiredSigningEnv.each { key ->
+  if (!System.getenv(key)) {
+    throw new GradleException("Missing Android release signing variable: " + key)
+  }
+}
+def releaseStore = file(System.getenv("PIA_ANDROID_KEYSTORE_PATH"))
+if (!releaseStore.isFile()) {
+  throw new GradleException("Android release keystore file does not exist")
+}
+android {
+  signingConfigs {
+    create("piaRelease") {
+      storeFile releaseStore
+      storePassword System.getenv("PIA_ANDROID_STORE_PASSWORD")
+      keyAlias System.getenv("PIA_ANDROID_KEY_ALIAS")
+      keyPassword System.getenv("PIA_ANDROID_KEY_PASSWORD")
+    }
+  }
+  buildTypes {
+    release {
+      signingConfig signingConfigs.piaRelease
+    }
+  }
+}
