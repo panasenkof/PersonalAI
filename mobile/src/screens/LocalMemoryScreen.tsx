@@ -8,6 +8,7 @@ import {
 
 import { useAuth } from "../auth/AuthContext";
 import { MemoryConflictError } from "../local-memory/types";
+import { FloatingBrand } from "../components/FloatingBrand";
 import type { EntityRecord, ObservationRecord, RelationRecord, RevisionRecord } from "../local-memory/types";
 import { localMemoryRepository, SqliteMemoryRepository } from "../local-memory/repository";
 import { closeLocalMemory } from "../local-memory/storage";
@@ -242,7 +243,14 @@ export function LocalMemoryScreen() {
   return (
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: t.bg }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.page}>
-        <Text style={[styles.title, { color: t.text }]}>🔐 Локальная память</Text>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8,
+          backgroundColor: t.soft, borderRadius: 22, padding: 12 }}>
+          <FloatingBrand size={74} motion={false} />
+          <View style={{ flex: 1, gap: 7 }}>
+            <Text style={{ color: t.text, fontSize: 23, fontWeight: "800" }}>Моя память</Text>
+            <Text style={{ color: t.muted, lineHeight: 19, fontSize: 12 }}>Зашифрована и хранится только на телефоне</Text>
+          </View>
+        </View>
         <Text style={{ color: t.muted }}>
           Зашифрованные заметки, история правок, связи и резервные копии хранятся на этом устройстве и не синхронизируются с сервером. Для доступа требуется биометрия.
         </Text>
@@ -379,10 +387,10 @@ export function LocalMemoryScreen() {
 
 const styles = StyleSheet.create({
   page: { padding: 18, paddingBottom: 60, gap: 12 },
-  title: { fontSize: 22, fontWeight: "700" },
+  title: { fontSize: 26, fontWeight: "800" },
   heading: { fontSize: 18, fontWeight: "600", marginTop: 10 },
-  input: { borderRadius: 10, borderWidth: 1, padding: 12, minHeight: 48, fontSize: 16 },
-  button: { borderRadius: 10, minHeight: 48, justifyContent: "center", padding: 12 },
+  input: { borderRadius: 15, borderWidth: 1, padding: 13, minHeight: 50, fontSize: 16 },
+  button: { borderRadius: 15, minHeight: 50, justifyContent: "center", padding: 12 },
   white: { color: "#fff", textAlign: "center", fontWeight: "600" },
-  note: { borderWidth: 1, borderRadius: 10, padding: 12, gap: 6 },
+  note: { borderWidth: 1, borderRadius: 18, padding: 15, gap: 7 },
 });
