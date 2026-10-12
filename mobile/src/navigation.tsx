@@ -16,7 +16,7 @@ import { useTheme } from "./theme";
 
 export type RootStackParams = {
   Tabs: undefined;
-  Chat: { conversationId?: string; title?: string };
+  Chat: { conversationId?: string; title?: string; initialPrompt?: string };
   DirectAgentSettings: undefined;
 };
 const Stack = createNativeStackNavigator<RootStackParams>();
@@ -33,13 +33,13 @@ function Tabs() {
       tabBarActiveTintColor: t.accent,
       tabBarInactiveTintColor: t.muted,
       tabBarLabelStyle: { fontSize: 11, fontWeight: "600" },
-      tabBarStyle: { backgroundColor: t.panel, borderTopColor: t.line, height: 58, paddingBottom: 4 },
+      tabBarStyle: { backgroundColor: t.panel, borderTopColor: t.line, height: 64, paddingBottom: 7, elevation: 8 },
       headerStyle: { backgroundColor: t.panel },
       headerTintColor: t.text,
     }}>
       {!offlineMode && (
         <Tab.Screen name="ChatsTab" component={ChatsScreen}
-          options={{ title: "Чаты", tabBarIcon: tabIcon("▤") }} />
+          options={{ title: "Главная", tabBarIcon: tabIcon("⌂") }} />
       )}
       <Tab.Screen name="DirectAgent" component={DirectAgentScreen}
         options={{ title: "Ассистент", tabBarIcon: tabIcon("✦") }} />
