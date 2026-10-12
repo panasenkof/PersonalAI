@@ -207,6 +207,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # The branch may advance during Gradle compilation; never publish stale binaries.
+          current_main="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')"
+          if [ "$current_main" != "$TARGET_SHA" ]; then
+            echo "Main advanced while building; skip stale APK. The next green CI will trigger a fresh build."
+            exit 0
+          fi
           cat > "$RUNNER_TEMP/apk-notes.md" <<EOF
           Android test APK built from verified main commit ${TARGET_SHA}.
 
