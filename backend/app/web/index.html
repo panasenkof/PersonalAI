@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PIA Agent</title>
+<title>PersAI</title>
 <meta name="theme-color" content="#2458d3">
-<meta name="description" content="PIA Agent — ваши диалоги, документы и личная база знаний.">
+<meta name="description" content="PersAI — ваши диалоги, документы и личная база знаний.">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="manifest" href="manifest.webmanifest">
@@ -15,7 +15,7 @@
 <header>
   <button class="ghost mobile-only" id="btnChats" aria-controls="sidebar" aria-expanded="false">Чаты</button>
   <img src="favicon.svg" width="32" height="32" alt="">
-  <b>PIA Agent</b>
+  <b>PersAI</b>
   <span class="spacer"></span>
   <button class="ghost hidden" id="btnInstall">Установить</button>
   <a class="help-link" href="help.html" target="_blank" rel="noopener">Помощь</a>
@@ -84,7 +84,7 @@
     <p class="intro">Владелец сервера может настроить модель заранее. Если ответы не приходят, уточните адрес модели и ключ доступа. Облачный провайдер может взимать плату.</p>
     <div class="row"><label>Провайдер</label>
       <select id="sProvider"><option value="cloud">Облачный</option><option value="local">Локальный</option></select></div>
-    <div class="row"><label>Base URL (OpenAI-compatible)</label><input id="sBase" placeholder="https://api.openai.com/v1"></div>
+    <div class="row"><label>Base URL (OpenAI-совместимый API)</label><input id="sBase" placeholder="https://api.openai.com/v1"></div>
     <div class="row"><label>API-ключ (пусто = не менять)</label><input id="sKey" type="password" placeholder="sk-…"></div>
     <div class="row"><label>Модель</label><input id="sModel" placeholder="gpt-4o-mini"></div>
     <div class="row"><label for="sVision">Модель понимает изображения</label><input id="sVision" type="checkbox"></div>
