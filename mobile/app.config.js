@@ -8,7 +8,7 @@ module.exports = ({ config }) => {
     const url = new URL(endpoint);
     validEndpoint = url.protocol === 'https:' && !url.username && !url.password && !url.search && !url.hash && url.pathname === '/' && !['localhost','127.0.0.1','[::1]'].includes(url.hostname);
   } catch { /* show a useful error below */ }
-  if (release && !validEndpoint) {
+  if (release && (!androidCiRelease || Boolean(endpoint)) && !validEndpoint) {
     throw new Error('Set EXPO_PUBLIC_API_BASE to your production HTTPS server before building.');
   }
   if (release && (!process.env.PIA_ANDROID_PACKAGE || (!androidCiRelease && !process.env.PIA_IOS_BUNDLE_ID))) {
@@ -26,6 +26,6 @@ module.exports = ({ config }) => {
     ...(androidCiRelease && versionCode ? { version: `${config.version}-test.${versionCode}` } : {}),
     ios: { ...config.ios, ...(process.env.PIA_IOS_BUNDLE_ID ? { bundleIdentifier: process.env.PIA_IOS_BUNDLE_ID } : {}) },
     android: { ...config.android, ...(process.env.PIA_ANDROID_PACKAGE ? { package: process.env.PIA_ANDROID_PACKAGE } : {}), ...(versionCode ? { versionCode } : {}) },
-    extra: { ...config.extra, ...(endpoint ? { apiBase: endpoint } : {}), ...(process.env.PIA_ANDROID_BUILD_SHA ? { buildSha: process.env.PIA_ANDROID_BUILD_SHA } : {}) },
+    extra: { ...config.extra, ...(androidCiRelease && !endpoint ? { apiBase: "" } : {}), ...(endpoint ? { apiBase: endpoint } : {}), ...(process.env.PIA_ANDROID_BUILD_SHA ? { buildSha: process.env.PIA_ANDROID_BUILD_SHA } : {}) },
   };
 };

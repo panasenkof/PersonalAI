@@ -25,6 +25,10 @@
 | **Безопасность** | **2FA (TOTP + recovery-коды)**, **роли user/admin**, отзыв токенов (`token_version`, logout-all), **ротация JWT-секрета** (`JWT_SECRET_PREVIOUS`), шифрование at rest (ключи LLM, история, TOTP, джобы, файлы; ротация MultiFernet + `rekey`), **fail-closed в production** (слабые секреты и вебхуки без секрета → отказ), защита логина от перебора, path traversal, лимит загрузки, CORS — подробно в [docs/SECURITY.md](docs/SECURITY.md) |
 | **Evals** | Золотой набор (6 сценариев): `python -m evals.runner` — scripted LLM на каждый PR; **`--live` — реальная LLM, автозапуск в CI** (`evals-live.yml`: ночью, при изменении агента/промптов, вручную; N прогонов, порог pass-rate, отчёт в Job Summary) |
 
+## Мобильный ИИ без сервера
+
+Мобильное приложение умеет напрямую вызывать OpenAI Responses API с телефона, использовать веб-поиск (по отдельному разрешению), находить разрешённые заметки в локальной зашифрованной SQLCipher-памяти и предлагать новые заметки только после подтверждения. **Backend PersonalAI не обязателен** для этого режима; требуется собственный OpenAI API-ключ на телефоне. [Инструкция, ограничения и тесты](docs/MOBILE_DIRECT_AGENT.md).
+
 ## Тестовые APK Android
 
 Подписанные автономные Android-сборки автоматически публикуются после зелёного CI при изменениях mobile: [GitHub Releases](https://github.com/panasenkof/PersonalAI/releases). Для однократной настройки ключа подписи и адреса сервера см. [docs/ANDROID_TEST_APK.md](docs/ANDROID_TEST_APK.md). До настройки Secrets/Variables первый выпуск ещё не состоится.

@@ -53,6 +53,9 @@ test("Android test builds require HTTPS and preserve a user-selected native pack
     process.env.PIA_ANDROID_VERSION_CODE = "1101";
     process.env.PIA_ANDROID_BUILD_SHA = "a".repeat(40);
     delete process.env.EXPO_PUBLIC_API_BASE;
+    const withoutServer = buildAppConfig({ config });
+    assert.equal(withoutServer.extra.apiBase, "");
+    process.env.EXPO_PUBLIC_API_BASE = "http://example.test";
     assert.throws(() => buildAppConfig({ config }), /HTTPS/);
     process.env.EXPO_PUBLIC_API_BASE = "https://api.example.test";
     const built = buildAppConfig({ config });
