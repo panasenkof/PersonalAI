@@ -237,3 +237,23 @@ test("Brave search never runs when the web switch is off", async () => {
   expect(response).toHaveBeenCalledTimes(1);
   expect(response.mock.calls[0][0]).toContain("/chat/completions");
 });
+
+test("keyless local OpenAI-compatible model works without Authorization header", async () => {
+  const response = jest.fn().mockResolvedValue({
+    ok: true, status: 200,
+    json: async () => ({ choices: [{ message: { role: "assistant", content: "Локально" } }] }),
+  });
+  const result = await start({
+    provider: "openai-compatible", baseUrl: "http://192.168.1.20:11434/v1",
+    apiKey: "", model: "qwen3:8b",
+  }, response);
+  expect(result.text).toBe("Локально");
+  expect(response.mock.calls[0][0]).toBe("http://192.168.1.20:11434/v1/chat/completions");
+  expect(response.mock.calls[0][1].headers.Authorization).toBeUndefined();
+});
+test("public HTTPS model server never silently sends an anonymous request", async () => {
+  const response = jest.fn();
+  await expect(start({ provider: "openai-compatible", baseUrl: "https://public.example/v1",
+    apiKey: "" }, response)).rejects.toThrow("API-ключ");
+  expect(response).not.toHaveBeenCalled();
+});
