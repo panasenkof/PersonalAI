@@ -1,16 +1,23 @@
-// npm dependencies are intentionally kept out of the runtime application.
-// Run with NODE_PATH pointing to a directory containing sharp (0.34+).
+// Rebuild platform icons from the selected PersAI light mark.
+// Install sharp >=0.34 locally or supply NODE_PATH pointing to its installation.
 const fs = require('node:fs');
 const path = require('node:path');
 const sharp = require('sharp');
 const root = path.resolve(__dirname, '..');
-const source = fs.readFileSync(path.join(root, 'brand/icon.svg'));
+const source = fs.readFileSync(path.join(root, 'brand/persai-approved-light.png'));
 (async () => {
-  for (const [file, size] of [['mobile/assets/icon.png',1024],['backend/app/web/icon-192.png',192],['backend/app/web/icon-512.png',512],['backend/app/web/apple-touch-icon.png',180]]) {
-    await sharp(source).resize(size,size).png().toFile(path.join(root,file));
+  for (const [file, size] of [
+    ['mobile/assets/icon.png', 1024],
+    ['backend/app/web/icon-192.png', 192],
+    ['backend/app/web/icon-512.png', 512],
+    ['backend/app/web/apple-touch-icon.png', 180],
+  ]) {
+    await sharp(source).resize(size, size).png().toFile(path.join(root, file));
   }
-  // Foreground fits Android's central 66% safe zone, with transparent surroundings.
-  const foreground = source.toString().replace('<rect width="1024" height="1024" fill="#2458d3"/>','');
-  await sharp(Buffer.from(foreground)).png().toFile(path.join(root,'mobile/assets/adaptive-icon.png'));
-  await sharp(Buffer.from(foreground)).resize(256,256).png().toFile(path.join(root,'mobile/assets/splash.png'));
-})();
+  // Adaptive icon's foreground should remain inside Android's central safe zone.
+  const foreground = await sharp(source).resize(674, 674).png().toBuffer();
+  await sharp(foreground).extend({ top: 175, bottom: 175, left: 175, right: 175,
+    background: { r: 0, g: 0, b: 0, alpha: 0 } })
+    .png().toFile(path.join(root, 'mobile/assets/adaptive-icon.png'));
+  await sharp(source).resize(256, 256).png().toFile(path.join(root, 'mobile/assets/splash.png'));
+})().catch(err => { console.error(err); process.exitCode = 1; });
