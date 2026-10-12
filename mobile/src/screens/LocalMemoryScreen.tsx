@@ -11,6 +11,7 @@ import { MemoryConflictError } from "../local-memory/types";
 import type { EntityRecord, ObservationRecord, RelationRecord, RevisionRecord } from "../local-memory/types";
 import { localMemoryRepository, SqliteMemoryRepository } from "../local-memory/repository";
 import { closeLocalMemory } from "../local-memory/storage";
+import { shouldLockLocalMemory } from "../local-memory/lifecycle";
 import { createRecoveryCode, shareEncryptedBackup, restoreEncryptedBackup } from "../local-memory/backup";
 import { useTheme } from "../theme";
 
@@ -78,7 +79,7 @@ export function LocalMemoryScreen() {
       // A native biometric sheet commonly emits blur/focus (and sometimes inactive).
       // Closing the SQLCipher connection in that moment causes a second auth prompt
       // and can race with the first unlock. Only actual backgrounding locks memory.
-      if (state === "background") lock();
+      if (shouldLockLocalMemory(state)) lock();
       else if (state === "active") unlock();
     });
     return () => { subscribed = false; app.remove(); };
