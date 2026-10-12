@@ -1,6 +1,6 @@
 import type { DirectAgentOptions, DirectResult } from "./engine";
 import type { DirectAgentSettings } from "./settings";
-import { validateBaseUrl, validateModel } from "./settings";
+import { anonymousLocalAllowed, validateBaseUrl, validateModel } from "./settings";
 
 type SearchResult = { title?: string; url?: string; description?: string };
 type WebContext = { context: string; sources: string[] };
@@ -95,7 +95,7 @@ function conversation(options: DirectAgentOptions, search: WebContext) {
 
 export async function runCompatibleAgent(options: DirectAgentOptions): Promise<DirectResult> {
   const { settings, signal } = options;
-  if (!settings.apiKey || !settings.model) throw new Error("Сначала укажите API-ключ и модель");
+  if (!settings.model || (!settings.apiKey && !anonymousLocalAllowed(settings))) throw new Error("Сначала укажите API-ключ и модель");
   if (!options.prompt.trim()) throw new Error("Введите вопрос");
   const transport = options.transport || fetch;
   const endpoint = apiEndpoint(settings);
@@ -129,7 +129,7 @@ export async function runCompatibleAgent(options: DirectAgentOptions): Promise<D
       method: "POST",
       headers: anthropic
         ? { "Content-Type": "application/json", "x-api-key": settings.apiKey, "anthropic-version": "2023-06-01" }
-        : { "Content-Type": "application/json", Authorization: "Bearer " + settings.apiKey },
+        : { "Content-Type": "application/json", ...(settings.apiKey ? { Authorization: "Bearer " + settings.apiKey } : {}) },
       body: JSON.stringify(payload),
       signal,
     });
