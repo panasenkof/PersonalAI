@@ -1,4 +1,6 @@
-import { useFocusEffect } from "@react-navigation/native";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import type { RootStackParams } from "../navigation";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator, AppState, FlatList, KeyboardAvoidingView, Linking,
@@ -25,6 +27,7 @@ export function DirectAgentScreen() {
   const { offlineMode, me } = useAuth();
   const profile = offlineMode ? "guest" : me?.id;
   const t = useTheme();
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParams>>();
   const insets = useSafeAreaInsets();
   const [settings, setSettings] = useState<DirectAgentSettings | null>(null);
   const [rows, setRows] = useState<Bubble[]>([]);
@@ -138,12 +141,19 @@ export function DirectAgentScreen() {
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: t.bg }}
       behavior={Platform.OS === "ios" ? "padding" : undefined}>
       <View style={{ padding: 12, backgroundColor: t.panel, borderBottomWidth: 1, borderColor: t.line }}>
-        <Text style={{ color: t.text, fontWeight: "700" }}>ИИ на телефоне · OpenAI</Text>
+        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+          <Text style={{ color: t.text, fontSize: 18, fontWeight: "700" }}>PersAI · Ассистент</Text>
+          <Pressable accessibilityRole="button" accessibilityLabel="Настроить подключение ИИ"
+            onPress={() => navigation.navigate("DirectAgentSettings")}
+            style={{ paddingVertical: 8, paddingHorizontal: 12, borderRadius: 10, backgroundColor: t.bg }}>
+            <Text style={{ color: t.accent, fontWeight: "600" }}>Настроить</Text>
+          </Pressable>
+        </View>
         <Text style={{ color: t.muted, fontSize: 12 }}>
-          Без PersonalAI Backend · веб: {settings?.allowWeb ? "вкл." : "выкл."} · память: {settings?.allowMemory ? "разрешена" : "закрыта"}
+          {settings?.provider === "anthropic" ? "Anthropic Messages" : settings?.provider === "openai-compatible" ? "OpenAI Chat Completions" : "OpenAI Responses"} · веб: {settings?.allowWeb ? "вкл." : "выкл."} · память: {settings?.allowMemory ? "разрешена" : "закрыта"}
         </Text>
         {!settings?.apiKey && <Text style={{ color: t.err, marginTop: 5 }}>
-          Добавьте API-ключ OpenAI во вкладке «ИИ настройки».
+          Добавьте API-ключ и модель в «Настроить».
         </Text>}
       </View>
       <FlatList
