@@ -1,8 +1,9 @@
 import React, { useState } from "react";
-import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View, ScrollView, Image } from "react-native";
+import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { authError } from "../ux";
+import { FloatingBrand } from "../components/FloatingBrand";
 import { AccessScreen } from "./AccessScreen";
 import { ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
@@ -53,18 +54,21 @@ export function LoginScreen() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.wrap}>
         <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
-        <Image source={require("../../assets/icon.png")} style={{ width: 72, height: 72, borderRadius: 20, alignSelf: "center" }} accessibilityLabel="Иконка PIA Agent" />
-        <Text style={[styles.title, { color: t.text }]}>PIA Agent</Text>
-        <Text style={{ color: t.muted, textAlign: "center", marginBottom: 16 }}>Ваши диалоги, документы и знания — в одном месте. Начните с простого вопроса.</Text>
-        <Pressable accessibilityRole="button" accessibilityLabel="Открыть локальную память"
-          style={[styles.btn, { backgroundColor: t.accent }]}
-          onPress={() => void openOffline().catch(e => setError(authError(String(e.message))))}>
-          <Text style={styles.btnText}>🔐 Моя память — без сервера</Text>
-        </Pressable>
-        <Text style={{ color: t.muted, textAlign: "center", fontSize: 13 }}>
-          Локальные заметки хранятся только на устройстве в зашифрованной базе.
-          Для этого режима нужна сборка приложения с SQLCipher (не Expo Go).
-        </Text>
+        <View style={{ alignItems: "center", paddingTop: 12, marginBottom: 8 }}>
+          <FloatingBrand size={150} />
+          <Text style={[styles.title, { color: t.text }]}>Pers<Text style={{ color: t.violet }}>AI</Text></Text>
+          <Text style={{ color: t.muted, textAlign: "center", fontSize: 15, lineHeight: 23, marginTop: 6 }}>
+            Ваш личный ИИ-ассистент{"\n"}с памятью и свободой выбора
+          </Text>
+        </View>
+        <View style={[styles.infoCard, { backgroundColor: t.soft, borderColor: t.line }]}>
+          <Text style={{ color: t.accent, fontWeight: "700" }}>✦  Ваши идеи и знания — рядом</Text>
+          <Text style={{ color: t.muted, fontSize: 13, lineHeight: 20 }}>
+            Общайтесь, планируйте, сохраняйте важное. Вы решаете, какой модели доверять.
+          </Text>
+        </View>
+        
+        <Text style={{ color: t.text, fontSize: 18, fontWeight: "700", marginTop: 8 }}>Войти в PersAI</Text>
         <TextInput style={input} placeholder="Email" placeholderTextColor={t.muted} autoCapitalize="none" accessibilityLabel="Email" autoComplete="email" keyboardType="email-address" value={email} onChangeText={setEmail} />
         <TextInput style={input} placeholder="Пароль (минимум 8 символов)" placeholderTextColor={t.muted} accessibilityLabel="Пароль" autoComplete="password" secureTextEntry={!showPassword} value={password} onChangeText={setPassword} />
         <Pressable accessibilityRole="button" onPress={() => setShowPassword(v => !v)} style={{ minHeight: 44, justifyContent: "center" }}><Text style={{ color: t.accent }}>{showPassword ? "Скрыть пароль" : "Показать пароль"}</Text></Pressable>
@@ -78,7 +82,16 @@ export function LoginScreen() {
         <Pressable disabled={busy} style={[styles.btn, { borderColor: t.line, borderWidth: 1 }]} onPress={() => submit("register")}>
           <Text style={{ color: t.text, fontWeight: "600" }}>Зарегистрироваться</Text>
         </Pressable>
-        <Pressable accessibilityRole="button" style={{ minHeight: 44, justifyContent: "center" }} onPress={async () => { try { if (server.trim() !== apiBase) await setApiBase(server); setShowAccess(true); } catch(e) { setError(authError((e as Error).message)); } }}><Text style={{ color: t.accent }}>Забыли пароль? Подтвердить email</Text></Pressable>
+        <Pressable accessibilityRole="button" style={{ minHeight: 44, justifyContent: "center" }} onPress={async () => { try { if (server.trim() !== apiBase) await setApiBase(server); setShowAccess(true); } catch(e) { setError(authError((e as Error).message)); } }}><Text style={{ color: t.accent, textAlign: "center" }}>Забыли пароль? Подтвердить email</Text></Pressable>
+        <View style={[styles.infoCard, { borderColor: t.line, backgroundColor: t.panel, marginTop: 8 }]}>
+          <Text style={{ color: t.text, fontWeight: "700" }}>◈  Использовать без сервера</Text>
+          <Text style={{ color: t.muted, fontSize: 13, lineHeight: 20 }}>Локальная зашифрованная память и прямое подключение к LLM. Нужна сборка с SQLCipher.</Text>
+          <Pressable accessibilityRole="button" accessibilityLabel="Открыть локальную память"
+            style={[styles.btn, { backgroundColor: t.soft, marginTop: 7 }]}
+            onPress={() => void openOffline().catch(e => setError(authError(String(e.message))))}>
+            <Text style={{ color: t.accent, fontWeight: "700" }}>Продолжить на устройстве  →</Text>
+          </Pressable>
+        </View>
         <Text style={{ color: t.muted, fontSize: 13 }}>Для первого входа нужен адрес сервера от владельца вашей установки. Пароль хранится на сервере; токены входа — в защищённом хранилище устройства.</Text>
         <Pressable style={{ minHeight: 44, justifyContent: "center" }} onPress={() => setShowServer((v) => !v)}>
           <Text style={{ color: t.muted, textAlign: "center" }}>Сервер: {apiBase}</Text>
@@ -97,9 +110,10 @@ export function LoginScreen() {
 
 const styles = StyleSheet.create({
   wrap: { flex: 1 },
-  content: { flexGrow: 1, justifyContent: "center", padding: 24, gap: 10 },
-  title: { fontSize: 28, fontWeight: "700", textAlign: "center", marginBottom: 12 },
-  input: { borderWidth: 1, borderRadius: 10, padding: 12, fontSize: 16 },
-  btn: { borderRadius: 10, padding: 13, alignItems: "center" },
+  content: { flexGrow: 1, justifyContent: "center", padding: 22, paddingBottom: 42, gap: 12 },
+  title: { fontSize: 36, fontWeight: "800", textAlign: "center", letterSpacing: -1.1 },
+  input: { borderWidth: 1, borderRadius: 15, padding: 14, fontSize: 16, minHeight: 52 },
+  infoCard: { borderWidth: 1, borderRadius: 22, padding: 17, gap: 9 },
+  btn: { borderRadius: 15, minHeight: 50, padding: 13, alignItems: "center", justifyContent: "center" },
   btnText: { color: "#fff", fontWeight: "600", fontSize: 16 },
 });

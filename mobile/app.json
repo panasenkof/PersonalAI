@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "PIA Agent",
+    "name": "PersAI",
     "slug": "pia-agent",
     "version": "0.3.0",
     "orientation": "portrait",
@@ -33,7 +33,7 @@
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#2458d3"
+      "backgroundColor": "#F8FAFF"
     },
     "ios": {
       "supportsTablet": true

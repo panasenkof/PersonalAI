@@ -30,7 +30,7 @@ export function ChatScreen({ route, navigation }: NativeStackScreenProps<RootSta
   const insets = useSafeAreaInsets();
   const [conversationId, setConversationId] = useState<string | null>(route.params?.conversationId ?? null);
   const [rows, setRows] = useState<Row[]>([]);
-  const [text, setText] = useState("");
+  const [text, setText] = useState(route.params?.initialPrompt ?? "");
   const [attachment, setAttachment] = useState<Attachment | null>(null);
   const [collections, setCollections] = useState<PrivacyCollection[]>([]);
   const [blobCollection, setBlobCollection] = useState("");

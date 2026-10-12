@@ -1,4 +1,6 @@
-import { useFocusEffect } from "@react-navigation/native";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import type { RootStackParams } from "../navigation";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator, AppState, FlatList, KeyboardAvoidingView, Linking,
@@ -8,10 +10,12 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useAuth } from "../auth/AuthContext";
 import { runDirectAgent } from "../direct-agent/engine";
+import { FloatingBrand } from "../components/FloatingBrand";
+import { shouldLockLocalMemory } from "../local-memory/lifecycle";
 import type { AgentTurn } from "../direct-agent/engine";
 import { searchApprovedNotes, saveApprovedNote } from "../direct-agent/memory";
 import type { NoteProposal } from "../direct-agent/memory";
-import { loadDirectSettings } from "../direct-agent/settings";
+import { anonymousLocalAllowed, loadDirectSettings } from "../direct-agent/settings";
 import type { DirectAgentSettings } from "../direct-agent/settings";
 import { closeLocalMemory } from "../local-memory/storage";
 import { useTheme } from "../theme";
@@ -25,6 +29,7 @@ export function DirectAgentScreen() {
   const { offlineMode, me } = useAuth();
   const profile = offlineMode ? "guest" : me?.id;
   const t = useTheme();
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParams>>();
   const insets = useSafeAreaInsets();
   const [settings, setSettings] = useState<DirectAgentSettings | null>(null);
   const [rows, setRows] = useState<Bubble[]>([]);
@@ -39,7 +44,7 @@ export function DirectAgentScreen() {
 
   useEffect(() => {
     const sub = AppState.addEventListener("change", state => {
-      if (state !== "active") {
+      if (shouldLockLocalMemory(state)) {
         controller.current?.abort();
         // Never leave sensitive answers visible in Android/iOS recent-app previews.
         setRows([]);
@@ -133,17 +138,35 @@ export function DirectAgentScreen() {
     }
   }
 
+  const canSend = Boolean(settings && (settings.apiKey || anonymousLocalAllowed(settings)));
   const action = { minHeight: 44, justifyContent: "center" as const, paddingHorizontal: 12 };
   return (
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: t.bg }}
       behavior={Platform.OS === "ios" ? "padding" : undefined}>
-      <View style={{ padding: 12, backgroundColor: t.panel, borderBottomWidth: 1, borderColor: t.line }}>
-        <Text style={{ color: t.text, fontWeight: "700" }}>ИИ на телефоне · OpenAI</Text>
-        <Text style={{ color: t.muted, fontSize: 12 }}>
-          Без PersonalAI Backend · веб: {settings?.allowWeb ? "вкл." : "выкл."} · память: {settings?.allowMemory ? "разрешена" : "закрыта"}
-        </Text>
-        {!settings?.apiKey && <Text style={{ color: t.err, marginTop: 5 }}>
-          Добавьте API-ключ OpenAI во вкладке «ИИ настройки».
+      <View style={{ padding: 16, backgroundColor: t.panel, borderBottomWidth: 1, borderColor: t.line, gap: 7 }}>
+        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+          <Text style={{ color: t.text, fontSize: 18, fontWeight: "700" }}>PersAI · Ассистент</Text>
+          <Pressable accessibilityRole="button" accessibilityLabel="Настроить подключение ИИ"
+            onPress={() => navigation.navigate("DirectAgentSettings")}
+            style={{ paddingVertical: 10, paddingHorizontal: 14, borderRadius: 15, backgroundColor: t.soft }}>
+            <Text style={{ color: t.accent, fontWeight: "600" }}>Настроить</Text>
+          </Pressable>
+        </View>
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 7 }}>
+          <View style={{ backgroundColor: t.soft, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 99 }}>
+            <Text style={{ color: t.muted, fontSize: 11 }}>
+              ◉ {settings?.provider === "anthropic" ? "Anthropic Messages" : settings?.provider === "openai-compatible" ? "Chat Completions" : "OpenAI Responses"}
+            </Text>
+          </View>
+          <View style={{ backgroundColor: t.soft, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 99 }}>
+            <Text style={{ color: t.muted, fontSize: 11 }}>◎ Веб {settings?.allowWeb ? "вкл." : "выкл."}</Text>
+          </View>
+          <View style={{ backgroundColor: t.soft, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 99 }}>
+            <Text style={{ color: t.muted, fontSize: 11 }}>◈ Память {settings?.allowMemory ? "разрешена" : "закрыта"}</Text>
+          </View>
+        </View>
+        {!canSend && <Text style={{ color: t.err, marginTop: 5 }}>
+          Добавьте API-ключ и модель в «Настроить».
         </Text>}
       </View>
       <FlatList
@@ -151,18 +174,41 @@ export function DirectAgentScreen() {
         data={rows}
         keyExtractor={item => String(item.id)}
         onContentSizeChange={() => list.current?.scrollToEnd({ animated: true })}
-        contentContainerStyle={{ padding: 12, gap: 10 }}
+        contentContainerStyle={{ padding: 14, gap: 12, flexGrow: 1 }}
         ListEmptyComponent={
-          <Text style={{ color: t.muted, textAlign: "center", marginTop: 24 }}>
-            Задайте вопрос, попросите найти информацию в интернете или вспомнить заметку.
-            Для чтения памяти требуется отдельное разрешение в настройках.
-            Диалог хранится только пока открыт этот экран.
-          </Text>
+          <View style={{ flex: 1, justifyContent: "center", alignItems: "center",
+            paddingVertical: 18, gap: 13 }}>
+            <FloatingBrand size={142} />
+            <Text style={{ color: t.text, fontSize: 26, fontWeight: "800",
+              textAlign: "center", marginTop: -5 }}>Чем могу помочь?</Text>
+            <Text style={{ color: t.muted, textAlign: "center", lineHeight: 22, maxWidth: 320 }}>
+              Спросите о чём угодно. Я могу использовать интернет и разрешённые заметки.
+            </Text>
+            <View style={{ width: "100%", gap: 9, marginTop: 13 }}>
+              {[
+                { label: "✦  Составить план", prompt: "Помоги составить план на неделю" },
+                { label: "◎  Найти свежую информацию", prompt: "Найди свежую информацию по интересующей меня теме" },
+                { label: "◈  Вспомнить важное", prompt: "Что ты помнишь обо мне?" },
+              ].map(item => (
+                <Pressable key={item.label} accessibilityRole="button"
+                  accessibilityLabel={item.label}
+                  onPress={() => setQuestion(item.prompt)}
+                  style={{ backgroundColor: t.panel, borderColor: t.line, borderWidth: 1,
+                    borderRadius: 16, padding: 16, minHeight: 52 }}>
+                  <Text style={{ color: t.text, fontWeight: "600" }}>{item.label}  →</Text>
+                </Pressable>
+              ))}
+            </View>
+            <Text style={{ color: t.muted, fontSize: 12, textAlign: "center" }}>
+              Диалог не сохраняется после закрытия экрана.
+            </Text>
+          </View>
         }
         renderItem={({ item }) => (
           <View style={{
             backgroundColor: item.role === "user" ? t.userBubble : t.panel,
-            borderRadius: 12, padding: 12, alignSelf: item.role === "user" ? "flex-end" : "stretch",
+            borderRadius: 20, padding: 15, borderWidth: item.role === "user" ? 0 : 1,
+            borderColor: t.line, alignSelf: item.role === "user" ? "flex-end" : "stretch",
           }}>
             <Text selectable style={{ color: item.role === "user" ? t.userText : t.text }}>{item.text}</Text>
             {item.sources?.length ? <View style={{ marginTop: 10, gap: 4 }}>
@@ -207,16 +253,18 @@ export function DirectAgentScreen() {
           multiline
           value={question}
           onChangeText={setQuestion}
-          style={{ flex: 1, borderWidth: 1, borderColor: t.line, borderRadius: 15, padding: 10,
+          style={{ flex: 1, borderWidth: 1, borderColor: t.line, borderRadius: 19, padding: 12, backgroundColor: t.soft,
             maxHeight: 120, minHeight: 44, color: t.text }}
         />
         {busy ? <Pressable accessibilityRole="button" accessibilityLabel="Остановить запрос"
           style={action} onPress={() => controller.current?.abort()}>
           <Text style={{ color: t.err }}>Стоп</Text>
         </Pressable> : <Pressable accessibilityRole="button" accessibilityLabel="Отправить запрос"
-          disabled={!settings?.apiKey || !question.trim()}
-          style={action} onPress={() => void send()}>
-          <Text style={{ color: settings?.apiKey && question.trim() ? t.accent : t.muted }}>Отправить</Text>
+          disabled={!canSend || !question.trim()}
+          style={{ minHeight: 46, minWidth: 46, alignItems: "center", justifyContent: "center",
+            backgroundColor: canSend && question.trim() ? t.accent : t.soft, borderRadius: 16 }}
+          onPress={() => void send()}>
+          <Text style={{ color: canSend && question.trim() ? "#FFFFFF" : t.muted, fontSize: 23 }}>↑</Text>
         </Pressable>}
       </View>
     </KeyboardAvoidingView>

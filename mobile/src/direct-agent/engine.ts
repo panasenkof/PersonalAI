@@ -1,4 +1,6 @@
 import type { DirectAgentSettings } from "./settings";
+import { anonymousLocalAllowed, validateBaseUrl, validateModel } from "./settings";
+import { fetchWebContext, runCompatibleAgent } from "./compatible";
 import type { MemorySnippet, NoteProposal } from "./memory";
 
 export type AgentTurn = { role: "user" | "assistant"; content: string };
@@ -32,7 +34,7 @@ export const MAX_DIRECT_REQUESTS = 4;
 export const MAX_DIRECT_REPLY_TOKENS = 1200;
 const ENDPOINT = "https://api.openai.com/v1/responses";
 const SYSTEM_PROMPT =
-  "Ты персональный помощник PersonalAI, работающий на телефоне пользователя. " +
+  "Ты персональный помощник PersAI, работающий на телефоне пользователя. " +
   "Для вопросов о предпочтениях и заметках используй search_local_notes, если он доступен. " +
   "Никогда не выдумывай содержимое памяти. Если нужно что-либо запомнить, вызови draft_local_note; " +
   "запись будет сохранена только после подтверждения пользователя. " +
@@ -106,35 +108,38 @@ function toolArguments(value: unknown): Record<string, unknown> {
 }
 
 /** Stateless Responses API: no PersonalAI backend, no remote conversation store.
- * All outbound requests are to OpenAI only; tool handlers remain on-device.
+ * Native OpenAI requests use Responses; compatible endpoints use their own protocol.
  */
 export async function runDirectAgent(options: DirectAgentOptions): Promise<DirectResult> {
   const { settings, lookup, propose, signal, status } = options;
-  if (!settings.apiKey || !settings.model) throw new Error("Сначала настройте ключ OpenAI и модель");
+  if (!settings.model || (!settings.apiKey && !anonymousLocalAllowed(settings))) throw new Error("Сначала настройте API-ключ и модель");
+  if (settings.provider !== "openai") return runCompatibleAgent(options);
   const prompt = options.prompt.trim().slice(0, 4000);
   if (!prompt) throw new Error("Введите вопрос");
+  const transport = options.transport || fetch;
+  const web = settings.allowWeb && settings.webSearchKey
+    ? await fetchWebContext(prompt, settings, transport, signal) : { context: "", sources: [] as string[] };
   const input: unknown[] = [
-    { role: "system", content: SYSTEM_PROMPT },
+    { role: "system", content: SYSTEM_PROMPT + (web.context ? "\n" + web.context : "") },
     ...options.history.slice(-8).map(h => ({ role: h.role, content: usableString(h.content, 2000) })),
     { role: "user", content: prompt },
   ];
   const tools: object[] = [];
   if (settings.allowMemory) tools.push(...LOCAL_TOOLS);
-  if (settings.allowWeb) tools.push({ type: "web_search", search_context_size: "low", external_web_access: true });
-  const transport = options.transport || fetch;
-  const collected = new Set<string>();
+  if (settings.allowWeb && !settings.webSearchKey) tools.push({ type: "web_search", search_context_size: "low", external_web_access: true });
+  const collected = new Set<string>(web.sources);
 
   for (let attempt = 1; attempt <= MAX_DIRECT_REQUESTS; attempt++) {
     if (signal?.aborted) throw new Error("Запрос остановлен");
     status?.("Запрос к LLM (" + attempt + "/" + MAX_DIRECT_REQUESTS + ")");
-    const response = await transport(ENDPOINT, {
+    const response = await transport(validateBaseUrl(settings.baseUrl || "https://api.openai.com/v1", "openai") + "/responses", {
       method: "POST",
       headers: {
         Authorization: "Bearer " + settings.apiKey,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: settings.model, input, tools, store: false,
+        model: validateModel(settings.model), input, tools, store: false,
         include: ["reasoning.encrypted_content", "web_search_call.action.sources"],
         max_output_tokens: MAX_DIRECT_REPLY_TOKENS,
       }),
@@ -142,7 +147,7 @@ export async function runDirectAgent(options: DirectAgentOptions): Promise<Direc
     });
     if (!response.ok) {
       // Never include third-party error response bodies: they may echo API keys.
-      throw new Error("OpenAI вернул HTTP " + response.status + ". Проверьте API-ключ, модель и баланс.");
+      throw new Error("Провайдер LLM вернул HTTP " + response.status + ". Проверьте API-ключ, модель и баланс.");
     }
     const data = await response.json() as Response;
     if (data.error || data.status === "failed") throw new Error("Модель не смогла обработать запрос");

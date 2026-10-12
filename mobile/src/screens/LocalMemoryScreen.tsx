@@ -8,9 +8,11 @@ import {
 
 import { useAuth } from "../auth/AuthContext";
 import { MemoryConflictError } from "../local-memory/types";
+import { FloatingBrand } from "../components/FloatingBrand";
 import type { EntityRecord, ObservationRecord, RelationRecord, RevisionRecord } from "../local-memory/types";
 import { localMemoryRepository, SqliteMemoryRepository } from "../local-memory/repository";
 import { closeLocalMemory } from "../local-memory/storage";
+import { shouldLockLocalMemory } from "../local-memory/lifecycle";
 import { createRecoveryCode, shareEncryptedBackup, restoreEncryptedBackup } from "../local-memory/backup";
 import { useTheme } from "../theme";
 
@@ -41,10 +43,13 @@ export function LocalMemoryScreen() {
   const [screenLocked, setScreenLocked] = useState(false);
   const [unlockEpoch, setUnlockEpoch] = useState(0);
   const locking = useRef<Promise<void>>(Promise.resolve());
+  const appLocked = useRef(false);
 
   useEffect(() => {
     let subscribed = true;
     function lock() {
+      if (appLocked.current) return;
+      appLocked.current = true;
       // React state is cleared immediately, before asynchronous SQLite close.
       setScreenLocked(true);
       setRepo(null);
@@ -62,21 +67,23 @@ export function LocalMemoryScreen() {
       locking.current = closeLocalMemory();
     }
     function unlock() {
+      if (!appLocked.current) return;
       void locking.current.then(() => {
         if (subscribed && AppState.currentState === "active") {
+          appLocked.current = false;
           setScreenLocked(false);
           setUnlockEpoch(value => value + 1);
         }
       }).catch(() => setMessage("Не удалось безопасно закрыть память"));
     }
     const app = AppState.addEventListener("change", state => {
-      if (state === "active") unlock();
-      else lock();
+      // A native biometric sheet commonly emits blur/focus (and sometimes inactive).
+      // Closing the SQLCipher connection in that moment causes a second auth prompt
+      // and can race with the first unlock. Only actual backgrounding locks memory.
+      if (shouldLockLocalMemory(state)) lock();
+      else if (state === "active") unlock();
     });
-    // Android may blur while the process remains technically active.
-    const blurred = AppState.addEventListener("blur", lock);
-    const focused = AppState.addEventListener("focus", unlock);
-    return () => { subscribed = false; app.remove(); blurred.remove(); focused.remove(); };
+    return () => { subscribed = false; app.remove(); };
   }, []);
 
   const refresh = useCallback(async (db: SqliteMemoryRepository, term: string, entityId?: string) => {
@@ -121,7 +128,11 @@ export function LocalMemoryScreen() {
         ? "Для локального шифрования требуется отдельная сборка с SQLCipher. Expo Go не поддерживается."
         : e.message === "local_memory_biometric_required"
           ? "Для защищённой локальной памяти необходимо настроить биометрию телефона."
-          : "Не удалось разблокировать локальную память: " + e.message);
+          : /cancel|user_cancel/i.test(e.message)
+            ? "Разблокировка отменена. Чтобы повторить, откройте раздел ещё раз."
+            : e.message === "local_memory_unlock_failed"
+              ? "Не удалось открыть ключ памяти. Если биометрия была изменена, используйте резервную копию."
+              : "Не удалось разблокировать локальную память: " + e.message);
     }).finally(() => { if (alive) setLoading(false); });
     return () => {
       alive = false;
@@ -232,9 +243,16 @@ export function LocalMemoryScreen() {
   return (
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: t.bg }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.page}>
-        <Text style={[styles.title, { color: t.text }]}>🔐 Моя память на телефоне</Text>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8,
+          backgroundColor: t.soft, borderRadius: 22, padding: 12 }}>
+          <FloatingBrand size={74} motion={false} />
+          <View style={{ flex: 1, gap: 7 }}>
+            <Text style={{ color: t.text, fontSize: 23, fontWeight: "800" }}>Моя память</Text>
+            <Text style={{ color: t.muted, lineHeight: 19, fontSize: 12 }}>Зашифрована и хранится только на телефоне</Text>
+          </View>
+        </View>
         <Text style={{ color: t.muted }}>
-          Заметки, история правок и связи хранятся только здесь. С серверной базой не синхронизируются.
+          Зашифрованные заметки, история правок, связи и резервные копии хранятся на этом устройстве и не синхронизируются с сервером. Для доступа требуется биометрия.
         </Text>
         {offlineMode && (
           <Pressable accessibilityRole="button" accessibilityLabel="Вернуться к входу на сервер"
@@ -369,10 +387,10 @@ export function LocalMemoryScreen() {
 
 const styles = StyleSheet.create({
   page: { padding: 18, paddingBottom: 60, gap: 12 },
-  title: { fontSize: 22, fontWeight: "700" },
+  title: { fontSize: 26, fontWeight: "800" },
   heading: { fontSize: 18, fontWeight: "600", marginTop: 10 },
-  input: { borderRadius: 10, borderWidth: 1, padding: 12, minHeight: 48, fontSize: 16 },
-  button: { borderRadius: 10, minHeight: 48, justifyContent: "center", padding: 12 },
+  input: { borderRadius: 15, borderWidth: 1, padding: 13, minHeight: 50, fontSize: 16 },
+  button: { borderRadius: 15, minHeight: 50, justifyContent: "center", padding: 12 },
   white: { color: "#fff", textAlign: "center", fontWeight: "600" },
-  note: { borderWidth: 1, borderRadius: 10, padding: 12, gap: 6 },
+  note: { borderWidth: 1, borderRadius: 18, padding: 15, gap: 7 },
 });

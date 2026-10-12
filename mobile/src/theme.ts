@@ -1,16 +1,19 @@
 import { useColorScheme } from "react-native";
 
+/** PersAI tokens: calm Aurora surfaces and the turquoise / indigo / orchid mark. */
 const light = {
-  bg: "#f5f6f8", panel: "#ffffff", line: "#e2e5ea", text: "#15181e", muted: "#6b7280",
-  accent: "#2458d3", userBubble: "#2458d3", userText: "#ffffff", ok: "#1f9d63", err: "#d64545", warn: "#fff4d6",
+  bg: "#F8FAFF", panel: "#FFFFFF", line: "#E8EAF7", text: "#111C3D", muted: "#6D779D",
+  accent: "#5966F8", secondary: "#10CFE4", violet: "#BD59F2",
+  soft: "#F1F3FF", glow: "#C8CBFF", orbA: "#89E7FC", orbB: "#EAB3FF",
+  userBubble: "#655DEA", userText: "#FFFFFF", ok: "#159D80", err: "#D5456B", warn: "#FFF2DA",
 };
 const dark: typeof light = {
-  bg: "#0f1115", panel: "#171a21", line: "#262b36", text: "#e6e9ef", muted: "#8b93a5",
-  accent: "#4f8cff", userBubble: "#27406e", userText: "#ffffff", ok: "#3ecf8e", err: "#ff7b7b", warn: "#2a2412",
+  bg: "#0E1024", panel: "#191C39", line: "#32365A", text: "#F3F3FF", muted: "#ADB3D3",
+  accent: "#A49BFF", secondary: "#52DFEF", violet: "#E09DFF",
+  soft: "#252A4F", glow: "#584A9F", orbA: "#267AAE", orbB: "#81539F",
+  userBubble: "#4B428E", userText: "#FFFFFF", ok: "#4FCFB1", err: "#FF8EAD", warn: "#463D29",
 };
-
 export type Theme = typeof light;
-
 export function useTheme(): Theme {
   return useColorScheme() === "dark" ? dark : light;
 }

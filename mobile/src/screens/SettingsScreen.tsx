@@ -84,7 +84,7 @@ export function SettingsScreen() {
             <Text style={{ color: t.text }}>Локальный провайдер</Text>
             <Switch value={llm.provider_kind === "local"} onValueChange={(v) => setLlm({ ...llm, provider_kind: v ? "local" : "cloud" })} />
           </View>
-          <Text style={label}>Base URL (OpenAI-compatible)</Text>
+          <Text style={label}>Base URL (OpenAI-совместимый сервер)</Text>
           <TextInput style={input} autoCapitalize="none" value={llm.base_url} onChangeText={(v) => setLlm({ ...llm, base_url: v })} />
           <Text style={label}>API-ключ (пусто = не менять)</Text>
           <TextInput style={input} autoCapitalize="none" secureTextEntry value={apiKey} onChangeText={setApiKey} placeholder="sk-…" placeholderTextColor={t.muted} />
@@ -306,7 +306,7 @@ export function SettingsScreen() {
         { text: "Отмена", style: "cancel" }, { text: "Удалить навсегда", style: "destructive", onPress: () => guard(async () => { await api.deleteAccount(dataPassword, deleteEmail.trim(), dataOtp); await logout(); }) },
       ])}><Text style={styles.btnText}>Удалить аккаунт</Text></Pressable>
       <Text style={[styles.h, { color: t.text }]}>О сервисе и помощь</Text>
-      <Text selectable style={{ color: t.muted }}>PIA Agent {service?.version ?? "—"} · {service?.operator || "Оператор не указан"}</Text>
+      <Text selectable style={{ color: t.muted }}>PersAI {service?.version ?? "—"} · {service?.operator || "Оператор не указан"}</Text>
       <Text selectable style={{ color: t.muted }}>
         Приложение {Constants.expoConfig?.version ?? "—"} · коммит {String((Constants.expoConfig?.extra as { buildSha?: string } | undefined)?.buildSha || "—").slice(0, 7)}
       </Text>
@@ -334,7 +334,7 @@ const styles = StyleSheet.create({
   wrap: { padding: 16, gap: 8, paddingBottom: 48 },
   h: { fontSize: 18, fontWeight: "700", marginTop: 16 },
   row: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  input: { borderWidth: 1, borderRadius: 10, padding: 10, fontSize: 15 },
+  input: { borderWidth: 1, borderRadius: 16, padding: 10, fontSize: 15 },
   btn: { borderRadius: 10, padding: 12, alignItems: "center", marginTop: 6 },
   btnText: { color: "#fff", fontWeight: "600" },
   small: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 10, minHeight: 44 },
