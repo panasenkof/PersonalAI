@@ -92,7 +92,7 @@ def test_sse_rejects_anonymous(client: TestClient) -> None:
 def test_web_ui_served(client: TestClient) -> None:
     r = client.get("/app/", follow_redirects=True)
     assert r.status_code == 200
-    assert "PIA Agent" in r.text
+    assert "PersAI" in r.text
     r2 = client.get("/", follow_redirects=False)
     assert r2.status_code in (302, 307)
     assert r2.headers["location"] == "/app/"
