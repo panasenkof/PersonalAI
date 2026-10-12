@@ -87,12 +87,12 @@ export function DirectAgentSettingsScreen() {
 
   const fieldStyle = {
     borderWidth: 1, borderColor: t.line, padding: 12, minHeight: 48,
-    borderRadius: 12, color: t.text, backgroundColor: t.panel,
+    borderRadius: 16, color: t.text, backgroundColor: t.panel,
   };
   return (
     <ScrollView style={{ flex: 1, backgroundColor: t.bg }}
-      contentContainerStyle={{ padding: 16, paddingBottom: 48, gap: 14 }}>
-      <Text style={{ color: t.text, fontSize: 22, fontWeight: "700" }}>Подключение ИИ</Text>
+      contentContainerStyle={{ padding: 18, paddingBottom: 56, gap: 15 }}>
+      <Text style={{ color: t.text, fontSize: 27, fontWeight: "800" }}>Подключение ИИ</Text>
       <Text style={{ color: t.muted }}>
         PersAI обращается к выбранной модели напрямую с телефона, без сервера PersAI.
         Поддерживаются OpenAI Responses, OpenAI-совместимые Chat Completions и
@@ -108,7 +108,7 @@ export function DirectAgentSettingsScreen() {
                 ...p, provider: item.id, baseUrl: defaultBaseUrl(item.id),
                 model: item.id === "anthropic" ? "claude-sonnet-4-5" : "gpt-4.1-mini",
               }))}
-              style={{ padding: 12, borderRadius: 12, borderWidth: 1,
+              style={{ padding: 12, borderRadius: 17, borderWidth: 1,
                 borderColor: prefs.provider === item.id ? t.accent : t.line,
                 backgroundColor: t.panel }}>
               <Text style={{ color: t.text, fontWeight: prefs.provider === item.id ? "700" : "400" }}>
@@ -133,7 +133,7 @@ export function DirectAgentSettingsScreen() {
         <TextInput accessibilityLabel="Название модели" autoCapitalize="none" autoCorrect={false}
           value={prefs.model} onChangeText={model => setPrefs(p => ({ ...p, model }))}
           style={fieldStyle} />
-        <View style={{ backgroundColor: t.panel, borderRadius: 14, padding: 14, gap: 12 }}>
+        <View style={{ backgroundColor: t.soft, borderRadius: 20, padding: 16, gap: 14 }}>
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
             <Text style={{ color: t.text, flex: 1 }}>Разрешить поиск в интернете</Text>
             <Switch accessibilityLabel="Разрешить веб-поиск" value={prefs.allowWeb}
@@ -166,7 +166,7 @@ export function DirectAgentSettingsScreen() {
         </View>
         <Pressable accessibilityRole="button" disabled={busy || !profile} onPress={() => void save()}
           style={{ minHeight: 50, justifyContent: "center", alignItems: "center",
-            backgroundColor: t.accent, borderRadius: 12 }}>
+            backgroundColor: t.accent, borderRadius: 17 }}>
           <Text style={{ color: "#fff", fontWeight: "700" }}>Сохранить настройки</Text>
         </Pressable>
         <Pressable accessibilityRole="button" disabled={busy} onPress={() => void clear("llm")}
