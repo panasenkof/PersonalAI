@@ -13,7 +13,7 @@ import { runDirectAgent } from "../direct-agent/engine";
 import type { AgentTurn } from "../direct-agent/engine";
 import { searchApprovedNotes, saveApprovedNote } from "../direct-agent/memory";
 import type { NoteProposal } from "../direct-agent/memory";
-import { loadDirectSettings } from "../direct-agent/settings";
+import { anonymousLocalAllowed, loadDirectSettings } from "../direct-agent/settings";
 import type { DirectAgentSettings } from "../direct-agent/settings";
 import { closeLocalMemory } from "../local-memory/storage";
 import { useTheme } from "../theme";
@@ -136,6 +136,7 @@ export function DirectAgentScreen() {
     }
   }
 
+  const canSend = Boolean(settings && (settings.apiKey || anonymousLocalAllowed(settings)));
   const action = { minHeight: 44, justifyContent: "center" as const, paddingHorizontal: 12 };
   return (
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: t.bg }}
@@ -152,7 +153,7 @@ export function DirectAgentScreen() {
         <Text style={{ color: t.muted, fontSize: 12 }}>
           {settings?.provider === "anthropic" ? "Anthropic Messages" : settings?.provider === "openai-compatible" ? "OpenAI Chat Completions" : "OpenAI Responses"} · веб: {settings?.allowWeb ? "вкл." : "выкл."} · память: {settings?.allowMemory ? "разрешена" : "закрыта"}
         </Text>
-        {!settings?.apiKey && <Text style={{ color: t.err, marginTop: 5 }}>
+        {!canSend && <Text style={{ color: t.err, marginTop: 5 }}>
           Добавьте API-ключ и модель в «Настроить».
         </Text>}
       </View>
@@ -224,9 +225,9 @@ export function DirectAgentScreen() {
           style={action} onPress={() => controller.current?.abort()}>
           <Text style={{ color: t.err }}>Стоп</Text>
         </Pressable> : <Pressable accessibilityRole="button" accessibilityLabel="Отправить запрос"
-          disabled={!settings?.apiKey || !question.trim()}
+          disabled={!canSend || !question.trim()}
           style={action} onPress={() => void send()}>
-          <Text style={{ color: settings?.apiKey && question.trim() ? t.accent : t.muted }}>Отправить</Text>
+          <Text style={{ color: canSend && question.trim() ? t.accent : t.muted }}>Отправить</Text>
         </Pressable>}
       </View>
     </KeyboardAvoidingView>
