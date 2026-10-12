@@ -12,7 +12,9 @@ module.exports = ({ config }) => {
     throw new Error('Set EXPO_PUBLIC_API_BASE to your production HTTPS server before building.');
   }
   if (release && (!process.env.PIA_ANDROID_PACKAGE || (!androidCiRelease && !process.env.PIA_IOS_BUNDLE_ID))) {
-    throw new Error('Set PIA_IOS_BUNDLE_ID and PIA_ANDROID_PACKAGE to your owned application identifiers.');
+    throw new Error(androidCiRelease
+      ? 'Set PIA_ANDROID_PACKAGE to your owned Android package ID.'
+      : 'Set PIA_IOS_BUNDLE_ID and PIA_ANDROID_PACKAGE to your owned application identifiers.');
   }
   const versionCodeRaw = process.env.PIA_ANDROID_VERSION_CODE;
   const versionCode = versionCodeRaw ? Number(versionCodeRaw) : undefined;
@@ -22,9 +24,8 @@ module.exports = ({ config }) => {
   return {
     ...config,
     ...(androidCiRelease && versionCode ? { version: `${config.version}-test.${versionCode}` } : {}),
-    extra: { ...config.extra, ...(process.env.PIA_ANDROID_BUILD_SHA ? { buildSha: process.env.PIA_ANDROID_BUILD_SHA } : {}) },
     ios: { ...config.ios, ...(process.env.PIA_IOS_BUNDLE_ID ? { bundleIdentifier: process.env.PIA_IOS_BUNDLE_ID } : {}) },
     android: { ...config.android, ...(process.env.PIA_ANDROID_PACKAGE ? { package: process.env.PIA_ANDROID_PACKAGE } : {}), ...(versionCode ? { versionCode } : {}) },
-    extra: { ...config.extra, ...(endpoint ? { apiBase: endpoint } : {}) },
+    extra: { ...config.extra, ...(endpoint ? { apiBase: endpoint } : {}), ...(process.env.PIA_ANDROID_BUILD_SHA ? { buildSha: process.env.PIA_ANDROID_BUILD_SHA } : {}) },
   };
 };

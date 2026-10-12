@@ -118,6 +118,18 @@ jobs:
           npm run typecheck
           npm test -- --runInBand
 
+      - name: Compute strictly increasing Android build number
+        if: steps.changes.outputs.needed == 'true'
+        id: version
+        shell: bash
+        run: |
+          code=$((GITHUB_RUN_NUMBER * 100 + GITHUB_RUN_ATTEMPT))
+          if [ "$GITHUB_RUN_ATTEMPT" -ge 100 ] || [ "$code" -gt 2100000000 ]; then
+            echo "::error::Android versionCode limit exceeded."
+            exit 1
+          fi
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+
       - name: Generate standalone Android project with SQLCipher
         if: steps.changes.outputs.needed == 'true'
         working-directory: mobile
@@ -125,7 +137,7 @@ jobs:
           PIA_ANDROID_RELEASE: 'true'
           PIA_ANDROID_PACKAGE: ${{ vars.PIA_ANDROID_PACKAGE }}
           EXPO_PUBLIC_API_BASE: ${{ vars.PIA_ANDROID_API_BASE }}
-          PIA_ANDROID_VERSION_CODE: ${{ github.run_number * 100 + github.run_attempt }}
+          PIA_ANDROID_VERSION_CODE: ${{ steps.version.outputs.code }}
           PIA_ANDROID_BUILD_SHA: ${{ env.TARGET_SHA }}
         run: |
           npx expo prebuild --platform android --no-install --clean
@@ -166,7 +178,7 @@ jobs:
           apk=android/app/build/outputs/apk/release/app-release.apk
           test -s "$apk"
           unzip -t "$apk" >/dev/null
-          unzip -l "$apk" | grep -q 'assets/index.android.bundle'
+          unzip -Z1 "$apk" | grep -Fx 'assets/index.android.bundle'
           apksigner="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
           test -x "$apksigner"
           "$apksigner" verify --verbose "$apk"
@@ -200,7 +212,7 @@ jobs:
 
           - Standalone release APK with native SQLCipher (not Expo Go/debug).
           - Android package: ${{ vars.PIA_ANDROID_PACKAGE }}
-          - Build number: ${{ github.run_number * 100 + github.run_attempt }}
+          - Build number: ${{ steps.version.outputs.code }}
           - Checksum: see attached .sha256 file.
           - Upgrade without uninstalling: keep the same signing certificate and package ID.
           - Test build only. Validate encrypted memory backup/restore on real devices.
