@@ -7,6 +7,8 @@ jest.mock("@react-navigation/native", () => ({
   useFocusEffect: (cb: () => void | (() => void)) => require("react").useEffect(cb, [cb]),
 }));
 jest.mock("../auth/AuthContext", () => ({ useAuth: () => ({ offlineMode: true }) }));
+jest.mock("@react-navigation/elements", () => ({ useHeaderHeight: () => 64 }));
+jest.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ top: 24, bottom: 24, left: 0, right: 0 }) }));
 jest.mock("../direct-agent/settings", () => ({ ...jest.requireActual("../direct-agent/settings"), loadDirectConnections: jest.fn(), saveDirectConnections: jest.fn() }));
 const mockBack = jest.fn();
 beforeEach(() => {

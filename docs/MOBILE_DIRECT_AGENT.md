@@ -9,7 +9,7 @@ then open Settings → Models and connections. Server PersonalAI is optional.
 
 The app supports OpenAI Responses, OpenAI-compatible Chat Completions and
 Anthropic-compatible Messages. Each saved connection has its own name, endpoint,
-API key, chat model, transcription model and permissions. Several connections
+API key, chat model, transcription model and web-search preferences. Several connections
 using the same protocol are supported. Select a connection and Save: all drafts
 are persisted and the screen closes. Changing endpoints clears that draft's key.
 Credentials never move to another endpoint/profile automatically. Old settings
@@ -23,8 +23,8 @@ budget at the provider too.
 
 ## Memory first, internet when needed
 
-The model's permission to read ordinary notes and the internet toggle start off.
-When memory is allowed, each turn searches it **before** calling the LLM/search.
+Every turn searches ordinary memory **before** calling the LLM/search. There is no
+separate memory permission or unlock. Internet search starts off.
 Only active standard notes from standard collections may be passed to the model;
 unclassified, sensitive and secret notes remain excluded. At most five bounded
 fragments are sent. A match avoids web search unless the user asks for current
@@ -49,7 +49,7 @@ phone's system speech service, which may send audio to its provider. No separate
 PersAI registration is required. Recognition requires an installed service and
 language support; microphone denial is handled explicitly.
 
-Memory and Assistant offer **Add information from a file**:
+Memory and Home offer **Add information from a file**:
 - Text: read on the phone, no provider transmission; up to 60,000 characters.
 - JPEG/PNG/WebP/GIF: selected vision model; up to 8 MB.
 - Audio: selected OpenAI-compatible `/audio/transcriptions` endpoint and configured
@@ -63,17 +63,61 @@ Media is private by default. External extraction is a separate explicit action
 for the selected file; it requires selecting ordinary data and the provider.
 Review/edit the extracted text, then save it as a note with source filename and
 sensitivity. Original media is not retained in the notes backup. Picker copies
-and extracted frames are cleaned up. Encrypted backup/restore is a collapsed
-section in Memory; the recovery code is kept separately from the exported file.
+and extracted frames are cleaned up. Encrypted backup/restore is a separate screen reached from Memory or Settings;
+notes and local chat history are included. The recovery code is kept separately
+from the exported file. Backups created before chat history are still supported.
+
+## Home, history and application session
+
+There are three tabs: Home, Memory and Settings. Home owns the complete assistant
+UI, dictation, import entry point and searchable conversation history. Direct API
+connections have one editor under Settings → Models and connections. Server
+account/model administration is separate and explicitly applies to server chats
+and messengers. Existing server conversations remain reachable from History.
+
+Messages, citations and pending note proposals are stored in the existing
+per-profile SQLCipher database. Navigation does not own model requests: switching
+tabs or conversations cannot abort, duplicate or resend a turn. Stop explicitly
+aborts it. Account changes abort the previous profile's work. An app cold start
+restores completed history and reports interrupted turns without re-spending them.
+A storage failure keeps visible data and offers a retry; an unsaved question never
+starts a model request.
+
+A cold start authenticates the whole application. Background/inactive/Android
+blur immediately adds an opaque privacy cover. Returning within **five minutes**
+requires no new prompt, including file pickers/sharing. After five minutes outside
+the app, the application session is revoked and SQLCipher closes. Foreground
+checks the deadline even when the OS suspended the timer. The navigation and
+job owner remain mounted behind the cover. A completed response waits for app
+unlock before saving. Android/iOS may still suspend or terminate the process;
+this is not a native background execution service.
+
+Memory is an overview of themed sections, search, current records and archive.
+Opening/creating a record leads to a separate editor; changes retain source
+metadata and revision history. Moving sections and archiving use version checks.
+Events, relations and revisions are in an optional details panel. Backup/restore
+is separate from the editor.
+
+## Keyboard and bottom panels
+
+Android uses resize mode; tabs hide while the keyboard is visible. The composer
+uses a full-width text field and a separate tool row, with no duplicated bottom
+safe-area inset from the tab bar. Stack editors account for header height on iOS
+and system bottom insets. History, section selection and attachments share a
+scrollable keyboard-aware BottomSheet with safe-area padding, a dismiss backdrop
+and Android Back handling. Browser resized-height checks approximate layout;
+actual IME, gesture navigation, three-button navigation and enlarged fonts require
+[phone acceptance](MOBILE_FIXES_ACCEPTANCE.md).
 
 ## Verification
 
+Use Node 22.13+ (CI uses Node 22) for the real SQLite regression adapter.
 `npm run typecheck`, `npm test -- --runInBand`,
 `node scripts/verify-mobile-ui.cjs`, Expo install check and Android/iOS exports.
 The browser suite renders the production screens with simulated native services
 and storage; it does not prove SQLCipher, actual hardware biometrics or STT.
 Native CI builds the APK; complete [native device acceptance](MOBILE_NATIVE_QA.md).
 
-Still separate future work: a model running on the phone, durable local chat
-history, streaming, shared server/mobile memory, sync and automatic routing of
+Still separate future work: a model running on the phone, streaming,
+shared server/mobile memory, sync and automatic routing of
 expensive tasks to a server. File/voice import above does not implement those.

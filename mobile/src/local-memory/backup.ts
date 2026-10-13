@@ -166,6 +166,12 @@ export async function restoreEncryptedBackup(
             // table is a constant, never user-controlled.
             await tx.execAsync(sql);
           }
+          // Older backups have no chats. Import newer ones without replacing
+          // any existing local conversation (including its pending proposals).
+          if (available.has("direct_conversations")) await tx.execAsync(
+            `INSERT OR IGNORE INTO direct_conversations(id,title,snapshot_json,created_at,updated_at)
+             SELECT id,title,snapshot_json,created_at,updated_at FROM pia_import.direct_conversations`,
+          );
           const violation = await tx.getFirstAsync("PRAGMA foreign_key_check");
           if (violation !== null) throw new Error("invalid_backup_references");
         });

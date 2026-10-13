@@ -1,7 +1,7 @@
 import { prepareDirectContext } from "../context";
 import { defaultDirectPreferences } from "../settings";
 const defaults = { ...defaultDirectPreferences, provider: "openai-compatible" as const, searchProvider: "public" as const,
-  apiKey: "key", webSearchKey: "", allowMemory: true, allowWeb: true };
+  apiKey: "key", webSearchKey: "", allowWeb: true };
 const options = (prompt: string, lookup: jest.Mock, transport: jest.Mock) => ({ settings: defaults, prompt, lookup, transport, history: [], propose: jest.fn() });
 const rss = '<rss><channel><item><title>Источник</title><link>https://example.org/reference</link><description>Данные &amp; факты</description></item></channel></rss>';
 test("memory is checked before any search; matching notes avoid external search", async () => {

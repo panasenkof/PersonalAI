@@ -3,7 +3,7 @@ import type { DirectAgentSettings } from "../settings";
 
 const base: DirectAgentSettings = {
   apiKey: "test-key-only", webSearchKey: "", provider: "openai",
-  baseUrl: "https://api.openai.com/v1", model: "gpt-4.1-mini", allowMemory: false, allowWeb: false,
+  baseUrl: "https://api.openai.com/v1", model: "gpt-4.1-mini", allowWeb: false,
 };
 const final = (text = "Готово") => ({
   ok: true, status: 200,
@@ -29,7 +29,7 @@ function start(overrides: Partial<DirectAgentSettings>, transport: jest.Mock, ov
   });
 }
 
-test("serverless OpenAI request does not send memory tools or enable web without permission", async () => {
+test("serverless requests always provide memory tools and keep web off until enabled", async () => {
   const request = jest.fn().mockResolvedValue(final());
   const result = await start({}, request);
   expect(result.text).toBe("Готово");
@@ -39,7 +39,7 @@ test("serverless OpenAI request does not send memory tools or enable web without
   const body = JSON.parse(request.mock.calls[0][1].body);
   expect(body.store).toBe(false);
   expect(body.include).toContain("reasoning.encrypted_content");
-  expect(body.tools).toEqual([]);
+  expect(body.tools.map((tool: any) => tool.name)).toEqual(["search_local_notes", "draft_local_note"]);
   expect(request.mock.calls[0][1].headers.Authorization).toBe("Bearer test-key-only");
   expect(JSON.stringify(body)).not.toContain("test-key-only");
 });
@@ -80,7 +80,7 @@ test("local-memory tool uses only approved callback and replays tool output", as
   const request = jest.fn().mockResolvedValueOnce(toolResponse("search_local_notes", { query: "кухня" }))
     .mockResolvedValueOnce(final("Вы любите пасту"));
   const lookup = jest.fn().mockResolvedValue([{ id: "1", title: "Вкусы", body: "Люблю пасту" }]);
-  const result = await start({ allowMemory: true }, request, { lookup });
+  const result = await start({  }, request, { lookup });
   expect(result.requests).toBe(2);
   expect(lookup).toHaveBeenCalledWith("кухня");
   const first = JSON.parse(request.mock.calls[0][1].body);
@@ -91,12 +91,12 @@ test("local-memory tool uses only approved callback and replays tool output", as
   }));
 });
 
-test("unapproved memory tool cannot read device notes even if model invents call", async () => {
-  const request = jest.fn().mockResolvedValueOnce(toolResponse("search_local_notes", { query: "secret" }))
+test("invented tools remain unavailable even with always-on memory", async () => {
+  const request = jest.fn().mockResolvedValueOnce(toolResponse("erase_local_memory", { query: "secret" }))
     .mockResolvedValueOnce(final());
-  const lookup = jest.fn();
+  const lookup = jest.fn().mockResolvedValue([]);
   await start({}, request, { lookup });
-  expect(lookup).not.toHaveBeenCalled();
+  expect(lookup).toHaveBeenCalledTimes(1);
   const second = JSON.parse(request.mock.calls[1][1].body);
   expect(second.input).toContainEqual(expect.objectContaining({
     type: "function_call_output", output: JSON.stringify({ error: "tool_not_allowed" }),
@@ -107,7 +107,7 @@ test("model can propose a memory note but never writes it directly", async () =>
   const request = jest.fn().mockResolvedValueOnce(toolResponse("draft_local_note", { title: "Вкус", body: "Люблю пасту" }))
     .mockResolvedValueOnce(final());
   const propose = jest.fn();
-  await start({ allowMemory: true }, request, { propose });
+  await start({  }, request, { propose });
   expect(propose).toHaveBeenCalledWith({ title: "Вкус", body: "Люблю пасту" });
   const second = JSON.parse(request.mock.calls[1][1].body);
   expect(second.input).toContainEqual(expect.objectContaining({
@@ -132,7 +132,7 @@ test("aborted direct requests never call the provider", async () => {
 test("limits tool cycles to prevent unbounded API spending", async () => {
   const request = jest.fn().mockImplementation(async () =>
     toolResponse("search_local_notes", { query: "тест" }));
-  await expect(start({ allowMemory: true }, request)).rejects.toThrow("лимит");
+  await expect(start({  }, request)).rejects.toThrow("лимит");
   expect(request).toHaveBeenCalledTimes(MAX_DIRECT_REQUESTS);
 });
 
@@ -150,7 +150,7 @@ test("OpenAI-compatible API uses Chat Completions, not proprietary Responses too
   expect(body).toMatchObject({ model: "vendor/my-model", max_tokens: 1200 });
   expect(body).not.toHaveProperty("include");
   expect(body).not.toHaveProperty("store");
-  expect(body.tools).toBeUndefined();
+  expect(body.tools).toContainEqual(expect.objectContaining({ type: "function" }));
 });
 
 test("explicit Brave search fails clearly when search key is absent", async () => {
@@ -194,7 +194,7 @@ test("Anthropic tool-use loop only accesses approved memory and replays tool_res
     }) });
   const lookup = jest.fn().mockResolvedValue([{ id: "a", title: "Чай", body: "Люблю чай" }]);
   const result = await start({ provider: "anthropic", baseUrl: "https://api.anthropic.com/v1",
-    allowMemory: true }, response, { lookup });
+     }, response, { lookup });
   expect(result.requests).toBe(2);
   expect(lookup).toHaveBeenCalledWith("чай");
   const body = JSON.parse(response.mock.calls[1][1].body);
@@ -217,7 +217,7 @@ test("Chat Completions tool call creates a draft but never saves without approva
     }) });
   const propose = jest.fn();
   await start({ provider: "openai-compatible", baseUrl: "https://llm.example.org/v1",
-    allowMemory: true }, response, { propose });
+     }, response, { propose });
   expect(propose).toHaveBeenCalledWith({ title: "Нравится", body: "Горы" });
   const next = JSON.parse(response.mock.calls[1][1].body);
   expect(next.messages).toContainEqual(expect.objectContaining({

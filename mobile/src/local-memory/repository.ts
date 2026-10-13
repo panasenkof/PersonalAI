@@ -138,7 +138,7 @@ export class SqliteMemoryRepository implements MemoryRepository {
     return record;
   }
 
-  async reviseEntity(id: string, expectedVersion: number, payload: Record<string, unknown>, reason: string): Promise<EntityRecord> {
+  async reviseEntity(id: string, expectedVersion: number, payload: Record<string, unknown>, reason: string, collectionId?: string): Promise<EntityRecord> {
     safeReason(reason);
     if (expectedVersion < 1) throw new Error("invalid_expected_version");
     const data = validPayload(payload);
@@ -148,15 +148,26 @@ export class SqliteMemoryRepository implements MemoryRepository {
       if (!row) throw new MemoryAccessError("entity_not_found");
       const before = entityFrom(row);
       if (before.record_version !== expectedVersion) throw new MemoryConflictError("stale_memory_version");
+      const collection = collectionId || before.collection_id;
+      if (!await tx.getFirstAsync<Row>("SELECT id FROM memory_collections WHERE id=?", [collection])) throw new MemoryAccessError("collection_not_found");
+      let sensitivity = before.sensitivity;
+      if (collection !== before.collection_id) {
+        const previousCollection = await tx.getFirstAsync<Row>("SELECT sensitivity FROM memory_collections WHERE id=?", [before.collection_id]);
+        // Moving a record must preserve its previous effective classification.
+        // In particular, inherit must not promote private content to ordinary.
+        const previousLevel = previousCollection?.sensitivity;
+        if (previousLevel === "secret" || previousLevel === "unclassified") sensitivity = "secret";
+        else if (previousLevel === "sensitive" && sensitivity !== "secret") sensitivity = "sensitive";
+      }
       const title = typeof payload.title === "string" ? payload.title : before.title;
       const timestamp = now();
       const result = await tx.runAsync(
-        `UPDATE memory_entities SET payload_json=?, title=?, record_version=record_version+1,
+        `UPDATE memory_entities SET payload_json=?, title=?, collection_id=?, sensitivity=?, record_version=record_version+1,
           updated_at=? WHERE id=? AND record_version=?`,
-        [data, title, timestamp, id, expectedVersion],
+        [data, title, collection, sensitivity, timestamp, id, expectedVersion],
       );
       if (result.changes !== 1) throw new MemoryConflictError("stale_memory_version");
-      const after = { ...before, payload: clone(payload), title, record_version: expectedVersion + 1, updated_at: timestamp };
+      const after = { ...before, payload: clone(payload), title, collection_id: collection, sensitivity, record_version: expectedVersion + 1, updated_at: timestamp };
       await tx.runAsync(
         `INSERT INTO memory_revisions(id,record_type,entity_id,observation_id,version,
           reason,actor_kind,before_json,after_json,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)`,
@@ -170,6 +181,32 @@ export class SqliteMemoryRepository implements MemoryRepository {
           [id, title ?? "", String(payload.body ?? "")],
         );
       }
+      updated = after;
+    });
+    if (!updated) throw new Error("revision_not_committed");
+    return updated;
+  }
+
+  async setEntityStatus(id: string, expectedVersion: number, status: "active" | "archived"): Promise<EntityRecord> {
+    if (status !== "active" && status !== "archived") throw new Error("invalid_record_status");
+    let updated: EntityRecord | null = null;
+    await withUnlockedTransaction(this.db, async tx => {
+      const row = await tx.getFirstAsync<Row>("SELECT * FROM memory_entities WHERE id=?", [id]);
+      if (!row) throw new MemoryAccessError("entity_not_found");
+      const before = entityFrom(row);
+      if (before.record_version !== expectedVersion) throw new MemoryConflictError("stale_memory_version");
+      const timestamp = now();
+      const result = await tx.runAsync(
+        "UPDATE memory_entities SET record_status=?,record_version=record_version+1,updated_at=? WHERE id=? AND record_version=?",
+        [status, timestamp, id, expectedVersion],
+      );
+      if (result.changes !== 1) throw new MemoryConflictError("stale_memory_version");
+      const after = { ...before, record_status: status, record_version: before.record_version + 1, updated_at: timestamp };
+      await tx.runAsync(
+        `INSERT INTO memory_revisions(id,record_type,entity_id,observation_id,version,reason,actor_kind,before_json,after_json,created_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?)`,
+        [uid(), "entity", id, null, after.record_version, status === "archived" ? "Перенос в архив" : "Возврат из архива", "user", JSON.stringify(before), JSON.stringify(after), timestamp],
+      );
       updated = after;
     });
     if (!updated) throw new Error("revision_not_committed");
@@ -295,22 +332,23 @@ export class SqliteMemoryRepository implements MemoryRepository {
     }));
   }
 
-  async searchNotes(query: string, limit = 50, offset = 0): Promise<EntityRecord[]> {
+  async searchNotes(query: string, limit = 50, offset = 0, filters: { collectionId?: string; status?: "active" | "archived" } = {}): Promise<EntityRecord[]> {
     const count = Math.min(100, Math.max(1, Math.trunc(limit)));
     const start = Math.max(0, Math.trunc(offset));
     const term = query.trim();
-    if (!term) {
-      return (await this.entities({ domain: "notes", limit: count, offset: start })).items;
-    }
+    const status = filters.status || "active";
+    if (status !== "active" && status !== "archived") throw new Error("invalid_record_status");
     // FTS5 MATCH accepts an entire quoted phrase: escape embedded quotes to
     // avoid treating user input as operators or exposing query syntax errors.
     const phrase = '"' + term.replace(/"/g, '""') + '"';
     const rows = await this.db.getAllAsync<Row>(
       `SELECT e.* FROM memory_entities e
-       JOIN memory_notes_fts f ON f.entity_id=e.id
-       WHERE memory_notes_fts MATCH ? AND e.domain='notes'
+       ${term ? "JOIN memory_notes_fts f ON f.entity_id=e.id" : ""}
+       WHERE e.domain='notes' AND e.record_status=?
+       ${filters.collectionId ? "AND e.collection_id=?" : ""}
+       ${term ? "AND memory_notes_fts MATCH ?" : ""}
        ORDER BY e.updated_at DESC, e.id LIMIT ? OFFSET ?`,
-      [phrase, count, start],
+      [status, ...(filters.collectionId ? [filters.collectionId] : []), ...(term ? [phrase] : []), count, start],
     );
     return rows.map(entityFrom);
   }

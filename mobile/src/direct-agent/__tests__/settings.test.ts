@@ -25,7 +25,7 @@ test("legacy OpenAI preferences and key remain usable after upgrade", async () =
   const settings = await loadDirectSettings("guest");
   expect(settings).toMatchObject({
     provider: "openai", baseUrl: "https://api.openai.com/v1",
-    apiKey: "legacy-secret", allowWeb: false, allowMemory: false,
+    apiKey: "legacy-secret", allowWeb: false,
   });
 });
 test("keys are bound to profile, protocol and endpoint, never sent to another model server", async () => {

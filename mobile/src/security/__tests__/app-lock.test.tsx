@@ -11,7 +11,7 @@ jest.mock("../../components/FloatingBrand", () => ({ FloatingBrand: () => null }
 let state = "active";
 const listeners = new Map<string, ((v: any) => void)[]>();
 beforeEach(() => {
-  jest.clearAllMocks(); state = "active"; listeners.clear();
+  jest.useFakeTimers(); jest.clearAllMocks(); state = "active"; listeners.clear();
   Object.defineProperty(AppState, "currentState", { get: () => state, configurable: true });
   jest.spyOn(AppState, "addEventListener").mockImplementation((event: any, cb: any) => {
     listeners.set(event, [...(listeners.get(event) || []), cb]); return { remove: jest.fn() };
@@ -22,19 +22,41 @@ beforeEach(() => {
   (authenticateExistingMemory as jest.Mock).mockResolvedValue(false);
   (closeLocalMemory as jest.Mock).mockResolvedValue(undefined);
 });
+afterEach(() => { jest.useRealTimers(); });
 const change = async (next: string) => act(async () => { state = next; listeners.get("change")?.forEach(cb => cb(next)); });
-test("one biometric challenge unlocks the entire app and grants memory access", async () => {
-  const v = render(<AppLock><Text>Моя память открыта</Text></AppLock>);
+test("short switches hide the app without a new biometric challenge or unmount", async () => {
+  const mounted = jest.fn(); const removed = jest.fn();
+  function Child() { React.useEffect(() => { mounted(); return removed; }, []); return <Text>Моя память открыта</Text>; }
+  const v = render(<AppLock><Child /></AppLock>);
   await waitFor(() => v.getByText("Моя память открыта"));
   expect(LocalAuthentication.authenticateAsync).toHaveBeenCalledTimes(1);
   expect(authorizeLocalMemorySession).toHaveBeenCalledTimes(1);
   await change("inactive"); expect(closeLocalMemory).not.toHaveBeenCalled();
-  await change("active"); expect(LocalAuthentication.authenticateAsync).toHaveBeenCalledTimes(1);
-  await change("background"); expect(v.queryByText("Моя память открыта")).toBeNull(); expect(revokeLocalMemorySession).toHaveBeenCalled();
-  await change("active"); fireEvent.press(v.getByLabelText("Разблокировать приложение"));
-  await waitFor(() => v.getByText("Моя память открыта"));
-  expect(LocalAuthentication.authenticateAsync).toHaveBeenCalledTimes(2);
+  await change("active");
+  for (let i = 0; i < 3; i++) {
+    await change("background");
+    expect(v.queryByText("Моя память открыта")).toBeNull();
+    expect(v.queryByLabelText("Разблокировать приложение")).toBeNull();
+    await act(async () => { jest.advanceTimersByTime(30000); });
+    await change("active"); expect(v.getByText("Моя память открыта")).toBeTruthy();
+  }
+  expect(LocalAuthentication.authenticateAsync).toHaveBeenCalledTimes(1);
+  expect(closeLocalMemory).not.toHaveBeenCalled(); expect(removed).not.toHaveBeenCalled(); expect(mounted).toHaveBeenCalledTimes(1);
 });
+test("five minutes in background expires the whole session but preserves the mounted job owner", async () => {
+  const mounted = jest.fn();
+  function Child() { React.useEffect(mounted, []); return <Text>Сохранённый диалог</Text>; }
+  const v = render(<AppLock><Child /></AppLock>);
+  await waitFor(() => v.getByText("Сохранённый диалог"));
+  await change("background");
+  await act(async () => { jest.advanceTimersByTime(5 * 60 * 1000); });
+  expect(closeLocalMemory).toHaveBeenCalledTimes(1);
+  expect(v.queryByText("Сохранённый диалог")).toBeNull();
+  await change("active"); fireEvent.press(v.getByLabelText("Разблокировать приложение"));
+  await waitFor(() => v.getByText("Сохранённый диалог"));
+  expect(LocalAuthentication.authenticateAsync).toHaveBeenCalledTimes(2); expect(mounted).toHaveBeenCalledTimes(1);
+});
+
 test("legacy-key migration itself is the single unlock and never opens a second biometric sheet", async () => {
   (authenticateExistingMemory as jest.Mock).mockResolvedValue(true);
   const v = render(<AppLock><Text>Заметки сохранены</Text></AppLock>);

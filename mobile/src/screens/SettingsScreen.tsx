@@ -77,7 +77,8 @@ export function SettingsScreen() {
       <Text style={[styles.h, { color: t.text }]}>Аккаунт</Text>
       <Text style={{ color: t.text }}>{me?.email} · роль: {me?.role}</Text>
 
-      <Text style={[styles.h, { color: t.text }]}>LLM</Text>
+      <Text style={[styles.h, { color: t.text }]}>Модель серверного агента</Text>
+      <Text style={{ color: t.muted }}>Используется в серверных диалогах и мессенджерах. Модель на главной выбирается в «Модели и подключения».</Text>
       {llm ? (
         <>
           <View style={styles.row}>

@@ -122,7 +122,7 @@ export function ChatsScreen() {
               ))}
             </View>
             <Text style={{ color: t.muted, fontSize: 12, textAlign: "center" }}>
-              Ответы ИИ требуют проверки. Память передаётся модели только с вашего разрешения.
+              Ответы ИИ требуют проверки. Эти диалоги сохраняются на вашем сервере.
             </Text>
           </View>
         )}

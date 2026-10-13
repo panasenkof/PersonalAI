@@ -11,7 +11,7 @@ beforeEach(() => {
 });
 test("switching active connection and reloading preserves all credentials, endpoints and models", async () => {
   const a = { ...newDirectConnection("openai", "one"), name: "Cloud", apiKey: "key-a", model: "gpt-4.1" };
-  const b = { ...newDirectConnection("anthropic", "two"), name: "Gateway", baseUrl: "https://my.example/v1", apiKey: "key-b", model: "vendor/claude", allowMemory: true };
+  const b = { ...newDirectConnection("anthropic", "two"), name: "Gateway", baseUrl: "https://my.example/v1", apiKey: "key-b", model: "vendor/claude" };
   await saveDirectConnections("guest", { activeId: "one", connections: [a, b] });
   let saved = await loadDirectConnections("guest");
   expect(saved.connections).toEqual(expect.arrayContaining([expect.objectContaining(a), expect.objectContaining(b)]));

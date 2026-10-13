@@ -1,5 +1,7 @@
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { useHeaderHeight } from "@react-navigation/elements";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import React, { useEffect, useRef, useState } from "react";
@@ -17,6 +19,7 @@ import { useTheme } from "../theme";
 
 export function MemoryImportScreen() {
   const t = useTheme();
+  const header = useHeaderHeight(); const insets = useSafeAreaInsets();
   const { offlineMode, me } = useAuth();
   const profile = offlineMode ? "guest" : me?.id;
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParams>>();
@@ -86,8 +89,8 @@ export function MemoryImportScreen() {
     } catch (e) { if (alive.current) setNotice("Не удалось сохранить: " + memoryErrorMessage(e)); }
     finally { if (alive.current) setBusy(false); }
   }
-  return <KeyboardAvoidingView style={{ flex: 1, backgroundColor: t.bg }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-    <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 18, gap: 15, paddingBottom: 48 }}>
+  return <KeyboardAvoidingView style={{ flex: 1, backgroundColor: t.bg }} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={header}>
+    <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentContainerStyle={{ padding: 18, gap: 15, paddingBottom: insets.bottom + 24 }}>
       <Text style={{ color: t.text, fontSize: 27, fontWeight: "800" }}>Сведения из файла</Text>
       <Text style={{ color: t.muted, lineHeight: 21 }}>Извлеките текст и полезные сведения, проверьте результат и сохраните заметку в памяти телефона.</Text>
       <Pressable disabled={busy} accessibilityRole="button" accessibilityLabel="Выбрать файл для памяти" style={button} onPress={() => void pick()}>
@@ -97,13 +100,13 @@ export function MemoryImportScreen() {
         <Text style={{ color: t.text, fontWeight: "700" }}>{file.name}</Text>
         {kind === "image" ? <Image source={{ uri: file.uri }} resizeMode="contain" style={{ width: "100%", height: 180, borderRadius: 14 }} /> : null}
         <Text style={{ color: t.muted, fontSize: 12 }}>{kind === "video" ? "Пять кадров по всей длительности. Звук в этот разбор не входит." : kind === "audio" ? "Речь преобразуется в текст выбранным сервисом распознавания." : kind === "text" ? "Текстовый файл читается на телефоне, без отправки в интернет." : "Выбранная модель должна поддерживать изображения."}</Text>
-        <Text style={{ color: t.text, fontWeight: "600" }}>Доступ к сведениям</Text>
+        <Text style={{ color: t.text, fontWeight: "600" }}>Обработка файла</Text>
         {([ ["sensitive", "Личные — только на телефоне"], ["standard", "Обычные — разрешить разбор у провайдера"] ] as const).map(([id, label]) =>
           <Pressable disabled={busy} key={id} accessibilityRole="button" accessibilityLabel={label} onPress={() => setClassification(id)} style={{ minHeight: 46, justifyContent: "center" }}>
             <Text style={{ color: classification === id ? t.accent : t.text }}>{classification === id ? "● " : "○ "}{label}</Text>
           </Pressable>)}
         {kind !== "text" ? <>
-          <Text style={{ color: t.muted, fontSize: 12 }}>При разборе файл или кадры отправляются выбранному сервису. Обычную сохранённую заметку ассистент сможет читать при разрешённом доступе к памяти.</Text>
+          <Text style={{ color: t.muted, fontSize: 12 }}>При разборе файл или кадры отправляются выбранному сервису.</Text>
           <Text style={{ color: t.text, fontWeight: "600" }}>Подключение для разбора</Text>
           {connections.map(c => <Pressable disabled={busy} key={c.id} accessibilityRole="button" accessibilityLabel={"Разобрать через " + c.name} style={{ minHeight: 44, justifyContent: "center" }} onPress={() => setConnectionId(c.id)}>
             <Text style={{ color: connectionId === c.id ? t.accent : t.text }}>{connectionId === c.id ? "● " : "○ "}{c.name} · {c.model}</Text>

@@ -12,13 +12,37 @@ const LEGACY_GUEST_KEY = "pia.local-memory.sqlcipher.key.v1";
 const OLD_PROTECTED_KEY_PREFIX = "pia.local-memory.sqlcipher.biometric.v2.";
 const KEY_PREFIX = "pia.local-memory.sqlcipher.app-session.v3.";
 let applicationSessionUnlocked = false;
-export function authorizeLocalMemorySession(): void { applicationSessionUnlocked = true; }
-export function revokeLocalMemorySession(): void { applicationSessionUnlocked = false; }
+const sessionListeners = new Set<(unlocked: boolean) => void>();
+export function authorizeLocalMemorySession(): void {
+  applicationSessionUnlocked = true;
+  for (const listener of sessionListeners) listener(true);
+}
+export function revokeLocalMemorySession(): void {
+  applicationSessionUnlocked = false;
+  for (const listener of sessionListeners) listener(false);
+}
+/** A completed answer waits for the next app unlock before writing ciphertext.
+ * Tab changes have no part in the lifetime of either the session or the job. */
+export function waitForApplicationSession(signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.reject(new Error("session_disposed"));
+  if (applicationSessionUnlocked) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const cleanup = () => { sessionListeners.delete(listener); signal?.removeEventListener("abort", abort); };
+    const listener = (unlocked: boolean) => { if (unlocked) { cleanup(); resolve(); } };
+    const abort = () => { cleanup(); reject(new Error("session_disposed")); };
+    sessionListeners.add(listener);
+    signal?.addEventListener("abort", abort, { once: true });
+  });
+}
 const requireApplicationSession = () => { if (!applicationSessionUnlocked) throw new Error("application_locked"); };
 export const LOCAL_MEMORY_SCHEMA_VERSION = 1;
 
 /** All memory (including full-text indexes, revisions, and WAL) is in SQLCipher. */
 export const SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS direct_conversations (
+  id TEXT PRIMARY KEY, title TEXT NOT NULL, snapshot_json TEXT NOT NULL,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS memory_collections (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL UNIQUE,
   description TEXT, sensitivity TEXT NOT NULL DEFAULT 'unclassified',
@@ -227,7 +251,7 @@ export async function openLocalMemory(profileId: string): Promise<SQLite.SQLiteD
   return withLocalMemoryDatabase(profileId, async db => db);
 }
 
-/** Close when switching accounts, going to background or locking the device. */
+/** Close on account switches or expiry of the application session. */
 export async function closeLocalMemory(): Promise<void> {
   await serialize(async () => {
     const previous = current;
