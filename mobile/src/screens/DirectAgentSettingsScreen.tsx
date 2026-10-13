@@ -1,5 +1,7 @@
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { useHeaderHeight } from "@react-navigation/elements";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import React, { useCallback, useRef, useState } from "react";
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, Switch, Text, TextInput, View } from "react-native";
 import { useAuth } from "../auth/AuthContext";
@@ -18,6 +20,7 @@ export function DirectAgentSettingsScreen() {
   const profile = offlineMode ? "guest" : me?.id;
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParams>>();
   const t = useTheme();
+  const headerHeight = useHeaderHeight(); const insets = useSafeAreaInsets();
   const [value, setValue] = useState<DirectConnections | null>(null);
   const [selectedId, setSelectedId] = useState("");
   const pending = useRef(false);
@@ -59,10 +62,10 @@ export function DirectAgentSettingsScreen() {
     borderRadius: 16, color: t.text, backgroundColor: t.panel };
   const label = { color: t.text, fontWeight: "600" as const };
   return (
-    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: t.bg }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-    <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 18, paddingBottom: 44, gap: 14 }}>
+    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: t.bg }} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={headerHeight}>
+    <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 24, gap: 14 }}>
       <Text style={{ color: t.text, fontSize: 28, fontWeight: "800" }}>Ваши модели</Text>
-      <Text style={{ color: t.muted, lineHeight: 21 }}>Для каждого подключения сохраняются свои адрес, ключ, модель и разрешения. Выберите подключение для ассистента и нажмите «Сохранить».</Text>
+      <Text style={{ color: t.muted, lineHeight: 21 }}>У каждого сервиса свои адрес, ключ и модель. Выберите сохранённое подключение или добавьте новое. Сохранение активирует выбранную модель.</Text>
       {!value && !notice ? <ActivityIndicator accessibilityLabel="Загрузка подключений" /> : null}
       {value && selected ? <>
         <View style={{ gap: 8 }}>
@@ -109,7 +112,8 @@ export function DirectAgentSettingsScreen() {
             <Text style={{ color: t.text, flex: 1 }}>Искать в интернете</Text>
             <Switch disabled={busy} accessibilityLabel="Разрешить веб-поиск" value={selected.allowWeb} onValueChange={allowWeb => update({ allowWeb })} />
           </View>
-          <Text style={{ color: t.muted, fontSize: 12 }}>Сначала ассистент проверяет разрешённую память. Интернет используется при отсутствии подходящих заметок или при запросе свежих данных.</Text>
+          <Text style={{ color: t.muted, fontSize: 12 }}>Сначала ассистент проверяет память. Интернет используется при отсутствии подходящих заметок или при запросе свежих данных.</Text>
+          {selected.allowWeb ? <>
           {([
             ["public", "Без регистрации (Bing)"], ["brave", "Brave Search API"],
             ...(selected.provider === "openai" ? [["builtin", "Встроенный поиск OpenAI"]] : []),
@@ -122,11 +126,7 @@ export function DirectAgentSettingsScreen() {
           {selected.searchProvider === "public" ? <Text style={{ color: t.muted, fontSize: 12 }}>Поисковая фраза отправляется Bing. Доступность и количество результатов зависят от сервиса.</Text> : null}
           {selected.searchProvider === "brave" ? <TextInput editable={!busy} accessibilityLabel="Ключ Brave Search API" secureTextEntry autoCapitalize="none" autoCorrect={false}
             value={selected.webSearchKey} onChangeText={webSearchKey => update({ webSearchKey })} placeholder="Ключ поиска" placeholderTextColor={t.muted} style={field} /> : null}
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-            <Text style={{ color: t.text, flex: 1 }}>Разрешить модели чтение обычных заметок</Text>
-            <Switch disabled={busy} accessibilityLabel="Разрешить чтение локальной памяти" value={selected.allowMemory} onValueChange={allowMemory => update({ allowMemory })} />
-          </View>
-          <Text style={{ color: t.muted, fontSize: 12 }}>Личные и секретные записи остаются на телефоне. Новые сведения сохраняются после вашего подтверждения.</Text>
+          </> : null}
         </View>
         <Pressable accessibilityRole="button" disabled={busy} onPress={() => void save()}
           style={{ minHeight: 52, justifyContent: "center", alignItems: "center", backgroundColor: t.accent, borderRadius: 18 }}>

@@ -167,3 +167,9 @@ test("native ATTACH decodes Expo file:// URI and binds the filesystem path", asy
   expect(params[0]).toBe("/cache/pia-encrypted-random-id.db");
   expect(String(params[0])).not.toContain("file://");
 });
+
+test("new backups also import chats without overwriting existing conversations; old backups remain valid", async () => {
+  mockDb.getAllAsync.mockResolvedValueOnce([...names, "direct_conversations"].map(name => ({ name })));
+  await restoreEncryptedBackup("guest", "file:///backup.db", code);
+  expect(mockDb.execAsync.mock.calls.map(([sql]) => sql)).toContainEqual(expect.stringContaining("INSERT OR IGNORE INTO direct_conversations"));
+});

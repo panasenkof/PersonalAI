@@ -5,87 +5,28 @@ jest.mock("expo-crypto", () => ({
   randomUUID: jest.fn(() => "fixed-" + Math.random().toString(36).slice(2)),
 }));
 
-type Row = Record<string, unknown>;
+// Exercise actual SQL, full-text search and rollback semantics rather than a
+// query-shaped fake. This adapter replaces ONLY the Expo native bridge.
+const { DatabaseSync } = require("node:sqlite");
+const { SCHEMA_SQL } = require("../storage");
 class FakeSqlite {
-  collections = new Map<string, Row>();
-  entities = new Map<string, Row>();
-  revisions: Row[] = [];
-  noteIndex = new Map<string, { title: string; body: string }>();
+  private sqlite = new DatabaseSync(":memory:");
   updates = 0;
-  async getFirstAsync<T>(sql: string, params: unknown[]): Promise<T | null> {
-    if (sql.includes("FROM memory_collections WHERE id")) return [...this.collections.values()]
-      .find(r => r.id === params[0]) as T || null;
-    if (sql.includes("FROM memory_collections WHERE slug")) return [...this.collections.values()]
-      .find(r => r.slug === params[0]) as T || null;
-    if (sql.includes("FROM memory_entities WHERE id")) return this.entities.get(String(params[0])) as T || null;
-    return null;
+  transactionStatements: string[] = [];
+  constructor() { this.sqlite.exec(SCHEMA_SQL); }
+  async getFirstAsync<T>(sql: string, params: unknown[] = []): Promise<T | null> {
+    return (this.sqlite.prepare(sql).get(...params) as T) ?? null;
   }
-  async getAllAsync<T>(sql: string, params: unknown[]): Promise<T[]> {
-    if (sql.includes("FROM memory_revisions")) {
-      return this.revisions.filter(r => r.record_type === params[0] &&
-        (r.entity_id === params[1] || r.observation_id === params[1])) as T[];
-    }
-    if (sql.includes("FROM memory_entities")) {
-      const records = [...this.entities.values()].filter(r => {
-        if (r.domain !== "notes") return false;
-        const fts = this.noteIndex.get(String(r.id));
-        const phrase = String(params[0]).slice(1, -1);
-        return Boolean(fts && (fts.title.includes(phrase) || fts.body.includes(phrase)));
-      });
-      return records as T[];
-    }
-    return [];
+  async getAllAsync<T>(sql: string, params: unknown[] = []): Promise<T[]> {
+    return this.sqlite.prepare(sql).all(...params) as T[];
   }
-  async runAsync(sql: string, params: unknown[]): Promise<{ changes: number }> {
-    if (sql.includes("INSERT INTO memory_collections")) {
-      this.collections.set(String(params[0]), {
-        id: params[0], name: params[1], slug: params[2], description: params[3],
-        sensitivity: params[4], created_at: params[5],
-      }); return { changes: 1 };
-    }
-    if (sql.includes("INSERT INTO memory_entities")) {
-      this.entities.set(String(params[0]), {
-        id: params[0], collection_id: params[1], domain: params[2], schema_version: params[3],
-        title: params[4], payload_json: params[5], record_status: params[6],
-        sensitivity: params[7], source_kind: params[8], source_ref: params[9],
-        valid_from: params[10], valid_until: params[11],
-        created_at: params[12], updated_at: params[13], record_version: params[14],
-      });
-      return { changes: 1 };
-    }
-    if (sql.includes("INSERT INTO memory_revisions")) {
-      this.revisions.push({
-        id: params[0], record_type: params[1], entity_id: params[2],
-        observation_id: params[3], version: params[4], reason: params[5],
-        actor_kind: params[6], before_json: params[7], after_json: params[8],
-        created_at: params[9],
-      });
-      return { changes: 1 };
-    }
-    if (sql.includes("UPDATE memory_entities")) {
-      const row = this.entities.get(String(params[3]));
-      if (!row || row.record_version !== params[4]) return { changes: 0 };
-      row.payload_json = params[0]; row.title = params[1];
-      row.updated_at = params[2]; row.record_version = Number(row.record_version) + 1;
-      this.updates++;
-      return { changes: 1 };
-    }
-    if (sql.includes("DELETE FROM memory_notes_fts")) {
-      this.noteIndex.delete(String(params[0])); return { changes: 1 };
-    }
-    if (sql.includes("INSERT INTO memory_notes_fts")) {
-      this.noteIndex.set(String(params[0]), {
-        title: String(params[1]), body: String(params[2]),
-      }); return { changes: 1 };
-    }
-    throw new Error("Unexpected SQL: " + sql);
+  async runAsync(sql: string, params: unknown[] = []): Promise<{ changes: number }> {
+    const result = this.sqlite.prepare(sql).run(...params);
+    if (sql.startsWith("UPDATE memory_entities")) this.updates += Number(result.changes);
+    return { changes: Number(result.changes) };
   }
-  readonly transactionStatements: string[] = [];
   async execAsync(sql: string): Promise<void> {
-    if (!["BEGIN IMMEDIATE", "COMMIT", "ROLLBACK"].includes(sql)) {
-      throw new Error("Unexpected transaction SQL: " + sql);
-    }
-    this.transactionStatements.push(sql);
+    this.transactionStatements.push(sql); this.sqlite.exec(sql);
   }
 }
 
@@ -144,4 +85,46 @@ test("offline creation uses the already-unlocked SQLCipher connection", async ()
   const col = await repo.createCollection({ name: "Notes", slug: "notes" });
   await repo.createEntity({ collection_id: col.id, domain: "notes", payload: { title: "A" } });
   expect(fake.transactionStatements).toEqual(["BEGIN IMMEDIATE", "COMMIT"]);
+});
+
+test("section filters, moves, archive and restore preserve payload and immutable revisions", async () => {
+  const fake = new FakeSqlite(); const repo = new SqliteMemoryRepository(fake as never);
+  const first = await repo.createCollection({ name: "Идеи", slug: "ideas", sensitivity: "standard" });
+  const second = await repo.createCollection({ name: "Рецепты", slug: "recipes", sensitivity: "standard" });
+  const note = await repo.createEntity({ collection_id: first.id, domain: "notes", title: "Рецепт", payload: { title: "Рецепт", body: "индейка", source_file: "original.txt" } });
+  expect(await repo.searchNotes("", 50, 0, { collectionId: second.id })).toHaveLength(0);
+  const moved = await repo.reviseEntity(note.id, 1, note.payload, "Смена раздела", second.id);
+  expect(moved.collection_id).toBe(second.id);
+  expect(await repo.searchNotes("индейка", 50, 0, { collectionId: first.id })).toHaveLength(0);
+  expect((await repo.searchNotes("индейка", 50, 0, { collectionId: second.id }))[0].id).toBe(note.id);
+  const archived = await repo.setEntityStatus(note.id, 2, "archived");
+  expect(await repo.searchNotes("индейка")).toHaveLength(0);
+  expect((await repo.searchNotes("индейка", 50, 0, { status: "archived" }))[0].id).toBe(note.id);
+  await expect(repo.setEntityStatus(note.id, 2, "active")).rejects.toBeInstanceOf(MemoryConflictError);
+  await repo.setEntityStatus(note.id, archived.record_version, "active");
+  expect((await repo.searchNotes("индейка"))[0].payload.source_file).toBe("original.txt");
+  const revisions = await repo.revisions("entity", note.id);
+  expect(revisions.map(r => r.version)).toEqual([2, 3, 4]);
+  expect(revisions[0].before_state.collection_id).toBe(first.id);
+  expect(revisions[0].after_state.collection_id).toBe(second.id);
+});
+
+test("invalid section changes roll back the whole edit", async () => {
+  const repo = new SqliteMemoryRepository(new FakeSqlite() as never);
+  const section = await repo.createCollection({ name: "Заметки", slug: "notes" });
+  const note = await repo.createEntity({ collection_id: section.id, domain: "notes", payload: { body: "original" } });
+  await expect(repo.reviseEntity(note.id, 1, { body: "lost" }, "move", "missing"))
+    .rejects.toBeInstanceOf(MemoryAccessError);
+  expect((await repo.entity(note.id))?.payload.body).toBe("original");
+  expect(await repo.revisions("entity", note.id)).toEqual([]);
+});
+
+test("moving private inherited records to an ordinary section does not change their effective classification", async () => {
+  const repo = new SqliteMemoryRepository(new FakeSqlite() as never);
+  const privateSection = await repo.createCollection({ name: "Личное", slug: "private", sensitivity: "secret" });
+  const ordinary = await repo.createCollection({ name: "Идеи", slug: "ideas", sensitivity: "standard" });
+  const note = await repo.createEntity({ collection_id: privateSection.id, domain: "notes", payload: { body: "личная запись" }, sensitivity: "inherit" });
+  const moved = await repo.reviseEntity(note.id, 1, note.payload, "Перенос", ordinary.id);
+  expect(moved.collection_id).toBe(ordinary.id); expect(moved.sensitivity).toBe("secret");
+  expect((await repo.entity(note.id))?.sensitivity).toBe("secret");
 });

@@ -5,15 +5,18 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { AuthProvider } from "./src/auth/AuthContext";
 import { AppLock } from "./src/security/AppLock";
 import { RootNavigator } from "./src/navigation";
+import { DirectChatProvider } from "./src/direct-agent/ChatContext";
 
 export default function App() {
   return (
     <SafeAreaProvider>
       <AppLock>
-      <AuthProvider>
-        <StatusBar style="auto" />
-        <RootNavigator />
-      </AuthProvider>
+        <AuthProvider>
+          <DirectChatProvider>
+            <StatusBar style="auto" />
+            <RootNavigator />
+          </DirectChatProvider>
+        </AuthProvider>
       </AppLock>
     </SafeAreaProvider>
   );

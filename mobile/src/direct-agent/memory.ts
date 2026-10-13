@@ -7,10 +7,8 @@ export type NoteProposal = { title: string; body: string };
 export async function searchApprovedNotes(
   profile: string,
   query: string,
-  allowed: boolean,
   repository?: MemoryRepository,
 ): Promise<MemorySnippet[]> {
-  if (!allowed) throw new Error("Доступ модели к памяти не разрешён");
   const q = query.trim().slice(0, 120);
   if (q.length < 2) return [];
   const db = repository || await localMemoryRepository(profile);

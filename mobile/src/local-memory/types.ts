@@ -49,7 +49,8 @@ export interface MemoryRepository {
   entity(id: string): Promise<EntityRecord | null>;
   entities(options?: { collection_id?: string; domain?: string; limit?: number; offset?: number }): Promise<MemoryPage<EntityRecord>>;
   createEntity(item: NewEntity): Promise<EntityRecord>;
-  reviseEntity(id: string, expectedVersion: number, payload: Record<string, unknown>, reason: string): Promise<EntityRecord>;
+  reviseEntity(id: string, expectedVersion: number, payload: Record<string, unknown>, reason: string, collectionId?: string): Promise<EntityRecord>;
+  setEntityStatus(id: string, expectedVersion: number, status: "active" | "archived"): Promise<EntityRecord>;
   observation(id: string): Promise<ObservationRecord | null>;
   observations(entityId: string): Promise<ObservationRecord[]>;
   createObservation(item: NewObservation): Promise<ObservationRecord>;
@@ -57,7 +58,7 @@ export interface MemoryRepository {
   linkEntities(sourceId: string, targetId: string, kind: string): Promise<RelationRecord>;
   relationsForEntity(id: string): Promise<RelationRecord[]>;
   revisions(type: "entity" | "observation", id: string): Promise<RevisionRecord[]>;
-  searchNotes(query: string, limit?: number, offset?: number): Promise<EntityRecord[]>;
+  searchNotes(query: string, limit?: number, offset?: number, filters?: { collectionId?: string; status?: "active" | "archived" }): Promise<EntityRecord[]>;
 }
 export class MemoryConflictError extends Error {}
 export class MemoryAccessError extends Error {}

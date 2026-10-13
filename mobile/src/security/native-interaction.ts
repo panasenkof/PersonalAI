@@ -1,6 +1,6 @@
-import * as LocalAuthentication from "expo-local-authentication";
 import { AppState } from "react-native";
-import { withBiometricPrompt } from "../local-memory/authentication";
+import { sessionExpired, sessionNow } from "./session";
+import type { SessionTimestamp } from "./session";
 
 let active = 0;
 const listeners = new Set<(success: boolean) => void>();
@@ -9,14 +9,17 @@ export function onNativeInteractionEnd(listener: (success: boolean) => void) {
   listeners.add(listener); return () => { listeners.delete(listener); };
 }
 /** Keep a system picker/share sheet from destroying its requesting screen.
- * Hide app content during it and reauthenticate if it backgrounded the app.
+ * The app boundary owns authentication; a short picker/share never prompts.
  * Consumers resume database/network work only after this promise succeeds.
  */
 export async function withNativeInteraction<T>(work: () => Promise<T>): Promise<T> {
   active++;
   let backgrounded = false;
+  let leftAt: SessionTimestamp | null = null;
   let success = false;
-  const state = AppState.addEventListener("change", value => { if (value === "background") backgrounded = true; });
+  const state = AppState.addEventListener("change", value => {
+    if (value !== "active" && leftAt === null) { backgrounded = true; leftAt = sessionNow(); }
+  });
   try {
     const result = await work();
     if (backgrounded) {
@@ -25,10 +28,7 @@ export async function withNativeInteraction<T>(work: () => Promise<T>): Promise<
         const timer = setTimeout(() => { returned.remove(); resolve(); }, 2000);
       });
       if (AppState.currentState !== "active") throw new Error("Вернитесь в PersAI и повторите операцию.");
-      const auth = await withBiometricPrompt(() => LocalAuthentication.authenticateAsync({
-        promptMessage: "Вернуться в PersAI", disableDeviceFallback: true, biometricsSecurityLevel: "strong", cancelLabel: "Отмена",
-      }));
-      if (!auth.success || AppState.currentState !== "active") throw new Error("Возвращение в приложение не подтверждено.");
+      if (sessionExpired(leftAt)) throw new Error("Сеанс приложения истёк. Войдите снова и повторите операцию.");
     }
     success = true;
     return result;

@@ -45,7 +45,7 @@ const SYSTEM_PROMPT =
 const LOCAL_TOOLS: object[] = [
   {
     type: "function", name: "search_local_notes",
-    description: "Поиск по разрешённым заметкам в зашифрованной памяти телефона. Запрос — 1-3 ключевых слова.",
+    description: "Поиск по обычным заметкам в зашифрованной памяти телефона. Запрос — 1-3 ключевых слова.",
     strict: true,
     parameters: {
       type: "object", properties: { query: { type: "string" } },
@@ -123,8 +123,7 @@ export async function runDirectAgent(options: DirectAgentOptions): Promise<Direc
     ...options.history.slice(-8).map(h => ({ role: h.role, content: usableString(h.content, 2000) })),
     { role: "user", content: prompt },
   ];
-  const tools: object[] = [];
-  if (settings.allowMemory) tools.push(...LOCAL_TOOLS);
+  const tools: object[] = [...LOCAL_TOOLS];
   if (web.builtinWeb) tools.push({ type: "web_search", search_context_size: "low", external_web_access: true });
   const collected = new Set<string>(web.sources);
 
@@ -171,11 +170,11 @@ export async function runDirectAgent(options: DirectAgentOptions): Promise<Direc
       let result: object;
       try {
         const args = toolArguments(call.arguments);
-        if (call.name === "search_local_notes" && settings.allowMemory) {
+        if (call.name === "search_local_notes") {
           const query = usableString(args.query, 120).trim();
           status?.("Поиск в памяти телефона");
           result = { notes: query.length >= 2 ? await lookup(query) : [] };
-        } else if (call.name === "draft_local_note" && settings.allowMemory) {
+        } else if (call.name === "draft_local_note") {
           const title = usableString(args.title, 160).trim();
           const body = usableString(args.body, 4000).trim();
           if (!title && !body) throw new Error("Пустая заметка");

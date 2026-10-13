@@ -2,16 +2,24 @@ import React from "react";
 import { AppState } from "./native";
 const stats = (window as any).__qa = { auth: 0, closes: 0, sends: 0, authorized: false, deletes: [] as string[] };
 export const WHEN_UNLOCKED_THIS_DEVICE_ONLY = "device";
-const vault = new Map<string, string>();
-export const getItemAsync = async (k: string) => vault.get(k) || null;
-export const setItemAsync = async (k: string, v: string) => { vault.set(k, v); };
-export const deleteItemAsync = async (k: string) => { vault.delete(k); };
+export const getItemAsync = async (k: string) => localStorage.getItem(k);
+export const setItemAsync = async (k: string, v: string) => { localStorage.setItem(k, v); };
+export const deleteItemAsync = async (k: string) => { localStorage.removeItem(k); };
 export const isAvailableAsync = async () => true;
 export const hasHardwareAsync = async () => true;
 export const isEnrolledAsync = async () => true;
 export const authenticateAsync = async () => { stats.auth++; return { success: true }; };
 export const authenticateExistingMemory = async () => false;
-export const authorizeLocalMemorySession = () => { stats.authorized = true; };
+const sessionListeners = new Set<() => void>();
+export const waitForApplicationSession = async (signal?: AbortSignal) => {
+  if (stats.authorized) return;
+  await new Promise<void>((resolve, reject) => {
+    const done = () => { sessionListeners.delete(done); signal?.removeEventListener("abort", cancel); resolve(); };
+    const cancel = () => { sessionListeners.delete(done); reject(new Error("session_disposed")); };
+    sessionListeners.add(done); signal?.addEventListener("abort", cancel, { once: true });
+  });
+};
+export const authorizeLocalMemorySession = () => { stats.authorized = true; sessionListeners.forEach(fn => fn()); };
 export const revokeLocalMemorySession = () => { stats.authorized = false; };
 export const closeLocalMemory = async () => { stats.closes++; };
 export const cacheDirectory = "file:///qa-cache/";
@@ -46,3 +54,5 @@ export const withLocalMemoryDatabase = async () => { throw new Error("Native SQL
 
 export const copyAsync = async () => {};
 export const writeAsStringAsync = async () => {};
+
+export const useHeaderHeight = () => 66;

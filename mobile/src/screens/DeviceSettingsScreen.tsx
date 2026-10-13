@@ -1,33 +1,45 @@
-import { useNavigation } from "@react-navigation/native";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import Constants from "expo-constants";
-import React from "react";
+import React, { useCallback, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../auth/AuthContext";
+import { loadDirectConnections } from "../direct-agent/settings";
 import type { RootStackParams } from "../navigation";
 import { useTheme } from "../theme";
-import { SettingsScreen } from "./SettingsScreen";
+
 export function DeviceSettingsScreen() {
-  const { offlineMode, closeOffline } = useAuth();
+  const { offlineMode, closeOffline, me } = useAuth();
+  const profile = offlineMode ? "guest" : me?.id;
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParams>>();
-  const t = useTheme();
-  if (!offlineMode) return <SettingsScreen />;
-  const card = { backgroundColor: t.panel, padding: 20, gap: 12, borderRadius: 22, borderWidth: 1, borderColor: t.line };
-  return <ScrollView style={{ flex: 1, backgroundColor: t.bg }} contentContainerStyle={{ padding: 18, gap: 16, paddingBottom: 44 }}>
-    <Text style={{ color: t.text, fontSize: 28, fontWeight: "800" }}>Настройки</Text>
-    <Pressable accessibilityRole="button" accessibilityLabel="Настроить подключение ИИ" style={card} onPress={() => navigation.navigate("DirectAgentSettings")}>
-      <Text style={{ color: t.text, fontSize: 18, fontWeight: "700" }}>Модели и подключения →</Text>
-      <Text style={{ color: t.muted, lineHeight: 20 }}>Сохранённые сервисы, локальные модели, поиск и доступ ассистента к памяти.</Text>
+  const t = useTheme(); const insets = useSafeAreaInsets();
+  const [model, setModel] = useState("Выберите сервис и модель");
+  useFocusEffect(useCallback(() => {
+    let alive = true;
+    if (profile) void loadDirectConnections(profile).then(value => {
+      const active = value.connections.find(c => c.id === value.activeId)!;
+      if (alive) setModel(active.name + " · " + active.model);
+    }).catch(() => { if (alive) setModel("Открыть подключения"); });
+    return () => { alive = false; };
+  }, [profile]));
+  const card = { backgroundColor: t.panel, padding: 20, gap: 10, borderRadius: 22, borderWidth: 1, borderColor: t.line };
+  return <ScrollView style={{ flex: 1, backgroundColor: t.bg }} contentContainerStyle={{ padding: 18, gap: 16, paddingBottom: insets.bottom + 24 }}>
+    <Text style={{ color: t.muted, lineHeight: 22 }}>Всё для работы вашего помощника.</Text>
+    <Pressable accessibilityRole="button" accessibilityLabel="Модели и подключения" style={card} onPress={() => navigation.navigate("ModelConnections")}>
+      <Text style={{ color: t.text, fontSize: 19, fontWeight: "700" }}>Модели и подключения →</Text>
+      <Text numberOfLines={2} style={{ color: t.accent }}>{model}</Text>
+      <Text style={{ color: t.muted, lineHeight: 20 }}>Сохранённые сервисы, адреса, ключи и интернет-поиск.</Text>
+    </Pressable>
+    <Pressable accessibilityRole="button" accessibilityLabel="Резервные копии" style={card} onPress={() => navigation.navigate("MemoryBackup")}>
+      <Text style={{ color: t.text, fontSize: 19, fontWeight: "700" }}>Резервные копии →</Text>
+      <Text style={{ color: t.muted, lineHeight: 20 }}>Сохранить записи и диалоги или перенести их на другой телефон.</Text>
     </Pressable>
     <View style={card}>
-      <Text style={{ color: t.text, fontSize: 18, fontWeight: "700" }}>Безопасность</Text>
-      <Text style={{ color: t.muted, lineHeight: 21 }}>Вход во всё приложение защищён биометрией. При сворачивании доступ блокируется. Заметки зашифрованы на телефоне.</Text>
-    </View>
-    <View style={card}>
-      <Text style={{ color: t.text, fontSize: 18, fontWeight: "700" }}>Работа на телефоне</Text>
-      <Text style={{ color: t.muted, lineHeight: 21 }}>Сервер PersAI не требуется. Модель может работать у провайдера или в вашей локальной сети. Резервные копии доступны в разделе «Память».</Text>
-      <Pressable accessibilityRole="button" accessibilityLabel="Войти на сервер" onPress={() => void closeOffline()} style={{ minHeight: 46, justifyContent: "center" }}>
-        <Text style={{ color: t.accent, fontWeight: "600" }}>Подключить серверный аккаунт →</Text>
+      <Text style={{ color: t.text, fontSize: 19, fontWeight: "700" }}>Серверный аккаунт</Text>
+      <Text style={{ color: t.muted, lineHeight: 21 }}>{offlineMode ? "Не подключён. Для работы на телефоне достаточно выбранной модели." : me?.email}</Text>
+      <Pressable accessibilityRole="button" accessibilityLabel={offlineMode ? "Подключить серверный аккаунт" : "Открыть настройки серверного аккаунта"} onPress={() => offlineMode ? void closeOffline() : navigation.navigate("ServerSettings")} style={{ minHeight: 46, justifyContent: "center" }}>
+        <Text style={{ color: t.accent, fontWeight: "600" }}>{offlineMode ? "Подключить →" : "Управление аккаунтом и сервером →"}</Text>
       </Pressable>
     </View>
     <Text style={{ color: t.muted, fontSize: 12 }}>PersAI {Constants.expoConfig?.version || "—"} · {String(Constants.expoConfig?.extra?.buildSha || "—").slice(0, 7)}</Text>

@@ -25,7 +25,7 @@ module.exports = ({ config }) => {
     ...config,
     ...(androidCiRelease && versionCode ? { version: `${config.version}-test.${versionCode}` } : {}),
     ios: { ...config.ios, ...(process.env.PIA_IOS_BUNDLE_ID ? { bundleIdentifier: process.env.PIA_IOS_BUNDLE_ID } : {}) },
-    android: { ...config.android, ...(process.env.PIA_ANDROID_PACKAGE ? { package: process.env.PIA_ANDROID_PACKAGE } : {}), ...(versionCode ? { versionCode } : {}) },
+    android: { ...config.android, softwareKeyboardLayoutMode: 'resize', ...(process.env.PIA_ANDROID_PACKAGE ? { package: process.env.PIA_ANDROID_PACKAGE } : {}), ...(versionCode ? { versionCode } : {}) },
     extra: { ...config.extra, ...(androidCiRelease && !endpoint ? { apiBase: "" } : {}), ...(endpoint ? { apiBase: endpoint } : {}), ...(process.env.PIA_ANDROID_BUILD_SHA ? { buildSha: process.env.PIA_ANDROID_BUILD_SHA } : {}) },
   };
 };

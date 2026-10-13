@@ -7,7 +7,6 @@ export type DirectAgentPreferences = {
   provider: DirectProvider;
   baseUrl: string;
   model: string;
-  allowMemory: boolean;
   allowWeb: boolean;
   transcriptionModel?: string;
   searchProvider?: "public" | "brave" | "builtin";
@@ -25,7 +24,6 @@ export const defaultDirectPreferences: DirectAgentPreferences = {
   provider: "openai",
   baseUrl: "https://api.openai.com/v1",
   model: DEFAULT_DIRECT_MODEL,
-  allowMemory: false,
   allowWeb: false,
 };
 const keyForProfile = (profile: string) => {
@@ -91,13 +89,13 @@ async function loadLegacySettings(profile: string): Promise<DirectAgentSettings>
   ]);
   let saved: Partial<DirectAgentPreferences> = {};
   try { saved = raw ? JSON.parse(raw) as Partial<DirectAgentPreferences> : {}; }
-  catch { /* Never grant memory/search permission when preferences are corrupt. */ }
+  catch { /* Never grant web-search permission when preferences are corrupt. */ }
   const provider = validateProvider(saved.provider ?? "openai");
   const baseUrl = validateBaseUrl(saved.baseUrl ?? defaultBaseUrl(provider), provider);
   const preferences = {
     provider, baseUrl,
     model: typeof saved.model === "string" ? validateModel(saved.model) : DEFAULT_DIRECT_MODEL,
-    allowMemory: saved.allowMemory === true, allowWeb: saved.allowWeb === true,
+    allowWeb: saved.allowWeb === true,
   };
   let apiKey = "";
   try {
@@ -121,7 +119,7 @@ export async function saveDirectPreferences(profile: string, prefs: DirectAgentP
   const provider = validateProvider(prefs.provider);
   await SecureStore.setItemAsync(preferenceKey(profile), JSON.stringify({
     provider, baseUrl: validateBaseUrl(prefs.baseUrl, provider),
-    model: validateModel(prefs.model), allowMemory: prefs.allowMemory === true,
+    model: validateModel(prefs.model),
     allowWeb: prefs.allowWeb === true,
   }));
 }
@@ -189,7 +187,7 @@ export async function loadDirectConnections(profile: string): Promise<DirectConn
       const baseUrl = validateBaseUrl(item.baseUrl, provider);
       connections.push({
         id, name: String(item.name || "Модель").slice(0, 60), provider, baseUrl,
-        model: validateModel(item.model), transcriptionModel: validateModel(item.transcriptionModel || "whisper-1"), allowMemory: item.allowMemory === true, allowWeb: item.allowWeb === true,
+        model: validateModel(item.model), transcriptionModel: validateModel(item.transcriptionModel || "whisper-1"), allowWeb: item.allowWeb === true,
         searchProvider: ["public", "brave", "builtin"].includes(item.searchProvider || "") ? item.searchProvider : "public",
         apiKey: item.credentialIdentity === identityOf({ provider, baseUrl }) ? savedApiKey || "" : "",
         webSearchKey: savedSearchKey || "",
@@ -216,7 +214,8 @@ export async function saveDirectConnections(profile: string, value: DirectConnec
     if (!["public", "brave", "builtin"].includes(searchProvider)) throw new Error("Выберите способ поиска");
     if (item.allowWeb && searchProvider === "brave" && !item.webSearchKey.trim()) throw new Error("Введите ключ Brave Search API");
     if (item.allowWeb && searchProvider === "builtin" && provider !== "openai") throw new Error("Встроенный поиск доступен через OpenAI Responses");
-    return { ...item, name: item.name.trim().slice(0, 60), provider, baseUrl,
+    const { allowMemory: _legacyMemoryFlag, ...current } = item as DirectConnection & { allowMemory?: boolean };
+    return { ...current, name: item.name.trim().slice(0, 60), provider, baseUrl,
       model: validateModel(item.model), transcriptionModel: validateModel(item.transcriptionModel || "whisper-1"), searchProvider,
       apiKey: item.apiKey.trim() ? validateSecret(item.apiKey) : "",
       webSearchKey: item.webSearchKey.trim() ? validateSecret(item.webSearchKey) : "",

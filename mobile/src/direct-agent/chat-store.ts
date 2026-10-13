@@ -1,0 +1,189 @@
+import * as Crypto from "expo-crypto";
+import { runDirectAgent } from "./engine";
+import { saveApprovedNote, searchApprovedNotes } from "./memory";
+import { conversationRepository } from "./conversations";
+import type { ChatDraft, ConversationRepository, SavedConversation } from "./conversations";
+import type { DirectAgentSettings } from "./settings";
+import { waitForApplicationSession } from "../local-memory/storage";
+
+export type LiveConversation = SavedConversation & { busy: boolean; progress: string; savingDraft?: string; deleting?: boolean };
+export type ChatSnapshot = { ready: boolean; error: string; conversations: LiveConversation[]; activeId: string | null };
+const newConversation = (): LiveConversation => {
+  const timestamp = new Date().toISOString();
+  return { id: Crypto.randomUUID(), title: "Новый диалог", createdAt: timestamp, updatedAt: timestamp,
+    rows: [], drafts: [], question: "", busy: false, progress: "" };
+};
+const saved = ({ busy, progress, savingDraft, deleting, ...conversation }: LiveConversation): SavedConversation =>
+  ({ ...conversation, interrupted: busy });
+
+/** Owns work independently of the navigation tree. Only an explicit Stop or
+ * a profile change aborts the model; focus/blur and overlays never do. */
+export class DirectChatStore {
+  private snapshot: ChatSnapshot = { ready: false, error: "", conversations: [], activeId: null };
+  private listeners = new Set<() => void>();
+  private requests = new Map<string, AbortController>();
+  private disposed = false;
+  private initializing = false;
+  private lifetime = new AbortController();
+  private writes: Promise<void> = Promise.resolve();
+  private repository: ConversationRepository;
+  constructor(private profile: string, repository?: ConversationRepository, private runner = runDirectAgent) {
+    this.repository = repository || conversationRepository(profile);
+  }
+  getSnapshot = () => this.snapshot;
+  subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
+  private publish(patch: Partial<ChatSnapshot>) {
+    if (this.disposed) return;
+    this.snapshot = { ...this.snapshot, ...patch };
+    for (const listener of this.listeners) listener();
+  }
+  private update(id: string, patch: Partial<LiveConversation>, persist = false): LiveConversation | undefined {
+    const previous = this.snapshot.conversations.find(c => c.id === id);
+    if (!previous || this.disposed) return;
+    const next = { ...previous, ...patch };
+    this.publish({ conversations: this.snapshot.conversations.map(c => c.id === id ? next : c) });
+    if (persist) void this.persist(next).catch(() => {});
+    return next;
+  }
+  private persist(conversation: LiveConversation): Promise<void> {
+    if (conversation.deleting) return Promise.resolve();
+    // Capture immutable state NOW, serialize all writes, and wait through app
+    // locking. A late save can never overwrite a newer message or resurrect a deleted chat.
+    const value = saved(conversation);
+    const work = this.writes.catch(() => {}).then(async () => {
+      await waitForApplicationSession(this.lifetime.signal);
+      if (this.disposed || !this.snapshot.conversations.some(c => c.id === value.id)) return;
+      await this.repository.save(value);
+    });
+    this.writes = work;
+    void work.catch(() => {
+      this.publish({ error: "Не удалось сохранить историю. Диалог остаётся открыт; повторите сохранение." });
+    });
+    return work;
+  }
+  async initialize() {
+    if (this.initializing || this.disposed || this.requests.size) return;
+    this.initializing = true;
+    try {
+      await this.writes.catch(() => {});
+      await waitForApplicationSession(this.lifetime.signal);
+      const records = await this.repository.load();
+      const conversations: LiveConversation[] = records.map(c => ({
+        ...c, question: c.question || "", busy: false, progress: "", interrupted: false,
+        rows: c.interrupted ? [...c.rows, { id: Crypto.randomUUID(), role: "info" as const,
+          text: "Приложение закрылось до завершения ответа. Можно отправить вопрос повторно." }] : c.rows,
+      }));
+      this.publish({ ready: true, conversations, activeId: conversations[0]?.id || null });
+      for (const c of conversations.filter(c => records.find(r => r.id === c.id)?.interrupted)) await this.persist(c);
+      if (!conversations.length) this.create();
+    } catch {
+      this.publish({ ready: false, error: "Не удалось открыть историю диалогов. Повторите загрузку." });
+    } finally { this.initializing = false; }
+  }
+  create() {
+    if (!this.snapshot.ready || this.disposed) return;
+    const conversation = newConversation();
+    this.publish({ conversations: [conversation, ...this.snapshot.conversations], activeId: conversation.id, error: "" });
+    void this.persist(conversation).catch(() => {});
+  }
+  select(id: string) {
+    if (this.snapshot.conversations.some(c => c.id === id)) this.publish({ activeId: id, error: "" });
+  }
+  setQuestion(question: string) {
+    if (this.snapshot.activeId) this.update(this.snapshot.activeId, { question });
+  }
+  async checkpoint() {
+    const ids = this.snapshot.conversations.map(c => c.id);
+    for (const id of ids) {
+      const current = this.snapshot.conversations.find(c => c.id === id);
+      if (current) await this.persist(current);
+    }
+    this.publish({ error: "" });
+  }
+  async remove(id: string) {
+    const conversation = this.snapshot.conversations.find(c => c.id === id);
+    if (!conversation || conversation.busy || conversation.savingDraft || conversation.deleting) return;
+    this.update(id, { deleting: true });
+    const work = this.writes.catch(() => {}).then(async () => {
+      await waitForApplicationSession(this.lifetime.signal);
+      if (this.disposed) return;
+      await this.repository.remove(id);
+      const remaining = this.snapshot.conversations.filter(c => c.id !== id);
+      this.publish({ conversations: remaining, activeId: this.snapshot.activeId === id ? remaining[0]?.id || null : this.snapshot.activeId });
+      if (!remaining.length) this.create();
+    });
+    this.writes = work;
+    try { await work; } catch { this.update(id, { deleting: false }); this.publish({ error: "Не удалось удалить диалог." }); }
+  }
+  async send(settings: DirectAgentSettings) {
+    const id = this.snapshot.activeId;
+    const current = this.snapshot.conversations.find(c => c.id === id);
+    if (!id || !current || current.busy || current.deleting || !current.question.trim() || this.disposed) return;
+    const prompt = current.question.trim();
+    const aborter = new AbortController();
+    this.requests.set(id, aborter);
+    const history = current.rows.filter(r => r.role !== "info").slice(-8)
+      .map(r => ({ role: r.role as "user" | "assistant", content: r.text }));
+    this.publish({ error: "" });
+    const pending = this.update(id, {
+      question: "", busy: true, progress: "Сохраняю вопрос…", updatedAt: new Date().toISOString(),
+      title: current.rows.length ? current.title : prompt.slice(0, 60),
+      rows: [...current.rows, { id: Crypto.randomUUID(), role: "user", text: prompt }],
+    })!;
+    let modelStarted = false;
+    try {
+      // Persist the submitted question before spending a model request.
+      await this.persist(pending);
+      if (this.disposed) return;
+      if (aborter.signal.aborted) throw new Error("aborted");
+      modelStarted = true;
+      const result = await this.runner({ settings, prompt, history, signal: aborter.signal,
+        lookup: query => searchApprovedNotes(this.profile, query),
+        status: progress => { if (!aborter.signal.aborted) this.update(id, { progress }); },
+        propose: note => {
+          const c = this.snapshot.conversations.find(c => c.id === id);
+          if (c && !aborter.signal.aborted) this.update(id, { drafts: [...c.drafts, { ...note, id: Crypto.randomUUID() }] }, true);
+        },
+      });
+      const c = this.snapshot.conversations.find(c => c.id === id);
+      if (!c || this.disposed) return;
+      if (aborter.signal.aborted) throw new Error("aborted");
+      this.update(id, { rows: [...c.rows, { id: Crypto.randomUUID(), role: "assistant", text: result.text, sources: result.sources }],
+        updatedAt: new Date().toISOString() });
+    } catch (e) {
+      const c = this.snapshot.conversations.find(c => c.id === id);
+      if (c && !this.disposed) this.update(id, {
+        ...(!modelStarted && !aborter.signal.aborted ? { question: c.question || prompt } : {}),
+        rows: [...c.rows, { id: Crypto.randomUUID(), role: "info",
+          text: aborter.signal.aborted ? "Запрос остановлен" : !modelStarted ? "Запрос не отправлен: не удалось сохранить историю." : String((e as Error).message) }],
+      });
+    } finally {
+      this.requests.delete(id);
+      const final = this.update(id, { busy: false, progress: "" });
+      if (final) await this.persist(final).catch(() => {});
+    }
+  }
+  stop(id = this.snapshot.activeId) { if (id && this.requests.has(id)) { this.update(id, { progress: "Останавливаю запрос…" }); this.requests.get(id)?.abort(); } }
+  dismiss(draft: ChatDraft) {
+    const c = this.snapshot.conversations.find(c => c.id === this.snapshot.activeId);
+    if (c && c.savingDraft !== draft.id) this.update(c.id, { drafts: c.drafts.filter(d => d.id !== draft.id) }, true);
+  }
+  async approve(draft: ChatDraft) {
+    const c = this.snapshot.conversations.find(c => c.id === this.snapshot.activeId);
+    if (!c || c.savingDraft || c.deleting) return;
+    this.update(c.id, { savingDraft: draft.id });
+    try {
+      await saveApprovedNote(this.profile, draft);
+      const latest = this.snapshot.conversations.find(x => x.id === c.id);
+      if (latest) this.update(c.id, { drafts: latest.drafts.filter(d => d.id !== draft.id), rows: [...latest.rows,
+        { id: Crypto.randomUUID(), role: "info", text: "Заметка сохранена." }] }, true);
+    } catch { this.publish({ error: "Не удалось сохранить заметку. Повторите попытку." }); }
+    finally { this.update(c.id, { savingDraft: undefined }); }
+  }
+  dispose() {
+    this.disposed = true;
+    this.lifetime.abort();
+    for (const request of this.requests.values()) request.abort();
+    this.requests.clear(); this.listeners.clear();
+  }
+}

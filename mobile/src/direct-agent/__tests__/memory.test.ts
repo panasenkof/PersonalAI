@@ -26,24 +26,23 @@ function fake() {
   return repo;
 }
 
-test("requires explicit permission before touching SQLCipher memory", async () => {
+test("memory is available without a separate permission flag", async () => {
   const repo = fake();
-  await expect(searchApprovedNotes("guest", "кухня", false, repo as unknown as MemoryRepository))
-    .rejects.toThrow("не разрешён");
-  expect(repo.listCollections).not.toHaveBeenCalled();
-  expect(repo.searchNotes).not.toHaveBeenCalled();
+  await expect(searchApprovedNotes("guest", "кухня", repo as unknown as MemoryRepository))
+    .resolves.toEqual([{ id: "ok", title: "Любимое", body: "Паста" }]);
+  expect(repo.listCollections).toHaveBeenCalled();
 });
 
 test("only standard active notes can leave the device", async () => {
   const repo = fake();
-  const found = await searchApprovedNotes("guest", "паста", true, repo as unknown as MemoryRepository);
+  const found = await searchApprovedNotes("guest", "паста", repo as unknown as MemoryRepository);
   expect(found).toEqual([{ id: "ok", title: "Любимое", body: "Паста" }]);
   expect(repo.searchNotes).toHaveBeenCalled();
 });
 
 test("short queries never bulk-export the database", async () => {
   const repo = fake();
-  const found = await searchApprovedNotes("guest", "a", true, repo as unknown as MemoryRepository);
+  const found = await searchApprovedNotes("guest", "a", repo as unknown as MemoryRepository);
   expect(found).toEqual([]);
   expect(repo.searchNotes).not.toHaveBeenCalled();
 });
