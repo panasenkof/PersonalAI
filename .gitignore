@@ -13,3 +13,7 @@ dist/
 .mypy_cache/
 .ruff_cache/
 .pytest_cache/
+
+# Expo prebuild output (native projects are regenerated in CI)
+mobile/android/
+mobile/ios/

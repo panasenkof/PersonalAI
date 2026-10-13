@@ -14,6 +14,9 @@ import { FactCard } from "../components/FactCard";
 import { MessageBubble } from "../components/MessageBubble";
 import { ToolChip } from "../components/ToolChip";
 import type { RootStackParams } from "../navigation";
+import { AttachmentMenu } from "../components/AttachmentMenu";
+import { withNativeInteraction } from "../security/native-interaction";
+import { VoiceInput } from "../components/VoiceInput";
 import { useTheme } from "../theme";
 import type { Attachment, AttachmentSensitivity, Fact, PrivacyCollection } from "../types";
 
@@ -111,18 +114,18 @@ export function ChatScreen({ route, navigation }: NativeStackScreenProps<RootSta
     setBlobMessage("Не классифицирован — внешняя обработка запрещена.");
     try {
       if (kind === "file") {
-        const r = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true });
-        if (r.canceled) return;
+        const r = await withNativeInteraction(() => DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true }));
+        if (r.canceled || !mounted.current) return;
         const f = r.assets[0];
         setAttachment(await api.upload(f.uri, f.name, f.mimeType ?? "application/octet-stream"));
       } else {
         if (kind === "camera") {
-          const permission = await ImagePicker.requestCameraPermissionsAsync();
+          const permission = await withNativeInteraction(() => ImagePicker.requestCameraPermissionsAsync());
           if (!permission.granted) throw new Error("Разрешите доступ к камере в настройках телефона или выберите готовый файл.");
         }
         const opts: ImagePicker.ImagePickerOptions = { mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.8 };
-        const r = kind === "camera" ? await ImagePicker.launchCameraAsync(opts) : await ImagePicker.launchImageLibraryAsync(opts);
-        if (r.canceled) return;
+        const r = await withNativeInteraction(() => kind === "camera" ? ImagePicker.launchCameraAsync(opts) : ImagePicker.launchImageLibraryAsync(opts));
+        if (r.canceled || !mounted.current) return;
         const a = r.assets[0];
         setAttachment(await api.upload(a.uri, a.fileName ?? "photo.jpg", a.mimeType ?? "image/jpeg"));
       }
@@ -283,12 +286,9 @@ export function ChatScreen({ route, navigation }: NativeStackScreenProps<RootSta
         {uploading ? (
           <ActivityIndicator style={styles.clip} />
         ) : (
-          <>
-            <Pressable accessibilityLabel="Сделать фото" disabled={busy} style={styles.clip} onPress={() => pick("camera")}><Text style={styles.clipText}>📷</Text></Pressable>
-            <Pressable accessibilityLabel="Выбрать фото" disabled={busy} style={styles.clip} onPress={() => pick("photo")}><Text style={styles.clipText}>🖼</Text></Pressable>
-            <Pressable accessibilityLabel="Прикрепить файл" disabled={busy} style={styles.clip} onPress={() => pick("file")}><Text style={styles.clipText}>📎</Text></Pressable>
-          </>
+          <AttachmentMenu disabled={busy} onPick={kind => void pick(kind)} />
         )}
+        <VoiceInput value={text} onChange={setText} disabled={busy || uploading || classifying} onError={message => setRows(r => [...r, { id: uid(), kind: "note", text: message }])} />
         <TextInput
           style={[styles.input, { color: t.text, borderColor: t.line }]}
           placeholder="Сообщение…"

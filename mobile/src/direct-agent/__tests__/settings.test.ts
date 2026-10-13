@@ -61,3 +61,15 @@ test("permits private HTTP model servers without accepting remote HTTP", () => {
     .toBe("http://192.168.1.12:11434/v1");
   expect(validateModel("anthropic/claude-sonnet-4")).toBe("anthropic/claude-sonnet-4");
 });
+
+
+test("legacy key migrates to the current server owner without leaking to another profile", async () => {
+  const owner = "a0b0c0d0-1111-2222-3333-444455556666";
+  const subject = Buffer.from(JSON.stringify({ sub: owner })).toString("base64url");
+  vault.set("pia.tokens", JSON.stringify({ access_token: "header." + subject + ".signature" }));
+  vault.set("pia.direct.openai.key.v1", "old-owner-key");
+  expect((await loadDirectSettings("guest")).apiKey).toBe("");
+  expect((await loadDirectSettings(owner)).apiKey).toBe("old-owner-key");
+  expect((await loadDirectSettings("other-user")).apiKey).toBe("");
+  expect(vault.has("pia.direct.openai.key.v1")).toBe(false);
+});

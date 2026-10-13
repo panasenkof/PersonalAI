@@ -2,6 +2,8 @@ import * as SecureStore from "expo-secure-store";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
 import { api, ApiError, configureApi } from "../api/client";
+import { requestApplicationLock } from "../local-memory/authentication";
+import { needsLegacyMemoryMigration, closeLocalMemory } from "../local-memory/storage";
 import { normalizeServer } from "../ux";
 import { DEFAULT_API_BASE } from "../config";
 import type { Me, Tokens } from "../types";
@@ -40,9 +42,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     tokens.current = t;
     if (t) await SecureStore.setItemAsync(TOKENS_KEY, JSON.stringify(t));
     else {
+      await closeLocalMemory();
       await SecureStore.deleteItemAsync(TOKENS_KEY);
       setMe(null); // drops to the login screen
     }
+  }, []);
+
+  const applyMe = useCallback(async (next: Me | null) => {
+    // An old account's per-item key is migrated at the application boundary,
+    // never by a second prompt opened from the Memory tab.
+    if (next?.id && await needsLegacyMemoryMigration(next.id)) requestApplicationLock();
+    setMe(next);
   }, []);
 
   useEffect(() => {
@@ -61,7 +71,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         catch { await setTokens(null); }
         try {
           // Offline boot must not attempt API calls even with saved server tokens.
-          if (offline !== "yes") setMe(await api.me());
+          if (offline !== "yes") await applyMe(await api.me());
         } catch (e) {
           // 401 → request() already cleared the session; network errors keep the tokens for a later retry
           if (e instanceof ApiError && e.status !== 401) console.warn("me() failed", e.detail);
@@ -69,9 +79,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       setReady(true);
     })().catch(() => setReady(true));
-  }, [setTokens]);
+  }, [setTokens, applyMe]);
 
-  const refreshMe = useCallback(async () => setMe(await api.me()), []);
+  const refreshMe = useCallback(async () => applyMe(await api.me()), [applyMe]);
 
   const value = useMemo<Ctx>(
     () => ({
@@ -79,10 +89,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       me,
       offlineMode,
       openOffline: async () => {
+        await closeLocalMemory();
         await SecureStore.setItemAsync(OFFLINE_KEY, "yes");
+        if (await needsLegacyMemoryMigration("guest")) requestApplicationLock();
         setOfflineMode(true);
       },
       closeOffline: async () => {
+        await closeLocalMemory();
         await SecureStore.deleteItemAsync(OFFLINE_KEY);
         setOfflineMode(false);
         // The existing login screen is the explicit path back to a server.
@@ -97,20 +110,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         await SecureStore.setItemAsync(BASE_KEY, clean);
       },
       login: async (email, password, otp) => {
+        await closeLocalMemory();
         await setTokens(await api.login(email, password, otp));
-        setMe(await api.me());
+        await applyMe(await api.me());
       },
       register: async (email, password) => {
+        await closeLocalMemory();
         const registered = await api.register(email, password);
         if (registered.email_verification_required) throw new ApiError(403, "email_not_verified");
         await setTokens(registered);
-        setMe(await api.me());
+        await applyMe(await api.me());
       },
       changePassword: async (current, next, otp) => { await setTokens(await api.changePassword(current, next, otp)); },
       logout: async () => setTokens(null),
       refreshMe,
     }),
-    [ready, me, offlineMode, apiBase, setTokens, refreshMe],
+    [ready, me, offlineMode, apiBase, setTokens, refreshMe, applyMe],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

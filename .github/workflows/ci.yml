@@ -134,6 +134,7 @@ jobs:
           npx playwright install --with-deps chromium
           node --test ../scripts/web-test-server.test.cjs
           NODE_PATH="$PWD/node_modules" node ../scripts/verify-web.cjs
+          node scripts/verify-mobile-ui.cjs
 
   docker-smoke:
     name: Production compose and scaling

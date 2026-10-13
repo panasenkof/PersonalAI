@@ -153,10 +153,10 @@ test("OpenAI-compatible API uses Chat Completions, not proprietary Responses too
   expect(body.tools).toBeUndefined();
 });
 
-test("non-OpenAI web toggle fails clearly before contacting the LLM when search key is absent", async () => {
+test("explicit Brave search fails clearly when search key is absent", async () => {
   const response = jest.fn();
   await expect(start({ provider: "anthropic", baseUrl: "https://api.anthropic.com/v1",
-    allowWeb: true }, response)).rejects.toThrow("Brave Search API");
+    allowWeb: true, searchProvider: "brave" }, response)).rejects.toThrow("Brave Search API");
   expect(response).not.toHaveBeenCalled();
 });
 

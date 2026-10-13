@@ -1,19 +1,22 @@
-import { useFocusEffect } from "@react-navigation/native";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import * as DocumentPicker from "expo-document-picker";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import {
   ActivityIndicator, AppState, KeyboardAvoidingView, Platform, Pressable,
   ScrollView, StyleSheet, Text, TextInput, View,
 } from "react-native";
 
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import type { RootStackParams } from "../navigation";
+import { VoiceInput } from "../components/VoiceInput";
 import { useAuth } from "../auth/AuthContext";
 import { MemoryConflictError } from "../local-memory/types";
 import { FloatingBrand } from "../components/FloatingBrand";
 import type { EntityRecord, ObservationRecord, RelationRecord, RevisionRecord } from "../local-memory/types";
 import { localMemoryRepository, SqliteMemoryRepository } from "../local-memory/repository";
-import { closeLocalMemory } from "../local-memory/storage";
-import { shouldLockLocalMemory } from "../local-memory/lifecycle";
 import { createRecoveryCode, shareEncryptedBackup, restoreEncryptedBackup } from "../local-memory/backup";
+import { withNativeInteraction } from "../security/native-interaction";
+import { memoryErrorMessage } from "../local-memory/errors";
 import { useTheme } from "../theme";
 
 const bodyOf = (e: EntityRecord): string => typeof e.payload.body === "string" ? e.payload.body : "";
@@ -21,6 +24,7 @@ const titleOf = (e: EntityRecord): string => e.title || "Без названия
 
 export function LocalMemoryScreen() {
   const t = useTheme();
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParams>>();
   const { offlineMode, closeOffline, me } = useAuth();
   const profileId = offlineMode ? "guest" : me?.id;
   const [repo, setRepo] = useState<SqliteMemoryRepository | null>(null);
@@ -37,57 +41,16 @@ export function LocalMemoryScreen() {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [backupExpanded, setBackupExpanded] = useState(false);
   const [backupCode, setBackupCode] = useState("");
   const [savedRecoveryCode, setSavedRecoveryCode] = useState(false);
   const [restoreCode, setRestoreCode] = useState("");
-  const [screenLocked, setScreenLocked] = useState(false);
   const [unlockEpoch, setUnlockEpoch] = useState(0);
-  const locking = useRef<Promise<void>>(Promise.resolve());
-  const appLocked = useRef(false);
-
-  useEffect(() => {
-    let subscribed = true;
-    function lock() {
-      if (appLocked.current) return;
-      appLocked.current = true;
-      // React state is cleared immediately, before asynchronous SQLite close.
-      setScreenLocked(true);
-      setRepo(null);
-      setNotes([]);
-      setSelected(null);
-      setHistory([]);
-      setEvents([]);
-      setRelations([]);
-      setTitle("");
-      setBody("");
-      setEventText("");
-      setBackupCode("");
-      setRestoreCode("");
-      setSavedRecoveryCode(false);
-      locking.current = closeLocalMemory();
-    }
-    function unlock() {
-      if (!appLocked.current) return;
-      void locking.current.then(() => {
-        if (subscribed && AppState.currentState === "active") {
-          appLocked.current = false;
-          setScreenLocked(false);
-          setUnlockEpoch(value => value + 1);
-        }
-      }).catch(() => setMessage("Не удалось безопасно закрыть память"));
-    }
-    const app = AppState.addEventListener("change", state => {
-      // A native biometric sheet commonly emits blur/focus (and sometimes inactive).
-      // Closing the SQLCipher connection in that moment causes a second auth prompt
-      // and can race with the first unlock. Only actual backgrounding locks memory.
-      if (shouldLockLocalMemory(state)) lock();
-      else if (state === "active") unlock();
-    });
-    return () => { subscribed = false; app.remove(); };
-  }, []);
+  const repoRef = useRef<SqliteMemoryRepository | null>(null);
 
   const refresh = useCallback(async (db: SqliteMemoryRepository, term: string, entityId?: string) => {
     const page = await db.searchNotes(term, 50);
+    if (repoRef.current !== db) return;
     setNotes(page);
     setHasMore(page.length === 50);
     if (entityId) {
@@ -99,6 +62,7 @@ export function LocalMemoryScreen() {
 
   useFocusEffect(useCallback(() => {
     let alive = true;
+    repoRef.current = null;
     setRepo(null);
     setNotes([]);
     setSelected(null);
@@ -120,35 +84,32 @@ export function LocalMemoryScreen() {
     }
     void localMemoryRepository(profileId).then(async db => {
       if (!alive || AppState.currentState !== "active") return;
+      repoRef.current = db;
       setRepo(db);
       await refresh(db, search, selected?.id);
       if (alive) setMessage("");
     }).catch((e: Error) => {
       if (alive) setMessage(e.message === "sqlcipher_required_native_build"
-        ? "Для локального шифрования требуется отдельная сборка с SQLCipher. Expo Go не поддерживается."
-        : e.message === "local_memory_biometric_required"
-          ? "Для защищённой локальной памяти необходимо настроить биометрию телефона."
-          : /cancel|user_cancel/i.test(e.message)
-            ? "Разблокировка отменена. Чтобы повторить, откройте раздел ещё раз."
-            : e.message === "local_memory_unlock_failed"
-              ? "Не удалось открыть ключ памяти. Если биометрия была изменена, используйте резервную копию."
-              : "Не удалось разблокировать локальную память: " + e.message);
+        ? "Для локального шифрования нужна сборка с SQLCipher. Expo Go не поддерживается."
+        : e.message === "application_locked" ? "Для доступа войдите в приложение."
+          : e.message === "local_memory_unlock_failed" ? "Не удалось открыть ключ существующей памяти. Исходная база сохранена; используйте резервную копию."
+            : "Не удалось открыть локальную память. Повторите открытие или перезапустите приложение.");
     }).finally(() => { if (alive) setLoading(false); });
     return () => {
-      alive = false;
-      void closeLocalMemory();
+      alive = false; repoRef.current = null;
     };
   }, [refresh, profileId, unlockEpoch]));
 
   const run = async (task: () => Promise<void>) => {
     if (busy || !repo) return;
+    const active = repo;
     setBusy(true); setMessage("");
     try { await task(); }
     catch (e) {
       setMessage(e instanceof MemoryConflictError
         ? "Запись была изменена. Откройте её заново, чтобы не потерять изменения."
-        : String((e as Error).message));
-    } finally { setBusy(false); }
+        : memoryErrorMessage(e));
+    } finally { if (repoRef.current === active) setBusy(false); }
   };
   const loadMore = async () => {
     if (busy || !repo || !hasMore) return;
@@ -158,7 +119,7 @@ export function LocalMemoryScreen() {
       setNotes(previous => [...previous, ...next]);
       setHasMore(next.length === 50);
     } catch (e) {
-      setMessage(String((e as Error).message));
+      setMessage(memoryErrorMessage(e));
     } finally { setBusy(false); }
   };
   const selectNote = async (item: EntityRecord) => {
@@ -190,6 +151,7 @@ export function LocalMemoryScreen() {
         sensitivity: "standard", source_kind: "user", source_ref: "device",
       });
     }
+    if (repoRef.current !== repo) return;
     setSelected(saved);
     setTitle(titleOf(saved)); setBody(bodyOf(saved));
     await refresh(repo!, search, saved.id);
@@ -217,7 +179,7 @@ export function LocalMemoryScreen() {
     if (!profileId || !backupCode || !savedRecoveryCode) {
       throw new Error("Сначала создайте и сохраните код восстановления отдельно от файла.");
     }
-    await shareEncryptedBackup(profileId, backupCode);
+    await withNativeInteraction(() => shareEncryptedBackup(profileId, backupCode));
     setBackupCode("");
     setSavedRecoveryCode(false);
     setMessage("Зашифрованная копия передана выбранному приложению. Код сохраните отдельно.");
@@ -226,7 +188,7 @@ export function LocalMemoryScreen() {
     if (!profileId || !restoreCode.trim()) {
       throw new Error("Введите 64-символьный код восстановления.");
     }
-    const picked = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true });
+    const picked = await withNativeInteraction(() => DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true }));
     if (picked.canceled || !picked.assets.length) return;
     const stats = await restoreEncryptedBackup(profileId, picked.assets[0].uri, restoreCode);
     setRestoreCode("");
@@ -252,7 +214,7 @@ export function LocalMemoryScreen() {
           </View>
         </View>
         <Text style={{ color: t.muted }}>
-          Зашифрованные заметки, история правок, связи и резервные копии хранятся на этом устройстве и не синхронизируются с сервером. Для доступа требуется биометрия.
+          Зашифрованные заметки, история правок, связи и резервные копии хранятся на этом устройстве и не синхронизируются с сервером. Доступ открывается вместе со всем приложением.
         </Text>
         {offlineMode && (
           <Pressable accessibilityRole="button" accessibilityLabel="Вернуться к входу на сервер"
@@ -263,24 +225,25 @@ export function LocalMemoryScreen() {
         )}
         {loading && <ActivityIndicator accessibilityLabel="Открытие локальной базы" />}
         {message ? <Text accessibilityRole="alert" style={{ color: t.muted }}>{message}</Text> : null}
-        {repo && !screenLocked ? (
+        {!repo && !loading ? <Pressable accessibilityRole="button" accessibilityLabel="Повторить открытие памяти" style={action} onPress={() => setUnlockEpoch(x => x + 1)}><Text style={styles.white}>Повторить открытие памяти</Text></Pressable> : null}
+        {repo ? (
           <>
             <TextInput accessibilityLabel="Поиск по локальным заметкам" placeholder="Поиск без интернета"
               placeholderTextColor={t.muted} value={search} onChangeText={setSearch}
-              style={input} onSubmitEditing={() => void refresh(repo, search, selected?.id)} />
+              style={input} onSubmitEditing={() => void run(() => refresh(repo, search, selected?.id))} />
             <Pressable accessibilityRole="button" style={action}
               onPress={() => void run(() => refresh(repo, search, selected?.id))}>
               <Text style={styles.white}>Найти заметки</Text>
             </Pressable>
             <Pressable accessibilityRole="button" style={[styles.button, { borderWidth: 1, borderColor: t.line }]}
               onPress={() => { setSelected(null); setTitle(""); setBody(""); setHistory([]); setRelations([]); setEvents([]); }}>
-              <Text style={{ color: t.text, textAlign: "center" }}>＋ Новая заметка</Text>
+              <Text style={{ color: t.text, textAlign: "center" }}>+ Новая заметка</Text>
             </Pressable>
             {notes.map(item => (
               <Pressable accessibilityRole="button" key={item.id}
                 accessibilityLabel={"Открыть заметку " + titleOf(item)}
                 style={[styles.note, { backgroundColor: t.panel, borderColor: t.line }]}
-                onPress={() => void selectNote(item)}>
+                onPress={() => void run(() => selectNote(item))}>
                 <Text style={{ color: t.text, fontWeight: "600" }}>{titleOf(item)}</Text>
                 <Text style={{ color: t.muted }} numberOfLines={2}>{bodyOf(item)}</Text>
               </Pressable>
@@ -292,12 +255,14 @@ export function LocalMemoryScreen() {
                 <Text style={{ color: t.text, textAlign: "center" }}>Показать ещё</Text>
               </Pressable>
             )}
+            <Pressable disabled={busy} accessibilityRole="button" accessibilityLabel="Добавить сведения из файла" style={[styles.button, { backgroundColor: t.soft }]} onPress={() => navigation.navigate("MemoryImport")}><Text style={{ color: t.accent, textAlign: "center", fontWeight: "600" }}>+ Сведения из фото, аудио, видео или текста</Text></Pressable>
             <Text style={[styles.heading, { color: t.text }]}>{selected ? "Редактирование" : "Новая заметка"}</Text>
             <TextInput accessibilityLabel="Заголовок заметки" value={title} onChangeText={setTitle}
               placeholder="Заголовок" placeholderTextColor={t.muted} style={input} />
             <TextInput accessibilityLabel="Текст заметки" multiline value={body} onChangeText={setBody}
               placeholder="Текст — всё остаётся на устройстве" placeholderTextColor={t.muted}
               style={[input, { minHeight: 110, textAlignVertical: "top" }]} />
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}><VoiceInput value={body} onChange={setBody} disabled={busy} onError={setMessage} /><Text style={{ color: t.muted }}>Надиктовать заметку</Text></View>
             <Pressable accessibilityRole="button" disabled={busy} style={action} onPress={save}>
               <Text style={styles.white}>Сохранить локально</Text>
             </Pressable>
@@ -333,7 +298,12 @@ export function LocalMemoryScreen() {
                   ))}
               </>
             )}
-            <Text style={[styles.heading, { color: t.text }]}>Резервная копия</Text>
+            <Pressable accessibilityRole="button" accessibilityLabel="Резервная копия и восстановление" accessibilityState={{ expanded: backupExpanded }} style={[styles.note, { backgroundColor: t.soft, borderColor: t.line }]} onPress={() => setBackupExpanded(x => !x)}>
+              <Text style={{ color: t.text, fontWeight: "700" }}>Резервная копия и восстановление {backupExpanded ? "⌃" : "⌄"}</Text>
+              <Text style={{ color: t.muted, fontSize: 12 }}>Сохранить память или перенести на другой телефон</Text>
+            </Pressable>
+            {backupExpanded ? <View style={{ gap: 12 }}>
+            <Text style={[styles.heading, { color: t.text }]}>Создать резервную копию</Text>
             <Text style={{ color: t.muted }}>
               Копия шифруется отдельно от базы телефона. Код восстановления состоит из 64 символов:
               сохраните его в другом месте. Без него файл невозможно прочитать.
@@ -378,6 +348,7 @@ export function LocalMemoryScreen() {
               style={action} onPress={restoreBackup}>
               <Text style={styles.white}>Выбрать файл и восстановить</Text>
             </Pressable>
+            </View> : null}
           </>
         ) : null}
       </ScrollView>

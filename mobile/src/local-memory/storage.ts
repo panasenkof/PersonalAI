@@ -1,13 +1,20 @@
 import * as Crypto from "expo-crypto";
 import * as SecureStore from "expo-secure-store";
 import * as SQLite from "expo-sqlite";
+import * as FileSystem from "expo-file-system/legacy";
 
 import { waitForUnlockedTransaction, withUnlockedTransaction } from "./transaction";
+import { withBiometricPrompt } from "./authentication";
 
 // Guest uses the historical database name so PR #15 notes are preserved.
 const GUEST_DB_NAME = "pia-personal-memory-v1.db";
 const LEGACY_GUEST_KEY = "pia.local-memory.sqlcipher.key.v1";
-const PROTECTED_KEY_PREFIX = "pia.local-memory.sqlcipher.biometric.v2.";
+const OLD_PROTECTED_KEY_PREFIX = "pia.local-memory.sqlcipher.biometric.v2.";
+const KEY_PREFIX = "pia.local-memory.sqlcipher.app-session.v3.";
+let applicationSessionUnlocked = false;
+export function authorizeLocalMemorySession(): void { applicationSessionUnlocked = true; }
+export function revokeLocalMemorySession(): void { applicationSessionUnlocked = false; }
+const requireApplicationSession = () => { if (!applicationSessionUnlocked) throw new Error("application_locked"); };
 export const LOCAL_MEMORY_SCHEMA_VERSION = 1;
 
 /** All memory (including full-text indexes, revisions, and WAL) is in SQLCipher. */
@@ -76,7 +83,7 @@ async function serialize<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 export async function localMemoryIdentity(profileId: string): Promise<{
-  databaseName: string; keyName: string; isGuest: boolean;
+  databaseName: string; keyName: string; legacyKeyName: string; isGuest: boolean;
 }> {
   if (profileId !== "guest" && !/^[a-f0-9-]{8,64}$/i.test(profileId)) {
     throw new Error("invalid_local_memory_owner");
@@ -85,62 +92,80 @@ export async function localMemoryIdentity(profileId: string): Promise<{
   const isGuest = profileId === "guest";
   return {
     databaseName: isGuest ? GUEST_DB_NAME : `pia-personal-memory-owner-${hash}.db`,
-    keyName: PROTECTED_KEY_PREFIX + (isGuest ? "guest" : hash),
+    keyName: KEY_PREFIX + (isGuest ? "guest" : hash),
+    legacyKeyName: OLD_PROTECTED_KEY_PREFIX + (isGuest ? "guest" : hash),
     isGuest,
   };
 }
 const VALID_KEY = /^[0-9a-f]{64}$/;
 const BIOMETRIC_OPTIONS = {
   requireAuthentication: true,
-  authenticationPrompt: "Разблокировать персональную память",
+  authenticationPrompt: "Войти в PersAI",
   keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
 };
 
+/** Upgrade an old biometric key as part of the APP'S unlock screen. A successful
+ * read of that protected secret IS the biometric challenge, avoiding a second
+ * authenticateAsync prompt. The underlying SQLCipher key never changes.
+ */
+export async function needsLegacyMemoryMigration(profileId: string): Promise<boolean> {
+  const identity = await localMemoryIdentity(profileId);
+  return !(await SecureStore.getItemAsync(identity.keyName)) &&
+    Boolean(await SecureStore.getItemAsync(identity.legacyKeyName + ".initialized"));
+}
+
+export async function authenticateExistingMemory(profileId: string): Promise<boolean> {
+  const identity = await localMemoryIdentity(profileId);
+  if (await SecureStore.getItemAsync(identity.keyName)) return false;
+  if (!(await SecureStore.getItemAsync(identity.legacyKeyName + ".initialized"))) return false;
+  const key = await withBiometricPrompt(() => SecureStore.getItemAsync(identity.legacyKeyName, BIOMETRIC_OPTIONS));
+  if (!key) return false;
+  if (!VALID_KEY.test(key)) throw new Error("invalid_local_memory_key");
+  await SecureStore.setItemAsync(identity.keyName, key, { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY });
+  if (await SecureStore.getItemAsync(identity.keyName) !== key) throw new Error("local_memory_unlock_failed");
+  return true;
+}
+
 async function initialize(profileId: string): Promise<SQLite.SQLiteDatabase> {
+  requireApplicationSession();
   if (!(await SecureStore.isAvailableAsync())) {
     throw new Error("secure_storage_unavailable");
   }
   const identity = await localMemoryIdentity(profileId);
-  // Fail closed on a device without enrolled hardware-backed authentication.
-  // There is deliberately no PIN hash or plaintext fallback.
-  if (!SecureStore.canUseBiometricAuthentication()) {
-    throw new Error("local_memory_biometric_required");
+  const marker = identity.keyName + ".initialized";
+  const previouslyInitialized = await SecureStore.getItemAsync(marker);
+  // AppLock has already authenticated the user. No per-memory biometric sheet.
+  let key = await SecureStore.getItemAsync(identity.keyName);
+  if (key !== null && !VALID_KEY.test(key)) throw new Error("invalid_local_memory_key");
+  let migratedLegacy = false;
+  if (!key && identity.isGuest) {
+    const legacy = await SecureStore.getItemAsync(LEGACY_GUEST_KEY);
+    if (legacy !== null && !VALID_KEY.test(legacy)) throw new Error("invalid_local_memory_key");
+    if (legacy) { key = legacy; migratedLegacy = true; }
   }
-  const db = await SQLite.openDatabaseAsync(identity.databaseName);
+  if (!key) {
+  // Repair the old marker-before-key bug ONLY after proving no data exists.
+  // Never replace a lost key for a nonempty encrypted file, even without a marker.
+  const directory = SQLite.defaultDatabaseDirectory;
+  if (!directory) throw new Error("local_memory_unlock_failed");
+  const path = directory.replace(/\/$/, "") + "/" + identity.databaseName;
+  // expo-sqlite returns a POSIX path on Android/iOS; FileSystem needs a URI.
+  const file = await FileSystem.getInfoAsync(path.startsWith("file://") ? path : "file://" + path);
+  if (file.exists && (file.isDirectory || file.size > 0)) throw new Error("local_memory_unlock_failed");
+  }
+  requireApplicationSession();
+  // Always use a fresh native handle; Expo otherwise caches connections.
+  const db = await SQLite.openDatabaseAsync(identity.databaseName, { useNewConnection: true });
   try {
     const cipher = await db.getFirstAsync<{ cipher_version: string }>("PRAGMA cipher_version");
     if (!cipher?.cipher_version) throw new Error("sqlcipher_required_native_build");
-    const marker = identity.keyName + ".initialized";
-    const previouslyInitialized = await SecureStore.getItemAsync(marker);
-    let key = await SecureStore.getItemAsync(identity.keyName, BIOMETRIC_OPTIONS);
-    if (key !== null && !VALID_KEY.test(key)) throw new Error("invalid_local_memory_key");
-    let migratedLegacy = false;
-    if (!key && identity.isGuest) {
-      // PR #15 guest data remains in the same encrypted SQLite database.
-      // Re-wrap its key under biometric access, never copy plaintext rows.
-      const legacy = await SecureStore.getItemAsync(LEGACY_GUEST_KEY);
-      if (legacy !== null && !VALID_KEY.test(legacy)) throw new Error("invalid_local_memory_key");
-      if (legacy) { key = legacy; migratedLegacy = true; }
-    }
-    if (!key && previouslyInitialized) {
-      // Never rotate a lost/cancelled biometric secret; old encrypted data
-      // would become inaccessible. Recovery must be explicit.
-      throw new Error("local_memory_unlock_failed");
-    }
     if (!key) {
       key = Array.from(Crypto.getRandomBytes(32), byte => byte.toString(16).padStart(2, "0")).join("");
+      await SecureStore.setItemAsync(identity.keyName, key!, { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY });
+    } else if (migratedLegacy) {
+      await SecureStore.setItemAsync(identity.keyName, key!, { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY });
     }
-    if (!previouslyInitialized) {
-      // Persistent marker precedes key creation. On an interrupted upgrade
-      // or failed authenticator we refuse to generate a replacement key.
-      await SecureStore.setItemAsync(marker, "yes", {
-        keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
-      });
-      await SecureStore.setItemAsync(identity.keyName, key, BIOMETRIC_OPTIONS);
-      // Merely writing a protected key does not constitute biometric unlock.
-      const validated = await SecureStore.getItemAsync(identity.keyName, BIOMETRIC_OPTIONS);
-      if (validated !== key) throw new Error("local_memory_unlock_failed");
-    }
+    requireApplicationSession();
     // Safe interpolation: key is validated hex only, and never logged or exported.
     await db.execAsync(`PRAGMA key = '${key}';`);
     await db.getFirstAsync("SELECT count(*) AS count FROM sqlite_master");
@@ -154,12 +179,19 @@ async function initialize(profileId: string): Promise<SQLite.SQLiteDatabase> {
         await tx.execAsync("PRAGMA user_version = 1");
       });
     }
+    if (!previouslyInitialized) await SecureStore.setItemAsync(marker, "yes", {
+      keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+    });
+    if (await SecureStore.getItemAsync(identity.legacyKeyName + ".initialized")) {
+      await SecureStore.deleteItemAsync(identity.legacyKeyName);
+      await SecureStore.deleteItemAsync(identity.legacyKeyName + ".initialized");
+    }
     if (migratedLegacy) {
       await SecureStore.deleteItemAsync(LEGACY_GUEST_KEY);
     }
     return db;
   } catch (error) {
-    await db.closeAsync();
+    try { await db.closeAsync(); } catch { /* preserve the original unlock failure */ }
     throw error;
   }
 }
@@ -173,17 +205,20 @@ export async function withLocalMemoryDatabase<T>(
   profileId: string, work: (db: SQLite.SQLiteDatabase) => Promise<T>,
 ): Promise<T> {
   return serialize(async () => {
+    requireApplicationSession();
     if (current && currentProfile !== profileId) {
-      await waitForUnlockedTransaction(current);
-      await current.closeAsync();
+      const previous = current;
       current = null;
       currentProfile = null;
+      await waitForUnlockedTransaction(previous);
+      await previous.closeAsync();
     }
     if (!current) {
       const db = await initialize(profileId);
       current = db;
       currentProfile = profileId;
     }
+    requireApplicationSession();
     return work(current);
   });
 }
@@ -195,11 +230,12 @@ export async function openLocalMemory(profileId: string): Promise<SQLite.SQLiteD
 /** Close when switching accounts, going to background or locking the device. */
 export async function closeLocalMemory(): Promise<void> {
   await serialize(async () => {
-    if (current) {
-      await waitForUnlockedTransaction(current);
-      await current.closeAsync();
-    }
+    const previous = current;
     current = null;
     currentProfile = null;
+    if (previous) {
+      await waitForUnlockedTransaction(previous);
+      await previous.closeAsync();
+    }
   });
 }

@@ -1,34 +1,51 @@
-# Mobile local memory: owner isolation and biometric unlock
+# Application unlock and isolated local memory
 
-PR #15 had a single DB/key for all users of the installation. This phase
-isolates device-local SQLCipher stores by profile, using a keyed identifier
-derived from the authenticated server user UUID. The `guest` store is
-separate and must not be silently merged with an account. Changing account
-closes the previous SQLite connection, clears UI state and opens the new
-owner's encrypted database.
+PersAI unlocks the **whole application once**, at startup or after a real
+background transition. `AppLock` covers inactive/system-sheet transitions,
+requires enrolled device biometrics and authorizes the in-process memory session.
+Opening the Memory tab, searching notes, saving a note or changing tabs never
+creates another biometric challenge. Without an authorized session the storage
+layer rejects operations, including use of an already-open connection.
 
-Every profile's SQLCipher key is stored via `expo-secure-store` with
-`requireAuthentication=true`, `WHEN_UNLOCKED_THIS_DEVICE_ONLY`. The
-key is retrieved with an interactive device biometric prompt. Devices without
-enrolled biometric authentication are explicitly rejected, **not downgraded**
-to unprotected storage. Updating biometric enrollments may invalidate the key.
-An encrypted export/restore flow is necessary before production distribution.
+Each guest/server owner has a distinct SQLCipher database and 256-bit key.
+Keys remain encrypted in device-bound `expo-secure-store` with
+`WHEN_UNLOCKED_THIS_DEVICE_ONLY`. New keys do not use per-item
+`requireAuthentication`: authentication belongs to the application boundary.
+Database rows, FTS, revisions and WAL remain encrypted. This is application
+access control backed by OS secure storage, not a per-query hardware challenge.
 
-## Upgrade without guest data loss
+## Upgrade without data loss
 
-The historical PR #15 database remains named `pia-personal-memory-v1.db`
-for the guest profile. On the first successful unlock, the legacy key is
-re-wrapped in a biometrically protected new SecureStore record. Only after
-the existing encrypted database unlocks and passes schema checks is the
-old unprotected key record removed. No plaintext memory copy is made.
+The guest database retains `pia-personal-memory-v1.db`. Existing v2 biometric
+keys are read **on the app unlock screen**, using that read as the one biometric
+challenge, and rewrapped into v3 device-bound storage. The SQLCipher key itself
+never changes. The old key is removed only after the database successfully opens
+and passes schema checks. The active owner is inferred from saved local mode or
+a cached JWT subject only to locate the legacy key; server authorization still
+uses the server's normal verification.
 
-Previously created local records are assigned to the explicit **guest**
-profile. They never automatically enter a signed-in user's different profile.
+Switching to a different old profile also routes its one-time key migration
+through the application unlock screen, preserving the same SQLCipher key. New
+profiles and subsequent tab changes do not add a challenge.
 
-## Limits
+The old unprotected PR #15 guest key is also migrated without copying plaintext
+rows. A cancelled migration does not rotate encryption. A stranded initialization
+marker can be repaired only for a proven absent/zero-length database. Existing
+nonempty encrypted data with a missing key is preserved and reported as locked.
+Do not erase an installed database to work around that error.
 
-This is device-profile isolation and local access control, *not*
-hardware attestation or an end-to-end encrypted multi-device sync solution.
-Users sharing enrolled biometrics and the same device may both unlock the
-guest store. Use dedicated OS accounts or do not share the guest mode.
-Recovery/backup and real-device SQLCipher behavior remain distinct tasks.
+## Lifecycle and operations
+
+The application owns background locking. Screens do not close the shared
+connection on tab blur. Repository operations lease the database for the complete
+operation and are serialized with profile switches and backup/restore. Reopening
+uses a fresh Expo SQLite native connection. Signing out or changing profiles
+closes the previous connection. Guest data is never merged into an account.
+
+System file pickers and share sheets hide app content without destroying the
+requesting screen; returning from a sheet that backgrounded the app requires
+application authentication before continuing database/network work.
+
+Biometrics shared on one phone can unlock its application. There is no hardware
+attestation, server/mobile sync or claim that JS tests prove on-device encryption.
+Run the native acceptance checklist before distributing a release broadly.

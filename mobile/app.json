@@ -12,6 +12,23 @@
     "plugins": [
       "expo-secure-store",
       [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Разрешите PersAI использовать Face ID для входа в приложение."
+        }
+      ],
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Разрешите микрофон для голосового ввода в PersAI.",
+          "speechRecognitionPermission": "Разрешите преобразование речи в текст.",
+          "androidSpeechServicePackages": [
+            "com.google.android.googlequicksearchbox",
+            "com.google.android.as"
+          ]
+        }
+      ],
+      [
         "expo-image-picker",
         {
           "photosPermission": "Разрешите доступ к фото, чтобы отправлять чеки и документы агенту.",
@@ -24,7 +41,8 @@
           "enableFTS": true,
           "useSQLCipher": true
         }
-      ]
+      ],
+      "expo-video"
     ],
     "extra": {
       "apiBase": "http://localhost:8000"
@@ -41,7 +59,7 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#2458d3"
+        "backgroundColor": "#F8FAFF"
       }
     },
     "description": "Ваш помощник для диалогов, документов и личной базы знаний"

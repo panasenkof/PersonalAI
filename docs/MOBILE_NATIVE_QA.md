@@ -19,8 +19,9 @@ encrypted-local-memory feature is approved for public release.
 3. Confirm ordinary SQLite cannot open the encrypted DB without the key;
    check that the DB file does not begin with the plaintext header
    `SQLite format 3\0`.
-4. Cancel biometric prompt: no previous notes may render; memory must
-   remain locked. Remove enrolled biometrics: app must refuse to access memory
+4. Cancel the APPLICATION biometric prompt: no app screens or previous notes may render.
+   On successful app unlock, visit Memory/Assistant three times: no second
+   biometric prompt is allowed. Remove enrolled biometrics: app must refuse to access memory
    rather than generate a new key.
 5. Sign into two distinct server accounts (once PR #17 is merged), create
    separate local notes, switch profile and ensure no cross-account results.
@@ -37,3 +38,20 @@ Store a record of on-device pass/fail before general availability.
 
 Local note search now supports `limit`/`offset` paging. The UI offers
 “Показать ещё” instead of truncating silently at the first 50 results.
+
+## Mobile usability acceptance
+
+- Upgrade from the previous APK without reinstalling: confirm old notes survive
+  the single application unlock and key rewrapping. Keep com.paigent.app and
+  the release certificate unchanged.
+- Save two different model connections; switch back/forth; restart; verify each
+  address, token and model, and that Save returns to the assistant.
+- Query a known standard note with memory allowed: memory is searched first.
+  Ask for a fresh fact and verify sources with public search without another account.
+- Deny microphone, then enable it; dictate without sending; cancel recognition.
+- Import text locally; image via vision; audio via STT; video via five frames.
+  Confirm no external transfer before the per-file action and no save before confirmation.
+- Open a picker/share sheet, cancel/return and authenticate the application as needed;
+  ensure no memory-specific sheet or closed-connection error appears.
+- Backup disclosure is initially collapsed; export/restore and wrong recovery-code
+  checks still need a genuine native device.

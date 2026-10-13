@@ -18,7 +18,10 @@ export async function searchApprovedNotes(
   // Only explicitly standard collections may leave the device. Never share
   // unclassified, sensitive or secret content through cloud-model tools.
   const standards = new Set(collections.filter(c => c.sensitivity === "standard").map(c => c.id));
-  const terms = [q, ...q.split(/[\s,.;!?]+/u).filter(s => s.length >= 3).slice(0, 4)];
+  const stop = new Set(["что", "как", "где", "мне", "меня", "мой", "мои", "моих", "для", "это", "найди", "пожалуйста", "расскажи", "помоги", "интернет", "интернете"]);
+  const words = q.toLowerCase().split(/[\s,.;!?]+/u).filter(s => s.length >= 3 && !stop.has(s));
+  const aboutMe = /(?:помнишь|знаешь).*(?:обо? мне|про меня)/iu.test(q);
+  const terms = aboutMe ? [""] : [q, ...words.slice(0, 6)];
   const seen = new Set<string>();
   const snippets: MemorySnippet[] = [];
   for (const term of terms) {

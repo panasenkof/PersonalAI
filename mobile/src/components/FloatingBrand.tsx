@@ -65,7 +65,7 @@ export function FloatingBrand({ size = 154, motion = true }: {
         transform: [{ translateY }, { rotate }, { scale }],
       }}>
         <Image source={require("../../assets/icon.png")}
-          style={{ width: size, height: size, borderRadius: size * .27 }} resizeMode="cover" />
+          style={{ width: size, height: size, borderRadius: size * .2 }} resizeMode="contain" />
       </Animated.View>
     </View>
   );
