@@ -1,6 +1,7 @@
 import type { DirectAgentSettings } from "./settings";
 import { anonymousLocalAllowed, validateBaseUrl, validateModel } from "./settings";
-import { fetchWebContext, runCompatibleAgent } from "./compatible";
+import { runCompatibleAgent } from "./compatible";
+import { prepareDirectContext } from "./context";
 import type { MemorySnippet, NoteProposal } from "./memory";
 
 export type AgentTurn = { role: "user" | "assistant"; content: string };
@@ -32,7 +33,6 @@ type Response = {
 };
 export const MAX_DIRECT_REQUESTS = 4;
 export const MAX_DIRECT_REPLY_TOKENS = 1200;
-const ENDPOINT = "https://api.openai.com/v1/responses";
 const SYSTEM_PROMPT =
   "Ты персональный помощник PersAI, работающий на телефоне пользователя. " +
   "Для вопросов о предпочтениях и заметках используй search_local_notes, если он доступен. " +
@@ -117,8 +117,7 @@ export async function runDirectAgent(options: DirectAgentOptions): Promise<Direc
   const prompt = options.prompt.trim().slice(0, 4000);
   if (!prompt) throw new Error("Введите вопрос");
   const transport = options.transport || fetch;
-  const web = settings.allowWeb && settings.webSearchKey
-    ? await fetchWebContext(prompt, settings, transport, signal) : { context: "", sources: [] as string[] };
+  const web = await prepareDirectContext(options);
   const input: unknown[] = [
     { role: "system", content: SYSTEM_PROMPT + (web.context ? "\n" + web.context : "") },
     ...options.history.slice(-8).map(h => ({ role: h.role, content: usableString(h.content, 2000) })),
@@ -126,7 +125,7 @@ export async function runDirectAgent(options: DirectAgentOptions): Promise<Direc
   ];
   const tools: object[] = [];
   if (settings.allowMemory) tools.push(...LOCAL_TOOLS);
-  if (settings.allowWeb && !settings.webSearchKey) tools.push({ type: "web_search", search_context_size: "low", external_web_access: true });
+  if (web.builtinWeb) tools.push({ type: "web_search", search_context_size: "low", external_web_access: true });
   const collected = new Set<string>(web.sources);
 
   for (let attempt = 1; attempt <= MAX_DIRECT_REQUESTS; attempt++) {

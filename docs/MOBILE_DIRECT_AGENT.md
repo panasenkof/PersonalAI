@@ -1,38 +1,79 @@
-# Мобильный агент PersonalAI без собственного сервера (первый рабочий этап)
+# PersAI: assistant and memory on the phone
 
-## Что реализовано
+Install the signed native Android APK (SQLCipher and speech require a native
+build; Expo Go is insufficient). Unlock **the application**, choose phone mode,
+then open Settings → Models and connections. Server PersonalAI is optional.
+`PIA_ANDROID_PACKAGE` remains **com.paigent.app**; keep the existing signing key.
 
-В мобильном Android/iOS приложении появился **«Мобильный ИИ»**. Вход через backend PersonalAI для него не нужен: на экране входа нажмите **«Моя память — без сервера»**, затем откройте вкладку **«ИИ настройки»**. Введите **личный API-ключ OpenAI** и модель (начальная модель: `gpt-4.1-mini`), сохраните. Вернитесь во вкладку «Мобильный ИИ» и отправьте вопрос. При наличии интернета телефон вызывает **официальный HTTPS OpenAI Responses API напрямую**.
+## Connections
 
-Отдельные разрешения в настройках **выключены по умолчанию**:
-- **Веб-поиск:** встроенный OpenAI `web_search` (не требует второго ключа). При поиске в сообщении появятся найденные OpenAI URL-источники, если они предоставлены API. Веб-поиск и API могут стоить денег.
-- **Память:** инструмент `search_local_notes` ищет заметки непосредственно в зашифрованной SQLite/SQLCipher. Только записи `active` из коллекций `standard` с чувствительностью записи `standard` / `inherit`; `unclassified`, `sensitive` и `secret` исключены. Максимум пять фрагментов, текст до 900 символов каждый. **Ничего не передаётся из локальной памяти без согласия.**
-- **Запись:** инструмент `draft_local_note` только формирует предложение. Пока пользователь не нажмёт «Сохранить», запись не попадёт в память. Пользователь может отклонить предложение.
+The app supports OpenAI Responses, OpenAI-compatible Chat Completions and
+Anthropic-compatible Messages. Each saved connection has its own name, endpoint,
+API key, chat model, transcription model and permissions. Several connections
+using the same protocol are supported. Select a connection and Save: all drafts
+are persisted and the screen closes. Changing endpoints clears that draft's key.
+Credentials never move to another endpoint/profile automatically. Old settings
+are migrated; the previous whole configuration remains active if a save fails.
 
-Локальная память по-прежнему открывается с биометрией, не расшифровывается во внешнем сервисе и не синхронизируется с сервером. Для чтения заметок или их записи используется профиль `guest` в offline-режиме либо отдельный профиль авторизованного пользователя. Актуальные модели/инструменты могут быть платными; модель должна поддерживать Responses API и function calling.
+A local OpenAI-compatible server on the private network may use HTTP without a
+key. The model runs there, not inside PersAI on the phone. Public APIs use HTTPS.
+Cloud calls may cost money. At most four model calls and 1200 output tokens per
+call for chat; extraction is a separate user-initiated request. Set a monetary
+budget at the provider too.
 
-## Модель доверия
+## Memory first, internet when needed
 
-- Ключ OpenAI сохраняется в `expo-secure-store` на самом устройстве, не в исходниках и не в GitHub Actions.
-- Разрешения на чтение памяти хранятся **отдельно для каждого профиля**; начальное значение **false**. Ключ API общедевайсный, настройки доступа к памяти — нет.
-- `store:false` в запросах Responses API: приложение не просит OpenAI хранить response objects для продолжения чата. При работе с внешней моделью запросы и разрешённые фрагменты памяти всё равно **передаются провайдеру** и подпадают под его правила обработки данных.
-- Входящий текст заметок и ответы веб-поиска — **недоверенный контент**. System prompt запрещает выполнять инструкции из него; программно модель может вызвать только разрешённый чтение-инструмент и предложить, но **не выполнить**, запись.
-- На вопрос максимум **4 вызова** Responses API и `max_output_tokens=1200` за вызов. Это не твёрдый денежный лимит: веб-поиск/входные токены тарифицируются отдельно; поставьте реальные бюджетные лимиты в кабинете OpenAI.
-- История чата в первой версии хранится только в состоянии активного экрана, не в SQLCipher и не в серверной истории. Во время ухода приложения в фон активный запрос прерывается и доступ к памяти закрывается. Ничего не публикуется автоматически.
-- Для работы без PersonalAI backend **не нужен** `PIA_ANDROID_API_BASE`. В GitHub Actions он теперь **необязателен** и нужен только для заранее заданного адреса серверного режима. API OpenAI вводится только на телефоне.
-- Это не запуск самой LLM на телефоне: для ответов и веб-поиска требуется интернет и доступ к OpenAI API.
+The model's permission to read ordinary notes and the internet toggle start off.
+When memory is allowed, each turn searches it **before** calling the LLM/search.
+Only active standard notes from standard collections may be passed to the model;
+unclassified, sensitive and secret notes remain excluded. At most five bounded
+fragments are sent. A match avoids web search unless the user asks for current
+information. Per-message “не используй интернет” also disables web access.
 
-## Проверка на реальном Android
+Search choices:
+- **Without registration:** public Bing RSS; no separate account or API key.
+  This is best-effort, with limited results. CAPTCHA, unavailable feeds and network
+  failures are reported; the app does not silently send queries elsewhere.
+- **Brave Search API:** separate search key, works independently of the LLM.
+- **Built-in OpenAI search:** Responses tool, with potential provider charges.
 
-1. Сборка: подписанный `assembleRelease` c SQLCipher из GitHub Releases, **не Expo Go**. Установите поверх прежней версии; предыдущие заметки должны сохраниться.
-2. Без сервера PersonalAI: «Моя память — без сервера» → «ИИ настройки» → API-ключ и модель → «Мобильный ИИ» → «Привет» → ответ через облачную LLM.
-3. Веб-поиск: выключен → спросите текущий факт (агент должен сообщить об отсутствии проверки); включите → новый вопрос, проверьте поиск и источники.
-4. Память выключена: создайте в «На телефоне» заметку «Люблю пасту», спросите ИИ «Что ты знаешь о моих предпочтениях?» → он **не должен получать** заметку. Включите право читать память → модель может запросить поиск; проверьте правильность ответа.
-5. Попросите «Запомни, что я люблю пасту» → появится черновик; «Отклонить» не сохраняет, «Сохранить» сохраняет. Убедитесь, что это не происходит без подтверждения.
-6. Отключите сеть, сверните приложение, заблокируйте телефон, попробуйте некорректный API-ключ; убедитесь в безопасной ошибке и отсутствии открытой памяти.
-7. Проверьте профиль guest и профиль другого пользователя: согласие на чтение памяти не переносится. Проверьте ошибки биометрии, отказ в доступе к памяти, ограничение числа вызовов.
-8. Проверьте `npm run typecheck`, `npm test -- --runInBand`, нативную Android CI-сборку и установку на реальное устройство.
+Sources and memory content are treated as data, not instructions. A failed
+memory lookup is reported as unavailable, never as proof the memory is empty.
+New agent notes are proposals until the user confirms Save.
 
-## Следующие этапы — НЕ реализованы
+## Dictation and files
 
-Общий планировщик/server-mobile scheduler, автоэскалация сложных задач на backend, полноценные файловые инструменты/URL extraction, потоковые ответы, кросс-платформенная синхронизация, стабильное хранение истории диалогов в локальной SQLCipher, поддержка иных OpenAI-совместимых провайдеров, локальная on-device LLM, совместная память server/mobile. Приоритет: интерфейс маршрутизации с пользовательским контролем → общие контракты инструментов и memory port → бенчмарки порога server/mobile.
+The microphone drafts Russian text; it never sends the message automatically.
+On-device speech is preferred. If unavailable, the user can explicitly choose the
+phone's system speech service, which may send audio to its provider. No separate
+PersAI registration is required. Recognition requires an installed service and
+language support; microphone denial is handled explicitly.
+
+Memory and Assistant offer **Add information from a file**:
+- Text: read on the phone, no provider transmission; up to 60,000 characters.
+- JPEG/PNG/WebP/GIF: selected vision model; up to 8 MB.
+- Audio: selected OpenAI-compatible `/audio/transcriptions` endpoint and configured
+  transcription model (`whisper-1` default); up to 20 MB. Anthropic does not provide
+  this endpoint; select another saved connection for audio.
+- Video: five ordered frames at 2/25/50/75/97 percent of the duration; up to 80 MB.
+  This samples visual content, **does not transcribe the audio track** and cannot
+  describe every event in the video.
+
+Media is private by default. External extraction is a separate explicit action
+for the selected file; it requires selecting ordinary data and the provider.
+Review/edit the extracted text, then save it as a note with source filename and
+sensitivity. Original media is not retained in the notes backup. Picker copies
+and extracted frames are cleaned up. Encrypted backup/restore is a collapsed
+section in Memory; the recovery code is kept separately from the exported file.
+
+## Verification
+
+`npm run typecheck`, `npm test -- --runInBand`,
+`node scripts/verify-mobile-ui.cjs`, Expo install check and Android/iOS exports.
+The browser suite renders the production screens with simulated native services
+and storage; it does not prove SQLCipher, actual hardware biometrics or STT.
+Native CI builds the APK; complete [native device acceptance](MOBILE_NATIVE_QA.md).
+
+Still separate future work: a model running on the phone, durable local chat
+history, streaming, shared server/mobile memory, sync and automatic routing of
+expensive tasks to a server. File/voice import above does not implement those.

@@ -1,185 +1,151 @@
-import { useFocusEffect } from "@react-navigation/native";
-import React, { useCallback, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, Switch, Text, TextInput, View } from "react-native";
-
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import React, { useCallback, useRef, useState } from "react";
+import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, Switch, Text, TextInput, View } from "react-native";
 import { useAuth } from "../auth/AuthContext";
-import {
-  clearDirectApiKey, clearWebSearchKey, defaultBaseUrl, defaultDirectPreferences,
-  loadDirectSettings, saveDirectApiKey, saveDirectPreferences, saveWebSearchKey,
-} from "../direct-agent/settings";
-import type { DirectAgentPreferences, DirectProvider } from "../direct-agent/settings";
+import { defaultBaseUrl, loadDirectConnections, newDirectConnection, saveDirectConnections } from "../direct-agent/settings";
+import type { DirectConnection, DirectConnections, DirectProvider } from "../direct-agent/settings";
+import type { RootStackParams } from "../navigation";
 import { useTheme } from "../theme";
 
 const PROVIDERS: Array<{ id: DirectProvider; name: string }> = [
   { id: "openai", name: "OpenAI Responses" },
   { id: "openai-compatible", name: "OpenAI-совместимый" },
-  { id: "anthropic", name: "Anthropic-совместимый" },
+  { id: "anthropic", name: "Anthropic Messages" },
 ];
 export function DirectAgentSettingsScreen() {
   const { offlineMode, me } = useAuth();
   const profile = offlineMode ? "guest" : me?.id;
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParams>>();
   const t = useTheme();
-  const [ready, setReady] = useState(false);
+  const [value, setValue] = useState<DirectConnections | null>(null);
+  const [selectedId, setSelectedId] = useState("");
+  const pending = useRef(false);
   const [busy, setBusy] = useState(false);
-  const [hasKey, setHasKey] = useState(false);
-  const [hasWebKey, setHasWebKey] = useState(false);
-  const [keyInput, setKeyInput] = useState("");
-  const [webKeyInput, setWebKeyInput] = useState("");
-  const [prefs, setPrefs] = useState<DirectAgentPreferences>(defaultDirectPreferences);
   const [notice, setNotice] = useState("");
-
-  const reload = useCallback(async (id: string) => {
-    const value = await loadDirectSettings(id);
-    setHasKey(Boolean(value.apiKey));
-    setHasWebKey(Boolean(value.webSearchKey));
-    setPrefs({
-      provider: value.provider, baseUrl: value.baseUrl, model: value.model,
-      allowMemory: value.allowMemory, allowWeb: value.allowWeb,
-    });
-  }, []);
+  const [retry, setRetry] = useState(0);
 
   useFocusEffect(useCallback(() => {
     let alive = true;
-    setReady(false);
-    if (profile) {
-      void loadDirectSettings(profile).then(value => {
-        if (!alive) return;
-        setHasKey(Boolean(value.apiKey));
-        setHasWebKey(Boolean(value.webSearchKey));
-        setPrefs({
-          provider: value.provider, baseUrl: value.baseUrl, model: value.model,
-          allowMemory: value.allowMemory, allowWeb: value.allowWeb,
-        });
-        setReady(true);
-      }).catch(() => {
-        if (alive) { setNotice("Не удалось открыть защищённые настройки"); setReady(true); }
-      });
-    } else setReady(true);
-    return () => { alive = false; setKeyInput(""); setWebKeyInput(""); };
-  }, [profile]));
+    setValue(null); setNotice("");
+    if (profile) void loadDirectConnections(profile).then(saved => {
+      if (alive) { setValue(saved); setSelectedId(saved.activeId); }
+    }).catch(() => { if (alive) setNotice("Не удалось открыть защищённые подключения."); });
+    return () => { alive = false; setValue(null); };
+  }, [profile, retry]));
 
+  const selected = value?.connections.find(c => c.id === selectedId);
+  function update(patch: Partial<DirectConnection>) {
+    setValue(v => v ? { ...v, connections: v.connections.map(c => c.id === selectedId ? { ...c, ...patch } : c) } : v);
+  }
+  function protocol(provider: DirectProvider) {
+    if (!selected || selected.provider === provider) return;
+    update({ provider, baseUrl: defaultBaseUrl(provider), apiKey: "",
+      model: provider === "anthropic" ? "claude-sonnet-4-5" : "gpt-4.1-mini",
+      ...(selected.searchProvider === "builtin" && provider !== "openai" ? { searchProvider: "public" } : {}),
+    });
+  }
   async function save() {
-    if (!profile || busy) return;
+    if (!profile || !value || pending.current) return;
+    pending.current = true;
     setBusy(true); setNotice("");
     try {
-      await saveDirectPreferences(profile, prefs);
-      if (keyInput.trim()) await saveDirectApiKey(profile, keyInput, prefs);
-      if (webKeyInput.trim()) await saveWebSearchKey(profile, webKeyInput);
-      setKeyInput(""); setWebKeyInput("");
-      await reload(profile);
-      setNotice("Настройки сохранены на устройстве.");
-    } catch (e) {
-      setNotice(String((e as Error).message));
-    } finally { setBusy(false); }
+      await saveDirectConnections(profile, { ...value, activeId: selectedId });
+      navigation.goBack();
+    } catch (e) { setNotice((e as Error).message); }
+    finally { pending.current = false; setBusy(false); }
   }
-
-  async function clear(kind: "llm" | "search") {
-    if (!profile || busy) return;
-    setBusy(true); setNotice("");
-    try {
-      if (kind === "llm") { await clearDirectApiKey(profile); setKeyInput(""); }
-      else { await clearWebSearchKey(profile); setWebKeyInput(""); }
-      await reload(profile);
-      setNotice(kind === "llm" ? "Ключ LLM удалён." : "Ключ интернет-поиска удалён.");
-    } catch { setNotice("Не удалось удалить ключ"); }
-    finally { setBusy(false); }
-  }
-
-  const fieldStyle = {
-    borderWidth: 1, borderColor: t.line, padding: 12, minHeight: 48,
-    borderRadius: 16, color: t.text, backgroundColor: t.panel,
-  };
+  const field = { borderWidth: 1, borderColor: t.line, padding: 14, minHeight: 50,
+    borderRadius: 16, color: t.text, backgroundColor: t.panel };
+  const label = { color: t.text, fontWeight: "600" as const };
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: t.bg }}
-      contentContainerStyle={{ padding: 18, paddingBottom: 56, gap: 15 }}>
-      <Text style={{ color: t.text, fontSize: 27, fontWeight: "800" }}>Подключение ИИ</Text>
-      <Text style={{ color: t.muted }}>
-        PersAI обращается к выбранной модели напрямую с телефона, без сервера PersAI.
-        Поддерживаются OpenAI Responses, OpenAI-совместимые Chat Completions и
-        Anthropic-совместимые Messages API. Запросы оплачиваются по тарифам провайдера.
-      </Text>
-      {!ready ? <ActivityIndicator /> : <>
-        <Text style={{ color: t.text, fontWeight: "600" }}>Протокол LLM</Text>
+    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: t.bg }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+    <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 18, paddingBottom: 44, gap: 14 }}>
+      <Text style={{ color: t.text, fontSize: 28, fontWeight: "800" }}>Ваши модели</Text>
+      <Text style={{ color: t.muted, lineHeight: 21 }}>Для каждого подключения сохраняются свои адрес, ключ, модель и разрешения. Выберите подключение для ассистента и нажмите «Сохранить».</Text>
+      {!value && !notice ? <ActivityIndicator accessibilityLabel="Загрузка подключений" /> : null}
+      {value && selected ? <>
         <View style={{ gap: 8 }}>
-          {PROVIDERS.map(item => (
-            <Pressable key={item.id} accessibilityRole="button"
-              accessibilityLabel={"Выбрать " + item.name}
-              onPress={() => setPrefs(p => ({
-                ...p, provider: item.id, baseUrl: defaultBaseUrl(item.id),
-                model: item.id === "anthropic" ? "claude-sonnet-4-5" : "gpt-4.1-mini",
-              }))}
-              style={{ padding: 12, borderRadius: 17, borderWidth: 1,
-                borderColor: prefs.provider === item.id ? t.accent : t.line,
-                backgroundColor: t.panel }}>
-              <Text style={{ color: t.text, fontWeight: prefs.provider === item.id ? "700" : "400" }}>
-                {prefs.provider === item.id ? "● " : "○ "}{item.name}
-              </Text>
+          {value.connections.map(c => (
+            <Pressable key={c.id} disabled={busy} accessibilityRole="button" accessibilityLabel={"Подключение " + c.name}
+              accessibilityState={{ selected: c.id === selectedId }} onPress={() => setSelectedId(c.id)}
+              style={{ padding: 15, borderRadius: 18, borderWidth: 1, borderColor: c.id === selectedId ? t.accent : t.line, backgroundColor: c.id === selectedId ? t.soft : t.panel }}>
+              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                <Text style={{ color: t.text, fontWeight: "700", flex: 1 }}>{c.name}</Text>
+                <Text style={{ color: t.accent }}>{c.id === selectedId ? "✓" : "→"}</Text>
+              </View>
+              <Text style={{ color: t.muted, fontSize: 12, marginTop: 5 }} numberOfLines={1}>{c.model} · {c.baseUrl}</Text>
             </Pressable>
           ))}
         </View>
-        <Text style={{ color: t.text, fontWeight: "600" }}>Адрес API (Base URL)</Text>
-        <TextInput accessibilityLabel="Адрес API LLM" autoCapitalize="none" autoCorrect={false}
-          keyboardType="url" value={prefs.baseUrl}
-          onChangeText={baseUrl => setPrefs(p => ({ ...p, baseUrl }))} style={fieldStyle} />
-        <Text style={{ color: t.muted, fontSize: 12 }}>
-          Для локальной OpenAI-совместимой модели можно указать HTTP-адрес устройства в частной сети; API-ключ необязателен.
-          При изменении адреса или протокола требуется отдельный API-ключ.
-        </Text>
-        <Text style={{ color: t.text, fontWeight: "600" }}>API-ключ модели: {hasKey ? "сохранён" : "не задан"}</Text>
-        <TextInput accessibilityLabel="API-ключ LLM" autoCapitalize="none" autoCorrect={false}
-          secureTextEntry placeholder="Введите ключ провайдера" placeholderTextColor={t.muted}
-          value={keyInput} onChangeText={setKeyInput} style={fieldStyle} />
-        <Text style={{ color: t.text, fontWeight: "600" }}>Название модели</Text>
-        <TextInput accessibilityLabel="Название модели" autoCapitalize="none" autoCorrect={false}
-          value={prefs.model} onChangeText={model => setPrefs(p => ({ ...p, model }))}
-          style={fieldStyle} />
-        <View style={{ backgroundColor: t.soft, borderRadius: 20, padding: 16, gap: 14 }}>
-          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-            <Text style={{ color: t.text, flex: 1 }}>Разрешить поиск в интернете</Text>
-            <Switch accessibilityLabel="Разрешить веб-поиск" value={prefs.allowWeb}
-              onValueChange={allowWeb => setPrefs(p => ({ ...p, allowWeb }))} />
-          </View>
-          <Text style={{ color: t.muted, fontSize: 12 }}>
-            Для OpenAI Responses возможен встроенный поиск. Для любой совместимой LLM
-            нужен отдельный Brave Search API: запрос отправляется поисковому сервису,
-            результаты передаются выбранной модели. Без ключа поиск не запускается.
-          </Text>
-          <Text style={{ color: t.text, fontWeight: "600" }}>
-            Ключ Brave Search API: {hasWebKey ? "сохранён" : "не задан"}
-          </Text>
-          <TextInput accessibilityLabel="Ключ Brave Search API" autoCapitalize="none"
-            autoCorrect={false} secureTextEntry placeholder="Необязателен для OpenAI Responses"
-            placeholderTextColor={t.muted} value={webKeyInput} onChangeText={setWebKeyInput}
-            style={fieldStyle} />
-          <Pressable accessibilityRole="button" disabled={busy} onPress={() => void clear("search")}>
-            <Text style={{ color: t.err }}>Удалить ключ поиска</Text>
-          </Pressable>
-          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-            <Text style={{ color: t.text, flex: 1 }}>Разрешить чтение обычных заметок моделью</Text>
-            <Switch accessibilityLabel="Разрешить чтение локальной памяти" value={prefs.allowMemory}
-              onValueChange={allowMemory => setPrefs(p => ({ ...p, allowMemory }))} />
-          </View>
-          <Text style={{ color: t.muted, fontSize: 12 }}>
-            Память по умолчанию закрыта. Модель получает только разрешённые обычные заметки,
-            если поддерживает вызов инструментов. Новые заметки сохраняются только после подтверждения.
-          </Text>
+        <Pressable disabled={busy || value.connections.length >= 20} accessibilityRole="button" accessibilityLabel="Добавить подключение"
+          style={{ minHeight: 46, justifyContent: "center" }} onPress={() => {
+            const created = newDirectConnection("openai-compatible");
+            setValue(v => v ? { ...v, connections: [...v.connections, created] } : v); setSelectedId(created.id);
+          }}><Text style={{ color: t.accent, fontWeight: "600" }}>+ Добавить подключение</Text></Pressable>
+        <Text style={label}>Название</Text>
+        <TextInput editable={!busy} accessibilityLabel="Название подключения" value={selected.name} onChangeText={name => update({ name })} style={field} maxLength={60} />
+        <Text style={label}>Протокол</Text>
+        <View style={{ gap: 7 }}>
+          {PROVIDERS.map(p => <Pressable key={p.id} disabled={busy} accessibilityRole="button" accessibilityLabel={"Выбрать " + p.name}
+            style={{ minHeight: 44, padding: 12, borderRadius: 14, backgroundColor: t.panel, borderWidth: 1, borderColor: selected.provider === p.id ? t.accent : t.line }}
+            onPress={() => protocol(p.id)}><Text style={{ color: t.text }}>{selected.provider === p.id ? "● " : "○ "}{p.name}</Text></Pressable>)}
         </View>
-        <Pressable accessibilityRole="button" disabled={busy || !profile} onPress={() => void save()}
-          style={{ minHeight: 50, justifyContent: "center", alignItems: "center",
-            backgroundColor: t.accent, borderRadius: 17 }}>
-          <Text style={{ color: "#fff", fontWeight: "700" }}>Сохранить настройки</Text>
+        <Text style={label}>Адрес API (Base URL)</Text>
+        <TextInput editable={!busy} accessibilityLabel="Адрес API LLM" autoCapitalize="none" autoCorrect={false} keyboardType="url"
+          value={selected.baseUrl} onChangeText={baseUrl => update({ baseUrl, apiKey: "" })} style={field} />
+        <Text style={{ color: t.muted, fontSize: 12 }}>HTTP доступен для модели в локальной сети. При смене адреса или протокола введите ключ этого сервиса.</Text>
+        <Text style={label}>API-ключ: {selected.apiKey ? "сохранён или введён" : "не задан"}</Text>
+        <TextInput editable={!busy} accessibilityLabel="API-ключ LLM" secureTextEntry autoCapitalize="none" autoCorrect={false}
+          value={selected.apiKey} onChangeText={apiKey => update({ apiKey })} placeholder="Ключ выбранного подключения" placeholderTextColor={t.muted} style={field} />
+        <Text style={label}>Модель</Text>
+        <TextInput editable={!busy} accessibilityLabel="Название модели" autoCapitalize="none" autoCorrect={false} value={selected.model}
+          onChangeText={model => update({ model })} style={field} />
+        {selected.provider !== "anthropic" ? <><Text style={label}>Модель распознавания аудио</Text>
+        <TextInput editable={!busy} accessibilityLabel="Модель распознавания аудио" value={selected.transcriptionModel || "whisper-1"} autoCapitalize="none" autoCorrect={false} onChangeText={transcriptionModel => update({ transcriptionModel })} style={field} />
+        <Text style={{ color: t.muted, fontSize: 12 }}>Используется при импорте аудио, если сервис поддерживает распознавание речи.</Text></> : null}
+        <View style={{ backgroundColor: t.soft, padding: 17, borderRadius: 22, gap: 14 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+            <Text style={{ color: t.text, flex: 1 }}>Искать в интернете</Text>
+            <Switch disabled={busy} accessibilityLabel="Разрешить веб-поиск" value={selected.allowWeb} onValueChange={allowWeb => update({ allowWeb })} />
+          </View>
+          <Text style={{ color: t.muted, fontSize: 12 }}>Сначала ассистент проверяет разрешённую память. Интернет используется при отсутствии подходящих заметок или при запросе свежих данных.</Text>
+          {([
+            ["public", "Без регистрации (Bing)"], ["brave", "Brave Search API"],
+            ...(selected.provider === "openai" ? [["builtin", "Встроенный поиск OpenAI"]] : []),
+          ] as Array<["public" | "brave" | "builtin", string]>).map(([id, name]) => (
+            <Pressable key={id} disabled={busy} accessibilityRole="button" accessibilityLabel={name}
+              style={{ minHeight: 44, justifyContent: "center" }} onPress={() => update({ searchProvider: id })}>
+              <Text style={{ color: selected.searchProvider === id ? t.accent : t.text }}>{selected.searchProvider === id ? "● " : "○ "}{name}</Text>
+            </Pressable>
+          ))}
+          {selected.searchProvider === "public" ? <Text style={{ color: t.muted, fontSize: 12 }}>Поисковая фраза отправляется Bing. Доступность и количество результатов зависят от сервиса.</Text> : null}
+          {selected.searchProvider === "brave" ? <TextInput editable={!busy} accessibilityLabel="Ключ Brave Search API" secureTextEntry autoCapitalize="none" autoCorrect={false}
+            value={selected.webSearchKey} onChangeText={webSearchKey => update({ webSearchKey })} placeholder="Ключ поиска" placeholderTextColor={t.muted} style={field} /> : null}
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+            <Text style={{ color: t.text, flex: 1 }}>Разрешить модели чтение обычных заметок</Text>
+            <Switch disabled={busy} accessibilityLabel="Разрешить чтение локальной памяти" value={selected.allowMemory} onValueChange={allowMemory => update({ allowMemory })} />
+          </View>
+          <Text style={{ color: t.muted, fontSize: 12 }}>Личные и секретные записи остаются на телефоне. Новые сведения сохраняются после вашего подтверждения.</Text>
+        </View>
+        <Pressable accessibilityRole="button" disabled={busy} onPress={() => void save()}
+          style={{ minHeight: 52, justifyContent: "center", alignItems: "center", backgroundColor: t.accent, borderRadius: 18 }}>
+          <Text style={{ color: "#fff", fontWeight: "700" }}>{busy ? "Сохранение…" : "Сохранить настройки"}</Text>
         </Pressable>
-        <Pressable accessibilityRole="button" disabled={busy} onPress={() => void clear("llm")}
-          style={{ minHeight: 44, justifyContent: "center", alignItems: "center" }}>
-          <Text style={{ color: t.err }}>Удалить API-ключ модели</Text>
+        <Pressable accessibilityRole="button" disabled={busy} onPress={() => update({ apiKey: "" })} style={{ minHeight: 44, justifyContent: "center" }}>
+          <Text style={{ color: t.err }}>Очистить ключ этого подключения</Text>
         </Pressable>
-        {notice ? <Text accessibilityRole="alert" style={{ color: t.text }}>{notice}</Text> : null}
-        <Text style={{ color: t.muted, fontSize: 12 }}>
-          Не более 4 обращений к модели и до 1200 выходных токенов на обращение.
-          Это не денежный лимит: задайте бюджет также у провайдера. История диалога
-          удаляется при закрытии экрана.
-        </Text>
-      </>}
+        {value.connections.length > 1 ? <Pressable accessibilityRole="button" disabled={busy} accessibilityLabel="Удалить подключение" style={{ minHeight: 44, justifyContent: "center" }}
+          onPress={() => Alert.alert("Удалить подключение?", "Изменение вступит в силу после сохранения настроек.", [
+            { text: "Отмена", style: "cancel" }, { text: "Удалить", style: "destructive", onPress: () => {
+              const rest = value.connections.filter(c => c.id !== selectedId); setValue({ activeId: rest[0].id, connections: rest }); setSelectedId(rest[0].id);
+            } },
+          ])}><Text style={{ color: t.err }}>Удалить подключение</Text></Pressable> : null}
+        <Text style={{ color: t.muted, fontSize: 12 }}>До 4 обращений к модели за вопрос, до 1200 выходных токенов на обращение. Денежный бюджет задаётся у провайдера.</Text>
+      </> : null}
+      {notice ? <><Text accessibilityRole="alert" style={{ color: t.err }}>{notice}</Text>
+        {!value ? <Pressable accessibilityRole="button" onPress={() => setRetry(x => x + 1)} style={{ minHeight: 44 }}><Text style={{ color: t.accent }}>Повторить загрузку</Text></Pressable> : null}</> : null}
     </ScrollView>
+    </KeyboardAvoidingView>
   );
 }

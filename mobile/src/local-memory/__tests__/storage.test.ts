@@ -1,9 +1,11 @@
 /** Native key policy and profile transitions (mocked SQLite/SecureStore). */
 import * as Crypto from "expo-crypto";
 import * as SecureStore from "expo-secure-store";
+import * as FileSystem from "expo-file-system/legacy";
 import * as SQLite from "expo-sqlite";
 
-jest.mock("expo-sqlite", () => ({ openDatabaseAsync: jest.fn() }));
+jest.mock("expo-sqlite", () => ({ openDatabaseAsync: jest.fn(), defaultDatabaseDirectory: "/private/SQLite" }));
+jest.mock("expo-file-system/legacy", () => ({ getInfoAsync: jest.fn() }));
 jest.mock("expo-secure-store", () => ({
   isAvailableAsync: jest.fn(), canUseBiometricAuthentication: jest.fn(),
   getItemAsync: jest.fn(), setItemAsync: jest.fn(), deleteItemAsync: jest.fn(),
@@ -14,12 +16,14 @@ jest.mock("expo-crypto", () => ({
   digestStringAsync: jest.fn(), CryptoDigestAlgorithm: { SHA256: "SHA-256" },
 }));
 
-import { closeLocalMemory, localMemoryIdentity, openLocalMemory } from "../storage";
+import { localMemoryRepository } from "../repository";
+import { authenticateExistingMemory, authorizeLocalMemorySession, revokeLocalMemorySession, closeLocalMemory, localMemoryIdentity, openLocalMemory } from "../storage";
 
 const vault = new Map<string, string>();
 let cancelled = false;
 type FakeDatabase = {
   getFirstAsync: jest.Mock;
+  getAllAsync: jest.Mock;
   execAsync: jest.Mock;
   withExclusiveTransactionAsync: jest.Mock;
   closeAsync: jest.Mock;
@@ -27,6 +31,7 @@ type FakeDatabase = {
 const databases: FakeDatabase[] = [];
 function newDatabase(): FakeDatabase {
   const db: FakeDatabase = {
+    getAllAsync: jest.fn(async () => []),
     getFirstAsync: jest.fn(async (sql: string) => {
       if (sql === "PRAGMA cipher_version") return { cipher_version: "4.6.0" };
       if (sql === "PRAGMA user_version") return { user_version: 0 };
@@ -44,7 +49,9 @@ function newDatabase(): FakeDatabase {
 
 beforeEach(async () => {
   await closeLocalMemory();
+  authorizeLocalMemorySession();
   vault.clear();
+  (FileSystem.getInfoAsync as jest.Mock).mockResolvedValue({ exists: false });
   databases.length = 0;
   cancelled = false;
   jest.clearAllMocks();
@@ -66,15 +73,13 @@ beforeEach(async () => {
   (SQLite.openDatabaseAsync as jest.Mock).mockImplementation(async () => newDatabase());
 });
 
-test("rejects unenrolled biometrics and plaintext Expo Go builds before creating a key", async () => {
-  (SecureStore.canUseBiometricAuthentication as jest.Mock).mockReturnValue(false);
-  await expect(openLocalMemory("guest")).rejects.toThrow("local_memory_biometric_required");
+test("rejects access outside an authenticated application session and unsupported SQLCipher", async () => {
+  revokeLocalMemorySession();
+  await expect(openLocalMemory("guest")).rejects.toThrow("application_locked");
   expect(SQLite.openDatabaseAsync).not.toHaveBeenCalled();
-  (SecureStore.canUseBiometricAuthentication as jest.Mock).mockReturnValue(true);
+  authorizeLocalMemorySession();
   (SQLite.openDatabaseAsync as jest.Mock).mockImplementationOnce(async () => {
-    const db = newDatabase();
-    db.getFirstAsync.mockResolvedValue(null);
-    return db;
+    const db = newDatabase(); db.getFirstAsync.mockResolvedValue(null); return db;
   });
   await expect(openLocalMemory("guest")).rejects.toThrow("sqlcipher_required_native_build");
   expect(SecureStore.setItemAsync).not.toHaveBeenCalled();
@@ -98,20 +103,19 @@ test("separates guest and owner databases, never reuses the same unlocked connec
   expect(guestDb.execAsync).toHaveBeenCalledWith("COMMIT");
   const names = (SQLite.openDatabaseAsync as jest.Mock).mock.calls.map(c => c[0]);
   expect(names).toEqual([guest.databaseName, bob.databaseName]);
-  expect((SecureStore.setItemAsync as jest.Mock).mock.calls.filter(x => x[2]?.requireAuthentication)).toHaveLength(2);
+  expect((SecureStore.setItemAsync as jest.Mock).mock.calls.filter(x => x[2]?.requireAuthentication)).toHaveLength(0);
   await closeLocalMemory();
   expect(ownerDb.closeAsync).toHaveBeenCalledTimes(1);
 });
 
-test("persists device-bound 256-bit key and requires interactive unlock", async () => {
+test("persists a device-bound 256-bit key without a separate memory prompt", async () => {
   const owner = "a0b0c0d0-1111-2222-3333-444455556666";
   const profile = await localMemoryIdentity(owner);
   const first = await openLocalMemory(owner);
   const key = vault.get(profile.keyName);
   expect(key).toMatch(/^[a-f0-9]{64}$/);
   expect(vault.get(profile.keyName + ".initialized")).toBe("yes");
-  expect((SecureStore.getItemAsync as jest.Mock).mock.calls.some(x => x[0] === profile.keyName &&
-    x[1]?.requireAuthentication)).toBe(true);
+  expect((SecureStore.getItemAsync as jest.Mock).mock.calls.some(x => x[1]?.requireAuthentication)).toBe(false);
   expect((first.execAsync as jest.Mock).mock.calls[0][0]).toBe(`PRAGMA key = '${key}';`);
   await closeLocalMemory();
   const second = await openLocalMemory(owner);
@@ -132,16 +136,25 @@ test("migrates legacy guest key in place without wiping notes", async () => {
   expect((next.execAsync as jest.Mock).mock.calls[0][0]).toBe(`PRAGMA key = '${legacy}';`);
 });
 
-test("missing previously protected key or cancelled authentication never rotates old encryption", async () => {
+test("lost existing keys never rotate encryption; legacy migration cancellation is retryable", async () => {
   const owner = "a0b0c0d0-1111-2222-3333-444455556666";
   const profile = await localMemoryIdentity(owner);
   vault.set(profile.keyName + ".initialized", "yes");
+  (FileSystem.getInfoAsync as jest.Mock).mockResolvedValue({ exists: true, isDirectory: false, size: 4096 });
   await expect(openLocalMemory(owner)).rejects.toThrow("local_memory_unlock_failed");
   expect(Crypto.getRandomBytes).not.toHaveBeenCalled();
-  vault.set(profile.keyName, "f".repeat(64));
+  vault.set(profile.legacyKeyName, "f".repeat(64));
+  vault.set(profile.legacyKeyName + ".initialized", "yes");
   cancelled = true;
-  await expect(openLocalMemory(owner)).rejects.toThrow("biometric_auth_cancelled");
-  expect(Crypto.getRandomBytes).not.toHaveBeenCalled();
+  await expect(authenticateExistingMemory(owner)).rejects.toThrow("biometric_auth_cancelled");
+  expect(vault.has(profile.keyName)).toBe(false);
+  cancelled = false;
+  expect(await authenticateExistingMemory(owner)).toBe(true);
+  const readsBefore = (SecureStore.getItemAsync as jest.Mock).mock.calls.filter(c => c[1]?.requireAuthentication).length;
+  const db = await openLocalMemory(owner);
+  expect(db.execAsync).toHaveBeenCalledWith("PRAGMA key = '" + "f".repeat(64) + "';");
+  expect((SecureStore.getItemAsync as jest.Mock).mock.calls.filter(c => c[1]?.requireAuthentication)).toHaveLength(readsBefore);
+  expect(vault.has(profile.legacyKeyName)).toBe(false);
 });
 
 test("refuses invalid stored keys, future schemas and malformed profile ids", async () => {
@@ -160,4 +173,69 @@ test("refuses invalid stored keys, future schemas and malformed profile ids", as
     return db;
   });
   await expect(openLocalMemory(owner)).rejects.toThrow("local_memory_schema_too_new");
+});
+
+
+test("interrupted first-time key write is retryable and never commits a false marker", async () => {
+  (SecureStore.setItemAsync as jest.Mock).mockRejectedValueOnce(new Error("cancelled"));
+  await expect(openLocalMemory("guest")).rejects.toThrow("cancelled");
+  const identity = await localMemoryIdentity("guest");
+  expect(vault.has(identity.keyName + ".initialized")).toBe(false);
+  await expect(openLocalMemory("guest")).resolves.toBeTruthy();
+  expect(vault.get(identity.keyName + ".initialized")).toBe("yes");
+});
+
+test("repairs a stranded old marker only for a proven empty database", async () => {
+  const identity = await localMemoryIdentity("guest");
+  vault.set(identity.keyName + ".initialized", "yes");
+  (FileSystem.getInfoAsync as jest.Mock).mockResolvedValue({ exists: true, isDirectory: false, size: 0 });
+  await expect(openLocalMemory("guest")).resolves.toBeTruthy();
+  expect(vault.get(identity.keyName)).toMatch(/^[a-f0-9]{64}$/);
+  expect(FileSystem.getInfoAsync).toHaveBeenCalledWith("file:///private/SQLite/pia-personal-memory-v1.db");
+});
+
+test("never invents a replacement key for existing data even if its marker is missing", async () => {
+  (FileSystem.getInfoAsync as jest.Mock).mockResolvedValue({ exists: true, isDirectory: false, size: 4096 });
+  await expect(openLocalMemory("guest")).rejects.toThrow("local_memory_unlock_failed");
+  expect(Crypto.getRandomBytes).not.toHaveBeenCalled();
+});
+
+test("closing a connection does not reuse it on a repeat visit", async () => {
+  const first = await openLocalMemory("guest");
+  await closeLocalMemory();
+  const second = await openLocalMemory("guest");
+  expect(second).not.toBe(first);
+  expect(SQLite.openDatabaseAsync).toHaveBeenLastCalledWith("pia-personal-memory-v1.db", { useNewConnection: true });
+});
+
+
+test("revoking the application session blocks even a previously open connection", async () => {
+  await openLocalMemory("guest");
+  revokeLocalMemorySession();
+  await expect(openLocalMemory("guest")).rejects.toThrow("application_locked");
+});
+
+
+test("a retained repository reopens after close and cannot use the old native handle", async () => {
+  const repo = await localMemoryRepository("guest");
+  const first = databases[0];
+  await closeLocalMemory();
+  await expect(repo.listCollections()).resolves.toEqual([]);
+  expect(first.getAllAsync).not.toHaveBeenCalled();
+  expect(databases[1].getAllAsync).toHaveBeenCalledTimes(1);
+});
+
+test("closing memory waits for the complete repository operation", async () => {
+  const repo = await localMemoryRepository("guest");
+  const first = databases[0];
+  let finish: (value: any[]) => void = () => {};
+  const reading = new Promise<any[]>(resolve => { finish = resolve; });
+  first.getAllAsync.mockReturnValueOnce(reading);
+  const operation = repo.listCollections();
+  await Promise.resolve(); await Promise.resolve();
+  const closing = closeLocalMemory();
+  expect(first.closeAsync).not.toHaveBeenCalled();
+  finish([]);
+  await operation; await closing;
+  expect(first.closeAsync).toHaveBeenCalledTimes(1);
 });

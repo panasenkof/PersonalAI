@@ -1,7 +1,7 @@
 import * as Crypto from "expo-crypto";
 import type * as SQLite from "expo-sqlite";
 
-import { openLocalMemory } from "./storage";
+import { openLocalMemory, withLocalMemoryDatabase } from "./storage";
 import { withUnlockedTransaction } from "./transaction";
 import type {
   CollectionRecord, EntityRecord, MemoryPage, MemoryRepository, NewEntity, NewObservation,
@@ -318,5 +318,15 @@ export class SqliteMemoryRepository implements MemoryRepository {
 
 /** Explicitly device-scoped; no server user tokens or remote calls. */
 export async function localMemoryRepository(profileId: string): Promise<SqliteMemoryRepository> {
-  return new SqliteMemoryRepository(await openLocalMemory(profileId));
+  await openLocalMemory(profileId);
+  // Lease the database for each COMPLETE repository operation. A mounted screen
+  // can survive backgrounding; it must not retain a closed native SQLite handle.
+  return new Proxy({} as SqliteMemoryRepository, {
+    get(_target, property) {
+      if (typeof property !== "string" || property === "then" ||
+          typeof (SqliteMemoryRepository.prototype as any)[property] !== "function") return undefined;
+      return (...args: unknown[]) => withLocalMemoryDatabase(profileId, db =>
+        (new SqliteMemoryRepository(db) as any)[property](...args));
+    },
+  });
 }

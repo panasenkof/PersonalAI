@@ -1,6 +1,7 @@
-import { useFocusEffect, useNavigation } from "@react-navigation/native";
+import { useFocusEffect, useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import type { RootStackParams } from "../navigation";
+import type { RouteProp } from "@react-navigation/native";
+import type { RootStackParams, TabParams } from "../navigation";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator, AppState, FlatList, KeyboardAvoidingView, Linking,
@@ -18,6 +19,8 @@ import type { NoteProposal } from "../direct-agent/memory";
 import { anonymousLocalAllowed, loadDirectSettings } from "../direct-agent/settings";
 import type { DirectAgentSettings } from "../direct-agent/settings";
 import { closeLocalMemory } from "../local-memory/storage";
+import { VoiceInput } from "../components/VoiceInput";
+import { memoryErrorMessage } from "../local-memory/errors";
 import { useTheme } from "../theme";
 
 type Bubble = { id: number; role: "user" | "assistant" | "info"; text: string; sources?: string[] };
@@ -30,6 +33,7 @@ export function DirectAgentScreen() {
   const profile = offlineMode ? "guest" : me?.id;
   const t = useTheme();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParams>>();
+  const route = useRoute<RouteProp<TabParams, "DirectAgent">>();
   const insets = useSafeAreaInsets();
   const [settings, setSettings] = useState<DirectAgentSettings | null>(null);
   const [rows, setRows] = useState<Bubble[]>([]);
@@ -43,6 +47,7 @@ export function DirectAgentScreen() {
   const list = useRef<FlatList<Bubble>>(null);
 
   useEffect(() => {
+    mounted.current = true;
     const sub = AppState.addEventListener("change", state => {
       if (shouldLockLocalMemory(state)) {
         controller.current?.abort();
@@ -64,6 +69,8 @@ export function DirectAgentScreen() {
     setQuestion("");
   }, [profile]);
 
+  useEffect(() => { if (route.params?.initialPrompt) setQuestion(route.params.initialPrompt); }, [route.params?.initialPrompt]);
+
   useFocusEffect(useCallback(() => {
     let alive = true;
     setSettings(null);
@@ -76,7 +83,6 @@ export function DirectAgentScreen() {
     return () => {
       alive = false;
       controller.current?.abort();
-      void closeLocalMemory();
     };
   }, [profile]));
 
@@ -132,7 +138,7 @@ export function DirectAgentScreen() {
       setRows(prev => [...prev, { id: uid(), role: "info", text: "Заметка сохранена в памяти телефона." }]);
     } catch (e) {
       if (mounted.current) {
-        setError("Не удалось сохранить заметку: " + String((e as Error).message));
+        setError("Не удалось сохранить заметку: " + memoryErrorMessage(e));
         setDrafts(prev => prev.map(d => d.id === draft.id ? { ...d, saving: false } : d));
       }
     }
@@ -153,16 +159,16 @@ export function DirectAgentScreen() {
           </Pressable>
         </View>
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 7 }}>
-          <View style={{ backgroundColor: t.soft, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 99 }}>
-            <Text style={{ color: t.muted, fontSize: 11 }}>
-              ◉ {settings?.provider === "anthropic" ? "Anthropic Messages" : settings?.provider === "openai-compatible" ? "Chat Completions" : "OpenAI Responses"}
+          <View style={{ backgroundColor: t.soft, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 99, maxWidth: "100%" }}>
+            <Text numberOfLines={1} style={{ color: t.muted, fontSize: 11 }}>
+              ◉ {settings?.model || "Модель не настроена"}
             </Text>
           </View>
-          <View style={{ backgroundColor: t.soft, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 99 }}>
+          <View style={{ backgroundColor: t.soft, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 99, maxWidth: "100%" }}>
             <Text style={{ color: t.muted, fontSize: 11 }}>◎ Веб {settings?.allowWeb ? "вкл." : "выкл."}</Text>
           </View>
-          <View style={{ backgroundColor: t.soft, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 99 }}>
-            <Text style={{ color: t.muted, fontSize: 11 }}>◈ Память {settings?.allowMemory ? "разрешена" : "закрыта"}</Text>
+          <View style={{ backgroundColor: t.soft, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 99, maxWidth: "100%" }}>
+            <Text style={{ color: t.muted, fontSize: 11 }}>◈ Доступ ИИ к заметкам: {settings?.allowMemory ? "вкл." : "выкл."}</Text>
           </View>
         </View>
         {!canSend && <Text style={{ color: t.err, marginTop: 5 }}>
@@ -256,6 +262,8 @@ export function DirectAgentScreen() {
           style={{ flex: 1, borderWidth: 1, borderColor: t.line, borderRadius: 19, padding: 12, backgroundColor: t.soft,
             maxHeight: 120, minHeight: 44, color: t.text }}
         />
+        <Pressable accessibilityRole="button" accessibilityLabel="Добавить сведения из файла" disabled={busy} style={action} onPress={() => navigation.navigate("MemoryImport")}><Text style={{ color: t.accent, fontSize: 24 }}>+</Text></Pressable>
+        <VoiceInput value={question} onChange={setQuestion} disabled={busy} onError={setError} />
         {busy ? <Pressable accessibilityRole="button" accessibilityLabel="Остановить запрос"
           style={action} onPress={() => controller.current?.abort()}>
           <Text style={{ color: t.err }}>Стоп</Text>

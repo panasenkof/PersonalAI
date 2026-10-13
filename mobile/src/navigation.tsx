@@ -1,3 +1,5 @@
+import Feather from "@expo/vector-icons/Feather";
+import type { NavigatorScreenParams } from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { DarkTheme, DefaultTheme, NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
@@ -10,45 +12,45 @@ import { DirectAgentScreen } from "./screens/DirectAgentScreen";
 import { DirectAgentSettingsScreen } from "./screens/DirectAgentSettingsScreen";
 import { ChatsScreen } from "./screens/ChatsScreen";
 import { LoginScreen } from "./screens/LoginScreen";
+import { MemoryImportScreen } from "./screens/MemoryImportScreen";
 import { LocalMemoryScreen } from "./screens/LocalMemoryScreen";
-import { SettingsScreen } from "./screens/SettingsScreen";
+import { DeviceSettingsScreen } from "./screens/DeviceSettingsScreen";
+import { LocalHomeScreen } from "./screens/LocalHomeScreen";
 import { useTheme } from "./theme";
 
+export type TabParams = { ChatsTab: undefined; DirectAgent: { initialPrompt?: string } | undefined; LocalMemory: undefined; Settings: undefined };
 export type RootStackParams = {
-  Tabs: undefined;
+  Tabs: NavigatorScreenParams<TabParams> | undefined;
   Chat: { conversationId?: string; title?: string; initialPrompt?: string };
   DirectAgentSettings: undefined;
+  MemoryImport: undefined;
 };
 const Stack = createNativeStackNavigator<RootStackParams>();
-const Tab = createBottomTabNavigator();
+const Tab = createBottomTabNavigator<TabParams>();
 
 function Tabs() {
   const { offlineMode } = useAuth();
   const t = useTheme();
-  const tabIcon = (symbol: string) => ({ color }: { color: string }) => (
-    <Text style={{ color, fontSize: 21 }}>{symbol}</Text>
+  const tabIcon = (symbol: React.ComponentProps<typeof Feather>["name"]) => ({ color }: { color: string }) => (
+    <Feather name={symbol} color={color} size={22} />
   );
   return (
     <Tab.Navigator screenOptions={{
       tabBarActiveTintColor: t.accent,
       tabBarInactiveTintColor: t.muted,
       tabBarLabelStyle: { fontSize: 11, fontWeight: "600" },
-      tabBarStyle: { backgroundColor: t.panel, borderTopColor: t.line, height: 64, paddingBottom: 7, elevation: 8 },
+      tabBarStyle: { backgroundColor: t.panel, borderTopColor: t.line, minHeight: 64, paddingTop: 7, elevation: 0 },
       headerStyle: { backgroundColor: t.panel },
       headerTintColor: t.text,
     }}>
-      {!offlineMode && (
-        <Tab.Screen name="ChatsTab" component={ChatsScreen}
-          options={{ title: "Главная", tabBarIcon: tabIcon("⌂") }} />
-      )}
+      <Tab.Screen name="ChatsTab" component={offlineMode ? LocalHomeScreen : ChatsScreen}
+          options={{ title: "Главная", tabBarIcon: tabIcon("home") }} />
       <Tab.Screen name="DirectAgent" component={DirectAgentScreen}
-        options={{ title: "Ассистент", tabBarIcon: tabIcon("✦") }} />
+        options={{ title: "Ассистент", tabBarIcon: tabIcon("message-circle") }} />
       <Tab.Screen name="LocalMemory" component={LocalMemoryScreen}
-        options={{ title: "Локальная память", tabBarLabel: "Память", tabBarIcon: tabIcon("◈") }} />
-      {!offlineMode && (
-        <Tab.Screen name="Settings" component={SettingsScreen}
-          options={{ title: "Настройки", tabBarIcon: tabIcon("⚙") }} />
-      )}
+        options={{ title: "Локальная память", tabBarLabel: "Память", tabBarIcon: tabIcon("database") }} />
+      <Tab.Screen name="Settings" component={DeviceSettingsScreen}
+          options={{ title: "Настройки", tabBarIcon: tabIcon("settings") }} />
     </Tab.Navigator>
   );
 }
@@ -71,6 +73,7 @@ export function RootNavigator() {
       }}>
         <Stack.Screen name="Tabs" component={Tabs} options={{ headerShown: false }} />
         <Stack.Screen name="Chat" component={ChatScreen} options={{ title: "Чат" }} />
+        <Stack.Screen name="MemoryImport" component={MemoryImportScreen} options={{ title: "Добавить в память" }} />
         <Stack.Screen name="DirectAgentSettings" component={DirectAgentSettingsScreen}
           options={{ title: "Подключение ИИ" }} />
       </Stack.Navigator>
