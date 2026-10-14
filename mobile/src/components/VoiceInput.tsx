@@ -5,12 +5,13 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, AppState, Pressable, Text, View } from "react-native";
 import { withNativeInteraction } from "../security/native-interaction";
 import { useTheme } from "../theme";
+import { IconAction } from "./IconAction";
 
 /** Dictation drafts text only. Offline recognition is preferred; use of the
  * phone's network speech service always requires a separate explicit choice.
  */
-export function VoiceInput({ value, onChange, disabled = false, onError }: {
-  value: string; onChange: (text: string) => void; disabled?: boolean; onError: (message: string) => void;
+export function VoiceInput({ value, onChange, disabled = false, onError, showLabel = false }: {
+  value: string; onChange: (text: string) => void; disabled?: boolean; onError: (message: string) => void; showLabel?: boolean;
 }) {
   const t = useTheme();
   const [offerNetwork, setOfferNetwork] = useState(false);
@@ -72,11 +73,13 @@ export function VoiceInput({ value, onChange, disabled = false, onError }: {
     finally { starting.current = false; }
   }
   return <View>
-    <Pressable accessibilityRole="button" accessibilityLabel={listening ? "Остановить диктовку" : "Голосовой ввод"}
+    {showLabel ? <IconAction icon={listening ? "square" : "mic"} label={listening ? "Стоп" : "Голос"}
+      accessibilityLabel={listening ? "Остановить диктовку" : "Голосовой ввод"} hint={listening ? "Завершить диктовку." : "Надиктовать сообщение. Отправка — отдельной кнопкой."}
+      disabled={disabled} emphasized={listening} hintAbove hintAlign="start" onPress={() => listening ? Speech.stop() : void start()} /> : <Pressable accessibilityRole="button" accessibilityLabel={listening ? "Остановить диктовку" : "Голосовой ввод"}
       disabled={disabled} onPress={() => listening ? Speech.stop() : void start()}
       style={{ minWidth: 46, minHeight: 46, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: listening ? t.accent : t.soft }}>
       <Feather name={listening ? "square" : "mic"} size={21} color={listening ? "#fff" : t.accent} />
-    </Pressable>
+    </Pressable>}
     {offerNetwork && !listening ? <Pressable accessibilityRole="button" accessibilityLabel="Использовать системную диктовку" disabled={disabled} style={{ minHeight: 44, width: 46, justifyContent: "center" }} onPress={() => Alert.alert("Системная диктовка", "Служба телефона может отправлять речь своему провайдеру. Разрешить её для этой диктовки?", [{ text: "Отмена", style: "cancel" }, { text: "Разрешить", onPress: () => void start(true) }])}><Text style={{ color: t.accent, fontSize: 10, textAlign: "center" }}>Через сервис</Text></Pressable> : null}
     {listening ? <Text style={{ color: t.accent, fontSize: 10, textAlign: "center" }}>Слушаю</Text> : null}
   </View>;

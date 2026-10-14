@@ -11,9 +11,8 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
 (async () => {
   await esbuild.build({ entryPoints: [path.join(qa, 'entry.tsx')], bundle: true, jsx: 'automatic', outdir: output, platform: 'browser', format: 'iife', define: { global: 'globalThis', __DEV__: 'false', 'process.env.NODE_ENV': '"production"' }, mainFields: ['browser', 'module', 'main'], resolveExtensions: ['.web.tsx', '.web.ts', '.web.js', '.tsx', '.ts', '.jsx', '.js'], loader: { '.js': 'jsx', '.png': 'file', '.ttf': 'file' }, plugins: [{ name: 'native-fixtures', setup(build) {
     build.onResolve({ filter: /^react-native$/ }, () => ({ path: path.join(qa, 'native.ts') }));
-    build.onResolve({ filter: /^@react-navigation\/elements$/ }, () => ({ path: path.join(qa, 'adapters.tsx') }));
+    build.onResolve({ filter: /^react-native-safe-area-context$/ }, () => ({ path: path.join(qa, 'safe-area.tsx') }));
     build.onResolve({ filter: /^\.\/conversations$/ }, args => args.importer.includes('/direct-agent/') ? ({ path: path.join(qa, 'conversations.ts') }) : undefined);
-    build.onResolve({ filter: /^@react-navigation\/native$/ }, () => ({ path: path.join(qa, 'navigation.tsx') }));
     build.onResolve({ filter: /auth\/AuthContext$/ }, () => ({ path: path.join(qa, 'auth.tsx') }));
     build.onResolve({ filter: /^\.\/storage$/ }, args => args.importer.includes('/local-memory/') ? ({ path: path.join(qa, 'adapters.tsx') }) : undefined);
     build.onResolve({ filter: /local-memory\/storage$/ }, () => ({ path: path.join(qa, 'adapters.tsx') }));
@@ -46,6 +45,21 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByLabel('Сообщение ассистенту', { exact: true }).waitFor({timeout:10000}).catch(async error => { console.error(await page.locator('body').innerText()); throw error; });
       assert.equal(await page.evaluate(() => window.__qa.auth), 1);
       assert.equal(await page.getByLabel('Вкладка Ассистент', { exact: true }).count(), 0);
+      assert.equal(await page.getByLabel('Сообщение ассистенту', { exact: true }).isEditable(), true);
+      // Use the ACTUAL tab navigator with no system bar, gesture navigation,
+      // and three-button navigation metrics, including a live metrics change.
+      for (const bottom of [0, 24, 48]) {
+        await page.evaluate(value => window.__insets(value), bottom);
+        await page.waitForFunction(value => {
+          const box = document.querySelector('[aria-label="Вкладка Главная"]').getBoundingClientRect();
+          return box.bottom <= innerHeight - value && box.height >= 44;
+        }, bottom);
+        for (const label of ['Вкладка Главная', 'Вкладка Память', 'Вкладка Настройки']) {
+          const box = await page.getByLabel(label, { exact: true }).boundingBox();
+          assert(box.height >= 44 && box.y + box.height <= 900 - bottom, `Tab ${label} must clear ${bottom}px system navigation`);
+        }
+      }
+      await page.evaluate(() => window.__insets(24));
       for (let visit = 0; visit < 3; visit++) {
         await page.getByLabel('Вкладка Память', { exact: true }).click();
         await page.getByLabel('Новая заметка', { exact: true }).waitFor();
@@ -54,6 +68,8 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       }
       assert.equal(await page.evaluate(() => window.__qa.auth), 1);
       await page.getByLabel('Выбрать модель и подключение', { exact: true }).click();
+      await page.getByLabel('Название модели', { exact: true }).waitFor();
+      await page.clock.runFor(500);
       await page.getByLabel('API-ключ LLM', { exact: true }).fill('qa-key');
       await page.getByLabel('Название модели', { exact: true }).fill('gpt-4.1');
       await page.getByLabel('Подключение Anthropic', { exact: true }).click();
@@ -80,10 +96,17 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.reload();
       await page.getByText('Ответ 1', { exact: true }).waitFor();
       await page.getByLabel('Новый диалог', { exact: true }).click();
+      await page.getByText('Начать пустой диалог. Предыдущие диалоги останутся в истории.', { exact: true }).waitFor();
+      assert.equal(await page.getByLabel('Сообщение ассистенту', { exact: true }).inputValue(), '', 'New-chat action opens an empty usable conversation');
       await page.getByLabel('Сообщение ассистенту', { exact: true }).fill('Второй вопрос');
       await page.getByLabel('Отправить запрос', { exact: true }).click();
       await page.waitForFunction(() => document.body.textContent.includes('Запрос к LLM'));
+      const beforeHistory = await page.evaluate(() => window.__qa.modalShows || 0);
       await page.getByLabel('История диалогов', { exact: true }).click();
+      await page.getByLabel('Поиск диалогов', { exact: true }).waitFor();
+      await page.clock.runFor(350);
+      assert.equal(await page.evaluate(() => window.__qa.modalShows), beforeHistory + 1, 'History Dialog must remain mounted after Android blur');
+      assert.equal(await page.getByText('PersAI · Защищено', { exact: true }).count(), 0);
       await page.getByLabel('Открыть диалог Купить молоко и хлеб', { exact: true }).click();
       await page.getByLabel('Поиск диалогов', { exact: true }).waitFor({ state: 'hidden' });
       await page.getByText('Ответ 1', { exact: true }).waitFor();
@@ -93,10 +116,22 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByLabel('Поиск диалогов', { exact: true }).waitFor({ state: 'hidden' });
       await page.getByText('Ответ 2', { exact: true }).waitFor();
       await page.getByLabel('Вкладка Память', { exact: true }).click();
+      const beforeSection = await page.evaluate(() => window.__qa.modalShows || 0);
       await page.getByLabel('Новый раздел памяти', { exact: true }).click();
       await page.getByLabel('Название раздела памяти', { exact: true }).fill('Рецепты');
+      await page.clock.runFor(350);
+      assert.equal(await page.evaluate(() => window.__qa.modalShows), beforeSection + 1, 'Section Dialog must not oscillate on focus loss');
+      await page.setViewportSize({ width, height: 470 }); await page.evaluate(() => window.__insets(48));
+      await page.waitForFunction(() => document.querySelector('[aria-label="Создать раздел"]').getBoundingClientRect().bottom <= innerHeight - 48);
+      const createBox = await page.getByLabel('Создать раздел', { exact: true }).boundingBox();
+      assert(createBox.y + createBox.height <= 470 - 48, 'Section action clears a three-button system bar in a reduced viewport');
+      if (process.env.SCREENSHOT_DIR) {
+        fs.mkdirSync(process.env.SCREENSHOT_DIR, { recursive: true });
+        await page.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, `section-${width}.png`) });
+      }
       await page.getByLabel('Создать раздел', { exact: true }).click();
       await page.getByLabel('Раздел Рецепты', { exact: true }).waitFor();
+      await page.setViewportSize({ width, height: 900 }); await page.evaluate(() => window.__insets(24));
       await page.getByLabel('Новая заметка', { exact: true }).click();
       await page.getByLabel('Заголовок заметки', { exact: true }).fill('Индейка');
       await page.getByLabel('Текст заметки', { exact: true }).fill('Чеснок и паприка');
@@ -121,9 +156,9 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByLabel('Поиск по заметкам', { exact: true }).fill(''); await page.clock.runFor(300);
       await page.getByLabel('Резервные копии', { exact: true }).click();
       await page.getByLabel('Создать новый код восстановления', { exact: true }).waitFor();
-      await page.getByLabel('Назад', { exact: true }).click();
+      await page.getByLabel(/back/i).click();
       await page.getByLabel('Раздел Все записи', { exact: true }).click();
-      await page.getByLabel('Добавить сведения из файла', { exact: true }).click();
+      await page.getByRole('button', { name: 'Добавить сведения из файла', exact: true }).click();
       const authenticationCount = await page.evaluate(() => window.__qa.auth);
       await page.getByLabel('Выбрать файл для памяти', { exact: true }).click();
       await page.getByText('note.txt', { exact: true }).waitFor();
@@ -146,9 +181,17 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       assert(sendBox.y + sendBox.height <= 470 - 24, 'Composer leaves space for the system bottom inset');
       await page.getByLabel('История диалогов', { exact: true }).click();
       await page.getByLabel('Поиск диалогов', { exact: true }).fill('Второй');
+      await page.evaluate(() => window.__insets(48));
+      await page.waitForFunction(() => document.querySelector('[aria-label="Открыть диалог Второй вопрос"]').getBoundingClientRect().bottom <= innerHeight - 48);
+      const historyBox = await page.getByLabel('Открыть диалог Второй вопрос', { exact: true }).boundingBox();
+      assert(historyBox.y + historyBox.height <= 470 - 48, 'History row clears the system bar in a reduced viewport');
+      await page.getByText('+ Новый диалог', { exact: true }).scrollIntoViewIfNeeded();
+      const historyAction = await page.getByText('+ Новый диалог', { exact: true }).boundingBox();
+      assert(historyAction.y + historyAction.height <= 470 - 48, 'The last sheet action is reachable above system navigation');
+      if (process.env.SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, `history-${width}.png`) });
       await page.getByLabel('Открыть диалог Второй вопрос', { exact: true }).click();
       await page.getByLabel('Поиск диалогов', { exact: true }).waitFor({ state: 'hidden' });
-      await page.setViewportSize({ width, height: 900 });
+      await page.setViewportSize({ width, height: 900 }); await page.evaluate(() => window.__insets(24));
       await page.getByLabel('История диалогов', { exact: true }).click();
       await page.getByLabel('Поиск диалогов', { exact: true }).waitFor();
       await page.evaluate(() => window.__state('background'));
@@ -169,7 +212,7 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByLabel('Поиск диалогов', { exact: true }).waitFor({ state: 'hidden' });
       assert.deepEqual(errors, []);
       if (process.env.SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, `home-${width}.png`) });
-      console.log(`PASS ${width}px: three tabs, persisted chats, active work across tabs/dialogs, memory sections/edit/archive/search, profiles, short picker, five-minute session, reduced viewport and no overflow`);
+      console.log(`PASS ${width}px: production app/navigation, 0/24/48px system insets, Android Modal focus events, named actions, persisted chats, work across tabs/dialogs, memory CRUD, profiles, picker, five-minute session and reduced viewport`);
 
       await page.close();
     }

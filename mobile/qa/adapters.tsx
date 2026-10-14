@@ -48,11 +48,9 @@ export function useSpeechRecognitionEvent(event: string, fn: (value: any) => voi
 }
 export default { expoConfig: { version: "0.3.0-qa", extra: { apiBase: "", buildSha: "qa" } } };
 
-export const LOCAL_MEMORY_SCHEMA_VERSION = 1;
+export const LOCAL_MEMORY_SCHEMA_VERSION = 2;
 export const localMemoryIdentity = async () => ({ databaseName: "qa.db", keyName: "qa" });
 export const withLocalMemoryDatabase = async () => { throw new Error("Native SQLCipher backups require an actual phone."); };
 
 export const copyAsync = async () => {};
 export const writeAsStringAsync = async () => {};
-
-export const useHeaderHeight = () => 66;

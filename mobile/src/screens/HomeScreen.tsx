@@ -13,6 +13,7 @@ import type { RootStackParams } from "../navigation";
 import { BottomSheet } from "../components/BottomSheet";
 import { FloatingBrand } from "../components/FloatingBrand";
 import { VoiceInput } from "../components/VoiceInput";
+import { IconAction } from "../components/IconAction";
 import { useTheme } from "../theme";
 
 export function HomeScreen() {
@@ -44,19 +45,19 @@ export function HomeScreen() {
   const busy = active?.busy || false;
   const action = { minHeight: 44, minWidth: 44, justifyContent: "center" as const, alignItems: "center" as const };
   const openConnections = () => navigation.navigate("ModelConnections");
-  return <KeyboardAvoidingView style={{ flex: 1, paddingTop: insets.top, backgroundColor: t.bg }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+  return <KeyboardAvoidingView style={{ flex: 1, paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right, backgroundColor: t.bg }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
     <View style={{ backgroundColor: t.panel, borderBottomWidth: 1, borderColor: t.line, paddingHorizontal: 16, paddingTop: 6, paddingBottom: 10, gap: 2 }}>
       <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
         <Text style={{ flex: 1, color: t.text, fontSize: 25, fontWeight: "800" }}>Pers<Text style={{ color: t.accent }}>AI</Text></Text>
-        <Pressable accessibilityRole="button" accessibilityLabel="История диалогов" style={action} onPress={() => setHistoryOpen(true)}><Feather name="clock" color={t.accent} size={23} /></Pressable>
-        <Pressable accessibilityRole="button" accessibilityLabel="Новый диалог" disabled={!ready} style={action} onPress={() => store.create()}><Feather name="edit" color={t.accent} size={23} /></Pressable>
+        <IconAction icon="clock" label="История" accessibilityLabel="История диалогов" hint="Открыть сохранённые диалоги и найти прошлые сообщения." onPress={() => setHistoryOpen(true)} />
+        <IconAction icon="edit" label="Новый чат" accessibilityLabel="Новый диалог" hint="Начать пустой диалог. Предыдущие диалоги останутся в истории." disabled={!ready} onPress={() => store.create()} />
       </View>
       <Pressable accessibilityRole="button" accessibilityLabel="Выбрать модель и подключение" onPress={openConnections} style={{ minHeight: 44, justifyContent: "center", gap: 4 }}>
         <Text numberOfLines={1} style={{ color: t.muted, fontSize: 13 }}>{connectionName || "Выбрать модель"} · {settings?.model || "Подключение не настроено"} ▾</Text>
         <Text style={{ color: t.muted, fontSize: 11 }}>Интернет {settings?.allowWeb ? "включён" : "выключен"} · Диалоги сохраняются на телефоне</Text>
       </Pressable>
     </View>
-    {!ready ? <View style={{ padding: 20, gap: 12 }}><ActivityIndicator accessibilityLabel="Загрузка диалогов" />
+    {!ready ? <View style={{ padding: 20, gap: 12 }}>{!error ? <ActivityIndicator accessibilityLabel="Загрузка диалогов" /> : null}
       {error ? <Pressable accessibilityRole="button" onPress={() => void store.initialize()} style={action}><Text style={{ color: t.accent }}>Повторить загрузку</Text></Pressable> : null}</View> : null}
     <FlatList ref={list} data={active?.rows || []} keyExtractor={item => item.id}
       keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag"
@@ -102,17 +103,16 @@ export function HomeScreen() {
         placeholder="Спросить у ИИ…" placeholderTextColor={t.muted} editable={ready}
         style={{ minHeight: 46, maxHeight: 112, borderWidth: 1, borderColor: t.line, borderRadius: 18, backgroundColor: t.soft, padding: 12, color: t.text, fontSize: 16 }} />
       <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-        <Pressable accessibilityRole="button" accessibilityLabel="Добавить сведения из файла" onPress={() => navigation.navigate("MemoryImport")} style={action}><Feather name="plus" size={24} color={t.accent} /></Pressable>
-        <VoiceInput value={question} onChange={value => store.setQuestion(value)} disabled={!ready} onError={setNotice} />
+        <IconAction icon="plus" label="Файл" accessibilityLabel="Добавить сведения из файла" hint="Добавить в память сведения из текста, фото, аудио или видео." hintAbove hintAlign="start" onPress={() => navigation.navigate("MemoryImport")} />
+        <VoiceInput value={question} onChange={value => store.setQuestion(value)} disabled={!ready} onError={setNotice} showLabel />
         <Text style={{ flex: 1, color: t.muted, fontSize: 11 }} numberOfLines={1}>{busy ? "Можно перейти в другую вкладку" : ""}</Text>
-        <Pressable accessibilityRole="button" accessibilityLabel={busy ? "Остановить запрос" : "Отправить запрос"} disabled={!busy && (!canSend || !question.trim())}
-          onPress={() => busy ? store.stop() : settings && void store.send(settings)}
-          style={{ minHeight: 44, minWidth: 44, justifyContent: "center", alignItems: "center", borderRadius: 15, backgroundColor: busy ? t.soft : canSend && question.trim() ? t.accent : t.soft }}>
-          <Feather name={busy ? "square" : "arrow-up"} size={22} color={busy ? t.err : canSend && question.trim() ? "#fff" : t.muted} />
-        </Pressable>
+        <IconAction icon={busy ? "square" : "arrow-up"} label={busy ? "Стоп" : "Отправить"} accessibilityLabel={busy ? "Остановить запрос" : "Отправить запрос"}
+          hint={busy ? "Остановить ответ ИИ в этом диалоге." : "Отправить написанное сообщение выбранной модели."} hintAbove emphasized={!busy}
+          disabled={!busy && (!canSend || !question.trim())} onPress={() => busy ? store.stop() : settings && void store.send(settings)} />
       </View>
     </View>
     <BottomSheet visible={historyOpen} title="Мои диалоги" onClose={() => setHistoryOpen(false)}>
+      <Text style={{ color: t.muted }}>Здесь сохранены ваши диалоги. Нажмите на название, чтобы продолжить разговор.</Text>
       <TextInput accessibilityLabel="Поиск диалогов" value={historySearch} onChangeText={setHistorySearch} placeholder="Найти диалог" placeholderTextColor={t.muted} style={{ borderWidth: 1, borderColor: t.line, borderRadius: 16, minHeight: 48, padding: 12, color: t.text }} />
       {conversations.filter(c => (c.title + c.rows.map(r => r.text).join(" ")).toLowerCase().includes(historySearch.toLowerCase())).map(c => <View key={c.id} style={{ flexDirection: "row", gap: 6, alignItems: "center" }}>
         <Pressable accessibilityRole="button" accessibilityLabel={"Открыть диалог " + c.title} accessibilityState={{ selected: c.id === active?.id }} onPress={() => { store.select(c.id); setHistoryOpen(false); }} style={{ flex: 1, minHeight: 64, borderWidth: 1, borderColor: c.id === active?.id ? t.accent : t.line, borderRadius: 16, padding: 14, gap: 5 }}>

@@ -73,7 +73,7 @@ export class DirectChatStore {
         rows: c.interrupted ? [...c.rows, { id: Crypto.randomUUID(), role: "info" as const,
           text: "Приложение закрылось до завершения ответа. Можно отправить вопрос повторно." }] : c.rows,
       }));
-      this.publish({ ready: true, conversations, activeId: conversations[0]?.id || null });
+      this.publish({ ready: true, error: "", conversations, activeId: conversations[0]?.id || null });
       for (const c of conversations.filter(c => records.find(r => r.id === c.id)?.interrupted)) await this.persist(c);
       if (!conversations.length) this.create();
     } catch {

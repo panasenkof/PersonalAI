@@ -35,7 +35,7 @@ export function waitForApplicationSession(signal?: AbortSignal): Promise<void> {
   });
 }
 const requireApplicationSession = () => { if (!applicationSessionUnlocked) throw new Error("application_locked"); };
-export const LOCAL_MEMORY_SCHEMA_VERSION = 1;
+export const LOCAL_MEMORY_SCHEMA_VERSION = 2;
 
 /** All memory (including full-text indexes, revisions, and WAL) is in SQLCipher. */
 export const SCHEMA_SQL = `
@@ -197,10 +197,14 @@ async function initialize(profileId: string): Promise<SQLite.SQLiteDatabase> {
     const row = await db.getFirstAsync<{ user_version: number }>("PRAGMA user_version");
     const version = row?.user_version ?? 0;
     if (version > LOCAL_MEMORY_SCHEMA_VERSION) throw new Error("local_memory_schema_too_new");
-    if (version === 0) {
+    // Version 1 exists in TWO deployed forms: before PR #28 without chats,
+    // and fresh PR #28 installations with chats. All CREATEs are additive and
+    // idempotent, so both upgrade on the same keyed connection without touching
+    // existing notes, indexes, revisions, conversations or encryption keys.
+    if (version < LOCAL_MEMORY_SCHEMA_VERSION) {
       await withUnlockedTransaction(db, async tx => {
         await tx.execAsync(SCHEMA_SQL);
-        await tx.execAsync("PRAGMA user_version = 1");
+        await tx.execAsync(`PRAGMA user_version = ${LOCAL_MEMORY_SCHEMA_VERSION}`);
       });
     }
     if (!previouslyInitialized) await SecureStore.setItemAsync(marker, "yes", {
