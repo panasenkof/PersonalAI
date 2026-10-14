@@ -42,8 +42,8 @@ test("release signing refuses missing and unexpected Gradle files", () => {
   }
 });
 
-test("Android test builds require HTTPS and preserve a user-selected native package", () => {
-  const previous = Object.fromEntries(["PIA_ANDROID_RELEASE", "PIA_ANDROID_PACKAGE", "EXPO_PUBLIC_API_BASE",
+test("Android test builds need no server and preserve a user-selected native package", () => {
+  const previous = Object.fromEntries(["PIA_ANDROID_RELEASE", "PIA_ANDROID_PACKAGE",
     "PIA_ANDROID_VERSION_CODE", "PIA_ANDROID_BUILD_SHA", "EAS_BUILD_PROFILE"].map(k => [k, process.env[k]]));
   const config = { version: "0.3.0", android: {}, ios: {}, extra: {} };
   try {
@@ -52,16 +52,11 @@ test("Android test builds require HTTPS and preserve a user-selected native pack
     process.env.PIA_ANDROID_PACKAGE = "com.example.piaagent";
     process.env.PIA_ANDROID_VERSION_CODE = "1101";
     process.env.PIA_ANDROID_BUILD_SHA = "a".repeat(40);
-    delete process.env.EXPO_PUBLIC_API_BASE;
-    const withoutServer = buildAppConfig({ config });
-    assert.equal(withoutServer.extra.apiBase, "");
-    process.env.EXPO_PUBLIC_API_BASE = "http://example.test";
-    assert.throws(() => buildAppConfig({ config }), /HTTPS/);
-    process.env.EXPO_PUBLIC_API_BASE = "https://api.example.test";
     const built = buildAppConfig({ config });
     assert.equal(built.android.package, "com.example.piaagent");
     assert.equal(built.android.versionCode, 1101);
     assert.equal(built.extra.buildSha, "a".repeat(40));
+    assert.equal(built.extra.apiBase, undefined);
     assert.equal(built.version, "0.3.0-test.1101");
     process.env.PIA_ANDROID_VERSION_CODE = "not-a-number";
     assert.throws(() => buildAppConfig({ config }), /version code/i);

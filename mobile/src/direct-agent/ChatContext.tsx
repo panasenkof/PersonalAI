@@ -1,15 +1,14 @@
 import React, { createContext, useContext, useEffect, useMemo, useSyncExternalStore } from "react";
-import { useAuth } from "../auth/AuthContext";
+import { useProfile } from "../profile/ProfileContext";
 import { DirectChatStore } from "./chat-store";
 
 const ChatContext = createContext<DirectChatStore | null>(null);
 export function DirectChatProvider({ children }: { children: React.ReactNode }) {
-  const { me, offlineMode } = useAuth();
-  const profile = offlineMode ? "guest" : me?.id;
-  const store = useMemo(() => profile ? new DirectChatStore(profile) : null, [profile]);
+  const profile = useProfile();
+  const store = useMemo(() => new DirectChatStore(profile), [profile]);
   useEffect(() => {
-    if (store) void store.initialize();
-    return () => store?.dispose();
+    void store.initialize();
+    return () => store.dispose();
   }, [store]);
   return <ChatContext.Provider value={store}>{children}</ChatContext.Provider>;
 }

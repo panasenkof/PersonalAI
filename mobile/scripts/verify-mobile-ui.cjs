@@ -13,7 +13,6 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
     build.onResolve({ filter: /^react-native$/ }, () => ({ path: path.join(qa, 'native.ts') }));
     build.onResolve({ filter: /^react-native-safe-area-context$/ }, () => ({ path: path.join(qa, 'safe-area.tsx') }));
     build.onResolve({ filter: /^\.\/conversations$/ }, args => args.importer.includes('/direct-agent/') ? ({ path: path.join(qa, 'conversations.ts') }) : undefined);
-    build.onResolve({ filter: /auth\/AuthContext$/ }, () => ({ path: path.join(qa, 'auth.tsx') }));
     build.onResolve({ filter: /^\.\/storage$/ }, args => args.importer.includes('/local-memory/') ? ({ path: path.join(qa, 'adapters.tsx') }) : undefined);
     build.onResolve({ filter: /local-memory\/storage$/ }, () => ({ path: path.join(qa, 'adapters.tsx') }));
     build.onResolve({ filter: /local-memory\/repository$/ }, () => ({ path: path.join(qa, 'repository.ts') }));

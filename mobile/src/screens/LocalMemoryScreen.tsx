@@ -4,7 +4,7 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import * as Crypto from "expo-crypto";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, ScrollView, Text, TextInput, View } from "react-native";
-import { useAuth } from "../auth/AuthContext";
+import { useProfile } from "../profile/ProfileContext";
 import { BottomSheet } from "../components/BottomSheet";
 import { localMemoryRepository } from "../local-memory/repository";
 import type { SqliteMemoryRepository } from "../local-memory/repository";
@@ -15,7 +15,7 @@ import { useTheme } from "../theme";
 
 export function LocalMemoryScreen() {
   const t = useTheme(); const navigation = useNavigation<NativeStackNavigationProp<RootStackParams>>();
-  const { offlineMode, me } = useAuth(); const profile = offlineMode ? "guest" : me?.id;
+  const profile = useProfile();
   const [collections, setCollections] = useState<CollectionRecord[]>([]);
   const [collectionId, setCollectionId] = useState<string | undefined>();
   const [status, setStatus] = useState<"active" | "archived">("active");

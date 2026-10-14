@@ -4,7 +4,7 @@ import { useHeaderHeight } from "@react-navigation/elements";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import React, { useCallback, useRef, useState } from "react";
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, Switch, Text, TextInput, View } from "react-native";
-import { useAuth } from "../auth/AuthContext";
+import { useProfile } from "../profile/ProfileContext";
 import { defaultBaseUrl, loadDirectConnections, newDirectConnection, saveDirectConnections } from "../direct-agent/settings";
 import type { DirectConnection, DirectConnections, DirectProvider } from "../direct-agent/settings";
 import type { RootStackParams } from "../navigation";
@@ -16,8 +16,7 @@ const PROVIDERS: Array<{ id: DirectProvider; name: string }> = [
   { id: "anthropic", name: "Anthropic Messages" },
 ];
 export function DirectAgentSettingsScreen() {
-  const { offlineMode, me } = useAuth();
-  const profile = offlineMode ? "guest" : me?.id;
+  const profile = useProfile();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParams>>();
   const t = useTheme();
   const headerHeight = useHeaderHeight(); const insets = useSafeAreaInsets();
