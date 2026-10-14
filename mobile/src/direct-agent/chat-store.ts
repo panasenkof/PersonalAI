@@ -5,6 +5,8 @@ import { saveApprovedNote, searchApprovedNotes } from "./memory";
 import { conversationRepository } from "./conversations";
 import type { ChatDraft, ConversationRepository, SavedConversation } from "./conversations";
 import type { DirectAgentSettings } from "./settings";
+import { sectionBySlug } from "../local-memory/sections";
+import type { SectionSlug } from "../local-memory/sections";
 import { waitForApplicationSession } from "../local-memory/storage";
 
 /** `streamText` is the answer as it arrives; it is never persisted. */
@@ -186,6 +188,11 @@ export class DirectChatStore {
     }
   }
   stop(id = this.snapshot.activeId) { if (id && this.requests.has(id)) { this.update(id, { progress: "Останавливаю запрос…" }); this.requests.get(id)?.abort(); } }
+  /** The user moves a proposed note to another section before saving it. */
+  setDraftSection(draft: ChatDraft, section: SectionSlug) {
+    const c = this.snapshot.conversations.find(c => c.id === this.snapshot.activeId);
+    if (c && c.savingDraft !== draft.id) this.update(c.id, { drafts: c.drafts.map(d => d.id === draft.id ? { ...d, section } : d) }, true);
+  }
   dismiss(draft: ChatDraft) {
     const c = this.snapshot.conversations.find(c => c.id === this.snapshot.activeId);
     if (c && c.savingDraft !== draft.id) this.update(c.id, { drafts: c.drafts.filter(d => d.id !== draft.id) }, true);
@@ -198,7 +205,7 @@ export class DirectChatStore {
       await saveApprovedNote(this.profile, draft);
       const latest = this.snapshot.conversations.find(x => x.id === c.id);
       if (latest) this.update(c.id, { drafts: latest.drafts.filter(d => d.id !== draft.id), rows: [...latest.rows,
-        { id: Crypto.randomUUID(), role: "info", text: "Заметка сохранена." }] }, true);
+        { id: Crypto.randomUUID(), role: "info", text: "Сохранено в разделе «" + (sectionBySlug(draft.section || "notes")?.name || "Заметки") + "»." }] }, true);
     } catch { this.publish({ error: "Не удалось сохранить заметку. Повторите попытку." }); }
     finally { this.update(c.id, { savingDraft: undefined }); }
   }

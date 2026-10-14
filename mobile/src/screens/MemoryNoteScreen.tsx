@@ -13,6 +13,7 @@ import type { SqliteMemoryRepository } from "../local-memory/repository";
 import { MemoryConflictError } from "../local-memory/types";
 import type { CollectionRecord, EntityRecord, ObservationRecord, RelationRecord, RevisionRecord } from "../local-memory/types";
 import { memoryErrorMessage } from "../local-memory/errors";
+import { ensureSections } from "../local-memory/sections";
 import type { RootStackParams } from "../navigation";
 import { useTheme } from "../theme";
 
@@ -47,7 +48,7 @@ export function MemoryNoteScreen() {
     void (async () => {
       if (!profile) throw new Error("profile_missing");
       const db = await localMemoryRepository(profile);
-      const sections = await db.listCollections();
+      const sections = await ensureSections(db);
       const note = route.params?.entityId ? await db.entity(route.params.entityId) : null;
       if (route.params?.entityId && !note) throw new Error("Запись не найдена.");
       if (!alive.current) return;
