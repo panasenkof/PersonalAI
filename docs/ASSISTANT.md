@@ -21,9 +21,21 @@ are migrated; the previous whole configuration remains active if a save fails.
 
 A local OpenAI-compatible server on the private network may use HTTP without a
 key. The model runs there, not inside PersAI on the phone. Public APIs use HTTPS.
-Cloud calls may cost money. At most four model calls and 1200 output tokens per
-call for chat; extraction is a separate user-initiated request. Set a monetary
-budget at the provider too.
+Cloud calls may cost money. At most four model calls per question and 4000 output
+tokens per call (8000 for reasoning models such as o-series and gpt-5); an answer
+cut by the limit is kept with a note. Extraction is a separate user-initiated
+request. Set a monetary budget at the provider too.
+
+Ready-made connections: YandexGPT (Yandex AI Studio; the folder ID is part of the
+model URI and is also sent as `OpenAI-Project`), DeepSeek, OpenRouter, a local
+model (Ollama, LM Studio), OpenAI and Anthropic. "Проверить связь" sends one short
+request through the normal chat path before saving. GigaChat is not offered: it
+needs an OAuth token exchange and a certificate authority Android does not trust
+by default.
+
+Answers stream as they are written. React Native's fetch cannot read a body
+incrementally, so streamed calls use XMLHttpRequest with Server-Sent Events and
+fold the events back into the provider's normal JSON reply.
 
 ## Memory first, internet when needed
 
@@ -120,6 +132,6 @@ The browser suite renders the production screens with simulated native services
 and storage; it does not prove SQLCipher, actual hardware biometrics or STT.
 Native CI builds the APK; complete [native device acceptance](DEVICE_QA.md).
 
-Planned work (see the README roadmap): structured memory sections, streaming,
+Planned work (see the README roadmap): structured memory sections,
 semantic search, learning from corrections, and device-to-device transfer through
 an encrypted copy in the user's own cloud storage — still without a PersAI server.
