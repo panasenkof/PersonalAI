@@ -5,6 +5,7 @@ import { anonymousLocalAllowed, validateBaseUrl, validateModel } from "./setting
 import type { WebContext } from "./web-search";
 export { fetchWebContext } from "./web-search";
 import { prepareDirectContext } from "./context";
+import { requestModel } from "./request";
 import { MAX_DIRECT_REPLY_TOKENS, TRUNCATED_NOTE } from "./limits";
 type ToolDefinition = { name: string; description: string; parameters: object };
 const DEFINITIONS: ToolDefinition[] = [
@@ -68,7 +69,6 @@ export async function runCompatibleAgent(options: DirectAgentOptions): Promise<D
   const { settings, signal } = options;
   if (!settings.model || (!settings.apiKey && !anonymousLocalAllowed(settings))) throw new Error("Сначала укажите API-ключ и модель");
   if (!options.prompt.trim()) throw new Error("Введите вопрос");
-  const transport = options.transport || fetch;
   const endpoint = apiEndpoint(settings);
   const model = validateModel(settings.model);
   const search = await prepareDirectContext(options);
@@ -96,18 +96,13 @@ export async function runCompatibleAgent(options: DirectAgentOptions): Promise<D
             },
           })) } : {}),
         };
-    const response = await transport(endpoint, {
-      method: "POST",
-      headers: anthropic
-        ? { "Content-Type": "application/json", "x-api-key": settings.apiKey, "anthropic-version": "2023-06-01" }
-        : { "Content-Type": "application/json", ...(settings.apiKey ? { Authorization: "Bearer " + settings.apiKey } : {}),
-            // Yandex AI Studio identifies the cloud folder from the model URI.
-            ...(yandexFolder(model) ? { "OpenAI-Project": yandexFolder(model)! } : {}) },
-      body: JSON.stringify(payload),
-      signal,
-    });
-    if (!response.ok) throw errorStatus(response.status);
-    const data = await response.json() as Record<string, any>;
+    const data = await requestModel(options, endpoint, anthropic
+      ? { "Content-Type": "application/json", "x-api-key": settings.apiKey, "anthropic-version": "2023-06-01" }
+      : { "Content-Type": "application/json", ...(settings.apiKey ? { Authorization: "Bearer " + settings.apiKey } : {}),
+          // Yandex AI Studio identifies the cloud folder from the model URI.
+          ...(yandexFolder(model) ? { "OpenAI-Project": yandexFolder(model)! } : {}) },
+      payload, anthropic ? "anthropic" : "chat", errorStatus) as Record<string, any>;
+    if (!data || typeof data !== "object") throw new Error("Неожиданный ответ модели");
     if (data.error) throw new Error("Модель не смогла обработать запрос");
     if (anthropic) {
       const blocks = Array.isArray(data.content) ? data.content as Array<Record<string, any>> : [];

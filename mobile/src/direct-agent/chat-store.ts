@@ -6,7 +6,8 @@ import type { ChatDraft, ConversationRepository, SavedConversation } from "./con
 import type { DirectAgentSettings } from "./settings";
 import { waitForApplicationSession } from "../local-memory/storage";
 
-export type LiveConversation = SavedConversation & { busy: boolean; progress: string; savingDraft?: string; deleting?: boolean };
+/** `streamText` is the answer as it arrives; it is never persisted. */
+export type LiveConversation = SavedConversation & { busy: boolean; progress: string; streamText?: string; savingDraft?: string; deleting?: boolean };
 /** `notice` is informational (e.g. unreadable old chats), unlike `error`. */
 export type ChatSnapshot = { ready: boolean; error: string; notice: string; conversations: LiveConversation[]; activeId: string | null };
 const newConversation = (): LiveConversation => {
@@ -14,7 +15,7 @@ const newConversation = (): LiveConversation => {
   return { id: Crypto.randomUUID(), title: "Новый диалог", createdAt: timestamp, updatedAt: timestamp,
     rows: [], drafts: [], question: "", busy: false, progress: "" };
 };
-const saved = ({ busy, progress, savingDraft, deleting, ...conversation }: LiveConversation): SavedConversation =>
+const saved = ({ busy, progress, streamText, savingDraft, deleting, ...conversation }: LiveConversation): SavedConversation =>
   ({ ...conversation, interrupted: busy });
 
 /** Owns work independently of the navigation tree. Only an explicit Stop or
@@ -134,13 +135,20 @@ export class DirectChatStore {
       rows: [...current.rows, { id: Crypto.randomUUID(), role: "user", text: prompt }],
     })!;
     let modelStarted = false;
+    // Repaint at most every 60 ms while tokens arrive.
+    let latest = ""; let paint: ReturnType<typeof setTimeout> | null = null;
+    const onText = (text: string) => {
+      latest = text;
+      if (paint || aborter.signal.aborted) return;
+      paint = setTimeout(() => { paint = null; if (!aborter.signal.aborted) this.update(id, { streamText: latest }); }, 60);
+    };
     try {
       // Persist the submitted question before spending a model request.
       await this.persist(pending);
       if (this.disposed) return;
       if (aborter.signal.aborted) throw new Error("aborted");
       modelStarted = true;
-      const result = await this.runner({ settings, prompt, history, signal: aborter.signal,
+      const result = await this.runner({ settings, prompt, history, signal: aborter.signal, onText,
         lookup: query => searchApprovedNotes(this.profile, query),
         status: progress => { if (!aborter.signal.aborted) this.update(id, { progress }); },
         propose: note => {
@@ -162,7 +170,8 @@ export class DirectChatStore {
       });
     } finally {
       this.requests.delete(id);
-      const final = this.update(id, { busy: false, progress: "" });
+      if (paint) clearTimeout(paint);
+      const final = this.update(id, { busy: false, progress: "", streamText: undefined });
       if (final) await this.persist(final).catch(() => {});
     }
   }

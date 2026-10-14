@@ -297,3 +297,25 @@ test("non-reasoning models never replay reasoning items", async () => {
   expect(second.input.some((item: any) => item.type === "reasoning")).toBe(false);
   expect(second.input.some((item: any) => item.type === "function_call_output")).toBe(true);
 });
+
+test("with a live text callback the answer streams through the same tool loop", async () => {
+  const texts: string[] = [];
+  const replies = [
+    ['data: {"type":"response.completed","response":{"status":"completed","output":[{"type":"function_call","name":"search_local_notes","call_id":"s1","arguments":"{\\"query\\":\\"кофе\\"}"}]}}\n\n'],
+    ['data: {"type":"response.output_text.delta","delta":"Вы любите "}\n\n', 'data: {"type":"response.output_text.delta","delta":"капучино"}\n\n',
+     'data: {"type":"response.completed","response":{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"Вы любите капучино"}]}]}}\n\n'],
+  ];
+  const bodies: any[] = []; let call = 0;
+  const streamXhr = () => {
+    const chunks = replies[call++]; const x: any = { status: 0, responseText: "", open: jest.fn(), setRequestHeader: jest.fn(), abort: jest.fn(),
+      send(body: string) { bodies.push(JSON.parse(body)); let i = 0; const step = () => { x.status = 200;
+        if (i < chunks.length) { x.responseText += chunks[i++]; x.onprogress?.(); setTimeout(step, 0); } else x.onload?.(); }; setTimeout(step, 0); } };
+    return x;
+  };
+  const lookup = jest.fn().mockResolvedValue([{ id: "n", title: "Кофе", body: "Капучино" }]);
+  const result = await start({}, jest.fn(), { onText: (t: string) => texts.push(t), streamXhr, lookup });
+  expect(result.text).toBe("Вы любите капучино");
+  expect(texts).toEqual(["Вы любите ", "Вы любите капучино"]);
+  expect(bodies.every(b => b.stream === true)).toBe(true);
+  expect(bodies[1].input.some((item: any) => item.type === "function_call_output")).toBe(true);
+});
