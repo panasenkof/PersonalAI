@@ -11,13 +11,13 @@ export async function checkConnection(settings: DirectAgentSettings, transport?:
       settings: { ...settings, allowWeb: false },
       prompt: "Проверка связи. Ответь одним словом: готово.",
       history: [], signal, transport,
+      // Streaming tells "cannot connect" apart from "slow model".
+      onText: () => {},
       lookup: async () => [], propose: () => {},
     });
     return { ok: true, reply: result.text.replace(/\s+/g, " ").trim().slice(0, 80) };
   } catch (e) {
-    const message = String((e as Error)?.message || e);
-    return { ok: false, message: /network request failed|failed to fetch|load failed/i.test(message)
-      ? "Сервис не отвечает. Проверьте адрес API и интернет; локальная модель должна быть в той же сети."
-      : message };
+    // Errors already name the host and the exact cause.
+    return { ok: false, message: String((e as Error)?.message || e) };
   }
 }

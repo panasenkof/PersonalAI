@@ -37,6 +37,8 @@ jobs:
         run: npm ci --no-audit --no-fund
       - name: Generate native Android project including Expo SQLCipher
         run: npx expo prebuild --platform android --no-install --clean
+      - name: Local models over http:// are allowed by the manifest
+        run: grep -q 'android:usesCleartextTraffic="true"' android/app/src/main/AndroidManifest.xml
       - name: Compile Android debug APK with native modules
         run: cd android && ./gradlew :app:assembleDebug --no-daemon --stacktrace
       - name: Compile standalone release APK with an ephemeral CI-only signing key

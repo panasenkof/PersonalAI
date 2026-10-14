@@ -1,5 +1,6 @@
 import * as Crypto from "expo-crypto";
 import { runDirectAgent } from "./engine";
+import { hostOf } from "./net";
 import { saveApprovedNote, searchApprovedNotes } from "./memory";
 import { conversationRepository } from "./conversations";
 import type { ChatDraft, ConversationRepository, SavedConversation } from "./conversations";
@@ -7,7 +8,8 @@ import type { DirectAgentSettings } from "./settings";
 import { waitForApplicationSession } from "../local-memory/storage";
 
 /** `streamText` is the answer as it arrives; it is never persisted. */
-export type LiveConversation = SavedConversation & { busy: boolean; progress: string; streamText?: string; savingDraft?: string; deleting?: boolean };
+/** `progressSince` is when the current stage began, for the elapsed timer. */
+export type LiveConversation = SavedConversation & { busy: boolean; progress: string; progressSince?: number; streamText?: string; savingDraft?: string; deleting?: boolean };
 /** `notice` is informational (e.g. unreadable old chats), unlike `error`. */
 export type ChatSnapshot = { ready: boolean; error: string; notice: string; conversations: LiveConversation[]; activeId: string | null };
 const newConversation = (): LiveConversation => {
@@ -15,7 +17,7 @@ const newConversation = (): LiveConversation => {
   return { id: Crypto.randomUUID(), title: "Новый диалог", createdAt: timestamp, updatedAt: timestamp,
     rows: [], drafts: [], question: "", busy: false, progress: "" };
 };
-const saved = ({ busy, progress, streamText, savingDraft, deleting, ...conversation }: LiveConversation): SavedConversation =>
+const saved = ({ busy, progress, progressSince, streamText, savingDraft, deleting, ...conversation }: LiveConversation): SavedConversation =>
   ({ ...conversation, interrupted: busy });
 
 /** Owns work independently of the navigation tree. Only an explicit Stop or
@@ -135,6 +137,8 @@ export class DirectChatStore {
       rows: [...current.rows, { id: Crypto.randomUUID(), role: "user", text: prompt }],
     })!;
     let modelStarted = false;
+    const host = hostOf(settings.baseUrl || "https://api.openai.com/v1");
+    let stage = "";
     // Repaint at most every 60 ms while tokens arrive.
     let latest = ""; let paint: ReturnType<typeof setTimeout> | null = null;
     const onText = (text: string) => {
@@ -150,7 +154,13 @@ export class DirectChatStore {
       modelStarted = true;
       const result = await this.runner({ settings, prompt, history, signal: aborter.signal, onText,
         lookup: query => searchApprovedNotes(this.profile, query),
-        status: progress => { if (!aborter.signal.aborted) this.update(id, { progress }); },
+        status: progress => { stage = progress; if (!aborter.signal.aborted) this.update(id, { progress, progressSince: Date.now() }); },
+        // "Запрос к LLM (1/4): подключаюсь к api.openai.com…" — the step and its network stage.
+        phase: phase => {
+          if (aborter.signal.aborted) return;
+          const detail = phase === "connecting" ? "подключаюсь к " + host + "…" : phase === "waiting" ? "модель думает…" : "пишет ответ…";
+          this.update(id, { progress: stage ? stage + ": " + detail : detail[0].toUpperCase() + detail.slice(1), progressSince: Date.now() });
+        },
         propose: note => {
           const c = this.snapshot.conversations.find(c => c.id === id);
           if (c && !aborter.signal.aborted) this.update(id, { drafts: [...c.drafts, { ...note, id: Crypto.randomUUID() }] }, true);
@@ -171,7 +181,7 @@ export class DirectChatStore {
     } finally {
       this.requests.delete(id);
       if (paint) clearTimeout(paint);
-      const final = this.update(id, { busy: false, progress: "", streamText: undefined });
+      const final = this.update(id, { busy: false, progress: "", progressSince: undefined, streamText: undefined });
       if (final) await this.persist(final).catch(() => {});
     }
   }
