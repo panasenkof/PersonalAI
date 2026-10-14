@@ -172,7 +172,7 @@ export function postModel(url: string, headers: Record<string, string>, body: Re
       const { events, rest } = parseSse(buffer); buffer = rest;
       for (const event of events) accumulator.add(event);
     };
-    request.onreadystatechange = () => { if (request.readyState >= 2) sawHeaders(); };
+    request.onreadystatechange = () => { if ((request.readyState ?? 0) >= 2) sawHeaders(); };
     request.onprogress = drain;
     request.onload = () => {
       if (request.status < 200 || request.status >= 300) {
