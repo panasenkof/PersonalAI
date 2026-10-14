@@ -3,6 +3,7 @@ import * as VideoThumbnails from "expo-video-thumbnails";
 import { createVideoPlayer } from "expo-video";
 import type { DirectAgentSettings } from "../direct-agent/settings";
 import { anonymousLocalAllowed, validateBaseUrl, validateModel } from "../direct-agent/settings";
+import { MAX_DIRECT_REPLY_TOKENS, MAX_REASONING_REPLY_TOKENS, isReasoningModel } from "../direct-agent/limits";
 
 export type ImportFile = { uri: string; name: string; mimeType?: string | null; size?: number; duration?: number };
 export type MediaKind = "image" | "audio" | "video" | "text";
@@ -104,11 +105,11 @@ export async function extractMedia(file: ImportFile, settings: DirectAgentSettin
     } else images.push(await readImage(file.uri, file.mimeType || ({ png: "image/png", webp: "image/webp", gif: "image/gif" } as Record<string, string>)[file.name.split(".").pop()?.toLowerCase() || ""] || "image/jpeg"));
     check(signal);
     const anthropic = settings.provider === "anthropic";
-    const payload = anthropic ? { model: validateModel(settings.model), max_tokens: 1200,
+    const payload = anthropic ? { model: validateModel(settings.model), max_tokens: MAX_DIRECT_REPLY_TOKENS,
       messages: [{ role: "user", content: [{ type: "text", text: prompt }, ...images.map(image => ({ type: "image", source: { type: "base64", media_type: image.mime, data: image.base64 } }))] }] } :
-      settings.provider === "openai" ? { model: validateModel(settings.model), store: false, max_output_tokens: 1200,
+      settings.provider === "openai" ? { model: validateModel(settings.model), store: false, max_output_tokens: isReasoningModel(settings.model) ? MAX_REASONING_REPLY_TOKENS : MAX_DIRECT_REPLY_TOKENS,
         input: [{ role: "user", content: [{ type: "input_text", text: prompt }, ...images.map(image => ({ type: "input_image", image_url: `data:${image.mime};base64,${image.base64}`, detail: "low" }))] }] } :
-        { model: validateModel(settings.model), max_tokens: 1200,
+        { model: validateModel(settings.model), max_tokens: MAX_DIRECT_REPLY_TOKENS,
           messages: [{ role: "user", content: [{ type: "text", text: prompt }, ...images.map(image => ({ type: "image_url", image_url: { url: `data:${image.mime};base64,${image.base64}`, detail: "low" } }))] }] };
     const response = await transport(base + (anthropic ? "/messages" : settings.provider === "openai" ? "/responses" : "/chat/completions"), {
       method: "POST", signal, body: JSON.stringify(payload),

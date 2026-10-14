@@ -140,7 +140,7 @@ export function DirectAgentSettingsScreen() {
               const rest = value.connections.filter(c => c.id !== selectedId); setValue({ activeId: rest[0].id, connections: rest }); setSelectedId(rest[0].id);
             } },
           ])}><Text style={{ color: t.err }}>Удалить подключение</Text></Pressable> : null}
-        <Text style={{ color: t.muted, fontSize: 12 }}>До 4 обращений к модели за вопрос, до 1200 выходных токенов на обращение. Денежный бюджет задаётся у провайдера.</Text>
+        <Text style={{ color: t.muted, fontSize: 12 }}>До 4 обращений к модели за вопрос, до 4000 выходных токенов на обращение (8000 для моделей с рассуждением). Денежный бюджет задаётся у провайдера.</Text>
       </> : null}
       {notice ? <><Text accessibilityRole="alert" style={{ color: t.err }}>{notice}</Text>
         {!value ? <Pressable accessibilityRole="button" onPress={() => setRetry(x => x + 1)} style={{ minHeight: 44 }}><Text style={{ color: t.accent }}>Повторить загрузку</Text></Pressable> : null}</> : null}
