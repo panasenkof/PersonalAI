@@ -1,8 +1,12 @@
 import { localMemoryRepository } from "../local-memory/repository";
 import type { EntityRecord, MemoryRepository } from "../local-memory/types";
+import { ensureSections, isSectionSlug } from "../local-memory/sections";
+import type { SectionSlug } from "../local-memory/sections";
 
-export type MemorySnippet = { id: string; title: string; body: string };
-export type NoteProposal = { title: string; body: string };
+/** `section` is the name of the memory section the note lives in. */
+export type MemorySnippet = { id: string; title: string; body: string; section?: string };
+/** `section` is a built-in section slug; unknown or missing means "notes". */
+export type NoteProposal = { title: string; body: string; section?: SectionSlug };
 
 export async function searchApprovedNotes(
   profile: string,
@@ -30,10 +34,12 @@ export async function searchApprovedNotes(
           note.record_status !== "active" ||
           !["standard", "inherit"].includes(note.sensitivity)) continue;
       seen.add(note.id);
+      const section = collections.find(c => c.id === note.collection_id)?.name;
       snippets.push({
         id: note.id,
         title: String(note.title || "").slice(0, 160),
         body: String(note.payload.body || "").slice(0, 900),
+        ...(section ? { section: section.slice(0, 60) } : {}),
       });
       if (snippets.length >= 5) return snippets;
     }
@@ -48,14 +54,17 @@ export async function saveApprovedNote(
   const body = proposal.body.trim().slice(0, 4000);
   if (!title && !body) throw new Error("Пустую заметку сохранить нельзя");
   const db = repository || await localMemoryRepository(profile);
-  const all = await db.listCollections();
-  let col = all.find(c => c.slug === "notes");
-  if (!col) col = await db.createCollection({ name: "Заметки", slug: "notes", sensitivity: "standard" });
-  if (col.sensitivity !== "standard") throw new Error("Коллекция заметок ограничена по доступу");
+  const all = await ensureSections(db);
+  const slug = isSectionSlug(proposal.section) ? proposal.section : "notes";
+  const col = all.find(c => c.slug === slug) || all.find(c => c.slug === "notes");
+  if (!col) throw new Error("Раздел для заметки не найден");
+  // A proposal may land in a personal section (e.g. documents) but never in a
+  // secret or unclassified one: those are only filled by the user directly.
+  if (col.sensitivity !== "standard" && col.sensitivity !== "sensitive") throw new Error("Раздел «" + col.name + "» ограничен по доступу");
   const saved = await db.createEntity({
     collection_id: col.id, domain: "notes", title,
     payload: { type: "note", title, body },
-    sensitivity: "standard", source_kind: "user", source_ref: "device-approved-agent",
+    sensitivity: col.sensitivity, source_kind: "user", source_ref: "device-approved-agent",
   });
   return saved.id;
 }

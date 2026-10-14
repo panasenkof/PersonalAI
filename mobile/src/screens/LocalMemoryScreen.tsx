@@ -10,6 +10,7 @@ import { localMemoryRepository } from "../local-memory/repository";
 import type { SqliteMemoryRepository } from "../local-memory/repository";
 import type { CollectionRecord, EntityRecord } from "../local-memory/types";
 import { memoryErrorMessage } from "../local-memory/errors";
+import { ensureSections, orderCollections, sectionBySlug } from "../local-memory/sections";
 import type { RootStackParams } from "../navigation";
 import { useTheme } from "../theme";
 
@@ -30,7 +31,7 @@ export function LocalMemoryScreen() {
   useFocusEffect(useCallback(() => {
     const request = ++generation.current; setLoading(true); setError("");
     if (profile) void localMemoryRepository(profile).then(async db => {
-      const [sections, page] = await Promise.all([db.listCollections(), db.searchNotes(term, 50, 0, { collectionId, status })]);
+      const [sections, page] = await Promise.all([ensureSections(db), db.searchNotes(term, 50, 0, { collectionId, status })]);
       if (request !== generation.current) return;
       repository.current = db; setCollections(sections); setNotes(page); setMore(page.length === 50);
     }).catch(e => { if (request === generation.current) { repository.current = null; setError(memoryErrorMessage(e)); } })
@@ -51,7 +52,7 @@ export function LocalMemoryScreen() {
     const request = generation.current; setBusy(true); setError("");
     try {
       const created = await repository.current.createCollection({ name: sectionName.trim(), slug: "section-" + Crypto.randomUUID(), sensitivity: "standard" });
-      if (request === generation.current) { setCollections(prev => [...prev, created]); setCollectionId(created.id); setSectionName(""); setSectionOpen(false); }
+      if (request === generation.current) { setCollections(prev => orderCollections([...prev, created])); setCollectionId(created.id); setSectionName(""); setSectionOpen(false); }
     } catch (e) { if (request === generation.current) setError(memoryErrorMessage(e)); }
     finally { setBusy(false); }
   }
@@ -59,7 +60,8 @@ export function LocalMemoryScreen() {
   return <View style={{ flex: 1, backgroundColor: t.bg }}>
     <View style={{ padding: 18, paddingBottom: 10, gap: 14 }}>
       <Text style={{ color: t.text, fontSize: 27, fontWeight: "800" }}>Мои знания</Text>
-      <Text style={{ color: t.muted, lineHeight: 20 }}>Рецепты, идеи, планы — разложите важное по темам.</Text>
+      <Text style={{ color: t.muted, lineHeight: 20 }}>{(() => { const c = collections.find(x => x.id === collectionId); const def = c && sectionBySlug(c.slug);
+        return def ? def.hint + "." : c ? "Ваш раздел «" + c.name + "»." : "Всё, что помощник знает о вас, разложено по разделам. Записи появляются после вашего подтверждения."; })()}</Text>
       <View style={{ flexDirection: "row", gap: 10 }}>
         <Pressable accessibilityRole="button" accessibilityLabel="Новая заметка" onPress={() => navigation.navigate("MemoryNote", { collectionId })} style={{ ...button, flex: 1, backgroundColor: t.accent }}><Text style={{ color: "#fff", fontWeight: "700" }}>+ Запись</Text></Pressable>
         <Pressable accessibilityRole="button" accessibilityLabel="Добавить сведения из файла" onPress={() => navigation.navigate("MemoryImport")} style={{ ...button, backgroundColor: t.soft, gap: 4 }}><Feather name="paperclip" size={20} color={t.accent} /><Text style={{ color: t.accent, fontSize: 11 }}>Файл</Text></Pressable>

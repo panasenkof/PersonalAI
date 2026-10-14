@@ -319,3 +319,17 @@ test("with a live text callback the answer streams through the same tool loop", 
   expect(bodies.every(b => b.stream === true)).toBe(true);
   expect(bodies[1].input.some((item: any) => item.type === "function_call_output")).toBe(true);
 });
+
+test("a proposed note carries the section the model chose, and the schema lists only allowed sections", async () => {
+  const propose = jest.fn();
+  const request = jest.fn()
+    .mockResolvedValueOnce(toolResponse("draft_local_note", { title: "Аня", body: "Сестра, день рождения 3 мая", section: "people" }))
+    .mockResolvedValueOnce(final());
+  await start({}, request, { propose });
+  expect(propose).toHaveBeenCalledWith({ title: "Аня", body: "Сестра, день рождения 3 мая", section: "people" });
+  const tool = JSON.parse(request.mock.calls[0][1].body).tools.find((t: any) => t.name === "draft_local_note");
+  expect(tool.parameters.required).toContain("section");
+  expect(tool.parameters.properties.section.enum).not.toContain("documents");
+  const system = JSON.parse(request.mock.calls[0][1].body).input[0].content;
+  expect(system).toContain("people — Люди");
+});
