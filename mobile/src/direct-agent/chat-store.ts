@@ -138,6 +138,7 @@ export class DirectChatStore {
     })!;
     let modelStarted = false;
     const host = hostOf(settings.baseUrl || "https://api.openai.com/v1");
+    let stage = "";
     // Repaint at most every 60 ms while tokens arrive.
     let latest = ""; let paint: ReturnType<typeof setTimeout> | null = null;
     const onText = (text: string) => {
@@ -153,11 +154,12 @@ export class DirectChatStore {
       modelStarted = true;
       const result = await this.runner({ settings, prompt, history, signal: aborter.signal, onText,
         lookup: query => searchApprovedNotes(this.profile, query),
-        status: progress => { if (!aborter.signal.aborted) this.update(id, { progress, progressSince: Date.now() }); },
+        status: progress => { stage = progress; if (!aborter.signal.aborted) this.update(id, { progress, progressSince: Date.now() }); },
+        // "Запрос к LLM (1/4): подключаюсь к api.openai.com…" — the step and its network stage.
         phase: phase => {
           if (aborter.signal.aborted) return;
-          const progress = phase === "connecting" ? "Подключаюсь к " + host + "…" : phase === "waiting" ? "Модель думает…" : "Пишет ответ…";
-          this.update(id, { progress, progressSince: Date.now() });
+          const detail = phase === "connecting" ? "подключаюсь к " + host + "…" : phase === "waiting" ? "модель думает…" : "пишет ответ…";
+          this.update(id, { progress: stage ? stage + ": " + detail : detail[0].toUpperCase() + detail.slice(1), progressSince: Date.now() });
         },
         propose: note => {
           const c = this.snapshot.conversations.find(c => c.id === id);
