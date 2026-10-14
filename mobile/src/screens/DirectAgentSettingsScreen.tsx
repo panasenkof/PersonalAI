@@ -5,7 +5,9 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import React, { useCallback, useRef, useState } from "react";
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, Switch, Text, TextInput, View } from "react-native";
 import { useProfile } from "../profile/ProfileContext";
-import { defaultBaseUrl, loadDirectConnections, newDirectConnection, saveDirectConnections } from "../direct-agent/settings";
+import { PROVIDER_PRESETS, connectionFromPreset, defaultBaseUrl, loadDirectConnections, newDirectConnection, saveDirectConnections } from "../direct-agent/settings";
+import { checkConnection } from "../direct-agent/check";
+import type { ConnectionCheck } from "../direct-agent/check";
 import type { DirectConnection, DirectConnections, DirectProvider } from "../direct-agent/settings";
 import type { RootStackParams } from "../navigation";
 import { useTheme } from "../theme";
@@ -26,6 +28,9 @@ export function DirectAgentSettingsScreen() {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [retry, setRetry] = useState(0);
+  const [checking, setChecking] = useState(false);
+  const [check, setCheck] = useState<ConnectionCheck | null>(null);
+  const checkAbort = useRef<AbortController | null>(null);
 
   useFocusEffect(useCallback(() => {
     let alive = true;
@@ -33,11 +38,23 @@ export function DirectAgentSettingsScreen() {
     if (profile) void loadDirectConnections(profile).then(saved => {
       if (alive) { setValue(saved); setSelectedId(saved.activeId); }
     }).catch(() => { if (alive) setNotice("Не удалось открыть защищённые подключения."); });
-    return () => { alive = false; setValue(null); };
+    return () => { alive = false; setValue(null); checkAbort.current?.abort(); setChecking(false); setCheck(null); };
   }, [profile, retry]));
 
   const selected = value?.connections.find(c => c.id === selectedId);
+  const preset = selected && PROVIDER_PRESETS.find(p => p.provider === selected.provider && p.baseUrl === selected.baseUrl);
+  function add(connection: DirectConnection) {
+    setValue(v => v ? { ...v, connections: [...v.connections, connection] } : v); setSelectedId(connection.id); setCheck(null);
+  }
+  async function runCheck() {
+    if (!selected || checking) return;
+    checkAbort.current?.abort(); const aborter = new AbortController(); checkAbort.current = aborter;
+    setChecking(true); setCheck(null);
+    const result = await checkConnection(selected, undefined, aborter.signal);
+    if (!aborter.signal.aborted) { setCheck(result); setChecking(false); }
+  }
   function update(patch: Partial<DirectConnection>) {
+    setCheck(null);
     setValue(v => v ? { ...v, connections: v.connections.map(c => c.id === selectedId ? { ...c, ...patch } : c) } : v);
   }
   function protocol(provider: DirectProvider) {
@@ -70,7 +87,7 @@ export function DirectAgentSettingsScreen() {
         <View style={{ gap: 8 }}>
           {value.connections.map(c => (
             <Pressable key={c.id} disabled={busy} accessibilityRole="button" accessibilityLabel={"Подключение " + c.name}
-              accessibilityState={{ selected: c.id === selectedId }} onPress={() => setSelectedId(c.id)}
+              accessibilityState={{ selected: c.id === selectedId }} onPress={() => { setSelectedId(c.id); setCheck(null); }}
               style={{ padding: 15, borderRadius: 18, borderWidth: 1, borderColor: c.id === selectedId ? t.accent : t.line, backgroundColor: c.id === selectedId ? t.soft : t.panel }}>
               <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
                 <Text style={{ color: t.text, fontWeight: "700", flex: 1 }}>{c.name}</Text>
@@ -80,11 +97,16 @@ export function DirectAgentSettingsScreen() {
             </Pressable>
           ))}
         </View>
-        <Pressable disabled={busy || value.connections.length >= 20} accessibilityRole="button" accessibilityLabel="Добавить подключение"
-          style={{ minHeight: 46, justifyContent: "center" }} onPress={() => {
-            const created = newDirectConnection("openai-compatible");
-            setValue(v => v ? { ...v, connections: [...v.connections, created] } : v); setSelectedId(created.id);
-          }}><Text style={{ color: t.accent, fontWeight: "600" }}>+ Добавить подключение</Text></Pressable>
+        <Text style={label}>Добавить подключение</Text>
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+          {PROVIDER_PRESETS.map(p => <Pressable key={p.id} disabled={busy || value.connections.length >= 20} accessibilityRole="button" accessibilityLabel={"Добавить " + p.name}
+            style={{ minHeight: 44, paddingHorizontal: 14, justifyContent: "center", borderRadius: 14, borderWidth: 1, borderColor: t.line, backgroundColor: t.panel }}
+            onPress={() => add(connectionFromPreset(p))}><Text style={{ color: t.accent }}>+ {p.name}</Text></Pressable>)}
+          <Pressable disabled={busy || value.connections.length >= 20} accessibilityRole="button" accessibilityLabel="Добавить подключение"
+            style={{ minHeight: 44, paddingHorizontal: 14, justifyContent: "center", borderRadius: 14, borderWidth: 1, borderColor: t.line, backgroundColor: t.panel }}
+            onPress={() => add(newDirectConnection("openai-compatible"))}><Text style={{ color: t.accent }}>+ Другой API</Text></Pressable>
+        </View>
+        {preset ? <Text style={{ color: t.muted, fontSize: 12, lineHeight: 18 }}>{preset.hint}</Text> : null}
         <Text style={label}>Название</Text>
         <TextInput editable={!busy} accessibilityLabel="Название подключения" value={selected.name} onChangeText={name => update({ name })} style={field} maxLength={60} />
         <Text style={label}>Протокол</Text>
@@ -127,6 +149,11 @@ export function DirectAgentSettingsScreen() {
             value={selected.webSearchKey} onChangeText={webSearchKey => update({ webSearchKey })} placeholder="Ключ поиска" placeholderTextColor={t.muted} style={field} /> : null}
           </> : null}
         </View>
+        <Pressable accessibilityRole="button" accessibilityLabel="Проверить связь" disabled={busy || checking} onPress={() => void runCheck()}
+          style={{ minHeight: 48, justifyContent: "center", alignItems: "center", borderRadius: 18, borderWidth: 1, borderColor: t.accent }}>
+          {checking ? <ActivityIndicator accessibilityLabel="Проверка связи" /> : <Text style={{ color: t.accent, fontWeight: "700" }}>Проверить связь</Text>}
+        </Pressable>
+        {check ? <Text accessibilityRole="alert" style={{ color: check.ok ? t.ok : t.err }}>{check.ok ? "Связь есть. Модель ответила: «" + check.reply + "»" : check.message}</Text> : null}
         <Pressable accessibilityRole="button" disabled={busy} onPress={() => void save()}
           style={{ minHeight: 52, justifyContent: "center", alignItems: "center", backgroundColor: t.accent, borderRadius: 18 }}>
           <Text style={{ color: "#fff", fontWeight: "700" }}>{busy ? "Сохранение…" : "Сохранить настройки"}</Text>

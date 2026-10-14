@@ -44,3 +44,16 @@ test("editing an endpoint clears only that connection's key, and a failed save k
   fireEvent.press(v.getByText("Сохранить настройки"));
   await waitFor(() => v.getByText("Не удалось сохранить")); expect(mockBack).not.toHaveBeenCalled();
 });
+test("a ready-made provider can be added and its connection checked before saving", async () => {
+  const fetchMock = jest.spyOn(globalThis, "fetch" as any).mockResolvedValue({ ok: true, status: 200,
+    json: async () => ({ choices: [{ message: { role: "assistant", content: "Готово" } }] }) } as any);
+  const v = render(<DirectAgentSettingsScreen />); await waitFor(() => v.getByLabelText("Адрес API LLM"));
+  fireEvent.press(v.getByLabelText("Добавить DeepSeek"));
+  expect(v.getByLabelText("Адрес API LLM").props.value).toBe("https://api.deepseek.com");
+  expect(v.getByText(/platform.deepseek.com/)).toBeTruthy();
+  fireEvent.changeText(v.getByLabelText("API-ключ LLM"), "ds-key");
+  fireEvent.press(v.getByLabelText("Проверить связь"));
+  await waitFor(() => v.getByText(/Связь есть/));
+  expect(fetchMock.mock.calls[0][0]).toBe("https://api.deepseek.com/chat/completions");
+  fetchMock.mockRestore();
+});
