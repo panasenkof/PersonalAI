@@ -140,6 +140,7 @@ jobs:
           PIA_ANDROID_BUILD_SHA: ${{ env.TARGET_SHA }}
         run: |
           npx expo prebuild --platform android --no-install --clean
+          grep -q 'android:usesCleartextTraffic="true"' android/app/src/main/AndroidManifest.xml
           node scripts/prepare-android-release.cjs
 
       - name: Restore signing key outside repository

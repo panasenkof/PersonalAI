@@ -5,18 +5,19 @@
  * protocol's events are folded back into the SAME JSON shape the non-streaming
  * API returns, so the tool loop handles both paths identically.
  */
+import { DEFAULT_TIMEOUTS, ModelRequestError, connectTimeoutError, hostOf, httpError, idleTimeoutError, nativeError, providerDetail, totalTimeoutError } from "./net";
+import type { Timeouts } from "./net";
+
 export type Protocol = "responses" | "chat" | "anthropic";
 export type SseEvent = { event?: string; data: string };
 type XhrLike = Pick<XMLHttpRequest, "open" | "setRequestHeader" | "send" | "abort" | "status" | "responseText"> & {
+  readyState?: number; onreadystatechange?: ((this: any, ev: any) => any) | null;
   onprogress: ((this: any, ev: any) => any) | null; onload: ((this: any, ev: any) => any) | null;
   onerror: ((this: any, ev: any) => any) | null; onabort: ((this: any, ev: any) => any) | null;
   ontimeout?: ((this: any, ev: any) => any) | null; timeout?: number;
 };
 export type XhrFactory = () => XhrLike;
 
-export class StreamHttpError extends Error {
-  constructor(readonly status: number) { super("http_" + status); }
-}
 
 /** Splits complete SSE events off the front of `buffer`. */
 export function parseSse(buffer: string): { events: SseEvent[]; rest: string } {
@@ -114,41 +115,88 @@ function safeJson(text: string): any {
 }
 
 const defaultXhr: XhrFactory = () => new XMLHttpRequest() as unknown as XhrLike;
-/** True where incremental XHR exists (the app); Jest's node environment uses fetch. */
+/** True where XMLHttpRequest exists (the app); Jest's node environment uses fetch. */
 export const streamingAvailable = () => typeof XMLHttpRequest !== "undefined";
 
-/** POSTs `body` with `stream: true` and resolves with the folded final JSON.
- * A server that ignores streaming and answers with plain JSON still works.
- * Error bodies are never read: providers may echo credentials in them. */
-export function postStream(url: string, headers: Record<string, string>, body: Record<string, unknown>,
-  protocol: Protocol, onText: (text: string) => void, signal?: AbortSignal, xhr: XhrFactory = defaultXhr): Promise<any> {
+export type Phase = "connecting" | "waiting" | "writing";
+export type PostOptions = {
+  protocol: Protocol;
+  /** Stream with Server-Sent Events; otherwise one JSON reply. */
+  stream: boolean;
+  onText?: (text: string) => void;
+  onPhase?: (phase: Phase) => void;
+  signal?: AbortSignal;
+  xhr?: XhrFactory;
+  timeouts?: Timeouts;
+  /** Redacted from any error text shown to the user. */
+  secrets?: string[];
+};
+
+/** POSTs `body` and resolves with the provider's non-streaming JSON shape.
+ * Every way this can stall ends in a ModelRequestError naming the cause:
+ * no headers within `connectMs`, silence longer than `idleMs` while
+ * streaming, or the whole call exceeding `totalMs`. A server that ignores
+ * `stream: true` and answers with plain JSON still works. */
+export function postModel(url: string, headers: Record<string, string>, body: Record<string, unknown>, options: PostOptions): Promise<any> {
+  const { protocol, stream, onText = () => {}, onPhase, signal, xhr = defaultXhr, timeouts = DEFAULT_TIMEOUTS, secrets = [] } = options;
+  const host = hostOf(url);
   return new Promise((resolve, reject) => {
     if (signal?.aborted) { reject(new Error("Запрос остановлен")); return; }
-    const request = xhr(); const accumulator = streamAccumulator(protocol, onText);
-    let consumed = 0; let buffer = ""; let settled = false;
-    const finish = (fn: () => void) => { if (settled) return; settled = true; signal?.removeEventListener("abort", abort); fn(); };
-    const abort = () => { try { request.abort(); } catch { /* already closed */ } finish(() => reject(new Error("Запрос остановлен"))); };
+    const request = xhr(); const accumulator = streamAccumulator(protocol, text => { if (!wrote) { wrote = true; onPhase?.("writing"); } onText(text); });
+    let consumed = 0; let buffer = ""; let settled = false; let headersSeen = false; let bytes = 0; let wrote = false;
+    const timers: Array<ReturnType<typeof setTimeout>> = [];
+    let idle: ReturnType<typeof setTimeout> | null = null;
+    const clear = () => { for (const t of timers) clearTimeout(t); if (idle) clearTimeout(idle); };
+    const finish = (fn: () => void) => {
+      if (settled) return; settled = true; clear(); signal?.removeEventListener("abort", abort); fn();
+    };
+    // Settle BEFORE aborting: abort() may synchronously fire onabort again.
+    const fail = (error: Error) => finish(() => { try { request.abort(); } catch { /* already closed */ } reject(error); });
+    const abort = () => fail(new Error("Запрос остановлен"));
+    const armIdle = () => {
+      if (!stream) return;
+      if (idle) clearTimeout(idle);
+      idle = setTimeout(() => fail(idleTimeoutError(host, timeouts, wrote)), timeouts.idleMs);
+    };
+    const sawHeaders = () => {
+      if (headersSeen || !request.status) return;
+      headersSeen = true; onPhase?.("waiting"); armIdle();
+    };
     const drain = () => {
+      sawHeaders();
       if (request.status && (request.status < 200 || request.status >= 300)) return;
       const text = request.responseText || "";
+      if (text.length > consumed) { bytes += text.length - consumed; armIdle(); }
       buffer += text.slice(consumed); consumed = text.length;
+      if (!stream) return;
       const { events, rest } = parseSse(buffer); buffer = rest;
       for (const event of events) accumulator.add(event);
     };
+    request.onreadystatechange = () => { if (request.readyState >= 2) sawHeaders(); };
     request.onprogress = drain;
     request.onload = () => {
-      if (request.status < 200 || request.status >= 300) { finish(() => reject(new StreamHttpError(request.status))); return; }
+      if (request.status < 200 || request.status >= 300) {
+        fail(httpError(request.status, host, providerDetail(request.responseText || "", secrets))); return;
+      }
       drain();
-      if (buffer.trim()) { for (const event of parseSse(buffer + "\n\n").events) accumulator.add(event); buffer = ""; }
-      const result = accumulator.result() ?? safeJson(request.responseText || "");
-      finish(() => result ? resolve(result) : reject(new Error("Неожиданный ответ модели")));
+      if (stream && buffer.trim()) { for (const event of parseSse(buffer + "\n\n").events) accumulator.add(event); buffer = ""; }
+      const result = (stream ? accumulator.result() : null) ?? safeJson(request.responseText || "");
+      if (result) finish(() => resolve(result));
+      else fail(new ModelRequestError("incomplete_stream", bytes
+        ? `${host}: сервер закрыл соединение, не завершив ответ (получено ${bytes} байт).`
+        : `${host}: сервер ответил пустым сообщением.`, host));
     };
-    request.onerror = () => finish(() => reject(new TypeError("Network request failed")));
-    request.onabort = () => finish(() => reject(new Error("Запрос остановлен")));
+    // On a network failure React Native puts the native message in responseText.
+    request.onerror = () => fail(nativeError(bytes ? "connection reset" : String(request.responseText || ""), host, secrets));
+    request.ontimeout = () => fail(totalTimeoutError(host, timeouts));
+    request.onabort = () => fail(new Error("Запрос остановлен"));
     signal?.addEventListener("abort", abort, { once: true });
+    if (stream) timers.push(setTimeout(() => { if (!headersSeen) fail(connectTimeoutError(host, timeouts)); }, timeouts.connectMs));
+    timers.push(setTimeout(() => fail(totalTimeoutError(host, timeouts)), timeouts.totalMs));
+    onPhase?.("connecting");
     request.open("POST", url);
     for (const [name, value] of Object.entries(headers)) request.setRequestHeader(name, value);
-    request.setRequestHeader("Accept", "text/event-stream");
-    request.send(JSON.stringify({ ...body, stream: true }));
+    request.setRequestHeader("Accept", stream ? "text/event-stream" : "application/json");
+    request.send(JSON.stringify(stream ? { ...body, stream: true } : body));
   });
 }

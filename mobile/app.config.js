@@ -1,5 +1,15 @@
 // Release builds must use owned application IDs. PersAI has no server endpoint:
 // the assistant talks directly to the model provider the user configures.
+// Android release builds refuse plain http:// by default, which blocked local
+// models (Ollama, LM Studio) on the home network. The app itself only allows
+// http:// for private-network addresses (validateBaseUrl), so permitting
+// cleartext at the OS level does not open public http:// connections.
+const withLocalModelCleartext = (expoConfig) => require('expo/config-plugins').withAndroidManifest(expoConfig, mod => {
+  const application = mod.modResults.manifest.application?.[0];
+  if (application) application.$['android:usesCleartextTraffic'] = 'true';
+  return mod;
+});
+
 module.exports = ({ config }) => {
   const androidCiRelease = process.env.PIA_ANDROID_RELEASE === 'true';
   const release = androidCiRelease || ['preview', 'production'].includes(process.env.EAS_BUILD_PROFILE);
@@ -15,6 +25,7 @@ module.exports = ({ config }) => {
   }
   return {
     ...config,
+    plugins: [...(config.plugins || []), withLocalModelCleartext],
     ...(androidCiRelease && versionCode ? { version: `${config.version}-test.${versionCode}` } : {}),
     ios: { ...config.ios, ...(process.env.PIA_IOS_BUNDLE_ID ? { bundleIdentifier: process.env.PIA_IOS_BUNDLE_ID } : {}) },
     android: { ...config.android, softwareKeyboardLayoutMode: 'resize', ...(process.env.PIA_ANDROID_PACKAGE ? { package: process.env.PIA_ANDROID_PACKAGE } : {}), ...(versionCode ? { versionCode } : {}) },

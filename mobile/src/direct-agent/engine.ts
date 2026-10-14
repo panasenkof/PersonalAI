@@ -3,7 +3,8 @@ import { anonymousLocalAllowed, validateBaseUrl, validateModel } from "./setting
 import { runCompatibleAgent } from "./compatible";
 import { prepareDirectContext } from "./context";
 import { requestModel } from "./request";
-import type { XhrFactory } from "./stream";
+import type { Phase, XhrFactory } from "./stream";
+import type { Timeouts } from "./net";
 import { MAX_DIRECT_REPLY_TOKENS, MAX_REASONING_REPLY_TOKENS, TRUNCATED_NOTE, isReasoningModel } from "./limits";
 import type { MemorySnippet, NoteProposal } from "./memory";
 
@@ -20,8 +21,12 @@ export type DirectAgentOptions = {
   transport?: typeof fetch;
   /** Receives the growing answer text while the model streams it. */
   onText?: (text: string) => void;
+  /** Network stage of the current model call, for the progress line. */
+  phase?: (phase: Phase) => void;
   /** Test hook: a fake XMLHttpRequest for the streaming path. */
   streamXhr?: XhrFactory;
+  /** Test hook: shorter time limits. */
+  timeouts?: Timeouts;
 };
 
 type OutputItem = {
@@ -144,8 +149,7 @@ export async function runDirectAgent(options: DirectAgentOptions): Promise<Direc
         model: validateModel(settings.model), input, tools, store: false,
         include: reasoning ? ["reasoning.encrypted_content", "web_search_call.action.sources"] : ["web_search_call.action.sources"],
         max_output_tokens: reasoning ? MAX_REASONING_REPLY_TOKENS : MAX_DIRECT_REPLY_TOKENS,
-      }, "responses",
-      status => new Error("Провайдер LLM вернул HTTP " + status + ". Проверьте API-ключ, модель и баланс.")) as Response;
+      }, "responses", reasoning) as Response;
     if (!data || typeof data !== "object") throw new Error("Неожиданный ответ модели");
     if (data.error || data.status === "failed") throw new Error("Модель не смогла обработать запрос");
     if (!Array.isArray(data.output)) throw new Error("Неожиданный ответ модели");

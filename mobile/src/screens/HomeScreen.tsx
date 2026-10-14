@@ -1,7 +1,7 @@
 import Feather from "@expo/vector-icons/Feather";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Linking, Platform, Pressable, Text, TextInput, View } from "react-native";
 import { useProfile } from "../profile/ProfileContext";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -111,7 +111,7 @@ export function HomeScreen() {
         {busy && active?.streamText ? <View accessibilityLiveRegion="polite" style={{ backgroundColor: t.panel, borderWidth: 1, borderColor: t.line, borderRadius: 20, padding: 15 }}>
           <Text selectable style={{ color: t.text, lineHeight: 23 }}>{active.streamText}</Text>
         </View> : null}
-        {busy ? <View style={{ flexDirection: "row", alignItems: "center", gap: 10, padding: 8 }}><ActivityIndicator /><Text style={{ flex: 1, color: t.muted }}>{active?.progress || "Готовлю ответ…"}</Text></View> : null}
+        {busy ? <View style={{ flexDirection: "row", alignItems: "center", gap: 10, padding: 8 }}><ActivityIndicator /><Text style={{ flex: 1, color: t.muted }}>{active?.progress || "Готовлю ответ…"}<Elapsed since={active?.progressSince} /></Text></View> : null}
       </View>}
     />
     {error || notice || historyNotice ? <View style={{ paddingHorizontal: 16, paddingVertical: 6 }}><Text accessibilityRole="alert" style={{ color: error || notice ? t.err : t.muted }}>{error || notice || historyNotice}</Text>
@@ -142,4 +142,19 @@ export function HomeScreen() {
       <Pressable accessibilityRole="button" style={action} onPress={() => { store.create(); setHistoryOpen(false); }}><Text style={{ color: t.accent, fontWeight: "700" }}>+ Новый диалог</Text></Pressable>
     </BottomSheet>
   </KeyboardAvoidingView>;
+}
+
+/** " · 0:42" after the first five seconds of a stage, ticking once a second. */
+function Elapsed({ since }: { since?: number }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (!since) return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [since]);
+  if (!since) return null;
+  const seconds = Math.floor((now - since) / 1000);
+  if (seconds < 5) return null;
+  return <Text>{" · " + Math.floor(seconds / 60) + ":" + String(seconds % 60).padStart(2, "0")}</Text>;
 }

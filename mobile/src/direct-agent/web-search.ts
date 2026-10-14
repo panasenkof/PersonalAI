@@ -1,5 +1,6 @@
 import { XMLParser } from "fast-xml-parser";
 import type { DirectAgentSettings } from "./settings";
+import { fetchWithTimeout } from "./net";
 export type WebContext = { context: string; sources: string[] };
 type SearchResult = { title?: string; url?: string; description?: string };
 const safe = (value: unknown, limit: number) => typeof value === "string" ? value.slice(0, limit) : "";
@@ -18,14 +19,14 @@ export async function fetchWebContext(
   let results: SearchResult[];
   if (provider === "brave") {
     if (!settings.webSearchKey) throw new Error("Введите ключ Brave Search API или выберите поиск без регистрации.");
-    const response = await transport("https://api.search.brave.com/res/v1/web/search?q=" + query + "&count=5", {
+    const response = await fetchWithTimeout(transport, "https://api.search.brave.com/res/v1/web/search?q=" + query + "&count=5", {
       method: "GET", headers: { Accept: "application/json", "X-Subscription-Token": settings.webSearchKey }, signal,
     });
     if (!response.ok) throw new Error("Интернет-поиск недоступен (HTTP " + response.status + ").");
     const data = await response.json() as { web?: { results?: SearchResult[] } };
     results = Array.isArray(data.web?.results) ? data.web!.results! : [];
   } else {
-    const response = await transport("https://www.bing.com/search?format=rss&q=" + query, {
+    const response = await fetchWithTimeout(transport, "https://www.bing.com/search?format=rss&q=" + query, {
       method: "GET", headers: { Accept: "application/rss+xml, application/xml, text/xml" }, signal,
     });
     if (!response.ok) throw new Error("Поиск без регистрации сейчас недоступен (HTTP " + response.status + "). Повторите запрос позже или смените способ поиска.");

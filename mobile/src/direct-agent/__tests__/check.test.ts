@@ -25,7 +25,7 @@ test("a rejected key is reported in plain words and the key is never echoed", as
 test("an unreachable local model gets a network hint", async () => {
   const transport = jest.fn().mockRejectedValue(new TypeError("Network request failed"));
   const result = await checkConnection(connectionFromPreset(PROVIDER_PRESETS.find(p => p.id === "local")!), transport as any);
-  expect(result).toEqual({ ok: false, message: expect.stringContaining("Сервис не отвечает") });
+  expect(result).toEqual({ ok: false, message: expect.stringContaining("192.168.1.10:11434: сетевая ошибка") });
 });
 
 test("Yandex requests carry the folder from the model URI", async () => {

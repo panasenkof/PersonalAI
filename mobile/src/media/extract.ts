@@ -4,6 +4,10 @@ import { createVideoPlayer } from "expo-video";
 import type { DirectAgentSettings } from "../direct-agent/settings";
 import { anonymousLocalAllowed, validateBaseUrl, validateModel } from "../direct-agent/settings";
 import { MAX_DIRECT_REPLY_TOKENS, MAX_REASONING_REPLY_TOKENS, isReasoningModel } from "../direct-agent/limits";
+import { fetchWithTimeout } from "../direct-agent/net";
+import type { Timeouts } from "../direct-agent/net";
+/** Uploading audio or images and reading them can take a few minutes. */
+const LONG_TIMEOUTS: Timeouts = { connectMs: 30_000, idleMs: 180_000, totalMs: 180_000 };
 
 export type ImportFile = { uri: string; name: string; mimeType?: string | null; size?: number; duration?: number };
 export type MediaKind = "image" | "audio" | "video" | "text";
@@ -80,8 +84,8 @@ export async function extractMedia(file: ImportFile, settings: DirectAgentSettin
     const audioMime = ({ m4a: "audio/mp4", wav: "audio/wav", ogg: "audio/ogg", flac: "audio/flac", aac: "audio/aac" } as Record<string, string>)[file.name.split(".").pop()?.toLowerCase() || ""] || "audio/mpeg";
     data.append("file", { uri: file.uri, name: file.name, type: file.mimeType || audioMime } as any);
     data.append("model", validateModel(settings.transcriptionModel || "whisper-1"));
-    const response = await transport(base + "/audio/transcriptions", { method: "POST", body: data,
-      headers: settings.apiKey ? { Authorization: "Bearer " + settings.apiKey } : {}, signal });
+    const response = await fetchWithTimeout(transport, base + "/audio/transcriptions", { method: "POST", body: data,
+      headers: settings.apiKey ? { Authorization: "Bearer " + settings.apiKey } : {}, signal }, LONG_TIMEOUTS, [settings.apiKey]);
     if (!response.ok) throw new Error("Распознавание аудио: HTTP " + response.status + ". Проверьте поддержку /audio/transcriptions и модель распознавания в подключении.");
     const result = await response.json() as { text?: string };
     check(signal);
@@ -111,11 +115,11 @@ export async function extractMedia(file: ImportFile, settings: DirectAgentSettin
         input: [{ role: "user", content: [{ type: "input_text", text: prompt }, ...images.map(image => ({ type: "input_image", image_url: `data:${image.mime};base64,${image.base64}`, detail: "low" }))] }] } :
         { model: validateModel(settings.model), max_tokens: MAX_DIRECT_REPLY_TOKENS,
           messages: [{ role: "user", content: [{ type: "text", text: prompt }, ...images.map(image => ({ type: "image_url", image_url: { url: `data:${image.mime};base64,${image.base64}`, detail: "low" } }))] }] };
-    const response = await transport(base + (anthropic ? "/messages" : settings.provider === "openai" ? "/responses" : "/chat/completions"), {
+    const response = await fetchWithTimeout(transport, base + (anthropic ? "/messages" : settings.provider === "openai" ? "/responses" : "/chat/completions"), {
       method: "POST", signal, body: JSON.stringify(payload),
       headers: anthropic ? { "Content-Type": "application/json", "x-api-key": settings.apiKey, "anthropic-version": "2023-06-01" } :
         { "Content-Type": "application/json", ...(settings.apiKey ? { Authorization: "Bearer " + settings.apiKey } : {}) },
-    });
+    }, LONG_TIMEOUTS, [settings.apiKey]);
     if (!response.ok) throw new Error("Разбор изображения: HTTP " + response.status + ". Выберите модель с поддержкой изображений.");
     const result = await response.json();
     check(signal);
