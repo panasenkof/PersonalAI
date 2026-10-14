@@ -3,6 +3,7 @@ import {
   clearDirectApiKey, defaultDirectPreferences, loadDirectSettings,
   saveDirectApiKey, saveDirectPreferences, saveWebSearchKey, validateBaseUrl, validateModel,
 } from "../settings";
+import { resetSavedMemoryProfileForTests } from "../../security/active-profile";
 
 jest.mock("expo-secure-store", () => ({
   getItemAsync: jest.fn(), setItemAsync: jest.fn(), deleteItemAsync: jest.fn(),
@@ -11,6 +12,7 @@ jest.mock("expo-secure-store", () => ({
 const vault = new Map<string, string>();
 beforeEach(() => {
   vault.clear();
+  resetSavedMemoryProfileForTests();
   jest.clearAllMocks();
   (SecureStore.getItemAsync as jest.Mock).mockImplementation(async (key: string) => vault.get(key) ?? null);
   (SecureStore.setItemAsync as jest.Mock).mockImplementation(async (key: string, value: string) => {
@@ -72,4 +74,17 @@ test("legacy key migrates to the current server owner without leaking to another
   expect((await loadDirectSettings(owner)).apiKey).toBe("old-owner-key");
   expect((await loadDirectSettings("other-user")).apiKey).toBe("");
   expect(vault.has("pia.direct.openai.key.v1")).toBe(false);
+  // The former server account becomes the device profile; server tokens are gone.
+  expect(vault.get("pia.profile.v1")).toBe(owner);
+  expect(vault.has("pia.tokens")).toBe(false);
+});
+
+test("a fresh install and a former offline user both use the guest profile", async () => {
+  const { savedMemoryProfile } = jest.requireActual("../../security/active-profile");
+  expect(await savedMemoryProfile()).toBe("guest");
+  resetSavedMemoryProfileForTests(); vault.clear();
+  vault.set("pia.offlineMemoryMode", "yes");
+  vault.set("pia.tokens", JSON.stringify({ access_token: "a.b.c" }));
+  expect(await savedMemoryProfile()).toBe("guest");
+  expect(vault.has("pia.offlineMemoryMode")).toBe(false);
 });

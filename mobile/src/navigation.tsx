@@ -4,30 +4,22 @@ import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { DarkTheme, DefaultTheme, NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import React from "react";
-import { ActivityIndicator, Text, useColorScheme, View } from "react-native";
+import { useColorScheme } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { useAuth } from "./auth/AuthContext";
-import { ChatScreen } from "./screens/ChatScreen";
 import { HomeScreen } from "./screens/HomeScreen";
 import { DirectAgentSettingsScreen } from "./screens/DirectAgentSettingsScreen";
-import { ChatsScreen } from "./screens/ChatsScreen";
-import { LoginScreen } from "./screens/LoginScreen";
 import { MemoryImportScreen } from "./screens/MemoryImportScreen";
 import { LocalMemoryScreen } from "./screens/LocalMemoryScreen";
 import { MemoryNoteScreen } from "./screens/MemoryNoteScreen";
 import { MemoryBackupScreen } from "./screens/MemoryBackupScreen";
 import { DeviceSettingsScreen } from "./screens/DeviceSettingsScreen";
-import { SettingsScreen } from "./screens/SettingsScreen";
 import { useTheme } from "./theme";
 
 export type TabParams = { Home: undefined; LocalMemory: undefined; Settings: undefined };
 export type RootStackParams = {
   Tabs: NavigatorScreenParams<TabParams> | undefined;
-  Chat: { conversationId?: string; title?: string; initialPrompt?: string };
   ModelConnections: undefined;
-  ServerSettings: undefined;
-  ServerChats: undefined;
   MemoryNote: { entityId?: string; collectionId?: string };
   MemoryBackup: undefined;
   MemoryImport: undefined;
@@ -64,30 +56,18 @@ function Tabs() {
   );
 }
 export function RootNavigator() {
-  const { ready, me, offlineMode } = useAuth();
   const dark = useColorScheme() === "dark";
   const t = useTheme();
-  if (!ready) {
-    return (
-      <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-        <ActivityIndicator />
-      </View>
-    );
-  }
-  if (!me && !offlineMode) return <LoginScreen />;
   return (
     <NavigationContainer theme={dark ? DarkTheme : DefaultTheme}>
       <Stack.Navigator screenOptions={{
         headerStyle: { backgroundColor: t.panel }, headerTintColor: t.text,
       }}>
         <Stack.Screen name="Tabs" component={Tabs} options={{ headerShown: false }} />
-        <Stack.Screen name="Chat" component={ChatScreen} options={{ title: "Чат" }} />
         <Stack.Screen name="MemoryImport" component={MemoryImportScreen} options={{ title: "Добавить в память" }} />
         <Stack.Screen name="MemoryNote" component={MemoryNoteScreen} options={{ title: "Запись" }} />
         <Stack.Screen name="MemoryBackup" component={MemoryBackupScreen} options={{ title: "Резервные копии" }} />
         <Stack.Screen name="ModelConnections" component={DirectAgentSettingsScreen} options={{ title: "Модели и подключения" }} />
-        <Stack.Screen name="ServerSettings" component={SettingsScreen} options={{ title: "Серверный аккаунт" }} />
-        <Stack.Screen name="ServerChats" component={ChatsScreen} options={{ title: "Серверные диалоги" }} />
       </Stack.Navigator>
     </NavigationContainer>
   );

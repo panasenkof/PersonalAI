@@ -2,16 +2,15 @@ import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import Constants from "expo-constants";
 import React, { useCallback, useState } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { Pressable, ScrollView, Text } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useAuth } from "../auth/AuthContext";
+import { useProfile } from "../profile/ProfileContext";
 import { loadDirectConnections } from "../direct-agent/settings";
 import type { RootStackParams } from "../navigation";
 import { useTheme } from "../theme";
 
 export function DeviceSettingsScreen() {
-  const { offlineMode, closeOffline, me } = useAuth();
-  const profile = offlineMode ? "guest" : me?.id;
+  const profile = useProfile();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParams>>();
   const t = useTheme(); const insets = useSafeAreaInsets();
   const [model, setModel] = useState("Выберите сервис и модель");
@@ -35,13 +34,6 @@ export function DeviceSettingsScreen() {
       <Text style={{ color: t.text, fontSize: 19, fontWeight: "700" }}>Резервные копии →</Text>
       <Text style={{ color: t.muted, lineHeight: 20 }}>Сохранить записи и диалоги или перенести их на другой телефон.</Text>
     </Pressable>
-    <View style={card}>
-      <Text style={{ color: t.text, fontSize: 19, fontWeight: "700" }}>Серверный аккаунт</Text>
-      <Text style={{ color: t.muted, lineHeight: 21 }}>{offlineMode ? "Не подключён. Для работы на телефоне достаточно выбранной модели." : me?.email}</Text>
-      <Pressable accessibilityRole="button" accessibilityLabel={offlineMode ? "Подключить серверный аккаунт" : "Открыть настройки серверного аккаунта"} onPress={() => offlineMode ? void closeOffline() : navigation.navigate("ServerSettings")} style={{ minHeight: 46, justifyContent: "center" }}>
-        <Text style={{ color: t.accent, fontWeight: "600" }}>{offlineMode ? "Подключить →" : "Управление аккаунтом и сервером →"}</Text>
-      </Pressable>
-    </View>
     <Text style={{ color: t.muted, fontSize: 12 }}>PersAI {Constants.expoConfig?.version || "—"} · {String(Constants.expoConfig?.extra?.buildSha || "—").slice(0, 7)}</Text>
   </ScrollView>;
 }

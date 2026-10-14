@@ -3,7 +3,7 @@ import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import React, { useCallback, useRef, useState } from "react";
 import { ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Linking, Platform, Pressable, Text, TextInput, View } from "react-native";
-import { useAuth } from "../auth/AuthContext";
+import { useProfile } from "../profile/ProfileContext";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useDirectChat } from "../direct-agent/ChatContext";
 import { anonymousLocalAllowed, loadDirectConnections } from "../direct-agent/settings";
@@ -20,8 +20,7 @@ export function HomeScreen() {
   const t = useTheme();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParams>>();
-  const { offlineMode, me } = useAuth();
-  const profile = offlineMode ? "guest" : me?.id;
+  const profile = useProfile();
   const { store, ready, error, conversations, active } = useDirectChat();
   const [settings, setSettings] = useState<DirectAgentSettings | null>(null);
   const [connectionName, setConnectionName] = useState("");
@@ -121,7 +120,6 @@ export function HomeScreen() {
         <Pressable accessibilityRole="button" accessibilityLabel={"Удалить диалог " + c.title} disabled={c.busy || Boolean(c.savingDraft) || c.deleting} style={action} onPress={() => Alert.alert("Удалить диалог?", c.title, [{ text: "Отмена", style: "cancel" }, { text: "Удалить", style: "destructive", onPress: () => void store.remove(c.id) }])}><Feather name="trash-2" size={19} color={c.busy ? t.muted : t.err} /></Pressable>
       </View>)}
       <Pressable accessibilityRole="button" style={action} onPress={() => { store.create(); setHistoryOpen(false); }}><Text style={{ color: t.accent, fontWeight: "700" }}>+ Новый диалог</Text></Pressable>
-      {!offlineMode ? <Pressable accessibilityRole="button" style={action} onPress={() => { setHistoryOpen(false); navigation.navigate("ServerChats"); }}><Text style={{ color: t.accent }}>Диалоги серверного аккаунта →</Text></Pressable> : null}
     </BottomSheet>
   </KeyboardAvoidingView>;
 }

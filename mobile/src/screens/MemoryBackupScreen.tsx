@@ -3,7 +3,7 @@ import * as DocumentPicker from "expo-document-picker";
 import React, { useRef, useState } from "react";
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useAuth } from "../auth/AuthContext";
+import { useProfile } from "../profile/ProfileContext";
 import { useDirectChat } from "../direct-agent/ChatContext";
 import { createRecoveryCode, restoreEncryptedBackup, shareEncryptedBackup } from "../local-memory/backup";
 import { memoryErrorMessage } from "../local-memory/errors";
@@ -12,7 +12,7 @@ import { useTheme } from "../theme";
 
 export function MemoryBackupScreen() {
   const t = useTheme(); const insets = useSafeAreaInsets(); const header = useHeaderHeight();
-  const { offlineMode, me } = useAuth(); const profile = offlineMode ? "guest" : me?.id;
+  const profile = useProfile();
   const { store, conversations } = useDirectChat();
   const [code, setCode] = useState(""); const [confirmed, setConfirmed] = useState(false); const [restoreCode, setRestoreCode] = useState("");
   const [busy, setBusy] = useState(false); const [notice, setNotice] = useState(""); const pending = useRef(false);

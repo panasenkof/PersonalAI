@@ -97,7 +97,7 @@ export async function shareEncryptedBackup(profileId: string, recoveryCode: stri
     // separately and never included in the name or exported file.
     await Sharing.shareAsync(path, {
       mimeType: "application/octet-stream",
-      dialogTitle: "Сохранить зашифрованную резервную копию PersonalAI",
+      dialogTitle: "Сохранить зашифрованную резервную копию PersAI",
     });
   } finally {
     await forgetTemporaryFile(path);

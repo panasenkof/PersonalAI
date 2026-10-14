@@ -45,13 +45,12 @@ jobs:
           PIA_ANDROID_KEY_ALIAS: pia-ci-only
           PIA_ANDROID_STORE_PASSWORD: ephemeral-ci-password-only
           PIA_ANDROID_KEY_PASSWORD: ephemeral-ci-password-only
-          EXPO_PUBLIC_API_BASE: https://example.org
         run: |
           keytool -genkeypair -noprompt -storetype PKCS12 \
             -keystore "$PIA_ANDROID_KEYSTORE_PATH" -alias "$PIA_ANDROID_KEY_ALIAS" \
             -keyalg RSA -keysize 2048 -validity 2 \
             -storepass "$PIA_ANDROID_STORE_PASSWORD" -keypass "$PIA_ANDROID_KEY_PASSWORD" \
-            -dname 'CN=PersonalAI CI Test,O=Ephemeral QA,C=US'
+            -dname 'CN=PersAI CI Test,O=Ephemeral QA,C=US'
           node scripts/prepare-android-release.cjs
           cd android
           ./gradlew :app:assembleRelease --no-daemon --stacktrace

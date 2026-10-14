@@ -1,171 +1,56 @@
-# PersAI — персональный ИИ и база знаний
+# PersAI — личный помощник с памятью на телефоне
 
-Мультимодальный персональный ассистент с собственной базой знаний: чат в **вебе**, через **Telegram**, **Slack**, **WhatsApp**, **Discord** и **мобильное приложение**; облачная или локальная OpenAI-совместимая LLM; доменные плагины (**automotive**, **medical_labs**); память диалогов, RAG-поиск, фоновая обработка с SSE-стримингом и отменой, MCP-сервер и проактивные напоминания.
+PersAI — мобильное приложение (Android, iOS), которое запоминает важное о пользователе, хранит эти знания в зашифрованной базе на телефоне и опирается на них в каждом ответе. Своего сервера у приложения нет: оно работает напрямую с моделью, которую выбрал пользователь, — OpenAI, совместимые API (в том числе локальные Ollama и LM Studio) или Anthropic.
 
-Спецификация: [docs/PLATFORM_SPEC.md](docs/PLATFORM_SPEC.md) · [масштабирование и надёжность](docs/SCALING.md) · [безопасность](docs/SECURITY.md) · [каналы](docs/CHANNELS.md). Лицензия: MIT.
+## Что умеет сейчас
 
-## Визуальный стиль PersAI (Android / iOS)
+- **Чат** с историей диалогов; запрос продолжается при переходе между вкладками, «Стоп» останавливает его.
+- **Память сначала:** перед каждым запросом ищет в своих записях и передаёт модели не больше пяти фрагментов, только из разделов с уровнем доступа «обычный».
+- **Запоминание с подтверждением:** модель предлагает запись, сохраняется она только после нажатия «Сохранить».
+- **Раздел «Память»:** записи по разделам, поиск, архив, история правок, события и связи.
+- **Импорт из файлов:** текст, изображения, аудио, видео (по кадрам) — с просмотром и правкой перед сохранением.
+- **Диктовка** без автоматической отправки.
+- **Интернет-поиск** по желанию: Bing без регистрации, Brave Search API или встроенный поиск OpenAI.
+- **Защита:** база SQLCipher, вход по биометрии, зашифрованные резервные копии с отдельным кодом восстановления.
 
-Мобильный интерфейс использует спокойную светлую тему Aurora с акцентами
-бирюзы, индиго и орхидеи; тёмный вариант выбирается системной настройкой.
-На стартовом экране и в пустом диалоге расположен символ PersAI с мягким
-«парящим» движением (native-driven трансформации). Уважает настройку системы
-«Уменьшить движение» и останавливается, когда приложение в фоне.
-Ни одна анимация не управляет состоянием локальной памяти или биометрией.
+Подробности: [помощник и подключения](docs/ASSISTANT.md) · [память, шифрование и резервные копии](docs/MEMORY_AND_SECURITY.md).
 
-Иконка №2 в светлом варианте сохранена как
-`brand/persai-approved-light.png`; стартовая иконка приложения использует
-`mobile/assets/icon.png`. Технические Android package ID, ключи SQLCipher и
-существующие SecureStore identifiers не меняются при ребрендинге.
-Для пересборки производных ресурсов (1024/512/192, splash и adaptive)
-установите `sharp >= 0.34` и выполните
-`NODE_PATH=<путь-к-sharp> node scripts/generate-brand.cjs`
-из корня репозитория. Для публикации в магазин предпочтительно заменить
-сжатый встроенный PNG оригинальным исходником логотипа высокого разрешения,
-проверив иконку в реальной Android/iOS-сборке.
+## Установка
 
-## Возможности
+Подписанные тестовые APK публикуются автоматически после зелёного CI в `main`: [GitHub Releases](https://github.com/panasenkof/PersonalAI/releases). Ставьте новую версию поверх старой — так сохраняется память. Настройка подписи: [docs/RELEASE_APK.md](docs/RELEASE_APK.md). Expo Go не подходит: SQLCipher и распознавание речи требуют нативной сборки.
 
-| Область | Что реализовано |
-|---|---|
-| **Диалоги** | История разговоров (Conversation/ChatTurn), окно последних ротов + компакт-сжатие старых, все каналы в одной ленте |
-| **RAG** | Эмбеддинги через `/embeddings`, чанкинг при записи сущностей/наблюдений, **pgvector** (HNSW, cosine) на Postgres + текстовый поиск, слияние RRF; на SQLite — косинус в Python; деградация до текста при недоступности эмбеддингов; бэкфилл `python -m app.rag.reindex` |
-| **Обработка** | `MESSAGE_MODE=queue`: приём запроса → **персистентная очередь** (Postgres + Redis, `QUEUE_BACKEND=redis`) → отдельные воркеры `python -m app.worker` (масштабируются независимо, подхват «осиротевших» джоб после рестарта, ретраи) → ответ в канал; `inprocess`/`sync` для одного инстанса и разработки |
-| **Стриминг и отмена** | `GET /v1/jobs/{id}/events` (SSE через Redis pub/sub — работает между репликами): статус → токены → **аргументы tool-call'ов по мере генерации** → `tool_start`/`tool` (результат, мс) → финал; **«Стоп»** — `POST /v1/jobs/{id}/cancel` (веб/мобайл) и `/stop` в мессенджерах, частичный ответ сохраняется |
-| **Web-чат** | Статический SPA на `/app`: логин (+2FA), список чатов, живой стриминг, чипы инструментов, кнопка Стоп, карточки подтверждения фактов, настройки LLM |
-| **Mobile** | Expo/React Native: вход (+2FA) → список чатов → чат (стриминг, tool-чипы, Стоп, вложения, подтверждение фактов) → настройки (LLM, 2FA, выход со всех устройств, привязка каналов, адрес сервера) |
-| **Telegram** | Link-code, фото, **документы/PDF**, голос (STT), **inline-кнопки подтверждения фактов** (`awaiting_confirm`), `/stop` `/new` |
-| **Slack** | Events API + HMAC-подпись, **файлы**, **треды** (ответ в `thread_ts`, диалог на тред), Block Kit-кнопки фактов, `/stop` `/new` |
-| **WhatsApp / Discord** | WhatsApp Cloud API (подпись, медиа, reply-кнопки) и Discord Interactions (Ed25519, `/ask` `/link` `/stop` `/new`, кнопки) — см. [docs/CHANNELS.md](docs/CHANNELS.md) |
-| **MCP** | `POST /mcp` — Streamable HTTP подмножество: `initialize`, `tools/list`, `tools/call` (инструменты агента под JWT-пользователем) |
-| **Automotive** | Техпаспорт авто, сервисные события, парсинг чека vision-моделью, регламент ТО (web+LLM), детерминированный `compute_next_due` |
-| **Medical labs** | `labs_record_report` (текст/PDF/изображение → наблюдение), `labs_get_trends` (динамика показателя), только извлечение — без диагнозов |
-| **Напоминания** | Планировщик: ТО «через N км» → в Telegram, одна запись на пункт/день (уникальный констрейнт) |
-| **Надёжность** | регрессионные тесты (SQLite и реальный Postgres+pgvector в CI), ruff + mypy, Alembic, Docker (app + worker + Postgres/pgvector + Redis), **retry с backoff+jitter и `Retry-After` для всех внешних API**, лимит параллельных LLM-вызовов, **rate limit LLM на пользователя** (Redis — общий для реплик), `/ready`, structured logs + correlation-id, `/v1/stats` |
-| **Безопасность** | **2FA (TOTP + recovery-коды)**, **роли user/admin**, отзыв токенов (`token_version`, logout-all), **ротация JWT-секрета** (`JWT_SECRET_PREVIOUS`), шифрование at rest (ключи LLM, история, TOTP, джобы, файлы; ротация MultiFernet + `rekey`), **fail-closed в production** (слабые секреты и вебхуки без секрета → отказ), защита логина от перебора, path traversal, лимит загрузки, CORS — подробно в [docs/SECURITY.md](docs/SECURITY.md) |
-| **Evals** | Золотой набор (6 сценариев): `python -m evals.runner` — scripted LLM на каждый PR; **`--live` — реальная LLM, автозапуск в CI** (`evals-live.yml`: ночью, при изменении агента/промптов, вручную; N прогонов, порог pass-rate, отчёт в Job Summary) |
-
-## Мобильный ИИ без сервера
-
-Мобильное приложение поддерживает OpenAI Responses, OpenAI-совместимые Chat Completions и Anthropic-совместимые Messages API. Интернет-поиск разрешается отдельно: через публичный Bing без регистрации, OpenAI web_search или Brave Search API. Ассистент сначала проверяет обычные заметки в локальной зашифрованной SQLCipher-памяти и предлагает новые заметки только после подтверждения. **Backend PersonalAI не обязателен** для этого режима; API-ключ выбранного провайдера вводится на телефоне; для локального совместимого API он может быть необязателен. На главной объединены чат и сохранённая история диалогов; ИИ продолжает ответ при смене вкладки. Приложение разблокируется целиком, повторный вход требуется после пяти минут в фоне. Память доступна без отдельных настроек. Поддержаны диктовка и подтверждаемый импорт сведений из файлов. [Инструкция, ограничения и тесты](docs/MOBILE_DIRECT_AGENT.md).
-
-## Тестовые APK Android
-
-Подписанные автономные Android-сборки автоматически публикуются после зелёного CI при изменениях mobile: [GitHub Releases](https://github.com/panasenkof/PersonalAI/releases). Для однократной настройки ключа подписи и адреса сервера см. [docs/ANDROID_TEST_APK.md](docs/ANDROID_TEST_APK.md). До настройки Secrets/Variables первый выпуск ещё не состоится.
-
-## Готовность продукта и установка
-
-Текущие доработки интерфейсов, ограничения выпуска и критерии пилота: [docs/PRODUCT_READINESS.md](docs/PRODUCT_READINESS.md). Инструкция доступна на `/app/help.html`, страница продукта — `/app/start.html`, сведения об операторе — `/app/service.html`. Процесс публичного выпуска и восстановления описан в [docs/LAUNCH_RUNBOOK.md](docs/LAUNCH_RUNBOOK.md). Веб можно добавить на домашний экран в поддерживающем браузере при HTTPS. Мобильное приложение обновлено до Expo SDK 54; подписанные сборки ещё требуют настройки EAS и проверки на устройствах; Expo Go не является способом распространения готового продукта.
-
-## Быстрый старт
-
-Для первого закрытого запуска на компьютере: [локальный пилот](docs/LOCAL_PILOT.md). `python scripts/configure-local-pilot.py` создаёт `.env` со случайными ключами, сохраняя существующую установку.
-
-### Docker (продакшн-режим: Postgres+pgvector, Redis, API, воркеры)
-
-```bash
-cp .env.example .env        # заполните JWT_SECRET, PIA_AGENT_SECRET, POSTGRES_PASSWORD
-docker compose up -d --build --scale worker=2
-open http://localhost:8000/app/    # web-чат
-```
-
-В `APP_ENV=production` слабые секреты и вебхуки без секрета останавливают запуск — см. [docs/SECURITY.md](docs/SECURITY.md).
-Обновление существующей установки — в [docs/SCALING.md](docs/SCALING.md#обновление-существующей-установки).
-
-### Разработка (SQLite, sync-режим)
-
-```bash
-cd backend
-python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.lock -r requirements-dev.lock
-export JWT_SECRET=dev-secret
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-```
-
-Первый администратор: `python -m app.security.admin admin@example.com` (в Docker: `docker compose exec app python -m app.security.admin admin@example.com`). Публичная регистрация всегда создаёт обычного пользователя.
-
-Миграции: `alembic upgrade head` (свежая SQLite создаётся и через `create_all` при старте).
-
-### Тесты и качество
-
-```bash
-cd backend
-pytest tests/ -q          # регрессионные тесты, включая golden-set evals (fakeredis вместо Redis)
-ruff check . && mypy app
-python -m evals.runner    # детерминированная проверка агента (офлайн)
-# live-evals с настоящей LLM:
-EVAL_LLM_API_KEY=sk-... python -m evals.runner --live --runs 3 --min-pass-rate 0.8
-```
-
-### Mobile (Expo)
+## Разработка
 
 ```bash
 cd mobile
 npm ci
-export EXPO_PUBLIC_API_BASE=http://YOUR_LAN_IP:8000   # можно сменить и в Настройках приложения
-npx expo start
-npm run typecheck && npm test                         # tsc + jest
+npm run typecheck && npm test        # tsc + jest
+node scripts/verify-mobile-ui.cjs    # браузерная проверка экранов (нужен playwright)
+npx expo start                       # только интерфейс; память требует нативной сборки
 ```
 
-## API (кратко)
+Используйте Node 22.13+ (в CI — Node 22). Иконки пересобираются командой `NODE_PATH=<путь-к-sharp> node mobile/scripts/generate-brand.cjs` из `brand/persai-approved-light.png`.
 
-- `POST /v1/auth/register|token` (+`otp` при 2FA) → access + **refresh**; `/refresh`, `/me`, `/password`, `/logout-all`, `/2fa/setup|enable|disable`
-- `GET /v1/admin/users|stats`, `PATCH /v1/admin/users/{id}` — только роль `admin`
-- `GET/PATCH /v1/settings/llm` — облачный/локальный `base_url`, модель, эмбеддинги, API-ключ
-- `POST /v1/messages` — текст + вложения (+`conversation_id`); в `queue`-режиме сразу возвращает `job_id`
-- `GET /v1/jobs/{id}` · **`GET /v1/jobs/{id}/events`** — SSE (`?access_token=` для EventSource) · **`POST /v1/jobs/{id}/cancel`**
-- `GET /v1/facts` · `POST /v1/facts/{id}/confirm|reject` — подтверждение извлечённых из фото/PDF фактов
-- `GET /ready` — готовность (БД, Redis)
-- `GET /v1/conversations` · `GET /v1/conversations/{id}/messages`
-- `GET /v1/collections` · `GET /v1/collections/{slug}/entities` · `GET /v1/stats`
-- `POST /v1/blobs` — загрузка файла (лимит `MAX_UPLOAD_BYTES`, владение по пользователю)
-- `POST /v1/channels/{telegram|slack|whatsapp|discord}/link-code`; вебхуки: `telegram/webhook`, `slack/events|interactive`, `whatsapp/webhook`, `discord/interactions`
-- **`POST /mcp`** — Model Context Protocol (`initialize`, `tools/list`, `tools/call`)
+## CI
 
-## Архитектура
+- `CI` — TypeScript, Jest, совместимость зависимостей Expo, сборка JS-бандлов Android и iOS, браузерная проверка экранов.
+- `Native Android SQLCipher build` — в pull request собирает настоящий APK с SQLCipher.
+- `Publish Android test APK` — после зелёного CI в `main` подписывает и публикует APK.
 
-```
-web / mobile / Telegram / Slack / WhatsApp / Discord / MCP
-        │
-        ▼
-FastAPI (N реплик) ──► IngestionEnvelope ──► submit_envelope ──► IngestionJob (Postgres) + Redis-очередь
-        ▲ SSE                                                           │
-        │                                                               ▼
-   Redis pub/sub  ◄── события, отмена ──  worker (M процессов): process_envelope ─► run_agent (tool loop, стриминг)
-                                                                        │                    │
-                                                                        ▼                    ▼
-                                                              доменные плагины      hybrid RAG (pgvector + текст, RRF)
-                                                                        │
-                                                                        ▼
-       KB: Collection / Entity / Observation / Blob / ChatTurn / ExtractedFact (подтверждение) / Chunk(vector)
-```
+Перед раздачей сборки пройдите [приёмку на телефоне](docs/DEVICE_QA.md): автоматические проверки имитируют биометрию, SQLCipher и системные окна.
 
-Ключевые модули: `app/agent` (оркестратор, история), `app/rag` (чанкинг, гибридный поиск), `app/queue` (очереди inprocess/redis, EventBus, отмена), `app/worker.py`, `app/net` (retry/backoff), `app/llm` (провайдеры, лимиты), `app/security` (2FA, шифрование, rate limit), `app/channels` (telegram, slack, whatsapp, discord), `app/domains` (automotive, medical_labs), `app/mcp`, `app/scheduler` (напоминания), `evals` (golden set).
+## Дорожная карта
 
-## Переменные окружения
+1. **Чистка** — проект сведён к мобильному приложению (этот шаг).
+2. **Стабильность** — вход по PIN-коду телефона, надёжные запросы к моделям, онбординг, провайдеры, доступные из России, потоковый ответ.
+3. **Знать и структурировать** — разделы «обо мне», люди, дела и проекты, предпочтения, даты; помощник сам предлагает факты из разговора.
+4. **Использовать** — поиск с учётом русских окончаний и по смыслу, показ использованных записей, напоминания.
+5. **Совершенствоваться** — правила из исправлений пользователя, уборка дублей и устаревшего, еженедельная сводка «что я узнал о вас».
 
-Смотрите [.env.example](.env.example): `JWT_SECRET`, `DATABASE_URL`, `PIA_AGENT_SECRET` (Fernet-ключ), `MESSAGE_MODE`, `QUEUE_BACKEND`/`REDIS_URL`/`EMBEDDED_WORKER`, `TELEGRAM_*`, `SLACK_*`, `WHATSAPP_*`, `DISCORD_*`, `STT_*`, `REMINDERS_*`, `LLM_ALLOW_LOCAL_FALLBACK` + `FALLBACK_*`, `RATE_LIMIT_AUTH_PER_MINUTE`/`RATE_LIMIT_LLM_PER_MINUTE`, `LLM_ALLOWED_BASE_URLS`, `JWT_SECRET_PREVIOUS`, `EVAL_LLM_*`, `LOG_FORMAT=json`.
+## История
 
-## Статус и roadmap
+До октября 2026 года в репозитории также был сервер PersonalAI (API, очереди, RAG, Telegram, MAX, Slack, WhatsApp, Discord, MCP, веб-чат). Он удалён, потому что приложению не нужен; последняя версия с сервером сохранена в ветке [`archive/server`](https://github.com/panasenkof/PersonalAI/tree/archive/server).
 
-- ✅ Фаза 0 — зелёные тесты, CI, Docker, Alembic, security hardening
-- ✅ Фаза 1 — память диалогов + гибридный RAG
-- ✅ Фаза 2 — фоновая очередь, SSE, web-чат, проактивные напоминания
-- ✅ Фаза 3 — MCP, Slack, medical_labs, evals, наблюдаемость
-- ✅ Фаза 4 — production-масштабирование: Redis-очередь + воркеры, pgvector, отмена и стриминг tool-call'ов, retry/rate-limit, каналы (документы, треды, кнопки, WhatsApp, Discord), 2FA/роли/ротация ключей, шифрование at rest, полноэкранное мобильное приложение, live-evals в CI
-- 🔜 Далее: шифрование поискового индекса на уровне СУБД (сейчас — на уровне диска/управляемого Postgres, см. [docs/SECURITY.md](docs/SECURITY.md)), кросс-рольные ACL, общие (shared) коллекции, push-уведомления в мобильном приложении
+## Лицензия
 
-## Известные ограничения
-
-- **Файлы** хранятся на диске (`BLOB_STORAGE_DIR`): для нескольких узлов нужен общий том (NFS/EFS) — S3-бэкенда пока нет.
-- **События SSE**: каждая реплика подписана на pub/sub всех джоб (простая схема с replay-буфером); при сотнях одновременных стримов стоит перейти на Redis Streams.
-- **Семантика доставки** — at-least-once: после падения воркера агент может повторить работу (записи в БД откатываются вместе с транзакцией, но внешние побочные эффекты — например ответ в мессенджер — возможны дважды).
-- **Поисковый индекс** (`chunks.text`, payload) не шифруется приложением — см. [docs/SECURITY.md](docs/SECURITY.md).
-- Refresh-токены не ротируются по одному (отзыв — `logout-all`); блокировка логина по e-mail может использоваться для DoS конкретной учётки.
-- CI проверяет мобильные типы, Jest, зависимости Expo и Android/iOS-бандлы; браузерная приёмка использует тестовый API. Для выпуска нужны live-evals с реальной LLM и приёмка подписанных сборок на устройствах.
-
-## Автор
-
-Panasenkof
-
-MAX: подключение бота, webhook и привязка аккаунта описаны в [docs/CHANNELS.md](docs/CHANNELS.md#max).
+MIT, см. [LICENSE](LICENSE).

@@ -107,7 +107,7 @@ function toolArguments(value: unknown): Record<string, unknown> {
   return obj as Record<string, unknown>;
 }
 
-/** Stateless Responses API: no PersonalAI backend, no remote conversation store.
+/** Stateless Responses API: no backend, no remote conversation store.
  * Native OpenAI requests use Responses; compatible endpoints use their own protocol.
  */
 export async function runDirectAgent(options: DirectAgentOptions): Promise<DirectResult> {

@@ -44,9 +44,6 @@
       ],
       "expo-video"
     ],
-    "extra": {
-      "apiBase": "http://localhost:8000"
-    },
     "icon": "./assets/icon.png",
     "splash": {
       "image": "./assets/splash.png",

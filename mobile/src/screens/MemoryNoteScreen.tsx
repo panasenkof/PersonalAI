@@ -5,7 +5,7 @@ import { useHeaderHeight } from "@react-navigation/elements";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useAuth } from "../auth/AuthContext";
+import { useProfile } from "../profile/ProfileContext";
 import { BottomSheet } from "../components/BottomSheet";
 import { VoiceInput } from "../components/VoiceInput";
 import { localMemoryRepository } from "../local-memory/repository";
@@ -20,7 +20,7 @@ export function MemoryNoteScreen() {
   const t = useTheme(); const insets = useSafeAreaInsets(); const headerHeight = useHeaderHeight();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParams>>();
   const route = useRoute<RouteProp<RootStackParams, "MemoryNote">>();
-  const { offlineMode, me } = useAuth(); const profile = offlineMode ? "guest" : me?.id;
+  const profile = useProfile();
   const repository = useRef<SqliteMemoryRepository | null>(null); const alive = useRef(true); const pending = useRef(false);
   const [selected, setSelected] = useState<EntityRecord | null>(null);
   const [collections, setCollections] = useState<CollectionRecord[]>([]);

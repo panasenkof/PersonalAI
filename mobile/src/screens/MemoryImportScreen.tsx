@@ -6,7 +6,7 @@ import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import React, { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
-import { useAuth } from "../auth/AuthContext";
+import { useProfile } from "../profile/ProfileContext";
 import { loadDirectConnections, anonymousLocalAllowed, defaultDirectPreferences } from "../direct-agent/settings";
 import type { DirectConnection } from "../direct-agent/settings";
 import { localMemoryRepository } from "../local-memory/repository";
@@ -20,8 +20,7 @@ import { useTheme } from "../theme";
 export function MemoryImportScreen() {
   const t = useTheme();
   const header = useHeaderHeight(); const insets = useSafeAreaInsets();
-  const { offlineMode, me } = useAuth();
-  const profile = offlineMode ? "guest" : me?.id;
+  const profile = useProfile();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParams>>();
   const [file, setFile] = useState<ImportFile | null>(null);
   const [connections, setConnections] = useState<DirectConnection[]>([]);

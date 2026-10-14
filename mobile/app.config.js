@@ -1,16 +1,8 @@
-// Release builds must explicitly target an HTTPS server and owned application IDs.
+// Release builds must use owned application IDs. PersAI has no server endpoint:
+// the assistant talks directly to the model provider the user configures.
 module.exports = ({ config }) => {
   const androidCiRelease = process.env.PIA_ANDROID_RELEASE === 'true';
   const release = androidCiRelease || ['preview', 'production'].includes(process.env.EAS_BUILD_PROFILE);
-  const endpoint = process.env.EXPO_PUBLIC_API_BASE;
-  let validEndpoint = false;
-  try {
-    const url = new URL(endpoint);
-    validEndpoint = url.protocol === 'https:' && !url.username && !url.password && !url.search && !url.hash && url.pathname === '/' && !['localhost','127.0.0.1','[::1]'].includes(url.hostname);
-  } catch { /* show a useful error below */ }
-  if (release && (!androidCiRelease || Boolean(endpoint)) && !validEndpoint) {
-    throw new Error('Set EXPO_PUBLIC_API_BASE to your production HTTPS server before building.');
-  }
   if (release && (!process.env.PIA_ANDROID_PACKAGE || (!androidCiRelease && !process.env.PIA_IOS_BUNDLE_ID))) {
     throw new Error(androidCiRelease
       ? 'Set PIA_ANDROID_PACKAGE to your owned Android package ID.'
@@ -26,6 +18,6 @@ module.exports = ({ config }) => {
     ...(androidCiRelease && versionCode ? { version: `${config.version}-test.${versionCode}` } : {}),
     ios: { ...config.ios, ...(process.env.PIA_IOS_BUNDLE_ID ? { bundleIdentifier: process.env.PIA_IOS_BUNDLE_ID } : {}) },
     android: { ...config.android, softwareKeyboardLayoutMode: 'resize', ...(process.env.PIA_ANDROID_PACKAGE ? { package: process.env.PIA_ANDROID_PACKAGE } : {}), ...(versionCode ? { versionCode } : {}) },
-    extra: { ...config.extra, ...(androidCiRelease && !endpoint ? { apiBase: "" } : {}), ...(endpoint ? { apiBase: endpoint } : {}), ...(process.env.PIA_ANDROID_BUILD_SHA ? { buildSha: process.env.PIA_ANDROID_BUILD_SHA } : {}) },
+    extra: { ...config.extra, ...(process.env.PIA_ANDROID_BUILD_SHA ? { buildSha: process.env.PIA_ANDROID_BUILD_SHA } : {}) },
   };
 };

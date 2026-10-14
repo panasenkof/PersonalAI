@@ -76,7 +76,6 @@ jobs:
         if: steps.changes.outputs.needed == 'true'
         env:
           PIA_ANDROID_PACKAGE: ${{ vars.PIA_ANDROID_PACKAGE }}
-          EXPO_PUBLIC_API_BASE: ${{ vars.PIA_ANDROID_API_BASE }}
           PIA_ANDROID_KEYSTORE_B64: ${{ secrets.PIA_ANDROID_KEYSTORE_B64 }}
           PIA_ANDROID_KEY_ALIAS: ${{ secrets.PIA_ANDROID_KEY_ALIAS }}
           PIA_ANDROID_STORE_PASSWORD: ${{ secrets.PIA_ANDROID_STORE_PASSWORD }}
@@ -86,7 +85,7 @@ jobs:
           set -euo pipefail
           for field in PIA_ANDROID_PACKAGE PIA_ANDROID_KEYSTORE_B64 PIA_ANDROID_KEY_ALIAS PIA_ANDROID_STORE_PASSWORD PIA_ANDROID_KEY_PASSWORD; do
             if [ -z "${!field:-}" ]; then
-              echo "::error::Missing $field. See docs/ANDROID_TEST_APK.md."
+              echo "::error::Missing $field. See docs/RELEASE_APK.md."
               exit 1
             fi
           done
@@ -137,7 +136,6 @@ jobs:
         env:
           PIA_ANDROID_RELEASE: 'true'
           PIA_ANDROID_PACKAGE: ${{ vars.PIA_ANDROID_PACKAGE }}
-          EXPO_PUBLIC_API_BASE: ${{ vars.PIA_ANDROID_API_BASE }}
           PIA_ANDROID_VERSION_CODE: ${{ steps.version.outputs.code }}
           PIA_ANDROID_BUILD_SHA: ${{ env.TARGET_SHA }}
         run: |
@@ -162,7 +160,6 @@ jobs:
           # Expo rebuilds the JS bundle during Gradle; retain the same config as prebuild.
           PIA_ANDROID_RELEASE: 'true'
           PIA_ANDROID_PACKAGE: ${{ vars.PIA_ANDROID_PACKAGE }}
-          EXPO_PUBLIC_API_BASE: ${{ vars.PIA_ANDROID_API_BASE }}
           PIA_ANDROID_VERSION_CODE: ${{ steps.version.outputs.code }}
           PIA_ANDROID_BUILD_SHA: ${{ env.TARGET_SHA }}
           PIA_ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/pia-release.jks
@@ -201,7 +198,7 @@ jobs:
           echo "APK signing certificate matches the configured release key."
           mkdir -p dist
           tag="android-test-b${GITHUB_RUN_NUMBER}-a${GITHUB_RUN_ATTEMPT}"
-          name="PersonalAI-${tag}.apk"
+          name="PersAI-${tag}.apk"
           cp "$apk" "dist/$name"
           (cd dist && sha256sum "$name" > "$name.sha256")
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
@@ -233,7 +230,7 @@ jobs:
           - Upgrade without uninstalling: keep the same signing certificate and package ID.
           - Test build only. Validate encrypted memory backup/restore on real devices.
 
-          Setup and device QA: docs/ANDROID_TEST_APK.md
+          Setup: docs/RELEASE_APK.md · Device QA: docs/DEVICE_QA.md
           EOF
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "dist/$APK_NAME" "dist/$APK_NAME.sha256" --clobber

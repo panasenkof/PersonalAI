@@ -2,7 +2,7 @@
  * SQLCipher PRAGMA key unlocks one native SQLite connection. Expo SDK 54
  * withExclusiveTransactionAsync() silently opens a NEW connection, without
  * inheriting its PRAGMA key or attached backup schemas. Never use that API
- * with PersonalAI's encrypted local database.
+ * with PersAI's encrypted local database.
  *
  * Execute BEGIN IMMEDIATE on the *same* opened connection and serialize
  * transactions with a per-connection FIFO. The profile lock also protects
