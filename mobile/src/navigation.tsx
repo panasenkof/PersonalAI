@@ -19,7 +19,8 @@ import { useTheme } from "./theme";
 export type TabParams = { Home: undefined; LocalMemory: undefined; Settings: undefined };
 export type RootStackParams = {
   Tabs: NavigatorScreenParams<TabParams> | undefined;
-  ModelConnections: undefined;
+  /** `presetId` adds and selects a ready-made provider (first-run setup). */
+  ModelConnections: { presetId?: string } | undefined;
   MemoryNote: { entityId?: string; collectionId?: string };
   MemoryBackup: undefined;
   MemoryImport: undefined;

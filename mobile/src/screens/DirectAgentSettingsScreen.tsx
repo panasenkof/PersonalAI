@@ -1,4 +1,5 @@
-import { useFocusEffect, useNavigation } from "@react-navigation/native";
+import { useFocusEffect, useNavigation, useRoute } from "@react-navigation/native";
+import type { RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useHeaderHeight } from "@react-navigation/elements";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -20,6 +21,9 @@ const PROVIDERS: Array<{ id: DirectProvider; name: string }> = [
 export function DirectAgentSettingsScreen() {
   const profile = useProfile();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParams>>();
+  const route = useRoute<RouteProp<RootStackParams, "ModelConnections">>();
+  const presetId = route.params?.presetId;
+  const appliedPreset = useRef<string | undefined>(undefined);
   const t = useTheme();
   const headerHeight = useHeaderHeight(); const insets = useSafeAreaInsets();
   const [value, setValue] = useState<DirectConnections | null>(null);
@@ -36,7 +40,15 @@ export function DirectAgentSettingsScreen() {
     let alive = true;
     setValue(null); setNotice("");
     if (profile) void loadDirectConnections(profile).then(saved => {
-      if (alive) { setValue(saved); setSelectedId(saved.activeId); }
+      if (!alive) return;
+      const preset = presetId ? PROVIDER_PRESETS.find(p => p.id === presetId) : undefined;
+      if (preset && appliedPreset.current !== presetId && saved.connections.length < 20) {
+        // First-run setup: reuse an unconfigured connection of the same kind, or add one.
+        const existing = saved.connections.find(c => c.provider === preset.provider && c.baseUrl === preset.baseUrl);
+        const chosen = existing || connectionFromPreset(preset);
+        setValue(existing ? saved : { ...saved, connections: [...saved.connections, chosen] }); setSelectedId(chosen.id);
+        appliedPreset.current = presetId;
+      } else { setValue(saved); setSelectedId(saved.activeId); }
     }).catch(() => { if (alive) setNotice("Не удалось открыть защищённые подключения."); });
     return () => { alive = false; setValue(null); checkAbort.current?.abort(); setChecking(false); setCheck(null); };
   }, [profile, retry]));

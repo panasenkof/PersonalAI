@@ -4,6 +4,7 @@ import { DirectAgentSettingsScreen } from "../screens/DirectAgentSettingsScreen"
 import { loadDirectConnections, newDirectConnection, saveDirectConnections } from "../direct-agent/settings";
 jest.mock("@react-navigation/native", () => ({
   useNavigation: () => ({ goBack: mockBack }),
+  useRoute: () => ({ params: mockParams.current }),
   useFocusEffect: (cb: () => void | (() => void)) => require("react").useEffect(cb, [cb]),
 }));
 jest.mock("../profile/ProfileContext", () => ({ useProfile: () => "guest" }));
@@ -11,8 +12,10 @@ jest.mock("@react-navigation/elements", () => ({ useHeaderHeight: () => 64 }));
 jest.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ top: 24, bottom: 24, left: 0, right: 0 }) }));
 jest.mock("../direct-agent/settings", () => ({ ...jest.requireActual("../direct-agent/settings"), loadDirectConnections: jest.fn(), saveDirectConnections: jest.fn() }));
 const mockBack = jest.fn();
+const mockParams: { current: { presetId?: string } | undefined } = { current: undefined };
 beforeEach(() => {
   jest.clearAllMocks();
+  mockParams.current = undefined;
   (loadDirectConnections as jest.Mock).mockResolvedValue({ activeId: "one", connections: [
     { ...newDirectConnection("openai", "one"), name: "OpenAI", apiKey: "key-a" },
     { ...newDirectConnection("anthropic", "two"), name: "Anthropic", baseUrl: "https://my.example/v1", apiKey: "key-b", model: "my-claude" },
@@ -56,4 +59,11 @@ test("a ready-made provider can be added and its connection checked before savin
   await waitFor(() => v.getByText(/Связь есть/));
   expect(fetchMock.mock.calls[0][0]).toBe("https://api.deepseek.com/chat/completions");
   fetchMock.mockRestore();
+});
+test("first-run setup opens straight on the chosen provider", async () => {
+  mockParams.current = { presetId: "openrouter" };
+  const v = render(<DirectAgentSettingsScreen />); await waitFor(() => v.getByLabelText("Адрес API LLM"));
+  expect(v.getByLabelText("Адрес API LLM").props.value).toBe("https://openrouter.ai/api/v1");
+  expect(v.getByLabelText("API-ключ LLM").props.value).toBe("");
+  expect(v.getByLabelText("Подключение OpenRouter")).toBeTruthy();
 });
