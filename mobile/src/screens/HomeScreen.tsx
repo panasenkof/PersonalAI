@@ -21,7 +21,7 @@ export function HomeScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParams>>();
   const profile = useProfile();
-  const { store, ready, error, conversations, active } = useDirectChat();
+  const { store, ready, error, notice: historyNotice, conversations, active } = useDirectChat();
   const [settings, setSettings] = useState<DirectAgentSettings | null>(null);
   const [connectionName, setConnectionName] = useState("");
   const [notice, setNotice] = useState("");
@@ -94,7 +94,7 @@ export function HomeScreen() {
         {busy ? <View style={{ flexDirection: "row", alignItems: "center", gap: 10, padding: 8 }}><ActivityIndicator /><Text style={{ flex: 1, color: t.muted }}>{active?.progress || "Готовлю ответ…"}</Text></View> : null}
       </View>}
     />
-    {error || notice ? <View style={{ paddingHorizontal: 16, paddingVertical: 6 }}><Text accessibilityRole="alert" style={{ color: t.err }}>{error || notice}</Text>
+    {error || notice || historyNotice ? <View style={{ paddingHorizontal: 16, paddingVertical: 6 }}><Text accessibilityRole="alert" style={{ color: error || notice ? t.err : t.muted }}>{error || notice || historyNotice}</Text>
       {error && ready ? <Pressable accessibilityRole="button" onPress={() => void store.checkpoint().catch(() => {})} style={{ minHeight: 44, justifyContent: "center" }}><Text style={{ color: t.accent }}>Повторить сохранение истории</Text></Pressable> : null}</View> : null}
     {!canSend && ready ? <Pressable accessibilityRole="button" onPress={openConnections} style={{ paddingHorizontal: 16, minHeight: 44, justifyContent: "center" }}><Text style={{ color: t.accent }}>Добавьте модель в настройках подключений →</Text></Pressable> : null}
     <View style={{ padding: 10, gap: 5, backgroundColor: t.panel, borderTopWidth: 1, borderColor: t.line }}>

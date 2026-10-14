@@ -7,7 +7,8 @@ import type { DirectAgentSettings } from "./settings";
 import { waitForApplicationSession } from "../local-memory/storage";
 
 export type LiveConversation = SavedConversation & { busy: boolean; progress: string; savingDraft?: string; deleting?: boolean };
-export type ChatSnapshot = { ready: boolean; error: string; conversations: LiveConversation[]; activeId: string | null };
+/** `notice` is informational (e.g. unreadable old chats), unlike `error`. */
+export type ChatSnapshot = { ready: boolean; error: string; notice: string; conversations: LiveConversation[]; activeId: string | null };
 const newConversation = (): LiveConversation => {
   const timestamp = new Date().toISOString();
   return { id: Crypto.randomUUID(), title: "Новый диалог", createdAt: timestamp, updatedAt: timestamp,
@@ -19,7 +20,8 @@ const saved = ({ busy, progress, savingDraft, deleting, ...conversation }: LiveC
 /** Owns work independently of the navigation tree. Only an explicit Stop or
  * a profile change aborts the model; focus/blur and overlays never do. */
 export class DirectChatStore {
-  private snapshot: ChatSnapshot = { ready: false, error: "", conversations: [], activeId: null };
+  private snapshot: ChatSnapshot = { ready: false, error: "", notice: "", conversations: [], activeId: null };
+  private skipped = 0;
   private listeners = new Set<() => void>();
   private requests = new Map<string, AbortController>();
   private disposed = false;
@@ -28,7 +30,7 @@ export class DirectChatStore {
   private writes: Promise<void> = Promise.resolve();
   private repository: ConversationRepository;
   constructor(private profile: string, repository?: ConversationRepository, private runner = runDirectAgent) {
-    this.repository = repository || conversationRepository(profile);
+    this.repository = repository || conversationRepository(profile, count => { this.skipped = count; });
   }
   getSnapshot = () => this.snapshot;
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
@@ -73,7 +75,8 @@ export class DirectChatStore {
         rows: c.interrupted ? [...c.rows, { id: Crypto.randomUUID(), role: "info" as const,
           text: "Приложение закрылось до завершения ответа. Можно отправить вопрос повторно." }] : c.rows,
       }));
-      this.publish({ ready: true, error: "", conversations, activeId: conversations[0]?.id || null });
+      this.publish({ ready: true, error: "", conversations, activeId: conversations[0]?.id || null,
+        notice: this.skipped ? `Не удалось прочитать диалогов: ${this.skipped}. Остальные открыты; повреждённые записи сохранены без изменений.` : "" });
       for (const c of conversations.filter(c => records.find(r => r.id === c.id)?.interrupted)) await this.persist(c);
       if (!conversations.length) this.create();
     } catch {
