@@ -1,6 +1,6 @@
 import { StatusBar } from "expo-status-bar";
 import React from "react";
-import { SafeAreaProvider } from "react-native-safe-area-context";
+import { initialWindowMetrics, SafeAreaProvider } from "react-native-safe-area-context";
 
 import { AuthProvider } from "./src/auth/AuthContext";
 import { AppLock } from "./src/security/AppLock";
@@ -9,7 +9,7 @@ import { DirectChatProvider } from "./src/direct-agent/ChatContext";
 
 export default function App() {
   return (
-    <SafeAreaProvider>
+    <SafeAreaProvider initialMetrics={initialWindowMetrics}>
       <AppLock>
         <AuthProvider>
           <DirectChatProvider>

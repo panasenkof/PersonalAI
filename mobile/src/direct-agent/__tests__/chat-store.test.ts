@@ -26,6 +26,19 @@ const turn = () => deferred<{ text: string; sources: string[]; requests: number 
 const started = async (runner: jest.Mock) => { for (let i = 0; i < 20 && !runner.mock.calls.length; i++) await Promise.resolve(); expect(runner).toHaveBeenCalledTimes(1); };
 beforeEach(() => { jest.clearAllMocks(); (waitForApplicationSession as jest.Mock).mockResolvedValue(undefined); });
 
+test("retrying a failed history load clears its error and enables a new conversation and message input", async () => {
+  const { repo } = repository();
+  (repo.load as jest.Mock).mockRejectedValueOnce(new Error("temporary_storage_failure"));
+  const store = new DirectChatStore("guest", repo, jest.fn());
+  await store.initialize(); expect(store.getSnapshot().ready).toBe(false);
+  expect(store.getSnapshot().error).toContain("открыть историю");
+  await store.initialize(); expect(store.getSnapshot()).toMatchObject({ ready: true, error: "" });
+  store.create(); store.setQuestion("Рабочий ввод");
+  expect(store.getSnapshot().conversations).toHaveLength(2);
+  expect(store.getSnapshot().conversations[0].question).toBe("Рабочий ввод");
+  await store.checkpoint(); store.dispose();
+});
+
 test("a detached screen and another conversation never abort work; full history survives a fresh store", async () => {
   const { records, repo } = repository(); const answer = turn();
   const runner = jest.fn((_options: any) => answer.promise); const store = new DirectChatStore("guest", repo, runner);

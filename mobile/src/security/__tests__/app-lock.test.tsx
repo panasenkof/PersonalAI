@@ -1,13 +1,19 @@
 import React from "react";
-import { AppState, Text } from "react-native";
+import { AppState, Pressable, Text } from "react-native";
 import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 import * as LocalAuthentication from "expo-local-authentication";
 import { AppLock } from "../AppLock";
+import { BottomSheet } from "../../components/BottomSheet";
 import { authenticateExistingMemory, authorizeLocalMemorySession, closeLocalMemory, revokeLocalMemorySession } from "../../local-memory/storage";
 jest.mock("expo-local-authentication", () => ({ hasHardwareAsync: jest.fn(), isEnrolledAsync: jest.fn(), authenticateAsync: jest.fn() }));
 jest.mock("../active-profile", () => ({ savedMemoryProfile: async () => "guest" }));
 jest.mock("../../local-memory/storage", () => ({ authenticateExistingMemory: jest.fn(), authorizeLocalMemorySession: jest.fn(), revokeLocalMemorySession: jest.fn(), closeLocalMemory: jest.fn() }));
 jest.mock("../../components/FloatingBrand", () => ({ FloatingBrand: () => null }));
+jest.mock("@expo/vector-icons/Feather", () => () => null);
+jest.mock("react-native-safe-area-context", () => ({
+  useSafeAreaInsets: () => ({ top: 24, bottom: 48, left: 0, right: 0 }),
+  SafeAreaProvider: ({ children }: any) => children,
+}));
 let state = "active";
 const listeners = new Map<string, ((v: any) => void)[]>();
 beforeEach(() => {
@@ -68,4 +74,32 @@ test("cancelled app authentication cannot expose any child or grant memory acces
   const v = render(<AppLock><Text>Закрытые данные</Text></AppLock>);
   await waitFor(() => v.getByText(/Вход не подтверждён/));
   expect(v.queryByText("Закрытые данные")).toBeNull(); expect(authorizeLocalMemorySession).not.toHaveBeenCalled();
+});
+
+test.each(["Мои диалоги", "Новый раздел"])("Android focus loss from opening '%s' does not remove and reopen the app's own modal", async title => {
+  function Screen() {
+    const [open, setOpen] = React.useState(false);
+    return <><Pressable accessibilityLabel="Открыть панель" onPress={() => setOpen(true)}><Text>Открыть</Text></Pressable>
+      <BottomSheet visible={open} title={title} onClose={() => setOpen(false)}><Text>Содержимое панели</Text></BottomSheet></>;
+  }
+  const v = render(<AppLock><Screen /></AppLock>);
+  await waitFor(() => v.getByLabelText("Открыть панель"));
+  fireEvent.press(v.getByLabelText("Открыть панель"));
+  expect(v.getByText("Содержимое панели")).toBeTruthy();
+  // A Dialog takes focus from Android's Activity, without backgrounding it.
+  await act(async () => { listeners.get("blur")?.forEach(cb => cb(undefined)); });
+  expect(v.getByText("Содержимое панели")).toBeTruthy();
+  expect(v.queryByText("PersAI · Защищено")).toBeNull();
+  await change("background");
+  expect(v.queryByText("Содержимое панели", { includeHiddenElements: true })).toBeNull();
+  await change("active");
+  expect(v.getByText("Содержимое панели")).toBeTruthy();
+  fireEvent.press(v.getByLabelText("Закрыть панель " + title));
+  // Without an internal Dialog, the notification shade must still cover data.
+  await act(async () => { listeners.get("blur")?.forEach(cb => cb(undefined)); });
+  expect(v.getByText("PersAI · Защищено")).toBeTruthy();
+  await act(async () => { listeners.get("focus")?.forEach(cb => cb(undefined)); });
+  expect(v.getByLabelText("Открыть панель")).toBeTruthy();
+  expect(LocalAuthentication.authenticateAsync).toHaveBeenCalledTimes(1);
+  expect(closeLocalMemory).not.toHaveBeenCalled();
 });

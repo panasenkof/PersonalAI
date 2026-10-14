@@ -62,14 +62,14 @@ export function LocalMemoryScreen() {
       <Text style={{ color: t.muted, lineHeight: 20 }}>Рецепты, идеи, планы — разложите важное по темам.</Text>
       <View style={{ flexDirection: "row", gap: 10 }}>
         <Pressable accessibilityRole="button" accessibilityLabel="Новая заметка" onPress={() => navigation.navigate("MemoryNote", { collectionId })} style={{ ...button, flex: 1, backgroundColor: t.accent }}><Text style={{ color: "#fff", fontWeight: "700" }}>+ Запись</Text></Pressable>
-        <Pressable accessibilityRole="button" accessibilityLabel="Добавить сведения из файла" onPress={() => navigation.navigate("MemoryImport")} style={{ ...button, backgroundColor: t.soft }}><Feather name="paperclip" size={22} color={t.accent} /></Pressable>
-        <Pressable accessibilityRole="button" accessibilityLabel="Резервные копии" onPress={() => navigation.navigate("MemoryBackup")} style={{ ...button, backgroundColor: t.soft }}><Feather name="download-cloud" size={22} color={t.accent} /></Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel="Добавить сведения из файла" onPress={() => navigation.navigate("MemoryImport")} style={{ ...button, backgroundColor: t.soft, gap: 4 }}><Feather name="paperclip" size={20} color={t.accent} /><Text style={{ color: t.accent, fontSize: 11 }}>Файл</Text></Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel="Резервные копии" onPress={() => navigation.navigate("MemoryBackup")} style={{ ...button, backgroundColor: t.soft, gap: 4 }}><Feather name="download-cloud" size={20} color={t.accent} /><Text style={{ color: t.accent, fontSize: 11 }}>Копии</Text></Pressable>
       </View>
       <TextInput accessibilityLabel="Поиск по заметкам" value={search} onChangeText={setSearch} placeholder="Найти в памяти" placeholderTextColor={t.muted} returnKeyType="search"
         style={{ backgroundColor: t.panel, color: t.text, borderWidth: 1, borderColor: t.line, borderRadius: 16, minHeight: 48, padding: 12 }} />
       <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 8 }}>
         {[{ id: undefined, name: "Все записи" }, ...collections].map(c => <Pressable key={c.id || "all"} accessibilityRole="button" accessibilityLabel={"Раздел " + c.name} accessibilityState={{ selected: c.id === collectionId }} onPress={() => setCollectionId(c.id)} style={{ ...button, backgroundColor: c.id === collectionId ? t.soft : t.panel, borderWidth: 1, borderColor: c.id === collectionId ? t.accent : t.line }}><Text style={{ color: c.id === collectionId ? t.accent : t.text }}>{c.name}</Text></Pressable>)}
-        <Pressable accessibilityRole="button" accessibilityLabel="Новый раздел памяти" onPress={() => setSectionOpen(true)} style={{ ...button, borderWidth: 1, borderColor: t.line }}><Feather name="folder-plus" size={20} color={t.accent} /></Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel="Новый раздел памяти" onPress={() => setSectionOpen(true)} style={{ ...button, flexDirection: "row", gap: 6, borderWidth: 1, borderColor: t.line }}><Feather name="folder-plus" size={20} color={t.accent} /><Text style={{ color: t.accent }}>Раздел</Text></Pressable>
       </ScrollView>
       <View style={{ flexDirection: "row", gap: 12, alignItems: "center" }}>
         <Text style={{ flex: 1, color: t.muted, fontSize: 12 }}>{loading ? "Загружаю…" : `${notes.length}${more ? "+" : ""} записей`}</Text>

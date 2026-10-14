@@ -134,7 +134,9 @@ export async function restoreEncryptedBackup(
           throw new Error("incompatible_backup_schema");
         }
         const version = await db.getFirstAsync<{ user_version: number }>("PRAGMA pia_import.user_version");
-        if (version?.user_version !== LOCAL_MEMORY_SCHEMA_VERSION) {
+        // v2 adds chats only; all six memory tables are unchanged. Old v1
+        // exports with or without chats can still restore into a v2 database.
+        if (!version || ![1, LOCAL_MEMORY_SCHEMA_VERSION].includes(version.user_version)) {
           throw new Error("incompatible_backup_version");
         }
         // Validate the *source* before any destination writes. A forged

@@ -10,7 +10,7 @@ import { nativeInteractionActive, onNativeInteractionEnd } from "./native-intera
 import { savedMemoryProfile } from "./active-profile";
 import { authenticateExistingMemory, authorizeLocalMemorySession, revokeLocalMemorySession, closeLocalMemory } from "../local-memory/storage";
 import { useTheme } from "../theme";
-import { ApplicationVisibility } from "./visibility";
+import { ApplicationVisibility, applicationModalActive } from "./visibility";
 
 /** One application boundary owns the session. Keep work mounted behind an
  * opaque privacy cover; briefly switching apps never destroys chats or jobs.
@@ -87,7 +87,11 @@ export function AppLock({ children }: { children: React.ReactNode }) {
       if (sessionExpired(leftAt.current)) lock();
       setCovered(AppState.currentState !== "active");
     });
-    const blur = AppState.addEventListener("blur", () => setCovered(true));
+    const blur = AppState.addEventListener("blur", () => {
+      // Our Modal is a different Android window, not a departure from the app.
+      // Unmounting it here restores Activity focus, remounts it, and loops forever.
+      if (!applicationModalActive()) setCovered(true);
+    });
     const focus = AppState.addEventListener("focus", () => { if (AppState.currentState === "active" && !nativeInteractionActive()) setCovered(false); });
     return () => { if (timer.current) clearTimeout(timer.current); revokeLocalMemorySession(); alive.current = false; app.remove(); blur.remove(); focus.remove(); native(); requested(); };
   }, [unlock, lock]);
