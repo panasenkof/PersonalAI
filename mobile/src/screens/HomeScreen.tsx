@@ -6,7 +6,7 @@ import { ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Linking, Plat
 import { useProfile } from "../profile/ProfileContext";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useDirectChat } from "../direct-agent/ChatContext";
-import { anonymousLocalAllowed, loadDirectConnections } from "../direct-agent/settings";
+import { PROVIDER_PRESETS, anonymousLocalAllowed, loadDirectConnections } from "../direct-agent/settings";
 import type { DirectAgentSettings } from "../direct-agent/settings";
 import type { ChatRow } from "../direct-agent/conversations";
 import type { RootStackParams } from "../navigation";
@@ -21,7 +21,7 @@ export function HomeScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParams>>();
   const profile = useProfile();
-  const { store, ready, error, conversations, active } = useDirectChat();
+  const { store, ready, error, notice: historyNotice, conversations, active } = useDirectChat();
   const [settings, setSettings] = useState<DirectAgentSettings | null>(null);
   const [connectionName, setConnectionName] = useState("");
   const [notice, setNotice] = useState("");
@@ -43,7 +43,9 @@ export function HomeScreen() {
   const question = active?.question || "";
   const busy = active?.busy || false;
   const action = { minHeight: 44, minWidth: 44, justifyContent: "center" as const, alignItems: "center" as const };
-  const openConnections = () => navigation.navigate("ModelConnections");
+  const openConnections = (presetId?: string) => navigation.navigate("ModelConnections", presetId ? { presetId } : undefined);
+  // First run: the active connection has neither a key nor a keyless local address.
+  const needsSetup = Boolean(settings && !settings.apiKey && !anonymousLocalAllowed(settings));
   return <KeyboardAvoidingView style={{ flex: 1, paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right, backgroundColor: t.bg }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
     <View style={{ backgroundColor: t.panel, borderBottomWidth: 1, borderColor: t.line, paddingHorizontal: 16, paddingTop: 6, paddingBottom: 10, gap: 2 }}>
       <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
@@ -51,7 +53,7 @@ export function HomeScreen() {
         <IconAction icon="clock" label="История" accessibilityLabel="История диалогов" hint="Открыть сохранённые диалоги и найти прошлые сообщения." onPress={() => setHistoryOpen(true)} />
         <IconAction icon="edit" label="Новый чат" accessibilityLabel="Новый диалог" hint="Начать пустой диалог. Предыдущие диалоги останутся в истории." disabled={!ready} onPress={() => store.create()} />
       </View>
-      <Pressable accessibilityRole="button" accessibilityLabel="Выбрать модель и подключение" onPress={openConnections} style={{ minHeight: 44, justifyContent: "center", gap: 4 }}>
+      <Pressable accessibilityRole="button" accessibilityLabel="Выбрать модель и подключение" onPress={() => openConnections()} style={{ minHeight: 44, justifyContent: "center", gap: 4 }}>
         <Text numberOfLines={1} style={{ color: t.muted, fontSize: 13 }}>{connectionName || "Выбрать модель"} · {settings?.model || "Подключение не настроено"} ▾</Text>
         <Text style={{ color: t.muted, fontSize: 11 }}>Интернет {settings?.allowWeb ? "включён" : "выключен"} · Диалоги сохраняются на телефоне</Text>
       </Pressable>
@@ -62,7 +64,22 @@ export function HomeScreen() {
       keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag"
       onContentSizeChange={() => list.current?.scrollToEnd({ animated: true })}
       contentContainerStyle={{ padding: 16, gap: 12, flexGrow: 1 }}
-      ListEmptyComponent={ready ? <View style={{ flex: 1, justifyContent: "center", alignItems: "center", gap: 12, paddingVertical: 12 }}>
+      ListEmptyComponent={ready && needsSetup ? <View style={{ flex: 1, justifyContent: "center", gap: 14, paddingVertical: 12 }}>
+        <View style={{ alignItems: "center", gap: 10 }}><FloatingBrand size={104} />
+          <Text style={{ color: t.text, fontSize: 26, fontWeight: "800", textAlign: "center" }}>Подключите модель</Text>
+          <Text style={{ color: t.muted, lineHeight: 21, textAlign: "center", maxWidth: 340 }}>PersAI работает с моделью, которую выбираете вы. Память и диалоги остаются на телефоне.</Text></View>
+        <View style={{ backgroundColor: t.panel, borderWidth: 1, borderColor: t.line, borderRadius: 18, padding: 16, gap: 6 }}>
+          {["1. Выберите сервис", "2. Вставьте ключ API", "3. Нажмите «Проверить связь» и сохраните", "4. Задайте первый вопрос"].map(step =>
+            <Text key={step} style={{ color: t.text, lineHeight: 22 }}>{step}</Text>)}
+        </View>
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>
+          {PROVIDER_PRESETS.slice(0, 4).map(p => <Pressable key={p.id} accessibilityRole="button" accessibilityLabel={"Начать с " + p.name}
+            style={{ flexBasis: "45%", flexGrow: 1, minHeight: 56, justifyContent: "center", backgroundColor: t.panel, borderWidth: 1, borderColor: t.accent, borderRadius: 16, padding: 12 }}
+            onPress={() => openConnections(p.id)}><Text style={{ color: t.accent, fontWeight: "700" }}>{p.name}</Text></Pressable>)}
+        </View>
+        <Pressable accessibilityRole="button" onPress={() => openConnections()} style={{ minHeight: 44, justifyContent: "center", alignItems: "center" }}>
+          <Text style={{ color: t.accent }}>Другие варианты, включая OpenAI и Anthropic →</Text></Pressable>
+      </View> : ready ? <View style={{ flex: 1, justifyContent: "center", alignItems: "center", gap: 12, paddingVertical: 12 }}>
         <FloatingBrand size={124} />
         <Text style={{ color: t.text, fontSize: 28, fontWeight: "800", textAlign: "center" }}>Чем помочь сегодня?</Text>
         <Text style={{ color: t.muted, lineHeight: 21, textAlign: "center", maxWidth: 340 }}>Обсуждайте идеи, возвращайтесь к своим знаниям и сохраняйте важное.</Text>
@@ -91,12 +108,15 @@ export function HomeScreen() {
           <View style={{ flexDirection: "row", gap: 20 }}><Pressable accessibilityRole="button" disabled={Boolean(active.savingDraft)} onPress={() => void store.approve(d)} style={action}><Text style={{ color: t.accent }}>{active.savingDraft === d.id ? "Сохранение…" : "Сохранить"}</Text></Pressable>
             <Pressable accessibilityRole="button" disabled={Boolean(active.savingDraft)} onPress={() => store.dismiss(d)} style={action}><Text style={{ color: t.muted }}>Отклонить</Text></Pressable></View>
         </View>)}
+        {busy && active?.streamText ? <View accessibilityLiveRegion="polite" style={{ backgroundColor: t.panel, borderWidth: 1, borderColor: t.line, borderRadius: 20, padding: 15 }}>
+          <Text selectable style={{ color: t.text, lineHeight: 23 }}>{active.streamText}</Text>
+        </View> : null}
         {busy ? <View style={{ flexDirection: "row", alignItems: "center", gap: 10, padding: 8 }}><ActivityIndicator /><Text style={{ flex: 1, color: t.muted }}>{active?.progress || "Готовлю ответ…"}</Text></View> : null}
       </View>}
     />
-    {error || notice ? <View style={{ paddingHorizontal: 16, paddingVertical: 6 }}><Text accessibilityRole="alert" style={{ color: t.err }}>{error || notice}</Text>
+    {error || notice || historyNotice ? <View style={{ paddingHorizontal: 16, paddingVertical: 6 }}><Text accessibilityRole="alert" style={{ color: error || notice ? t.err : t.muted }}>{error || notice || historyNotice}</Text>
       {error && ready ? <Pressable accessibilityRole="button" onPress={() => void store.checkpoint().catch(() => {})} style={{ minHeight: 44, justifyContent: "center" }}><Text style={{ color: t.accent }}>Повторить сохранение истории</Text></Pressable> : null}</View> : null}
-    {!canSend && ready ? <Pressable accessibilityRole="button" onPress={openConnections} style={{ paddingHorizontal: 16, minHeight: 44, justifyContent: "center" }}><Text style={{ color: t.accent }}>Добавьте модель в настройках подключений →</Text></Pressable> : null}
+    {!canSend && ready && !(needsSetup && !active?.rows.length) ? <Pressable accessibilityRole="button" onPress={() => openConnections()} style={{ paddingHorizontal: 16, minHeight: 44, justifyContent: "center" }}><Text style={{ color: t.accent }}>Добавьте модель в настройках подключений →</Text></Pressable> : null}
     <View style={{ padding: 10, gap: 5, backgroundColor: t.panel, borderTopWidth: 1, borderColor: t.line }}>
       <TextInput accessibilityLabel="Сообщение ассистенту" multiline value={question} onChangeText={value => store.setQuestion(value)}
         placeholder="Спросить у ИИ…" placeholderTextColor={t.muted} editable={ready}

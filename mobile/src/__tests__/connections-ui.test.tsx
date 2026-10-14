@@ -4,6 +4,7 @@ import { DirectAgentSettingsScreen } from "../screens/DirectAgentSettingsScreen"
 import { loadDirectConnections, newDirectConnection, saveDirectConnections } from "../direct-agent/settings";
 jest.mock("@react-navigation/native", () => ({
   useNavigation: () => ({ goBack: mockBack }),
+  useRoute: () => ({ params: mockParams.current }),
   useFocusEffect: (cb: () => void | (() => void)) => require("react").useEffect(cb, [cb]),
 }));
 jest.mock("../profile/ProfileContext", () => ({ useProfile: () => "guest" }));
@@ -11,8 +12,10 @@ jest.mock("@react-navigation/elements", () => ({ useHeaderHeight: () => 64 }));
 jest.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ top: 24, bottom: 24, left: 0, right: 0 }) }));
 jest.mock("../direct-agent/settings", () => ({ ...jest.requireActual("../direct-agent/settings"), loadDirectConnections: jest.fn(), saveDirectConnections: jest.fn() }));
 const mockBack = jest.fn();
+const mockParams: { current: { presetId?: string } | undefined } = { current: undefined };
 beforeEach(() => {
   jest.clearAllMocks();
+  mockParams.current = undefined;
   (loadDirectConnections as jest.Mock).mockResolvedValue({ activeId: "one", connections: [
     { ...newDirectConnection("openai", "one"), name: "OpenAI", apiKey: "key-a" },
     { ...newDirectConnection("anthropic", "two"), name: "Anthropic", baseUrl: "https://my.example/v1", apiKey: "key-b", model: "my-claude" },
@@ -43,4 +46,24 @@ test("editing an endpoint clears only that connection's key, and a failed save k
   (saveDirectConnections as jest.Mock).mockRejectedValueOnce(new Error("Не удалось сохранить"));
   fireEvent.press(v.getByText("Сохранить настройки"));
   await waitFor(() => v.getByText("Не удалось сохранить")); expect(mockBack).not.toHaveBeenCalled();
+});
+test("a ready-made provider can be added and its connection checked before saving", async () => {
+  const fetchMock = jest.spyOn(globalThis, "fetch" as any).mockResolvedValue({ ok: true, status: 200,
+    json: async () => ({ choices: [{ message: { role: "assistant", content: "Готово" } }] }) } as any);
+  const v = render(<DirectAgentSettingsScreen />); await waitFor(() => v.getByLabelText("Адрес API LLM"));
+  fireEvent.press(v.getByLabelText("Добавить DeepSeek"));
+  expect(v.getByLabelText("Адрес API LLM").props.value).toBe("https://api.deepseek.com");
+  expect(v.getByText(/platform.deepseek.com/)).toBeTruthy();
+  fireEvent.changeText(v.getByLabelText("API-ключ LLM"), "ds-key");
+  fireEvent.press(v.getByLabelText("Проверить связь"));
+  await waitFor(() => v.getByText(/Связь есть/));
+  expect(fetchMock.mock.calls[0][0]).toBe("https://api.deepseek.com/chat/completions");
+  fetchMock.mockRestore();
+});
+test("first-run setup opens straight on the chosen provider", async () => {
+  mockParams.current = { presetId: "openrouter" };
+  const v = render(<DirectAgentSettingsScreen />); await waitFor(() => v.getByLabelText("Адрес API LLM"));
+  expect(v.getByLabelText("Адрес API LLM").props.value).toBe("https://openrouter.ai/api/v1");
+  expect(v.getByLabelText("API-ключ LLM").props.value).toBe("");
+  expect(v.getByLabelText("Подключение OpenRouter")).toBeTruthy();
 });

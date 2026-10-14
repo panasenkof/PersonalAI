@@ -5,7 +5,8 @@ import * as LocalAuthentication from "expo-local-authentication";
 import { AppLock } from "../AppLock";
 import { BottomSheet } from "../../components/BottomSheet";
 import { authenticateExistingMemory, authorizeLocalMemorySession, closeLocalMemory, revokeLocalMemorySession } from "../../local-memory/storage";
-jest.mock("expo-local-authentication", () => ({ hasHardwareAsync: jest.fn(), isEnrolledAsync: jest.fn(), authenticateAsync: jest.fn() }));
+jest.mock("expo-local-authentication", () => ({ getEnrolledLevelAsync: jest.fn(), authenticateAsync: jest.fn(),
+  SecurityLevel: { NONE: 0, SECRET: 1, BIOMETRIC_WEAK: 2, BIOMETRIC_STRONG: 3 } }));
 jest.mock("../active-profile", () => ({ savedMemoryProfile: async () => "guest" }));
 jest.mock("../../local-memory/storage", () => ({ authenticateExistingMemory: jest.fn(), authorizeLocalMemorySession: jest.fn(), revokeLocalMemorySession: jest.fn(), closeLocalMemory: jest.fn() }));
 jest.mock("../../components/FloatingBrand", () => ({ FloatingBrand: () => null }));
@@ -22,8 +23,7 @@ beforeEach(() => {
   jest.spyOn(AppState, "addEventListener").mockImplementation((event: any, cb: any) => {
     listeners.set(event, [...(listeners.get(event) || []), cb]); return { remove: jest.fn() };
   });
-  (LocalAuthentication.hasHardwareAsync as jest.Mock).mockResolvedValue(true);
-  (LocalAuthentication.isEnrolledAsync as jest.Mock).mockResolvedValue(true);
+  (LocalAuthentication.getEnrolledLevelAsync as jest.Mock).mockResolvedValue(3);
   (LocalAuthentication.authenticateAsync as jest.Mock).mockResolvedValue({ success: true });
   (authenticateExistingMemory as jest.Mock).mockResolvedValue(false);
   (closeLocalMemory as jest.Mock).mockResolvedValue(undefined);
@@ -102,4 +102,20 @@ test.each(["Мои диалоги", "Новый раздел"])("Android focus l
   expect(v.getByLabelText("Открыть панель")).toBeTruthy();
   expect(LocalAuthentication.authenticateAsync).toHaveBeenCalledTimes(1);
   expect(closeLocalMemory).not.toHaveBeenCalled();
+});
+
+test("a phone protected only by a PIN unlocks through the device passcode", async () => {
+  (LocalAuthentication.getEnrolledLevelAsync as jest.Mock).mockResolvedValue(1);
+  const v = render(<AppLock><Text>Память по PIN</Text></AppLock>);
+  await waitFor(() => v.getByText("Память по PIN"));
+  expect(LocalAuthentication.authenticateAsync).toHaveBeenCalledWith(expect.objectContaining({ disableDeviceFallback: false }));
+  expect(authorizeLocalMemorySession).toHaveBeenCalledTimes(1);
+});
+test("a phone without any screen lock is told to enable one and stays locked", async () => {
+  (LocalAuthentication.getEnrolledLevelAsync as jest.Mock).mockResolvedValue(0);
+  const v = render(<AppLock><Text>Закрытая память</Text></AppLock>);
+  await waitFor(() => v.getByText(/Включите блокировку экрана/));
+  expect(v.queryByText("Закрытая память")).toBeNull();
+  expect(LocalAuthentication.authenticateAsync).not.toHaveBeenCalled();
+  expect(authorizeLocalMemorySession).not.toHaveBeenCalled();
 });

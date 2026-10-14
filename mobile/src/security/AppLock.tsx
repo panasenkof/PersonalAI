@@ -42,13 +42,16 @@ export function AppLock({ children }: { children: React.ReactNode }) {
     const requestEpoch = epoch.current;
     try {
       try { await closing.current; } catch { closing.current = closeLocalMemory(); await closing.current; }
-      if (!(await LocalAuthentication.hasHardwareAsync()) || !(await LocalAuthentication.isEnrolledAsync())) {
-        setNotice("Настройте отпечаток пальца или распознавание лица в настройках телефона, затем повторите вход."); return;
+      // Any screen lock the phone offers is accepted: a PIN, pattern or password
+      // as well as fingerprint or face. Only a phone with no screen lock at all
+      // is refused, because then nothing protects the encrypted memory key.
+      if (await LocalAuthentication.getEnrolledLevelAsync() === LocalAuthentication.SecurityLevel.NONE) {
+        setNotice("Включите блокировку экрана телефона — PIN-код, пароль, графический ключ или биометрию, затем повторите вход."); return;
       }
       const migratedUnlock = await authenticateExistingMemory(await savedMemoryProfile());
       const result = migratedUnlock ? { success: true } : await withBiometricPrompt(() => LocalAuthentication.authenticateAsync({
-        promptMessage: "Войти в PersAI", cancelLabel: "Отмена", disableDeviceFallback: true,
-        biometricsSecurityLevel: "strong", fallbackLabel: "",
+        promptMessage: "Войти в PersAI", cancelLabel: "Отмена", disableDeviceFallback: false,
+        biometricsSecurityLevel: "weak", fallbackLabel: "Ввести код телефона",
       }));
       if (!alive.current || requestEpoch !== epoch.current) return;
       if (result.success && AppState.currentState === "active") {
@@ -99,13 +102,13 @@ export function AppLock({ children }: { children: React.ReactNode }) {
     <View style={{ flex: 1, backgroundColor: t.bg, justifyContent: "center", alignItems: "center", padding: 28, gap: 18 }}>
       <FloatingBrand size={144} motion={false} />
       <Text style={{ color: t.text, fontSize: 30, fontWeight: "800" }}>PersAI</Text>
-      <Text style={{ color: t.muted, textAlign: "center", lineHeight: 22 }}>Ваш личный помощник. Вход защищён биометрией телефона.</Text>
-      {busy ? <ActivityIndicator accessibilityLabel="Проверка биометрии" /> : <Pressable accessibilityRole="button" accessibilityLabel="Разблокировать приложение"
+      <Text style={{ color: t.muted, textAlign: "center", lineHeight: 22 }}>Ваш личный помощник. Вход защищён блокировкой экрана телефона.</Text>
+      {busy ? <ActivityIndicator accessibilityLabel="Проверка входа" /> : <Pressable accessibilityRole="button" accessibilityLabel="Разблокировать приложение"
         style={{ minHeight: 52, minWidth: 230, alignItems: "center", justifyContent: "center", backgroundColor: t.accent, borderRadius: 18 }} onPress={() => void unlock()}>
         <Text style={{ color: "#fff", fontWeight: "700" }}>Разблокировать</Text>
       </Pressable>}
       {notice ? <Text accessibilityRole="alert" style={{ color: t.err, textAlign: "center" }}>{notice}</Text> : null}
-      <Pressable accessibilityRole="button" onPress={() => void Linking.openSettings().catch(() => setNotice("Откройте настройки телефона и настройте биометрию."))} style={{ minHeight: 44, justifyContent: "center" }}>
+      <Pressable accessibilityRole="button" onPress={() => void Linking.openSettings().catch(() => setNotice("Откройте настройки телефона и включите блокировку экрана."))} style={{ minHeight: 44, justifyContent: "center" }}>
         <Text style={{ color: t.accent }}>Настройки телефона</Text>
       </Pressable>
     </View>

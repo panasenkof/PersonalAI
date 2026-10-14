@@ -26,3 +26,27 @@ test("actual SQL preserves sources and proposals across reopen, keeps profiles s
   await reopened.remove("first"); expect((await reopened.load()).map(c => c.id)).toEqual(["second"]);
   for (const db of databases.values()) db.close();
 });
+
+test("one damaged chat does not hide the others and intact messages are kept", async () => {
+  const db = new DatabaseSync(":memory:"); db.exec(SCHEMA_SQL);
+  (withLocalMemoryDatabase as jest.Mock).mockImplementation(async (_profile, work) => work({
+    getAllAsync: async (sql: string, params: unknown[] = []) => db.prepare(sql).all(...params),
+    runAsync: async (sql: string, params: unknown[] = []) => db.prepare(sql).run(...params),
+  }));
+  const insert = db.prepare("INSERT INTO direct_conversations(id,title,snapshot_json,created_at,updated_at) VALUES (?,?,?,?,?)");
+  insert.run("broken", "x", "{not json", "2026-10-14", "2026-10-14T12:00:00Z");
+  insert.run("partly", "Частично", JSON.stringify({ id: "partly", title: "Частично", createdAt: "2026-10-14", updatedAt: "2026-10-14T11:00:00Z",
+    rows: [{ id: "ok", role: "user", text: "Целое сообщение", sources: ["https://example.org", "http://bad.test"] }, { id: 5, role: "user" }, null],
+    drafts: [{ id: "d", title: "Заметка", body: "Текст" }, { id: "bad" }], question: 3 }), "2026-10-14", "2026-10-14T11:00:00Z");
+  insert.run("fine", "Целый", JSON.stringify({ id: "fine", title: "Целый", createdAt: "2026-10-13", updatedAt: "2026-10-13T10:00:00Z", rows: [], drafts: [], question: "" }), "2026-10-13", "2026-10-13T10:00:00Z");
+  const skipped = jest.fn();
+  const loaded = await conversationRepository("guest", skipped).load();
+  expect(loaded.map(c => c.id)).toEqual(["partly", "fine"]);
+  expect(loaded[0].rows).toEqual([{ id: "ok", role: "user", text: "Целое сообщение", sources: ["https://example.org"] }]);
+  expect(loaded[0].drafts).toEqual([{ id: "d", title: "Заметка", body: "Текст" }]);
+  expect(loaded[0].question).toBe("");
+  expect(skipped).toHaveBeenCalledWith(1);
+  // The unreadable record is left in place for a future repair, never deleted.
+  expect(db.prepare("SELECT count(*) AS n FROM direct_conversations").get().n).toBe(3);
+  db.close();
+});

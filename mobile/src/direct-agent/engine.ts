@@ -2,6 +2,9 @@ import type { DirectAgentSettings } from "./settings";
 import { anonymousLocalAllowed, validateBaseUrl, validateModel } from "./settings";
 import { runCompatibleAgent } from "./compatible";
 import { prepareDirectContext } from "./context";
+import { requestModel } from "./request";
+import type { XhrFactory } from "./stream";
+import { MAX_DIRECT_REPLY_TOKENS, MAX_REASONING_REPLY_TOKENS, TRUNCATED_NOTE, isReasoningModel } from "./limits";
 import type { MemorySnippet, NoteProposal } from "./memory";
 
 export type AgentTurn = { role: "user" | "assistant"; content: string };
@@ -15,6 +18,10 @@ export type DirectAgentOptions = {
   propose: (note: NoteProposal) => void;
   status?: (text: string) => void;
   transport?: typeof fetch;
+  /** Receives the growing answer text while the model streams it. */
+  onText?: (text: string) => void;
+  /** Test hook: a fake XMLHttpRequest for the streaming path. */
+  streamXhr?: XhrFactory;
 };
 
 type OutputItem = {
@@ -27,12 +34,13 @@ type OutputItem = {
 };
 type Response = {
   status?: string;
+  incomplete_details?: { reason?: string };
   output?: OutputItem[];
   output_text?: string;
   error?: { message?: string };
 };
 export const MAX_DIRECT_REQUESTS = 4;
-export const MAX_DIRECT_REPLY_TOKENS = 1200;
+export { MAX_DIRECT_REPLY_TOKENS, MAX_REASONING_REPLY_TOKENS, TRUNCATED_NOTE, isReasoningModel };
 const SYSTEM_PROMPT =
   "Ты персональный помощник PersAI, работающий на телефоне пользователя. " +
   "Для вопросов о предпочтениях и заметках используй search_local_notes, если он доступен. " +
@@ -116,7 +124,6 @@ export async function runDirectAgent(options: DirectAgentOptions): Promise<Direc
   if (settings.provider !== "openai") return runCompatibleAgent(options);
   const prompt = options.prompt.trim().slice(0, 4000);
   if (!prompt) throw new Error("Введите вопрос");
-  const transport = options.transport || fetch;
   const web = await prepareDirectContext(options);
   const input: unknown[] = [
     { role: "system", content: SYSTEM_PROMPT + (web.context ? "\n" + web.context : "") },
@@ -126,35 +133,35 @@ export async function runDirectAgent(options: DirectAgentOptions): Promise<Direc
   const tools: object[] = [...LOCAL_TOOLS];
   if (web.builtinWeb) tools.push({ type: "web_search", search_context_size: "low", external_web_access: true });
   const collected = new Set<string>(web.sources);
+  const reasoning = isReasoningModel(settings.model);
 
   for (let attempt = 1; attempt <= MAX_DIRECT_REQUESTS; attempt++) {
     if (signal?.aborted) throw new Error("Запрос остановлен");
     status?.("Запрос к LLM (" + attempt + "/" + MAX_DIRECT_REQUESTS + ")");
-    const response = await transport(validateBaseUrl(settings.baseUrl || "https://api.openai.com/v1", "openai") + "/responses", {
-      method: "POST",
-      headers: {
-        Authorization: "Bearer " + settings.apiKey,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
+    const data = await requestModel(options, validateBaseUrl(settings.baseUrl || "https://api.openai.com/v1", "openai") + "/responses",
+      { Authorization: "Bearer " + settings.apiKey, "Content-Type": "application/json" },
+      {
         model: validateModel(settings.model), input, tools, store: false,
-        include: ["reasoning.encrypted_content", "web_search_call.action.sources"],
-        max_output_tokens: MAX_DIRECT_REPLY_TOKENS,
-      }),
-      signal,
-    });
-    if (!response.ok) {
-      // Never include third-party error response bodies: they may echo API keys.
-      throw new Error("Провайдер LLM вернул HTTP " + response.status + ". Проверьте API-ключ, модель и баланс.");
-    }
-    const data = await response.json() as Response;
+        include: reasoning ? ["reasoning.encrypted_content", "web_search_call.action.sources"] : ["web_search_call.action.sources"],
+        max_output_tokens: reasoning ? MAX_REASONING_REPLY_TOKENS : MAX_DIRECT_REPLY_TOKENS,
+      }, "responses",
+      status => new Error("Провайдер LLM вернул HTTP " + status + ". Проверьте API-ключ, модель и баланс.")) as Response;
+    if (!data || typeof data !== "object") throw new Error("Неожиданный ответ модели");
     if (data.error || data.status === "failed") throw new Error("Модель не смогла обработать запрос");
-    if (data.status === "incomplete") throw new Error("Модель достигла ограничения ответа. Уточните вопрос.");
     if (!Array.isArray(data.output)) throw new Error("Неожиданный ответ модели");
+    if (data.status === "incomplete") {
+      // Keep whatever the model managed to write instead of losing the answer.
+      const partial = extractText(data);
+      if (partial) return { text: partial + TRUNCATED_NOTE, sources: [...new Set([...collected, ...collectSources(data.output)])].slice(0, 8), requests: attempt };
+      throw new Error(data.incomplete_details?.reason === "max_output_tokens"
+        ? "Модель израсходовала лимит ответа, не успев ответить. Уточните или сократите вопрос."
+        : "Модель не закончила ответ. Повторите запрос.");
+    }
     for (const url of collectSources(data.output)) collected.add(url);
     // With store:false the entire output (including encrypted reasoning state)
     // must be replayed to continue the tool loop.
-    input.push(...data.output);
+    // Reasoning items without encrypted content cannot be replayed.
+    input.push(...(reasoning ? data.output : data.output.filter(item => item.type !== "reasoning")));
     const calls = data.output.filter(i => i.type === "function_call");
     if (!calls.length) {
       const text = extractText(data);

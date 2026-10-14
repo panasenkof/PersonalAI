@@ -208,6 +208,7 @@ export async function saveDirectConnections(profile: string, value: DirectConnec
   // publish its manifest atomically so an interrupted save preserves the old set.
   const validated = value.connections.map(item => {
     if (!validId(item.id) || !item.name.trim()) throw new Error("Введите название подключения");
+    if (/[<>]/.test(item.model)) throw new Error("В названии модели «" + item.name.trim() + "» замените часть в угловых скобках на свои данные");
     const provider = validateProvider(item.provider);
     const baseUrl = validateBaseUrl(item.baseUrl, provider);
     const searchProvider = item.searchProvider || "public";
@@ -259,3 +260,30 @@ export async function loadDirectSettings(profile: string): Promise<DirectAgentSe
   if (!active) throw new Error("Выберите подключение в настройках");
   return active;
 }
+
+export type ProviderPreset = {
+  id: string; name: string; provider: DirectProvider; baseUrl: string; model: string;
+  /** Shown under the form: where to get a key and what to replace. */
+  hint: string;
+};
+/** Ready-made connections. Users still paste their own key; model names can be edited. */
+export const PROVIDER_PRESETS: ProviderPreset[] = [
+  { id: "yandex", name: "YandexGPT", provider: "openai-compatible", baseUrl: "https://ai.api.cloud.yandex.net/v1",
+    model: "gpt://<ID-каталога>/yandexgpt/latest",
+    hint: "Ключ API и ID каталога — в Yandex AI Studio. Замените <ID-каталога> в названии модели на свой." },
+  { id: "deepseek", name: "DeepSeek", provider: "openai-compatible", baseUrl: "https://api.deepseek.com", model: "deepseek-flash",
+    hint: "Ключ — в личном кабинете platform.deepseek.com." },
+  { id: "openrouter", name: "OpenRouter", provider: "openai-compatible", baseUrl: "https://openrouter.ai/api/v1", model: "openai/gpt-4.1-mini",
+    hint: "Один ключ openrouter.ai даёт доступ к моделям разных компаний; название модели — как в каталоге OpenRouter." },
+  { id: "local", name: "Локальная модель (Ollama, LM Studio)", provider: "openai-compatible", baseUrl: "http://192.168.1.10:11434/v1", model: "qwen2.5:7b",
+    hint: "Укажите адрес компьютера в вашей сети. Ключ не нужен; модель работает на компьютере, а не на телефоне." },
+  { id: "openai", name: "OpenAI", provider: "openai", baseUrl: "https://api.openai.com/v1", model: DEFAULT_DIRECT_MODEL,
+    hint: "Ключ — на platform.openai.com. Из России сервис может быть недоступен." },
+  { id: "anthropic", name: "Anthropic (Claude)", provider: "anthropic", baseUrl: "https://api.anthropic.com/v1", model: "claude-sonnet-4-5",
+    hint: "Ключ — в console.anthropic.com. Из России сервис может быть недоступен." },
+];
+export function connectionFromPreset(preset: ProviderPreset, id = Crypto.randomUUID()): DirectConnection {
+  return { ...newDirectConnection(preset.provider, id), name: preset.name, baseUrl: preset.baseUrl, model: preset.model };
+}
+/** A placeholder left in a preset model name, e.g. "<ID-каталога>". */
+export const hasModelPlaceholder = (model: string) => /[<>]/.test(model);

@@ -38,7 +38,9 @@ test("serverless requests always provide memory tools and keep web off until ena
   expect(request.mock.calls[0][0]).toBe("https://api.openai.com/v1/responses");
   const body = JSON.parse(request.mock.calls[0][1].body);
   expect(body.store).toBe(false);
-  expect(body.include).toContain("reasoning.encrypted_content");
+  // gpt-4.1-mini is not a reasoning model: OpenAI rejects reasoning.encrypted_content for it.
+  expect(body.include).not.toContain("reasoning.encrypted_content");
+  expect(body.max_output_tokens).toBe(4000);
   expect(body.tools.map((tool: any) => tool.name)).toEqual(["search_local_notes", "draft_local_note"]);
   expect(request.mock.calls[0][1].headers.Authorization).toBe("Bearer test-key-only");
   expect(JSON.stringify(body)).not.toContain("test-key-only");
@@ -147,7 +149,7 @@ test("OpenAI-compatible API uses Chat Completions, not proprietary Responses too
   expect(result.text).toBe("Привет");
   expect(response.mock.calls[0][0]).toBe("https://llm.example.net/v1/chat/completions");
   const body = JSON.parse(response.mock.calls[0][1].body);
-  expect(body).toMatchObject({ model: "vendor/my-model", max_tokens: 1200 });
+  expect(body).toMatchObject({ model: "vendor/my-model", max_tokens: 4000 });
   expect(body).not.toHaveProperty("include");
   expect(body).not.toHaveProperty("store");
   expect(body.tools).toContainEqual(expect.objectContaining({ type: "function" }));
@@ -256,4 +258,64 @@ test("public HTTPS model server never silently sends an anonymous request", asyn
   await expect(start({ provider: "openai-compatible", baseUrl: "https://public.example/v1",
     apiKey: "" }, response)).rejects.toThrow("API-ключ");
   expect(response).not.toHaveBeenCalled();
+});
+
+test("reasoning models keep encrypted reasoning state and a larger budget", async () => {
+  const request = jest.fn().mockResolvedValue(final());
+  await start({ model: "gpt-5-mini" }, request);
+  const body = JSON.parse(request.mock.calls[0][1].body);
+  expect(body.include).toContain("reasoning.encrypted_content");
+  expect(body.max_output_tokens).toBe(8000);
+});
+
+test("an answer cut by the output limit is kept with a note instead of an error", async () => {
+  const request = jest.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({
+    status: "incomplete", incomplete_details: { reason: "max_output_tokens" },
+    output: [{ type: "message", content: [{ type: "output_text", text: "Начало длинного ответа" }] }],
+  }) });
+  const result = await start({}, request);
+  expect(result.text).toContain("Начало длинного ответа");
+  expect(result.text).toContain("обрезан");
+});
+
+test("an incomplete reply without any text explains the limit", async () => {
+  const request = jest.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({
+    status: "incomplete", incomplete_details: { reason: "max_output_tokens" }, output: [{ type: "reasoning", summary: [] }],
+  }) });
+  await expect(start({ model: "o4-mini" }, request)).rejects.toThrow("лимит ответа");
+});
+
+test("non-reasoning models never replay reasoning items", async () => {
+  const request = jest.fn()
+    .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ status: "completed", output: [
+      { type: "reasoning", summary: [] },
+      { type: "function_call", name: "search_local_notes", call_id: "c1", arguments: JSON.stringify({ query: "кофе" }) },
+    ] }) })
+    .mockResolvedValueOnce(final());
+  await start({}, request);
+  const second = JSON.parse(request.mock.calls[1][1].body);
+  expect(second.input.some((item: any) => item.type === "reasoning")).toBe(false);
+  expect(second.input.some((item: any) => item.type === "function_call_output")).toBe(true);
+});
+
+test("with a live text callback the answer streams through the same tool loop", async () => {
+  const texts: string[] = [];
+  const replies = [
+    ['data: {"type":"response.completed","response":{"status":"completed","output":[{"type":"function_call","name":"search_local_notes","call_id":"s1","arguments":"{\\"query\\":\\"кофе\\"}"}]}}\n\n'],
+    ['data: {"type":"response.output_text.delta","delta":"Вы любите "}\n\n', 'data: {"type":"response.output_text.delta","delta":"капучино"}\n\n',
+     'data: {"type":"response.completed","response":{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"Вы любите капучино"}]}]}}\n\n'],
+  ];
+  const bodies: any[] = []; let call = 0;
+  const streamXhr = () => {
+    const chunks = replies[call++]; const x: any = { status: 0, responseText: "", open: jest.fn(), setRequestHeader: jest.fn(), abort: jest.fn(),
+      send(body: string) { bodies.push(JSON.parse(body)); let i = 0; const step = () => { x.status = 200;
+        if (i < chunks.length) { x.responseText += chunks[i++]; x.onprogress?.(); setTimeout(step, 0); } else x.onload?.(); }; setTimeout(step, 0); } };
+    return x;
+  };
+  const lookup = jest.fn().mockResolvedValue([{ id: "n", title: "Кофе", body: "Капучино" }]);
+  const result = await start({}, jest.fn(), { onText: (t: string) => texts.push(t), streamXhr, lookup });
+  expect(result.text).toBe("Вы любите капучино");
+  expect(texts).toEqual(["Вы любите ", "Вы любите капучино"]);
+  expect(bodies.every(b => b.stream === true)).toBe(true);
+  expect(bodies[1].input.some((item: any) => item.type === "function_call_output")).toBe(true);
 });
