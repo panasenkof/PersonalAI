@@ -1,23 +1,31 @@
 import * as FileSystem from "expo-file-system/legacy";
-import * as Thumbnails from "expo-video-thumbnails";
+import { createVideoPlayer } from "expo-video";
+import { ImageManipulator } from "expo-image-manipulator";
 import { extractMedia } from "../extract";
 import { defaultDirectPreferences } from "../../direct-agent/settings";
 jest.mock("expo-file-system/legacy", () => ({ getInfoAsync: jest.fn(), readAsStringAsync: jest.fn(), deleteAsync: jest.fn(), EncodingType: { Base64: "base64" } }));
-jest.mock("expo-video-thumbnails", () => ({ getThumbnailAsync: jest.fn() }));
 jest.mock("expo-video", () => ({ createVideoPlayer: jest.fn() }));
+jest.mock("expo-image-manipulator", () => ({ ImageManipulator: { manipulate: jest.fn() }, SaveFormat: { JPEG: "jpeg" } }));
+const mockPlayer = { muted: false, release: jest.fn(), generateThumbnailsAsync: jest.fn(), replaceAsync: jest.fn(),
+  listeners: {} as Record<string, (e: any) => void>,
+  addListener(name: string, fn: (e: any) => void) { this.listeners[name] = fn; return { remove() {} }; } };
 const settings = { ...defaultDirectPreferences, apiKey: "secret", webSearchKey: "" };
 beforeEach(() => {
   jest.clearAllMocks();
   (FileSystem.getInfoAsync as jest.Mock).mockResolvedValue({ exists: true, isDirectory: false, size: 1000 });
   (FileSystem.readAsStringAsync as jest.Mock).mockResolvedValue("dGVzdA==");
-  (Thumbnails.getThumbnailAsync as jest.Mock).mockImplementation(async (_uri, { time }) => ({ uri: "file:///cache/frame-" + time + ".jpg" }));
+  (createVideoPlayer as jest.Mock).mockReturnValue(mockPlayer);
+  mockPlayer.replaceAsync.mockImplementation(async () => { mockPlayer.listeners.sourceLoad({ duration: 100 }); });
+  mockPlayer.generateThumbnailsAsync.mockImplementation(async (times: number[]) => times.map(t => ({ requestedTime: t })));
+  (ImageManipulator.manipulate as jest.Mock).mockImplementation((thumb: { requestedTime: number }) => ({
+    renderAsync: async () => ({ saveAsync: async () => ({ uri: "file:///cache/frame-" + thumb.requestedTime + ".jpg", base64: "ZnJhbWU=" }) }) }));
 });
 test("unapproved images, audio and video never reach a provider", async () => {
   const transport = jest.fn();
   for (const [name, mimeType] of [["image.png", "image/png"], ["audio.mp3", "audio/mpeg"], ["video.mp4", "video/mp4"]]) {
     await expect(extractMedia({ uri: "file:///cache/" + name, name, mimeType }, settings, false, undefined, transport as unknown as typeof fetch)).rejects.toThrow("Разрешите");
   }
-  expect(transport).not.toHaveBeenCalled(); expect(Thumbnails.getThumbnailAsync).not.toHaveBeenCalled();
+  expect(transport).not.toHaveBeenCalled(); expect(createVideoPlayer).not.toHaveBeenCalled();
 });
 test("text imports stay on-device and reject truncation", async () => {
   (FileSystem.readAsStringAsync as jest.Mock).mockResolvedValue("Мой рецепт"); const transport = jest.fn();
@@ -36,8 +44,9 @@ test("images use the chosen vision protocol with no conversation store", async (
 test("video samples across its duration and removes every extracted frame after failure", async () => {
   const transport = jest.fn(async () => ({ ok: false, status: 400 }));
   await expect(extractMedia({ uri: "file:///cache/video.mp4", name: "video.mp4", duration: 100_000 }, settings, true, undefined, transport as unknown as typeof fetch)).rejects.toThrow("HTTP 400");
-  expect((Thumbnails.getThumbnailAsync as jest.Mock).mock.calls.map(c => c[1].time)).toEqual([2000, 25000, 50000, 75000, 97000]);
+  expect(mockPlayer.generateThumbnailsAsync.mock.calls[0][0]).toEqual([2, 25, 50, 75, 97]);
   expect(FileSystem.deleteAsync).toHaveBeenCalledTimes(5);
+  expect(mockPlayer.release).toHaveBeenCalledTimes(1);
 });
 test("provider errors cannot expose an echoed key and cancellation prevents egress", async () => {
   const transport = jest.fn(async () => ({ ok: false, status: 401, text: async () => "secret" }));
