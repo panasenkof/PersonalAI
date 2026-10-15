@@ -7,86 +7,44 @@ npm warn deprecated domexception@4.0.0: Use your platform's native DOMException 
 npm warn deprecated abab@2.0.6: Use your platform's native atob() and btoa() methods instead
 npm warn deprecated uuid@7.0.3: uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).
 
-added 847 packages in 15s
-+ npx expo install react-native-worklets expo-build-properties
-env: load .env.development
-env: export EXPO_PUBLIC_USE_RN_FETCH
-› Installing 2 SDK 57.0.0 compatible native modules using npm
-> npm install
-
-added 2 packages, changed 1 package, and audited 850 packages in 7s
-
-75 packages are looking for funding
-  run `npm fund` for details
-
-63 vulnerabilities (14 moderate, 49 high)
-
-To address issues that do not require attention, run:
-  npm audit fix
-
-To address all issues (including breaking changes), run:
-  npm audit fix --force
-
-Run `npm audit` for details.
-
-Cannot automatically write to dynamic config at: app.config.js
-Add the following to your Expo config
-
-{
-  "plugins": [
-    "expo-build-properties"
-  ]
-}
-
-+ echo '=== babel-preset-expo worklets'
-=== babel-preset-expo worklets
-+ grep -rn 'react-native-worklets/plugin\|worklets' node_modules/babel-preset-expo/build/index.js
-+ head
-142:                    worklets: platformOptions.worklets,
-+ sed -n 125,150p node_modules/babel-preset-expo/build/index.js
-                {
-                    platform,
-                    engine,
-                    isDev,
-                    isProduction,
-                    isServerEnv,
-                    isReactServer,
-                    isNodeModule,
-                    isFastRefreshEnabled,
-                    isReactCompilerEnabled,
-                    isModernEngine,
-                    baseUrl,
-                    bundler,
-                    inlineEnvironmentVariables,
-                    disableDeepImportWarnings: platformOptions.disableDeepImportWarnings,
-                    lazyDecorators: lazyDecoratorsOptions,
-                    reanimated: platformOptions.reanimated,
-                    worklets: platformOptions.worklets,
-                    expoUi: platformOptions.expoUi,
-                    reactCompiler: platformOptions['react-compiler'],
-                    enableReactFastRefresh: platformOptions.enableReactFastRefresh,
-                    minifyTypeofWindow: platformOptions.minifyTypeofWindow,
-                    transformImportMeta: platformOptions.transformImportMeta,
-                    disableImportExportTransform: platformOptions.disableImportExportTransform,
-                    jsxRuntime: platformOptions.jsxRuntime,
-                    jsxImportSource: platformOptions.jsxImportSource,
-+ grep -rln react-native-worklets/plugin node_modules/babel-preset-expo/build
-+ head
-node_modules/babel-preset-expo/build/configs/expo.js
-+ npx expo install --check
-env: load .env.development
-env: export EXPO_PUBLIC_USE_RN_FETCH
-Dependencies are up to date
-+ echo '=== expo-doctor'
-=== expo-doctor
-+ npx -y expo-doctor@latest
-env: load .env.development
-env: export EXPO_PUBLIC_USE_RN_FETCH
-Running 21 checks on your project...
-21/21 checks passed. No issues detected!
+added 849 packages in 20s
 + echo '=== tsc'
 === tsc
 + npx tsc --noEmit
++ head -80
++ echo '=== jest'
+=== jest
++ npx jest --ci
++ grep -E '✕|●|Tests:|Test Suites:|FAIL'
 + head -60
+  ● Console
+Test Suites: 27 passed, 27 total
+Tests:       194 passed, 194 total
++ echo '=== export'
+=== export
++ npx expo export --platform android --output-dir /tmp/native-export
++ tail -6
+_expo/static/js/android/AppEntry-9e522ba3556ec0ac43a79893aada3fba.hbc (3.4MB)
+
+› Files (1):
+metadata.json (1.6KB)
+
+Exported: /tmp/native-export
++ echo '=== prebuild'
+=== prebuild
++ npx expo prebuild --platform android --no-install --clean
++ tail -4
+- Updating package.json
+✔ Updated package.json
+- Running prebuild
+✔ Finished prebuild
++ grep -n 'minSdkVersion\|minSdk' android/gradle.properties android/build.gradle
++ head
+android/gradle.properties:64:android.minSdkVersion=26
++ grep -c usesCleartextTraffic android/app/src/main/AndroidManifest.xml
+1
++ grep -n 'RECORD_AUDIO\|FOREGROUND' android/app/src/main/AndroidManifest.xml
+4:  <uses-permission android:name="android.permission.RECORD_AUDIO"/>
++ rm -rf android
 + true
 exit code: 0
