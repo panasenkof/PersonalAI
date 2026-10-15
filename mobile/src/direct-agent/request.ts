@@ -14,7 +14,7 @@ export async function requestModel(options: DirectAgentOptions, url: string, hea
   payload: Record<string, unknown>, protocol: Protocol, reasoning = false): Promise<any> {
   const { onText, signal } = options;
   const timeouts = options.timeouts || (reasoning ? REASONING_TIMEOUTS : DEFAULT_TIMEOUTS);
-  const secrets = [options.settings.apiKey, options.settings.webSearchKey].filter(Boolean);
+  const secrets = [options.settings.apiKey, options.settings.webSearchKey, ...Object.values(options.settings.searchKeys || {})].filter((v): v is string => Boolean(v));
   if (options.streamXhr || (!options.transport && streamingAvailable())) {
     const send = (stream: boolean) => postModel(url, headers, payload, {
       protocol, stream, onText, onPhase: options.phase, signal, xhr: options.streamXhr, timeouts, secrets,

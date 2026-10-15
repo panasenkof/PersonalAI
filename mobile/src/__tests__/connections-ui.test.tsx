@@ -51,8 +51,11 @@ test("a ready-made provider can be added and its connection checked before savin
   const fetchMock = jest.spyOn(globalThis, "fetch" as any).mockResolvedValue({ ok: true, status: 200,
     json: async () => ({ choices: [{ message: { role: "assistant", content: "Готово" } }] }) } as any);
   const v = render(<DirectAgentSettingsScreen />); await waitFor(() => v.getByLabelText("Адрес API LLM"));
-  fireEvent.press(v.getByLabelText("Добавить DeepSeek"));
+  fireEvent.press(v.getByLabelText("Добавить подключение"));
+  expect(v.getByLabelText("Адрес API LLM").props.value).toBe("");
+  fireEvent.press(v.getByLabelText("Шаблон DeepSeek"));
   expect(v.getByLabelText("Адрес API LLM").props.value).toBe("https://api.deepseek.com");
+  expect(v.getByLabelText("Название подключения").props.value).toBe("DeepSeek");
   expect(v.getByText(/platform.deepseek.com/)).toBeTruthy();
   fireEvent.changeText(v.getByLabelText("API-ключ LLM"), "ds-key");
   fireEvent.press(v.getByLabelText("Проверить связь"));
@@ -66,4 +69,29 @@ test("first-run setup opens straight on the chosen provider", async () => {
   expect(v.getByLabelText("Адрес API LLM").props.value).toBe("https://openrouter.ai/api/v1");
   expect(v.getByLabelText("API-ключ LLM").props.value).toBe("");
   expect(v.getByLabelText("Подключение OpenRouter")).toBeTruthy();
+});
+test("each search service keeps its own key when switching", async () => {
+  const v = render(<DirectAgentSettingsScreen />); await waitFor(() => v.getByLabelText("Адрес API LLM"));
+  fireEvent(v.getByLabelText("Разрешить веб-поиск"), "valueChange", true);
+  fireEvent.press(v.getByLabelText("Поиск Tavily"));
+  fireEvent.changeText(v.getByLabelText("Ключ Tavily"), "tvly-1");
+  fireEvent.press(v.getByLabelText("Поиск Яндекс"));
+  expect(v.getByLabelText("API-ключ Yandex Cloud для поиска").props.value).toBe("");
+  fireEvent.changeText(v.getByLabelText("API-ключ Yandex Cloud для поиска"), "AQVN-1");
+  fireEvent.changeText(v.getByLabelText("Идентификатор каталога Yandex Cloud"), "b1gfolder");
+  fireEvent.press(v.getByLabelText("Поиск Tavily"));
+  expect(v.getByLabelText("Ключ Tavily").props.value).toBe("tvly-1");
+  fireEvent.press(v.getByText("Сохранить настройки"));
+  await waitFor(() => expect(mockBack).toHaveBeenCalledTimes(1));
+  expect(saveDirectConnections).toHaveBeenCalledWith("guest", expect.objectContaining({ connections: expect.arrayContaining([
+    expect.objectContaining({ id: "one", searchProvider: "tavily", webSearchKey: "tvly-1", searchKeys: { tavily: "tvly-1", yandex: "AQVN-1" }, searchFolderId: "b1gfolder" }),
+  ]) }));
+});
+test("two API types: switching to Anthropic sets its address and asks for a new key", async () => {
+  const v = render(<DirectAgentSettingsScreen />); await waitFor(() => v.getByLabelText("Адрес API LLM"));
+  fireEvent.press(v.getByLabelText("Тип API Anthropic"));
+  expect(v.getByLabelText("Адрес API LLM").props.value).toBe("https://api.anthropic.com/v1");
+  expect(v.getByLabelText("API-ключ LLM").props.value).toBe("");
+  expect(v.getByLabelText("Шаблон Anthropic (Claude)")).toBeTruthy();
+  expect(v.queryByLabelText("Шаблон DeepSeek")).toBeNull();
 });

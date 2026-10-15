@@ -46,10 +46,11 @@ test("keys are bound to profile, protocol and endpoint, never sent to another mo
   await clearDirectApiKey("guest");
   expect((await loadDirectSettings("guest")).apiKey).toBe("");
 });
-test("independent Brave web search key persists but web access remains off by default", async () => {
+test("a legacy Brave search key is not reused for Tavily and web access stays off", async () => {
   await saveWebSearchKey("guest", "brave-key");
   const value = await loadDirectSettings("guest");
-  expect(value.webSearchKey).toBe("brave-key");
+  expect(value.webSearchKey).toBe("");
+  expect(value.searchProvider).toBe("tavily");
   expect(value.allowWeb).toBe(false);
 });
 test.each([

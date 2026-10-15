@@ -1,6 +1,6 @@
 import type { DirectAgentOptions } from "./engine";
 import type { MemorySnippet } from "./memory";
-import { fetchWebContext } from "./web-search";
+import { fetchWebContext, searchProviderOf } from "./web-search";
 
 /** Words that ask for current information even when memory has an answer. */
 export const WEB_REQUEST = /интернет|в сети|онлайн|погугли|поищи|найди\s+(?:в\s+)?(?:интернет|сет)|свеж\w*|актуальн\w*|сегодня|сейчас|новост\w*|последн\w+\s+(?:новост|верси|данн|событ)|курс\w*\s+(?:валют|доллар|евро|рубл)|погод\w*|\b(latest|today|current|news|online|web|search)\b/iu;
@@ -40,7 +40,7 @@ export async function prepareDirectContext(options: DirectAgentOptions & { now?:
     denyWeb ? " Интернет не используется по вашей просьбе." :
     !settings.allowWeb ? " Интернет-поиск выключен в настройках подключения — отвечу без него." : ""));
   else if (useWeb) options.notify?.("В памяти нашлись записи, но вы просите свежие данные — проверяю в интернете.");
-  const provider = settings.searchProvider || (settings.webSearchKey ? "brave" : settings.provider === "openai" ? "builtin" : "public");
+  const provider = searchProviderOf(settings);
   const builtinWeb = useWeb && provider === "builtin" && settings.provider === "openai";
   if (useWeb) status?.("Проверяю источники в интернете");
   let web = { context: "", sources: [] as string[] };

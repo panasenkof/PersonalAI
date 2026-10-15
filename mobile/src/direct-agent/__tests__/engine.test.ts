@@ -158,9 +158,9 @@ test("OpenAI-compatible API uses Chat Completions, not proprietary Responses too
 test("a failed web search never costs the answer: the model replies and the user sees why", async () => {
   const response = jest.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ content: [{ type: "text", text: "Отвечаю без интернета" }] }) });
   const result = await start({ provider: "anthropic", baseUrl: "https://api.anthropic.com/v1",
-    allowWeb: true, searchProvider: "brave" }, response, { prompt: "Найди в интернете свежие новости" });
+    allowWeb: true, searchProvider: "tavily", webSearchKey: "" }, response, { prompt: "Найди в интернете свежие новости" });
   expect(result.text).toBe("Отвечаю без интернета");
-  expect(result.notice).toContain("Brave Search API");
+  expect(result.notice).toContain("Введите ключ Tavily");
   expect(response).toHaveBeenCalledTimes(1);
   expect(JSON.parse(response.mock.calls[0][1].body).system).toContain("свежие данные не проверены");
 });
@@ -168,18 +168,18 @@ test("a failed web search never costs the answer: the model replies and the user
 test("when memory has nothing the user is told and the web is searched", async () => {
   const notify = jest.fn();
   const response = jest.fn()
-    .mockResolvedValueOnce({ ok: true, status: 200, text: async () => '<rss><channel><item><title>Пасха</title><link>https://example.org/easter</link><description>Остров</description></item></channel></rss>' })
+    .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ results: [{ title: "Пасха", url: "https://example.org/easter", content: "Остров" }] }) })
     .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ content: [{ type: "text", text: "Ответ" }] }) });
-  await start({ provider: "anthropic", baseUrl: "https://api.anthropic.com/v1", allowWeb: true, searchProvider: "public" }, response, { prompt: "Расскажи про остров Пасхи", notify });
+  await start({ provider: "anthropic", baseUrl: "https://api.anthropic.com/v1", allowWeb: true, searchProvider: "tavily", webSearchKey: "tvly-k" }, response, { prompt: "Расскажи про остров Пасхи", notify });
   expect(notify).toHaveBeenCalledWith("В памяти ничего не нашлось. Ищу в интернете.");
-  expect(response.mock.calls[0][0]).toContain("bing.com/search");
+  expect(response.mock.calls[0][0]).toBe("https://api.tavily.com/search");
   expect(response.mock.calls[1][0]).toBe("https://api.anthropic.com/v1/messages");
 });
 
 test("an answer found in memory never goes to the web", async () => {
   const notify = jest.fn();
   const response = jest.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ content: [{ type: "text", text: "Ответ" }] }) });
-  await start({ provider: "anthropic", baseUrl: "https://api.anthropic.com/v1", allowWeb: true, searchProvider: "public" }, response,
+  await start({ provider: "anthropic", baseUrl: "https://api.anthropic.com/v1", allowWeb: true, searchProvider: "tavily", webSearchKey: "tvly-k" }, response,
     { prompt: "Где машина сестры?", notify, lookup: jest.fn().mockResolvedValue([{ id: "n", title: "Машина", body: "Продана" }]) });
   expect(response).toHaveBeenCalledTimes(1);
   expect(response.mock.calls[0][0]).toBe("https://api.anthropic.com/v1/messages");
@@ -199,28 +199,31 @@ test("Tavily search sends its key as a bearer token and supplies citations", asy
   expect(JSON.stringify(JSON.parse(response.mock.calls[1][1].body))).not.toContain("tvly-secret");
 });
 
-test("provider-independent Brave search supplies citations to Anthropic Messages and never leaks search key", async () => {
+test("Yandex search sends an Api-Key with the folder, reads Base64 XML and never leaks the key", async () => {
+  const xml = '<?xml version="1.0" encoding="utf-8"?><yandexsearch version="1.0"><response><results><grouping>' +
+    '<group><doc><url>https://example.net/reference</url><title>Справка <hlword>Пасха</hlword> &amp; остров</title><passages><passage>Остров <hlword>Пасхи</hlword> в Тихом океане</passage></passages></doc></group>' +
+    '<group><doc><url>http://insecure.example</url><title>Ignore</title><headline>Non-HTTPS</headline></doc></group>' +
+    '</grouping></results></response></yandexsearch>';
   const response = jest.fn()
-    .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({
-      web: { results: [
-        { title: "Reference", url: "https://example.net/reference", description: "Relevant information." },
-        { title: "Ignore", url: "http://insecure.example", description: "Non-HTTPS." },
-      ] },
-    }) })
-    .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({
-      content: [{ type: "text", text: "Согласно источнику..." }],
-    }) });
-  const result = await start({ provider: "anthropic", model: "claude-sonnet-4-5",
-    baseUrl: "https://api.anthropic.com/v1", allowWeb: true,
-    webSearchKey: "brave-secret-value" }, response, { prompt: "Найди в интернете свежие новости" });
+    .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ rawData: Buffer.from(xml, "utf8").toString("base64") }) })
+    .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ content: [{ type: "text", text: "Согласно источнику..." }] }) });
+  const result = await start({ provider: "anthropic", model: "claude-sonnet-4-5", baseUrl: "https://api.anthropic.com/v1", allowWeb: true,
+    searchProvider: "yandex", searchFolderId: "b1gfolder", webSearchKey: "AQVN-yandex-secret" }, response, { prompt: "Найди в интернете про остров Пасхи" });
   expect(result.sources).toEqual(["https://example.net/reference"]);
-  expect(response.mock.calls[0][0]).toContain("api.search.brave.com");
-  expect(response.mock.calls[0][1].headers["X-Subscription-Token"]).toBe("brave-secret-value");
-  expect(response.mock.calls[1][0]).toBe("https://api.anthropic.com/v1/messages");
-  expect(response.mock.calls[1][1].headers["x-api-key"]).toBe("test-key-only");
+  expect(response.mock.calls[0][0]).toBe("https://searchapi.api.cloud.yandex.net/v2/web/search");
+  expect(response.mock.calls[0][1].headers.Authorization).toBe("Api-Key AQVN-yandex-secret");
+  expect(JSON.parse(response.mock.calls[0][1].body)).toMatchObject({ folderId: "b1gfolder", responseFormat: "FORMAT_XML",
+    query: { searchType: "SEARCH_TYPE_RU", queryText: "Найди в интернете про остров Пасхи" } });
   const body = JSON.parse(response.mock.calls[1][1].body);
-  expect(body.system).toContain("https://example.net/reference");
-  expect(JSON.stringify(body)).not.toContain("brave-secret-value");
+  expect(body.system).toContain("Справка Пасха & остров — https://example.net/reference");
+  expect(body.system).toContain("Остров Пасхи в Тихом океане");
+  expect(JSON.stringify(body)).not.toContain("AQVN-yandex-secret");
+});
+
+test("a Yandex error inside the XML names its code; code 15 means nothing found", async () => {
+  const { parseYandexXml } = require("../web-search");
+  expect(() => parseYandexXml('<yandexsearch><response><error code="31">Ключ не подходит</error></response></yandexsearch>')).toThrow("поиск вернул ошибку 31: «Ключ не подходит»");
+  expect(parseYandexXml('<yandexsearch><response><error code="15">Искомая комбинация слов нигде не встречается</error></response></yandexsearch>')).toEqual([]);
 });
 
 test("Anthropic tool-use loop only accesses approved memory and replays tool_result", async () => {
@@ -265,14 +268,14 @@ test("Chat Completions tool call creates a draft but never saves without approva
   }));
 });
 
-test("Brave search never runs when the web switch is off", async () => {
+test("search never runs when the web switch is off", async () => {
   const response = jest.fn().mockResolvedValue({
     ok: true, status: 200, json: async () => ({
       choices: [{ message: { role: "assistant", content: "Ответ" } }],
     }),
   });
   await start({ provider: "openai-compatible", baseUrl: "https://llm.example.org/v1",
-    allowWeb: false, webSearchKey: "brave-key" }, response);
+    allowWeb: false, searchProvider: "tavily", webSearchKey: "tvly-key" }, response);
   expect(response).toHaveBeenCalledTimes(1);
   expect(response.mock.calls[0][0]).toContain("/chat/completions");
 });
