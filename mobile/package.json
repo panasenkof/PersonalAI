@@ -60,5 +60,11 @@
   },
   "jest": {
     "preset": "jest-expo"
+  },
+  "react-native-executorch": {
+    "backends": [
+      "xnnpack",
+      "coreml"
+    ]
   }
 }
