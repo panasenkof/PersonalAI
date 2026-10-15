@@ -4,6 +4,7 @@ import Feather from "@expo/vector-icons/Feather";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, AppState, Platform, Pressable, Text, View } from "react-native";
 import { nativeInteractionActive, withNativeInteraction } from "../security/native-interaction";
+import type { ServiceChoice } from "../media/voice";
 import { NO_SERVICE_MESSAGE, START_TIMEOUT_MS, pickRecognitionService, startTimeoutMessage, voiceErrorMessage } from "../media/voice";
 import { useTheme } from "../theme";
 import { IconAction } from "./IconAction";
@@ -11,7 +12,7 @@ import { IconAction } from "./IconAction";
 /** Consent to the phone's network speech service, asked once per app session. */
 let networkConsent = false;
 
-function recognitionService(): string | undefined {
+function recognitionService(): ServiceChoice | undefined {
   if (Platform.OS !== "android") return undefined;
   try {
     return pickRecognitionService(Speech.getSpeechRecognitionServices?.() ?? [], Speech.getDefaultRecognitionService?.()?.packageName ?? "");
@@ -28,7 +29,7 @@ export function VoiceInput({ value, onChange, disabled = false, onError, showLab
   const t = useTheme();
   const [offerNetwork, setOfferNetwork] = useState(false);
   const offline = useRef(true);
-  const service = useRef<string | undefined>(undefined);
+  const service = useRef<ServiceChoice | undefined>(undefined);
   const [listening, setListening] = useState(false);
   const owns = useRef(false);
   const started = useRef(false);
@@ -98,7 +99,7 @@ export function VoiceInput({ value, onChange, disabled = false, onError, showLab
       owns.current = true; started.current = false; setListening(true);
       Speech.start({
         lang: "ru-RU", interimResults: true, continuous: false, requiresOnDeviceRecognition: !useNetwork, addsPunctuation: true,
-        ...(service.current ? { androidRecognitionServicePackage: service.current } : {}),
+        ...(service.current?.pkg ? { androidRecognitionServicePackage: service.current.pkg } : {}),
       });
       watchdog.current = setTimeout(() => {
         if (owns.current && !started.current) { onError(startTimeoutMessage(service.current)); stop(); }

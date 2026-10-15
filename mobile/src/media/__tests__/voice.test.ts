@@ -1,16 +1,22 @@
 import { NO_SERVICE_MESSAGE, pickRecognitionService, startTimeoutMessage, voiceErrorMessage } from "../voice";
 
 test("the phone's default recognition service is used when there is one", () => {
-  expect(pickRecognitionService(["com.google.android.googlequicksearchbox"], "com.samsung.android.bixby")).toBeUndefined();
+  expect(pickRecognitionService(["com.google.android.googlequicksearchbox"], "com.samsung.android.bixby").pkg).toBeUndefined();
 });
 test("without a default service an installed Google service is chosen", () => {
-  expect(pickRecognitionService(["com.xiaomi.mibrain.speech", "com.google.android.as"], "")).toBe("com.google.android.as");
-  expect(pickRecognitionService(["com.xiaomi.mibrain.speech"], "")).toBe("com.xiaomi.mibrain.speech");
-  expect(pickRecognitionService([], "")).toBeUndefined();
+  expect(pickRecognitionService(["com.xiaomi.mibrain.speech", "com.google.android.as"], "").pkg).toBe("com.google.android.as");
+});
+test("another app's own service is never chosen and the message says what to install", () => {
+  const choice = pickRecognitionService(["com.anthropic.claude"], "");
+  expect(choice.pkg).toBeUndefined();
+  const text = startTimeoutMessage(choice);
+  expect(text).toContain("найдены только: com.anthropic.claude");
+  expect(text).toContain("Голосовой ввод");
+  expect(voiceErrorMessage("client", "", choice)).toContain("нет службы Google");
 });
 test.each(["not-allowed", "network", "language-not-supported", "service-not-allowed", "busy", "client", "audio-capture", "unknown"])(
   "error %s names the service, a reason and the raw code", code => {
-    const text = voiceErrorMessage(code, "native detail", "com.google.android.googlequicksearchbox");
+    const text = voiceErrorMessage(code, "native detail", { pkg: "com.google.android.googlequicksearchbox", installed: [], defaultPackage: "" });
     expect(text).toContain("Google (приложение «Google»)");
     expect(text).toContain("Код: «" + code + ": native detail»");
   });
