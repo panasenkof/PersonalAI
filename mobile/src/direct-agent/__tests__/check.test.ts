@@ -98,3 +98,25 @@ describe("search errors read what the service said", () => {
     expect(message).toContain("HTTP 403");
   });
 });
+
+describe("search providers after removing Bing and Brave", () => {
+  const { migrateSearchProvider } = require("../settings");
+  test("saved Bing or Brave becomes Tavily, and a Brave key is never reused", () => {
+    expect(migrateSearchProvider("public")).toEqual({ provider: "tavily", dropKey: false });
+    expect(migrateSearchProvider("brave")).toEqual({ provider: "tavily", dropKey: true });
+    expect(migrateSearchProvider("yandex")).toEqual({ provider: "yandex", dropKey: false });
+  });
+  test("Yandex search needs a key and a folder ID before saving", async () => {
+    const base = { ...connectionFromPreset(PROVIDER_PRESETS.find(p => p.id === "deepseek")!), apiKey: "k", allowWeb: true, searchProvider: "yandex" as const };
+    await expect(saveDirectConnections("guest", { activeId: base.id, connections: [{ ...base, webSearchKey: "" }] })).rejects.toThrow("API-ключ Yandex Cloud");
+    await expect(saveDirectConnections("guest", { activeId: base.id, connections: [{ ...base, webSearchKey: "AQVNkey", searchFolderId: "" }] })).rejects.toThrow("идентификатор каталога");
+    await expect(saveDirectConnections("guest", { activeId: base.id, connections: [{ ...base, webSearchKey: "AQVNkey", searchFolderId: "b1g/../x" }] })).rejects.toThrow("латинские буквы и цифры");
+  });
+  test("a Yandex search check reports a rejected key with the host", async () => {
+    const transport = jest.fn().mockResolvedValue({ ok: false, status: 401, text: async () => JSON.stringify({ code: 16, message: "Unknown api key 'AQVNkey'" }) });
+    const { checkWebSearch } = require("../check");
+    const message = (await checkWebSearch({ ...connectionFromPreset(PROVIDER_PRESETS.find(p => p.id === "deepseek")!), allowWeb: true, searchProvider: "yandex", webSearchKey: "AQVNkey", searchFolderId: "b1gfolder" }, transport as any)).message;
+    expect(message).toContain("searchapi.api.cloud.yandex.net: ключ API не принят");
+    expect(message).not.toContain("AQVNkey");
+  });
+});

@@ -59,11 +59,19 @@ and the chat shows the exact reason. Unclassified, sensitive and secret notes
 never leave the phone.
 
 Search choices:
-- **Without registration:** public Bing RSS; no separate account or API key.
-  This is best-effort, with limited results. CAPTCHA, unavailable feeds and network
-  failures are reported; the app does not silently send queries elsewhere.
-- **Brave Search API:** separate search key, works independently of the LLM.
+- **Yandex (Yandex Cloud Search API):** works from Russia, about 0.49 ₽ per search,
+  billed to the user's Yandex Cloud account. Needs a service account with the
+  `search-api.webSearch.user` role, an API key with the `yc.search-api.execute`
+  scope and the folder ID. `POST https://searchapi.api.cloud.yandex.net/v2/web/search`,
+  `Authorization: Api-Key …`; the XML result arrives Base64-encoded in `rawData`.
+- **Tavily:** free 1,000 searches a month; rejects requests from Russia with HTTP 403,
+  so from Russia it works only through a VPN.
 - **Built-in OpenAI search:** Responses tool, with potential provider charges.
+
+Bing RSS and Brave Search API were removed. A saved Bing or Brave choice becomes
+Tavily; a Brave key is never sent to another service. Switching the search service
+clears its key field. «Проверить поиск» runs one real search and shows the link count
+or the exact reason.
 
 Sources and memory content are treated as data, not instructions. A failed
 memory lookup is reported as unavailable, never as proof the memory is empty.

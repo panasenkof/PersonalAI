@@ -3,7 +3,7 @@
 ## 1. Обновление зависимостей
 - [ ] 1.1 Задача GitHub Actions `deps-upgrade.yml`: на push в `deps/**` выполняет обновление и коммитит `package.json` и `package-lock.json` обратно в ветку
 - [ ] 1.2 Последовательно 54 → 55 → 56 → 57: `npx expo install expo@^<N>.0.0 --fix` на каждом шаге
-- [ ] 1.3 Удалить `react-native-sse`, `expo-linear-gradient`, `expo-image-picker`; убрать плагин `expo-image-picker` из `app.json`
+- [ ] 1.3 Удалить `react-native-sse`, `expo-linear-gradient`, `expo-image-picker`, `fast-xml-parser`; убрать плагин `expo-image-picker` из `app.json`
 - [ ] 1.4 Добавить `@expo/vector-icons` явно
 
 ## 2. Совместимость кода

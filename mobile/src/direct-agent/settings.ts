@@ -9,8 +9,19 @@ export type DirectAgentPreferences = {
   model: string;
   allowWeb: boolean;
   transcriptionModel?: string;
-  searchProvider?: "public" | "brave" | "tavily" | "builtin";
+  searchProvider?: SearchProvider;
+  /** Yandex Cloud folder ID for Yandex Search API; not a secret. */
+  searchFolderId?: string;
 };
+export type SearchProvider = "tavily" | "yandex" | "builtin";
+export const SEARCH_PROVIDERS: SearchProvider[] = ["tavily", "yandex", "builtin"];
+/** Bing ("public") and Brave were removed: a saved choice becomes Tavily, and a
+ * Brave key is never sent to another service. */
+export function migrateSearchProvider(value: unknown): { provider: SearchProvider; dropKey: boolean } {
+  if (value === "tavily" || value === "yandex" || value === "builtin") return { provider: value, dropKey: false };
+  return { provider: "tavily", dropKey: value === "brave" || value === undefined };
+}
+const validFolder = (value: unknown) => typeof value === "string" && /^[a-z0-9]{1,50}$/i.test(value.trim()) ? value.trim() : "";
 export type DirectAgentSettings = DirectAgentPreferences & {
   apiKey: string;
   webSearchKey: string;
@@ -155,7 +166,7 @@ export function newDirectConnection(provider: DirectProvider, id = Crypto.random
       provider === "openai-compatible" ? "Совместимая модель" : "OpenAI",
     provider, baseUrl: defaultBaseUrl(provider),
     model: provider === "anthropic" ? "claude-sonnet-4-5" : DEFAULT_DIRECT_MODEL,
-    apiKey: "", webSearchKey: "", searchProvider: "public",
+    apiKey: "", webSearchKey: "", searchProvider: "tavily",
   };
 }
 
@@ -166,7 +177,8 @@ export async function loadDirectConnections(profile: string): Promise<DirectConn
     const connections = (["openai", "openai-compatible", "anthropic"] as const)
       .map(provider => newDirectConnection(provider, "default-" + provider));
     const active = connections.find(c => c.provider === legacy.provider)!;
-    Object.assign(active, legacy, { searchProvider: legacy.webSearchKey ? "brave" : "public" });
+    // The only legacy search key was a Brave key; it is not reused for Tavily.
+    Object.assign(active, legacy, { searchProvider: "tavily", webSearchKey: "" });
     return { activeId: active.id, connections };
   }
   try {
@@ -185,12 +197,13 @@ export async function loadDirectConnections(profile: string): Promise<DirectConn
       ]);
       const provider = validateProvider(item.provider);
       const baseUrl = validateBaseUrl(item.baseUrl, provider);
+      const search = migrateSearchProvider(item.searchProvider);
       connections.push({
         id, name: String(item.name || "Модель").slice(0, 60), provider, baseUrl,
         model: validateModel(item.model), transcriptionModel: validateModel(item.transcriptionModel || "whisper-1"), allowWeb: item.allowWeb === true,
-        searchProvider: ["public", "brave", "tavily", "builtin"].includes(item.searchProvider || "") ? item.searchProvider : "public",
+        searchProvider: search.provider, searchFolderId: validFolder(item.searchFolderId),
         apiKey: item.credentialIdentity === identityOf({ provider, baseUrl }) ? savedApiKey || "" : "",
-        webSearchKey: savedSearchKey || "",
+        webSearchKey: search.dropKey ? "" : savedSearchKey || "",
       });
     }
     return { activeId: index.activeId, connections };
@@ -211,14 +224,17 @@ export async function saveDirectConnections(profile: string, value: DirectConnec
     if (/[<>]/.test(item.model)) throw new Error("В названии модели «" + item.name.trim() + "» замените часть в угловых скобках на свои данные");
     const provider = validateProvider(item.provider);
     const baseUrl = validateBaseUrl(item.baseUrl, provider);
-    const searchProvider = item.searchProvider || "public";
-    if (!["public", "brave", "tavily", "builtin"].includes(searchProvider)) throw new Error("Выберите способ поиска");
-    if (item.allowWeb && searchProvider === "brave" && !item.webSearchKey.trim()) throw new Error("Введите ключ Brave Search API");
+    const searchProvider = item.searchProvider || "tavily";
+    if (!SEARCH_PROVIDERS.includes(searchProvider)) throw new Error("Выберите способ поиска");
     if (item.allowWeb && searchProvider === "tavily" && !item.webSearchKey.trim()) throw new Error("Введите ключ Tavily");
+    if (item.allowWeb && searchProvider === "yandex" && !item.webSearchKey.trim()) throw new Error("Введите API-ключ Yandex Cloud для поиска");
+    const searchFolderId = (item.searchFolderId || "").trim();
+    if (searchFolderId && !validFolder(searchFolderId)) throw new Error("Идентификатор каталога Yandex Cloud — латинские буквы и цифры, например b1g…");
+    if (item.allowWeb && searchProvider === "yandex" && !searchFolderId) throw new Error("Введите идентификатор каталога Yandex Cloud (folder ID)");
     if (item.allowWeb && searchProvider === "builtin" && provider !== "openai") throw new Error("Встроенный поиск доступен через OpenAI Responses");
     const { allowMemory: _legacyMemoryFlag, ...current } = item as DirectConnection & { allowMemory?: boolean };
     return { ...current, name: item.name.trim().slice(0, 60), provider, baseUrl,
-      model: validateModel(item.model), transcriptionModel: validateModel(item.transcriptionModel || "whisper-1"), searchProvider,
+      model: validateModel(item.model), transcriptionModel: validateModel(item.transcriptionModel || "whisper-1"), searchProvider, searchFolderId,
       apiKey: item.apiKey.trim() ? validateSecret(item.apiKey) : "",
       webSearchKey: item.webSearchKey.trim() ? validateSecret(item.webSearchKey) : "",
       credentialIdentity: identityOf({ provider, baseUrl }),

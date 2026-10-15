@@ -1,63 +1,91 @@
-import { XMLParser } from "fast-xml-parser";
-import type { DirectAgentSettings } from "./settings";
+import { toByteArray } from "base64-js";
+import type { DirectAgentSettings, SearchProvider } from "./settings";
 import { SHORT_TIMEOUTS, fetchWithTimeout, httpError, providerDetail } from "./net";
 export type WebContext = { context: string; sources: string[] };
 type SearchResult = { title?: string; url?: string; description?: string };
 const safe = (value: unknown, limit: number) => typeof value === "string" ? value.slice(0, limit) : "";
 
-/** Public RSS is a user-selected best-effort search source, never an implicit
- * fallback that sends the query to a second provider without the user's choice.
- */
+/** Without an explicit choice OpenAI uses its built-in search, others Tavily. */
+export const searchProviderOf = (settings: Pick<DirectAgentSettings, "searchProvider" | "provider">): SearchProvider =>
+  settings.searchProvider || (settings.provider === "openai" ? "builtin" : "tavily");
+
+export const YANDEX_SEARCH_URL = "https://searchapi.api.cloud.yandex.net/v2/web/search";
+
+const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'" };
+const decodeEntities = (text: string) => text.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (all, e: string) =>
+  e[0] === "#" ? String.fromCodePoint(e[1] === "x" || e[1] === "X" ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10)) : ENTITIES[e.toLowerCase()] ?? all);
+const plain = (xml: string) => decodeEntities(xml.replace(/<[^>]*>/g, "")).replace(/\s+/g, " ").trim();
+const tag = (xml: string, name: string) => new RegExp(`<${name}(?:\\s[^>]*)?>([\\s\\S]*?)</${name}>`, "i").exec(xml)?.[1];
+
+function utf8(bytes: Uint8Array): string {
+  let percent = "";
+  for (const b of bytes) percent += "%" + (b < 16 ? "0" : "") + b.toString(16);
+  return decodeURIComponent(percent);
+}
+
+/** Yandex Search API returns the classic Yandex XML, Base64-encoded in rawData. */
+export function parseYandexXml(xml: string): SearchResult[] {
+  const error = /<error\b[^>]*code="(\d+)"[^>]*>([\s\S]*?)<\/error>/i.exec(xml);
+  // Code 15: nothing was found for the query; that is an empty result, not a failure.
+  if (error && error[1] !== "15") throw new Error(`searchapi.api.cloud.yandex.net: поиск вернул ошибку ${error[1]}: «${plain(error[2]).slice(0, 160)}».`);
+  const results: SearchResult[] = [];
+  for (const doc of xml.match(/<doc\b[\s\S]*?<\/doc>/gi) || []) {
+    const passages = (doc.match(/<passage\b[^>]*>[\s\S]*?<\/passage>/gi) || []).map(plain).join(" … ");
+    results.push({ url: plain(tag(doc, "url") || ""), title: plain(tag(doc, "title") || ""), description: passages || plain(tag(doc, "headline") || "") });
+  }
+  return results;
+}
+
+/** Search for the prompt with the connection's own search service. A failure
+ * throws a message naming the host and the reason; the caller answers without it. */
 export async function fetchWebContext(
   prompt: string, settings: DirectAgentSettings, transport: typeof fetch, signal?: AbortSignal,
 ): Promise<WebContext> {
   if (!settings.allowWeb) return { context: "", sources: [] };
   if (signal?.aborted) throw new Error("Запрос остановлен");
-  const provider = settings.searchProvider || (settings.webSearchKey ? "brave" : settings.provider === "openai" ? "builtin" : "public");
+  const provider = searchProviderOf(settings);
   if (provider === "builtin") return { context: "", sources: [] };
-  const query = encodeURIComponent(prompt.slice(0, 300));
+  const secrets = [settings.webSearchKey];
   let results: SearchResult[];
-  if (provider === "tavily") {
+  if (provider === "yandex") {
+    if (!settings.webSearchKey) throw new Error("Введите API-ключ Yandex Cloud для поиска.");
+    if (!settings.searchFolderId) throw new Error("Введите идентификатор каталога Yandex Cloud (folder ID).");
+    // Synchronous search; billed per request (about 0.49 ₽ in 2026).
+    const response = await fetchWithTimeout(transport, YANDEX_SEARCH_URL, {
+      method: "POST", signal,
+      headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: "Api-Key " + settings.webSearchKey },
+      body: JSON.stringify({
+        query: { searchType: "SEARCH_TYPE_RU", queryText: prompt.slice(0, 400), familyMode: "FAMILY_MODE_MODERATE" },
+        groupSpec: { groupMode: "GROUP_MODE_DEEP", groupsOnPage: "5", docsInGroup: "1" },
+        maxPassages: "2", l10n: "LOCALIZATION_RU", folderId: settings.searchFolderId, responseFormat: "FORMAT_XML",
+      }),
+    }, SHORT_TIMEOUTS, secrets);
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      throw httpError(response.status, "searchapi.api.cloud.yandex.net", providerDetail(body, secrets));
+    }
+    let raw: string;
+    try {
+      const data = await response.json() as { rawData?: string };
+      raw = utf8(toByteArray(String(data.rawData || "")));
+    } catch { throw new Error("searchapi.api.cloud.yandex.net: ответ пришёл, но это не результаты поиска. Повторите позже."); }
+    results = parseYandexXml(raw);
+  } else {
     if (!settings.webSearchKey) throw new Error("Введите ключ Tavily или выберите другой способ поиска.");
     // 1 credit per basic search; the free plan has 1,000 credits a month.
     const response = await fetchWithTimeout(transport, "https://api.tavily.com/search", {
       method: "POST", signal,
       headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: "Bearer " + settings.webSearchKey },
       body: JSON.stringify({ query: prompt.slice(0, 300), max_results: 5, search_depth: "basic", include_answer: false }),
-    }, SHORT_TIMEOUTS, [settings.webSearchKey]);
+    }, SHORT_TIMEOUTS, secrets);
     if (!response.ok) {
       const body = await response.text().catch(() => "");
-      throw httpError(response.status, "api.tavily.com", providerDetail(body, [settings.webSearchKey]));
+      throw httpError(response.status, "api.tavily.com", providerDetail(body, secrets));
     }
     let data: { results?: Array<{ title?: string; url?: string; content?: string }> };
     try { data = await response.json(); }
     catch { throw new Error("api.tavily.com: ответ пришёл, но это не результаты поиска (HTTP " + response.status + "). Повторите позже."); }
     results = (Array.isArray(data.results) ? data.results : []).map(r => ({ title: r.title, url: r.url, description: r.content }));
-  } else if (provider === "brave") {
-    if (!settings.webSearchKey) throw new Error("Введите ключ Brave Search API или выберите поиск без регистрации.");
-    const response = await fetchWithTimeout(transport, "https://api.search.brave.com/res/v1/web/search?q=" + query + "&count=5", {
-      method: "GET", headers: { Accept: "application/json", "X-Subscription-Token": settings.webSearchKey }, signal,
-    }, SHORT_TIMEOUTS, [settings.webSearchKey]);
-    if (!response.ok) {
-      const body = await response.text().catch(() => "");
-      throw httpError(response.status, "api.search.brave.com", providerDetail(body, [settings.webSearchKey]));
-    }
-    const data = await response.json() as { web?: { results?: SearchResult[] } };
-    results = Array.isArray(data.web?.results) ? data.web!.results! : [];
-  } else {
-    const response = await fetchWithTimeout(transport, "https://www.bing.com/search?format=rss&q=" + query, {
-      method: "GET", headers: { Accept: "application/rss+xml, application/xml, text/xml" }, signal,
-    });
-    if (!response.ok) throw new Error("Поиск без регистрации сейчас недоступен (HTTP " + response.status + "). Повторите запрос позже или смените способ поиска.");
-    const text = await response.text();
-    if (text.length > 500_000 || /<!DOCTYPE|<!ENTITY/i.test(text) || !/<rss[\s>]/i.test(text)) {
-      throw new Error("Поисковый сервис не вернул результаты. Повторите запрос позже или смените способ поиска.");
-    }
-    const parsed = new XMLParser({ processEntities: true, parseTagValue: false, ignoreAttributes: true }).parse(text);
-    const items = parsed?.rss?.channel?.item;
-    results = (Array.isArray(items) ? items : items ? [items] : []).map((item: any) => ({
-      title: item.title, url: item.link, description: item.description,
-    }));
   }
   const sources: string[] = [];
   const snippets: string[] = [];

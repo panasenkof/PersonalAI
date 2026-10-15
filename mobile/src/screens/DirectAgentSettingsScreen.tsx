@@ -10,7 +10,8 @@ import { PROVIDER_PRESETS, connectionFromPreset, defaultBaseUrl, loadDirectConne
 import { checkConnection, checkWebSearch } from "../direct-agent/check";
 import type { SearchCheck } from "../direct-agent/check";
 import type { ConnectionCheck } from "../direct-agent/check";
-import type { DirectConnection, DirectConnections, DirectProvider } from "../direct-agent/settings";
+import type { DirectConnection, DirectConnections, DirectProvider, SearchProvider } from "../direct-agent/settings";
+import { yandexFolder } from "../direct-agent/compatible";
 import type { RootStackParams } from "../navigation";
 import { useTheme } from "../theme";
 
@@ -70,6 +71,12 @@ export function DirectAgentSettingsScreen() {
     const result = await checkConnection(selected, undefined, aborter.signal);
     if (!aborter.signal.aborted) { setCheck(result); setChecking(false); }
   }
+  /** A search key belongs to one service: switching services never carries it over. */
+  function chooseSearch(id: SearchProvider) {
+    if (!selected || selected.searchProvider === id) return;
+    update({ searchProvider: id, webSearchKey: "",
+      ...(id === "yandex" && !selected.searchFolderId && yandexFolder(selected.model) ? { searchFolderId: yandexFolder(selected.model)! } : {}) });
+  }
   async function runSearchCheck() {
     if (!selected || searching) return;
     searchAbort.current?.abort(); const aborter = new AbortController(); searchAbort.current = aborter;
@@ -85,7 +92,7 @@ export function DirectAgentSettingsScreen() {
     if (!selected || selected.provider === provider) return;
     update({ provider, baseUrl: defaultBaseUrl(provider), apiKey: "",
       model: provider === "anthropic" ? "claude-sonnet-4-5" : "gpt-4.1-mini",
-      ...(selected.searchProvider === "builtin" && provider !== "openai" ? { searchProvider: "public" } : {}),
+      ...(selected.searchProvider === "builtin" && provider !== "openai" ? { searchProvider: "tavily" as const, webSearchKey: "" } : {}),
     });
   }
   async function save() {
@@ -160,20 +167,23 @@ export function DirectAgentSettingsScreen() {
           <Text style={{ color: t.muted, fontSize: 12 }}>Сначала помощник ищет в памяти телефона. Если там ничего нет — сообщает об этом и ищет в интернете. Каждый поиск тратит запрос у выбранного сервиса (у Tavily — 1 из 1000 бесплатных в месяц).</Text>
           {selected.allowWeb ? <>
           {([
-            ["tavily", "Tavily — бесплатно 1000 поисков в месяц, нужен ключ"], ["public", "Без регистрации (Bing)"], ["brave", "Brave Search API"],
+            ["tavily", "Tavily — бесплатно 1000 поисков в месяц (из России — только через VPN)"],
+            ["yandex", "Яндекс (Yandex Cloud Search API) — около 0,49 ₽ за поиск, работает из России"],
             ...(selected.provider === "openai" ? [["builtin", "Встроенный поиск OpenAI"]] : []),
-          ] as Array<["public" | "brave" | "tavily" | "builtin", string]>).map(([id, name]) => (
+          ] as Array<[SearchProvider, string]>).map(([id, name]) => (
             <Pressable key={id} disabled={busy} accessibilityRole="button" accessibilityLabel={name}
-              style={{ minHeight: 44, justifyContent: "center" }} onPress={() => update({ searchProvider: id })}>
+              style={{ minHeight: 44, justifyContent: "center" }} onPress={() => chooseSearch(id)}>
               <Text style={{ color: selected.searchProvider === id ? t.accent : t.text }}>{selected.searchProvider === id ? "● " : "○ "}{name}</Text>
             </Pressable>
           ))}
-          {selected.searchProvider === "public" ? <Text style={{ color: t.muted, fontSize: 12 }}>Поисковая фраза отправляется Bing. Из России он часто не отвечает; если поиск не удаётся, выберите Tavily.</Text> : null}
-          {selected.searchProvider === "tavily" ? <><Text style={{ color: t.muted, fontSize: 12 }}>Ключ — на tavily.com после регистрации (карта не нужна). Бесплатно 1000 поисков в месяц; поисковая фраза отправляется Tavily.</Text>
+          {selected.searchProvider === "tavily" ? <><Text style={{ color: t.muted, fontSize: 12 }}>Ключ — на tavily.com после регистрации (карта не нужна). Бесплатно 1000 поисков в месяц; поисковая фраза отправляется Tavily. Tavily отклоняет запросы из России (HTTP 403) — без VPN выберите Яндекс.</Text>
             <TextInput editable={!busy} accessibilityLabel="Ключ Tavily" secureTextEntry autoCapitalize="none" autoCorrect={false}
               value={selected.webSearchKey} onChangeText={webSearchKey => update({ webSearchKey })} placeholder="tvly-…" placeholderTextColor={t.muted} style={field} /></> : null}
-          {selected.searchProvider === "brave" ? <TextInput editable={!busy} accessibilityLabel="Ключ Brave Search API" secureTextEntry autoCapitalize="none" autoCorrect={false}
-            value={selected.webSearchKey} onChangeText={webSearchKey => update({ webSearchKey })} placeholder="Ключ поиска" placeholderTextColor={t.muted} style={field} /> : null}
+          {selected.searchProvider === "yandex" ? <><Text style={{ color: t.muted, fontSize: 12 }}>В консоли Yandex Cloud: сервисный аккаунт с ролью «search-api.webSearch.user», API-ключ с областью «yc.search-api.execute», идентификатор каталога (b1g…). Поисковая фраза отправляется Яндексу, оплата — со счёта Yandex Cloud.</Text>
+            <TextInput editable={!busy} accessibilityLabel="API-ключ Yandex Cloud для поиска" secureTextEntry autoCapitalize="none" autoCorrect={false}
+              value={selected.webSearchKey} onChangeText={webSearchKey => update({ webSearchKey })} placeholder="API-ключ (AQVN…)" placeholderTextColor={t.muted} style={field} />
+            <TextInput editable={!busy} accessibilityLabel="Идентификатор каталога Yandex Cloud" autoCapitalize="none" autoCorrect={false}
+              value={selected.searchFolderId || ""} onChangeText={searchFolderId => update({ searchFolderId })} placeholder="Каталог (b1g…)" placeholderTextColor={t.muted} style={field} /></> : null}
           {selected.searchProvider !== "builtin" ? <Pressable accessibilityRole="button" accessibilityLabel="Проверить поиск" disabled={busy || searching} onPress={() => void runSearchCheck()}
             style={{ minHeight: 44, justifyContent: "center", alignItems: "center", borderRadius: 16, borderWidth: 1, borderColor: t.accent }}>
             {searching ? <ActivityIndicator accessibilityLabel="Проверка поиска" /> : <Text style={{ color: t.accent, fontWeight: "700" }}>Проверить поиск</Text>}
