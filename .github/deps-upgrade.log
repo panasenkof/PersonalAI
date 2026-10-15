@@ -1,0 +1,99 @@
++ cd mobile
++ npx expo install react-native-worklets expo-build-properties
+npm warn exec The following package was not found and will be installed: expo@57.0.30
+npm warn deprecated uuid@7.0.3: uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).
+env: load .env.development
+env: export EXPO_PUBLIC_USE_RN_FETCH
+ConfigError: Cannot determine the project's Expo SDK version because the module `expo` is not installed. Install it with `npm install expo` and try again.
+++ pick react-native-blob-util '^0\.24\.'
+++ npm view react-native-blob-util versions --json
+++ node -e 'const v=JSON.parse(require("fs").readFileSync(0,"utf8"));const re=new RegExp(process.argv[1]);console.log(v.filter(x=>re.test(x)&&!x.includes("-")).pop()||"")' '^0\.24\.'
++ npm install --no-audit --no-fund react-native-executorch@0.10.5 react-native-blob-util@0.24.12 react-native-audio-api@0.13.6
+npm warn deprecated whatwg-encoding@2.0.0: Use @exodus/bytes instead for a more spec-conformant and faster implementation
+npm warn deprecated inflight@1.0.6: This module is not supported, and leaks memory. Do not use it. Check out lru-cache if you want a good and tested way to coalesce async requests by a key value, which is much more comprehensive and powerful.
+npm warn deprecated glob@7.2.3: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+npm warn deprecated abab@2.0.6: Use your platform's native atob() and btoa() methods instead
+npm warn deprecated domexception@4.0.0: Use your platform's native DOMException instead
+npm warn deprecated uuid@7.0.3: uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).
+
+added 847 packages in 20s
++ cat node_modules/react-native-executorch/rne-build-config.json
+{
+  "enableOpencv": false,
+  "enablePhonemis": false,
+  "enableXnnpack": true,
+  "enableCoreml": true,
+  "enableMlx": false,
+  "enableVulkan": false
+}+ echo '=== babel-preset-expo worklets'
+=== babel-preset-expo worklets
++ grep -rn worklets node_modules/babel-preset-expo/build/common.js node_modules/babel-preset-expo/build/index.js
++ head -20
+node_modules/babel-preset-expo/build/index.js:142:                    worklets: platformOptions.worklets,
++ echo '=== audio-api types'
+=== audio-api types
++ sed -n 1,40p node_modules/react-native-audio-api/lib/typescript/types.d.ts
++ head -5
+import type PeriodicWave from './core/PeriodicWave';
+export interface AudioBufferLike {
+    readonly length: number;
+    readonly duration: number;
+    readonly sampleRate: number;
++ ls node_modules/react-native-audio-api/lib
+commonjs
+module
+typescript
++ echo '=== executorch types'
+=== executorch types
++ ls node_modules/react-native-executorch/lib/typescript/src
++ head
+constants.d.ts
+constants.d.ts.map
+core
+extensions
+fetcher
+hooks
+index.d.ts
+index.d.ts.map
+models.d.ts
+models.d.ts.map
++ grep -n speechToText -A3 node_modules/react-native-executorch/lib/typescript/src/models.d.ts
++ head -10
+632:    speechToText: {
+633-        /**
+634-         * OpenAI Whisper automatic speech recognition model family with integrated
+635-         * Voice Activity Detection. Includes multilingual and English-only (`EN`)
++ npx expo install --check
+env: load .env.development
+env: export EXPO_PUBLIC_USE_RN_FETCH
+Dependencies are up to date
++ echo '=== expo-doctor'
+=== expo-doctor
++ npx -y expo-doctor@latest
+env: load .env.development
+env: export EXPO_PUBLIC_USE_RN_FETCH
+Running 21 checks on your project...
+20/21 checks passed. 1 checks failed. Possible issues detected:
+Use the --verbose flag to see more details about passed checks.
+
+✖ Check that required peer dependencies are installed
+Missing peer dependency: react-native-worklets
+Required by: react-native-executorch
+Advice:
+Install missing required peer dependency with "npx expo install react-native-worklets"
+Your app may crash outside of Expo Go without this dependency. Native module peer dependencies must be installed directly.
+
+1 check failed, indicating possible issues with the project.
++ echo '=== tsc'
+=== tsc
++ npx tsc --noEmit
++ head -60
++ echo '=== jest'
+=== jest
++ npx jest --ci
++ grep -E '✕|Tests:|Test Suites:|FAIL|Cannot find'
++ head -40
+Test Suites: 26 passed, 26 total
+Tests:       189 passed, 189 total
++ true
+exit code: 0
