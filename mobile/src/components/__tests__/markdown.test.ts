@@ -1,4 +1,4 @@
-import { hasMarkdown, parseInline, parseMarkdown } from "../markdown";
+import { hasMarkdown, parseInline, parseMarkdown } from "../markdown-parse";
 
 test("bold, italic, code and links lose their markup", () => {
   expect(parseInline("Вы спрашивали: **«Сколько лет Де Ниро?»** — *примерно* `83`, [ЦБ](https://cbr.ru/)")).toEqual([

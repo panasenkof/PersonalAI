@@ -1,8 +1,8 @@
 import React from "react";
 import { Linking, Platform, Text } from "react-native";
 import type { TextStyle } from "react-native";
-import { hasMarkdown, parseMarkdown } from "./markdown";
-import type { Span } from "./markdown";
+import { hasMarkdown, parseMarkdown } from "./markdown-parse";
+import type { Span } from "./markdown-parse";
 import { useTheme } from "../theme";
 
 /** Renders a model answer as one selectable text: copying still takes it whole. */
