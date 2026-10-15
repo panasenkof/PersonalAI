@@ -156,6 +156,10 @@ export class DirectChatStore {
       modelStarted = true;
       const result = await this.runner({ settings, prompt, history, signal: aborter.signal, onText,
         lookup: query => searchApprovedNotes(this.profile, query),
+        notify: text => {
+          const c = this.snapshot.conversations.find(c => c.id === id);
+          if (c && !aborter.signal.aborted) this.update(id, { rows: [...c.rows, { id: Crypto.randomUUID(), role: "info", text }] }, true);
+        },
         status: progress => { stage = progress; if (!aborter.signal.aborted) this.update(id, { progress, progressSince: Date.now() }); },
         // "Запрос к LLM (1/4): подключаюсь к api.openai.com…" — the step and its network stage.
         phase: phase => {

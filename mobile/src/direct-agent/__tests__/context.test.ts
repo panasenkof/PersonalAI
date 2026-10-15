@@ -41,10 +41,23 @@ test("an unanswered search is cut off and reported instead of stalling the answe
   expect(context.webError).toContain("www.bing.com: ответ не завершился за 12 с");
   expect(Date.now() - started).toBeLessThan(13_500);
 }, 20_000);
-test("questions without a request for current information stay off the internet", async () => {
-  const transport = jest.fn();
-  for (const prompt of ["Расскажи про остров Пасхи", "Проверь текст письма", "Что ты помнишь обо мне?"]) {
-    await prepareDirectContext(options(prompt, jest.fn(async () => []), transport));
-  }
+test("memory comes first: the user hears it found nothing, then the web is searched", async () => {
+  const notify = jest.fn(); const order: string[] = [];
+  const lookup = jest.fn(async () => { order.push("memory"); return []; });
+  const transport = jest.fn(async () => { order.push("web"); return { ok: true, text: async () => rss }; });
+  await prepareDirectContext({ ...options("Расскажи про остров Пасхи", lookup, transport), notify });
+  expect(order).toEqual(["memory", "web"]);
+  expect(notify).toHaveBeenCalledWith("В памяти ничего не нашлось. Ищу в интернете.");
+});
+test("with web search off the user is told memory had nothing and why the web was not used", async () => {
+  const notify = jest.fn(); const transport = jest.fn();
+  await prepareDirectContext({ ...options("Расскажи про остров", jest.fn(async () => []), transport), settings: { ...defaults, allowWeb: false }, notify });
   expect(transport).not.toHaveBeenCalled();
+  expect(notify.mock.calls[0][0]).toContain("Интернет-поиск выключен");
+});
+test("questions about the user are answered from memory only", async () => {
+  const notify = jest.fn(); const transport = jest.fn();
+  await prepareDirectContext({ ...options("Что ты помнишь обо мне?", jest.fn(async () => []), transport), notify });
+  expect(transport).not.toHaveBeenCalled();
+  expect(notify.mock.calls[0][0]).toContain("Расскажите о себе");
 });

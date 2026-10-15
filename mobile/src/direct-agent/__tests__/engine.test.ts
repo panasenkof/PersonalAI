@@ -165,11 +165,25 @@ test("a failed web search never costs the answer: the model replies and the user
   expect(JSON.parse(response.mock.calls[0][1].body).system).toContain("свежие данные не проверены");
 });
 
-test("without an explicit request the web is not searched even when memory is empty", async () => {
+test("when memory has nothing the user is told and the web is searched", async () => {
+  const notify = jest.fn();
+  const response = jest.fn()
+    .mockResolvedValueOnce({ ok: true, status: 200, text: async () => '<rss><channel><item><title>Пасха</title><link>https://example.org/easter</link><description>Остров</description></item></channel></rss>' })
+    .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ content: [{ type: "text", text: "Ответ" }] }) });
+  await start({ provider: "anthropic", baseUrl: "https://api.anthropic.com/v1", allowWeb: true, searchProvider: "public" }, response, { prompt: "Расскажи про остров Пасхи", notify });
+  expect(notify).toHaveBeenCalledWith("В памяти ничего не нашлось. Ищу в интернете.");
+  expect(response.mock.calls[0][0]).toContain("bing.com/search");
+  expect(response.mock.calls[1][0]).toBe("https://api.anthropic.com/v1/messages");
+});
+
+test("an answer found in memory never goes to the web", async () => {
+  const notify = jest.fn();
   const response = jest.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ content: [{ type: "text", text: "Ответ" }] }) });
-  await start({ provider: "anthropic", baseUrl: "https://api.anthropic.com/v1", allowWeb: true, searchProvider: "public" }, response, { prompt: "Расскажи про остров Пасхи" });
+  await start({ provider: "anthropic", baseUrl: "https://api.anthropic.com/v1", allowWeb: true, searchProvider: "public" }, response,
+    { prompt: "Где машина сестры?", notify, lookup: jest.fn().mockResolvedValue([{ id: "n", title: "Машина", body: "Продана" }]) });
   expect(response).toHaveBeenCalledTimes(1);
   expect(response.mock.calls[0][0]).toBe("https://api.anthropic.com/v1/messages");
+  expect(notify).not.toHaveBeenCalled();
 });
 
 test("Tavily search sends its key as a bearer token and supplies citations", async () => {

@@ -145,7 +145,7 @@ export function DirectAgentSettingsScreen() {
             <Text style={{ color: t.text, flex: 1 }}>Искать в интернете</Text>
             <Switch disabled={busy} accessibilityLabel="Разрешить веб-поиск" value={selected.allowWeb} onValueChange={allowWeb => update({ allowWeb })} />
           </View>
-          <Text style={{ color: t.muted, fontSize: 12 }}>Ассистент ищет в интернете только когда вы просите: «найди в интернете», «новости», «сегодня», «актуальный курс». Иначе отвечает по памяти и своим знаниям.</Text>
+          <Text style={{ color: t.muted, fontSize: 12 }}>Сначала помощник ищет в памяти телефона. Если там ничего нет — сообщает об этом и ищет в интернете. Каждый поиск тратит запрос у выбранного сервиса (у Tavily — 1 из 1000 бесплатных в месяц).</Text>
           {selected.allowWeb ? <>
           {([
             ["tavily", "Tavily — бесплатно 1000 поисков в месяц, нужен ключ"], ["public", "Без регистрации (Bing)"], ["brave", "Brave Search API"],

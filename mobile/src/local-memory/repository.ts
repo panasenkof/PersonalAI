@@ -332,7 +332,10 @@ export class SqliteMemoryRepository implements MemoryRepository {
     }));
   }
 
-  async searchNotes(query: string, limit = 50, offset = 0, filters: { collectionId?: string; status?: "active" | "archived" } = {}): Promise<EntityRecord[]> {
+  /** `prefix` matches words that start with the query (a word stem without its
+   * ending), so «машин» finds «машина», «машину» and «машиной». Results with a
+   * query are ranked by relevance (bm25), then by date. */
+  async searchNotes(query: string, limit = 50, offset = 0, filters: { collectionId?: string; status?: "active" | "archived"; prefix?: boolean } = {}): Promise<EntityRecord[]> {
     const count = Math.min(100, Math.max(1, Math.trunc(limit)));
     const start = Math.max(0, Math.trunc(offset));
     const term = query.trim();
@@ -340,14 +343,14 @@ export class SqliteMemoryRepository implements MemoryRepository {
     if (status !== "active" && status !== "archived") throw new Error("invalid_record_status");
     // FTS5 MATCH accepts an entire quoted phrase: escape embedded quotes to
     // avoid treating user input as operators or exposing query syntax errors.
-    const phrase = '"' + term.replace(/"/g, '""') + '"';
+    const phrase = '"' + term.replace(/"/g, '""') + '"' + (filters.prefix ? "*" : "");
     const rows = await this.db.getAllAsync<Row>(
       `SELECT e.* FROM memory_entities e
        ${term ? "JOIN memory_notes_fts f ON f.entity_id=e.id" : ""}
        WHERE e.domain='notes' AND e.record_status=?
        ${filters.collectionId ? "AND e.collection_id=?" : ""}
        ${term ? "AND memory_notes_fts MATCH ?" : ""}
-       ORDER BY e.updated_at DESC, e.id LIMIT ? OFFSET ?`,
+       ORDER BY ${term ? "bm25(memory_notes_fts), " : ""}e.updated_at DESC, e.id LIMIT ? OFFSET ?`,
       [status, ...(filters.collectionId ? [filters.collectionId] : []), ...(term ? [phrase] : []), count, start],
     );
     return rows.map(entityFrom);

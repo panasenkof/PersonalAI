@@ -128,3 +128,22 @@ test("moving private inherited records to an ordinary section does not change th
   expect(moved.collection_id).toBe(ordinary.id); expect(moved.sensitivity).toBe("secret");
   expect((await repo.entity(note.id))?.sensitivity).toBe("secret");
 });
+
+test("memory finds other Russian word forms and ranks the best match first", async () => {
+  const { searchApprovedNotes, wordStem } = require("../../direct-agent/memory");
+  const repo = new SqliteMemoryRepository(new FakeSqlite() as never);
+  const people = await repo.createCollection({ name: "Люди", slug: "people", sensitivity: "standard" });
+  const docs = await repo.createCollection({ name: "Документы", slug: "documents", sensitivity: "sensitive" });
+  const add = (collection_id: string, title: string, body: string) => repo.createEntity({ collection_id, domain: "notes", title, payload: { type: "note", title, body }, sensitivity: "standard" });
+  await add(people.id, "Машина", "Сестра Аня продала машину в мае");
+  await add(people.id, "Аня", "Сестра, любит кофе и машины");
+  await add(people.id, "Отпуск", "Поездка в Казань");
+  await add(docs.id, "ОСАГО", "Полис на машину до мая");
+  expect(wordStem("машину")).toBe("машин");
+  expect(wordStem("сестры")).toBe("сестр");
+  const found = await searchApprovedNotes("guest", "Где машина сестры?", repo);
+  expect(found.map((n: any) => n.title)).toEqual(["Машина", "Аня"]);
+  expect(found[0].section).toBe("Люди");
+  expect(found.some((n: any) => n.title === "ОСАГО")).toBe(false);
+  expect(await searchApprovedNotes("guest", "Что с самолётом?", repo)).toEqual([]);
+});

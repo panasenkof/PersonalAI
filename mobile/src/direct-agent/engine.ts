@@ -23,6 +23,8 @@ export type DirectAgentOptions = {
   transport?: typeof fetch;
   /** Receives the growing answer text while the model streams it. */
   onText?: (text: string) => void;
+  /** A message for the user shown in the chat right away, e.g. "nothing in memory, searching the web". */
+  notify?: (text: string) => void;
   /** Network stage of the current model call, for the progress line. */
   phase?: (phase: Phase) => void;
   /** Test hook: a fake XMLHttpRequest for the streaming path. */

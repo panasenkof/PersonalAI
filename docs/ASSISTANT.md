@@ -39,12 +39,24 @@ fold the events back into the provider's normal JSON reply.
 
 ## Memory first, internet when needed
 
-Every turn searches ordinary memory **before** calling the LLM/search. There is no
-separate memory permission or unlock. Internet search starts off.
-Only active standard notes from standard collections may be passed to the model;
-unclassified, sensitive and secret notes remain excluded. At most five bounded
-fragments are sent. A match avoids web search unless the user asks for current
-information. Per-message “не используй интернет” also disables web access.
+Every turn follows the same order:
+
+1. **Memory, every way it can be searched:** the whole phrase, each keyword,
+   then each keyword without its Russian ending as a prefix («машину» finds
+   «машина», «машины»). Notes matched by more of these searches rank first;
+   results are ordered by relevance (bm25). At most five fragments, only from
+   active notes in standard sections, are passed to the model.
+2. **If memory has nothing, the user is told so in the chat** — «В памяти ничего
+   не нашлось. Ищу в интернете.» — and the web is searched (when web search is on
+   for the connection). With web search off, or after «не используй интернет»,
+   the message says why the web was not used.
+3. **If memory has an answer, the web is not used**, unless the question asks for
+   current information («сегодня», «новости», «актуальный курс»…).
+
+Questions about the user themselves («что ты помнишь обо мне») are answered from
+memory only. A failed search never ends the turn: the model answers without it
+and the chat shows the exact reason. Unclassified, sensitive and secret notes
+never leave the phone.
 
 Search choices:
 - **Without registration:** public Bing RSS; no separate account or API key.
