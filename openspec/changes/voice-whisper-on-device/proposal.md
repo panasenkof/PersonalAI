@@ -5,7 +5,7 @@
 
 ## What Changes
 - Распознавание речи `react-native-executorch` (`useSpeechToText`), многоязычный Whisper с `language: "ru"`, потоковый режим: текст появляется по ходу речи ([документация](https://docs.swmansion.com/react-native-executorch/docs/hooks/natural-language-processing/useSpeechToText)).
-- Модель по умолчанию — `whisper-base`, вариант Android `xnnpack int8` (около 267 МБ). По выбору — `whisper-small` `xnnpack int8` (около 535 МБ), точнее и медленнее ([файлы моделей](https://huggingface.co/software-mansion/react-native-executorch-whisper-base)). Окончательный выбор — по замеру на телефоне.
+- Модель по умолчанию — многоязычный `whisper-base`, на Android вариант XNNPACK fp32 (около 400 МБ), на iOS Core ML. По выбору — `whisper-tiny` (около 150 МБ), быстрее, но ошибается чаще. Многоязычных int8-вариантов в каталоге библиотеки 0.10 нет; `whisper-small` (около 1,1 ГБ) слишком велик. Окончательный выбор — по замеру на телефоне.
 - Модель скачивается один раз по запросу пользователя, с прогрессом и предупреждением о размере; хранится в папке приложения, удаляется в настройках.
 - Звук с микрофона 16 кГц через `react-native-audio-api`.
 - Порядок выбора: своя модель, если скачана → системная служба Google (с согласием) → понятное сообщение, что скачать модель.

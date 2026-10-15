@@ -55,4 +55,14 @@ export const withLocalMemoryDatabase = async () => { throw new Error("Native SQL
 
 export const copyAsync = async () => {};
 export const writeAsStringAsync = async () => {};
+
+// react-native-executorch, react-native-audio-api, react-native-blob-util: on-device
+// Whisper is unsupported on the web, so these are never called in the browser check.
+export const models = { speechToText: { WHISPER: {} } };
+export const setTelemetryEnabled = () => {};
+export const download = async (config: unknown) => config;
+export const createWhisperSpeechToText = async () => { throw new Error("Whisper is not available on the web"); };
+export const AudioManager = { requestRecordingPermissions: async () => "Denied", setAudioSessionOptions() {} };
+export class AudioRecorder { onAudioReady() {} clearOnAudioReady() {} async start() { return { status: "error", message: "web" }; } async stop() {} }
+export const fs = { unlink: async () => {} };
 export class AsyncLocalStorage<T> { getStore(): T | undefined { return undefined; } run<R>(_store: T, fn: () => R): R { return fn(); } }
