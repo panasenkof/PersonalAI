@@ -7,30 +7,34 @@ npm warn deprecated domexception@4.0.0: Use your platform's native DOMException 
 npm warn deprecated abab@2.0.6: Use your platform's native atob() and btoa() methods instead
 npm warn deprecated uuid@7.0.3: uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).
 
-added 849 packages in 18s
-+ echo '=== tsc'
-=== tsc
-+ npx tsc --noEmit
-+ head -60
-+ echo '=== jest'
-=== jest
-+ npx jest --ci
-+ grep -E '✕|Tests:|Test Suites:|FAIL'
-+ head -40
-Test Suites: 28 passed, 28 total
-Tests:       196 passed, 196 total
-+ echo '=== whisper ui'
-=== whisper ui
-+ npx jest --ci src/__tests__/voice-whisper.test.tsx
-+ tail -30
-PASS src/__tests__/voice-whisper.test.tsx
-  ✓ with the model downloaded, dictation goes through Whisper on the phone and never the system service (80 ms)
-  ✓ without Google and without the model the error points to the on-device model (4 ms)
+added 849 packages in 19s
++ npx playwright install --with-deps chromium
++ echo '=== ui'
+=== ui
++ node scripts/verify-mobile-ui.cjs
++ tail -60
+✘ [ERROR] Could not resolve "node:async_hooks"
 
-Test Suites: 1 passed, 1 total
-Tests:       2 passed, 2 total
-Snapshots:   0 total
-Time:        0.513 s, estimated 1 s
-Ran all test suites matching /src\/__tests__\/voice-whisper.test.tsx/i.
+    node_modules/expo-font/build/serverContext.web.js:1:34:
+      1 │ import { AsyncLocalStorage } from 'node:async_hooks';
+        ╵                                   ~~~~~~~~~~~~~~~~~~
+
+  The package "node:async_hooks" wasn't found on the file system but is built into node. Are you trying to bundle for node? You can use "platform: 'node'" to do that, which will remove this error.
+
+Error: Build failed with 1 error:
+node_modules/expo-font/build/serverContext.web.js:1:34: ERROR: Could not resolve "node:async_hooks"
+    at failureErrorWithLog (/home/runner/work/PersonalAI/PersonalAI/mobile/node_modules/esbuild/lib/main.js:1752:15)
+    at /home/runner/work/PersonalAI/PersonalAI/mobile/node_modules/esbuild/lib/main.js:1211:25
+    at runOnEndCallbacks (/home/runner/work/PersonalAI/PersonalAI/mobile/node_modules/esbuild/lib/main.js:1592:45)
+    at buildResponseToResult (/home/runner/work/PersonalAI/PersonalAI/mobile/node_modules/esbuild/lib/main.js:1209:7)
+    at /home/runner/work/PersonalAI/PersonalAI/mobile/node_modules/esbuild/lib/main.js:1236:16
+    at responseCallbacks.<computed> (/home/runner/work/PersonalAI/PersonalAI/mobile/node_modules/esbuild/lib/main.js:886:9)
+    at handleIncomingPacket (/home/runner/work/PersonalAI/PersonalAI/mobile/node_modules/esbuild/lib/main.js:941:12)
+    at Socket.readFromStdout (/home/runner/work/PersonalAI/PersonalAI/mobile/node_modules/esbuild/lib/main.js:864:7)
+    at Socket.emit (node:events:519:28)
+    at addChunk (node:internal/streams/readable:561:12) {
+  errors: [Getter/Setter],
+  warnings: [Getter/Setter]
+}
 + true
 exit code: 0
