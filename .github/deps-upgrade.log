@@ -7,44 +7,30 @@ npm warn deprecated domexception@4.0.0: Use your platform's native DOMException 
 npm warn deprecated abab@2.0.6: Use your platform's native atob() and btoa() methods instead
 npm warn deprecated uuid@7.0.3: uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).
 
-added 849 packages in 20s
+added 849 packages in 18s
 + echo '=== tsc'
 === tsc
 + npx tsc --noEmit
-+ head -80
++ head -60
 + echo '=== jest'
 === jest
 + npx jest --ci
-+ grep -E '✕|●|Tests:|Test Suites:|FAIL'
-+ head -60
-  ● Console
-Test Suites: 27 passed, 27 total
-Tests:       194 passed, 194 total
-+ echo '=== export'
-=== export
-+ npx expo export --platform android --output-dir /tmp/native-export
-+ tail -6
-_expo/static/js/android/AppEntry-9e522ba3556ec0ac43a79893aada3fba.hbc (3.4MB)
++ grep -E '✕|Tests:|Test Suites:|FAIL'
++ head -40
+Test Suites: 28 passed, 28 total
+Tests:       196 passed, 196 total
++ echo '=== whisper ui'
+=== whisper ui
++ npx jest --ci src/__tests__/voice-whisper.test.tsx
++ tail -30
+PASS src/__tests__/voice-whisper.test.tsx
+  ✓ with the model downloaded, dictation goes through Whisper on the phone and never the system service (80 ms)
+  ✓ without Google and without the model the error points to the on-device model (4 ms)
 
-› Files (1):
-metadata.json (1.6KB)
-
-Exported: /tmp/native-export
-+ echo '=== prebuild'
-=== prebuild
-+ npx expo prebuild --platform android --no-install --clean
-+ tail -4
-- Updating package.json
-✔ Updated package.json
-- Running prebuild
-✔ Finished prebuild
-+ grep -n 'minSdkVersion\|minSdk' android/gradle.properties android/build.gradle
-+ head
-android/gradle.properties:64:android.minSdkVersion=26
-+ grep -c usesCleartextTraffic android/app/src/main/AndroidManifest.xml
-1
-+ grep -n 'RECORD_AUDIO\|FOREGROUND' android/app/src/main/AndroidManifest.xml
-4:  <uses-permission android:name="android.permission.RECORD_AUDIO"/>
-+ rm -rf android
+Test Suites: 1 passed, 1 total
+Tests:       2 passed, 2 total
+Snapshots:   0 total
+Time:        0.513 s, estimated 1 s
+Ran all test suites matching /src\/__tests__\/voice-whisper.test.tsx/i.
 + true
 exit code: 0
