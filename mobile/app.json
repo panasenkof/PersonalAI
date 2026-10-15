@@ -29,13 +29,6 @@
         }
       ],
       [
-        "expo-image-picker",
-        {
-          "photosPermission": "Разрешите доступ к фото, чтобы отправлять чеки и документы агенту.",
-          "cameraPermission": "Разрешите доступ к камере, чтобы фотографировать чеки."
-        }
-      ],
-      [
         "expo-sqlite",
         {
           "enableFTS": true,
