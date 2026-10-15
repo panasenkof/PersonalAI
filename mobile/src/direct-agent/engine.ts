@@ -10,7 +10,8 @@ import type { MemorySnippet, NoteProposal } from "./memory";
 import { PROPOSABLE_SECTIONS, isSectionSlug, sectionGuide } from "../local-memory/sections";
 
 export type AgentTurn = { role: "user" | "assistant"; content: string };
-export type DirectResult = { text: string; sources: string[]; requests: number };
+/** `notice` is shown to the user before the answer, e.g. why web search failed. */
+export type DirectResult = { text: string; sources: string[]; requests: number; notice?: string };
 export type DirectAgentOptions = {
   settings: DirectAgentSettings;
   prompt: string;
@@ -161,7 +162,7 @@ export async function runDirectAgent(options: DirectAgentOptions): Promise<Direc
     if (data.status === "incomplete") {
       // Keep whatever the model managed to write instead of losing the answer.
       const partial = extractText(data);
-      if (partial) return { text: partial + TRUNCATED_NOTE, sources: [...new Set([...collected, ...collectSources(data.output)])].slice(0, 8), requests: attempt };
+      if (partial) return { text: partial + TRUNCATED_NOTE, sources: [...new Set([...collected, ...collectSources(data.output)])].slice(0, 8), requests: attempt, ...(web.webError ? { notice: "Интернет-поиск не удался — " + web.webError + " Ответ дан без интернета." } : {}) };
       throw new Error(data.incomplete_details?.reason === "max_output_tokens"
         ? "Модель израсходовала лимит ответа, не успев ответить. Уточните или сократите вопрос."
         : "Модель не закончила ответ. Повторите запрос.");
@@ -175,7 +176,7 @@ export async function runDirectAgent(options: DirectAgentOptions): Promise<Direc
     if (!calls.length) {
       const text = extractText(data);
       if (!text) throw new Error("Модель не вернула текст ответа");
-      return { text, sources: [...collected].slice(0, 8), requests: attempt };
+      return { text, sources: [...collected].slice(0, 8), requests: attempt, ...(web.webError ? { notice: "Интернет-поиск не удался — " + web.webError + " Ответ дан без интернета." } : {}) };
     }
     if (attempt === MAX_DIRECT_REQUESTS) {
       throw new Error("Достигнут лимит обращений к LLM за один вопрос");

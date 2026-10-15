@@ -145,18 +145,21 @@ export function DirectAgentSettingsScreen() {
             <Text style={{ color: t.text, flex: 1 }}>Искать в интернете</Text>
             <Switch disabled={busy} accessibilityLabel="Разрешить веб-поиск" value={selected.allowWeb} onValueChange={allowWeb => update({ allowWeb })} />
           </View>
-          <Text style={{ color: t.muted, fontSize: 12 }}>Сначала ассистент проверяет память. Интернет используется при отсутствии подходящих заметок или при запросе свежих данных.</Text>
+          <Text style={{ color: t.muted, fontSize: 12 }}>Ассистент ищет в интернете только когда вы просите: «найди в интернете», «новости», «сегодня», «актуальный курс». Иначе отвечает по памяти и своим знаниям.</Text>
           {selected.allowWeb ? <>
           {([
-            ["public", "Без регистрации (Bing)"], ["brave", "Brave Search API"],
+            ["tavily", "Tavily — бесплатно 1000 поисков в месяц, нужен ключ"], ["public", "Без регистрации (Bing)"], ["brave", "Brave Search API"],
             ...(selected.provider === "openai" ? [["builtin", "Встроенный поиск OpenAI"]] : []),
-          ] as Array<["public" | "brave" | "builtin", string]>).map(([id, name]) => (
+          ] as Array<["public" | "brave" | "tavily" | "builtin", string]>).map(([id, name]) => (
             <Pressable key={id} disabled={busy} accessibilityRole="button" accessibilityLabel={name}
               style={{ minHeight: 44, justifyContent: "center" }} onPress={() => update({ searchProvider: id })}>
               <Text style={{ color: selected.searchProvider === id ? t.accent : t.text }}>{selected.searchProvider === id ? "● " : "○ "}{name}</Text>
             </Pressable>
           ))}
-          {selected.searchProvider === "public" ? <Text style={{ color: t.muted, fontSize: 12 }}>Поисковая фраза отправляется Bing. Доступность и количество результатов зависят от сервиса.</Text> : null}
+          {selected.searchProvider === "public" ? <Text style={{ color: t.muted, fontSize: 12 }}>Поисковая фраза отправляется Bing. Из России он часто не отвечает; если поиск не удаётся, выберите Tavily.</Text> : null}
+          {selected.searchProvider === "tavily" ? <><Text style={{ color: t.muted, fontSize: 12 }}>Ключ — на tavily.com после регистрации (карта не нужна). Бесплатно 1000 поисков в месяц; поисковая фраза отправляется Tavily.</Text>
+            <TextInput editable={!busy} accessibilityLabel="Ключ Tavily" secureTextEntry autoCapitalize="none" autoCorrect={false}
+              value={selected.webSearchKey} onChangeText={webSearchKey => update({ webSearchKey })} placeholder="tvly-…" placeholderTextColor={t.muted} style={field} /></> : null}
           {selected.searchProvider === "brave" ? <TextInput editable={!busy} accessibilityLabel="Ключ Brave Search API" secureTextEntry autoCapitalize="none" autoCorrect={false}
             value={selected.webSearchKey} onChangeText={webSearchKey => update({ webSearchKey })} placeholder="Ключ поиска" placeholderTextColor={t.muted} style={field} /> : null}
           </> : null}

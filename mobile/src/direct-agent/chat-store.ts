@@ -171,7 +171,9 @@ export class DirectChatStore {
       const c = this.snapshot.conversations.find(c => c.id === id);
       if (!c || this.disposed) return;
       if (aborter.signal.aborted) throw new Error("aborted");
-      this.update(id, { rows: [...c.rows, { id: Crypto.randomUUID(), role: "assistant", text: result.text, sources: result.sources }],
+      this.update(id, { rows: [...c.rows,
+        ...(result.notice ? [{ id: Crypto.randomUUID(), role: "info" as const, text: result.notice }] : []),
+        { id: Crypto.randomUUID(), role: "assistant", text: result.text, sources: result.sources }],
         updatedAt: new Date().toISOString() });
     } catch (e) {
       const c = this.snapshot.conversations.find(c => c.id === id);

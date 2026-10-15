@@ -114,7 +114,7 @@ export async function runCompatibleAgent(options: DirectAgentOptions): Promise<D
       if (!calls.length) {
         const answer = blocks.filter(block => block.type === "text").map(block => safe(block.text, 24000)).join("\n").trim();
         if (!answer) throw new Error("Модель не вернула текст ответа");
-        return { text: answer + (data.stop_reason === "max_tokens" ? TRUNCATED_NOTE : ""), sources, requests: attempt };
+        return { text: answer + (data.stop_reason === "max_tokens" ? TRUNCATED_NOTE : ""), sources, requests: attempt, ...(search.webError ? { notice: "Интернет-поиск не удался — " + search.webError + " Ответ дан без интернета." } : {}) };
       }
       if (attempt === MAX_CALLS || calls.length > 5) throw new Error("Достигнут лимит обращений к LLM за один вопрос");
       messages.push({ role: "assistant", content: blocks });
@@ -133,7 +133,7 @@ export async function runCompatibleAgent(options: DirectAgentOptions): Promise<D
       if (!calls.length) {
         const answer = safe(message.content, 24000).trim();
         if (!answer) throw new Error("Модель не вернула текст ответа");
-        return { text: answer + (data.choices?.[0]?.finish_reason === "length" ? TRUNCATED_NOTE : ""), sources, requests: attempt };
+        return { text: answer + (data.choices?.[0]?.finish_reason === "length" ? TRUNCATED_NOTE : ""), sources, requests: attempt, ...(search.webError ? { notice: "Интернет-поиск не удался — " + search.webError + " Ответ дан без интернета." } : {}) };
       }
       if (attempt === MAX_CALLS || calls.length > 5) throw new Error("Достигнут лимит обращений к LLM за один вопрос");
       messages.push({ role: "assistant", content: message.content ?? null, tool_calls: calls });
