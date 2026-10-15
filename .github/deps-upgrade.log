@@ -1,60 +1,446 @@
 + cd mobile
-+ npx expo install expo-font expo-splash-screen
++ npx expo install expo-modules-core
 npm warn exec The following package was not found and will be installed: expo@57.0.30
 npm warn deprecated uuid@7.0.3: uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).
 env: load .env.development
 env: export EXPO_PUBLIC_USE_RN_FETCH
 ConfigError: Cannot determine the project's Expo SDK version because the module `expo` is not installed. Install it with `npm install expo` and try again.
-+ npm install --no-audit --no-fund -D @types/node@22
+++ node -p 'require("react-native/package.json").version'
+node:internal/modules/cjs/loader:1433
+  throw err;
+  ^
+
+Error: Cannot find module 'react-native/package.json'
+Require stack:
+- /home/runner/work/PersonalAI/PersonalAI/mobile/[eval]
+    at Function._resolveFilename (node:internal/modules/cjs/loader:1430:15)
+    at defaultResolveImpl (node:internal/modules/cjs/loader:1040:19)
+    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1045:22)
+    at Function._load (node:internal/modules/cjs/loader:1216:25)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:254:19)
+    at Module.require (node:internal/modules/cjs/loader:1527:12)
+    at require (node:internal/modules/helpers:147:16)
+    at [eval]:1:1
+    at runScriptInThisContext (node:internal/vm:209:10)
+    at node:internal/process/execution:446:12 {
+  code: 'MODULE_NOT_FOUND',
+  requireStack: [ '/home/runner/work/PersonalAI/PersonalAI/mobile/[eval]' ]
+}
+
+Node.js v22.23.3
++ npm install --no-audit --no-fund -D @react-native/jest-preset@
+npm warn ERESOLVE overriding peer dependency
+npm warn While resolving: pia-mobile@0.3.0
+npm warn Found: @react-native/jest-preset@0.86.3
+npm warn node_modules/@react-native/jest-preset
+npm warn   peer @react-native/jest-preset@"^0.86.3" from jest-expo@57.0.6
+npm warn   node_modules/jest-expo
+npm warn     dev jest-expo@"~57.0.6" from the root project
+npm warn   2 more (react-native, the root project)
+npm warn
+npm warn Could not resolve dependency:
+npm warn peer @react-native/jest-preset@"^0.86.3" from jest-expo@57.0.6
+npm warn node_modules/jest-expo
+npm warn   dev jest-expo@"~57.0.6" from the root project
+npm warn ERESOLVE overriding peer dependency
+npm warn While resolving: pia-mobile@0.3.0
+npm warn Found: @react-native/jest-preset@0.86.3
+npm warn node_modules/@react-native/jest-preset
+npm warn   peer @react-native/jest-preset@"^0.86.3" from jest-expo@57.0.6
+npm warn   node_modules/jest-expo
+npm warn     dev jest-expo@"~57.0.6" from the root project
+npm warn   2 more (react-native, the root project)
+npm warn
+npm warn Could not resolve dependency:
+npm warn peerOptional @react-native/jest-preset@"0.86.3" from react-native@0.86.3
+npm warn node_modules/react-native
+npm warn   peerOptional react-native@"*" from @expo/devtools@57.0.1
+npm warn   node_modules/@expo/devtools
+npm warn   29 more (@expo/dom-webview, @expo/log-box, @expo/metro-runtime, ...)
+npm warn ERESOLVE overriding peer dependency
+npm warn While resolving: pia-mobile@0.3.0
+npm warn Found: @react-native/jest-preset@0.86.3
+npm warn node_modules/@react-native/jest-preset
+npm warn   peer @react-native/jest-preset@"^0.86.3" from jest-expo@57.0.6
+npm warn   node_modules/jest-expo
+npm warn     dev jest-expo@"~57.0.6" from the root project
+npm warn   2 more (react-native, the root project)
+npm warn
+npm warn Could not resolve dependency:
+npm warn peerOptional @react-native/jest-preset@"0.86.3" from react-native@0.86.3
+npm warn node_modules/react-native
+npm warn   peerOptional react-native@"*" from @expo/devtools@57.0.1
+npm warn   node_modules/@expo/devtools
+npm warn   29 more (@expo/dom-webview, @expo/log-box, @expo/metro-runtime, ...)
+npm warn ERESOLVE overriding peer dependency
+npm warn While resolving: pia-mobile@0.3.0
+npm warn Found: @react-native/jest-preset@0.86.3
+npm warn node_modules/@react-native/jest-preset
+npm warn   peer @react-native/jest-preset@"^0.86.3" from jest-expo@57.0.6
+npm warn   node_modules/jest-expo
+npm warn     dev jest-expo@"~57.0.6" from the root project
+npm warn   2 more (react-native, the root project)
+npm warn
+npm warn Could not resolve dependency:
+npm warn peerOptional @react-native/jest-preset@"0.86.3" from react-native@0.86.3
+npm warn node_modules/react-native
+npm warn   peerOptional react-native@"*" from @expo/devtools@57.0.1
+npm warn   node_modules/@expo/devtools
+npm warn   29 more (@expo/dom-webview, @expo/log-box, @expo/metro-runtime, ...)
+npm warn ERESOLVE overriding peer dependency
+npm warn While resolving: pia-mobile@0.3.0
+npm warn Found: @react-native/jest-preset@0.86.3
+npm warn node_modules/@react-native/jest-preset
+npm warn   peer @react-native/jest-preset@"^0.86.3" from jest-expo@57.0.6
+npm warn   node_modules/jest-expo
+npm warn     dev jest-expo@"~57.0.6" from the root project
+npm warn   2 more (react-native, the root project)
+npm warn
+npm warn Could not resolve dependency:
+npm warn peerOptional @react-native/jest-preset@"0.86.3" from react-native@0.86.3
+npm warn node_modules/react-native
+npm warn   peerOptional react-native@"*" from @expo/devtools@57.0.1
+npm warn   node_modules/@expo/devtools
+npm warn   29 more (@expo/dom-webview, @expo/log-box, @expo/metro-runtime, ...)
+npm warn ERESOLVE overriding peer dependency
+npm warn While resolving: pia-mobile@0.3.0
+npm warn Found: @react-native/jest-preset@0.86.3
+npm warn node_modules/@react-native/jest-preset
+npm warn   peer @react-native/jest-preset@"^0.86.3" from jest-expo@57.0.6
+npm warn   node_modules/jest-expo
+npm warn     dev jest-expo@"~57.0.6" from the root project
+npm warn   2 more (react-native, the root project)
+npm warn
+npm warn Could not resolve dependency:
+npm warn peerOptional @react-native/jest-preset@"0.86.3" from react-native@0.86.3
+npm warn node_modules/react-native
+npm warn   peerOptional react-native@"*" from @expo/devtools@57.0.1
+npm warn   node_modules/@expo/devtools
+npm warn   29 more (@expo/dom-webview, @expo/log-box, @expo/metro-runtime, ...)
+npm warn ERESOLVE overriding peer dependency
+npm warn While resolving: pia-mobile@0.3.0
+npm warn Found: @react-native/jest-preset@0.86.3
+npm warn node_modules/@react-native/jest-preset
+npm warn   peer @react-native/jest-preset@"^0.86.3" from jest-expo@57.0.6
+npm warn   node_modules/jest-expo
+npm warn     dev jest-expo@"~57.0.6" from the root project
+npm warn   2 more (react-native, the root project)
+npm warn
+npm warn Could not resolve dependency:
+npm warn peerOptional @react-native/jest-preset@"0.86.3" from react-native@0.86.3
+npm warn node_modules/react-native
+npm warn   peerOptional react-native@"*" from @expo/devtools@57.0.1
+npm warn   node_modules/@expo/devtools
+npm warn   29 more (@expo/dom-webview, @expo/log-box, @expo/metro-runtime, ...)
+npm warn ERESOLVE overriding peer dependency
+npm warn While resolving: pia-mobile@0.3.0
+npm warn Found: @react-native/jest-preset@0.86.3
+npm warn node_modules/@react-native/jest-preset
+npm warn   peer @react-native/jest-preset@"^0.86.3" from jest-expo@57.0.6
+npm warn   node_modules/jest-expo
+npm warn     dev jest-expo@"~57.0.6" from the root project
+npm warn   2 more (react-native, the root project)
+npm warn
+npm warn Could not resolve dependency:
+npm warn peerOptional @react-native/jest-preset@"0.86.3" from react-native@0.86.3
+npm warn node_modules/react-native
+npm warn   peerOptional react-native@"*" from @expo/devtools@57.0.1
+npm warn   node_modules/@expo/devtools
+npm warn   29 more (@expo/dom-webview, @expo/log-box, @expo/metro-runtime, ...)
+npm warn ERESOLVE overriding peer dependency
+npm warn While resolving: pia-mobile@0.3.0
+npm warn Found: @react-native/jest-preset@0.86.3
+npm warn node_modules/@react-native/jest-preset
+npm warn   peer @react-native/jest-preset@"^0.86.3" from jest-expo@57.0.6
+npm warn   node_modules/jest-expo
+npm warn     dev jest-expo@"~57.0.6" from the root project
+npm warn   2 more (react-native, the root project)
+npm warn
+npm warn Could not resolve dependency:
+npm warn peerOptional @react-native/jest-preset@"0.86.3" from react-native@0.86.3
+npm warn node_modules/react-native
+npm warn   peerOptional react-native@"*" from @expo/devtools@57.0.1
+npm warn   node_modules/@expo/devtools
+npm warn   29 more (@expo/dom-webview, @expo/log-box, @expo/metro-runtime, ...)
+npm warn ERESOLVE overriding peer dependency
+npm warn While resolving: pia-mobile@0.3.0
+npm warn Found: @react-native/jest-preset@0.86.3
+npm warn node_modules/@react-native/jest-preset
+npm warn   peer @react-native/jest-preset@"^0.86.3" from jest-expo@57.0.6
+npm warn   node_modules/jest-expo
+npm warn     dev jest-expo@"~57.0.6" from the root project
+npm warn   2 more (react-native, the root project)
+npm warn
+npm warn Could not resolve dependency:
+npm warn peerOptional @react-native/jest-preset@"0.86.3" from react-native@0.86.3
+npm warn node_modules/react-native
+npm warn   peerOptional react-native@"*" from @expo/devtools@57.0.1
+npm warn   node_modules/@expo/devtools
+npm warn   29 more (@expo/dom-webview, @expo/log-box, @expo/metro-runtime, ...)
+npm warn ERESOLVE overriding peer dependency
+npm warn While resolving: pia-mobile@0.3.0
+npm warn Found: @react-native/jest-preset@0.86.3
+npm warn node_modules/@react-native/jest-preset
+npm warn   peer @react-native/jest-preset@"^0.86.3" from jest-expo@57.0.6
+npm warn   node_modules/jest-expo
+npm warn     dev jest-expo@"~57.0.6" from the root project
+npm warn   2 more (react-native, the root project)
+npm warn
+npm warn Could not resolve dependency:
+npm warn peerOptional @react-native/jest-preset@"0.86.3" from react-native@0.86.3
+npm warn node_modules/react-native
+npm warn   peerOptional react-native@"*" from @expo/devtools@57.0.1
+npm warn   node_modules/@expo/devtools
+npm warn   29 more (@expo/dom-webview, @expo/log-box, @expo/metro-runtime, ...)
+npm warn ERESOLVE overriding peer dependency
+npm warn While resolving: pia-mobile@0.3.0
+npm warn Found: @react-native/jest-preset@0.86.3
+npm warn node_modules/@react-native/jest-preset
+npm warn   peer @react-native/jest-preset@"^0.86.3" from jest-expo@57.0.6
+npm warn   node_modules/jest-expo
+npm warn     dev jest-expo@"~57.0.6" from the root project
+npm warn   2 more (react-native, the root project)
+npm warn
+npm warn Could not resolve dependency:
+npm warn peerOptional @react-native/jest-preset@"0.86.3" from react-native@0.86.3
+npm warn node_modules/react-native
+npm warn   peerOptional react-native@"*" from @expo/devtools@57.0.1
+npm warn   node_modules/@expo/devtools
+npm warn   29 more (@expo/dom-webview, @expo/log-box, @expo/metro-runtime, ...)
+npm warn ERESOLVE overriding peer dependency
+npm warn While resolving: pia-mobile@0.3.0
+npm warn Found: @react-native/jest-preset@0.86.3
+npm warn node_modules/@react-native/jest-preset
+npm warn   peer @react-native/jest-preset@"^0.86.3" from jest-expo@57.0.6
+npm warn   node_modules/jest-expo
+npm warn     dev jest-expo@"~57.0.6" from the root project
+npm warn   2 more (react-native, the root project)
+npm warn
+npm warn Could not resolve dependency:
+npm warn peerOptional @react-native/jest-preset@"0.86.3" from react-native@0.86.3
+npm warn node_modules/react-native
+npm warn   peerOptional react-native@"*" from @expo/devtools@57.0.1
+npm warn   node_modules/@expo/devtools
+npm warn   29 more (@expo/dom-webview, @expo/log-box, @expo/metro-runtime, ...)
+npm warn ERESOLVE overriding peer dependency
+npm warn While resolving: pia-mobile@0.3.0
+npm warn Found: @react-native/jest-preset@0.86.3
+npm warn node_modules/@react-native/jest-preset
+npm warn   peer @react-native/jest-preset@"^0.86.3" from jest-expo@57.0.6
+npm warn   node_modules/jest-expo
+npm warn     dev jest-expo@"~57.0.6" from the root project
+npm warn   2 more (react-native, the root project)
+npm warn
+npm warn Could not resolve dependency:
+npm warn peerOptional @react-native/jest-preset@"0.86.3" from react-native@0.86.3
+npm warn node_modules/react-native
+npm warn   peerOptional react-native@"*" from @expo/devtools@57.0.1
+npm warn   node_modules/@expo/devtools
+npm warn   29 more (@expo/dom-webview, @expo/log-box, @expo/metro-runtime, ...)
+npm warn ERESOLVE overriding peer dependency
+npm warn While resolving: pia-mobile@0.3.0
+npm warn Found: @react-native/jest-preset@0.86.3
+npm warn node_modules/@react-native/jest-preset
+npm warn   peer @react-native/jest-preset@"^0.86.3" from jest-expo@57.0.6
+npm warn   node_modules/jest-expo
+npm warn     dev jest-expo@"~57.0.6" from the root project
+npm warn   2 more (react-native, the root project)
+npm warn
+npm warn Could not resolve dependency:
+npm warn peerOptional @react-native/jest-preset@"0.86.3" from react-native@0.86.3
+npm warn node_modules/react-native
+npm warn   peerOptional react-native@"*" from @expo/devtools@57.0.1
+npm warn   node_modules/@expo/devtools
+npm warn   29 more (@expo/dom-webview, @expo/log-box, @expo/metro-runtime, ...)
+npm warn ERESOLVE overriding peer dependency
+npm warn While resolving: pia-mobile@0.3.0
+npm warn Found: @react-native/jest-preset@0.86.3
+npm warn node_modules/@react-native/jest-preset
+npm warn   peer @react-native/jest-preset@"^0.86.3" from jest-expo@57.0.6
+npm warn   node_modules/jest-expo
+npm warn     dev jest-expo@"~57.0.6" from the root project
+npm warn   2 more (react-native, the root project)
+npm warn
+npm warn Could not resolve dependency:
+npm warn peerOptional @react-native/jest-preset@"0.86.3" from react-native@0.86.3
+npm warn node_modules/react-native
+npm warn   peerOptional react-native@"*" from @expo/devtools@57.0.1
+npm warn   node_modules/@expo/devtools
+npm warn   29 more (@expo/dom-webview, @expo/log-box, @expo/metro-runtime, ...)
+npm warn ERESOLVE overriding peer dependency
+npm warn While resolving: pia-mobile@0.3.0
+npm warn Found: @react-native/jest-preset@0.86.3
+npm warn node_modules/@react-native/jest-preset
+npm warn   peer @react-native/jest-preset@"^0.86.3" from jest-expo@57.0.6
+npm warn   node_modules/jest-expo
+npm warn     dev jest-expo@"~57.0.6" from the root project
+npm warn   2 more (react-native, the root project)
+npm warn
+npm warn Could not resolve dependency:
+npm warn peerOptional @react-native/jest-preset@"0.86.3" from react-native@0.86.3
+npm warn node_modules/react-native
+npm warn   peerOptional react-native@"*" from @expo/devtools@57.0.1
+npm warn   node_modules/@expo/devtools
+npm warn   29 more (@expo/dom-webview, @expo/log-box, @expo/metro-runtime, ...)
+npm warn ERESOLVE overriding peer dependency
+npm warn While resolving: pia-mobile@0.3.0
+npm warn Found: @react-native/jest-preset@0.86.3
+npm warn node_modules/@react-native/jest-preset
+npm warn   peer @react-native/jest-preset@"^0.86.3" from jest-expo@57.0.6
+npm warn   node_modules/jest-expo
+npm warn     dev jest-expo@"~57.0.6" from the root project
+npm warn   2 more (react-native, the root project)
+npm warn
+npm warn Could not resolve dependency:
+npm warn peerOptional @react-native/jest-preset@"0.86.3" from react-native@0.86.3
+npm warn node_modules/react-native
+npm warn   peerOptional react-native@"*" from @expo/devtools@57.0.1
+npm warn   node_modules/@expo/devtools
+npm warn   29 more (@expo/dom-webview, @expo/log-box, @expo/metro-runtime, ...)
+npm warn ERESOLVE overriding peer dependency
+npm warn While resolving: pia-mobile@0.3.0
+npm warn Found: @react-native/jest-preset@0.86.3
+npm warn node_modules/@react-native/jest-preset
+npm warn   peer @react-native/jest-preset@"^0.86.3" from jest-expo@57.0.6
+npm warn   node_modules/jest-expo
+npm warn     dev jest-expo@"~57.0.6" from the root project
+npm warn   2 more (react-native, the root project)
+npm warn
+npm warn Could not resolve dependency:
+npm warn peerOptional @react-native/jest-preset@"0.86.3" from react-native@0.86.3
+npm warn node_modules/react-native
+npm warn   peerOptional react-native@"*" from @expo/devtools@57.0.1
+npm warn   node_modules/@expo/devtools
+npm warn   29 more (@expo/dom-webview, @expo/log-box, @expo/metro-runtime, ...)
+npm warn ERESOLVE overriding peer dependency
+npm warn While resolving: pia-mobile@0.3.0
+npm warn Found: @react-native/jest-preset@0.86.3
+npm warn node_modules/@react-native/jest-preset
+npm warn   peer @react-native/jest-preset@"^0.86.3" from jest-expo@57.0.6
+npm warn   node_modules/jest-expo
+npm warn     dev jest-expo@"~57.0.6" from the root project
+npm warn   2 more (react-native, the root project)
+npm warn
+npm warn Could not resolve dependency:
+npm warn peerOptional @react-native/jest-preset@"0.86.3" from react-native@0.86.3
+npm warn node_modules/react-native
+npm warn   peerOptional react-native@"*" from @expo/devtools@57.0.1
+npm warn   node_modules/@expo/devtools
+npm warn   29 more (@expo/dom-webview, @expo/log-box, @expo/metro-runtime, ...)
+npm warn ERESOLVE overriding peer dependency
+npm warn While resolving: pia-mobile@0.3.0
+npm warn Found: @react-native/jest-preset@0.86.3
+npm warn node_modules/@react-native/jest-preset
+npm warn   peer @react-native/jest-preset@"^0.86.3" from jest-expo@57.0.6
+npm warn   node_modules/jest-expo
+npm warn     dev jest-expo@"~57.0.6" from the root project
+npm warn   2 more (react-native, the root project)
+npm warn
+npm warn Could not resolve dependency:
+npm warn peerOptional @react-native/jest-preset@"0.86.3" from react-native@0.86.3
+npm warn node_modules/react-native
+npm warn   peerOptional react-native@"*" from @expo/devtools@57.0.1
+npm warn   node_modules/@expo/devtools
+npm warn   29 more (@expo/dom-webview, @expo/log-box, @expo/metro-runtime, ...)
+npm warn ERESOLVE overriding peer dependency
+npm warn While resolving: pia-mobile@0.3.0
+npm warn Found: @react-native/jest-preset@0.86.3
+npm warn node_modules/@react-native/jest-preset
+npm warn   peer @react-native/jest-preset@"^0.86.3" from jest-expo@57.0.6
+npm warn   node_modules/jest-expo
+npm warn     dev jest-expo@"~57.0.6" from the root project
+npm warn   2 more (react-native, the root project)
+npm warn
+npm warn Could not resolve dependency:
+npm warn peerOptional @react-native/jest-preset@"0.86.3" from react-native@0.86.3
+npm warn node_modules/react-native
+npm warn   peerOptional react-native@"*" from @expo/devtools@57.0.1
+npm warn   node_modules/@expo/devtools
+npm warn   29 more (@expo/dom-webview, @expo/log-box, @expo/metro-runtime, ...)
+npm warn ERESOLVE overriding peer dependency
+npm warn While resolving: pia-mobile@0.3.0
+npm warn Found: @react-native/jest-preset@0.86.3
+npm warn node_modules/@react-native/jest-preset
+npm warn   peer @react-native/jest-preset@"^0.86.3" from jest-expo@57.0.6
+npm warn   node_modules/jest-expo
+npm warn     dev jest-expo@"~57.0.6" from the root project
+npm warn   2 more (react-native, the root project)
+npm warn
+npm warn Could not resolve dependency:
+npm warn peerOptional @react-native/jest-preset@"0.86.3" from react-native@0.86.3
+npm warn node_modules/react-native
+npm warn   peerOptional react-native@"*" from @expo/devtools@57.0.1
+npm warn   node_modules/@expo/devtools
+npm warn   29 more (@expo/dom-webview, @expo/log-box, @expo/metro-runtime, ...)
+npm warn ERESOLVE overriding peer dependency
+npm warn While resolving: pia-mobile@0.3.0
+npm warn Found: @react-native/jest-preset@0.86.3
+npm warn node_modules/@react-native/jest-preset
+npm warn   peer @react-native/jest-preset@"^0.86.3" from jest-expo@57.0.6
+npm warn   node_modules/jest-expo
+npm warn     dev jest-expo@"~57.0.6" from the root project
+npm warn   2 more (react-native, the root project)
+npm warn
+npm warn Could not resolve dependency:
+npm warn peerOptional @react-native/jest-preset@"0.86.3" from react-native@0.86.3
+npm warn node_modules/react-native
+npm warn   peerOptional react-native@"*" from @expo/devtools@57.0.1
+npm warn   node_modules/@expo/devtools
+npm warn   29 more (@expo/dom-webview, @expo/log-box, @expo/metro-runtime, ...)
+npm warn ERESOLVE overriding peer dependency
+npm warn While resolving: pia-mobile@0.3.0
+npm warn Found: @react-native/jest-preset@0.86.3
+npm warn node_modules/@react-native/jest-preset
+npm warn   peer @react-native/jest-preset@"^0.86.3" from jest-expo@57.0.6
+npm warn   node_modules/jest-expo
+npm warn     dev jest-expo@"~57.0.6" from the root project
+npm warn   2 more (react-native, the root project)
+npm warn
+npm warn Could not resolve dependency:
+npm warn peerOptional @react-native/jest-preset@"0.86.3" from react-native@0.86.3
+npm warn node_modules/react-native
+npm warn   peerOptional react-native@"*" from @expo/devtools@57.0.1
+npm warn   node_modules/@expo/devtools
+npm warn   29 more (@expo/dom-webview, @expo/log-box, @expo/metro-runtime, ...)
+npm warn ERESOLVE overriding peer dependency
+npm warn While resolving: pia-mobile@0.3.0
+npm warn Found: @react-native/jest-preset@0.86.3
+npm warn node_modules/@react-native/jest-preset
+npm warn   peer @react-native/jest-preset@"^0.86.3" from jest-expo@57.0.6
+npm warn   node_modules/jest-expo
+npm warn     dev jest-expo@"~57.0.6" from the root project
+npm warn   2 more (react-native, the root project)
+npm warn
+npm warn Could not resolve dependency:
+npm warn peerOptional @react-native/jest-preset@"0.86.3" from react-native@0.86.3
+npm warn node_modules/react-native
+npm warn   peerOptional react-native@"*" from @expo/devtools@57.0.1
+npm warn   node_modules/@expo/devtools
+npm warn   29 more (@expo/dom-webview, @expo/log-box, @expo/metro-runtime, ...)
 npm warn deprecated whatwg-encoding@2.0.0: Use @exodus/bytes instead for a more spec-conformant and faster implementation
 npm warn deprecated inflight@1.0.6: This module is not supported, and leaks memory. Do not use it. Check out lru-cache if you want a good and tested way to coalesce async requests by a key value, which is much more comprehensive and powerful.
 npm warn deprecated glob@7.2.3: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
-npm warn deprecated abab@2.0.6: Use your platform's native atob() and btoa() methods instead
 npm warn deprecated domexception@4.0.0: Use your platform's native DOMException instead
+npm warn deprecated abab@2.0.6: Use your platform's native atob() and btoa() methods instead
 npm warn deprecated uuid@7.0.3: uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).
 
-added 860 packages in 19s
-+ echo '=== jest-expo needs'
-=== jest-expo needs
-++ node -p 'require("jest-expo/package.json").version'
-+ npm view jest-expo@57.0.6 dependencies peerDependencies --json
-{
-  "dependencies": {
-    "json5": "^2.2.3",
-    "lodash": "^4.17.19",
-    "babel-jest": "^29.2.1",
-    "server-only": "^0.0.1",
-    "@jest/globals": "^29.2.1",
-    "jest-snapshot": "^29.2.1",
-    "stacktrace-js": "^2.0.2",
-    "react-test-renderer": "19.2.3",
-    "jest-watch-typeahead": "2.2.1",
-    "jest-environment-jsdom": "^29.2.1",
-    "jest-watch-select-projects": "^2.0.0",
-    "@jest/create-cache-key-function": "^29.2.1"
-  },
-  "peerDependencies": {
-    "expo": "*",
-    "react-native": "*",
-    "react-server-dom-webpack": "~19.0.4 || ~19.1.5 || ~19.2.4",
-    "@react-native/jest-preset": "^0.86.3"
-  }
-}
-+ echo '=== installed jest'
-=== installed jest
-+ node -p 'require("jest/package.json").version'
-29.7.0
-+ npm ls jest jest-environment-node @jest/core --depth=1
-pia-mobile@0.3.0 /home/runner/work/PersonalAI/PersonalAI/mobile
-├─┬ @testing-library/react-native@13.3.3
-│ └── jest@29.7.0 deduped
-└─┬ jest@29.7.0
-  └── @jest/core@29.7.0
-
-+ npx expo install --fix
-env: load .env.development
-env: export EXPO_PUBLIC_USE_RN_FETCH
-Dependencies are up to date
+added 823 packages in 12s
++ echo '=== expo config'
+=== expo config
++ npx expo config --json --full
++ tail -40
+PluginError: Failed to resolve plugin for module "expo-splash-screen" relative to "/home/runner/work/PersonalAI/PersonalAI/mobile". Do you have node modules installed?
+PluginError: Failed to resolve plugin for module "expo-splash-screen" relative to "/home/runner/work/PersonalAI/PersonalAI/mobile". Do you have node modules installed?
+    at resolvePluginForModule (/home/runner/work/PersonalAI/PersonalAI/mobile/node_modules/@expo/config-plugins/build/utils/plugin-resolver.js:84:9)
+    at resolveConfigPluginFunctionWithInfo (/home/runner/work/PersonalAI/PersonalAI/mobile/node_modules/@expo/config-plugins/build/utils/plugin-resolver.js:133:7)
+    at resolveConfigPluginFunction (/home/runner/work/PersonalAI/PersonalAI/mobile/node_modules/@expo/config-plugins/build/utils/plugin-resolver.js:124:7)
+    at withStaticPlugin (/home/runner/work/PersonalAI/PersonalAI/mobile/node_modules/@expo/config-plugins/build/plugins/withStaticPlugin.js:83:70)
+    at /home/runner/work/PersonalAI/PersonalAI/mobile/node_modules/@expo/config-plugins/build/plugins/withPlugins.js:28:84
+    at Array.reduce (<anonymous>)
+    at withPlugins (/home/runner/work/PersonalAI/PersonalAI/mobile/node_modules/@expo/config-plugins/build/plugins/withPlugins.js:28:18)
+    at withConfigPlugins (/home/runner/work/PersonalAI/PersonalAI/mobile/node_modules/@expo/config/build/plugins/withConfigPlugins.js:33:47)
+    at fillAndReturnConfig (/home/runner/work/PersonalAI/PersonalAI/mobile/node_modules/@expo/config/build/Config.js:247:78)
+    at getConfig (/home/runner/work/PersonalAI/PersonalAI/mobile/node_modules/@expo/config/build/Config.js:300:12)
 + echo '=== expo-doctor'
 === expo-doctor
 + npx -y expo-doctor@latest
@@ -64,82 +450,37 @@ Error: node /home/runner/work/PersonalAI/PersonalAI/mobile/node_modules/expo/bin
 + echo '=== tsc'
 === tsc
 + npx tsc --noEmit
-+ head -80
++ head -60
 + echo '=== jest one suite'
 === jest one suite
 + npx jest --ci src/media/__tests__/voice.test.ts
-+ head -80
-FAIL src/media/__tests__/voice.test.ts
-  ● Test suite failed to run
++ head -60
+PASS src/media/__tests__/voice.test.ts
+  ✓ the phone's default recognition service is used when there is one (1 ms)
+  ✓ without a default service an installed Google service is chosen
+  ✓ another app's own service is never chosen and the message says what to install
+  ✓ error not-allowed names the service, a reason and the raw code
+  ✓ error network names the service, a reason and the raw code
+  ✓ error language-not-supported names the service, a reason and the raw code
+  ✓ error service-not-allowed names the service, a reason and the raw code
+  ✓ error busy names the service, a reason and the raw code (1 ms)
+  ✓ error client names the service, a reason and the raw code
+  ✓ error audio-capture names the service, a reason and the raw code
+  ✓ error unknown names the service, a reason and the raw code
+  ✓ missing Russian points to where to install it
+  ✓ a service that never starts and a phone without one are explained
 
-    Cannot find module 'expo-modules-core' from 'node_modules/jest-expo/src/preset/setup.js'
-
-      at Resolver._throwModNotFoundError (node_modules/jest-resolve/build/resolver.js:427:11)
-      at Object.<anonymous> (node_modules/jest-expo/src/preset/setup.js:233:6)
-
-Test Suites: 1 failed, 1 total
-Tests:       0 total
+Test Suites: 1 passed, 1 total
+Tests:       13 passed, 13 total
 Snapshots:   0 total
-Time:        0.879 s
+Time:        1.279 s
 Ran all test suites matching /src\/media\/__tests__\/voice.test.ts/i.
 + echo '=== jest'
 === jest
 + npx jest --ci
-+ head -80
-+ grep -E '✕|Tests:|Test Suites:|FAIL'
-FAIL src/local-memory/__tests__/storage.test.ts
-FAIL src/local-memory/__tests__/backup.test.ts
-FAIL src/direct-agent/__tests__/engine.test.ts
-FAIL src/local-memory/__tests__/repository.test.ts
-FAIL src/direct-agent/__tests__/chat-store.test.ts
-FAIL src/direct-agent/__tests__/check.test.ts
-FAIL src/security/__tests__/app-lock.test.tsx
-FAIL src/local-memory/__tests__/upgrade.test.ts
-FAIL src/__tests__/connections-ui.test.tsx
-FAIL src/direct-agent/__tests__/connections.test.ts
-FAIL src/direct-agent/__tests__/context.test.ts
-FAIL src/direct-agent/__tests__/timeouts.test.ts
-FAIL src/direct-agent/__tests__/memory.test.ts
-FAIL src/direct-agent/__tests__/stream.test.ts
-FAIL src/media/__tests__/extract.test.ts
-FAIL src/direct-agent/__tests__/settings.test.ts
-FAIL src/direct-agent/__tests__/conversations.test.ts
-FAIL src/__tests__/voice-ui.test.tsx
-FAIL src/__tests__/bottom-sheet.test.tsx
-FAIL src/__tests__/icon-action.test.tsx
-FAIL src/local-memory/__tests__/sections.test.ts
-FAIL src/security/__tests__/native-interaction.test.ts
-FAIL src/__tests__/release.test.ts
-FAIL src/security/__tests__/session.test.ts
-FAIL src/local-memory/__tests__/transaction.test.ts
-FAIL src/media/__tests__/voice.test.ts
-FAIL src/local-memory/__tests__/storage.test.ts
-FAIL src/local-memory/__tests__/backup.test.ts
-FAIL src/direct-agent/__tests__/engine.test.ts
-FAIL src/local-memory/__tests__/repository.test.ts
-FAIL src/direct-agent/__tests__/chat-store.test.ts
-FAIL src/direct-agent/__tests__/check.test.ts
-FAIL src/security/__tests__/app-lock.test.tsx
-FAIL src/local-memory/__tests__/upgrade.test.ts
-FAIL src/__tests__/connections-ui.test.tsx
-FAIL src/direct-agent/__tests__/connections.test.ts
-FAIL src/direct-agent/__tests__/context.test.ts
-FAIL src/direct-agent/__tests__/timeouts.test.ts
-FAIL src/direct-agent/__tests__/memory.test.ts
-FAIL src/direct-agent/__tests__/stream.test.ts
-FAIL src/media/__tests__/extract.test.ts
-FAIL src/direct-agent/__tests__/settings.test.ts
-FAIL src/direct-agent/__tests__/conversations.test.ts
-FAIL src/__tests__/voice-ui.test.tsx
-FAIL src/__tests__/bottom-sheet.test.tsx
-FAIL src/__tests__/icon-action.test.tsx
-FAIL src/local-memory/__tests__/sections.test.ts
-FAIL src/security/__tests__/native-interaction.test.ts
-FAIL src/__tests__/release.test.ts
-FAIL src/security/__tests__/session.test.ts
-FAIL src/local-memory/__tests__/transaction.test.ts
-FAIL src/media/__tests__/voice.test.ts
-Test Suites: 26 failed, 26 total
-Tests:       0 total
++ grep -E '✕|Tests:|Test Suites:|FAIL|●.*›'
++ head -120
+Test Suites: 26 passed, 26 total
+Tests:       189 passed, 189 total
 + true
 exit code: 0
