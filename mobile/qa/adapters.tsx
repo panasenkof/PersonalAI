@@ -31,8 +31,9 @@ export const getDocumentAsync = async () => {
   (window as any).__state("background"); await new Promise(resolve => setTimeout(resolve, 20)); (window as any).__state("active");
   return { canceled: false, assets: [{ uri: "file:///qa-cache/note.txt", name: "note.txt", mimeType: "text/plain", size: 100 }] };
 };
-export const getThumbnailAsync = async () => ({ uri: "file:///qa-cache/frame.jpg" });
-export const createVideoPlayer = () => ({ release() {}, muted: true, addListener() { return { remove() {} }; }, replaceAsync: async () => {} });
+export const createVideoPlayer = () => ({ release() {}, muted: true, addListener() { return { remove() {} }; }, replaceAsync: async () => {}, generateThumbnailsAsync: async (times: number[]) => times.map(t => ({ requestedTime: t })) });
+export const ImageManipulator = { manipulate: () => ({ renderAsync: async () => ({ saveAsync: async () => ({ uri: "file:///qa-cache/frame.jpg", base64: "ZnJhbWU=" }) }) }) };
+export const SaveFormat = { JPEG: "jpeg", PNG: "png", WEBP: "webp" };
 const speechListeners = new Map<string, Set<(value: any) => void>>();
 export const ExpoSpeechRecognitionModule = {
   isRecognitionAvailable: () => true, supportsOnDeviceRecognition: () => true,

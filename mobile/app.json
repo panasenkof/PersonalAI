@@ -11,6 +11,8 @@
     ],
     "plugins": [
       "expo-secure-store",
+      "expo-status-bar",
+      "expo-sharing",
       [
         "expo-local-authentication",
         {
@@ -29,27 +31,24 @@
         }
       ],
       [
-        "expo-image-picker",
-        {
-          "photosPermission": "Разрешите доступ к фото, чтобы отправлять чеки и документы агенту.",
-          "cameraPermission": "Разрешите доступ к камере, чтобы фотографировать чеки."
-        }
-      ],
-      [
         "expo-sqlite",
         {
           "enableFTS": true,
           "useSQLCipher": true
         }
       ],
-      "expo-video"
+      "expo-video",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#F8FAFF",
+          "imageWidth": 200
+        }
+      ]
     ],
     "icon": "./assets/icon.png",
-    "splash": {
-      "image": "./assets/splash.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#F8FAFF"
-    },
     "ios": {
       "supportsTablet": true
     },
