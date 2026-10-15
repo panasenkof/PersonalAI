@@ -74,3 +74,27 @@ describe("search check", () => {
     expect(transport).toHaveBeenCalledTimes(0);
   });
 });
+
+describe("search errors read what the service said", () => {
+  const tavily = { ...connectionFromPreset(PROVIDER_PRESETS.find(p => p.id === "deepseek")!), apiKey: "k", allowWeb: true, searchProvider: "tavily" as const, webSearchKey: "tvly-dev-secret123" };
+  test("Tavily's detail.error text is shown", async () => {
+    const transport = jest.fn().mockResolvedValue({ ok: false, status: 432, text: async () => JSON.stringify({ detail: { error: "This request exceeds your plan's set usage limit" } }) });
+    const { checkWebSearch } = require("../check");
+    expect((await checkWebSearch(tavily, transport as any)).message).toContain("Ответ сервиса: «This request exceeds your plan's set usage limit»");
+  });
+  test("a firewall page on 403 is told apart from a key problem and suggests a VPN check", async () => {
+    const transport = jest.fn().mockResolvedValue({ ok: false, status: 403, text: async () => "<html><head><title>Attention Required! | Cloudflare</title></head><body>cf-ray</body></html>" });
+    const { checkWebSearch } = require("../check");
+    const message = (await checkWebSearch(tavily, transport as any)).message;
+    expect(message).toContain("защита сервиса");
+    expect(message).toContain("VPN");
+    expect(message).toContain("Attention Required! | Cloudflare");
+  });
+  test("a bare 403 mentions both a blocked country and key rights", async () => {
+    const transport = jest.fn().mockResolvedValue({ ok: false, status: 403, text: async () => "" });
+    const { checkWebSearch } = require("../check");
+    const message = (await checkWebSearch(tavily, transport as any)).message;
+    expect(message).toContain("страну или сеть");
+    expect(message).toContain("HTTP 403");
+  });
+});

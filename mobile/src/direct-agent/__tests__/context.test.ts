@@ -63,3 +63,9 @@ test("questions about the user are answered from memory only", async () => {
   expect(transport).not.toHaveBeenCalled();
   expect(notify.mock.calls[0][0]).toContain("Расскажите о себе");
 });
+test("the model is told today's date from the phone clock", async () => {
+  const { todayLine } = require("../context");
+  expect(todayLine(new Date(2026, 9, 15, 15, 22))).toContain("Сегодня 15 октября 2026 г., четверг, 15:22");
+  const context = await prepareDirectContext({ ...options("Сколько лет Де Ниро", jest.fn(async () => []), jest.fn()), settings: { ...options("x", jest.fn(async () => []), jest.fn()).settings, allowWeb: false }, now: new Date(2026, 9, 15) });
+  expect(context.context.startsWith("Сегодня 15 октября 2026 г.")).toBe(true);
+});
