@@ -25,7 +25,7 @@ export const DEFAULT_TIMEOUTS: Timeouts = { connectMs: 25_000, idleMs: 60_000, t
 /** Reasoning models may stay silent for minutes before the first token. */
 export const REASONING_TIMEOUTS: Timeouts = { connectMs: 25_000, idleMs: 180_000, totalMs: 360_000 };
 /** Web search and other short helper requests. */
-export const SHORT_TIMEOUTS: Timeouts = { connectMs: 15_000, idleMs: 15_000, totalMs: 20_000 };
+export const SHORT_TIMEOUTS: Timeouts = { connectMs: 12_000, idleMs: 12_000, totalMs: 12_000 };
 
 export const hostOf = (url: string): string => {
   try { return new URL(url).host; } catch { return "сервер"; }

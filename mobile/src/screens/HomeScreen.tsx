@@ -15,6 +15,7 @@ import { FloatingBrand } from "../components/FloatingBrand";
 import { VoiceInput } from "../components/VoiceInput";
 import { IconAction } from "../components/IconAction";
 import { useTheme } from "../theme";
+import { PROPOSABLE_SECTIONS, SECTIONS } from "../local-memory/sections";
 
 export function HomeScreen() {
   const t = useTheme();
@@ -105,6 +106,13 @@ export function HomeScreen() {
       ListFooterComponent={<View style={{ gap: 10 }}>
         {active?.drafts.map(d => <View key={d.id} style={{ backgroundColor: t.panel, borderWidth: 1, borderColor: t.accent, borderRadius: 20, padding: 16, gap: 8 }}>
           <Text style={{ color: t.accent, fontWeight: "700" }}>Запомнить?</Text><Text selectable style={{ color: t.text, fontWeight: "700" }}>{d.title}</Text><Text selectable style={{ color: t.text }}>{d.body}</Text>
+          <Text style={{ color: t.muted, fontSize: 12 }}>Раздел</Text>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+            {SECTIONS.filter(x => PROPOSABLE_SECTIONS.includes(x.slug)).map(x => { const chosen = (d.section || "notes") === x.slug; return <Pressable key={x.slug} accessibilityRole="button"
+              accessibilityLabel={"Сохранить в раздел " + x.name} accessibilityState={{ selected: chosen }} disabled={Boolean(active.savingDraft)} onPress={() => store.setDraftSection(d, x.slug)}
+              style={{ minHeight: 36, paddingHorizontal: 10, justifyContent: "center", borderRadius: 12, borderWidth: 1, borderColor: chosen ? t.accent : t.line, backgroundColor: chosen ? t.soft : t.panel }}>
+              <Text style={{ color: chosen ? t.accent : t.text, fontSize: 13 }}>{x.name}</Text></Pressable>; })}
+          </View>
           <View style={{ flexDirection: "row", gap: 20 }}><Pressable accessibilityRole="button" disabled={Boolean(active.savingDraft)} onPress={() => void store.approve(d)} style={action}><Text style={{ color: t.accent }}>{active.savingDraft === d.id ? "Сохранение…" : "Сохранить"}</Text></Pressable>
             <Pressable accessibilityRole="button" disabled={Boolean(active.savingDraft)} onPress={() => store.dismiss(d)} style={action}><Text style={{ color: t.muted }}>Отклонить</Text></Pressable></View>
         </View>)}

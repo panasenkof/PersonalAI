@@ -9,7 +9,7 @@ export type DirectAgentPreferences = {
   model: string;
   allowWeb: boolean;
   transcriptionModel?: string;
-  searchProvider?: "public" | "brave" | "builtin";
+  searchProvider?: "public" | "brave" | "tavily" | "builtin";
 };
 export type DirectAgentSettings = DirectAgentPreferences & {
   apiKey: string;
@@ -188,7 +188,7 @@ export async function loadDirectConnections(profile: string): Promise<DirectConn
       connections.push({
         id, name: String(item.name || "Модель").slice(0, 60), provider, baseUrl,
         model: validateModel(item.model), transcriptionModel: validateModel(item.transcriptionModel || "whisper-1"), allowWeb: item.allowWeb === true,
-        searchProvider: ["public", "brave", "builtin"].includes(item.searchProvider || "") ? item.searchProvider : "public",
+        searchProvider: ["public", "brave", "tavily", "builtin"].includes(item.searchProvider || "") ? item.searchProvider : "public",
         apiKey: item.credentialIdentity === identityOf({ provider, baseUrl }) ? savedApiKey || "" : "",
         webSearchKey: savedSearchKey || "",
       });
@@ -212,8 +212,9 @@ export async function saveDirectConnections(profile: string, value: DirectConnec
     const provider = validateProvider(item.provider);
     const baseUrl = validateBaseUrl(item.baseUrl, provider);
     const searchProvider = item.searchProvider || "public";
-    if (!["public", "brave", "builtin"].includes(searchProvider)) throw new Error("Выберите способ поиска");
+    if (!["public", "brave", "tavily", "builtin"].includes(searchProvider)) throw new Error("Выберите способ поиска");
     if (item.allowWeb && searchProvider === "brave" && !item.webSearchKey.trim()) throw new Error("Введите ключ Brave Search API");
+    if (item.allowWeb && searchProvider === "tavily" && !item.webSearchKey.trim()) throw new Error("Введите ключ Tavily");
     if (item.allowWeb && searchProvider === "builtin" && provider !== "openai") throw new Error("Встроенный поиск доступен через OpenAI Responses");
     const { allowMemory: _legacyMemoryFlag, ...current } = item as DirectConnection & { allowMemory?: boolean };
     return { ...current, name: item.name.trim().slice(0, 60), provider, baseUrl,

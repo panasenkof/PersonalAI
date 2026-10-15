@@ -58,7 +58,7 @@ export interface MemoryRepository {
   linkEntities(sourceId: string, targetId: string, kind: string): Promise<RelationRecord>;
   relationsForEntity(id: string): Promise<RelationRecord[]>;
   revisions(type: "entity" | "observation", id: string): Promise<RevisionRecord[]>;
-  searchNotes(query: string, limit?: number, offset?: number, filters?: { collectionId?: string; status?: "active" | "archived" }): Promise<EntityRecord[]>;
+  searchNotes(query: string, limit?: number, offset?: number, filters?: { collectionId?: string; status?: "active" | "archived"; prefix?: boolean }): Promise<EntityRecord[]>;
 }
 export class MemoryConflictError extends Error {}
 export class MemoryAccessError extends Error {}

@@ -56,7 +56,7 @@ test("web search is enabled only with explicit toggle and citations returned", a
       }] }],
     }),
   });
-  const result = await start({ allowWeb: true }, request);
+  const result = await start({ allowWeb: true }, request, { prompt: "Найди в интернете свежие новости" });
   const tools = JSON.parse(request.mock.calls[0][1].body).tools;
   expect(tools).toContainEqual(expect.objectContaining({ type: "web_search" }));
   expect(result.sources).toEqual(["https://example.org/source"]);
@@ -72,7 +72,7 @@ test("web search sources are surfaced from provider action metadata", async () =
       ],
     }),
   });
-  const result = await start({ allowWeb: true }, request);
+  const result = await start({ allowWeb: true }, request, { prompt: "Найди в интернете свежие новости" });
   expect(result.sources).toEqual(["https://example.org/web"]);
   const body = JSON.parse(request.mock.calls[0][1].body);
   expect(body.include).toContain("web_search_call.action.sources");
@@ -155,11 +155,48 @@ test("OpenAI-compatible API uses Chat Completions, not proprietary Responses too
   expect(body.tools).toContainEqual(expect.objectContaining({ type: "function" }));
 });
 
-test("explicit Brave search fails clearly when search key is absent", async () => {
-  const response = jest.fn();
-  await expect(start({ provider: "anthropic", baseUrl: "https://api.anthropic.com/v1",
-    allowWeb: true, searchProvider: "brave" }, response)).rejects.toThrow("Brave Search API");
-  expect(response).not.toHaveBeenCalled();
+test("a failed web search never costs the answer: the model replies and the user sees why", async () => {
+  const response = jest.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ content: [{ type: "text", text: "Отвечаю без интернета" }] }) });
+  const result = await start({ provider: "anthropic", baseUrl: "https://api.anthropic.com/v1",
+    allowWeb: true, searchProvider: "brave" }, response, { prompt: "Найди в интернете свежие новости" });
+  expect(result.text).toBe("Отвечаю без интернета");
+  expect(result.notice).toContain("Brave Search API");
+  expect(response).toHaveBeenCalledTimes(1);
+  expect(JSON.parse(response.mock.calls[0][1].body).system).toContain("свежие данные не проверены");
+});
+
+test("when memory has nothing the user is told and the web is searched", async () => {
+  const notify = jest.fn();
+  const response = jest.fn()
+    .mockResolvedValueOnce({ ok: true, status: 200, text: async () => '<rss><channel><item><title>Пасха</title><link>https://example.org/easter</link><description>Остров</description></item></channel></rss>' })
+    .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ content: [{ type: "text", text: "Ответ" }] }) });
+  await start({ provider: "anthropic", baseUrl: "https://api.anthropic.com/v1", allowWeb: true, searchProvider: "public" }, response, { prompt: "Расскажи про остров Пасхи", notify });
+  expect(notify).toHaveBeenCalledWith("В памяти ничего не нашлось. Ищу в интернете.");
+  expect(response.mock.calls[0][0]).toContain("bing.com/search");
+  expect(response.mock.calls[1][0]).toBe("https://api.anthropic.com/v1/messages");
+});
+
+test("an answer found in memory never goes to the web", async () => {
+  const notify = jest.fn();
+  const response = jest.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ content: [{ type: "text", text: "Ответ" }] }) });
+  await start({ provider: "anthropic", baseUrl: "https://api.anthropic.com/v1", allowWeb: true, searchProvider: "public" }, response,
+    { prompt: "Где машина сестры?", notify, lookup: jest.fn().mockResolvedValue([{ id: "n", title: "Машина", body: "Продана" }]) });
+  expect(response).toHaveBeenCalledTimes(1);
+  expect(response.mock.calls[0][0]).toBe("https://api.anthropic.com/v1/messages");
+  expect(notify).not.toHaveBeenCalled();
+});
+
+test("Tavily search sends its key as a bearer token and supplies citations", async () => {
+  const response = jest.fn()
+    .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ results: [{ title: "Курс", url: "https://example.org/rate", content: "Курс доллара" }] }) })
+    .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ choices: [{ message: { role: "assistant", content: "По данным источника…" } }] }) });
+  const result = await start({ provider: "openai-compatible", baseUrl: "https://api.deepseek.com", model: "deepseek-flash",
+    allowWeb: true, searchProvider: "tavily", webSearchKey: "tvly-secret" }, response, { prompt: "Какой сегодня курс доллара?" });
+  expect(response.mock.calls[0][0]).toBe("https://api.tavily.com/search");
+  expect(response.mock.calls[0][1].headers.Authorization).toBe("Bearer tvly-secret");
+  expect(JSON.parse(response.mock.calls[0][1].body)).toMatchObject({ query: "Какой сегодня курс доллара?", max_results: 5, search_depth: "basic" });
+  expect(result.sources).toEqual(["https://example.org/rate"]);
+  expect(JSON.stringify(JSON.parse(response.mock.calls[1][1].body))).not.toContain("tvly-secret");
 });
 
 test("provider-independent Brave search supplies citations to Anthropic Messages and never leaks search key", async () => {
@@ -175,7 +212,7 @@ test("provider-independent Brave search supplies citations to Anthropic Messages
     }) });
   const result = await start({ provider: "anthropic", model: "claude-sonnet-4-5",
     baseUrl: "https://api.anthropic.com/v1", allowWeb: true,
-    webSearchKey: "brave-secret-value" }, response);
+    webSearchKey: "brave-secret-value" }, response, { prompt: "Найди в интернете свежие новости" });
   expect(result.sources).toEqual(["https://example.net/reference"]);
   expect(response.mock.calls[0][0]).toContain("api.search.brave.com");
   expect(response.mock.calls[0][1].headers["X-Subscription-Token"]).toBe("brave-secret-value");
@@ -318,4 +355,18 @@ test("with a live text callback the answer streams through the same tool loop", 
   expect(texts).toEqual(["Вы любите ", "Вы любите капучино"]);
   expect(bodies.every(b => b.stream === true)).toBe(true);
   expect(bodies[1].input.some((item: any) => item.type === "function_call_output")).toBe(true);
+});
+
+test("a proposed note carries the section the model chose, and the schema lists only allowed sections", async () => {
+  const propose = jest.fn();
+  const request = jest.fn()
+    .mockResolvedValueOnce(toolResponse("draft_local_note", { title: "Аня", body: "Сестра, день рождения 3 мая", section: "people" }))
+    .mockResolvedValueOnce(final());
+  await start({}, request, { propose });
+  expect(propose).toHaveBeenCalledWith({ title: "Аня", body: "Сестра, день рождения 3 мая", section: "people" });
+  const tool = JSON.parse(request.mock.calls[0][1].body).tools.find((t: any) => t.name === "draft_local_note");
+  expect(tool.parameters.required).toContain("section");
+  expect(tool.parameters.properties.section.enum).not.toContain("documents");
+  const system = JSON.parse(request.mock.calls[0][1].body).input[0].content;
+  expect(system).toContain("people — Люди");
 });

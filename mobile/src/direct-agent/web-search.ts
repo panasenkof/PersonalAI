@@ -1,6 +1,6 @@
 import { XMLParser } from "fast-xml-parser";
 import type { DirectAgentSettings } from "./settings";
-import { fetchWithTimeout } from "./net";
+import { SHORT_TIMEOUTS, fetchWithTimeout, httpError, providerDetail } from "./net";
 export type WebContext = { context: string; sources: string[] };
 type SearchResult = { title?: string; url?: string; description?: string };
 const safe = (value: unknown, limit: number) => typeof value === "string" ? value.slice(0, limit) : "";
@@ -17,7 +17,21 @@ export async function fetchWebContext(
   if (provider === "builtin") return { context: "", sources: [] };
   const query = encodeURIComponent(prompt.slice(0, 300));
   let results: SearchResult[];
-  if (provider === "brave") {
+  if (provider === "tavily") {
+    if (!settings.webSearchKey) throw new Error("Введите ключ Tavily или выберите другой способ поиска.");
+    // 1 credit per basic search; the free plan has 1,000 credits a month.
+    const response = await fetchWithTimeout(transport, "https://api.tavily.com/search", {
+      method: "POST", signal,
+      headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: "Bearer " + settings.webSearchKey },
+      body: JSON.stringify({ query: prompt.slice(0, 300), max_results: 5, search_depth: "basic", include_answer: false }),
+    }, SHORT_TIMEOUTS, [settings.webSearchKey]);
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      throw httpError(response.status, "api.tavily.com", providerDetail(body, [settings.webSearchKey]));
+    }
+    const data = await response.json() as { results?: Array<{ title?: string; url?: string; content?: string }> };
+    results = (Array.isArray(data.results) ? data.results : []).map(r => ({ title: r.title, url: r.url, description: r.content }));
+  } else if (provider === "brave") {
     if (!settings.webSearchKey) throw new Error("Введите ключ Brave Search API или выберите поиск без регистрации.");
     const response = await fetchWithTimeout(transport, "https://api.search.brave.com/res/v1/web/search?q=" + query + "&count=5", {
       method: "GET", headers: { Accept: "application/json", "X-Subscription-Token": settings.webSearchKey }, signal,
