@@ -1,0 +1,75 @@
++ cd mobile
+++ pick expo '^57\.'
+++ npm view expo versions --json
+++ node -e 'const v=JSON.parse(require("fs").readFileSync(0,"utf8"));const re=new RegExp(process.argv[1]);console.log(v.filter(x=>re.test(x)&&!x.includes("-")).pop()||"")' '^57\.'
++ EXPO=57.0.30
++ echo 'expo 57.0.30'
+expo 57.0.30
++ npm install --no-audit --no-fund expo@57.0.30
+npm warn deprecated whatwg-encoding@2.0.0: Use @exodus/bytes instead for a more spec-conformant and faster implementation
+npm warn deprecated rimraf@3.0.2: Rimraf versions prior to v4 are no longer supported
+npm warn deprecated inflight@1.0.6: This module is not supported, and leaks memory. Do not use it. Check out lru-cache if you want a good and tested way to coalesce async requests by a key value, which is much more comprehensive and powerful.
+npm warn deprecated glob@7.2.3: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+npm warn deprecated domexception@4.0.0: Use your platform's native DOMException instead
+npm warn deprecated abab@2.0.6: Use your platform's native atob() and btoa() methods instead
+npm warn deprecated uuid@7.0.3: uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).
+
+added 914 packages in 25s
++ npx expo install --fix
+The following packages should be updated for best compatibility with the installed expo version:
+  @expo/metro-runtime@6.1.2 - expected version: ~57.0.17
+  expo-constants@18.0.14 - expected version: ~57.0.22
+  expo-crypto@15.0.9 - expected version: ~57.0.4
+  expo-document-picker@14.0.8 - expected version: ~57.0.3
+  expo-file-system@19.0.24 - expected version: ~57.0.7
+  expo-image-picker@17.0.11 - expected version: ~57.0.20
+  expo-linear-gradient@15.0.8 - expected version: ~57.0.2
+  expo-local-authentication@17.0.9 - expected version: ~57.0.3
+  expo-secure-store@15.0.8 - expected version: ~57.0.4
+  expo-sharing@14.0.8 - expected version: ~57.0.23
+  expo-sqlite@16.0.10 - expected version: ~57.0.4
+  expo-status-bar@3.0.9 - expected version: ~57.0.1
+  expo-system-ui@6.0.9 - expected version: ~57.0.4
+  expo-video@3.0.16 - expected version: ~57.0.5
+  expo-video-thumbnails@10.0.8 - expected version: ~57.0.2
+  react@19.1.0 - expected version: 19.2.3
+  react-dom@19.1.0 - expected version: 19.2.3
+  react-native@0.81.5 - expected version: 0.86.3
+  react-native-safe-area-context@5.6.2 - expected version: ~5.7.0
+  react-native-screens@4.16.0 - expected version: ~4.26.0
+  @types/react@19.1.17 - expected version: ~19.2.4
+  @types/react-dom@19.1.11 - expected version: ~19.2.3
+  jest-expo@54.0.18 - expected version: ~57.0.6
+  typescript@5.9.3 - expected version: ~6.0.3
+Your project may not work correctly until you install the expected versions of the packages.
+› Installing 24 SDK 57.0.0 compatible native modules using npm
+> npm install
+npm warn ERESOLVE overriding peer dependency
+
+added 14 packages, removed 22 packages, changed 51 packages, and audited 907 packages in 15s
+
+81 packages are looking for funding
+  run `npm fund` for details
+
+58 vulnerabilities (13 moderate, 45 high)
+
+To address issues that do not require attention, run:
+  npm audit fix
+
+To address all issues (including breaking changes), run:
+  npm audit fix --force
+
+Run `npm audit` for details.
+
+Cannot automatically write to dynamic config at: app.config.js
+Add the following to your Expo config
+
+{
+  "plugins": [
+    "expo-sharing",
+    "expo-status-bar"
+  ]
+}
+
++ exit 1
+exit code: 1
