@@ -1,7 +1,7 @@
 import React from "react";
 import { Linking, Platform, Text } from "react-native";
 import type { TextStyle } from "react-native";
-import { parseMarkdown } from "./markdown";
+import { hasMarkdown, parseMarkdown } from "./markdown";
 import type { Span } from "./markdown";
 import { useTheme } from "../theme";
 
@@ -9,7 +9,9 @@ import { useTheme } from "../theme";
 export function MarkdownText({ text, style }: { text: string; style?: TextStyle }) {
   const t = useTheme();
   const mono = Platform.OS === "ios" ? "Menlo" : "monospace";
-  const spans = (items: Span[], prefix: string) => items.map((s, i) => <Text key={prefix + i}
+  if (!hasMarkdown(text)) return <Text selectable style={style}>{text}</Text>;
+  const plain = (s: Span) => !s.bold && !s.italic && !s.code && !s.url;
+  const spans = (items: Span[], prefix: string) => items.length === 1 && plain(items[0]) ? items[0].text : items.map((s, i) => plain(s) ? s.text : <Text key={prefix + i}
     onPress={s.url ? () => void Linking.openURL(s.url!).catch(() => undefined) : undefined}
     style={{ ...(s.bold ? { fontWeight: "700" as const } : {}), ...(s.italic ? { fontStyle: "italic" as const } : {}),
       ...(s.code ? { fontFamily: mono, backgroundColor: t.soft } : {}), ...(s.url ? { color: t.accent, textDecorationLine: "underline" as const } : {}) }}>{s.text}</Text>);

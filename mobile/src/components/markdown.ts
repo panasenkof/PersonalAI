@@ -52,3 +52,6 @@ export function parseMarkdown(source: string): Block[] {
   while (blocks.length && blocks[blocks.length - 1].kind === "blank") blocks.pop();
   return blocks;
 }
+
+/** Plain answers keep the original single-text rendering. */
+export const hasMarkdown = (text: string) => /(\*\*|__|`|\[[^\]\n]+\]\(https?:|^\s*(#{1,6}\s|[-*+•]\s|\d{1,3}[.)]\s|>|```)|(?<![\w*])\*(?!\s)[^*\n]+?\*(?![\w*]))/m.test(text);

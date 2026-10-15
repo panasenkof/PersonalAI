@@ -1,4 +1,4 @@
-import { parseInline, parseMarkdown } from "../markdown";
+import { hasMarkdown, parseInline, parseMarkdown } from "../markdown";
 
 test("bold, italic, code and links lose their markup", () => {
   expect(parseInline("Вы спрашивали: **«Сколько лет Де Ниро?»** — *примерно* `83`, [ЦБ](https://cbr.ru/)")).toEqual([
@@ -18,4 +18,11 @@ test("headings, lists, quotes, code and blank lines become blocks", () => {
 });
 test("an unfinished bold while the answer streams is shown as typed", () => {
   expect(parseInline("Ответ: **83").map(s => s.text).join("")).toBe("Ответ: **83");
+});
+test("plain answers are detected and keep single-text rendering", () => {
+  expect(hasMarkdown("Ответ 1")).toBe(false);
+  expect(hasMarkdown("2 * 3 = 6, файл file_name")).toBe(false);
+  expect(hasMarkdown("Вы спрашивали: **«Сколько лет»**")).toBe(true);
+  expect(hasMarkdown("Список:\n- молоко")).toBe(true);
+  expect(hasMarkdown("## Итог")).toBe(true);
 });
