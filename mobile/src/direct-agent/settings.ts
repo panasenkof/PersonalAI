@@ -24,8 +24,40 @@ export function migrateSearchProvider(value: unknown): { provider: SearchProvide
 const validFolder = (value: unknown) => typeof value === "string" && /^[a-z0-9]{1,50}$/i.test(value.trim()) ? value.trim() : "";
 export type DirectAgentSettings = DirectAgentPreferences & {
   apiKey: string;
+  /** Key of the selected search service (kept in step with `searchKeys`). */
   webSearchKey: string;
+  /** One key per search service; switching services keeps each key. */
+  searchKeys?: SearchKeys;
 };
+export type KeyedSearch = "tavily" | "yandex";
+export type SearchKeys = Partial<Record<KeyedSearch, string>>;
+/** The stored search secret: JSON with one key per service, or (before October
+ * 2026) a bare key that belonged to the connection's selected service. */
+export function parseSearchKeys(raw: string | null, provider: SearchProvider): SearchKeys {
+  if (!raw) return {};
+  if (raw.startsWith("{")) try {
+    const data = JSON.parse(raw) as Record<string, unknown>;
+    const keys: SearchKeys = {};
+    for (const id of ["tavily", "yandex"] as const) if (typeof data[id] === "string" && data[id]) keys[id] = data[id] as string;
+    return keys;
+  } catch { return {}; }
+  return provider === "tavily" || provider === "yandex" ? { [provider]: raw } : {};
+}
+/** The key for the selected search service, never another service's key. */
+export function searchKeyOf(settings: Pick<DirectAgentSettings, "searchKeys" | "webSearchKey">, provider: SearchProvider): string {
+  if (provider === "builtin") return "";
+  return settings.searchKeys ? settings.searchKeys[provider] || "" : settings.webSearchKey;
+}
+
+/** The user picks one of two API types; an OpenAI-compatible connection to
+ * api.openai.com uses OpenAI's own Responses protocol (and its built-in search). */
+export type ApiType = "openai" | "anthropic";
+export const apiTypeOf = (provider: DirectProvider): ApiType => provider === "anthropic" ? "anthropic" : "openai";
+export function providerFor(type: ApiType, baseUrl: string): DirectProvider {
+  if (type === "anthropic") return "anthropic";
+  try { return new URL(baseUrl.trim()).hostname.toLowerCase() === "api.openai.com" ? "openai" : "openai-compatible"; }
+  catch { return "openai-compatible"; }
+}
 const LEGACY_KEY = "pia.direct.openai.key.v1";
 const CREDENTIAL_PREFIX = "pia.direct.credentials.v2.";
 const SEARCH_KEY_PREFIX = "pia.direct.web-search.v1.";
@@ -191,7 +223,7 @@ export async function loadDirectConnections(profile: string): Promise<DirectConn
       const stored = await SecureStore.getItemAsync(connectionKey(profile, index.generation, id));
       if (!stored) throw new Error("connection_missing");
       const item = JSON.parse(stored) as DirectConnection & { credentialIdentity?: string };
-      const [savedApiKey, savedSearchKey] = await Promise.all([
+      const [savedApiKey, savedSearch] = await Promise.all([
         SecureStore.getItemAsync(connectionKey(profile, index.generation, id) + ".api"),
         SecureStore.getItemAsync(connectionKey(profile, index.generation, id) + ".search"),
       ]);
@@ -203,10 +235,16 @@ export async function loadDirectConnections(profile: string): Promise<DirectConn
         model: validateModel(item.model), transcriptionModel: validateModel(item.transcriptionModel || "whisper-1"), allowWeb: item.allowWeb === true,
         searchProvider: search.provider, searchFolderId: validFolder(item.searchFolderId),
         apiKey: item.credentialIdentity === identityOf({ provider, baseUrl }) ? savedApiKey || "" : "",
-        webSearchKey: search.dropKey ? "" : savedSearchKey || "",
+        ...(() => {
+          const searchKeys = search.dropKey ? {} : parseSearchKeys(savedSearch, search.provider);
+          return { searchKeys, webSearchKey: searchKeyOf({ searchKeys, webSearchKey: "" }, search.provider) };
+        })(),
       });
     }
-    return { activeId: index.activeId, connections };
+    // Placeholders the app created by itself (never given a key, not active, default
+    // address) are hidden; the next save removes them.
+    const useful = connections.filter(c => !(c.id.startsWith("default-") && !c.apiKey && c.id !== index.activeId && c.baseUrl === defaultBaseUrl(c.provider)));
+    return { activeId: index.activeId, connections: useful };
   } catch {
     // Do not silently fall back to another credential/endpoint after corruption.
     throw new Error("Не удалось прочитать подключения. Повторите открытие настроек.");
@@ -221,13 +259,21 @@ export async function saveDirectConnections(profile: string, value: DirectConnec
   // publish its manifest atomically so an interrupted save preserves the old set.
   const validated = value.connections.map(item => {
     if (!validId(item.id) || !item.name.trim()) throw new Error("Введите название подключения");
+    if (!item.baseUrl.trim()) throw new Error("Укажите адрес API в подключении «" + item.name.trim() + "»");
+    if (!item.model.trim()) throw new Error("Укажите модель в подключении «" + item.name.trim() + "»");
     if (/[<>]/.test(item.model)) throw new Error("В названии модели «" + item.name.trim() + "» замените часть в угловых скобках на свои данные");
     const provider = validateProvider(item.provider);
     const baseUrl = validateBaseUrl(item.baseUrl, provider);
     const searchProvider = item.searchProvider || "tavily";
     if (!SEARCH_PROVIDERS.includes(searchProvider)) throw new Error("Выберите способ поиска");
-    if (item.allowWeb && searchProvider === "tavily" && !item.webSearchKey.trim()) throw new Error("Введите ключ Tavily");
-    if (item.allowWeb && searchProvider === "yandex" && !item.webSearchKey.trim()) throw new Error("Введите API-ключ Yandex Cloud для поиска");
+    // Older callers pass only webSearchKey: it belongs to the selected service.
+    const rawKeys: SearchKeys = item.searchKeys ? { ...item.searchKeys } :
+      searchProvider !== "builtin" && item.webSearchKey ? { [searchProvider]: item.webSearchKey } : {};
+    const searchKeys: SearchKeys = {};
+    for (const id of ["tavily", "yandex"] as const) if (rawKeys[id]?.trim()) searchKeys[id] = validateSecret(rawKeys[id]!);
+    const activeSearchKey = searchKeyOf({ searchKeys, webSearchKey: "" }, searchProvider);
+    if (item.allowWeb && searchProvider === "tavily" && !activeSearchKey) throw new Error("Введите ключ Tavily");
+    if (item.allowWeb && searchProvider === "yandex" && !activeSearchKey) throw new Error("Введите API-ключ Yandex Cloud для поиска");
     const searchFolderId = (item.searchFolderId || "").trim();
     if (searchFolderId && !validFolder(searchFolderId)) throw new Error("Идентификатор каталога Yandex Cloud — латинские буквы и цифры, например b1g…");
     if (item.allowWeb && searchProvider === "yandex" && !searchFolderId) throw new Error("Введите идентификатор каталога Yandex Cloud (folder ID)");
@@ -236,7 +282,7 @@ export async function saveDirectConnections(profile: string, value: DirectConnec
     return { ...current, name: item.name.trim().slice(0, 60), provider, baseUrl,
       model: validateModel(item.model), transcriptionModel: validateModel(item.transcriptionModel || "whisper-1"), searchProvider, searchFolderId,
       apiKey: item.apiKey.trim() ? validateSecret(item.apiKey) : "",
-      webSearchKey: item.webSearchKey.trim() ? validateSecret(item.webSearchKey) : "",
+      webSearchKey: "", searchKeys, searchSecret: JSON.stringify(searchKeys),
       credentialIdentity: identityOf({ provider, baseUrl }),
     };
   });
@@ -247,8 +293,8 @@ export async function saveDirectConnections(profile: string, value: DirectConnec
   try {
     for (const connection of validated) {
       const key = connectionKey(profile, generation, connection.id);
-      const { apiKey, webSearchKey, ...metadata } = connection;
-      for (const [storageKey, contents] of [[key, JSON.stringify(metadata)], [key + ".api", apiKey], [key + ".search", webSearchKey]]) {
+      const { apiKey, webSearchKey: _active, searchKeys: _keys, searchSecret, ...metadata } = connection;
+      for (const [storageKey, contents] of [[key, JSON.stringify(metadata)], [key + ".api", apiKey], [key + ".search", searchSecret]]) {
         staged.push(storageKey);
         await SecureStore.setItemAsync(storageKey, contents, { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY });
       }

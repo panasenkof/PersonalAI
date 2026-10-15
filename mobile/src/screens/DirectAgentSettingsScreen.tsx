@@ -6,20 +6,24 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import React, { useCallback, useRef, useState } from "react";
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, Switch, Text, TextInput, View } from "react-native";
 import { useProfile } from "../profile/ProfileContext";
-import { PROVIDER_PRESETS, connectionFromPreset, defaultBaseUrl, loadDirectConnections, newDirectConnection, saveDirectConnections } from "../direct-agent/settings";
+import { PROVIDER_PRESETS, apiTypeOf, connectionFromPreset, defaultBaseUrl, loadDirectConnections, newDirectConnection, providerFor, saveDirectConnections, searchKeyOf } from "../direct-agent/settings";
 import { checkConnection, checkWebSearch } from "../direct-agent/check";
-import type { SearchCheck } from "../direct-agent/check";
-import type { ConnectionCheck } from "../direct-agent/check";
-import type { DirectConnection, DirectConnections, DirectProvider, SearchProvider } from "../direct-agent/settings";
+import type { ConnectionCheck, SearchCheck } from "../direct-agent/check";
+import type { ApiType, DirectConnection, DirectConnections, KeyedSearch, ProviderPreset, SearchKeys, SearchProvider } from "../direct-agent/settings";
 import { yandexFolder } from "../direct-agent/compatible";
 import type { RootStackParams } from "../navigation";
 import { useTheme } from "../theme";
 
-const PROVIDERS: Array<{ id: DirectProvider; name: string }> = [
-  { id: "openai", name: "OpenAI Responses" },
-  { id: "openai-compatible", name: "OpenAI-совместимый" },
-  { id: "anthropic", name: "Anthropic Messages" },
+const API_TYPES: Array<{ id: ApiType; name: string; hint: string }> = [
+  { id: "openai", name: "OpenAI-совместимый", hint: "DeepSeek, YandexGPT, OpenRouter, OpenAI, Ollama, LM Studio и большинство других сервисов." },
+  { id: "anthropic", name: "Anthropic", hint: "Модели Claude напрямую через API Anthropic." },
 ];
+const SEARCH_OPTIONS: Array<{ id: SearchProvider; name: string; hint: string }> = [
+  { id: "yandex", name: "Яндекс", hint: "Работает из России, около 0,49 ₽ за поиск со счёта Yandex Cloud. Нужны API-ключ сервисного аккаунта (роль «search-api.webSearch.user», область «yc.search-api.execute») и идентификатор каталога." },
+  { id: "tavily", name: "Tavily", hint: "Бесплатно 1000 поисков в месяц, ключ — на tavily.com. Из России отвечает отказом (HTTP 403) — работает только через VPN." },
+  { id: "builtin", name: "Встроенный OpenAI", hint: "Поиск самой модели OpenAI; оплачивается OpenAI." },
+];
+
 export function DirectAgentSettingsScreen() {
   const profile = useProfile();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParams>>();
@@ -40,6 +44,7 @@ export function DirectAgentSettingsScreen() {
   const [searching, setSearching] = useState(false);
   const [searchCheck, setSearchCheck] = useState<SearchCheck | null>(null);
   const searchAbort = useRef<AbortController | null>(null);
+  const [more, setMore] = useState(false);
 
   useFocusEffect(useCallback(() => {
     let alive = true;
@@ -60,9 +65,37 @@ export function DirectAgentSettingsScreen() {
   }, [profile, retry]));
 
   const selected = value?.connections.find(c => c.id === selectedId);
+  const type = selected ? apiTypeOf(selected.provider) : "openai";
   const preset = selected && PROVIDER_PRESETS.find(p => p.provider === selected.provider && p.baseUrl === selected.baseUrl);
+  const search = selected ? (selected.searchProvider === "builtin" && selected.provider !== "openai" ? "tavily" : selected.searchProvider || "tavily") : "tavily";
+  const keys: SearchKeys = selected ? selected.searchKeys ?? (search !== "builtin" && selected.webSearchKey ? { [search]: selected.webSearchKey } as SearchKeys : {}) : {};
+
+  function choose(id: string) { setSelectedId(id); setCheck(null); setSearchCheck(null); }
   function add(connection: DirectConnection) {
-    setValue(v => v ? { ...v, connections: [...v.connections, connection] } : v); setSelectedId(connection.id); setCheck(null);
+    setValue(v => v ? { ...v, connections: [...v.connections, connection] } : v); choose(connection.id);
+  }
+  function update(patch: Partial<DirectConnection>) {
+    setCheck(null); setSearchCheck(null);
+    setValue(v => v ? { ...v, connections: v.connections.map(c => c.id === selectedId ? { ...c, ...patch } : c) } : v);
+  }
+  /** The model key is bound to its address: a new address or type needs the key of that service. */
+  function setAddress(baseUrl: string) { update({ baseUrl, provider: providerFor(type, baseUrl), apiKey: "" }); }
+  function setType(next: ApiType) {
+    if (!selected || next === type) return;
+    const baseUrl = defaultBaseUrl(next === "anthropic" ? "anthropic" : "openai");
+    update({ provider: providerFor(next, baseUrl), baseUrl, apiKey: "", model: next === "anthropic" ? "claude-sonnet-4-5" : "gpt-4.1-mini" });
+  }
+  function applyPreset(p: ProviderPreset) {
+    update({ name: p.name, provider: p.provider, baseUrl: p.baseUrl, model: p.model, apiKey: "" });
+  }
+  function setSearchKey(id: KeyedSearch, key: string) {
+    const searchKeys: SearchKeys = { ...keys, [id]: key };
+    update({ searchKeys, webSearchKey: searchKeyOf({ searchKeys, webSearchKey: "" }, search) });
+  }
+  function chooseSearch(id: SearchProvider) {
+    if (!selected) return;
+    update({ searchProvider: id, searchKeys: keys, webSearchKey: searchKeyOf({ searchKeys: keys, webSearchKey: "" }, id),
+      ...(id === "yandex" && !selected.searchFolderId && yandexFolder(selected.model) ? { searchFolderId: yandexFolder(selected.model)! } : {}) });
   }
   async function runCheck() {
     if (!selected || checking) return;
@@ -71,148 +104,158 @@ export function DirectAgentSettingsScreen() {
     const result = await checkConnection(selected, undefined, aborter.signal);
     if (!aborter.signal.aborted) { setCheck(result); setChecking(false); }
   }
-  /** A search key belongs to one service: switching services never carries it over. */
-  function chooseSearch(id: SearchProvider) {
-    if (!selected || selected.searchProvider === id) return;
-    update({ searchProvider: id, webSearchKey: "",
-      ...(id === "yandex" && !selected.searchFolderId && yandexFolder(selected.model) ? { searchFolderId: yandexFolder(selected.model)! } : {}) });
-  }
   async function runSearchCheck() {
     if (!selected || searching) return;
     searchAbort.current?.abort(); const aborter = new AbortController(); searchAbort.current = aborter;
     setSearching(true); setSearchCheck(null);
-    const result = await checkWebSearch(selected, fetch, aborter.signal);
+    const result = await checkWebSearch({ ...selected, searchProvider: search, searchKeys: keys }, fetch, aborter.signal);
     if (!aborter.signal.aborted) { setSearchCheck(result); setSearching(false); }
-  }
-  function update(patch: Partial<DirectConnection>) {
-    setCheck(null); setSearchCheck(null);
-    setValue(v => v ? { ...v, connections: v.connections.map(c => c.id === selectedId ? { ...c, ...patch } : c) } : v);
-  }
-  function protocol(provider: DirectProvider) {
-    if (!selected || selected.provider === provider) return;
-    update({ provider, baseUrl: defaultBaseUrl(provider), apiKey: "",
-      model: provider === "anthropic" ? "claude-sonnet-4-5" : "gpt-4.1-mini",
-      ...(selected.searchProvider === "builtin" && provider !== "openai" ? { searchProvider: "tavily" as const, webSearchKey: "" } : {}),
-    });
   }
   async function save() {
     if (!profile || !value || pending.current) return;
     pending.current = true;
     setBusy(true); setNotice("");
     try {
-      await saveDirectConnections(profile, { ...value, activeId: selectedId });
+      await saveDirectConnections(profile, { ...value, activeId: selectedId,
+        connections: value.connections.map(c => c.searchProvider === "builtin" && c.provider !== "openai" ? { ...c, searchProvider: "tavily" as const } : c) });
       navigation.goBack();
     } catch (e) { setNotice((e as Error).message); }
     finally { pending.current = false; setBusy(false); }
   }
-  const field = { borderWidth: 1, borderColor: t.line, padding: 14, minHeight: 50,
-    borderRadius: 16, color: t.text, backgroundColor: t.panel };
+
+  const field = { borderWidth: 1, borderColor: t.line, padding: 14, minHeight: 50, borderRadius: 16, color: t.text, backgroundColor: t.panel };
   const label = { color: t.text, fontWeight: "600" as const };
+  const small = { color: t.muted, fontSize: 12, lineHeight: 17 };
+  const card = { backgroundColor: t.soft, padding: 16, borderRadius: 22, gap: 10 };
+  const section = { color: t.text, fontSize: 18, fontWeight: "800" as const, marginTop: 6 };
+  const chip = (on: boolean) => ({ minHeight: 44, paddingHorizontal: 14, justifyContent: "center" as const, borderRadius: 14,
+    borderWidth: 1, borderColor: on ? t.accent : t.line, backgroundColor: on ? t.panel : t.bg });
+  const host = (url: string) => { try { return new URL(url).host; } catch { return url; } };
   return (
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: t.bg }} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={headerHeight}>
-    <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 24, gap: 14 }}>
+    <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 24, gap: 12 }}>
       <Text style={{ color: t.text, fontSize: 28, fontWeight: "800" }}>Ваши модели</Text>
-      <Text style={{ color: t.muted, lineHeight: 21 }}>У каждого сервиса свои адрес, ключ и модель. Выберите сохранённое подключение или добавьте новое. Сохранение активирует выбранную модель.</Text>
       {!value && !notice ? <ActivityIndicator accessibilityLabel="Загрузка подключений" /> : null}
       {value && selected ? <>
         <View style={{ gap: 8 }}>
-          {value.connections.map(c => (
-            <Pressable key={c.id} disabled={busy} accessibilityRole="button" accessibilityLabel={"Подключение " + c.name}
-              accessibilityState={{ selected: c.id === selectedId }} onPress={() => { setSelectedId(c.id); setCheck(null); }}
-              style={{ padding: 15, borderRadius: 18, borderWidth: 1, borderColor: c.id === selectedId ? t.accent : t.line, backgroundColor: c.id === selectedId ? t.soft : t.panel }}>
-              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+          {value.connections.map(c => {
+            const on = c.id === selectedId;
+            return <Pressable key={c.id} disabled={busy} accessibilityRole="button" accessibilityLabel={"Подключение " + c.name}
+              accessibilityState={{ selected: on }} onPress={() => choose(c.id)}
+              style={{ padding: 14, borderRadius: 18, borderWidth: 1, borderColor: on ? t.accent : t.line, backgroundColor: on ? t.soft : t.panel }}>
+              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
                 <Text style={{ color: t.text, fontWeight: "700", flex: 1 }}>{c.name}</Text>
-                <Text style={{ color: t.accent }}>{c.id === selectedId ? "✓" : "→"}</Text>
+                {c.id === value.activeId ? <Text style={{ color: t.accent, fontSize: 12 }}>активна</Text> : null}
               </View>
-              <Text style={{ color: t.muted, fontSize: 12, marginTop: 5 }} numberOfLines={1}>{c.model} · {c.baseUrl}</Text>
-            </Pressable>
-          ))}
-        </View>
-        <Text style={label}>Добавить подключение</Text>
-        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-          {PROVIDER_PRESETS.map(p => <Pressable key={p.id} disabled={busy || value.connections.length >= 20} accessibilityRole="button" accessibilityLabel={"Добавить " + p.name}
-            style={{ minHeight: 44, paddingHorizontal: 14, justifyContent: "center", borderRadius: 14, borderWidth: 1, borderColor: t.line, backgroundColor: t.panel }}
-            onPress={() => add(connectionFromPreset(p))}><Text style={{ color: t.accent }}>+ {p.name}</Text></Pressable>)}
+              <Text style={{ ...small, marginTop: 4 }} numberOfLines={1}>{c.model || "модель не указана"} · {host(c.baseUrl)}</Text>
+            </Pressable>;
+          })}
           <Pressable disabled={busy || value.connections.length >= 20} accessibilityRole="button" accessibilityLabel="Добавить подключение"
-            style={{ minHeight: 44, paddingHorizontal: 14, justifyContent: "center", borderRadius: 14, borderWidth: 1, borderColor: t.line, backgroundColor: t.panel }}
-            onPress={() => add(newDirectConnection("openai-compatible"))}><Text style={{ color: t.accent }}>+ Другой API</Text></Pressable>
+            style={{ ...chip(false), alignItems: "center" }} onPress={() => add({ ...newDirectConnection("openai-compatible"), name: "Новое подключение", baseUrl: "", model: "" })}>
+            <Text style={{ color: t.accent, fontWeight: "700" }}>+ Новое подключение</Text>
+          </Pressable>
         </View>
-        {preset ? <Text style={{ color: t.muted, fontSize: 12, lineHeight: 18 }}>{preset.hint}</Text> : null}
-        <Text style={label}>Название</Text>
-        <TextInput editable={!busy} accessibilityLabel="Название подключения" value={selected.name} onChangeText={name => update({ name })} style={field} maxLength={60} />
-        <Text style={label}>Протокол</Text>
-        <View style={{ gap: 7 }}>
-          {PROVIDERS.map(p => <Pressable key={p.id} disabled={busy} accessibilityRole="button" accessibilityLabel={"Выбрать " + p.name}
-            style={{ minHeight: 44, padding: 12, borderRadius: 14, backgroundColor: t.panel, borderWidth: 1, borderColor: selected.provider === p.id ? t.accent : t.line }}
-            onPress={() => protocol(p.id)}><Text style={{ color: t.text }}>{selected.provider === p.id ? "● " : "○ "}{p.name}</Text></Pressable>)}
+
+        <Text style={section}>Модель</Text>
+        <View style={card}>
+          <Text style={label}>Тип API</Text>
+          <View style={{ flexDirection: "row", gap: 8 }}>
+            {API_TYPES.map(a => <Pressable key={a.id} disabled={busy} accessibilityRole="button" accessibilityLabel={"Тип API " + a.name}
+              accessibilityState={{ selected: type === a.id }} style={{ ...chip(type === a.id), flex: 1, alignItems: "center" }} onPress={() => setType(a.id)}>
+              <Text style={{ color: type === a.id ? t.accent : t.text, fontWeight: type === a.id ? "700" : "400" }}>{type === a.id ? "● " : "○ "}{a.name}</Text>
+            </Pressable>)}
+          </View>
+          <Text style={small}>{API_TYPES.find(a => a.id === type)!.hint}</Text>
+
+          <Text style={label}>Заполнить по шаблону</Text>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+            {PROVIDER_PRESETS.filter(p => apiTypeOf(p.provider) === type).map(p => <Pressable key={p.id} disabled={busy} accessibilityRole="button"
+              accessibilityLabel={"Шаблон " + p.name} style={chip(preset?.id === p.id)} onPress={() => applyPreset(p)}>
+              <Text style={{ color: t.accent }}>{p.name}</Text>
+            </Pressable>)}
+          </View>
+          <Text style={small}>Шаблон подставит адрес и модель; ключ вставьте свой.{preset ? " " + preset.hint : ""}</Text>
+
+          <Text style={label}>Название</Text>
+          <TextInput editable={!busy} accessibilityLabel="Название подключения" value={selected.name} onChangeText={name => update({ name })}
+            placeholder="Например, DeepSeek" placeholderTextColor={t.muted} style={field} maxLength={60} />
+          <Text style={label}>Адрес API</Text>
+          <TextInput editable={!busy} accessibilityLabel="Адрес API LLM" autoCapitalize="none" autoCorrect={false} keyboardType="url"
+            value={selected.baseUrl} onChangeText={setAddress} placeholder="https://…" placeholderTextColor={t.muted} style={field} />
+          <Text style={small}>Только https://; http:// — для модели в вашей локальной сети. После смены адреса ключ нужно ввести заново.</Text>
+          <Text style={label}>API-ключ (токен){selected.apiKey ? " — введён" : ""}</Text>
+          <TextInput editable={!busy} accessibilityLabel="API-ключ LLM" secureTextEntry autoCapitalize="none" autoCorrect={false}
+            value={selected.apiKey} onChangeText={apiKey => update({ apiKey })} placeholder={/^http:\/\//.test(selected.baseUrl) ? "Не нужен для локальной модели" : "Ключ этого сервиса"} placeholderTextColor={t.muted} style={field} />
+          <Text style={label}>Модель</Text>
+          <TextInput editable={!busy} accessibilityLabel="Название модели" autoCapitalize="none" autoCorrect={false} value={selected.model}
+            onChangeText={model => update({ model })} placeholder="Например, deepseek-chat" placeholderTextColor={t.muted} style={field} />
+          <Pressable accessibilityRole="button" accessibilityLabel="Проверить связь" disabled={busy || checking} onPress={() => void runCheck()}
+            style={{ minHeight: 46, justifyContent: "center", alignItems: "center", borderRadius: 16, borderWidth: 1, borderColor: t.accent }}>
+            {checking ? <ActivityIndicator accessibilityLabel="Проверка связи" /> : <Text style={{ color: t.accent, fontWeight: "700" }}>Проверить связь</Text>}
+          </Pressable>
+          {check ? <Text selectable accessibilityRole="alert" style={{ color: check.ok ? t.ok : t.err }}>{check.ok ? "Связь есть. Модель ответила: «" + check.reply + "»" : check.message}</Text> : null}
         </View>
-        <Text style={label}>Адрес API (Base URL)</Text>
-        <TextInput editable={!busy} accessibilityLabel="Адрес API LLM" autoCapitalize="none" autoCorrect={false} keyboardType="url"
-          value={selected.baseUrl} onChangeText={baseUrl => update({ baseUrl, apiKey: "" })} style={field} />
-        <Text style={{ color: t.muted, fontSize: 12 }}>HTTP доступен для модели в локальной сети. При смене адреса или протокола введите ключ этого сервиса.</Text>
-        <Text style={label}>API-ключ: {selected.apiKey ? "сохранён или введён" : "не задан"}</Text>
-        <TextInput editable={!busy} accessibilityLabel="API-ключ LLM" secureTextEntry autoCapitalize="none" autoCorrect={false}
-          value={selected.apiKey} onChangeText={apiKey => update({ apiKey })} placeholder="Ключ выбранного подключения" placeholderTextColor={t.muted} style={field} />
-        <Text style={label}>Модель</Text>
-        <TextInput editable={!busy} accessibilityLabel="Название модели" autoCapitalize="none" autoCorrect={false} value={selected.model}
-          onChangeText={model => update({ model })} style={field} />
-        {selected.provider !== "anthropic" ? <><Text style={label}>Модель распознавания аудио</Text>
-        <TextInput editable={!busy} accessibilityLabel="Модель распознавания аудио" value={selected.transcriptionModel || "whisper-1"} autoCapitalize="none" autoCorrect={false} onChangeText={transcriptionModel => update({ transcriptionModel })} style={field} />
-        <Text style={{ color: t.muted, fontSize: 12 }}>Используется при импорте аудио, если сервис поддерживает распознавание речи.</Text></> : null}
-        <View style={{ backgroundColor: t.soft, padding: 17, borderRadius: 22, gap: 14 }}>
+
+        <Text style={section}>Интернет-поиск</Text>
+        <View style={card}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-            <Text style={{ color: t.text, flex: 1 }}>Искать в интернете</Text>
+            <Text style={{ color: t.text, flex: 1 }}>Искать в интернете, если в памяти ничего нет</Text>
             <Switch disabled={busy} accessibilityLabel="Разрешить веб-поиск" value={selected.allowWeb} onValueChange={allowWeb => update({ allowWeb })} />
           </View>
-          <Text style={{ color: t.muted, fontSize: 12 }}>Сначала помощник ищет в памяти телефона. Если там ничего нет — сообщает об этом и ищет в интернете. Каждый поиск тратит запрос у выбранного сервиса (у Tavily — 1 из 1000 бесплатных в месяц).</Text>
           {selected.allowWeb ? <>
-          {([
-            ["tavily", "Tavily — бесплатно 1000 поисков в месяц (из России — только через VPN)"],
-            ["yandex", "Яндекс (Yandex Cloud Search API) — около 0,49 ₽ за поиск, работает из России"],
-            ...(selected.provider === "openai" ? [["builtin", "Встроенный поиск OpenAI"]] : []),
-          ] as Array<[SearchProvider, string]>).map(([id, name]) => (
-            <Pressable key={id} disabled={busy} accessibilityRole="button" accessibilityLabel={name}
-              style={{ minHeight: 44, justifyContent: "center" }} onPress={() => chooseSearch(id)}>
-              <Text style={{ color: selected.searchProvider === id ? t.accent : t.text }}>{selected.searchProvider === id ? "● " : "○ "}{name}</Text>
-            </Pressable>
-          ))}
-          {selected.searchProvider === "tavily" ? <><Text style={{ color: t.muted, fontSize: 12 }}>Ключ — на tavily.com после регистрации (карта не нужна). Бесплатно 1000 поисков в месяц; поисковая фраза отправляется Tavily. Tavily отклоняет запросы из России (HTTP 403) — без VPN выберите Яндекс.</Text>
-            <TextInput editable={!busy} accessibilityLabel="Ключ Tavily" secureTextEntry autoCapitalize="none" autoCorrect={false}
-              value={selected.webSearchKey} onChangeText={webSearchKey => update({ webSearchKey })} placeholder="tvly-…" placeholderTextColor={t.muted} style={field} /></> : null}
-          {selected.searchProvider === "yandex" ? <><Text style={{ color: t.muted, fontSize: 12 }}>В консоли Yandex Cloud: сервисный аккаунт с ролью «search-api.webSearch.user», API-ключ с областью «yc.search-api.execute», идентификатор каталога (b1g…). Поисковая фраза отправляется Яндексу, оплата — со счёта Yandex Cloud.</Text>
-            <TextInput editable={!busy} accessibilityLabel="API-ключ Yandex Cloud для поиска" secureTextEntry autoCapitalize="none" autoCorrect={false}
-              value={selected.webSearchKey} onChangeText={webSearchKey => update({ webSearchKey })} placeholder="API-ключ (AQVN…)" placeholderTextColor={t.muted} style={field} />
-            <TextInput editable={!busy} accessibilityLabel="Идентификатор каталога Yandex Cloud" autoCapitalize="none" autoCorrect={false}
-              value={selected.searchFolderId || ""} onChangeText={searchFolderId => update({ searchFolderId })} placeholder="Каталог (b1g…)" placeholderTextColor={t.muted} style={field} /></> : null}
-          {selected.searchProvider !== "builtin" ? <Pressable accessibilityRole="button" accessibilityLabel="Проверить поиск" disabled={busy || searching} onPress={() => void runSearchCheck()}
-            style={{ minHeight: 44, justifyContent: "center", alignItems: "center", borderRadius: 16, borderWidth: 1, borderColor: t.accent }}>
-            {searching ? <ActivityIndicator accessibilityLabel="Проверка поиска" /> : <Text style={{ color: t.accent, fontWeight: "700" }}>Проверить поиск</Text>}
-          </Pressable> : null}
-          {searchCheck ? <Text selectable accessibilityRole="alert" style={{ color: searchCheck.ok ? t.ok : t.err }}>{searchCheck.ok ? "Поиск работает: найдено ссылок — " + searchCheck.count + (searchCheck.first ? ", первая: " + searchCheck.first : "") + "." : searchCheck.message}</Text> : null}
-          </> : null}
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+              {SEARCH_OPTIONS.filter(o => o.id !== "builtin" || selected.provider === "openai").map(o => <Pressable key={o.id} disabled={busy} accessibilityRole="button"
+                accessibilityLabel={"Поиск " + o.name} accessibilityState={{ selected: search === o.id }} style={chip(search === o.id)} onPress={() => chooseSearch(o.id)}>
+                <Text style={{ color: search === o.id ? t.accent : t.text, fontWeight: search === o.id ? "700" : "400" }}>{search === o.id ? "● " : "○ "}{o.name}</Text>
+              </Pressable>)}
+            </View>
+            <Text style={small}>{SEARCH_OPTIONS.find(o => o.id === search)!.hint} У каждого способа поиска свой ключ; при переключении ключи сохраняются.</Text>
+            {search === "tavily" ? <TextInput editable={!busy} accessibilityLabel="Ключ Tavily" secureTextEntry autoCapitalize="none" autoCorrect={false}
+              value={keys.tavily || ""} onChangeText={key => setSearchKey("tavily", key)} placeholder="Ключ Tavily (tvly-…)" placeholderTextColor={t.muted} style={field} /> : null}
+            {search === "yandex" ? <>
+              <TextInput editable={!busy} accessibilityLabel="API-ключ Yandex Cloud для поиска" secureTextEntry autoCapitalize="none" autoCorrect={false}
+                value={keys.yandex || ""} onChangeText={key => setSearchKey("yandex", key)} placeholder="API-ключ Yandex Cloud (AQVN…)" placeholderTextColor={t.muted} style={field} />
+              <TextInput editable={!busy} accessibilityLabel="Идентификатор каталога Yandex Cloud" autoCapitalize="none" autoCorrect={false}
+                value={selected.searchFolderId || ""} onChangeText={searchFolderId => update({ searchFolderId })} placeholder="Идентификатор каталога (b1g…)" placeholderTextColor={t.muted} style={field} />
+            </> : null}
+            {search !== "builtin" ? <Pressable accessibilityRole="button" accessibilityLabel="Проверить поиск" disabled={busy || searching} onPress={() => void runSearchCheck()}
+              style={{ minHeight: 46, justifyContent: "center", alignItems: "center", borderRadius: 16, borderWidth: 1, borderColor: t.accent }}>
+              {searching ? <ActivityIndicator accessibilityLabel="Проверка поиска" /> : <Text style={{ color: t.accent, fontWeight: "700" }}>Проверить поиск</Text>}
+            </Pressable> : null}
+            {searchCheck ? <Text selectable accessibilityRole="alert" style={{ color: searchCheck.ok ? t.ok : t.err }}>{searchCheck.ok ? "Поиск работает: найдено ссылок — " + searchCheck.count + (searchCheck.first ? ", первая: " + searchCheck.first : "") + "." : searchCheck.message}</Text> : null}
+          </> : <Text style={small}>Помощник всегда сначала ищет в памяти телефона. С поиском он сообщит, что в памяти пусто, и поищет в интернете.</Text>}
         </View>
-        <Pressable accessibilityRole="button" accessibilityLabel="Проверить связь" disabled={busy || checking} onPress={() => void runCheck()}
-          style={{ minHeight: 48, justifyContent: "center", alignItems: "center", borderRadius: 18, borderWidth: 1, borderColor: t.accent }}>
-          {checking ? <ActivityIndicator accessibilityLabel="Проверка связи" /> : <Text style={{ color: t.accent, fontWeight: "700" }}>Проверить связь</Text>}
+
+        <Pressable accessibilityRole="button" accessibilityLabel={more ? "Скрыть дополнительные настройки" : "Дополнительные настройки"} onPress={() => setMore(m => !m)}
+          style={{ minHeight: 44, justifyContent: "center" }}>
+          <Text style={{ color: t.accent }}>{more ? "▾ Дополнительно" : "▸ Дополнительно"}</Text>
         </Pressable>
-        {check ? <Text accessibilityRole="alert" style={{ color: check.ok ? t.ok : t.err }}>{check.ok ? "Связь есть. Модель ответила: «" + check.reply + "»" : check.message}</Text> : null}
+        {more ? <View style={card}>
+          {type === "openai" ? <>
+            <Text style={label}>Модель распознавания аудио</Text>
+            <TextInput editable={!busy} accessibilityLabel="Модель распознавания аудио" value={selected.transcriptionModel || "whisper-1"} autoCapitalize="none" autoCorrect={false}
+              onChangeText={transcriptionModel => update({ transcriptionModel })} style={field} />
+            <Text style={small}>Для импорта аудиофайлов, если сервис умеет распознавать речь (у DeepSeek такого нет).</Text>
+          </> : null}
+          <Text style={small}>До 4 обращений к модели за вопрос, до 4000 выходных токенов на обращение (8000 для моделей с рассуждением). Денежный бюджет задаётся у провайдера.</Text>
+          {value.connections.length > 1 ? <Pressable accessibilityRole="button" disabled={busy} accessibilityLabel="Удалить подключение" style={{ minHeight: 44, justifyContent: "center" }}
+            onPress={() => Alert.alert("Удалить подключение «" + selected.name + "»?", "Изменение вступит в силу после сохранения.", [
+              { text: "Отмена", style: "cancel" }, { text: "Удалить", style: "destructive", onPress: () => {
+                const rest = value.connections.filter(c => c.id !== selectedId);
+                setValue({ activeId: rest.some(c => c.id === value.activeId) ? value.activeId : rest[0].id, connections: rest }); choose(rest[0].id);
+              } },
+            ])}><Text style={{ color: t.err }}>Удалить это подключение</Text></Pressable> : null}
+        </View> : null}
+
+        {notice ? <Text accessibilityRole="alert" style={{ color: t.err }}>{notice}</Text> : null}
         <Pressable accessibilityRole="button" disabled={busy} onPress={() => void save()}
           style={{ minHeight: 52, justifyContent: "center", alignItems: "center", backgroundColor: t.accent, borderRadius: 18 }}>
           <Text style={{ color: "#fff", fontWeight: "700" }}>{busy ? "Сохранение…" : "Сохранить настройки"}</Text>
         </Pressable>
-        <Pressable accessibilityRole="button" disabled={busy} onPress={() => update({ apiKey: "" })} style={{ minHeight: 44, justifyContent: "center" }}>
-          <Text style={{ color: t.err }}>Очистить ключ этого подключения</Text>
-        </Pressable>
-        {value.connections.length > 1 ? <Pressable accessibilityRole="button" disabled={busy} accessibilityLabel="Удалить подключение" style={{ minHeight: 44, justifyContent: "center" }}
-          onPress={() => Alert.alert("Удалить подключение?", "Изменение вступит в силу после сохранения настроек.", [
-            { text: "Отмена", style: "cancel" }, { text: "Удалить", style: "destructive", onPress: () => {
-              const rest = value.connections.filter(c => c.id !== selectedId); setValue({ activeId: rest[0].id, connections: rest }); setSelectedId(rest[0].id);
-            } },
-          ])}><Text style={{ color: t.err }}>Удалить подключение</Text></Pressable> : null}
-        <Text style={{ color: t.muted, fontSize: 12 }}>До 4 обращений к модели за вопрос, до 4000 выходных токенов на обращение (8000 для моделей с рассуждением). Денежный бюджет задаётся у провайдера.</Text>
+        <Text style={small}>Сохранение делает выбранное подключение активным.</Text>
       </> : null}
-      {notice ? <><Text accessibilityRole="alert" style={{ color: t.err }}>{notice}</Text>
-        {!value ? <Pressable accessibilityRole="button" onPress={() => setRetry(x => x + 1)} style={{ minHeight: 44 }}><Text style={{ color: t.accent }}>Повторить загрузку</Text></Pressable> : null}</> : null}
+      {notice && !value ? <><Text accessibilityRole="alert" style={{ color: t.err }}>{notice}</Text>
+        <Pressable accessibilityRole="button" onPress={() => setRetry(x => x + 1)} style={{ minHeight: 44 }}><Text style={{ color: t.accent }}>Повторить загрузку</Text></Pressable></> : null}
     </ScrollView>
     </KeyboardAvoidingView>
   );

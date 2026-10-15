@@ -68,9 +68,13 @@ Search choices:
   so from Russia it works only through a VPN.
 - **Built-in OpenAI search:** Responses tool, with potential provider charges.
 
-Bing RSS and Brave Search API were removed. A saved Bing or Brave choice becomes
+Each search service keeps its own key (stored together as one JSON secret per
+connection; a bare key saved earlier belongs to the service that was selected).
+The models page asks for an API type (OpenAI-compatible or Anthropic), then a name,
+API address, key and model; an OpenAI-compatible connection to api.openai.com uses
+the Responses protocol. Bing RSS and Brave Search API were removed. A saved Bing or Brave choice becomes
 Tavily; a Brave key is never sent to another service. Switching the search service
-clears its key field. «Проверить поиск» runs one real search and shows the link count
+keeps each key. «Проверить поиск» runs one real search and shows the link count
 or the exact reason.
 
 Sources and memory content are treated as data, not instructions. A failed

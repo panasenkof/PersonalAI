@@ -1,5 +1,6 @@
 import { toByteArray } from "base64-js";
 import type { DirectAgentSettings, SearchProvider } from "./settings";
+import { searchKeyOf } from "./settings";
 import { SHORT_TIMEOUTS, fetchWithTimeout, httpError, providerDetail } from "./net";
 export type WebContext = { context: string; sources: string[] };
 type SearchResult = { title?: string; url?: string; description?: string };
@@ -45,15 +46,16 @@ export async function fetchWebContext(
   if (signal?.aborted) throw new Error("Запрос остановлен");
   const provider = searchProviderOf(settings);
   if (provider === "builtin") return { context: "", sources: [] };
-  const secrets = [settings.webSearchKey];
+  const key = searchKeyOf(settings, provider);
+  const secrets = [key];
   let results: SearchResult[];
   if (provider === "yandex") {
-    if (!settings.webSearchKey) throw new Error("Введите API-ключ Yandex Cloud для поиска.");
+    if (!key) throw new Error("Введите API-ключ Yandex Cloud для поиска.");
     if (!settings.searchFolderId) throw new Error("Введите идентификатор каталога Yandex Cloud (folder ID).");
     // Synchronous search; billed per request (about 0.49 ₽ in 2026).
     const response = await fetchWithTimeout(transport, YANDEX_SEARCH_URL, {
       method: "POST", signal,
-      headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: "Api-Key " + settings.webSearchKey },
+      headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: "Api-Key " + key },
       body: JSON.stringify({
         query: { searchType: "SEARCH_TYPE_RU", queryText: prompt.slice(0, 400), familyMode: "FAMILY_MODE_MODERATE" },
         groupSpec: { groupMode: "GROUP_MODE_DEEP", groupsOnPage: "5", docsInGroup: "1" },
@@ -71,11 +73,11 @@ export async function fetchWebContext(
     } catch { throw new Error("searchapi.api.cloud.yandex.net: ответ пришёл, но это не результаты поиска. Повторите позже."); }
     results = parseYandexXml(raw);
   } else {
-    if (!settings.webSearchKey) throw new Error("Введите ключ Tavily или выберите другой способ поиска.");
+    if (!key) throw new Error("Введите ключ Tavily или выберите другой способ поиска.");
     // 1 credit per basic search; the free plan has 1,000 credits a month.
     const response = await fetchWithTimeout(transport, "https://api.tavily.com/search", {
       method: "POST", signal,
-      headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: "Bearer " + settings.webSearchKey },
+      headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: "Bearer " + key },
       body: JSON.stringify({ query: prompt.slice(0, 300), max_results: 5, search_depth: "basic", include_answer: false }),
     }, SHORT_TIMEOUTS, secrets);
     if (!response.ok) {
