@@ -7,7 +7,8 @@ import React, { useCallback, useRef, useState } from "react";
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, Switch, Text, TextInput, View } from "react-native";
 import { useProfile } from "../profile/ProfileContext";
 import { PROVIDER_PRESETS, connectionFromPreset, defaultBaseUrl, loadDirectConnections, newDirectConnection, saveDirectConnections } from "../direct-agent/settings";
-import { checkConnection } from "../direct-agent/check";
+import { checkConnection, checkWebSearch } from "../direct-agent/check";
+import type { SearchCheck } from "../direct-agent/check";
 import type { ConnectionCheck } from "../direct-agent/check";
 import type { DirectConnection, DirectConnections, DirectProvider } from "../direct-agent/settings";
 import type { RootStackParams } from "../navigation";
@@ -35,6 +36,9 @@ export function DirectAgentSettingsScreen() {
   const [checking, setChecking] = useState(false);
   const [check, setCheck] = useState<ConnectionCheck | null>(null);
   const checkAbort = useRef<AbortController | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [searchCheck, setSearchCheck] = useState<SearchCheck | null>(null);
+  const searchAbort = useRef<AbortController | null>(null);
 
   useFocusEffect(useCallback(() => {
     let alive = true;
@@ -50,7 +54,8 @@ export function DirectAgentSettingsScreen() {
         appliedPreset.current = presetId;
       } else { setValue(saved); setSelectedId(saved.activeId); }
     }).catch(() => { if (alive) setNotice("Не удалось открыть защищённые подключения."); });
-    return () => { alive = false; setValue(null); checkAbort.current?.abort(); setChecking(false); setCheck(null); };
+    return () => { alive = false; setValue(null); checkAbort.current?.abort(); setChecking(false); setCheck(null);
+      searchAbort.current?.abort(); setSearching(false); setSearchCheck(null); };
   }, [profile, retry]));
 
   const selected = value?.connections.find(c => c.id === selectedId);
@@ -65,8 +70,15 @@ export function DirectAgentSettingsScreen() {
     const result = await checkConnection(selected, undefined, aborter.signal);
     if (!aborter.signal.aborted) { setCheck(result); setChecking(false); }
   }
+  async function runSearchCheck() {
+    if (!selected || searching) return;
+    searchAbort.current?.abort(); const aborter = new AbortController(); searchAbort.current = aborter;
+    setSearching(true); setSearchCheck(null);
+    const result = await checkWebSearch(selected, fetch, aborter.signal);
+    if (!aborter.signal.aborted) { setSearchCheck(result); setSearching(false); }
+  }
   function update(patch: Partial<DirectConnection>) {
-    setCheck(null);
+    setCheck(null); setSearchCheck(null);
     setValue(v => v ? { ...v, connections: v.connections.map(c => c.id === selectedId ? { ...c, ...patch } : c) } : v);
   }
   function protocol(provider: DirectProvider) {
@@ -162,6 +174,11 @@ export function DirectAgentSettingsScreen() {
               value={selected.webSearchKey} onChangeText={webSearchKey => update({ webSearchKey })} placeholder="tvly-…" placeholderTextColor={t.muted} style={field} /></> : null}
           {selected.searchProvider === "brave" ? <TextInput editable={!busy} accessibilityLabel="Ключ Brave Search API" secureTextEntry autoCapitalize="none" autoCorrect={false}
             value={selected.webSearchKey} onChangeText={webSearchKey => update({ webSearchKey })} placeholder="Ключ поиска" placeholderTextColor={t.muted} style={field} /> : null}
+          {selected.searchProvider !== "builtin" ? <Pressable accessibilityRole="button" accessibilityLabel="Проверить поиск" disabled={busy || searching} onPress={() => void runSearchCheck()}
+            style={{ minHeight: 44, justifyContent: "center", alignItems: "center", borderRadius: 16, borderWidth: 1, borderColor: t.accent }}>
+            {searching ? <ActivityIndicator accessibilityLabel="Проверка поиска" /> : <Text style={{ color: t.accent, fontWeight: "700" }}>Проверить поиск</Text>}
+          </Pressable> : null}
+          {searchCheck ? <Text selectable accessibilityRole="alert" style={{ color: searchCheck.ok ? t.ok : t.err }}>{searchCheck.ok ? "Поиск работает: найдено ссылок — " + searchCheck.count + (searchCheck.first ? ", первая: " + searchCheck.first : "") + "." : searchCheck.message}</Text> : null}
           </> : null}
         </View>
         <Pressable accessibilityRole="button" accessibilityLabel="Проверить связь" disabled={busy || checking} onPress={() => void runCheck()}

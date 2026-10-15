@@ -32,6 +32,8 @@ test("blocked public feeds are reported, never switch to another provider silent
   const context = await prepareDirectContext(options("Найди в интернете информацию", jest.fn(async () => []), transport));
   expect(context.webError).toContain("Поисковый сервис");
   expect(context.context).toContain("свежие данные не проверены");
+  // The model is given the exact reason so its answer can name it.
+  expect(context.context).toContain("Причина (дословно): «" + context.webError + "»");
   expect(transport).toHaveBeenCalledTimes(1);
 });
 test("an unanswered search is cut off and reported instead of stalling the answer", async () => {
@@ -60,4 +62,10 @@ test("questions about the user are answered from memory only", async () => {
   await prepareDirectContext({ ...options("Что ты помнишь обо мне?", jest.fn(async () => []), transport), notify });
   expect(transport).not.toHaveBeenCalled();
   expect(notify.mock.calls[0][0]).toContain("Расскажите о себе");
+});
+test("the model is told today's date from the phone clock", async () => {
+  const { todayLine } = require("../context");
+  expect(todayLine(new Date(2026, 9, 15, 15, 22))).toContain("Сегодня 15 октября 2026 г., четверг, 15:22");
+  const context = await prepareDirectContext({ ...options("Сколько лет Де Ниро", jest.fn(async () => []), jest.fn()), settings: { ...options("x", jest.fn(async () => []), jest.fn()).settings, allowWeb: false }, now: new Date(2026, 9, 15) });
+  expect(context.context.startsWith("Сегодня 15 октября 2026 г.")).toBe(true);
 });

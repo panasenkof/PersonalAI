@@ -43,12 +43,24 @@ export function redact(text: string, secrets: string[] = []): string {
 /** Reads only the provider's error code and a redacted, shortened message. */
 export function providerDetail(body: string, secrets: string[] = []): { code?: string; message?: string } {
   let data: any;
-  try { data = JSON.parse(body); } catch { return {}; }
-  const error = Array.isArray(data) ? data[0]?.error ?? data[0] : data?.error ?? data;
+  try { data = JSON.parse(body); } catch { return htmlDetail(body); }
+  // Tavily and FastAPI services put the error under `detail`.
+  const detail = data && !Array.isArray(data) && data.detail !== undefined ? data.detail : undefined;
+  const error = detail !== undefined ? (detail?.error ?? (Array.isArray(detail) ? detail[0]?.msg : detail)) :
+    Array.isArray(data) ? data[0]?.error ?? data[0] : data?.error ?? data;
   const raw = typeof error === "string" ? { message: error } : error && typeof error === "object" ? error : {};
   const code = [raw.code, raw.type, raw.status].find(v => typeof v === "string" && /^[a-z][a-z0-9_.-]{1,63}$/i.test(v) && !/^(sk|key)[-_]/i.test(v));
   const message = typeof raw.message === "string" ? redact(raw.message, secrets).replace(/\s+/g, " ").trim().slice(0, 180) : undefined;
   return { ...(code ? { code } : {}), ...(message ? { message } : {}) };
+}
+
+/** A non-JSON error page: a firewall or CDN answered instead of the API. */
+function htmlDetail(body: string): { code?: string; message?: string } {
+  // Only an HTML page is interpreted; other raw bodies are never echoed.
+  if (!/^\s*<(?:!doctype|html|head|body)/i.test(body)) return {};
+  const blocked = /cloudflare|cf-ray|attention required|access denied|request blocked|forbidden|captcha|not available in your (?:country|region)/i.test(body);
+  const title = /<title[^>]*>([^<]{1,120})<\/title>/i.exec(body)?.[1]?.replace(/\s+/g, " ").trim();
+  return { ...(blocked ? { code: "blocked_by_firewall" } : {}), ...(title ? { message: redact(title) } : {}) };
 }
 
 /** Plain-language reason for an HTTP error status. */
@@ -57,14 +69,18 @@ export function httpError(status: number, host: string, detail: { code?: string;
   const region = /unsupported_country|country|region|territory|not available in your/i.test(text);
   const quota = /insufficient_quota|quota|balance|billing|credit/i.test(text);
   const model = /model/i.test(text);
+  const firewall = detail.code === "blocked_by_firewall";
   const reason =
     status === 400 ? (model ? "сервис не принял название модели или её параметры" : "сервис отклонил запрос") :
     status === 401 ? "ключ API не принят — проверьте ключ этого подключения" :
     status === 402 ? "на счёте сервиса нет средств" :
-    status === 403 ? (region ? "сервис недоступен в вашей стране или регионе" : "доступ запрещён для этого ключа или адреса") :
+    status === 403 ? (region ? "сервис недоступен в вашей стране или регионе" :
+      firewall ? "запрос отклонила защита сервиса, а не сам API — обычно так блокируют страну или сеть (проверьте с VPN или выберите другой способ поиска)" :
+      "доступ запрещён — сервис мог заблокировать вашу страну или сеть (проверьте с VPN) или ключ не имеет прав") :
     status === 404 ? (model ? "такая модель не найдена — проверьте её название" : "адрес API не найден — проверьте Base URL") :
     status === 408 || status === 504 ? "сервис не успел ответить" :
     status === 413 ? "запрос слишком большой" :
+    status === 432 || status === 433 ? "исчерпан лимит тарифа — бесплатные запросы на этот месяц закончились" :
     status === 429 ? (quota ? "исчерпана квота или баланс" : "превышен лимит запросов — подождите и повторите") :
     status >= 500 ? "ошибка на стороне сервиса — повторите позже" : "сервис вернул ошибку";
   const said = [detail.code, detail.message].filter(Boolean).join(": ");

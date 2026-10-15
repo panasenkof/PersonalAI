@@ -40,3 +40,61 @@ test("a preset with an unfilled placeholder cannot be saved and says what to rep
   const yandex = connectionFromPreset(PROVIDER_PRESETS.find(p => p.id === "yandex")!, "yandex");
   await expect(saveDirectConnections("guest", { activeId: "yandex", connections: [yandex] })).rejects.toThrow("угловых скобках");
 });
+
+describe("search check", () => {
+  const tavily = { ...connectionFromPreset(PROVIDER_PRESETS.find(p => p.id === "deepseek")!), apiKey: "k", allowWeb: true, searchProvider: "tavily" as const, webSearchKey: "tvly-dev-secret123" };
+  test("a working Tavily key reports how many links came back", async () => {
+    const transport = jest.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ results: [{ title: "ЦБ", url: "https://cbr.ru/", content: "курс" }] }) });
+    const { checkWebSearch } = require("../check");
+    await expect(checkWebSearch(tavily, transport as any)).resolves.toMatchObject({ ok: true, count: 1, first: "https://cbr.ru/" });
+    expect(transport.mock.calls[0][0]).toBe("https://api.tavily.com/search");
+  });
+  test("a rejected key is named precisely and the key never appears in the message", async () => {
+    const transport = jest.fn().mockResolvedValue({ ok: false, status: 401, text: async () => JSON.stringify({ detail: { error: "Unauthorized: missing or invalid API key tvly-dev-secret123" } }) });
+    const { checkWebSearch } = require("../check");
+    const result = await checkWebSearch(tavily, transport as any);
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("api.tavily.com: ключ API не принят");
+    expect(result.message).not.toContain("tvly-dev-secret123");
+  });
+  test("an exhausted Tavily plan says the monthly limit is spent", async () => {
+    const transport = jest.fn().mockResolvedValue({ ok: false, status: 432, text: async () => "{}" });
+    const { checkWebSearch } = require("../check");
+    expect((await checkWebSearch(tavily, transport as any)).message).toContain("исчерпан лимит тарифа");
+  });
+  test("an unreachable host names the host and the cause", async () => {
+    const transport = jest.fn().mockRejectedValue(new TypeError("Unable to resolve host \"api.tavily.com\""));
+    const { checkWebSearch } = require("../check");
+    expect((await checkWebSearch(tavily, transport as any)).message).toContain("api.tavily.com: адрес сервера не найден");
+  });
+  test("search switched off is reported without a request", async () => {
+    const transport = jest.fn();
+    const { checkWebSearch } = require("../check");
+    expect((await checkWebSearch({ ...tavily, allowWeb: false }, transport as any)).message).toContain("выключен");
+    expect(transport).toHaveBeenCalledTimes(0);
+  });
+});
+
+describe("search errors read what the service said", () => {
+  const tavily = { ...connectionFromPreset(PROVIDER_PRESETS.find(p => p.id === "deepseek")!), apiKey: "k", allowWeb: true, searchProvider: "tavily" as const, webSearchKey: "tvly-dev-secret123" };
+  test("Tavily's detail.error text is shown", async () => {
+    const transport = jest.fn().mockResolvedValue({ ok: false, status: 432, text: async () => JSON.stringify({ detail: { error: "This request exceeds your plan's set usage limit" } }) });
+    const { checkWebSearch } = require("../check");
+    expect((await checkWebSearch(tavily, transport as any)).message).toContain("Ответ сервиса: «This request exceeds your plan's set usage limit»");
+  });
+  test("a firewall page on 403 is told apart from a key problem and suggests a VPN check", async () => {
+    const transport = jest.fn().mockResolvedValue({ ok: false, status: 403, text: async () => "<html><head><title>Attention Required! | Cloudflare</title></head><body>cf-ray</body></html>" });
+    const { checkWebSearch } = require("../check");
+    const message = (await checkWebSearch(tavily, transport as any)).message;
+    expect(message).toContain("защита сервиса");
+    expect(message).toContain("VPN");
+    expect(message).toContain("Attention Required! | Cloudflare");
+  });
+  test("a bare 403 mentions both a blocked country and key rights", async () => {
+    const transport = jest.fn().mockResolvedValue({ ok: false, status: 403, text: async () => "" });
+    const { checkWebSearch } = require("../check");
+    const message = (await checkWebSearch(tavily, transport as any)).message;
+    expect(message).toContain("страну или сеть");
+    expect(message).toContain("HTTP 403");
+  });
+});
