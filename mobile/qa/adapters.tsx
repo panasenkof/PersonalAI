@@ -65,3 +65,4 @@ export const createWhisperSpeechToText = async () => { throw new Error("Whisper 
 export const AudioManager = { requestRecordingPermissions: async () => "Denied", setAudioSessionOptions() {} };
 export class AudioRecorder { onAudioReady() {} clearOnAudioReady() {} async start() { return { status: "error", message: "web" }; } async stop() {} }
 export const fs = { unlink: async () => {} };
+export class AsyncLocalStorage<T> { getStore(): T | undefined { return undefined; } run<R>(_store: T, fn: () => R): R { return fn(); } }

@@ -16,6 +16,8 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
     build.onResolve({ filter: /^\.\/storage$/ }, args => args.importer.includes('/local-memory/') ? ({ path: path.join(qa, 'adapters.tsx') }) : undefined);
     build.onResolve({ filter: /local-memory\/storage$/ }, () => ({ path: path.join(qa, 'adapters.tsx') }));
     build.onResolve({ filter: /local-memory\/repository$/ }, () => ({ path: path.join(qa, 'repository.ts') }));
+    // expo-font's web build imports Node's AsyncLocalStorage for server rendering.
+    build.onResolve({ filter: /^node:async_hooks$/ }, () => ({ path: path.join(qa, 'adapters.tsx') }));
     build.onResolve({ filter: /^react-native-(executorch|audio-api|blob-util)$/ }, () => ({ path: path.join(qa, 'adapters.tsx') }));
     build.onResolve({ filter: /^expo-(secure-store|local-authentication|constants|file-system\/legacy|document-picker|video|image-manipulator|speech-recognition)$/ }, () => ({ path: path.join(qa, 'adapters.tsx') }));
   } }] });
