@@ -16,6 +16,7 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
     build.onResolve({ filter: /^\.\/storage$/ }, args => args.importer.includes('/local-memory/') ? ({ path: path.join(qa, 'adapters.tsx') }) : undefined);
     build.onResolve({ filter: /local-memory\/storage$/ }, () => ({ path: path.join(qa, 'adapters.tsx') }));
     build.onResolve({ filter: /local-memory\/repository$/ }, () => ({ path: path.join(qa, 'repository.ts') }));
+    build.onResolve({ filter: /^react-native-(executorch|audio-api|blob-util)$/ }, () => ({ path: path.join(qa, 'adapters.tsx') }));
     build.onResolve({ filter: /^expo-(secure-store|local-authentication|constants|file-system\/legacy|document-picker|video|image-manipulator|speech-recognition)$/ }, () => ({ path: path.join(qa, 'adapters.tsx') }));
   } }] });
   fs.writeFileSync(path.join(output, 'index.html'), '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body,#root{height:100%;margin:0}#root{display:flex;flex-direction:column}*{box-sizing:border-box}body{font-family:Arial,sans-serif}</style></head><body><div id="root"></div><script>window.process={env:{NODE_ENV:"production",EXPO_OS:"web"}}</script><script src="entry.js"></script></body></html>');

@@ -6,6 +6,8 @@ import { Alert, AppState, Platform, Pressable, Text, View } from "react-native";
 import { nativeInteractionActive, withNativeInteraction } from "../security/native-interaction";
 import type { ServiceChoice } from "../media/voice";
 import { NO_SERVICE_MESSAGE, START_TIMEOUT_MS, pickRecognitionService, startTimeoutMessage, voiceErrorMessage } from "../media/voice";
+import { startWhisperDictation, useWhisperStatus } from "../media/whisper";
+import type { DictationSession } from "../media/whisper";
 import { useTheme } from "../theme";
 import { IconAction } from "./IconAction";
 
@@ -19,14 +21,19 @@ function recognitionService(): ServiceChoice | undefined {
   } catch { return undefined; }
 }
 
-/** Dictation drafts text only. Offline recognition is preferred; use of the
- * phone's network speech service requires an explicit choice. Every failure
- * names its reason: nothing fails silently.
- */
+/** Dictation drafts text only. Order: Whisper on the phone (once downloaded),
+ * then the phone's own offline recognition, then the phone's network speech
+ * service only by explicit choice. Every failure names its reason. */
 export function VoiceInput({ value, onChange, disabled = false, onError, showLabel = false }: {
   value: string; onChange: (text: string) => void; disabled?: boolean; onError: (message: string) => void; showLabel?: boolean;
 }) {
   const t = useTheme();
+  const whisper = useWhisperStatus();
+  const session = useRef<DictationSession | null>(null);
+  const viaWhisper = useRef(false);
+  /** Without Google and without the model, point to the on-device model. */
+  const report = (message: string) => onError(message + (whisper.state === "absent" || whisper.state === "error" ?
+    " Или включите распознавание на самом телефоне: Настройки → Голос без интернета." : ""));
   const [offerNetwork, setOfferNetwork] = useState(false);
   const offline = useRef(true);
   const service = useRef<ServiceChoice | undefined>(undefined);
@@ -46,8 +53,11 @@ export function VoiceInput({ value, onChange, disabled = false, onError, showLab
     clearTimers();
     const wasOwner = owns.current;
     owns.current = false; starting.current = false; started.current = false; setListening(false);
-    if (wasOwner) try { Speech.abort(); } catch { /* already stopped */ }
+    if (viaWhisper.current) { viaWhisper.current = false; void session.current?.stop(); session.current = null; }
+    else if (wasOwner) try { Speech.abort(); } catch { /* already stopped */ }
   }, []);
+  /** «Стоп»: the recognizer finishes the last phrase before ending. */
+  const finish = () => { if (viaWhisper.current) void session.current?.stop(); else Speech.stop(); };
   useSpeechRecognitionEvent("start", () => {
     started.current = true;
     if (watchdog.current) clearTimeout(watchdog.current);
@@ -66,7 +76,7 @@ export function VoiceInput({ value, onChange, disabled = false, onError, showLab
   useSpeechRecognitionEvent("error", event => {
     if (!owns.current) return;
     if (offline.current && !["aborted", "not-allowed", "no-speech", "speech-timeout"].includes(event.error)) setOfferNetwork(true);
-    if (event.error !== "aborted") onError(voiceErrorMessage(event.error, event.message, service.current));
+    if (event.error !== "aborted") report(voiceErrorMessage(event.error, event.message, service.current));
     stop();
   });
   useFocusEffect(useCallback(() => stop, [stop]));
@@ -78,8 +88,24 @@ export function VoiceInput({ value, onChange, disabled = false, onError, showLab
   }, [stop]);
   useEffect(() => { if (disabled) stop(); }, [disabled, stop]);
 
+  async function startWhisper() {
+    starting.current = true;
+    base.current = value.trim(); owns.current = true; viaWhisper.current = true; setListening(true);
+    try {
+      const running = await withNativeInteraction(() => startWhisperDictation(
+        text => { if (viaWhisper.current && text) onChange((base.current + (base.current ? " " : "") + text).slice(0, 4000)); },
+        message => onError(message),
+        () => { if (!viaWhisper.current) return; viaWhisper.current = false; owns.current = false; session.current = null; setListening(false); clearTimers(); }));
+      if (!viaWhisper.current) { void running.stop(); return; }
+      session.current = running;
+      timer.current = setTimeout(() => { if (viaWhisper.current) void session.current?.stop(); }, 60_000);
+    } catch (e) { onError((e as Error).message || "Голос на телефоне: не удалось начать диктовку."); stop(); }
+    finally { starting.current = false; }
+  }
   async function start(network = false) {
     if (disabled || owns.current || starting.current) return;
+    if (whisper.state === "ready" && !network) return startWhisper();
+    if (whisper.state === "downloading" && !network) { onError(`Модель распознавания ещё скачивается (${whisper.progress}%). Подождите или используйте системную службу.`); }
     starting.current = true;
     try {
       if (!Speech.isRecognitionAvailable()) throw new Error(NO_SERVICE_MESSAGE);
@@ -102,10 +128,10 @@ export function VoiceInput({ value, onChange, disabled = false, onError, showLab
         ...(service.current?.pkg ? { androidRecognitionServicePackage: service.current.pkg } : {}),
       });
       watchdog.current = setTimeout(() => {
-        if (owns.current && !started.current) { onError(startTimeoutMessage(service.current)); stop(); }
+        if (owns.current && !started.current) { report(startTimeoutMessage(service.current)); stop(); }
       }, START_TIMEOUT_MS);
       timer.current = setTimeout(() => { if (owns.current) Speech.stop(); }, 60_000);
-    } catch (e) { onError((e as Error).message || "Голосовой ввод: не удалось начать распознавание."); stop(); }
+    } catch (e) { report((e as Error).message || "Голосовой ввод: не удалось начать распознавание."); stop(); }
     finally { starting.current = false; }
   }
   const offerConsent = () => Alert.alert("Системная диктовка", "Служба телефона может отправлять речь своему серверу. Разрешить её?",
@@ -113,8 +139,8 @@ export function VoiceInput({ value, onChange, disabled = false, onError, showLab
   return <View>
     {showLabel ? <IconAction icon={listening ? "square" : "mic"} label={listening ? "Стоп" : "Голос"}
       accessibilityLabel={listening ? "Остановить диктовку" : "Голосовой ввод"} hint={listening ? "Завершить диктовку." : "Надиктовать сообщение. Отправка — отдельной кнопкой."}
-      disabled={disabled} emphasized={listening} hintAbove hintAlign="start" onPress={() => listening ? Speech.stop() : void start()} /> : <Pressable accessibilityRole="button" accessibilityLabel={listening ? "Остановить диктовку" : "Голосовой ввод"}
-      disabled={disabled} onPress={() => listening ? Speech.stop() : void start()}
+      disabled={disabled} emphasized={listening} hintAbove hintAlign="start" onPress={() => listening ? finish() : void start()} /> : <Pressable accessibilityRole="button" accessibilityLabel={listening ? "Остановить диктовку" : "Голосовой ввод"}
+      disabled={disabled} onPress={() => listening ? finish() : void start()}
       style={{ minWidth: 46, minHeight: 46, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: listening ? t.accent : t.soft }}>
       <Feather name={listening ? "square" : "mic"} size={21} color={listening ? "#fff" : t.accent} />
     </Pressable>}

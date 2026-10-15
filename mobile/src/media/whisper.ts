@@ -31,6 +31,12 @@ const configFor = (id: WhisperId): WhisperSttModel => {
   // CPU (XNNPACK) on Android works on every phone; Core ML on iOS.
   return Platform.OS === "ios" ? group.COREML_FP16 : group.XNNPACK_FP32;
 };
+const pathsOf = (m?: WhisperSttModel) => m ? [m.modelPath, m.tokenizerPath, m.vadModel?.modelPath].filter((p): p is string => Boolean(p) && !/^https?:/.test(p!)) : [];
+async function unlink(paths: string[]) {
+  if (!paths.length) return;
+  const BlobUtil = (require("react-native-blob-util") as typeof import("react-native-blob-util")).default;
+  for (const path of paths) await BlobUtil.fs.unlink(path.replace(/^file:\/\//, "")).catch(() => undefined);
+}
 async function readSaved(): Promise<Saved | null> {
   try {
     const raw = await SecureStore.getItemAsync(KEY);
@@ -60,8 +66,12 @@ export async function downloadWhisper(id: WhisperId): Promise<void> {
     const resolved = await rne.download(configFor(id), { signal, onProgress: progress => {
       if (!signal.aborted) set({ state: "downloading", id, progress: Math.round(progress * 100) });
     } });
+    const previous = await readSaved();
     await SecureStore.setItemAsync(KEY, JSON.stringify({ id, resolved } satisfies Saved));
     engine?.model.dispose(); engine = null;
+    // Replacing a model frees the old files (the shared voice detector stays).
+    const keep = new Set(pathsOf(resolved));
+    await unlink(pathsOf(previous?.resolved).filter(p => !keep.has(p)));
     set({ state: "ready", id });
   } catch (e) {
     if (signal.aborted) { const saved = await readSaved(); set(saved ? { state: "ready", id: saved.id } : { state: "absent" }); return; }
@@ -75,12 +85,7 @@ export async function deleteWhisper(): Promise<void> {
   engine?.model.dispose(); engine = null;
   const saved = await readSaved();
   await SecureStore.deleteItemAsync(KEY);
-  if (saved) {
-    const BlobUtil = (require("react-native-blob-util") as typeof import("react-native-blob-util")).default;
-    for (const path of [saved.resolved.modelPath, saved.resolved.tokenizerPath, saved.resolved.vadModel?.modelPath]) {
-      if (path && !/^https?:/.test(path)) await BlobUtil.fs.unlink(path.replace(/^file:\/\//, "")).catch(() => undefined);
-    }
-  }
+  await unlink(pathsOf(saved?.resolved));
   if (status.state !== "unsupported") set({ state: "absent" });
 }
 
