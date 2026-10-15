@@ -65,6 +65,7 @@ export function httpError(status: number, host: string, detail: { code?: string;
     status === 404 ? (model ? "такая модель не найдена — проверьте её название" : "адрес API не найден — проверьте Base URL") :
     status === 408 || status === 504 ? "сервис не успел ответить" :
     status === 413 ? "запрос слишком большой" :
+    status === 432 || status === 433 ? "исчерпан лимит тарифа — бесплатные запросы на этот месяц закончились" :
     status === 429 ? (quota ? "исчерпана квота или баланс" : "превышен лимит запросов — подождите и повторите") :
     status >= 500 ? "ошибка на стороне сервиса — повторите позже" : "сервис вернул ошибку";
   const said = [detail.code, detail.message].filter(Boolean).join(": ");

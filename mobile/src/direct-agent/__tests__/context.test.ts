@@ -32,6 +32,8 @@ test("blocked public feeds are reported, never switch to another provider silent
   const context = await prepareDirectContext(options("Найди в интернете информацию", jest.fn(async () => []), transport));
   expect(context.webError).toContain("Поисковый сервис");
   expect(context.context).toContain("свежие данные не проверены");
+  // The model is given the exact reason so its answer can name it.
+  expect(context.context).toContain("Причина (дословно): «" + context.webError + "»");
   expect(transport).toHaveBeenCalledTimes(1);
 });
 test("an unanswered search is cut off and reported instead of stalling the answer", async () => {

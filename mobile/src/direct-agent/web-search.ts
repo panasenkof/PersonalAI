@@ -29,14 +29,19 @@ export async function fetchWebContext(
       const body = await response.text().catch(() => "");
       throw httpError(response.status, "api.tavily.com", providerDetail(body, [settings.webSearchKey]));
     }
-    const data = await response.json() as { results?: Array<{ title?: string; url?: string; content?: string }> };
+    let data: { results?: Array<{ title?: string; url?: string; content?: string }> };
+    try { data = await response.json(); }
+    catch { throw new Error("api.tavily.com: ответ пришёл, но это не результаты поиска (HTTP " + response.status + "). Повторите позже."); }
     results = (Array.isArray(data.results) ? data.results : []).map(r => ({ title: r.title, url: r.url, description: r.content }));
   } else if (provider === "brave") {
     if (!settings.webSearchKey) throw new Error("Введите ключ Brave Search API или выберите поиск без регистрации.");
     const response = await fetchWithTimeout(transport, "https://api.search.brave.com/res/v1/web/search?q=" + query + "&count=5", {
       method: "GET", headers: { Accept: "application/json", "X-Subscription-Token": settings.webSearchKey }, signal,
-    });
-    if (!response.ok) throw new Error("Интернет-поиск недоступен (HTTP " + response.status + ").");
+    }, SHORT_TIMEOUTS, [settings.webSearchKey]);
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      throw httpError(response.status, "api.search.brave.com", providerDetail(body, [settings.webSearchKey]));
+    }
     const data = await response.json() as { web?: { results?: SearchResult[] } };
     results = Array.isArray(data.web?.results) ? data.web!.results! : [];
   } else {
