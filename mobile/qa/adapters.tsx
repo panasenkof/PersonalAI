@@ -38,9 +38,12 @@ const speechListeners = new Map<string, Set<(value: any) => void>>();
 export const ExpoSpeechRecognitionModule = {
   isRecognitionAvailable: () => true, supportsOnDeviceRecognition: () => true,
   requestPermissionsAsync: async () => ({ granted: true }),
-  start: () => { speechListeners.get("result")?.forEach(fn => fn({ results: [{ transcript: "Купить молоко и хлеб" }], isFinal: true })); speechListeners.get("end")?.forEach(fn => fn({})); },
-  stop: () => speechListeners.get("end")?.forEach(fn => fn({})), abort: () => {},
+  start: () => { speechListeners.get("start")?.forEach(fn => fn({}));
+    if ((stats as any).holdSpeech) return;
+    speechListeners.get("result")?.forEach(fn => fn({ results: [{ transcript: "Купить молоко и хлеб" }], isFinal: true })); speechListeners.get("end")?.forEach(fn => fn({})); },
+  stop: () => speechListeners.get("end")?.forEach(fn => fn({})), abort: () => { (stats as any).speechAborts = ((stats as any).speechAborts || 0) + 1; },
 };
+(window as any).__speechEvent = (name: string, event: any) => speechListeners.get(name)?.forEach(fn => fn(event));
 export function useSpeechRecognitionEvent(event: string, fn: (value: any) => void) {
   React.useEffect(() => {
     if (!speechListeners.has(event)) speechListeners.set(event, new Set()); speechListeners.get(event)!.add(fn);
@@ -61,6 +64,7 @@ export const writeAsStringAsync = async () => {};
 export const models = { speechToText: { WHISPER: {} } };
 export const setTelemetryEnabled = () => {};
 export const download = async (config: unknown) => config;
+export const createFsmnVoiceActivityDetector = async () => { throw new Error("VAD is not available on the web"); };
 export const createWhisperSpeechToText = async () => { throw new Error("Whisper is not available on the web"); };
 export const AudioManager = { requestRecordingPermissions: async () => "Denied", setAudioSessionOptions() {} };
 export class AudioRecorder { onAudioReady() {} clearOnAudioReady() {} async start() { return { status: "error", message: "web" }; } async stop() {} }

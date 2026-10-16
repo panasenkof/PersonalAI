@@ -1,7 +1,7 @@
 import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
 import { useSyncExternalStore } from "react";
-import type { WhisperSpeechToText, WhisperSttModel } from "react-native-executorch";
+import type { FsmnVoiceActivityDetector, WhisperSpeechToText, WhisperSttModel } from "react-native-executorch";
 import { WHISPER_RATE, isWhisperId, joinTranscript, resampleTo16k, whisperErrorMessage, whisperSupported } from "./whisper-core";
 import type { WhisperId } from "./whisper-core";
 
@@ -89,7 +89,15 @@ export async function deleteWhisper(): Promise<void> {
   if (status.state !== "unsupported") set({ state: "absent" });
 }
 
+let engineLoad: Promise<WhisperSpeechToText> | null = null;
 async function loadEngine(): Promise<WhisperSpeechToText> {
+  if (engineLoad) return engineLoad;
+  const loading = loadEngineOnce();
+  engineLoad = loading;
+  try { return await loading; }
+  finally { if (engineLoad === loading) engineLoad = null; }
+}
+async function loadEngineOnce(): Promise<WhisperSpeechToText> {
   const saved = await readSaved();
   if (!saved) throw new Error("Модель распознавания не скачана. Скачайте её: Настройки → Голос без интернета.");
   if (engine?.id === saved.id) return engine.model;
@@ -100,40 +108,109 @@ async function loadEngine(): Promise<WhisperSpeechToText> {
 }
 
 export type DictationSession = { stop: () => Promise<void> };
-/** Records 16 kHz mono and streams it into Whisper; `onText` receives the whole
- * transcript so far. Resolves once the microphone is running. */
-export async function startWhisperDictation(onText: (text: string) => void, onError: (message: string) => void, onEnd: () => void): Promise<DictationSession> {
+export const DICTATION_PAUSE_MS = 1800;
+export const NO_SPEECH_TIMEOUT_MS = 8000;
+const MAX_DICTATION_MS = 60_000;
+type DictationOptions = { signal?: AbortSignal; onFinishing?: () => void };
+let dictationDrain: Promise<void> = Promise.resolve();
+/** A new draft waits for an aborted decoder's final cleanup before reusing the
+ * same model. Otherwise the old generator can reset the new stream's state. */
+export async function startWhisperDictation(onText: (text: string) => void, onError: (message: string) => void,
+  onEnd: () => void, options: DictationOptions = {}): Promise<DictationSession> {
+  const previous = dictationDrain;
+  let release!: () => void;
+  dictationDrain = new Promise<void>(resolve => { release = resolve; });
+  await previous;
+  try { return await beginWhisperDictation(onText, onError, () => { release(); onEnd(); }, options); }
+  catch (e) { release(); throw e; }
+}
+/** A neural VAD observes microphone audio independently of the slower Whisper
+ * decoder. Finishing releases the microphone, then flushes the last phrase.
+ * The detector reuses the already downloaded VAD model; nothing is fetched. */
+async function beginWhisperDictation(onText: (text: string) => void, onError: (message: string) => void,
+  onEnd: () => void, { signal, onFinishing }: DictationOptions = {}): Promise<DictationSession> {
+  const checkCancelled = () => { if (signal?.aborted) throw new Error("Диктовка отменена."); };
+  checkCancelled();
   const model = await loadEngine();
+  checkCancelled();
   const { AudioManager, AudioRecorder } = require("react-native-audio-api") as typeof import("react-native-audio-api");
   const permission = await AudioManager.requestRecordingPermissions();
+  checkCancelled();
   if (permission !== "Granted") throw new Error("Голос на телефоне: нет разрешения на микрофон. Разрешите микрофон для PersAI в настройках телефона.");
-  AudioManager.setAudioSessionOptions({ iosCategory: "playAndRecord", iosMode: "spokenAudio", iosOptions: ["allowBluetoothHFP", "defaultToSpeaker"] });
+  const saved = await readSaved();
+  checkCancelled();
+  if (!saved) throw new Error("Модель распознавания не скачана.");
+  let vad: FsmnVoiceActivityDetector;
+  try { vad = await executorch().createFsmnVoiceActivityDetector(saved.resolved.vadModel); }
+  catch (e) { throw new Error(whisperErrorMessage(e, "load")); }
+  if (signal?.aborted) { vad.dispose(); checkCancelled(); }
+  let recorder: InstanceType<typeof AudioRecorder>;
+  try { recorder = new AudioRecorder(); }
+  catch (e) { vad.dispose(); throw new Error(whisperErrorMessage(e, "record")); }
   let ended = false;
-  const finish = () => { if (!ended) { ended = true; onEnd(); } };
-  void (async () => {
-    try { for await (const part of model.stream({ language: "ru" })) onText(joinTranscript(part.committed, part.nonCommitted)); }
-    catch (e) { onError(whisperErrorMessage(e, "recognize")); }
-    finally { finish(); }
-  })();
-  const recorder = new AudioRecorder();
-  recorder.onAudioReady({ sampleRate: WHISPER_RATE, bufferLength: 1600, channelCount: 1 }, event => {
-    model.streamInsert(resampleTo16k(new Float32Array(event.buffer.getChannelData(0)), event.buffer.sampleRate));
-  });
-  const started = await recorder.start();
-  if (started.status === "error") {
-    recorder.clearOnAudioReady(); model.streamStop();
-    throw new Error(whisperErrorMessage(new Error(started.message), "record"));
-  }
-  return { stop: async () => {
+  let speechDetected = false;
+  let stopping: Promise<void> | null = null;
+  let recordingStart: ReturnType<typeof recorder.start> | undefined;
+  let noSpeechTimer: ReturnType<typeof setTimeout> | undefined;
+  let limitTimer: ReturnType<typeof setTimeout> | undefined;
+  const heardSpeech = () => { clearTimeout(noSpeechTimer); noSpeechTimer = undefined; };
+  const stop = (): Promise<void> => stopping ??= (async () => {
+    heardSpeech(); clearTimeout(limitTimer);
     recorder.clearOnAudioReady();
-    await recorder.stop().catch(() => undefined);
-    model.streamStop();
-  } };
+    // A cancellation may arrive while the native recorder is still starting.
+    await recordingStart?.catch(() => undefined);
+    try { await recorder.stop(); } catch { /* already stopped */ }
+    finally { model.streamStop(); vad.dispose(); }
+  })();
+  const finish = () => { if (!stopping && !ended) { onFinishing?.(); void stop(); } };
+  const cancel = () => { model.transcribeStop(); void stop(); };
+  signal?.addEventListener("abort", cancel, { once: true });
+  const stream = (async () => {
+    try {
+      for await (const part of model.stream({ language: "ru" })) {
+        const text = joinTranscript(part.committed, part.nonCommitted);
+        if (!signal?.aborted && text) onText(text);
+      }
+    } catch (e) { if (!signal?.aborted) onError(whisperErrorMessage(e, "recognize")); }
+    finally { await stop(); signal?.removeEventListener("abort", cancel); ended = true; onEnd(); }
+  })();
+  try {
+    AudioManager.setAudioSessionOptions({ iosCategory: "playAndRecord", iosMode: "spokenAudio", iosOptions: ["allowBluetoothHFP", "defaultToSpeaker"] });
+    recorder.onAudioReady({ sampleRate: WHISPER_RATE, bufferLength: 1600, channelCount: 1 }, event => {
+      if (stopping || ended) return;
+      try {
+        const samples = resampleTo16k(new Float32Array(event.buffer.getChannelData(0)), event.buffer.sampleRate);
+        model.streamInsert(samples);
+        // A 2.5-second rolling neural window distinguishes speech from noise.
+        // The margin tolerates breaths and thinking pauses before ending input.
+        const activity = vad.detectVoiceOnStream(samples, {
+          detectionMargin: DICTATION_PAUSE_MS, minSpeechDurationMs: 150,
+          minSilenceDurationMs: 300, speechPadMs: 100, mergeGapMs: 300,
+        });
+        if (activity === "speechStart") { speechDetected = true; heardSpeech(); }
+        if (activity === "speechEnd") finish();
+      } catch (e) { onError(whisperErrorMessage(e, "recognize")); void stop(); }
+    });
+    const started = await (recordingStart = recorder.start());
+    if (started.status === "error") throw new Error(whisperErrorMessage(new Error(started.message), "record"));
+    if (!stopping && !ended) {
+      if (!speechDetected) noSpeechTimer = setTimeout(() => {
+        onError("Голосовой ввод: речь не обнаружена за 8 секунд. Нажмите микрофон и повторите.");
+        finish();
+      }, NO_SPEECH_TIMEOUT_MS);
+      limitTimer = setTimeout(finish, MAX_DICTATION_MS);
+    }
+    return { stop: async () => { finish(); await stop(); } };
+  } catch (e) {
+    await stop(); await stream;
+    throw e;
+  }
 }
 
 /** Transcribes an audio file on the phone: decoded to 16 kHz mono and passed
  * to Whisper. The file never leaves the device. */
 export async function transcribeAudioFile(uri: string, signal?: AbortSignal): Promise<string> {
+  await dictationDrain;
   const model = await loadEngine();
   const FileSystem = require("expo-file-system/legacy") as typeof import("expo-file-system/legacy");
   const { toByteArray } = require("base64-js") as typeof import("base64-js");

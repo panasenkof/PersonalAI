@@ -14,6 +14,7 @@ import { BottomSheet } from "../components/BottomSheet";
 import { FloatingBrand } from "../components/FloatingBrand";
 import { VoiceInput } from "../components/VoiceInput";
 import { IconAction } from "../components/IconAction";
+import { PromptInput } from "../components/PromptInput";
 import { useTheme } from "../theme";
 import { MarkdownText } from "../components/Markdown";
 import { PROPOSABLE_SECTIONS, SECTIONS } from "../local-memory/sections";
@@ -29,6 +30,7 @@ export function HomeScreen() {
   const [notice, setNotice] = useState("");
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historySearch, setHistorySearch] = useState("");
+  const [voiceReset, setVoiceReset] = useState(0);
   const list = useRef<FlatList<ChatRow>>(null);
   useFocusEffect(useCallback(() => {
     let alive = true;
@@ -49,8 +51,8 @@ export function HomeScreen() {
   // First run: the active connection has neither a key nor a keyless local address.
   const needsSetup = Boolean(settings && !settings.apiKey && !anonymousLocalAllowed(settings));
   return <KeyboardAvoidingView style={{ flex: 1, paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right, backgroundColor: t.bg }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
-    <View style={{ backgroundColor: t.panel, borderBottomWidth: 1, borderColor: t.line, paddingHorizontal: 16, paddingTop: 6, paddingBottom: 10, gap: 2 }}>
-      <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
+    <View style={{ zIndex: 2, backgroundColor: t.panel, borderBottomWidth: 1, borderColor: t.line, paddingHorizontal: 16, paddingTop: 6, paddingBottom: 10, gap: 2 }}>
+      <View style={{ zIndex: 1, flexDirection: "row", gap: 8, alignItems: "center" }}>
         <Text style={{ flex: 1, color: t.text, fontSize: 25, fontWeight: "800" }}>Pers<Text style={{ color: t.accent }}>AI</Text></Text>
         <IconAction icon="clock" label="История" accessibilityLabel="История диалогов" hint="Открыть сохранённые диалоги и найти прошлые сообщения." onPress={() => setHistoryOpen(true)} />
         <IconAction icon="edit" label="Новый чат" accessibilityLabel="Новый диалог" hint="Начать пустой диалог. Предыдущие диалоги останутся в истории." disabled={!ready} onPress={() => store.create()} />
@@ -127,17 +129,15 @@ export function HomeScreen() {
     {error || notice || historyNotice ? <View style={{ paddingHorizontal: 16, paddingVertical: 6 }}><Text accessibilityRole="alert" style={{ color: error || notice ? t.err : t.muted }}>{error || notice || historyNotice}</Text>
       {error && ready ? <Pressable accessibilityRole="button" onPress={() => void store.checkpoint().catch(() => {})} style={{ minHeight: 44, justifyContent: "center" }}><Text style={{ color: t.accent }}>Повторить сохранение истории</Text></Pressable> : null}</View> : null}
     {!canSend && ready && !(needsSetup && !active?.rows.length) ? <Pressable accessibilityRole="button" onPress={() => openConnections()} style={{ paddingHorizontal: 16, minHeight: 44, justifyContent: "center" }}><Text style={{ color: t.accent }}>Добавьте модель в настройках подключений →</Text></Pressable> : null}
-    <View style={{ padding: 10, gap: 5, backgroundColor: t.panel, borderTopWidth: 1, borderColor: t.line }}>
-      <TextInput accessibilityLabel="Сообщение ассистенту" multiline value={question} onChangeText={value => store.setQuestion(value)}
-        placeholder="Спросить у ИИ…" placeholderTextColor={t.muted} editable={ready}
-        style={{ minHeight: 46, maxHeight: 112, borderWidth: 1, borderColor: t.line, borderRadius: 18, backgroundColor: t.soft, padding: 12, color: t.text, fontSize: 16 }} />
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+    <View style={{ zIndex: 3, padding: 10, gap: 5, backgroundColor: t.panel, borderTopWidth: 1, borderColor: t.line }}>
+      <PromptInput value={question} onChange={value => store.setQuestion(value)} onClear={() => setVoiceReset(n => n + 1)} editable={ready} />
+      <View style={{ zIndex: 1, flexDirection: "row", alignItems: "center", gap: 6 }}>
         <IconAction icon="plus" label="Файл" accessibilityLabel="Добавить сведения из файла" hint="Добавить в память сведения из текста, фото, аудио или видео." hintAbove hintAlign="start" onPress={() => navigation.navigate("MemoryImport")} />
-        <VoiceInput value={question} onChange={value => store.setQuestion(value)} disabled={!ready} onError={setNotice} showLabel />
+        <VoiceInput key={`${active?.id}:${voiceReset}`} value={question} onChange={value => { if (store.getSnapshot().activeId === active?.id) store.setQuestion(value); }} disabled={!ready} onError={setNotice} showLabel />
         <Text style={{ flex: 1, color: t.muted, fontSize: 11 }} numberOfLines={1}>{busy ? "Можно перейти в другую вкладку" : ""}</Text>
         <IconAction icon={busy ? "square" : "arrow-up"} label={busy ? "Стоп" : "Отправить"} accessibilityLabel={busy ? "Остановить запрос" : "Отправить запрос"}
           hint={busy ? "Остановить ответ ИИ в этом диалоге." : "Отправить написанное сообщение выбранной модели."} hintAbove emphasized={!busy}
-          disabled={!busy && (!canSend || !question.trim())} onPress={() => busy ? store.stop() : settings && void store.send(settings)} />
+          disabled={!busy && (!canSend || !question.trim())} onPress={() => { if (busy) store.stop(); else if (settings) { setVoiceReset(n => n + 1); void store.send(settings); } }} />
       </View>
     </View>
     <BottomSheet visible={historyOpen} title="Мои диалоги" onClose={() => setHistoryOpen(false)}>
