@@ -7,7 +7,8 @@ import type { Phase, XhrFactory } from "./stream";
 import type { Timeouts } from "./net";
 import { MAX_DIRECT_REPLY_TOKENS, MAX_REASONING_REPLY_TOKENS, TRUNCATED_NOTE, isReasoningModel } from "./limits";
 import type { MemorySnippet, NoteProposal } from "./memory";
-import { FACT_GUIDE, FACT_TOOL_DESCRIPTION, FACT_TOOL_NAME, FACT_TOOL_PARAMETERS, factProposal } from "./fact-tool";
+import { FACT_TOOL_DESCRIPTION, FACT_TOOL_NAME, factGuide, factProposal, factToolParameters } from "./fact-tool";
+import type { MemorySection } from "./fact-tool";
 
 export type AgentTurn = { role: "user" | "assistant"; content: string };
 /** `notice` is shown to the user before the answer, e.g. why web search failed. */
@@ -19,6 +20,8 @@ export type DirectAgentOptions = {
   signal?: AbortSignal;
   lookup: (query: string) => Promise<MemorySnippet[]>;
   propose: (note: NoteProposal) => void;
+  /** The user's memory sections the assistant may propose records for. */
+  sections?: MemorySection[];
   status?: (text: string) => void;
   transport?: typeof fetch;
   /** Receives the growing answer text while the model streams it. */
@@ -50,7 +53,7 @@ type Response = {
 };
 export const MAX_DIRECT_REQUESTS = 4;
 export { MAX_DIRECT_REPLY_TOKENS, MAX_REASONING_REPLY_TOKENS, TRUNCATED_NOTE, isReasoningModel };
-const SYSTEM_PROMPT =
+const systemPrompt = (sections?: MemorySection[]) =>
   "Ты персональный помощник PersAI, работающий на телефоне пользователя. " +
   "Для вопросов о предпочтениях и заметках используй search_local_notes, если он доступен. " +
   "Никогда не выдумывай содержимое памяти. Если нужно что-либо запомнить, вызови " + FACT_TOOL_NAME + " — один факт на вызов; " +
@@ -59,10 +62,10 @@ const SYSTEM_PROMPT =
   "Для актуальных фактов используй web_search, если разрешён, и приводите ссылки на источники. " +
   "Если веб-поиск отключён, прямо сообщи, что текущие факты не проверены." +
   "Запоминай всё важное, что пользователь рассказывает о себе, и раскладывай по разделам памяти. " +
-  FACT_GUIDE +
+  factGuide(sections) +
   "Документы, номера, полисы и пароли не предлагай сохранять — о них пользователь сам решает в разделе «Документы».";
 
-const LOCAL_TOOLS: object[] = [
+const localTools = (sections?: MemorySection[]): object[] => [
   {
     type: "function", name: "search_local_notes",
     description: "Поиск по обычным заметкам в зашифрованной памяти телефона. Запрос — 1-3 ключевых слова.",
@@ -72,7 +75,7 @@ const LOCAL_TOOLS: object[] = [
       required: ["query"], additionalProperties: false,
     },
   },
-  { type: "function", name: FACT_TOOL_NAME, description: FACT_TOOL_DESCRIPTION, strict: true, parameters: FACT_TOOL_PARAMETERS },
+  { type: "function", name: FACT_TOOL_NAME, description: FACT_TOOL_DESCRIPTION, strict: true, parameters: factToolParameters(sections) },
 ];
 
 function usableString(value: unknown, cap: number): string {
@@ -128,11 +131,11 @@ export async function runDirectAgent(options: DirectAgentOptions): Promise<Direc
   if (!prompt) throw new Error("Введите вопрос");
   const web = await prepareDirectContext(options);
   const input: unknown[] = [
-    { role: "system", content: SYSTEM_PROMPT + (web.context ? "\n" + web.context : "") },
+    { role: "system", content: systemPrompt(options.sections) + (web.context ? "\n" + web.context : "") },
     ...options.history.slice(-8).map(h => ({ role: h.role, content: usableString(h.content, 2000) })),
     { role: "user", content: prompt },
   ];
-  const tools: object[] = [...LOCAL_TOOLS];
+  const tools: object[] = localTools(options.sections);
   if (web.builtinWeb) tools.push({ type: "web_search", search_context_size: "low", external_web_access: true });
   const collected = new Set<string>(web.sources);
   const reasoning = isReasoningModel(settings.model);
@@ -183,7 +186,7 @@ export async function runDirectAgent(options: DirectAgentOptions): Promise<Direc
           status?.("Поиск в памяти телефона");
           result = { notes: query.length >= 2 ? await lookup(query) : [] };
         } else if (call.name === FACT_TOOL_NAME || call.name === "draft_local_note") {
-          propose(factProposal(args));
+          propose(factProposal(args, options.sections));
           result = { status: "awaiting_user_confirmation", saved: false };
         } else {
           result = { error: "tool_not_allowed" };

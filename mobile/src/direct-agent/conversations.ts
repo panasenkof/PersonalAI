@@ -1,6 +1,6 @@
 import { withLocalMemoryDatabase } from "../local-memory/storage";
 import type { NoteProposal } from "./memory";
-import { factProposal } from "./fact-tool";
+import { restoredProposal } from "./fact-tool";
 
 export type ChatRow = { id: string; role: "user" | "assistant" | "info"; text: string; sources?: string[] };
 export type ChatDraft = NoteProposal & { id: string };
@@ -33,9 +33,8 @@ export function parseConversation(json: string): SavedConversation | null {
     d && typeof d.id === "string" && typeof d.title === "string" && typeof d.body === "string")
     .map((d: any) => {
       // Re-validate the stored proposal exactly like a fresh one from the model.
-      let extra = {};
-      try { const { title: _t, body: _b, ...rest } = factProposal({ ...d, title: "x" }); extra = rest; } catch { /* keep the text only */ }
-      return { id: d.id, title: d.title, body: d.body, ...extra };
+      // Re-validated, not looked up again: the section was resolved when proposed.
+      return { id: d.id, title: d.title, body: d.body, ...restoredProposal(d) };
     });
   return {
     id: value.id, title: typeof value.title === "string" && value.title ? value.title : "Диалог",

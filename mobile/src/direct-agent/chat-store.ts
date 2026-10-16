@@ -1,19 +1,20 @@
 import * as Crypto from "expo-crypto";
 import { runDirectAgent } from "./engine";
 import { hostOf } from "./net";
-import { saveApprovedNote, searchApprovedNotes } from "./memory";
+import { proposableMemorySections, saveApprovedNote, searchApprovedNotes } from "./memory";
+import { DEFAULT_SECTIONS } from "./fact-tool";
+import type { MemorySection } from "./fact-tool";
 import { conversationRepository } from "./conversations";
 import type { ChatDraft, ConversationRepository, SavedConversation } from "./conversations";
 import type { DirectAgentSettings } from "./settings";
-import { sectionBySlug } from "../local-memory/sections";
-import type { SectionSlug } from "../local-memory/sections";
 import { waitForApplicationSession } from "../local-memory/storage";
 
 /** `streamText` is the answer as it arrives; it is never persisted. */
 /** `progressSince` is when the current stage began, for the elapsed timer. */
 export type LiveConversation = SavedConversation & { busy: boolean; progress: string; progressSince?: number; streamText?: string; savingDraft?: string; deleting?: boolean };
 /** `notice` is informational (e.g. unreadable old chats), unlike `error`. */
-export type ChatSnapshot = { ready: boolean; error: string; notice: string; conversations: LiveConversation[]; activeId: string | null };
+/** `sections` are the memory sections a proposal can go to, the user's own included. */
+export type ChatSnapshot = { ready: boolean; error: string; notice: string; conversations: LiveConversation[]; activeId: string | null; sections: MemorySection[] };
 const newConversation = (): LiveConversation => {
   const timestamp = new Date().toISOString();
   return { id: Crypto.randomUUID(), title: "Новый диалог", createdAt: timestamp, updatedAt: timestamp,
@@ -22,10 +23,16 @@ const newConversation = (): LiveConversation => {
 const saved = ({ busy, progress, progressSince, streamText, savingDraft, deleting, ...conversation }: LiveConversation): SavedConversation =>
   ({ ...conversation, interrupted: busy });
 
+/** Where a proposal will be saved: its section, the new one, or «Заметки». */
+export function draftSectionName(draft: ChatDraft, sections: MemorySection[]): string {
+  if (draft.section) return sections.find(s => s.slug === draft.section)?.name || DEFAULT_SECTIONS.find(s => s.slug === draft.section)?.name || "Заметки";
+  return draft.newSection || "Заметки";
+}
+
 /** Owns work independently of the navigation tree. Only an explicit Stop or
  * a profile change aborts the model; focus/blur and overlays never do. */
 export class DirectChatStore {
-  private snapshot: ChatSnapshot = { ready: false, error: "", notice: "", conversations: [], activeId: null };
+  private snapshot: ChatSnapshot = { ready: false, error: "", notice: "", conversations: [], activeId: null, sections: DEFAULT_SECTIONS };
   private skipped = 0;
   private listeners = new Set<() => void>();
   private requests = new Map<string, AbortController>();
@@ -38,6 +45,14 @@ export class DirectChatStore {
     this.repository = repository || conversationRepository(profile, count => { this.skipped = count; });
   }
   getSnapshot = () => this.snapshot;
+  /** Re-reads the user's sections; on failure the previous list stays. */
+  async refreshSections(): Promise<MemorySection[]> {
+    try {
+      const sections = await proposableMemorySections(this.profile);
+      if (Array.isArray(sections) && sections.length) this.publish({ sections });
+    } catch { /* memory locked or unavailable: keep the known list */ }
+    return this.snapshot.sections;
+  }
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   private publish(patch: Partial<ChatSnapshot>) {
     if (this.disposed) return;
@@ -84,6 +99,7 @@ export class DirectChatStore {
         notice: this.skipped ? `Не удалось прочитать диалогов: ${this.skipped}. Остальные открыты; повреждённые записи сохранены без изменений.` : "" });
       for (const c of conversations.filter(c => records.find(r => r.id === c.id)?.interrupted)) await this.persist(c);
       if (!conversations.length) this.create();
+      void this.refreshSections();
     } catch {
       this.publish({ ready: false, error: "Не удалось открыть историю диалогов. Повторите загрузку." });
     } finally { this.initializing = false; }
@@ -153,8 +169,12 @@ export class DirectChatStore {
       await this.persist(pending);
       if (this.disposed) return;
       if (aborter.signal.aborted) throw new Error("aborted");
+      // The model must see the sections as they are now, including ones the
+      // user created a minute ago in the memory screen.
+      const sections = await this.refreshSections();
+      if (aborter.signal.aborted) throw new Error("aborted");
       modelStarted = true;
-      const result = await this.runner({ settings, prompt, history, signal: aborter.signal, onText,
+      const result = await this.runner({ settings, prompt, history, signal: aborter.signal, onText, sections,
         lookup: query => searchApprovedNotes(this.profile, query),
         notify: text => {
           const c = this.snapshot.conversations.find(c => c.id === id);
@@ -195,9 +215,14 @@ export class DirectChatStore {
   }
   stop(id = this.snapshot.activeId) { if (id && this.requests.has(id)) { this.update(id, { progress: "Останавливаю запрос…" }); this.requests.get(id)?.abort(); } }
   /** The user moves a proposed note to another section before saving it. */
-  setDraftSection(draft: ChatDraft, section: SectionSlug) {
+  /** `section` is an existing slug, or null for the new section the model proposed. */
+  setDraftSection(draft: ChatDraft, section: string | null) {
     const c = this.snapshot.conversations.find(c => c.id === this.snapshot.activeId);
-    if (c && c.savingDraft !== draft.id) this.update(c.id, { drafts: c.drafts.map(d => d.id === draft.id ? { ...d, section } : d) }, true);
+    if (c && c.savingDraft !== draft.id) this.update(c.id, { drafts: c.drafts.map(d => {
+      if (d.id !== draft.id) return d;
+      const { section: _old, ...rest } = d;
+      return section ? { ...rest, section } : rest;
+    }) }, true);
   }
   dismiss(draft: ChatDraft) {
     const c = this.snapshot.conversations.find(c => c.id === this.snapshot.activeId);
@@ -209,9 +234,10 @@ export class DirectChatStore {
     this.update(c.id, { savingDraft: draft.id });
     try {
       await saveApprovedNote(this.profile, draft);
+      if (draft.newSection && !draft.section) void this.refreshSections();
       const latest = this.snapshot.conversations.find(x => x.id === c.id);
       if (latest) this.update(c.id, { drafts: latest.drafts.filter(d => d.id !== draft.id), rows: [...latest.rows,
-        { id: Crypto.randomUUID(), role: "info", text: "Сохранено в разделе «" + (sectionBySlug(draft.section || "notes")?.name || "Заметки") + "»" +
+        { id: Crypto.randomUUID(), role: "info", text: "Сохранено в разделе «" + draftSectionName(draft, this.snapshot.sections) + "»" +
           (draft.person && draft.kind !== "person" ? " и связано с записью «" + draft.person + "» в «Люди»." : ".") }] }, true);
     } catch { this.publish({ error: "Не удалось сохранить заметку. Повторите попытку." }); }
     finally { this.update(c.id, { savingDraft: undefined }); }

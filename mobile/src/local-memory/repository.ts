@@ -134,7 +134,7 @@ export class SqliteMemoryRepository implements MemoryRepository {
       title: item.title ?? (typeof payload.title === "string" ? payload.title : null),
       record_status: "active", sensitivity: item.sensitivity ?? "inherit",
       source_kind: item.source_kind ?? null, source_ref: item.source_ref ?? null,
-      valid_from: null, valid_until: null,
+      valid_from: item.valid_from && Number.isFinite(Date.parse(item.valid_from)) ? item.valid_from : null, valid_until: null,
       created_at: timestamp, updated_at: timestamp, record_version: 1, kind,
     };
     await withUnlockedTransaction(this.db, async tx => {
@@ -144,7 +144,7 @@ export class SqliteMemoryRepository implements MemoryRepository {
           created_at, updated_at, record_version, kind) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [id, record.collection_id, record.domain, record.schema_version, record.title,
           validPayload(payload), record.record_status, record.sensitivity,
-          record.source_kind, record.source_ref, null, null, timestamp, timestamp, 1, kind],
+          record.source_kind, record.source_ref, record.valid_from, null, timestamp, timestamp, 1, kind],
       );
       await indexEntity(tx, id, timestamp);
     });

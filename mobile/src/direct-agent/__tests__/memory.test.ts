@@ -92,3 +92,19 @@ test("a long record sends the chunk that matched, not its beginning", async () =
   expect(await searchApprovedNotes("guest", "где ключи", repo as unknown as MemoryRepository))
     .toEqual([{ id: "long", title: "Дневник", body: "Ключи у соседа.", section: "Заметки" }]);
 });
+
+test("a proposal goes to the user's own section, or creates the section the user asked for on save", async () => {
+  const repo = fake();
+  repo.listCollections.mockResolvedValue([
+    { id: "standard", slug: "notes", name: "Заметки", sensitivity: "standard" },
+    { id: "recipes", slug: "section-1", name: "Рецепты", sensitivity: "standard" },
+  ]);
+  await saveApprovedNote("guest", { title: "Борщ", body: "Свёкла", section: "section-1" }, repo as unknown as MemoryRepository);
+  expect(repo.createEntity).toHaveBeenLastCalledWith(expect.objectContaining({ collection_id: "recipes" }));
+  // A section that was proposed as new but already exists by name is reused.
+  await saveApprovedNote("guest", { title: "Щи", body: "Капуста", newSection: "рецепты" }, repo as unknown as MemoryRepository);
+  expect(repo.createEntity).toHaveBeenLastCalledWith(expect.objectContaining({ collection_id: "recipes" }));
+  await saveApprovedNote("guest", { title: "Цепь", body: "Сменить", newSection: "Гараж" }, repo as unknown as MemoryRepository);
+  expect(repo.createCollection).toHaveBeenLastCalledWith(expect.objectContaining({ name: "Гараж", sensitivity: "standard" }));
+  expect(repo.createEntity).toHaveBeenLastCalledWith(expect.objectContaining({ title: "Цепь" }));
+});
