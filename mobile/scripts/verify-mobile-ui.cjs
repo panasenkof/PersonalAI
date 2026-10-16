@@ -32,6 +32,7 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
   let browser;
   try {
   browser = await chromium.launch({ headless: true, ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}), args: ['--no-sandbox'] });
+    if (process.env.SCREENSHOT_DIR) fs.mkdirSync(process.env.SCREENSHOT_DIR, { recursive: true });
     for (const width of [320, 390, 768]) {
       const page = await browser.newPage({ viewport: { width, height: 900 }, colorScheme: width === 390 ? "dark" : "light" });
       const errors = []; page.on('pageerror', error => { errors.push(error.message); console.error('UI runtime:', error.message); if (process.env.GITHUB_ACTIONS) console.log('::warning title=UI runtime::' + String(error.message).slice(0, 500).replace(/\n/g, '%0A')); });
@@ -82,10 +83,43 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       assert.equal(await page.getByLabel('Разрешить чтение локальной памяти', { exact: true }).count(), 0);
       await page.getByText('Сохранить настройки', { exact: true }).click();
       await page.getByLabel('Сообщение ассистенту', { exact: true }).waitFor();
+      const prompt = page.getByLabel('Сообщение ассистенту', { exact: true });
+      assert.equal(await page.getByLabel('Очистить сообщение', { exact: true }).count(), 0);
+      await prompt.fill('Длинный черновик\nВторая строка');
+      await page.getByLabel('Очистить сообщение', { exact: true }).click();
+      assert.equal(await prompt.inputValue(), '');
+      assert.equal(await prompt.evaluate(el => document.activeElement === el), true, 'Clear keeps keyboard focus in the composer');
+      assert.equal(await page.getByLabel('Очистить сообщение', { exact: true }).count(), 0);
+      // Clear an active recording, then deliver the service's stale callback.
+      await page.evaluate(() => { window.__qa.holdSpeech = true; });
+      await page.getByLabel('Голосовой ввод', { exact: true }).click();
+      await page.getByLabel('Остановить диктовку', { exact: true }).waitFor();
+      await page.evaluate(() => window.__speechEvent('result', { results: [{ transcript: 'Удалить эту диктовку' }], isFinal: false }));
+      await page.getByLabel('Очистить сообщение', { exact: true }).click();
+      await page.waitForFunction(() => window.__qa.speechAborts === 1);
+      await page.evaluate(() => window.__speechEvent('result', { results: [{ transcript: 'Старый результат' }], isFinal: true }));
+      assert.equal(await prompt.inputValue(), '', 'A late transcription must not refill a cleared draft');
+      await page.evaluate(() => { window.__qa.holdSpeech = false; });
       await page.getByLabel('Голосовой ввод', { exact: true }).click();
       await page.waitForFunction(() => document.querySelector('[aria-label="Сообщение ассистенту"]').value.includes('Купить молоко'));
       assert.equal(replyNumber, 0, 'Dictation never autosends');
+      // Sending a draft also ends any still-active dictation for that draft.
+      await page.evaluate(() => { window.__qa.holdSpeech = true; });
+      await page.getByLabel('Голосовой ввод', { exact: true }).click();
+      await page.getByLabel('Остановить диктовку', { exact: true }).waitFor();
       await page.getByLabel('Отправить запрос', { exact: true }).click();
+      await page.waitForFunction(() => window.__qa.speechAborts === 2);
+      await page.evaluate(() => { window.__qa.holdSpeech = false; window.__speechEvent('result', { results: [{ transcript: 'Запоздалый текст после отправки' }], isFinal: true }); });
+      assert.equal(await prompt.inputValue(), '', 'A late transcript cannot refill an already sent draft');
+
+      const sendHint = page.getByText('Отправить написанное сообщение выбранной модели.', { exact: true });
+      await sendHint.waitFor();
+      const hintBox = await sendHint.boundingBox();
+      const buttonBox = await page.getByLabel('Остановить запрос', { exact: true }).boundingBox();
+      assert(hintBox.x >= 0 && hintBox.x + hintBox.width <= width, 'Hint stays inside a narrow screen');
+      assert(hintBox.y + hintBox.height < buttonBox.y && buttonBox.y - hintBox.y - hintBox.height < 30, 'Composer hint appears right above its button');
+      if (process.env.SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, `composer-hint-${width}.png`) });
+
       await page.waitForFunction(() => document.body.textContent.includes('Запрос к LLM'));
       await page.getByLabel('Вкладка Память', { exact: true }).click();
       await page.getByLabel('Вкладка Настройки', { exact: true }).click();
@@ -179,6 +213,8 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByLabel('Вкладка Главная', { exact: true }).click();
       await page.setViewportSize({ width, height: 470 });
       await page.getByLabel('Сообщение ассистенту', { exact: true }).fill('Черновик');
+      const clearBox = await page.getByLabel('Очистить сообщение', { exact: true }).boundingBox();
+      assert(clearBox.x >= 0 && clearBox.x + clearBox.width <= width && clearBox.y + clearBox.height <= 470 - 24, 'Clear remains reachable with the keyboard viewport');
       const sendBox = await page.getByLabel('Отправить запрос', { exact: true }).boundingBox();
       assert(sendBox.y + sendBox.height <= 470 - 24, 'Composer leaves space for the system bottom inset');
       await page.getByLabel('История диалогов', { exact: true }).click();

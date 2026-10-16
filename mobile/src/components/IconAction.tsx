@@ -1,7 +1,15 @@
 import Feather from "@expo/vector-icons/Feather";
-import React, { useEffect, useRef, useState } from "react";
-import { Platform, Pressable, Text, ToastAndroid, View } from "react-native";
+import React, { useEffect, useId, useRef, useSyncExternalStore } from "react";
+import { Pressable, Text, View } from "react-native";
 import { useTheme } from "../theme";
+
+type Hint = { owner: string; text: string };
+let visibleHint: Hint | null = null;
+const hintListeners = new Set<() => void>();
+const subscribe = (listener: () => void) => { hintListeners.add(listener); return () => { hintListeners.delete(listener); }; };
+const currentHint = () => visibleHint;
+const showHint = (hint: Hint | null) => { visibleHint = hint; hintListeners.forEach(listener => listener()); };
+const dismissHint = (owner: string) => { if (visibleHint?.owner === owner) showHint(null); };
 
 /** Visible names make icons discoverable; a tap or hold also explains the
  * action. Hints use no native window, so they cannot steal Android focus. */
@@ -10,17 +18,16 @@ export function IconAction({ icon, label, accessibilityLabel, hint, onPress, dis
   icon: React.ComponentProps<typeof Feather>["name"]; label: string; accessibilityLabel: string;
   hint: string; onPress: () => void; disabled?: boolean; emphasized?: boolean; hintAbove?: boolean; hintAlign?: "start" | "end";
 }) {
-  const t = useTheme(); const [help, setHelp] = useState(false);
+  const t = useTheme(); const owner = useId();
+  const visible = useSyncExternalStore(subscribe, currentHint, currentHint);
+  const help = visible?.owner === owner ? visible.text : "";
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); dismissHint(owner); }, [owner]);
   const explain = () => {
-    if (Platform.OS === "android") ToastAndroid.show(hint, ToastAndroid.SHORT);
-    else {
-      if (timer.current) clearTimeout(timer.current);
-      setHelp(true); timer.current = setTimeout(() => setHelp(false), 2500);
-    }
+    if (timer.current) clearTimeout(timer.current);
+    showHint({ owner, text: hint }); timer.current = setTimeout(() => dismissHint(owner), 2500);
   };
-  return <View style={{ position: "relative", zIndex: help ? 1 : 0 }}>
+  return <View style={{ position: "relative", zIndex: help ? 10 : 0 }}>
     <Pressable accessibilityRole="button" accessibilityLabel={accessibilityLabel} accessibilityHint={hint}
       accessibilityState={{ disabled }} disabled={disabled} onLongPress={explain}
       onPress={() => { explain(); onPress(); }}
@@ -29,9 +36,9 @@ export function IconAction({ icon, label, accessibilityLabel, hint, onPress, dis
       <Feather name={icon} size={21} color={emphasized && !disabled ? "#fff" : t.accent} />
       <Text style={{ fontSize: 11, fontWeight: "600", color: emphasized && !disabled ? "#fff" : t.accent }}>{label}</Text>
     </Pressable>
-    {help ? <View pointerEvents="none" style={{ position: "absolute", ...(hintAlign === "start" ? { left: 0 } : { right: 0 }), ...(hintAbove ? { bottom: "100%" } : { top: "100%" }), width: 200,
-      padding: 10, backgroundColor: t.soft, borderWidth: 1, borderColor: t.line, borderRadius: 12 }}>
-      <Text accessibilityLiveRegion="polite" style={{ color: t.text, fontSize: 12, lineHeight: 17 }}>{hint}</Text>
+    {help ? <View testID="action-hint" pointerEvents="none" style={{ position: "absolute", ...(hintAlign === "start" ? { left: 0 } : { right: 0 }), ...(hintAbove ? { bottom: "100%", marginBottom: 6 } : { top: "100%", marginTop: 6 }), width: 200,
+      padding: 10, backgroundColor: t.soft, borderWidth: 1, borderColor: t.line, borderRadius: 12, elevation: 8 }}>
+      <Text accessibilityLiveRegion="polite" style={{ color: t.text, fontSize: 12, lineHeight: 17 }}>{help}</Text>
     </View> : null}
   </View>;
 }
