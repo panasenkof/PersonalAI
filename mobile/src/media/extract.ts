@@ -6,6 +6,7 @@ import type { DirectAgentSettings } from "../direct-agent/settings";
 import { anonymousLocalAllowed, validateBaseUrl, validateModel } from "../direct-agent/settings";
 import { MAX_DIRECT_REPLY_TOKENS, MAX_REASONING_REPLY_TOKENS, isReasoningModel } from "../direct-agent/limits";
 import { fetchWithTimeout } from "../direct-agent/net";
+import { getWhisperStatus, transcribeAudioFile } from "./whisper";
 import type { Timeouts } from "../direct-agent/net";
 /** Uploading audio or images and reading them can take a few minutes. */
 const LONG_TIMEOUTS: Timeouts = { connectMs: 30_000, idleMs: 180_000, totalMs: 180_000 };
@@ -94,6 +95,14 @@ export async function extractMedia(file: ImportFile, settings: DirectAgentSettin
     if (text.length > 60_000) throw new Error("Текст длиннее 60 000 символов. Разделите его на части.");
     return text;
   }
+  // With Whisper downloaded, audio is transcribed on the phone and sent nowhere.
+  if (kind === "audio" && getWhisperStatus().state === "ready") {
+    const text = await transcribeAudioFile(file.uri, signal);
+    check(signal);
+    if (!text) throw new Error("В аудио не удалось распознать речь.");
+    if (text.length > 60_000) throw new Error("Расшифровка слишком длинная. Разделите аудио на части.");
+    return text;
+  }
   if (!approved) throw new Error("Разрешите передачу этого файла выбранному провайдеру для разбора.");
   if (!settings.apiKey && !anonymousLocalAllowed(settings)) throw new Error("Настройте ключ подключения для разбора файлов.");
   const base = validateBaseUrl(settings.baseUrl, settings.provider);
@@ -105,7 +114,7 @@ export async function extractMedia(file: ImportFile, settings: DirectAgentSettin
     data.append("model", validateModel(settings.transcriptionModel || "whisper-1"));
     const response = await fetchWithTimeout(transport, base + "/audio/transcriptions", { method: "POST", body: data,
       headers: settings.apiKey ? { Authorization: "Bearer " + settings.apiKey } : {}, signal }, LONG_TIMEOUTS, [settings.apiKey]);
-    if (!response.ok) throw new Error("Распознавание аудио: HTTP " + response.status + ". Проверьте поддержку /audio/transcriptions и модель распознавания в подключении.");
+    if (!response.ok) throw new Error("Распознавание аудио у сервиса подключения: HTTP " + response.status + ". Этот сервис, похоже, не распознаёт речь (у DeepSeek такого нет). Скачайте распознавание на телефон: Настройки → Голос без интернета — тогда аудио распознаётся без отправки куда-либо.");
     const result = await response.json() as { text?: string };
     check(signal);
     if (!result.text?.trim()) throw new Error("В аудио не удалось распознать речь.");
