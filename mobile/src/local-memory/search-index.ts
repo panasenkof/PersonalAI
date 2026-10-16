@@ -2,13 +2,10 @@
  * chunk in `memory_search_fts`. It is always rebuilt from the record, its names
  * and index words, in the same transaction as the change, so search never
  * shows a stale version. Backups carry the records; the index is rebuilt. */
+import type * as SQLite from "expo-sqlite";
 import { foldText } from "./query";
 
-type SQL = {
-  getAllAsync<T>(sql: string, params?: unknown[]): Promise<T[]>;
-  getFirstAsync<T>(sql: string, params?: unknown[]): Promise<T | null>;
-  runAsync(sql: string, params?: unknown[]): Promise<unknown>;
-};
+type SQL = Pick<SQLite.SQLiteDatabase, "getAllAsync" | "getFirstAsync" | "runAsync">;
 type Row = Record<string, unknown>;
 
 export const MEMORY_KINDS = ["fact", "person", "event", "preference", "document", "note"] as const;

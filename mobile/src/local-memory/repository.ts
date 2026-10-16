@@ -450,7 +450,7 @@ export class SqliteMemoryRepository implements MemoryRepository {
     status: "active" | "archived"; collectionIds?: string[]; sensitivities?: string[]; limit: number; offset: number;
   }): Promise<Row[]> {
     const filters = ["e.domain='notes'", "e.record_status=?"];
-    const params: unknown[] = [options.status];
+    const params: SQLite.SQLiteBindValue[] = [options.status];
     if (options.collectionIds) {
       if (!options.collectionIds.length) return [];
       filters.push(`e.collection_id IN (${options.collectionIds.map(() => "?").join(",")})`); params.push(...options.collectionIds);
