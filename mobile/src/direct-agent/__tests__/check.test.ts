@@ -120,3 +120,23 @@ describe("search providers after removing Bing and Brave", () => {
     expect(message).not.toContain("AQVNkey");
   });
 });
+
+describe("Tavily credits left", () => {
+  const { fetchTavilyUsage, formatTavilyUsage } = require("../web-search");
+  test("the account plan usage gives what is left this month, the key stays in the header", async () => {
+    const transport = jest.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({
+      key: { usage: 60, limit: null }, account: { current_plan: "Researcher", plan_usage: 60, plan_limit: 1000, paygo_usage: 0, paygo_limit: null } }) });
+    const usage = await fetchTavilyUsage("tvly-dev-secret", transport as any);
+    expect(transport.mock.calls[0][0]).toBe("https://api.tavily.com/usage");
+    expect(transport.mock.calls[0][1].headers.Authorization).toBe("Bearer tvly-dev-secret");
+    expect(formatTavilyUsage(usage)).toBe("Осталось 940 из 1000 запросов в этом месяце (план Researcher).");
+  });
+  test("an exhausted plan says when search returns", () => {
+    expect(formatTavilyUsage({ used: 1000, limit: 1000 })).toContain("Бесплатные запросы закончились");
+    expect(formatTavilyUsage({ used: 950, limit: 1000 })).toContain("скоро закончатся");
+  });
+  test("a blocked request names the reason", async () => {
+    const transport = jest.fn().mockResolvedValue({ ok: false, status: 403, text: async () => "" });
+    await expect(fetchTavilyUsage("tvly-x", transport as any)).rejects.toThrow("api.tavily.com");
+  });
+});

@@ -3,7 +3,7 @@ import type { RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useHeaderHeight } from "@react-navigation/elements";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, Switch, Text, TextInput, View } from "react-native";
 import { useProfile } from "../profile/ProfileContext";
 import { PROVIDER_PRESETS, apiTypeOf, connectionFromPreset, defaultBaseUrl, loadDirectConnections, newDirectConnection, providerFor, saveDirectConnections, searchKeyOf } from "../direct-agent/settings";
@@ -11,6 +11,7 @@ import { checkConnection, checkWebSearch } from "../direct-agent/check";
 import type { ConnectionCheck, SearchCheck } from "../direct-agent/check";
 import type { ApiType, DirectConnection, DirectConnections, KeyedSearch, ProviderPreset, SearchKeys, SearchProvider } from "../direct-agent/settings";
 import { yandexFolder } from "../direct-agent/compatible";
+import { fetchTavilyUsage, formatTavilyUsage } from "../direct-agent/web-search";
 import type { RootStackParams } from "../navigation";
 import { useTheme } from "../theme";
 
@@ -45,6 +46,8 @@ export function DirectAgentSettingsScreen() {
   const [searchCheck, setSearchCheck] = useState<SearchCheck | null>(null);
   const searchAbort = useRef<AbortController | null>(null);
   const [more, setMore] = useState(false);
+  const [usage, setUsage] = useState<{ text: string; ok: boolean } | null>(null);
+  const [usageTick, setUsageTick] = useState(0);
 
   useFocusEffect(useCallback(() => {
     let alive = true;
@@ -97,6 +100,21 @@ export function DirectAgentSettingsScreen() {
     update({ searchProvider: id, searchKeys: keys, webSearchKey: searchKeyOf({ searchKeys: keys, webSearchKey: "" }, id),
       ...(id === "yandex" && !selected.searchFolderId && yandexFolder(selected.model) ? { searchFolderId: yandexFolder(selected.model)! } : {}) });
   }
+  // Tavily credits left this month: loaded when Tavily is chosen and a key is entered,
+  // refreshed after «Проверить поиск». The /usage request does not spend a search.
+  const tavilyKey = selected?.allowWeb && search === "tavily" ? (keys.tavily || "").trim() : "";
+  useEffect(() => {
+    setUsage(null);
+    if (!/^tvly-\S{8,}$/.test(tavilyKey)) return;
+    const aborter = new AbortController();
+    const timer = setTimeout(() => {
+      fetchTavilyUsage(tavilyKey, fetch, aborter.signal)
+        .then(u => { if (!aborter.signal.aborted) setUsage({ text: formatTavilyUsage(u), ok: u.limit === null || u.used < u.limit }); })
+        .catch(e => { if (!aborter.signal.aborted) setUsage({ text: "Остаток запросов Tavily не получен: " + String((e as Error)?.message || e), ok: false }); });
+    }, 700);
+    return () => { clearTimeout(timer); aborter.abort(); };
+  }, [tavilyKey, usageTick]);
+
   async function runCheck() {
     if (!selected || checking) return;
     checkAbort.current?.abort(); const aborter = new AbortController(); checkAbort.current = aborter;
@@ -109,7 +127,7 @@ export function DirectAgentSettingsScreen() {
     searchAbort.current?.abort(); const aborter = new AbortController(); searchAbort.current = aborter;
     setSearching(true); setSearchCheck(null);
     const result = await checkWebSearch({ ...selected, searchProvider: search, searchKeys: keys }, fetch, aborter.signal);
-    if (!aborter.signal.aborted) { setSearchCheck(result); setSearching(false); }
+    if (!aborter.signal.aborted) { setSearchCheck(result); setSearching(false); setUsageTick(x => x + 1); }
   }
   async function save() {
     if (!profile || !value || pending.current) return;
@@ -212,6 +230,7 @@ export function DirectAgentSettingsScreen() {
             <Text style={small}>{SEARCH_OPTIONS.find(o => o.id === search)!.hint} У каждого способа поиска свой ключ; при переключении ключи сохраняются.</Text>
             {search === "tavily" ? <TextInput editable={!busy} accessibilityLabel="Ключ Tavily" secureTextEntry autoCapitalize="none" autoCorrect={false}
               value={keys.tavily || ""} onChangeText={key => setSearchKey("tavily", key)} placeholder="Ключ Tavily (tvly-…)" placeholderTextColor={t.muted} style={field} /> : null}
+            {search === "tavily" && usage ? <Text selectable accessibilityLabel="Остаток запросов Tavily" style={{ color: usage.ok ? t.muted : t.err, fontSize: 13 }}>{usage.text}</Text> : null}
             {search === "yandex" ? <>
               <TextInput editable={!busy} accessibilityLabel="API-ключ Yandex Cloud для поиска" secureTextEntry autoCapitalize="none" autoCorrect={false}
                 value={keys.yandex || ""} onChangeText={key => setSearchKey("yandex", key)} placeholder="API-ключ Yandex Cloud (AQVN…)" placeholderTextColor={t.muted} style={field} />
