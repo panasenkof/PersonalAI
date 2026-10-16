@@ -10,7 +10,13 @@ export type NoteProposal = { title: string; body: string; section?: SectionSlug 
 
 const STOP_WORDS = new Set(["что", "как", "где", "когда", "кто", "чем", "мне", "меня", "мой", "моя", "моё", "мои", "моих", "моей", "моего",
   "для", "это", "эта", "этот", "эти", "найди", "найти", "пожалуйста", "расскажи", "напомни", "помоги", "подскажи", "скажи", "знаешь", "помнишь",
-  "интернет", "интернете", "есть", "был", "была", "было", "про", "при", "или", "его", "её", "них", "там", "тут", "так", "уже", "ещё", "еще", "мы", "вы", "ты"]);
+  "интернет", "интернете", "есть", "был", "была", "было", "про", "при", "или", "его", "её", "них", "там", "тут", "так", "уже", "ещё", "еще", "мы", "вы", "ты",
+  // Question and helper words: they occur everywhere and found unrelated notes
+  // («Сколько лет Де Ниро?» → «Маше 7 лет»), so the assistant skipped the internet.
+  "какой", "какая", "какое", "какие", "каких", "каким", "какую", "каком", "сколько", "который", "которая", "которое", "которые",
+  "зовут", "лет", "год", "года", "году", "лучше", "стоит", "нужно", "надо", "можно", "будет", "буду", "будут", "чтобы", "если", "тоже", "очень",
+  "сейчас", "сегодня", "всегда", "никогда", "всё", "все", "мой", "наш", "наша", "наше", "наши", "свой", "своя", "себя", "она", "оно", "они", "него", "неё",
+  "почему", "зачем", "откуда", "куда", "чей", "чья", "чьё"]);
 // Longest first, so «ами» is removed before «и».
 const RU_ENDINGS = ["иями", "ями", "ами", "ого", "его", "ому", "ему", "ыми", "ими", "ость", "ах", "ях", "ам", "ям", "ов", "ев", "ей", "ой", "ий", "ый",
   "ая", "яя", "ое", "ее", "ые", "ие", "ую", "юю", "ом", "ем", "ть", "ся", "а", "я", "о", "е", "ы", "и", "у", "ю", "ь", "й"];
@@ -41,14 +47,20 @@ export async function searchApprovedNotes(
   // Only explicitly standard collections may leave the device. Never share
   // unclassified, sensitive or secret content through cloud-model tools.
   const standards = new Set(collections.filter(c => c.sensitivity === "standard").map(c => c.id));
-  const words = [...new Set(q.toLowerCase().split(/[^\p{L}\p{N}-]+/u).filter(s => s.length >= 3 && !STOP_WORDS.has(s)))].slice(0, 6);
+  const tokens = q.split(/[^\p{L}\p{N}-]+/u).filter(Boolean);
+  // A capitalised word after the first is a name («Маше», «Аню»): its stem may be short.
+  const names = new Set(tokens.slice(1).filter(t => /^\p{Lu}\p{Ll}/u.test(t)).map(t => t.toLowerCase()));
+  const words = [...new Set(tokens.map(t => t.toLowerCase()).filter(s => (s.length >= 3 || names.has(s)) && !STOP_WORDS.has(s)))].slice(0, 6);
+  const stemOf = (w: string) => names.has(w) ? w.replace(/(ой|ей|ею|ою|[аяеиыуюо])$/u, "") : wordStem(w);
   const aboutMe = /(?:помнишь|знаешь|расскажи).*(?:обо? мне|про меня)|кто я\b/iu.test(q);
-  const searches: Array<{ term: string; prefix: boolean; weight: number }> = aboutMe
-    ? [{ term: "", prefix: false, weight: 1 }]
+  const searches: Array<{ term: string; prefix: boolean; weight: number; word: number }> = aboutMe
+    ? [{ term: "", prefix: false, weight: 1, word: -1 }]
     : [
-        { term: q, prefix: false, weight: 4 },
-        ...words.map(w => ({ term: w, prefix: false, weight: 2 })),
-        ...words.map(w => ({ term: wordStem(w), prefix: true, weight: 1 })).filter(s => s.term.length >= 3),
+        { term: q, prefix: false, weight: 4, word: -1 },
+        ...words.map((w, i) => ({ term: w, prefix: false, weight: 2, word: i })),
+        // A stem shorter than four letters («как», «лет») matches too much; names may be shorter.
+        ...words.map((w, i) => ({ term: stemOf(w), prefix: true, weight: 1, word: i }))
+          .filter(s => s.term.length >= (names.has(words[s.word]) ? 2 : 4) && s.term !== words[s.word]),
       ];
   const scored = new Map<string, { note: EntityRecord; score: number; order: number }>();
   for (const search of searches) {
@@ -57,9 +69,9 @@ export async function searchApprovedNotes(
     for (const note of matches) {
       if (!standards.has(note.collection_id) || note.record_status !== "active" ||
           !["standard", "inherit"].includes(note.sensitivity)) continue;
-      const found = scored.get(note.id);
-      if (found) found.score += search.weight;
-      else scored.set(note.id, { note, score: search.weight, order: scored.size });
+      const found = scored.get(note.id) || { note, score: 0, order: scored.size };
+      found.score += search.weight;
+      scored.set(note.id, found);
     }
   }
   return [...scored.values()].sort((a, b) => b.score - a.score || a.order - b.order).slice(0, 5).map(({ note }) => {

@@ -15,6 +15,7 @@ import { FloatingBrand } from "../components/FloatingBrand";
 import { VoiceInput } from "../components/VoiceInput";
 import { IconAction } from "../components/IconAction";
 import { useTheme } from "../theme";
+import { MarkdownText } from "../components/Markdown";
 import { PROPOSABLE_SECTIONS, SECTIONS } from "../local-memory/sections";
 
 export function HomeScreen() {
@@ -98,7 +99,8 @@ export function HomeScreen() {
       </View> : null}
       renderItem={({ item }) => <View style={{ alignSelf: item.role === "user" ? "flex-end" : "stretch", backgroundColor: item.role === "user" ? t.userBubble : item.role === "info" ? t.soft : t.panel,
         borderWidth: item.role === "assistant" ? 1 : 0, borderColor: t.line, borderRadius: 20, padding: 15, gap: 10 }}>
-        <Text selectable style={{ color: item.role === "user" ? t.userText : item.role === "info" ? t.muted : t.text, lineHeight: 23 }}>{item.text}</Text>
+        {item.role === "assistant" ? <MarkdownText text={item.text} style={{ color: t.text, lineHeight: 23 }} /> :
+          <Text selectable style={{ color: item.role === "user" ? t.userText : item.role === "info" ? t.muted : t.text, lineHeight: 23 }}>{item.text}</Text>}
         {item.sources?.length ? <View style={{ gap: 4 }}><Text style={{ color: t.muted, fontSize: 12 }}>Источники</Text>{item.sources.map(url => <Pressable key={url} accessibilityRole="link" onPress={() => void Linking.openURL(url).catch(() => setNotice("Не удалось открыть ссылку."))} style={{ minHeight: 44, justifyContent: "center" }}>
           <Text numberOfLines={2} style={{ color: t.accent, textDecorationLine: "underline" }}>{url}</Text>
         </Pressable>)}</View> : null}
@@ -117,7 +119,7 @@ export function HomeScreen() {
             <Pressable accessibilityRole="button" disabled={Boolean(active.savingDraft)} onPress={() => store.dismiss(d)} style={action}><Text style={{ color: t.muted }}>Отклонить</Text></Pressable></View>
         </View>)}
         {busy && active?.streamText ? <View accessibilityLiveRegion="polite" style={{ backgroundColor: t.panel, borderWidth: 1, borderColor: t.line, borderRadius: 20, padding: 15 }}>
-          <Text selectable style={{ color: t.text, lineHeight: 23 }}>{active.streamText}</Text>
+          <MarkdownText text={active.streamText} style={{ color: t.text, lineHeight: 23 }} />
         </View> : null}
         {busy ? <View style={{ flexDirection: "row", alignItems: "center", gap: 10, padding: 8 }}><ActivityIndicator /><Text style={{ flex: 1, color: t.muted }}>{active?.progress || "Готовлю ответ…"}<Elapsed since={active?.progressSince} /></Text></View> : null}
       </View>}

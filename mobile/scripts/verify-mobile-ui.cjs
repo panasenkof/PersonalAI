@@ -34,7 +34,7 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
   browser = await chromium.launch({ headless: true, ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}), args: ['--no-sandbox'] });
     for (const width of [320, 390, 768]) {
       const page = await browser.newPage({ viewport: { width, height: 900 }, colorScheme: width === 390 ? "dark" : "light" });
-      const errors = []; page.on('pageerror', error => { errors.push(error.message); console.error('UI runtime:', error.message); });
+      const errors = []; page.on('pageerror', error => { errors.push(error.message); console.error('UI runtime:', error.message); if (process.env.GITHUB_ACTIONS) console.log('::warning title=UI runtime::' + String(error.message).slice(0, 500).replace(/\n/g, '%0A')); });
       let replyNumber = 0;
       let releaseReply;
       await page.route('**/v1/responses', async route => {
@@ -219,4 +219,9 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.close();
     }
   } finally { await browser?.close(); await new Promise(resolve => server.close(resolve)); }
-})().catch(error => { console.error(error); process.exitCode = 1; });
+})().catch(error => {
+  console.error(error);
+  // In GitHub Actions this becomes an annotation, readable without the raw log.
+  if (process.env.GITHUB_ACTIONS) console.log('::error title=Browser acceptance::' + String(error && (error.stack || error.message) || error).slice(0, 1800).replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A'));
+  process.exitCode = 1;
+});
