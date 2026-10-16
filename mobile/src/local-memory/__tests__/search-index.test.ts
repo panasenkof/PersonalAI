@@ -51,3 +51,13 @@ test("a three-letter stem is searched only among index words and names", () => {
   expect(searchSteps("Как зовут моего шефа?")).toContainEqual({ term: "шеф", prefix: true, weight: 1, column: "terms" });
   expect(ftsPhrase("шеф", true, "terms")).toBe('{terms aliases} : "шеф"*');
 });
+
+test("vectors: cosine, BLOB round trip and rank fusion", () => {
+  const { cosine, toBlob, fromBlob, fuseRanks } = require("../vectors");
+  const a = Float32Array.from([1, 0, 0]), b = Float32Array.from([0.6, 0.8, 0]);
+  expect(cosine(a, a)).toBeCloseTo(1); expect(cosine(a, b)).toBeCloseTo(0.6); expect(cosine(a, Float32Array.from([1, 0]))).toBe(0);
+  expect(Array.from(fromBlob(toBlob(b)))).toEqual(Array.from(b));
+  expect(fromBlob(new Uint8Array(3))).toBeNull();
+  const fused = fuseRanks([["x", "y"], ["z", "x"]]);
+  expect([...fused.entries()].sort((p, q) => q[1] - p[1])[0][0]).toBe("x");
+});

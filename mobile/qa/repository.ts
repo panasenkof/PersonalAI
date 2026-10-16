@@ -25,6 +25,7 @@ export async function localMemoryRepository(_profile: string): Promise<any> {
     setEntityKind: async (id: string, version: number, kind: any) => { const n = notes.find(n => n.id === id)!; if (n.record_version !== version) throw new Error("stale_memory_version"); Object.assign(n, { kind, record_version: version + 1 }); save(); return n; },
     indexTerms: async () => [], setIndexTerms: async (_id: string, terms: string[]) => terms,
     staleIndexTerms: async () => [], indexTermsStatus: async () => ({ done: 0, pending: 0 }),
+    pendingVectorChunks: async () => [], saveVectors: async () => 0, vectorStatus: async () => ({ done: 0, total: 0 }),
     searchMemory: async (term: string, options: any = {}) => notes.filter(n => n.record_status === "active" && (!options.collectionIds || options.collectionIds.includes(n.collection_id)) && JSON.stringify(n).toLowerCase().includes(term.toLowerCase().slice(0, 4))).slice(0, options.limit || 5).map(entity => ({ entity, chunk: String(entity.payload.body || ""), score: 1 })),
     linkEntities: async (source: string, target: string, kind: string) => { const r = { id: crypto.randomUUID(), source_entity_id: source, target_entity_id: target, kind }; relations.push(r); return r; },
   };

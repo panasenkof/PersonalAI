@@ -6,6 +6,7 @@ import { withUnlockedTransaction } from "./transaction";
 import { defaultKind, indexEntity, isMemoryKind, normalizeAlias } from "./search-index";
 import type { MemoryKind } from "./search-index";
 import { ftsPhrase, searchSteps } from "./query";
+import { MIN_SIMILARITY, cosine, embeddingHash, embeddingText, fromBlob, fuseRanks, toBlob } from "./vectors";
 import type {
   CollectionRecord, EntityRecord, MemoryHit, MemoryPage, MemoryRepository, NewEntity, NewObservation,
   ObservationRecord, RelationRecord, RevisionRecord, RecordSensitivity,
@@ -430,6 +431,86 @@ export class SqliteMemoryRepository implements MemoryRepository {
     return words.split(" ").filter(Boolean);
   }
 
+  /** Chunks whose vector for `model` is missing or older than the text and
+   * title, with the text to embed. Every section is included: vectors never
+   * leave the phone, and what reaches the model is filtered at search time. */
+  async pendingVectorChunks(model: string, limit = 32): Promise<Array<{ chunkId: string; text: string; hash: string }>> {
+    const rows = await this.db.getAllAsync<Row>(
+      `SELECT c.id, c.text, e.title, v.content_hash AS vhash FROM memory_chunks c
+       JOIN memory_entities e ON e.id=c.entity_id
+       LEFT JOIN memory_vectors v ON v.chunk_id=c.id AND v.model=?
+       WHERE e.record_status='active' AND e.domain='notes' ORDER BY e.updated_at DESC, c.ord`, [model]);
+    const out: Array<{ chunkId: string; text: string; hash: string }> = [];
+    for (const r of rows) {
+      const text = embeddingText(TEXT(r.title), String(r.text));
+      if (!text) continue;
+      const hash = embeddingHash(TEXT(r.title), String(r.text));
+      if (r.vhash !== hash) out.push({ chunkId: String(r.id), text, hash });
+      if (out.length >= limit) break;
+    }
+    return out;
+  }
+
+  /** Stores vectors computed on the phone; a chunk deleted meanwhile is skipped. */
+  async saveVectors(model: string, items: Array<{ chunkId: string; vector: Float32Array; hash: string }>): Promise<number> {
+    let saved = 0;
+    await withUnlockedTransaction(this.db, async tx => {
+      for (const item of items) {
+        if (!await tx.getFirstAsync<Row>("SELECT id FROM memory_chunks WHERE id=?", [item.chunkId])) continue;
+        await tx.runAsync("INSERT OR REPLACE INTO memory_vectors(chunk_id,model,dim,vector,content_hash) VALUES (?,?,?,?,?)",
+          [item.chunkId, model, item.vector.length, toBlob(item.vector), item.hash]);
+        saved++;
+      }
+    });
+    return saved;
+  }
+
+  /** Chunks of active records with a current vector, and all such chunks. */
+  async vectorStatus(model: string): Promise<{ done: number; total: number }> {
+    const rows = await this.db.getAllAsync<Row>(
+      `SELECT c.text, e.title, v.content_hash AS vhash FROM memory_chunks c JOIN memory_entities e ON e.id=c.entity_id
+       LEFT JOIN memory_vectors v ON v.chunk_id=c.id AND v.model=? WHERE e.record_status='active' AND e.domain='notes'`, [model]);
+    let done = 0, total = 0;
+    for (const r of rows) {
+      if (!embeddingText(TEXT(r.title), String(r.text))) continue;
+      total++;
+      if (r.vhash === embeddingHash(TEXT(r.title), String(r.text))) done++;
+    }
+    return { done, total };
+  }
+
+  /** Records whose chunks are closest in meaning to the question vector, best
+   * chunk per record, above MIN_SIMILARITY, within the same filters. */
+  async vectorMatches(model: string, query: Float32Array, options: { collectionIds?: string[]; sensitivities?: string[]; limit?: number } = {}):
+    Promise<Array<{ row: Row; chunkId: string; similarity: number }>> {
+    const filters = ["e.domain='notes'", "e.record_status='active'"];
+    const params: SQLite.SQLiteBindValue[] = [model];
+    if (options.collectionIds) {
+      if (!options.collectionIds.length) return [];
+      filters.push(`e.collection_id IN (${options.collectionIds.map(() => "?").join(",")})`); params.push(...options.collectionIds);
+    }
+    if (options.sensitivities) { filters.push(`e.sensitivity IN (${options.sensitivities.map(() => "?").join(",")})`); params.push(...options.sensitivities); }
+    const rows = await this.db.getAllAsync<Row>(
+      `SELECT v.chunk_id, v.vector, c.entity_id FROM memory_vectors v JOIN memory_chunks c ON c.id=v.chunk_id
+       JOIN memory_entities e ON e.id=c.entity_id WHERE v.model=? AND ${filters.join(" AND ")}`, params);
+    const best = new Map<string, { chunkId: string; similarity: number }>();
+    for (const r of rows) {
+      const vector = fromBlob(r.vector);
+      if (!vector) continue;
+      const similarity = cosine(query, vector);
+      if (similarity < MIN_SIMILARITY) continue;
+      const id = String(r.entity_id);
+      if ((best.get(id)?.similarity ?? -1) < similarity) best.set(id, { chunkId: String(r.chunk_id), similarity });
+    }
+    const top = [...best.entries()].sort((a, b) => b[1].similarity - a[1].similarity).slice(0, options.limit ?? 8);
+    const out: Array<{ row: Row; chunkId: string; similarity: number }> = [];
+    for (const [id, hit] of top) {
+      const row = await this.db.getFirstAsync<Row>("SELECT * FROM memory_entities WHERE id=?", [id]);
+      if (row) out.push({ row, ...hit });
+    }
+    return out;
+  }
+
   /** How many enrichable records have current index words from `source`, and how many wait. */
   async indexTermsStatus(source: string): Promise<{ done: number; pending: number }> {
     const row = await this.db.getFirstAsync<Row>(
@@ -516,7 +597,9 @@ export class SqliteMemoryRepository implements MemoryRepository {
    * names, every search over title, text, index words and names. A record
    * found by more of them ranks higher. Each hit carries its best chunk.
    * Only the given sections and sensitivities are searched. */
-  async searchMemory(query: string, options: { collectionIds?: string[]; sensitivities?: string[]; limit?: number } = {}): Promise<MemoryHit[]> {
+  async searchMemory(query: string, options: { collectionIds?: string[]; sensitivities?: string[]; limit?: number;
+    /** The question's vector from the on-device model (п. 13), if it is downloaded. */
+    vector?: { model: string; values: Float32Array } } = {}): Promise<MemoryHit[]> {
     const limit = Math.min(20, Math.max(1, Math.trunc(options.limit ?? 5)));
     const scored = new Map<string, { row: Row; score: number; order: number; chunk: string | null; weight: number }>();
     for (const step of searchSteps(query)) {
@@ -543,7 +626,23 @@ export class SqliteMemoryRepository implements MemoryRepository {
         scored.set(id, found);
       }
     }
-    const top = [...scored.values()].sort((a, b) => b.score - a.score || a.order - b.order).slice(0, limit);
+    let top = [...scored.values()].sort((a, b) => b.score - a.score || a.order - b.order);
+    // Meaning (п. 13): the closest chunks join through rank fusion. Without the
+    // model, or when nothing is close enough, the word search stands as it is.
+    if (options.vector) {
+      const near = await this.vectorMatches(options.vector.model, options.vector.values, { ...options, limit: 8 });
+      if (near.length) {
+        for (const n of near) {
+          const id = String(n.row.id);
+          const found = scored.get(id) || { row: n.row, score: 0, order: scored.size, chunk: null, weight: 0 };
+          if (!found.chunk) found.chunk = n.chunkId;
+          scored.set(id, found);
+        }
+        const fused = fuseRanks([top.map(t => String(t.row.id)), near.map(n => String(n.row.id))]);
+        top = [...scored.values()].sort((a, b) => (fused.get(String(b.row.id)) || 0) - (fused.get(String(a.row.id)) || 0) || a.order - b.order);
+      }
+    }
+    top = top.slice(0, limit);
     const hits: MemoryHit[] = [];
     for (const item of top) {
       const chunk = await this.db.getFirstAsync<Row>(

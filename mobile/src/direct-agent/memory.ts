@@ -1,6 +1,7 @@
 import { localMemoryRepository } from "../local-memory/repository";
 import type { MemoryRepository } from "../local-memory/types";
 import { ensureSections, orderCollections } from "../local-memory/sections";
+import { VECTOR_MODEL } from "../local-memory/vectors";
 import { normalizeAlias as normalizeName } from "../local-memory/search-index";
 import { DEFAULT_SECTIONS, PROPOSABLE_KINDS, findSection, proposableSections } from "./fact-tool";
 import type { MemorySection, NoteProposal } from "./fact-tool";
@@ -30,10 +31,15 @@ export { wordStem } from "../local-memory/query";
  * text, index words and names. Records found by more of these searches rank
  * higher. Only active records in standard sections may leave the device; a
  * long record sends the chunk that matched, not its beginning. */
+export type QueryEmbedder = (text: string) => Promise<Float32Array | null>;
+/** On the phone the question is also compared by meaning, when the model is downloaded. */
+const deviceEmbedder: QueryEmbedder = text => (require("../media/embedder") as typeof import("../media/embedder")).embedQuery(text);
+
 export async function searchApprovedNotes(
   profile: string,
   query: string,
   repository?: MemoryRepository,
+  embed: QueryEmbedder | undefined = repository ? undefined : deviceEmbedder,
 ): Promise<MemorySnippet[]> {
   if (query.trim().length < 2) return [];
   const db = repository || await localMemoryRepository(profile);
@@ -42,7 +48,9 @@ export async function searchApprovedNotes(
   // unclassified, sensitive or secret content through cloud-model tools.
   const standards = collections.filter(c => c.sensitivity === "standard").map(c => c.id);
   if (!standards.length) return [];
-  const hits = await db.searchMemory(query, { collectionIds: standards, sensitivities: ["standard", "inherit"], limit: 5 });
+  const values = embed ? await embed(query.trim().slice(0, 500)).catch(() => null) : null;
+  const hits = await db.searchMemory(query, { collectionIds: standards, sensitivities: ["standard", "inherit"], limit: 5,
+    ...(values ? { vector: { model: VECTOR_MODEL, values } } : {}) });
   return hits.filter(({ entity }) => standards.includes(entity.collection_id) && entity.record_status === "active" &&
     ["standard", "inherit"].includes(entity.sensitivity)).map(({ entity, chunk }) => {
     const section = collections.find(c => c.id === entity.collection_id)?.name;

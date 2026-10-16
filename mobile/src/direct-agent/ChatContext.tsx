@@ -2,15 +2,17 @@ import React, { createContext, useContext, useEffect, useMemo, useSyncExternalSt
 import { useProfile } from "../profile/ProfileContext";
 import { DirectChatStore } from "./chat-store";
 import { scheduleIndexTerms } from "./enrich-runner";
+import { scheduleVectors } from "../media/vector-runner";
 
 const ChatContext = createContext<DirectChatStore | null>(null);
 export function DirectChatProvider({ children }: { children: React.ReactNode }) {
   const profile = useProfile();
-  const store = useMemo(() => new DirectChatStore(profile, undefined, undefined, () => scheduleIndexTerms(profile)), [profile]);
+  const store = useMemo(() => new DirectChatStore(profile, undefined, undefined, () => { scheduleIndexTerms(profile); scheduleVectors(profile); }), [profile]);
   useEffect(() => {
     void store.initialize();
     // Older records get index words in the background after the app opens.
     scheduleIndexTerms(profile, 8000);
+    scheduleVectors(profile, 10000);
     return () => store.dispose();
   }, [store]);
   return <ChatContext.Provider value={store}>{children}</ChatContext.Provider>;
