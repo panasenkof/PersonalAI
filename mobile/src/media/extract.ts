@@ -114,7 +114,7 @@ export async function extractMedia(file: ImportFile, settings: DirectAgentSettin
     data.append("model", validateModel(settings.transcriptionModel || "whisper-1"));
     const response = await fetchWithTimeout(transport, base + "/audio/transcriptions", { method: "POST", body: data,
       headers: settings.apiKey ? { Authorization: "Bearer " + settings.apiKey } : {}, signal }, LONG_TIMEOUTS, [settings.apiKey]);
-    if (!response.ok) throw new Error("Распознавание аудио у сервиса подключения: HTTP " + response.status + ". Этот сервис, похоже, не распознаёт речь (у DeepSeek такого нет). Скачайте распознавание на телефон: Настройки → Голос без интернета — тогда аудио распознаётся без отправки куда-либо.");
+    if (!response.ok) throw new Error("Распознавание аудио у сервиса подключения: HTTP " + response.status + ". Этот сервис, похоже, не распознаёт речь (у DeepSeek такого нет). Скачайте распознавание на телефон: Настройки → Голосовой ввод → Голос без интернета — тогда аудио распознаётся без отправки куда-либо.");
     const result = await response.json() as { text?: string };
     check(signal);
     if (!result.text?.trim()) throw new Error("В аудио не удалось распознать речь.");
