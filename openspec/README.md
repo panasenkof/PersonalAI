@@ -8,7 +8,7 @@
 
 ## Контекст проекта
 
-- Мобильное приложение на Expo (сейчас SDK 54, React Native 0.81), код в `mobile/`. Своего сервера нет.
+- Мобильное приложение на Expo (сейчас SDK 57, React Native 0.86), код в `mobile/`. Своего сервера нет.
 - Память — SQLCipher на телефоне (`expo-sqlite` с `useSQLCipher`), FTS5 внутри зашифрованной базы.
 - Модели — по выбору пользователя: OpenAI Responses, OpenAI-совместимые (DeepSeek, YandexGPT, OpenRouter, локальные), Anthropic Messages. Ключи в `expo-secure-store`.
 - Интернет-поиск — Яндекс (Yandex Cloud Search API), Tavily или встроенный поиск OpenAI.

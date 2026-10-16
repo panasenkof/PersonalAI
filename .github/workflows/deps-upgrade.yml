@@ -1,0 +1,38 @@
+name: Dependency upgrade
+# npm is not reachable from the assistant's workspace. Pushing a branch under deps/
+# that contains .github/deps-upgrade.sh runs the script here and commits the
+# resulting package files and a report (.github/deps-upgrade.log) back to the branch.
+on:
+  push:
+    branches: ["deps/**"]
+    paths: [".github/deps-upgrade.sh"]
+permissions:
+  contents: write
+concurrency:
+  group: deps-upgrade-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  upgrade:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Run the upgrade script
+        run: |
+          set +e
+          bash .github/deps-upgrade.sh > .github/deps-upgrade.log 2>&1
+          echo "exit code: $?" >> .github/deps-upgrade.log
+          tail -c 3000 .github/deps-upgrade.log
+      - name: Commit the result
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm -q .github/deps-upgrade.sh
+          git add -A mobile/package.json mobile/package-lock.json .github/deps-upgrade.log
+          git commit -q -m "Dependency upgrade: package files and report"
+          git push origin HEAD:${{ github.ref_name }}

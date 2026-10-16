@@ -1,18 +1,18 @@
 # Tasks
 
 ## 1. Обновление зависимостей
-- [ ] 1.1 Задача GitHub Actions `deps-upgrade.yml`: на push в `deps/**` выполняет обновление и коммитит `package.json` и `package-lock.json` обратно в ветку
-- [ ] 1.2 Последовательно 54 → 55 → 56 → 57: `npx expo install expo@^<N>.0.0 --fix` на каждом шаге
-- [ ] 1.3 Удалить `react-native-sse`, `expo-linear-gradient`, `expo-image-picker`, `fast-xml-parser`; убрать плагин `expo-image-picker` из `app.json`
-- [ ] 1.4 Добавить `@expo/vector-icons` явно
+- [x] 1.1 Задача GitHub Actions `deps-upgrade.yml`: на push в `deps/**` выполняет обновление и коммитит `package.json` и `package-lock.json` обратно в ветку
+- [x] 1.2 Сразу на `expo@57.0.30` (RN 0.86.3, React 19.2.3) с `npx expo install --fix`; промежуточные SDK не понадобились
+- [x] 1.3 Удалены `react-native-sse`, `expo-linear-gradient`, `expo-image-picker`, `fast-xml-parser`, `expo-video-thumbnails` (убран в SDK 56); плагин `expo-image-picker` убран из `app.json`
+- [x] 1.4 `@expo/vector-icons` уже указан явно; добавлен его обязательный `expo-font`
 
 ## 2. Совместимость кода
-- [ ] 2.1 TypeScript 6: исправить новые ошибки `tsc`
-- [ ] 2.2 Проверить запросы к моделям при `expo/fetch` как глобальном `fetch`; при проблемах — `EXPO_PUBLIC_USE_RN_FETCH=1`
-- [ ] 2.3 `expo-video`, `expo-file-system/legacy`, `expo-speech-recognition` — проверить изменения API
+- [x] 2.1 TypeScript 6.0.3: в `tsconfig` явно `types: ["jest", "node"]`, добавлен `@types/node`; `tsc` без ошибок
+- [x] 2.2 Оставлен fetch React Native (`EXPO_PUBLIC_USE_RN_FETCH=1` в `.env.production` и `.env.development`): загрузка аудио шлёт `FormData` с `{ uri }`; потоковые ответы и так идут через XHR
+- [x] 2.3 Кадры видео — `player.generateThumbnailsAsync` + `expo-image-manipulator`; `expo-file-system/legacy` остаётся; `expo-speech-recognition` 57.1.1. Заставка — плагин `expo-splash-screen` вместо удалённого поля `splash`
 - [ ] 2.4 Edge-to-edge на Android 16: отступы вкладок и полей ввода
 
 ## 3. Проверка
-- [ ] 3.1 CI: typecheck, Jest, `expo install --check`, бандлы, проверка экранов
+- [x] 3.1 `expo-doctor` 21/21, `tsc`, Jest 189/189, `expo install --check`, бандлы Android и iOS, `prebuild` с `usesCleartextTraffic` — в задаче обновления; CI — в этом PR
 - [ ] 3.2 Нативная сборка APK с SQLCipher, манифест с `usesCleartextTraffic`
 - [ ] 3.3 Приёмка на телефоне: вход, память, диктовка, файлы, обновление поверх `b54` без потери данных
