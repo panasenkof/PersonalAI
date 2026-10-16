@@ -116,7 +116,7 @@ describe("search providers after removing Bing and Brave", () => {
     const transport = jest.fn().mockResolvedValue({ ok: false, status: 401, text: async () => JSON.stringify({ code: 16, message: "Unknown api key 'AQVNkey'" }) });
     const { checkWebSearch } = require("../check");
     const message = (await checkWebSearch({ ...connectionFromPreset(PROVIDER_PRESETS.find(p => p.id === "deepseek")!), allowWeb: true, searchProvider: "yandex", webSearchKey: "AQVNkey", searchFolderId: "b1gfolder" }, transport as any)).message;
-    expect(message).toContain("searchapi.api.cloud.yandex.net: ключ API не принят");
+    expect(message).toContain("searchapi.api.cloud.yandex.net: ключ не принят");
     expect(message).not.toContain("AQVNkey");
   });
 });
@@ -138,5 +138,23 @@ describe("Tavily credits left", () => {
   test("a blocked request names the reason", async () => {
     const transport = jest.fn().mockResolvedValue({ ok: false, status: 403, text: async () => "" });
     await expect(fetchTavilyUsage("tvly-x", transport as any)).rejects.toThrow("api.tavily.com");
+  });
+});
+
+describe("Yandex access errors list what to check in the console", () => {
+  const { checkWebSearch } = require("../check");
+  const yandex = { ...connectionFromPreset(PROVIDER_PRESETS.find(p => p.id === "deepseek")!), allowWeb: true, searchProvider: "yandex" as const, webSearchKey: "AQVNsecretkey", searchFolderId: "b1gfolder" };
+  test("403 PermissionDenied is a missing role, not a blocked country", async () => {
+    const transport = jest.fn().mockResolvedValue({ ok: false, status: 403, text: async () => JSON.stringify({ code: 7, message: "rpc error: code = PermissionDenied desc = Permission denied" }) });
+    const message = (await checkWebSearch(yandex, transport as any)).message;
+    expect(message).toContain("нет прав на поиск");
+    expect(message).toContain("search-api.webSearch.user");
+    expect(message).toContain("«b1gfolder»");
+    expect(message).not.toContain("VPN");
+    expect(message).not.toContain("AQVNsecretkey");
+  });
+  test("401 asks for the whole key secret", async () => {
+    const transport = jest.fn().mockResolvedValue({ ok: false, status: 401, text: async () => JSON.stringify({ message: "Unauthenticated" }) });
+    expect((await checkWebSearch(yandex, transport as any)).message).toContain("ключ не принят");
   });
 });
