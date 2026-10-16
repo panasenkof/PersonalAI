@@ -4,7 +4,7 @@
 Слова и индексные слова не находят запись, если с вопросом нет общих слов: «чем угостить Аню» → «любит кофе». Нужен смысловой поиск, а у DeepSeek эмбеддингов нет. Модель на телефоне бесплатна, работает без интернета и может искать даже в личном разделе «Документы»: найденное там видит только пользователь.
 
 ## What Changes
-- `react-native-executorch` (`useTextEmbedder` / `createTextEmbedder`), многоязычная модель на выбор по проверочному набору: `paraphrase-multilingual-MiniLM-L12-v2` (384 измерения, около 380 МБ) или `distiluse-base-multilingual-cased-v2` (512 измерений, от 133 МБ) ([модели](https://docs.swmansion.com/react-native-executorch/docs/extensions/text-embeddings)).
+- `react-native-executorch` (`useTextEmbedder` / `createTextEmbedder`), модель `paraphrase-multilingual-MiniLM-L12-v2` (384 измерения; на Android XNNPACK 8da4w, около 400 МБ). Выбрана 16.10: на русском точнее `distiluse-base-multilingual-cased-v2` ([encodechka](https://github.com/avidale/encodechka): 0,734 против 0,708) при том же размере. Если проверочный набор покажет нехватку точности — экспорт `multilingual-e5-small` (0,742).
 - Модель скачивается один раз по запросу пользователя, по Wi-Fi, с прогрессом; без неё работают остальные способы поиска.
 - Векторы кусков в `memory_vectors`; поиск — косинусная близость по всем кускам профиля в памяти телефона (до десятков тысяч кусков это быстро).
 - Фоновая индексация старых записей кусками, при разблокированном приложении.

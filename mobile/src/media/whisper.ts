@@ -130,3 +130,27 @@ export async function startWhisperDictation(onText: (text: string) => void, onEr
     model.streamStop();
   } };
 }
+
+/** Transcribes an audio file on the phone: decoded to 16 kHz mono and passed
+ * to Whisper. The file never leaves the device. */
+export async function transcribeAudioFile(uri: string, signal?: AbortSignal): Promise<string> {
+  const model = await loadEngine();
+  const FileSystem = require("expo-file-system/legacy") as typeof import("expo-file-system/legacy");
+  const { toByteArray } = require("base64-js") as typeof import("base64-js");
+  const { decodeAudioData } = require("react-native-audio-api") as typeof import("react-native-audio-api");
+  let samples: Float32Array;
+  try {
+    const bytes = toByteArray(await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 }));
+    const audio = await decodeAudioData(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer, WHISPER_RATE);
+    // Stereo files are mixed down to mono.
+    const channels = Array.from({ length: audio.numberOfChannels }, (_, i) => audio.getChannelData(i));
+    samples = channels.length === 1 ? new Float32Array(channels[0]) : new Float32Array(audio.length).map((_, i) => channels.reduce((sum, ch) => sum + ch[i], 0) / channels.length);
+    samples = resampleTo16k(samples, audio.sampleRate);
+  } catch (e) { throw new Error("Голос на телефоне: не удалось прочитать аудиофайл — поддерживаются MP3, M4A, WAV, OGG, FLAC, AAC. Код: «" + String((e as Error)?.message || e).slice(0, 120) + "»."); }
+  if (signal?.aborted) throw new Error("Разбор файла остановлен");
+  const stop = () => model.transcribeStop();
+  signal?.addEventListener("abort", stop, { once: true });
+  try { return (await model.transcribe(samples, { language: "ru" })).trim(); }
+  catch (e) { if (signal?.aborted) throw new Error("Разбор файла остановлен"); throw new Error(whisperErrorMessage(e, "recognize")); }
+  finally { signal?.removeEventListener("abort", stop); }
+}

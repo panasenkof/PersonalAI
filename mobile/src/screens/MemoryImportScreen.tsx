@@ -16,8 +16,10 @@ import type { RootStackParams } from "../navigation";
 import { withNativeInteraction } from "../security/native-interaction";
 import { memoryErrorMessage } from "../local-memory/errors";
 import { useTheme } from "../theme";
+import { useWhisperStatus } from "../media/whisper";
 
 export function MemoryImportScreen() {
+  const whisper = useWhisperStatus();
   const t = useTheme();
   const header = useHeaderHeight(); const insets = useSafeAreaInsets();
   const profile = useProfile();
@@ -45,7 +47,8 @@ export function MemoryImportScreen() {
   }, [profile]);
   const selected = connections.find(c => c.id === connectionId);
   const kind = file ? mediaKind(file) : null;
-  const canExtract = kind === "text" || Boolean(selected && classification === "standard" &&
+  const localAudio = kind === "audio" && whisper.state === "ready";
+  const canExtract = kind === "text" || localAudio || Boolean(selected && classification === "standard" &&
     (selected.apiKey || anonymousLocalAllowed(selected)) && !(kind === "audio" && selected.provider === "anthropic"));
   const field = { color: t.text, backgroundColor: t.panel, borderWidth: 1, borderColor: t.line, borderRadius: 16, padding: 14, minHeight: 50 };
   const button = { backgroundColor: t.accent, padding: 14, borderRadius: 17, minHeight: 50, justifyContent: "center" as const, alignItems: "center" as const };
@@ -98,13 +101,13 @@ export function MemoryImportScreen() {
       {file ? <View style={{ backgroundColor: t.panel, padding: 16, borderRadius: 20, borderWidth: 1, borderColor: t.line, gap: 10 }}>
         <Text style={{ color: t.text, fontWeight: "700" }}>{file.name}</Text>
         {kind === "image" ? <Image source={{ uri: file.uri }} resizeMode="contain" style={{ width: "100%", height: 180, borderRadius: 14 }} /> : null}
-        <Text style={{ color: t.muted, fontSize: 12 }}>{kind === "video" ? "Пять кадров по всей длительности. Звук в этот разбор не входит." : kind === "audio" ? "Речь преобразуется в текст выбранным сервисом распознавания." : kind === "text" ? "Текстовый файл читается на телефоне, без отправки в интернет." : "Выбранная модель должна поддерживать изображения."}</Text>
+        <Text style={{ color: t.muted, fontSize: 12 }}>{kind === "video" ? "Пять кадров по всей длительности. Звук в этот разбор не входит." : kind === "audio" ? (localAudio ? "Речь распознаётся на телефоне моделью Whisper; файл никуда не отправляется." : "Речь преобразуется в текст сервисом подключения. Чтобы распознавать на телефоне, скачайте модель: Настройки → Голос без интернета.") : kind === "text" ? "Текстовый файл читается на телефоне, без отправки в интернет." : "Выбранная модель должна поддерживать изображения."}</Text>
         <Text style={{ color: t.text, fontWeight: "600" }}>Обработка файла</Text>
         {([ ["sensitive", "Личные — только на телефоне"], ["standard", "Обычные — разрешить разбор у провайдера"] ] as const).map(([id, label]) =>
           <Pressable disabled={busy} key={id} accessibilityRole="button" accessibilityLabel={label} onPress={() => setClassification(id)} style={{ minHeight: 46, justifyContent: "center" }}>
             <Text style={{ color: classification === id ? t.accent : t.text }}>{classification === id ? "● " : "○ "}{label}</Text>
           </Pressable>)}
-        {kind !== "text" ? <>
+        {kind !== "text" && !localAudio ? <>
           <Text style={{ color: t.muted, fontSize: 12 }}>При разборе файл или кадры отправляются выбранному сервису.</Text>
           <Text style={{ color: t.text, fontWeight: "600" }}>Подключение для разбора</Text>
           {connections.map(c => <Pressable disabled={busy} key={c.id} accessibilityRole="button" accessibilityLabel={"Разобрать через " + c.name} style={{ minHeight: 44, justifyContent: "center" }} onPress={() => setConnectionId(c.id)}>
@@ -113,7 +116,7 @@ export function MemoryImportScreen() {
           {kind === "audio" && selected?.provider === "anthropic" ? <Text style={{ color: t.err }}>Для аудио выберите OpenAI-совместимое подключение с распознаванием речи.</Text> : null}
         </> : null}
         <Pressable disabled={busy || !canExtract} accessibilityRole="button" accessibilityLabel="Извлечь сведения из файла" style={[button, { opacity: canExtract ? 1 : .5 }]} onPress={() => void extract()}>
-          <Text style={{ color: "#fff", fontWeight: "700" }}>{kind === "text" ? "Прочитать текст на телефоне" : "Передать файл провайдеру и разобрать"}</Text>
+          <Text style={{ color: "#fff", fontWeight: "700" }}>{kind === "text" ? "Прочитать текст на телефоне" : localAudio ? "Распознать речь на телефоне" : "Передать файл провайдеру и разобрать"}</Text>
         </Pressable>
       </View> : null}
       {busy ? <><ActivityIndicator /><Pressable accessibilityRole="button" onPress={() => controller.current?.abort()} style={{ minHeight: 44 }}><Text style={{ color: t.err }}>Остановить разбор</Text></Pressable></> : null}
