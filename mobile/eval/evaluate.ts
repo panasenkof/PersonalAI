@@ -30,7 +30,7 @@ export async function evaluateMemorySearch(): Promise<EvalReport> {
   for (const note of EVAL_NOTES) {
     const col = sections.find(c => c.slug === note.section)!;
     const saved = await repo.createEntity({ collection_id: col.id, domain: "notes", title: note.title,
-      payload: { type: "note", title: note.title, body: note.body }, sensitivity: col.sensitivity, source_kind: "user" });
+      payload: { type: "note", title: note.title, body: note.body }, sensitivity: col.sensitivity === "unclassified" ? "inherit" : col.sensitivity, source_kind: "user" });
     idOf.set(saved.id, note.id);
     if (sectionBySlug(note.section)?.sensitivity !== "standard") privateIds.add(note.id);
   }
