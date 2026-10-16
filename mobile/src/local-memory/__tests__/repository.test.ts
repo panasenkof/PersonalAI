@@ -221,3 +221,22 @@ test("searchMemory searches only the given sections and sensitivities", async ()
   expect(hits.map(h => h.entity.id)).toEqual([visible.id]);
   expect(await repo.searchMemory("полис", { collectionIds: [] })).toEqual([]);
 });
+
+test("an approved fact about someone is typed, dated and linked to that person; a new person gets a record in «Люди»", async () => {
+  const { saveApprovedNote, searchApprovedNotes } = require("../../direct-agent/memory");
+  const repo = new SqliteMemoryRepository(new FakeSqlite() as never);
+  const coffee = await saveApprovedNote("guest", { title: "Аня любит кофе", body: "Сестра Аня пьёт капучино", section: "preferences", kind: "preference", person: "Аня" }, repo);
+  expect(await repo.entity(coffee)).toMatchObject({ kind: "preference" });
+  const [anya] = await repo.entitiesByAlias("аня", "person");
+  expect(anya).toMatchObject({ title: "Аня", kind: "person" });
+  expect((await repo.relationsForEntity(coffee))).toMatchObject([{ source_entity_id: coffee, target_entity_id: anya.id, kind: "about" }]);
+  // The second fact about her links to the same record.
+  const birthday = await saveApprovedNote("guest", { title: "День рождения Ани", body: "3 мая", section: "dates", kind: "event", person: "аня", date: "2027-05-03" }, repo);
+  expect((await repo.entity(birthday))!.payload.date).toBe("2027-05-03");
+  expect((await repo.relationsForEntity(anya.id)).map(r => r.source_entity_id).sort()).toEqual([coffee, birthday].sort());
+  expect((await repo.entities({ kind: "person" })).items).toHaveLength(1);
+  // A person record keeps the name it was proposed with as a name to search by.
+  const boss = await saveApprovedNote("guest", { title: "Руководитель", body: "Елена Сергеевна, директор", section: "people", kind: "person", person: "Елена Сергеевна" }, repo);
+  expect(await repo.aliases(boss)).toEqual(["Елена Сергеевна"]);
+  expect((await searchApprovedNotes("guest", "Что знаешь про Елену?", repo)).map((n: any) => n.id)).toContain(boss);
+});

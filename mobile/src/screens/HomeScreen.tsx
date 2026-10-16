@@ -18,6 +18,7 @@ import { PromptInput } from "../components/PromptInput";
 import { useTheme } from "../theme";
 import { MarkdownText } from "../components/Markdown";
 import { PROPOSABLE_SECTIONS, SECTIONS } from "../local-memory/sections";
+import { KIND_NAMES } from "../direct-agent/fact-tool";
 
 export function HomeScreen() {
   const t = useTheme();
@@ -110,6 +111,7 @@ export function HomeScreen() {
       ListFooterComponent={<View style={{ gap: 10 }}>
         {active?.drafts.map(d => <View key={d.id} style={{ backgroundColor: t.panel, borderWidth: 1, borderColor: t.accent, borderRadius: 20, padding: 16, gap: 8 }}>
           <Text style={{ color: t.accent, fontWeight: "700" }}>Запомнить?</Text><Text selectable style={{ color: t.text, fontWeight: "700" }}>{d.title}</Text><Text selectable style={{ color: t.text }}>{d.body}</Text>
+          {d.kind || d.person || d.date ? <Text style={{ color: t.muted, fontSize: 13 }}>{[d.kind ? KIND_NAMES[d.kind] : "", d.person ? (d.kind === "person" ? "имя: " : "о ком: ") + d.person : "", d.date ? "дата: " + new Date(d.date + "T00:00:00").toLocaleDateString() : ""].filter(Boolean).join(" · ")}</Text> : null}
           <Text style={{ color: t.muted, fontSize: 12 }}>Раздел</Text>
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
             {SECTIONS.filter(x => PROPOSABLE_SECTIONS.includes(x.slug)).map(x => { const chosen = (d.section || "notes") === x.slug; return <Pressable key={x.slug} accessibilityRole="button"

@@ -14,6 +14,12 @@ import { MemoryConflictError } from "../local-memory/types";
 import type { CollectionRecord, EntityRecord, ObservationRecord, RelationRecord, RevisionRecord } from "../local-memory/types";
 import { memoryErrorMessage } from "../local-memory/errors";
 import { ensureSections } from "../local-memory/sections";
+import { MEMORY_KINDS, defaultKind } from "../local-memory/search-index";
+import type { MemoryKind } from "../local-memory/search-index";
+import { KIND_NAMES } from "../direct-agent/fact-tool";
+
+/** «Маша, Мария Петровна» → ["Маша", "Мария Петровна"]. */
+const splitNames = (text: string) => text.split(/[,;\n]/).map(n => n.trim()).filter(Boolean);
 import type { RootStackParams } from "../navigation";
 import { useTheme } from "../theme";
 
@@ -27,14 +33,17 @@ export function MemoryNoteScreen() {
   const [collections, setCollections] = useState<CollectionRecord[]>([]);
   const [collectionId, setCollectionId] = useState(route.params?.collectionId);
   const [title, setTitle] = useState(""); const [body, setBody] = useState("");
+  const [kind, setKind] = useState<MemoryKind>("note"); const [names, setNames] = useState("");
   const [loading, setLoading] = useState(true); const [busy, setBusy] = useState(false); const [error, setError] = useState("");
   const [retry, setRetry] = useState(0); const [leaving, setLeaving] = useState(false);
   const [sectionOpen, setSectionOpen] = useState(false); const [details, setDetails] = useState(false);
   const [history, setHistory] = useState<RevisionRecord[]>([]); const [events, setEvents] = useState<ObservationRecord[]>([]);
   const [relations, setRelations] = useState<RelationRecord[]>([]); const [related, setRelated] = useState<EntityRecord[]>([]);
   const [eventText, setEventText] = useState(""); const [linkOpen, setLinkOpen] = useState(false); const [linkSearch, setLinkSearch] = useState("");
-  const baseline = useRef({ title: "", body: "", collectionId: route.params?.collectionId });
-  const dirty = title !== baseline.current.title || body !== baseline.current.body || collectionId !== baseline.current.collectionId;
+  const baseline = useRef({ title: "", body: "", collectionId: route.params?.collectionId, kind: "note" as MemoryKind, names: "" });
+  const kindTouched = useRef(false);
+  const dirty = title !== baseline.current.title || body !== baseline.current.body || collectionId !== baseline.current.collectionId ||
+    kind !== baseline.current.kind || splitNames(names).join(",") !== splitNames(baseline.current.names).join(",");
   usePreventRemove(!leaving && (busy || dirty), ({ data }) => {
     if (busy) { setError("Дождитесь завершения сохранения."); return; }
     Alert.alert("Изменения не сохранены", "Закрыть запись без сохранения?", [
@@ -55,8 +64,12 @@ export function MemoryNoteScreen() {
       repository.current = db; setCollections(sections); setSelected(note);
       const initialTitle = note?.title || ""; const initialBody = String(note?.payload.body || "");
       const initialCollection = note?.collection_id || route.params?.collectionId;
-      baseline.current = { title: initialTitle, body: initialBody, collectionId: initialCollection };
-      setTitle(initialTitle); setBody(initialBody); setCollectionId(initialCollection);
+      const initialKind = note?.kind || defaultKind(sections.find(c => c.id === initialCollection)?.slug);
+      const initialNames = note ? (await db.aliases(note.id)).join(", ") : "";
+      if (!alive.current) return;
+      baseline.current = { title: initialTitle, body: initialBody, collectionId: initialCollection, kind: initialKind, names: initialNames };
+      kindTouched.current = false;
+      setTitle(initialTitle); setBody(initialBody); setCollectionId(initialCollection); setKind(initialKind); setNames(initialNames);
     })().catch(e => { if (alive.current) setError(memoryErrorMessage(e)); }).finally(() => { if (alive.current) setLoading(false); });
     return () => { alive.current = false; repository.current = null; };
   }, [profile, route.params?.entityId, route.params?.collectionId, retry]);
@@ -78,9 +91,15 @@ export function MemoryNoteScreen() {
     }
     const finalTitle = title.trim() || body.trim().split("\n")[0].slice(0, 80);
     const payload = { ...selected?.payload, type: "note", title: finalTitle, body: body.trim() };
-    if (selected) await db.reviseEntity(selected.id, selected.record_version, payload, "Редактирование записи", collection);
-    else await db.createEntity({ collection_id: collection, domain: "notes", title: finalTitle, payload,
+    const base = baseline.current;
+    let saved: EntityRecord;
+    if (selected) {
+      const textChanged = title !== base.title || body !== base.body || collectionId !== base.collectionId;
+      saved = textChanged ? await db.reviseEntity(selected.id, selected.record_version, payload, "Редактирование записи", collection) : selected;
+      if (kind !== saved.kind) saved = await db.setEntityKind(saved.id, saved.record_version, kind);
+    } else saved = await db.createEntity({ collection_id: collection, domain: "notes", title: finalTitle, payload, kind,
       sensitivity: "inherit", source_kind: "user", source_ref: "device" });
+    if (splitNames(names).join(",") !== splitNames(base.names).join(",")) await db.setAliases(saved.id, splitNames(names));
     if (alive.current) setLeaving(true);
   });
   const loadDetails = () => run(async db => {
@@ -103,8 +122,18 @@ export function MemoryNoteScreen() {
       {loading ? <ActivityIndicator accessibilityLabel="Загрузка записи" /> : null}
       {!loading && repository.current ? <>
         <Pressable accessibilityRole="button" accessibilityLabel="Выбрать раздел записи" onPress={() => setSectionOpen(true)} style={{ ...button, backgroundColor: t.soft }}><Text style={{ color: t.accent }}>Раздел: {collections.find(c => c.id === collectionId)?.name || "Заметки"} ▾</Text></Pressable>
+        <Text style={{ color: t.muted, fontSize: 12 }}>Тип записи</Text>
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+          {MEMORY_KINDS.map(k => { const chosen = k === kind; return <Pressable key={k} accessibilityRole="button" accessibilityLabel={"Тип записи: " + KIND_NAMES[k]}
+            accessibilityState={{ selected: chosen }} disabled={busy} onPress={() => { kindTouched.current = true; setKind(k); }}
+            style={{ minHeight: 36, paddingHorizontal: 10, justifyContent: "center", borderRadius: 12, borderWidth: 1, borderColor: chosen ? t.accent : t.line, backgroundColor: chosen ? t.soft : t.panel }}>
+            <Text style={{ color: chosen ? t.accent : t.text, fontSize: 13 }}>{KIND_NAMES[k]}</Text></Pressable>; })}
+        </View>
         <TextInput accessibilityLabel="Заголовок заметки" value={title} onChangeText={setTitle} editable={!busy} maxLength={160} placeholder="Заголовок" placeholderTextColor={t.muted} style={field} />
         <TextInput accessibilityLabel="Текст заметки" multiline value={body} onChangeText={setBody} editable={!busy} placeholder="Что нужно запомнить?" placeholderTextColor={t.muted} style={{ ...field, minHeight: 200, textAlignVertical: "top", lineHeight: 23 }} />
+        <TextInput accessibilityLabel="Другие имена и прозвища" value={names} onChangeText={setNames} editable={!busy} maxLength={600}
+          placeholder={kind === "person" ? "Другие имена через запятую: Маша, Мария Петровна" : "Другие названия через запятую (по желанию)"} placeholderTextColor={t.muted} style={field} />
+        <Text style={{ color: t.muted, fontSize: 12 }}>По этим именам запись тоже находится в поиске.</Text>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}><VoiceInput value={body} onChange={setBody} disabled={busy} onError={setError} /><Text style={{ color: t.muted }}>Надиктовать запись</Text></View>
         <Pressable accessibilityRole="button" accessibilityLabel="Сохранить запись" disabled={busy || (!title.trim() && !body.trim())} onPress={() => void save()} style={{ ...button, backgroundColor: t.accent, alignItems: "center" }}><Text style={{ color: "#fff", fontWeight: "700" }}>{busy ? "Сохранение…" : "Сохранить запись"}</Text></Pressable>
         {selected ? <>
@@ -120,7 +149,8 @@ export function MemoryNoteScreen() {
               if (alive.current) { setEvents(await db.observations(selected.id)); setEventText(""); }
             })}><Text style={{ color: t.accent }}>Добавить событие</Text></Pressable>
             <Text style={{ color: t.text, fontWeight: "700" }}>Связанные записи ({relations.length})</Text>
-            {relations.map(r => <Text key={r.id} style={{ color: t.muted }}>{related.find(e => e.id === (r.source_entity_id === selected.id ? r.target_entity_id : r.source_entity_id))?.title || "Другая запись"}</Text>)}
+            {relations.map(r => { const other = related.find(e => e.id === (r.source_entity_id === selected.id ? r.target_entity_id : r.source_entity_id));
+              return <Text key={r.id} style={{ color: t.muted }}>{(other?.title || "Другая запись") + (other?.kind ? " · " + KIND_NAMES[other.kind] : "") + (r.kind === "about" ? (r.source_entity_id === selected.id ? " — о ком запись" : " — запись об этом человеке") : "")}</Text>; })}
             <Pressable accessibilityRole="button" accessibilityLabel="Связать с другой записью" style={button} onPress={() => setLinkOpen(true)}><Text style={{ color: t.accent }}>+ Связать с другой записью</Text></Pressable>
           </View> : null}
           <Pressable accessibilityRole="button" accessibilityLabel={selected.record_status === "archived" ? "Вернуть запись из архива" : "Архивировать запись"} disabled={busy || dirty} style={button} onPress={() => void run(async db => {
@@ -133,7 +163,7 @@ export function MemoryNoteScreen() {
       {!loading && !repository.current ? <Pressable accessibilityRole="button" style={button} onPress={() => setRetry(n => n + 1)}><Text style={{ color: t.accent }}>Повторить загрузку</Text></Pressable> : null}
     </ScrollView>
     <BottomSheet visible={sectionOpen} title="Раздел записи" onClose={() => setSectionOpen(false)}>
-      {collections.length ? collections.map(c => <Pressable key={c.id} accessibilityRole="button" accessibilityLabel={"Поместить в раздел " + c.name} accessibilityState={{ selected: c.id === collectionId }} style={button} onPress={() => { setCollectionId(c.id); setSectionOpen(false); }}><Text style={{ color: c.id === collectionId ? t.accent : t.text }}>{c.name}</Text></Pressable>) : <Text style={{ color: t.muted }}>Первая запись будет в разделе «Заметки». Другие разделы можно создать на странице памяти.</Text>}
+      {collections.length ? collections.map(c => <Pressable key={c.id} accessibilityRole="button" accessibilityLabel={"Поместить в раздел " + c.name} accessibilityState={{ selected: c.id === collectionId }} style={button} onPress={() => { setCollectionId(c.id); setSectionOpen(false); if (!selected && !kindTouched.current) setKind(defaultKind(c.slug)); }}><Text style={{ color: c.id === collectionId ? t.accent : t.text }}>{c.name}</Text></Pressable>) : <Text style={{ color: t.muted }}>Первая запись будет в разделе «Заметки». Другие разделы можно создать на странице памяти.</Text>}
     </BottomSheet>
     <BottomSheet visible={linkOpen} title="Связать записи" onClose={() => { setLinkOpen(false); void loadDetails(); }}>
       <TextInput accessibilityLabel="Найти связанную запись" value={linkSearch} onChangeText={setLinkSearch} placeholder="Поиск" placeholderTextColor={t.muted} style={field} />

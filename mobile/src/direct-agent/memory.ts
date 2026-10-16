@@ -1,12 +1,14 @@
 import { localMemoryRepository } from "../local-memory/repository";
 import type { MemoryRepository } from "../local-memory/types";
 import { ensureSections, isSectionSlug } from "../local-memory/sections";
-import type { SectionSlug } from "../local-memory/sections";
+import { normalizeAlias as normalizeName } from "../local-memory/search-index";
+import { PROPOSABLE_KINDS } from "./fact-tool";
+import type { NoteProposal } from "./fact-tool";
 
 /** `section` is the name of the memory section the note lives in. */
 export type MemorySnippet = { id: string; title: string; body: string; section?: string };
-/** `section` is a built-in section slug; unknown or missing means "notes". */
-export type NoteProposal = { title: string; body: string; section?: SectionSlug };
+export { FACT_TOOL_NAME, KIND_NAMES, PROPOSABLE_KINDS, factProposal } from "./fact-tool";
+export type { NoteProposal, ProposableKind } from "./fact-tool";
 
 /** A word without its Russian ending; the search itself lives in local-memory/query. */
 export { wordStem } from "../local-memory/query";
@@ -56,10 +58,27 @@ export async function saveApprovedNote(
   // A proposal may land in a personal section (e.g. documents) but never in a
   // secret or unclassified one: those are only filled by the user directly.
   if (col.sensitivity !== "standard" && col.sensitivity !== "sensitive") throw new Error("Раздел «" + col.name + "» ограничен по доступу");
+  const kind = proposal.kind && (PROPOSABLE_KINDS as readonly string[]).includes(proposal.kind) ? proposal.kind : undefined;
   const saved = await db.createEntity({
     collection_id: col.id, domain: "notes", title,
-    payload: { type: "note", title, body },
+    payload: { type: "note", title, body, ...(proposal.date ? { date: proposal.date } : {}) },
     sensitivity: col.sensitivity, source_kind: "user", source_ref: "device-approved-agent",
+    ...(kind ? { kind } : {}),
   });
+  const person = proposal.person?.trim();
+  // A fact about someone is linked to that person's record; a person seen for
+  // the first time gets a record in «Люди», saved with the same confirmation.
+  if (person && kind !== "person") {
+    let target = (await db.entitiesByAlias(person, "person"))[0];
+    if (!target) {
+      const people = all.find(c => c.slug === "people");
+      if (people) target = await db.createEntity({ collection_id: people.id, domain: "notes", title: person.slice(0, 160),
+        payload: { type: "note", title: person.slice(0, 160), body: "" }, sensitivity: people.sensitivity === "standard" ? "standard" : "inherit",
+        source_kind: "user", source_ref: "device-approved-agent", kind: "person" });
+    }
+    if (target && target.id !== saved.id) await db.linkEntities(saved.id, target.id, "about");
+  } else if (person && kind === "person") {
+    if (normalizeName(person) !== normalizeName(title)) await db.setAliases(saved.id, [person]);
+  }
   return saved.id;
 }

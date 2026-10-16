@@ -41,7 +41,7 @@ test("serverless requests always provide memory tools and keep web off until ena
   // gpt-4.1-mini is not a reasoning model: OpenAI rejects reasoning.encrypted_content for it.
   expect(body.include).not.toContain("reasoning.encrypted_content");
   expect(body.max_output_tokens).toBe(4000);
-  expect(body.tools.map((tool: any) => tool.name)).toEqual(["search_local_notes", "draft_local_note"]);
+  expect(body.tools.map((tool: any) => tool.name)).toEqual(["search_local_notes", "draft_memory_fact"]);
   expect(request.mock.calls[0][1].headers.Authorization).toBe("Bearer test-key-only");
   expect(JSON.stringify(body)).not.toContain("test-key-only");
 });
@@ -367,9 +367,21 @@ test("a proposed note carries the section the model chose, and the schema lists 
     .mockResolvedValueOnce(final());
   await start({}, request, { propose });
   expect(propose).toHaveBeenCalledWith({ title: "Аня", body: "Сестра, день рождения 3 мая", section: "people" });
-  const tool = JSON.parse(request.mock.calls[0][1].body).tools.find((t: any) => t.name === "draft_local_note");
-  expect(tool.parameters.required).toContain("section");
+  const tool = JSON.parse(request.mock.calls[0][1].body).tools.find((t: any) => t.name === "draft_memory_fact");
+  expect(tool.parameters.required).toEqual(["title", "body", "section", "kind", "person", "date"]);
+  expect(tool.parameters.properties.kind.enum).not.toContain("document");
   expect(tool.parameters.properties.section.enum).not.toContain("documents");
   const system = JSON.parse(request.mock.calls[0][1].body).input[0].content;
   expect(system).toContain("people — Люди");
+});
+
+test("a proposed fact carries its type, person and date; invalid values are dropped, never trusted", async () => {
+  const propose = jest.fn();
+  const request = jest.fn()
+    .mockResolvedValueOnce(toolResponse("draft_memory_fact", { title: "Аня любит кофе", body: "Сестра Аня пьёт капучино", section: "people", kind: "preference", person: "Аня", date: null }))
+    .mockResolvedValueOnce(toolResponse("draft_memory_fact", { title: "Паспорт", body: "Номер", section: "documents", kind: "document", person: "null", date: "2026-02-30" }))
+    .mockResolvedValueOnce(final());
+  await start({}, request, { propose });
+  expect(propose).toHaveBeenCalledWith({ title: "Аня любит кофе", body: "Сестра Аня пьёт капучино", section: "people", kind: "preference", person: "Аня" });
+  expect(propose).toHaveBeenCalledWith({ title: "Паспорт", body: "Номер" });
 });

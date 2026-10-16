@@ -211,7 +211,8 @@ export class DirectChatStore {
       await saveApprovedNote(this.profile, draft);
       const latest = this.snapshot.conversations.find(x => x.id === c.id);
       if (latest) this.update(c.id, { drafts: latest.drafts.filter(d => d.id !== draft.id), rows: [...latest.rows,
-        { id: Crypto.randomUUID(), role: "info", text: "Сохранено в разделе «" + (sectionBySlug(draft.section || "notes")?.name || "Заметки") + "»." }] }, true);
+        { id: Crypto.randomUUID(), role: "info", text: "Сохранено в разделе «" + (sectionBySlug(draft.section || "notes")?.name || "Заметки") + "»" +
+          (draft.person && draft.kind !== "person" ? " и связано с записью «" + draft.person + "» в «Люди»." : ".") }] }, true);
     } catch { this.publish({ error: "Не удалось сохранить заметку. Повторите попытку." }); }
     finally { this.update(c.id, { savingDraft: undefined }); }
   }
