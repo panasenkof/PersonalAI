@@ -125,7 +125,7 @@ export function MemoryNoteScreen() {
         <Text style={{ color: t.muted, fontSize: 12 }}>Тип записи</Text>
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
           {MEMORY_KINDS.map(k => { const chosen = k === kind; return <Pressable key={k} accessibilityRole="button" accessibilityLabel={"Тип записи: " + KIND_NAMES[k]}
-            accessibilityState={{ selected: chosen }} disabled={busy} onPress={() => { kindTouched.current = true; setKind(k); }}
+            accessibilityState={{ selected: chosen }} aria-selected={chosen} disabled={busy} onPress={() => { kindTouched.current = true; setKind(k); }}
             style={{ minHeight: 36, paddingHorizontal: 10, justifyContent: "center", borderRadius: 12, borderWidth: 1, borderColor: chosen ? t.accent : t.line, backgroundColor: chosen ? t.soft : t.panel }}>
             <Text style={{ color: chosen ? t.accent : t.text, fontSize: 13 }}>{KIND_NAMES[k]}</Text></Pressable>; })}
         </View>
