@@ -53,7 +53,7 @@ test("native speech endpointing finishes without a tap and preserves the final p
   act(() => mockEvents.start({}));
   act(() => mockEvents.result({ results: [{ transcript: "купить" }], isFinal: false }));
   act(() => mockEvents.speechend({}));
-  expect(v.getByLabelText("Завершение диктовки")).toBeTruthy();
+  expect(v.getByLabelText("Прервать распознавание последней фразы")).toBeTruthy();
   expect(Speech.stop).not.toHaveBeenCalled();
   act(() => mockEvents.result({ results: [{ transcript: "купить молоко" }], isFinal: true }));
   act(() => mockEvents.end({}));
@@ -85,4 +85,25 @@ test("a stalled final result releases the input and reports why, retaining the p
   expect(v.getByText("План купить")).toBeTruthy();
   expect(v.getByLabelText("Голосовой ввод")).toBeTruthy();
   v.unmount(); jest.useRealTimers();
+});
+
+test("the button cancels while permission is pending and while the last phrase is decoded; recognized text stays", async () => {
+  let grant!: (value: any) => void;
+  (Speech.requestPermissionsAsync as jest.Mock).mockReturnValueOnce(new Promise(resolve => { grant = resolve; }));
+  const v = render(<Draft error={jest.fn()} />);
+  fireEvent.press(v.getByLabelText("Голосовой ввод"));
+  await waitFor(() => expect(v.getByLabelText("Отменить подготовку диктовки")).toBeTruthy());
+  fireEvent.press(v.getByLabelText("Отменить подготовку диктовки"));
+  expect(v.getByLabelText("Голосовой ввод")).toBeTruthy();
+  await act(async () => { grant({ granted: true }); });
+  expect(Speech.start).not.toHaveBeenCalled();
+  fireEvent.press(v.getByLabelText("Голосовой ввод"));
+  await waitFor(() => expect(Speech.start).toHaveBeenCalled());
+  act(() => mockEvents.start({}));
+  act(() => mockEvents.result({ results: [{ transcript: "купить" }], isFinal: false }));
+  act(() => mockEvents.speechend({}));
+  fireEvent.press(v.getByLabelText("Прервать распознавание последней фразы"));
+  expect(Speech.abort).toHaveBeenCalled();
+  expect(v.getByText("План купить")).toBeTruthy();
+  expect(v.getByLabelText("Голосовой ввод")).toBeTruthy();
 });

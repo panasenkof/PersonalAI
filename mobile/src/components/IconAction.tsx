@@ -10,6 +10,10 @@ const subscribe = (listener: () => void) => { hintListeners.add(listener); retur
 const currentHint = () => visibleHint;
 const showHint = (hint: Hint | null) => { visibleHint = hint; hintListeners.forEach(listener => listener()); };
 const dismissHint = (owner: string) => { if (visibleHint?.owner === owner) showHint(null); };
+/** A tap explains an action once per app session; holding always explains.
+ * Otherwise every «Отправить» covers the chat with the same hint. */
+const explainedByTap = new Set<string>();
+export const resetActionHints = () => { explainedByTap.clear(); };
 
 /** Visible names make icons discoverable; a tap or hold also explains the
  * action. Hints use no native window, so they cannot steal Android focus. */
@@ -30,7 +34,7 @@ export function IconAction({ icon, label, accessibilityLabel, hint, onPress, dis
   return <View style={{ position: "relative", zIndex: help ? 10 : 0 }}>
     <Pressable accessibilityRole="button" accessibilityLabel={accessibilityLabel} accessibilityHint={hint}
       accessibilityState={{ disabled }} disabled={disabled} onLongPress={explain}
-      onPress={() => { explain(); onPress(); }}
+      onPress={() => { if (!explainedByTap.has(accessibilityLabel)) { explainedByTap.add(accessibilityLabel); explain(); } onPress(); }}
       style={{ minHeight: 48, minWidth: 56, paddingHorizontal: 7, gap: 3, alignItems: "center", justifyContent: "center", borderRadius: 15,
         backgroundColor: emphasized && !disabled ? t.accent : "transparent", opacity: disabled ? 0.5 : 1 }}>
       <Feather name={icon} size={21} color={emphasized && !disabled ? "#fff" : t.accent} />

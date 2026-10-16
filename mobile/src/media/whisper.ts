@@ -99,7 +99,7 @@ async function loadEngine(): Promise<WhisperSpeechToText> {
 }
 async function loadEngineOnce(): Promise<WhisperSpeechToText> {
   const saved = await readSaved();
-  if (!saved) throw new Error("Модель распознавания не скачана. Скачайте её: Настройки → Голос без интернета.");
+  if (!saved) throw new Error("Модель распознавания не скачана. Скачайте её: Настройки → Голосовой ввод → Голос без интернета.");
   if (engine?.id === saved.id) return engine.model;
   engine?.model.dispose(); engine = null;
   try { engine = { id: saved.id, model: await executorch().createWhisperSpeechToText(saved.resolved) }; }
@@ -111,24 +111,49 @@ export type DictationSession = { stop: () => Promise<void> };
 export const DICTATION_PAUSE_MS = 1800;
 export const NO_SPEECH_TIMEOUT_MS = 8000;
 const MAX_DICTATION_MS = 60_000;
-type DictationOptions = { signal?: AbortSignal; onFinishing?: () => void };
+/** How long a new dictation waits for the previous decoder to finish. */
+export const DRAIN_TIMEOUT_MS = 5000;
+/** The neural detector sees 0.3 s of audio per call instead of every 0.1 s
+ * buffer: a third of the work on the JS thread, well inside the pause margin. */
+export const VAD_WINDOW_SAMPLES = 4800;
+type DictationOptions = { signal?: AbortSignal; onFinishing?: () => void; onStopping?: () => void };
 let dictationDrain: Promise<void> = Promise.resolve();
+/** Resolves once the current dictation has been asked to stop. */
+let dictationStopping: Promise<void> = Promise.resolve();
 /** A new draft waits for an aborted decoder's final cleanup before reusing the
- * same model. Otherwise the old generator can reset the new stream's state. */
+ * same model (otherwise the old generator can reset the new stream's state),
+ * but never forever: if it has not ended in
+ * DRAIN_TIMEOUT_MS the stuck model is released and the next start loads a
+ * fresh one, so one native hang cannot block every later dictation. */
+async function drainPrevious(previous: Promise<void>, stopping: Promise<void>): Promise<void> {
+  // A live dictation is not stuck: the timeout starts when it is asked to stop.
+  await Promise.race([previous, stopping]);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = await Promise.race([
+    previous.then(() => false),
+    new Promise<boolean>(resolve => { timer = setTimeout(() => resolve(true), DRAIN_TIMEOUT_MS); }),
+  ]);
+  clearTimeout(timer);
+  if (timedOut && engine) {
+    const stuck = engine.model; engine = null;
+    try { stuck.streamStop(); stuck.dispose(); } catch { /* already released */ }
+  }
+}
 export async function startWhisperDictation(onText: (text: string) => void, onError: (message: string) => void,
   onEnd: () => void, options: DictationOptions = {}): Promise<DictationSession> {
-  const previous = dictationDrain;
-  let release!: () => void;
+  const previous = dictationDrain, previousStopping = dictationStopping;
+  let release!: () => void, stopping!: () => void;
   dictationDrain = new Promise<void>(resolve => { release = resolve; });
-  await previous;
-  try { return await beginWhisperDictation(onText, onError, () => { release(); onEnd(); }, options); }
-  catch (e) { release(); throw e; }
+  dictationStopping = new Promise<void>(resolve => { stopping = resolve; });
+  await drainPrevious(previous, previousStopping);
+  try { return await beginWhisperDictation(onText, onError, () => { stopping(); release(); onEnd(); }, { ...options, onStopping: stopping }); }
+  catch (e) { stopping(); release(); throw e; }
 }
 /** A neural VAD observes microphone audio independently of the slower Whisper
  * decoder. Finishing releases the microphone, then flushes the last phrase.
  * The detector reuses the already downloaded VAD model; nothing is fetched. */
 async function beginWhisperDictation(onText: (text: string) => void, onError: (message: string) => void,
-  onEnd: () => void, { signal, onFinishing }: DictationOptions = {}): Promise<DictationSession> {
+  onEnd: () => void, { signal, onFinishing, onStopping }: DictationOptions = {}): Promise<DictationSession> {
   const checkCancelled = () => { if (signal?.aborted) throw new Error("Диктовка отменена."); };
   checkCancelled();
   const model = await loadEngine();
@@ -153,14 +178,21 @@ async function beginWhisperDictation(onText: (text: string) => void, onError: (m
   let recordingStart: ReturnType<typeof recorder.start> | undefined;
   let noSpeechTimer: ReturnType<typeof setTimeout> | undefined;
   let limitTimer: ReturnType<typeof setTimeout> | undefined;
+  let pending: Float32Array[] = [];
+  let pendingLength = 0;
   const heardSpeech = () => { clearTimeout(noSpeechTimer); noSpeechTimer = undefined; };
   const stop = (): Promise<void> => stopping ??= (async () => {
+    onStopping?.();
     heardSpeech(); clearTimeout(limitTimer);
     recorder.clearOnAudioReady();
     // A cancellation may arrive while the native recorder is still starting.
     await recordingStart?.catch(() => undefined);
     try { await recorder.stop(); } catch { /* already stopped */ }
-    finally { model.streamStop(); vad.dispose(); }
+    finally {
+      // The model may already have been released after a stuck decoder.
+      try { model.streamStop(); } catch { /* released */ }
+      try { vad.dispose(); } catch { /* released */ }
+    }
   })();
   const finish = () => { if (!stopping && !ended) { onFinishing?.(); void stop(); } };
   const cancel = () => { model.transcribeStop(); void stop(); };
@@ -181,9 +213,15 @@ async function beginWhisperDictation(onText: (text: string) => void, onError: (m
       try {
         const samples = resampleTo16k(new Float32Array(event.buffer.getChannelData(0)), event.buffer.sampleRate);
         model.streamInsert(samples);
+        pending.push(samples); pendingLength += samples.length;
+        if (pendingLength < VAD_WINDOW_SAMPLES) return;
+        const window = new Float32Array(pendingLength);
+        let offset = 0;
+        for (const part of pending) { window.set(part, offset); offset += part.length; }
+        pending = []; pendingLength = 0;
         // A 2.5-second rolling neural window distinguishes speech from noise.
         // The margin tolerates breaths and thinking pauses before ending input.
-        const activity = vad.detectVoiceOnStream(samples, {
+        const activity = vad.detectVoiceOnStream(window, {
           detectionMargin: DICTATION_PAUSE_MS, minSpeechDurationMs: 150,
           minSilenceDurationMs: 300, speechPadMs: 100, mergeGapMs: 300,
         });
@@ -210,7 +248,7 @@ async function beginWhisperDictation(onText: (text: string) => void, onError: (m
 /** Transcribes an audio file on the phone: decoded to 16 kHz mono and passed
  * to Whisper. The file never leaves the device. */
 export async function transcribeAudioFile(uri: string, signal?: AbortSignal): Promise<string> {
-  await dictationDrain;
+  await drainPrevious(dictationDrain, dictationStopping);
   const model = await loadEngine();
   const FileSystem = require("expo-file-system/legacy") as typeof import("expo-file-system/legacy");
   const { toByteArray } = require("base64-js") as typeof import("base64-js");

@@ -1,5 +1,15 @@
 schema: spec-driven
 
+context: |
+  PersAI — только мобильное приложение (Expo, Android 13+ и iOS), без сервера.
+  Все артефакты OpenSpec, тексты интерфейса и сообщения об ошибках — на русском.
+  Память хранится только на телефоне в SQLCipher; раздел «Документы» никогда не
+  передаётся модели и сторонним сервисам.
+  Каждый PR обновляет PLAN.md (статус пунктов, «Что изменилось», номер редакции)
+  и docs/DEVICE_QA.md, если меняется поведение на телефоне.
+  Сообщение об ошибке называет сервис, причину и путь в настройках
+  («Настройки → <раздел>»).
+
 # Project context (optional)
 # Add only constraints that should guide OpenSpec artifacts and workflows.
 # Include constraints an agent cannot infer by reading the code.

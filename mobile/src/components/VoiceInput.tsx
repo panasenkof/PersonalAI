@@ -53,7 +53,7 @@ export function VoiceInput({ value, onChange, disabled = false, onError, showLab
     timer.current = watchdog.current = finalTimer.current = null;
   };
   const report = (message: string) => onError(message + (whisper.state === "absent" || whisper.state === "error" ?
-    " Или включите распознавание на самом телефоне: Настройки → Голос без интернета." : ""));
+    " Или скачайте распознавание на телефон: Настройки → Голосовой ввод → Голос без интернета." : ""));
   const stop = useCallback(() => {
     generation.current++;
     clearTimers();
@@ -183,14 +183,17 @@ export function VoiceInput({ value, onChange, disabled = false, onError, showLab
       [{ text: "Отмена", style: "cancel" }, { text: "Разрешить", onPress: () => { if (generation.current !== token) return; networkConsent = true; void start(true); } }]);
   };
   const active = phase !== "idle";
+  // While the model loads or the last phrase is decoded, the button cancels:
+  // the user is never locked out. Text already in the draft stays there.
   const waiting = phase === "starting" || phase === "finishing";
-  const label = phase === "starting" ? "Подготовка" : phase === "finishing" ? "Распознаю" : active ? "Стоп" : "Голос";
-  const accessibilityLabel = phase === "starting" ? "Подготовка диктовки" : phase === "finishing" ? "Завершение диктовки" : active ? "Остановить диктовку" : "Голосовой ввод";
+  const press = () => waiting ? stop() : active ? finish() : void start();
+  const label = phase === "starting" ? "Отмена" : phase === "finishing" ? "Прервать" : active ? "Стоп" : "Голос";
+  const accessibilityLabel = phase === "starting" ? "Отменить подготовку диктовки" : phase === "finishing" ? "Прервать распознавание последней фразы" : active ? "Остановить диктовку" : "Голосовой ввод";
   return <View style={{ zIndex: 1 }}>
     {showLabel ? <IconAction icon={active ? "square" : "mic"} label={label} accessibilityLabel={accessibilityLabel}
-      hint={active ? "Диктовка завершится после паузы в речи. Можно закончить раньше кнопкой «Стоп»." : (selectedEngine === "whisper" ? "Whisper на телефоне. " : "Системное распознавание. ") + "Надиктовать сообщение. Ввод завершится после паузы, отправка — отдельной кнопкой."}
-      disabled={disabled || !voice.loaded || voice.saving || waiting} emphasized={active} hintAbove hintAlign="start" onPress={() => active ? finish() : void start()} /> : <Pressable accessibilityRole="button" accessibilityLabel={accessibilityLabel}
-      disabled={disabled || !voice.loaded || voice.saving || waiting} onPress={() => active ? finish() : void start()}
+      hint={phase === "starting" ? "Отменить запуск диктовки." : phase === "finishing" ? "Не ждать последнюю фразу: уже распознанный текст останется." : active ? "Диктовка завершится после паузы в речи. Можно закончить раньше кнопкой «Стоп»." : (selectedEngine === "whisper" ? "Whisper на телефоне. " : "Системное распознавание. ") + "Надиктовать сообщение. Ввод завершится после паузы, отправка — отдельной кнопкой."}
+      disabled={disabled || !voice.loaded || voice.saving} emphasized={active} hintAbove hintAlign="start" onPress={press} /> : <Pressable accessibilityRole="button" accessibilityLabel={accessibilityLabel}
+      disabled={disabled || !voice.loaded || voice.saving} onPress={press}
       style={{ minWidth: 46, minHeight: 46, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: active ? t.accent : t.soft }}>
       <Feather name={active ? "square" : "mic"} size={21} color={active ? "#fff" : t.accent} />
     </Pressable>}

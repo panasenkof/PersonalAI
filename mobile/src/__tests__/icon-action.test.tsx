@@ -1,9 +1,10 @@
 import React from "react";
 import { Platform, ToastAndroid } from "react-native";
 import { act, fireEvent, render } from "@testing-library/react-native";
-import { IconAction } from "../components/IconAction";
+import { IconAction, resetActionHints } from "../components/IconAction";
 jest.mock("@expo/vector-icons/Feather", () => () => null);
 
+beforeEach(() => resetActionHints());
 afterEach(() => { jest.useRealTimers(); jest.restoreAllMocks(); });
 test.each(["android", "ios"] as const)("%s: tapping shows help beside the button and performs the action; holding only explains", os => {
   jest.useFakeTimers(); jest.replaceProperty(Platform, "OS", os);
@@ -47,4 +48,18 @@ test("only the most recently requested hint remains visible until its own timeou
   expect(v.getByText("Отправить сообщение")).toBeTruthy();
   act(() => jest.advanceTimersByTime(1000));
   expect(v.queryByText("Отправить сообщение")).toBeNull();
+});
+
+test("a tap explains an action only the first time; holding explains it again", () => {
+  jest.useFakeTimers();
+  const pressed = jest.fn();
+  const v = render(<IconAction icon="arrow-up" label="Отправить" accessibilityLabel="Отправить запрос" hint="Отправить сообщение" onPress={pressed} />);
+  fireEvent.press(v.getByLabelText("Отправить запрос"));
+  expect(v.getByText("Отправить сообщение")).toBeTruthy();
+  act(() => jest.advanceTimersByTime(2500));
+  fireEvent.press(v.getByLabelText("Отправить запрос"));
+  expect(v.queryByText("Отправить сообщение")).toBeNull();
+  expect(pressed).toHaveBeenCalledTimes(2);
+  fireEvent(v.getByLabelText("Отправить запрос"), "longPress");
+  expect(v.getByText("Отправить сообщение")).toBeTruthy();
 });

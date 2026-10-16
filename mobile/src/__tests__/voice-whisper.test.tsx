@@ -47,7 +47,7 @@ test("without Google and without the model the error points to the on-device mod
   const v = render(<Draft error={error} />);
   fireEvent.press(v.getByLabelText("Голосовой ввод"));
   await waitFor(() => expect(error).toHaveBeenCalled());
-  expect(error.mock.calls[0][0]).toContain("Настройки → Голос без интернета");
+  expect(error.mock.calls[0][0]).toContain("Настройки → Голосовой ввод → Голос без интернета");
   expect(startWhisperDictation).not.toHaveBeenCalled();
 });
 
@@ -57,7 +57,7 @@ test("Whisper automatically finalizes after silence; clearing the input ignores 
   fireEvent.press(v.getByLabelText("Голосовой ввод"));
   await waitFor(() => expect(startWhisperDictation).toHaveBeenCalled());
   act(() => mockCallbacks.finishing!());
-  expect(v.getByLabelText("Завершение диктовки")).toBeTruthy();
+  expect(v.getByLabelText("Прервать распознавание последней фразы")).toBeTruthy();
   act(() => mockCallbacks.text!("купить хлеб"));
   expect(changed).toHaveBeenLastCalledWith("План купить хлеб");
   v.unmount();
