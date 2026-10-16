@@ -14,12 +14,22 @@ import type * as SQLite from "expo-sqlite";
 
 import { LOCAL_MEMORY_SCHEMA_VERSION, withLocalMemoryDatabase } from "./storage";
 import { withUnlockedTransaction } from "./transaction";
+import { reindexAll } from "./search-index";
 
 const CODE_PATTERN = /^[a-f0-9]{64}$/;
+/** The records themselves, present in every version (v1–v3). */
 const BACKUP_TABLES = [
   "memory_collections", "memory_entities", "memory_observations",
-  "memory_relations", "memory_revisions", "memory_notes_fts",
+  "memory_relations", "memory_revisions",
 ] as const;
+/** v3 user data; chunks, the search index and vectors are rebuilt instead. */
+const V3_TABLES = {
+  memory_aliases: "entity_id,alias,normalized",
+  memory_index_terms: "entity_id,terms,source,created_at",
+} as const;
+const ENTITY_COLUMNS = "id,collection_id,domain,schema_version,title,payload_json,record_status,sensitivity," +
+  "source_kind,source_ref,valid_from,valid_until,created_at,updated_at,record_version";
+export const RESTORABLE_VERSIONS = [1, 2, 3];
 const MAX_BACKUP_BYTES = 150 * 1024 * 1024;
 
 function checkedRecoveryCode(value: string): string {
@@ -76,7 +86,7 @@ export async function shareEncryptedBackup(profileId: string, recoveryCode: stri
         await attach(db, "pia_export", path, code);
         attached = true;
         // sqlcipher_export copies *all* memory, provenance, relations,
-        // revisions and encrypted FTS without passing plaintext to JS.
+        // revisions, names and the encrypted index without passing plaintext to JS.
         await db.getFirstAsync("SELECT sqlcipher_export('pia_export')");
         await db.execAsync(`PRAGMA pia_export.user_version = ${LOCAL_MEMORY_SCHEMA_VERSION}`);
         const check = await db.getFirstAsync<{ n: number }>(
@@ -134,9 +144,9 @@ export async function restoreEncryptedBackup(
           throw new Error("incompatible_backup_schema");
         }
         const version = await db.getFirstAsync<{ user_version: number }>("PRAGMA pia_import.user_version");
-        // v2 adds chats only; all six memory tables are unchanged. Old v1
-        // exports with or without chats can still restore into a v2 database.
-        if (!version || ![1, LOCAL_MEMORY_SCHEMA_VERSION].includes(version.user_version)) {
+        // v2 added chats, v3 record types, names and index words. Every older
+        // backup restores into the current schema; the search index is rebuilt.
+        if (!version || !RESTORABLE_VERSIONS.includes(version.user_version) || version.user_version > LOCAL_MEMORY_SCHEMA_VERSION) {
           throw new Error("incompatible_backup_version");
         }
         // Validate the *source* before any destination writes. A forged
@@ -160,14 +170,23 @@ export async function restoreEncryptedBackup(
             "SELECT count(*) AS n FROM memory_collections",
           );
           if (existing?.n !== 0) throw new Error("restore_requires_empty_memory");
+          const entityColumns = await tx.getAllAsync<{ name: string }>("PRAGMA pia_import.table_info(memory_entities)");
+          const typed = entityColumns.some(c => c.name === "kind");
           for (const table of BACKUP_TABLES) {
-            const sql = table === "memory_notes_fts"
-              ? "INSERT INTO memory_notes_fts(entity_id,title,body) " +
-                "SELECT entity_id,title,body FROM pia_import.memory_notes_fts"
+            // Named columns: v3 added «kind», and the type check rejects unknown values.
+            const sql = table === "memory_entities"
+              ? `INSERT INTO memory_entities(${ENTITY_COLUMNS}${typed ? ",kind" : ""}) SELECT ${ENTITY_COLUMNS}${typed ? ",kind" : ""} FROM pia_import.memory_entities`
               : `INSERT INTO ${table} SELECT * FROM pia_import.${table}`;
             // table is a constant, never user-controlled.
             await tx.execAsync(sql);
           }
+          if (!typed) await tx.execAsync("UPDATE memory_entities SET kind='person' WHERE collection_id IN (SELECT id FROM memory_collections WHERE slug='people')");
+          for (const [table, columns] of Object.entries(V3_TABLES)) {
+            if (available.has(table)) await tx.execAsync(`INSERT INTO ${table}(${columns}) SELECT ${columns} FROM pia_import.${table}`);
+          }
+          // Chunks and the search index are derived: rebuilt here from the
+          // restored records, so a backup can never carry a mismatched index.
+          await reindexAll(tx);
           // Older backups have no chats. Import newer ones without replacing
           // any existing local conversation (including its pending proposals).
           if (available.has("direct_conversations")) await tx.execAsync(

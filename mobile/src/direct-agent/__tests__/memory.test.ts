@@ -8,7 +8,9 @@ function fake() {
       { id: "secret", slug: "private", name: "Личное", sensitivity: "secret" },
       { id: "unclassified", slug: "unknown", sensitivity: "unclassified" },
     ]),
-    searchNotes: jest.fn().mockResolvedValue([
+    // The repository already filters; the caller checks again, so a fake that
+    // returns everything proves no private record can slip through.
+    searchMemory: jest.fn(async () => [
       { id: "ok", collection_id: "standard", sensitivity: "standard", record_status: "active",
         title: "Любимое", payload: { body: "Паста" } },
       { id: "hidden", collection_id: "secret", sensitivity: "standard", record_status: "active",
@@ -19,7 +21,7 @@ function fake() {
         title: "Данные", payload: { body: "Нельзя отправлять" } },
       { id: "archived", collection_id: "standard", sensitivity: "standard", record_status: "archived",
         title: "Архив", payload: { body: "Нельзя отправлять" } },
-    ]),
+    ].map(entity => ({ entity, chunk: "", score: 1 }))),
     createEntity: jest.fn().mockResolvedValue({ id: "new-note" }),
     createCollection: jest.fn(async (c: any) => ({ id: c.slug, description: null, created_at: "2026-10-14", ...c })),
   };
@@ -37,14 +39,14 @@ test("only standard active notes can leave the device", async () => {
   const repo = fake();
   const found = await searchApprovedNotes("guest", "паста", repo as unknown as MemoryRepository);
   expect(found).toEqual([{ id: "ok", title: "Любимое", body: "Паста", section: "Заметки" }]);
-  expect(repo.searchNotes).toHaveBeenCalled();
+  expect(repo.searchMemory).toHaveBeenCalledWith("паста", { collectionIds: ["standard"], sensitivities: ["standard", "inherit"], limit: 5 });
 });
 
 test("short queries never bulk-export the database", async () => {
   const repo = fake();
   const found = await searchApprovedNotes("guest", "a", repo as unknown as MemoryRepository);
   expect(found).toEqual([]);
-  expect(repo.searchNotes).not.toHaveBeenCalled();
+  expect(repo.searchMemory).not.toHaveBeenCalled();
 });
 
 test("save creates a standard note only after caller explicitly approves", async () => {
@@ -80,4 +82,13 @@ test("documents stay personal and an unknown section falls back to notes", async
   expect(repo.createEntity).toHaveBeenLastCalledWith(expect.objectContaining({ collection_id: "documents", sensitivity: "sensitive" }));
   await saveApprovedNote("guest", { title: "Идея", body: "Текст", section: "nonsense" as any }, repo as unknown as MemoryRepository);
   expect(repo.createEntity).toHaveBeenLastCalledWith(expect.objectContaining({ collection_id: "standard" }));
+});
+
+test("a long record sends the chunk that matched, not its beginning", async () => {
+  const repo = fake();
+  const long = "Начало. ".repeat(200);
+  repo.searchMemory.mockResolvedValueOnce([{ entity: { id: "long", collection_id: "standard", sensitivity: "standard", record_status: "active",
+    title: "Дневник", payload: { body: long + "Ключи у соседа." } }, chunk: "Ключи у соседа.", score: 3 }] as never);
+  expect(await searchApprovedNotes("guest", "где ключи", repo as unknown as MemoryRepository))
+    .toEqual([{ id: "long", title: "Дневник", body: "Ключи у соседа.", section: "Заметки" }]);
 });

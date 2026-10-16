@@ -5,6 +5,7 @@ import * as FileSystem from "expo-file-system/legacy";
 
 import { waitForUnlockedTransaction, withUnlockedTransaction } from "./transaction";
 import { withBiometricPrompt } from "./authentication";
+import { MEMORY_KINDS, reindexAll } from "./search-index";
 
 // Guest uses the historical database name so PR #15 notes are preserved.
 const GUEST_DB_NAME = "pia-personal-memory-v1.db";
@@ -35,7 +36,8 @@ export function waitForApplicationSession(signal?: AbortSignal): Promise<void> {
   });
 }
 const requireApplicationSession = () => { if (!applicationSessionUnlocked) throw new Error("application_locked"); };
-export const LOCAL_MEMORY_SCHEMA_VERSION = 2;
+export const LOCAL_MEMORY_SCHEMA_VERSION = 3;
+const KIND_CHECK = `CHECK(kind IN (${MEMORY_KINDS.map(k => `'${k}'`).join(",")}))`;
 
 /** All memory (including full-text indexes, revisions, and WAL) is in SQLCipher. */
 export const SCHEMA_SQL = `
@@ -54,7 +56,8 @@ CREATE TABLE IF NOT EXISTS memory_entities (
   title TEXT, payload_json TEXT NOT NULL,
   record_status TEXT NOT NULL DEFAULT 'active', sensitivity TEXT NOT NULL DEFAULT 'inherit',
   source_kind TEXT, source_ref TEXT, valid_from TEXT, valid_until TEXT,
-  created_at TEXT NOT NULL, updated_at TEXT NOT NULL, record_version INTEGER NOT NULL DEFAULT 1
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL, record_version INTEGER NOT NULL DEFAULT 1,
+  kind TEXT NOT NULL DEFAULT 'note' ${KIND_CHECK}
 );
 CREATE INDEX IF NOT EXISTS ix_memory_entities_collection ON memory_entities(collection_id, created_at);
 CREATE TABLE IF NOT EXISTS memory_observations (
@@ -86,8 +89,46 @@ CREATE TABLE IF NOT EXISTS memory_revisions (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ix_local_entity_revision ON memory_revisions(entity_id, version);
 CREATE UNIQUE INDEX IF NOT EXISTS ix_local_observation_revision ON memory_revisions(observation_id, version);
-CREATE VIRTUAL TABLE IF NOT EXISTS memory_notes_fts USING fts5(entity_id UNINDEXED, title, body);
+CREATE TABLE IF NOT EXISTS memory_chunks (
+  id TEXT PRIMARY KEY, entity_id TEXT NOT NULL REFERENCES memory_entities(id) ON DELETE CASCADE,
+  ord INTEGER NOT NULL, text TEXT NOT NULL, content_hash TEXT NOT NULL, created_at TEXT NOT NULL,
+  UNIQUE(entity_id, ord)
+);
+CREATE TABLE IF NOT EXISTS memory_aliases (
+  entity_id TEXT NOT NULL REFERENCES memory_entities(id) ON DELETE CASCADE,
+  alias TEXT NOT NULL, normalized TEXT NOT NULL,
+  UNIQUE(entity_id, normalized)
+);
+CREATE INDEX IF NOT EXISTS ix_memory_aliases_normalized ON memory_aliases(normalized);
+CREATE TABLE IF NOT EXISTS memory_index_terms (
+  entity_id TEXT NOT NULL REFERENCES memory_entities(id) ON DELETE CASCADE,
+  terms TEXT NOT NULL, source TEXT NOT NULL, created_at TEXT NOT NULL,
+  UNIQUE(entity_id, source)
+);
+CREATE TABLE IF NOT EXISTS memory_vectors (
+  chunk_id TEXT NOT NULL REFERENCES memory_chunks(id) ON DELETE CASCADE,
+  model TEXT NOT NULL, dim INTEGER NOT NULL, vector BLOB NOT NULL, content_hash TEXT NOT NULL,
+  PRIMARY KEY(chunk_id, model)
+);
+CREATE VIRTUAL TABLE IF NOT EXISTS memory_search_fts USING fts5(
+  entity_id UNINDEXED, chunk_id UNINDEXED, title, body, terms, aliases, prefix='2 3 4'
+);
 `;
+
+/** v2 → v3: record types, chunks, names, index words, vectors and one search
+ * index over all of them. Runs inside the upgrade transaction: any failure
+ * rolls back to the previous version with every record intact. */
+async function upgradeToV3(tx: SQLite.SQLiteDatabase): Promise<void> {
+  const columns = await tx.getAllAsync<{ name: string }>("PRAGMA table_info(memory_entities)");
+  if (!columns.some(c => c.name === "kind")) {
+    await tx.execAsync(`ALTER TABLE memory_entities ADD COLUMN kind TEXT NOT NULL DEFAULT 'note' ${KIND_CHECK}`);
+  }
+  // Records in «Люди» are people; everything else stays a note until edited.
+  await tx.execAsync("UPDATE memory_entities SET kind='person' WHERE kind='note' AND collection_id IN (SELECT id FROM memory_collections WHERE slug='people')");
+  await tx.execAsync("CREATE INDEX IF NOT EXISTS ix_memory_entities_kind ON memory_entities(kind)");
+  await reindexAll(tx);
+  await tx.execAsync("DROP TABLE IF EXISTS memory_notes_fts");
+}
 
 /** SQLCipher is only available in custom native builds, never Expo Go.
  * Verify cipher support before writing any sensitive content, fail closed.
@@ -197,6 +238,8 @@ async function initialize(profileId: string): Promise<SQLite.SQLiteDatabase> {
     const row = await db.getFirstAsync<{ user_version: number }>("PRAGMA user_version");
     const version = row?.user_version ?? 0;
     if (version > LOCAL_MEMORY_SCHEMA_VERSION) throw new Error("local_memory_schema_too_new");
+    // v3 (record types, chunks, one search index) is built from the records
+    // themselves, so v1 and v2 databases upgrade the same way.
     // Version 1 exists in TWO deployed forms: before PR #28 without chats,
     // and fresh PR #28 installations with chats. All CREATEs are additive and
     // idempotent, so both upgrade on the same keyed connection without touching
@@ -204,6 +247,7 @@ async function initialize(profileId: string): Promise<SQLite.SQLiteDatabase> {
     if (version < LOCAL_MEMORY_SCHEMA_VERSION) {
       await withUnlockedTransaction(db, async tx => {
         await tx.execAsync(SCHEMA_SQL);
+        if (version < 3) await upgradeToV3(tx);
         await tx.execAsync(`PRAGMA user_version = ${LOCAL_MEMORY_SCHEMA_VERSION}`);
       });
     }

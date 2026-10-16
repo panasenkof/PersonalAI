@@ -1,3 +1,6 @@
+import type { MemoryKind } from "./search-index";
+export type { MemoryKind } from "./search-index";
+
 /** Device-local mirror of the server MemoryRepository contract.
  * No network/account/session dependency and no automatic sync or export. */
 export type MemorySensitivity = "unclassified" | "standard" | "sensitive" | "secret";
@@ -14,7 +17,11 @@ export type EntityRecord = {
   sensitivity: RecordSensitivity; source_kind: string | null; source_ref: string | null;
   valid_from: string | null; valid_until: string | null;
   created_at: string; updated_at: string; record_version: number;
+  /** fact, person, event, preference, document or note. */
+  kind: MemoryKind;
 };
+/** A search result: the record and its chunk that matched best. */
+export type MemoryHit = { entity: EntityRecord; chunk: string; score: number };
 export type ObservationRecord = {
   id: string; entity_id: string; kind: string; payload: Record<string, unknown>;
   occurred_at: string; created_at: string; sensitivity: RecordSensitivity;
@@ -37,6 +44,8 @@ export type NewEntity = {
   collection_id: string; domain: string; payload: Record<string, unknown>;
   schema_version?: string; title?: string | null; sensitivity?: RecordSensitivity;
   source_kind?: string | null; source_ref?: string | null;
+  /** Default: from the section («Люди» → person, «Важные даты» → event…). */
+  kind?: MemoryKind;
 };
 export type NewObservation = {
   entity_id: string; kind: string; payload: Record<string, unknown>;
@@ -47,7 +56,7 @@ export interface MemoryRepository {
   listCollections(): Promise<CollectionRecord[]>;
   createCollection(item: { name: string; slug: string; sensitivity?: MemorySensitivity }): Promise<CollectionRecord>;
   entity(id: string): Promise<EntityRecord | null>;
-  entities(options?: { collection_id?: string; domain?: string; limit?: number; offset?: number }): Promise<MemoryPage<EntityRecord>>;
+  entities(options?: { collection_id?: string; domain?: string; kind?: MemoryKind; limit?: number; offset?: number }): Promise<MemoryPage<EntityRecord>>;
   createEntity(item: NewEntity): Promise<EntityRecord>;
   reviseEntity(id: string, expectedVersion: number, payload: Record<string, unknown>, reason: string, collectionId?: string): Promise<EntityRecord>;
   setEntityStatus(id: string, expectedVersion: number, status: "active" | "archived"): Promise<EntityRecord>;
@@ -58,6 +67,13 @@ export interface MemoryRepository {
   linkEntities(sourceId: string, targetId: string, kind: string): Promise<RelationRecord>;
   relationsForEntity(id: string): Promise<RelationRecord[]>;
   revisions(type: "entity" | "observation", id: string): Promise<RevisionRecord[]>;
+  setEntityKind(id: string, expectedVersion: number, kind: MemoryKind): Promise<EntityRecord>;
+  aliases(entityId: string): Promise<string[]>;
+  setAliases(entityId: string, aliases: string[]): Promise<string[]>;
+  entitiesByAlias(name: string, kind?: MemoryKind): Promise<EntityRecord[]>;
+  indexTerms(entityId: string): Promise<Array<{ source: string; terms: string[] }>>;
+  setIndexTerms(entityId: string, terms: string[], source: string): Promise<string[]>;
+  searchMemory(query: string, options?: { collectionIds?: string[]; sensitivities?: string[]; limit?: number }): Promise<MemoryHit[]>;
   searchNotes(query: string, limit?: number, offset?: number, filters?: { collectionId?: string; status?: "active" | "archived"; prefix?: boolean }): Promise<EntityRecord[]>;
 }
 export class MemoryConflictError extends Error {}

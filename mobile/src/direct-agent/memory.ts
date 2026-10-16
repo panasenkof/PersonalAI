@@ -1,5 +1,5 @@
 import { localMemoryRepository } from "../local-memory/repository";
-import type { EntityRecord, MemoryRepository } from "../local-memory/types";
+import type { MemoryRepository } from "../local-memory/types";
 import { ensureSections, isSectionSlug } from "../local-memory/sections";
 import type { SectionSlug } from "../local-memory/sections";
 
@@ -8,78 +8,35 @@ export type MemorySnippet = { id: string; title: string; body: string; section?:
 /** `section` is a built-in section slug; unknown or missing means "notes". */
 export type NoteProposal = { title: string; body: string; section?: SectionSlug };
 
-const STOP_WORDS = new Set(["что", "как", "где", "когда", "кто", "чем", "мне", "меня", "мой", "моя", "моё", "мои", "моих", "моей", "моего",
-  "для", "это", "эта", "этот", "эти", "найди", "найти", "пожалуйста", "расскажи", "напомни", "помоги", "подскажи", "скажи", "знаешь", "помнишь",
-  "интернет", "интернете", "есть", "был", "была", "было", "про", "при", "или", "его", "её", "них", "там", "тут", "так", "уже", "ещё", "еще", "мы", "вы", "ты",
-  // Question and helper words: they occur everywhere and found unrelated notes
-  // («Сколько лет Де Ниро?» → «Маше 7 лет»), so the assistant skipped the internet.
-  "какой", "какая", "какое", "какие", "каких", "каким", "какую", "каком", "сколько", "который", "которая", "которое", "которые",
-  "зовут", "лет", "год", "года", "году", "лучше", "стоит", "нужно", "надо", "можно", "будет", "буду", "будут", "чтобы", "если", "тоже", "очень",
-  "сейчас", "сегодня", "всегда", "никогда", "всё", "все", "мой", "наш", "наша", "наше", "наши", "свой", "своя", "себя", "она", "оно", "они", "него", "неё",
-  "почему", "зачем", "откуда", "куда", "чей", "чья", "чьё"]);
-// Longest first, so «ами» is removed before «и».
-const RU_ENDINGS = ["иями", "ями", "ами", "ого", "его", "ому", "ему", "ыми", "ими", "ость", "ах", "ях", "ам", "ям", "ов", "ев", "ей", "ой", "ий", "ый",
-  "ая", "яя", "ое", "ее", "ые", "ие", "ую", "юю", "ом", "ем", "ть", "ся", "а", "я", "о", "е", "ы", "и", "у", "ю", "ь", "й"];
-
-/** A word without its Russian ending, for prefix search («машину» → «машин»). */
-export function wordStem(word: string): string {
-  const w = word.toLowerCase();
-  if (!/[а-яё]/.test(w)) return w.length > 4 ? w.replace(/(ing|ed|es|s)$/, "") : w;
-  for (const ending of RU_ENDINGS) {
-    if (w.endsWith(ending) && w.length - ending.length >= 3) return w.slice(0, -ending.length);
-  }
-  return w;
-}
+/** A word without its Russian ending; the search itself lives in local-memory/query. */
+export { wordStem } from "../local-memory/query";
 
 /** Searches every way available, most specific first: the whole phrase, each
- * keyword, then each keyword's stem so other word forms match. Notes found by
- * more of these searches rank higher. Only active notes in standard sections
- * may leave the device. */
+ * keyword, then each keyword's stem so other word forms match, over titles,
+ * text, index words and names. Records found by more of these searches rank
+ * higher. Only active records in standard sections may leave the device; a
+ * long record sends the chunk that matched, not its beginning. */
 export async function searchApprovedNotes(
   profile: string,
   query: string,
   repository?: MemoryRepository,
 ): Promise<MemorySnippet[]> {
-  const q = query.trim().slice(0, 120);
-  if (q.length < 2) return [];
+  if (query.trim().length < 2) return [];
   const db = repository || await localMemoryRepository(profile);
   const collections = await db.listCollections();
   // Only explicitly standard collections may leave the device. Never share
   // unclassified, sensitive or secret content through cloud-model tools.
-  const standards = new Set(collections.filter(c => c.sensitivity === "standard").map(c => c.id));
-  const tokens = q.split(/[^\p{L}\p{N}-]+/u).filter(Boolean);
-  // A capitalised word after the first is a name («Маше», «Аню»): its stem may be short.
-  const names = new Set(tokens.slice(1).filter(t => /^\p{Lu}\p{Ll}/u.test(t)).map(t => t.toLowerCase()));
-  const words = [...new Set(tokens.map(t => t.toLowerCase()).filter(s => (s.length >= 3 || names.has(s)) && !STOP_WORDS.has(s)))].slice(0, 6);
-  const stemOf = (w: string) => names.has(w) ? w.replace(/(ой|ей|ею|ою|[аяеиыуюо])$/u, "") : wordStem(w);
-  const aboutMe = /(?:помнишь|знаешь|расскажи).*(?:обо? мне|про меня)|кто я\b/iu.test(q);
-  const searches: Array<{ term: string; prefix: boolean; weight: number; word: number }> = aboutMe
-    ? [{ term: "", prefix: false, weight: 1, word: -1 }]
-    : [
-        { term: q, prefix: false, weight: 4, word: -1 },
-        ...words.map((w, i) => ({ term: w, prefix: false, weight: 2, word: i })),
-        // A stem shorter than four letters («как», «лет») matches too much; names may be shorter.
-        ...words.map((w, i) => ({ term: stemOf(w), prefix: true, weight: 1, word: i }))
-          .filter(s => s.term.length >= (names.has(words[s.word]) ? 2 : 4) && s.term !== words[s.word]),
-      ];
-  const scored = new Map<string, { note: EntityRecord; score: number; order: number }>();
-  for (const search of searches) {
-    // searchNotes uses safe, parameterized FTS and returns device-local data.
-    const matches: EntityRecord[] = await db.searchNotes(search.term, 8, 0, search.prefix ? { prefix: true } : undefined);
-    for (const note of matches) {
-      if (!standards.has(note.collection_id) || note.record_status !== "active" ||
-          !["standard", "inherit"].includes(note.sensitivity)) continue;
-      const found = scored.get(note.id) || { note, score: 0, order: scored.size };
-      found.score += search.weight;
-      scored.set(note.id, found);
-    }
-  }
-  return [...scored.values()].sort((a, b) => b.score - a.score || a.order - b.order).slice(0, 5).map(({ note }) => {
-    const section = collections.find(c => c.id === note.collection_id)?.name;
+  const standards = collections.filter(c => c.sensitivity === "standard").map(c => c.id);
+  if (!standards.length) return [];
+  const hits = await db.searchMemory(query, { collectionIds: standards, sensitivities: ["standard", "inherit"], limit: 5 });
+  return hits.filter(({ entity }) => standards.includes(entity.collection_id) && entity.record_status === "active" &&
+    ["standard", "inherit"].includes(entity.sensitivity)).map(({ entity, chunk }) => {
+    const section = collections.find(c => c.id === entity.collection_id)?.name;
+    const body = String(entity.payload.body || "");
     return {
-      id: note.id,
-      title: String(note.title || "").slice(0, 160),
-      body: String(note.payload.body || "").slice(0, 900),
+      id: entity.id,
+      title: String(entity.title || "").slice(0, 160),
+      body: (body.length <= 900 || !chunk ? body : chunk).slice(0, 900),
       ...(section ? { section: section.slice(0, 60) } : {}),
     };
   });

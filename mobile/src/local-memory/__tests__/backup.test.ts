@@ -9,7 +9,7 @@ jest.mock("expo-file-system/legacy", () => ({
 }));
 jest.mock("expo-sharing", () => ({ isAvailableAsync: jest.fn(), shareAsync: jest.fn() }));
 jest.mock("../storage", () => ({
-  LOCAL_MEMORY_SCHEMA_VERSION: 2,
+  LOCAL_MEMORY_SCHEMA_VERSION: 3,
   withLocalMemoryDatabase: jest.fn(async (_id: string, task: (db: unknown) => Promise<unknown>) => task(mockDb)),
 }));
 
@@ -28,6 +28,8 @@ const mockDb = {
 };
 const names = ["memory_collections", "memory_entities", "memory_observations",
   "memory_relations", "memory_revisions", "memory_notes_fts"];
+let mockTables = names;
+const tablesOnce = (tables: string[]) => { mockTables = tables; };
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -56,7 +58,11 @@ beforeEach(() => {
     if (sql.includes("foreign_key_check")) return null;
     return {};
   });
-  mockDb.getAllAsync.mockResolvedValue(names.map(name => ({ name })));
+  mockTables = names;
+  mockDb.getAllAsync.mockImplementation(async (sql: string) => {
+    if (sql.includes("pia_import.sqlite_master")) { const tables = mockTables; mockTables = names; return tables.map(name => ({ name })); }
+    return [];
+  });
 
 });
 
@@ -75,7 +81,7 @@ test("export SQLCipher-encrypts a new independent file before sharing and erases
     "/cache/pia-encrypted-random-id.db", code,
   ]);
   expect(mockDb.getFirstAsync).toHaveBeenCalledWith("SELECT sqlcipher_export('pia_export')");
-  expect(mockDb.execAsync).toHaveBeenCalledWith("PRAGMA pia_export.user_version = 2");
+  expect(mockDb.execAsync).toHaveBeenCalledWith("PRAGMA pia_export.user_version = 3");
   expect(mockDb.execAsync).toHaveBeenCalledWith("DETACH DATABASE pia_export");
   expect(Sharing.shareAsync).toHaveBeenCalledTimes(1);
   expect(FS.deleteAsync).toHaveBeenCalledWith("file:///cache/pia-encrypted-random-id.db", {
@@ -90,7 +96,7 @@ test("failed share deletes ciphertext from cache", async () => {
 });
 
 test("wrong password/corrupted backup cannot mutate the destination", async () => {
-  mockDb.getAllAsync.mockRejectedValueOnce(new Error("wrong key"));
+  mockDb.getAllAsync.mockImplementationOnce(async () => { throw new Error("wrong key"); });
   await expect(restoreEncryptedBackup("guest", "file:///bad.db", code)).rejects.toThrow("wrong key");
   expect(mockDb.execAsync.mock.calls.some(([sql]: string[]) => sql.startsWith("INSERT INTO"))).toBe(false);
   expect(mockDb.execAsync).toHaveBeenCalledWith("DETACH DATABASE pia_import");
@@ -104,7 +110,7 @@ test("restore refuses to overwrite a profile with any existing collection", asyn
   expect(mockDb.execAsync.mock.calls.some(([sql]: string[]) => sql.startsWith("INSERT INTO"))).toBe(false);
 });
 
-test("restore imports all six tables and FTS atomically on the unlocked connection", async () => {
+test("restore imports the five record tables atomically on the unlocked connection and rebuilds the search index", async () => {
   const restored = await restoreEncryptedBackup("guest", "file:///backup.db", code);
   expect(restored).toEqual({ collections: 1, entities: 2, observations: 1 });
   expect(mockDb.runAsync).toHaveBeenCalledWith("ATTACH DATABASE ? AS pia_import KEY ?", [
@@ -114,8 +120,10 @@ test("restore imports all six tables and FTS atomically on the unlocked connecti
   const statements = mockDb.execAsync.mock.calls.map(([sql]: string[]) => sql);
   expect(statements).toContain("BEGIN IMMEDIATE");
   expect(statements).toContain("COMMIT");
-  expect(statements.filter((sql: string) => sql.startsWith("INSERT INTO"))).toHaveLength(6);
-  expect(statements.some((sql: string) => sql.includes("FROM pia_import.memory_notes_fts"))).toBe(true);
+  expect(statements.filter((sql: string) => sql.startsWith("INSERT INTO"))).toHaveLength(5);
+  // The old index is never copied: it is rebuilt from the restored records.
+  expect(statements.some((sql: string) => sql.includes("FROM pia_import.memory_notes_fts"))).toBe(false);
+  expect(mockDb.getAllAsync).toHaveBeenCalledWith("SELECT id FROM memory_entities ORDER BY created_at, id");
   expect(mockDb.execAsync).toHaveBeenCalledWith("DETACH DATABASE pia_import");
   expect(FS.deleteAsync).toHaveBeenCalledTimes(4);
 });
@@ -133,7 +141,7 @@ test("rejects corrupt backup contents before target transaction", async () => {
 });
 
 test("rejects unknown schema or oversized import before any transaction", async () => {
-  mockDb.getAllAsync.mockResolvedValueOnce([]);
+  tablesOnce([]);
   await expect(restoreEncryptedBackup("guest", "file:///backup.db", code))
     .rejects.toThrow("incompatible_backup_schema");
   expect(mockDb.execAsync.mock.calls.some(([sql]: string[]) => sql.startsWith("INSERT INTO"))).toBe(false);
@@ -169,20 +177,20 @@ test("native ATTACH decodes Expo file:// URI and binds the filesystem path", asy
 });
 
 test("new backups also import chats without overwriting existing conversations; old backups remain valid", async () => {
-  mockDb.getAllAsync.mockResolvedValueOnce([...names, "direct_conversations"].map(name => ({ name })));
+  tablesOnce([...names, "direct_conversations"]);
   await restoreEncryptedBackup("guest", "file:///backup.db", code);
   expect(mockDb.execAsync.mock.calls.map(([sql]) => sql)).toContainEqual(expect.stringContaining("INSERT OR IGNORE INTO direct_conversations"));
 });
 
-test.each([1, 2])("restores deployed schema v%s including chats into the upgraded memory", async version => {
+test.each([1, 2, 3])("restores deployed schema v%s including chats into the upgraded memory", async version => {
   const read = mockDb.getFirstAsync.getMockImplementation()!;
   mockDb.getFirstAsync.mockImplementation(async sql => sql === "PRAGMA pia_import.user_version" ? { user_version: version } : read(sql));
-  mockDb.getAllAsync.mockResolvedValueOnce([...names, "direct_conversations"].map(name => ({ name })));
+  tablesOnce([...names, "direct_conversations"]);
   await restoreEncryptedBackup("guest", "file:///backup.db", code);
   expect(mockDb.execAsync.mock.calls.map(([sql]) => sql)).toContainEqual(expect.stringContaining("INSERT OR IGNORE INTO direct_conversations"));
 });
 
-test.each([0, 3])("rejects unsupported backup schema v%s before copying any memory", async version => {
+test.each([0, 4])("rejects unsupported backup schema v%s before copying any memory", async version => {
   const read = mockDb.getFirstAsync.getMockImplementation()!;
   mockDb.getFirstAsync.mockImplementation(async sql => sql === "PRAGMA pia_import.user_version" ? { user_version: version } : read(sql));
   await expect(restoreEncryptedBackup("guest", "file:///backup.db", code)).rejects.toThrow("incompatible_backup_version");
