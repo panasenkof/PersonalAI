@@ -45,7 +45,8 @@ export function factProposal(args: Record<string, unknown>): NoteProposal {
   const person = text(args.person, 80).replace(/\s+/g, " ");
   return {
     title, body,
-    ...(isSectionSlug(args.section) ? { section: args.section } : {}),
+    // Only the sections offered in the schema: never «Документы», even if a model sends it.
+    ...(isSectionSlug(args.section) && PROPOSABLE_SECTIONS.includes(args.section) ? { section: args.section } : {}),
     ...(isMemoryKind(args.kind) && (PROPOSABLE_KINDS as readonly string[]).includes(args.kind) ? { kind: args.kind as ProposableKind } : {}),
     ...(person && person.toLowerCase() !== "null" ? { person } : {}),
     ...(validDate(args.date) ? { date: args.date } : {}),
