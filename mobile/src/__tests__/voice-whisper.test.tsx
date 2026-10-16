@@ -7,6 +7,10 @@ import { startWhisperDictation } from "../media/whisper";
 jest.mock("@react-navigation/native", () => ({ useFocusEffect: (cb: any) => require("react").useEffect(cb, [cb]) }));
 jest.mock("../security/native-interaction", () => ({ withNativeInteraction: (fn: any) => fn(), nativeInteractionActive: () => false }));
 jest.mock("@expo/vector-icons/Feather", () => () => null);
+jest.mock("../media/voice-engine", () => ({
+  useVoiceEngine: () => ({ loaded: true, preference: "auto", saving: false, error: "" }),
+  resolveVoiceEngine: (preference: string, ready: boolean) => preference === "auto" ? (ready ? "whisper" : "system") : preference,
+}));
 jest.mock("expo-speech-recognition", () => ({
   useSpeechRecognitionEvent: () => {},
   ExpoSpeechRecognitionModule: { isRecognitionAvailable: jest.fn(() => true), supportsOnDeviceRecognition: jest.fn(() => true), requestPermissionsAsync: jest.fn(), start: jest.fn(), stop: jest.fn(), abort: jest.fn() },

@@ -8,6 +8,7 @@ import type { ServiceChoice } from "../media/voice";
 import { NO_SERVICE_MESSAGE, START_TIMEOUT_MS, pickRecognitionService, startTimeoutMessage, voiceErrorMessage } from "../media/voice";
 import { startWhisperDictation, useWhisperStatus } from "../media/whisper";
 import type { DictationSession } from "../media/whisper";
+import { resolveVoiceEngine, useVoiceEngine } from "../media/voice-engine";
 import { useTheme } from "../theme";
 import { IconAction } from "./IconAction";
 
@@ -27,6 +28,8 @@ export function VoiceInput({ value, onChange, disabled = false, onError, showLab
 }) {
   const t = useTheme();
   const whisper = useWhisperStatus();
+  const voice = useVoiceEngine();
+  const selectedEngine = resolveVoiceEngine(voice.preference, whisper.state === "ready");
   const session = useRef<DictationSession | null>(null);
   const controller = useRef<AbortController | null>(null);
   const generation = useRef(0);
@@ -111,6 +114,7 @@ export function VoiceInput({ value, onChange, disabled = false, onError, showLab
     return () => { sub.remove(); stop(); };
   }, [stop]);
   useEffect(() => { if (disabled) stop(); }, [disabled, stop]);
+  useEffect(() => { setOfferNetwork(false); return stop; }, [voice.preference, stop]);
 
   async function startWhisper(token: number) {
     const aborter = new AbortController(); controller.current = aborter;
@@ -132,10 +136,17 @@ export function VoiceInput({ value, onChange, disabled = false, onError, showLab
     } finally { if (generation.current === token) starting.current = false; }
   }
   async function start(network = false) {
-    if (disabled || owns.current || starting.current) return;
+    if (disabled || !voice.loaded || voice.saving || owns.current || starting.current) return;
+    if (voice.error) { onError(voice.error); return; }
+    if (selectedEngine === "whisper" && !network && whisper.state !== "ready") {
+      onError(whisper.state === "unsupported" ? "Whisper недоступен на этом телефоне. Выберите системное распознавание: Настройки → Голосовой ввод." :
+        whisper.state === "downloading" ? `Модель Whisper ещё скачивается (${whisper.progress}%). Дождитесь завершения или выберите системное распознавание в настройках.` :
+        "Выбран Whisper. Скачайте модель: Настройки → Голосовой ввод → Голос без интернета. Или выберите системное распознавание.");
+      return;
+    }
     const token = ++generation.current;
     starting.current = true; setPhase("starting");
-    if (whisper.state === "ready" && !network) return startWhisper(token);
+    if (selectedEngine === "whisper" && !network) return startWhisper(token);
     try {
       if (!Speech.isRecognitionAvailable()) throw new Error(NO_SERVICE_MESSAGE);
       const useNetwork = network || networkConsent || !Speech.supportsOnDeviceRecognition();
@@ -177,9 +188,9 @@ export function VoiceInput({ value, onChange, disabled = false, onError, showLab
   const accessibilityLabel = phase === "starting" ? "Подготовка диктовки" : phase === "finishing" ? "Завершение диктовки" : active ? "Остановить диктовку" : "Голосовой ввод";
   return <View style={{ zIndex: 1 }}>
     {showLabel ? <IconAction icon={active ? "square" : "mic"} label={label} accessibilityLabel={accessibilityLabel}
-      hint={active ? "Диктовка завершится после паузы в речи. Можно закончить раньше кнопкой «Стоп»." : "Надиктовать сообщение. Ввод завершится после паузы, отправка — отдельной кнопкой."}
-      disabled={disabled || waiting} emphasized={active} hintAbove hintAlign="start" onPress={() => active ? finish() : void start()} /> : <Pressable accessibilityRole="button" accessibilityLabel={accessibilityLabel}
-      disabled={disabled || waiting} onPress={() => active ? finish() : void start()}
+      hint={active ? "Диктовка завершится после паузы в речи. Можно закончить раньше кнопкой «Стоп»." : (selectedEngine === "whisper" ? "Whisper на телефоне. " : "Системное распознавание. ") + "Надиктовать сообщение. Ввод завершится после паузы, отправка — отдельной кнопкой."}
+      disabled={disabled || !voice.loaded || voice.saving || waiting} emphasized={active} hintAbove hintAlign="start" onPress={() => active ? finish() : void start()} /> : <Pressable accessibilityRole="button" accessibilityLabel={accessibilityLabel}
+      disabled={disabled || !voice.loaded || voice.saving || waiting} onPress={() => active ? finish() : void start()}
       style={{ minWidth: 46, minHeight: 46, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: active ? t.accent : t.soft }}>
       <Feather name={active ? "square" : "mic"} size={21} color={active ? "#fff" : t.accent} />
     </Pressable>}

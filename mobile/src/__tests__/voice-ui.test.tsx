@@ -6,6 +6,10 @@ import { VoiceInput } from "../components/VoiceInput";
 jest.mock("@react-navigation/native", () => ({ useFocusEffect: (cb: any) => require("react").useEffect(cb, [cb]) }));
 jest.mock("../security/native-interaction", () => ({ withNativeInteraction: (fn: any) => fn(), nativeInteractionActive: () => false }));
 jest.mock("@expo/vector-icons/Feather", () => () => null);
+jest.mock("../media/voice-engine", () => ({
+  useVoiceEngine: () => ({ loaded: true, preference: "auto", saving: false, error: "" }),
+  resolveVoiceEngine: (preference: string, ready: boolean) => preference === "auto" ? (ready ? "whisper" : "system") : preference,
+}));
 jest.mock("../media/whisper", () => ({ useWhisperStatus: () => ({ state: "absent" }) }));
 const mockEvents: Record<string, (v: any) => void> = {};
 jest.mock("expo-speech-recognition", () => ({
