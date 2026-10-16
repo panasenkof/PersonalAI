@@ -17,7 +17,6 @@ import { IconAction } from "../components/IconAction";
 import { PromptInput } from "../components/PromptInput";
 import { useTheme } from "../theme";
 import { MarkdownText } from "../components/Markdown";
-import { PROPOSABLE_SECTIONS, SECTIONS } from "../local-memory/sections";
 import { KIND_NAMES } from "../direct-agent/fact-tool";
 
 export function HomeScreen() {
@@ -25,7 +24,7 @@ export function HomeScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParams>>();
   const profile = useProfile();
-  const { store, ready, error, notice: historyNotice, conversations, active } = useDirectChat();
+  const { store, ready, error, notice: historyNotice, conversations, active, sections } = useDirectChat();
   const [settings, setSettings] = useState<DirectAgentSettings | null>(null);
   const [connectionName, setConnectionName] = useState("");
   const [notice, setNotice] = useState("");
@@ -41,9 +40,11 @@ export function HomeScreen() {
       const connection = value.connections.find(c => c.id === value.activeId)!;
       setSettings(connection); setConnectionName(connection.name); setNotice("");
     }).catch(() => { if (alive) { setSettings(null); setNotice("Не удалось прочитать подключения. Откройте настройки."); } });
+    // A section created in the memory screen shows up in proposals right away.
+    void store.refreshSections();
     // Changing focus does not own or abort an agent request.
     return () => { alive = false; };
-  }, [profile]));
+  }, [profile, store]));
   const canSend = Boolean(ready && !active?.deleting && settings && (settings.apiKey || anonymousLocalAllowed(settings)));
   const question = active?.question || "";
   const busy = active?.busy || false;
@@ -114,8 +115,10 @@ export function HomeScreen() {
           {d.kind || d.person || d.date ? <Text style={{ color: t.muted, fontSize: 13 }}>{[d.kind ? KIND_NAMES[d.kind] : "", d.person ? (d.kind === "person" ? "имя: " : "о ком: ") + d.person : "", d.date ? "дата: " + new Date(d.date + "T00:00:00").toLocaleDateString() : ""].filter(Boolean).join(" · ")}</Text> : null}
           <Text style={{ color: t.muted, fontSize: 12 }}>Раздел</Text>
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-            {SECTIONS.filter(x => PROPOSABLE_SECTIONS.includes(x.slug)).map(x => { const chosen = (d.section || "notes") === x.slug; return <Pressable key={x.slug} accessibilityRole="button"
-              accessibilityLabel={"Сохранить в раздел " + x.name} accessibilityState={{ selected: chosen }} disabled={Boolean(active.savingDraft)} onPress={() => store.setDraftSection(d, x.slug)}
+            {[...sections.map(x => ({ key: x.slug, slug: x.slug as string | null, name: x.name, label: "Сохранить в раздел " + x.name })),
+              ...(d.newSection && !sections.some(x => x.name.toLowerCase() === d.newSection!.toLowerCase()) ? [{ key: "new", slug: null, name: "+ Новый раздел «" + d.newSection + "»", label: "Создать раздел " + d.newSection + " и сохранить в него" }] : [])]
+              .map(x => { const chosen = x.slug ? (d.section || (d.newSection ? "" : "notes")) === x.slug : !d.section; return <Pressable key={x.key} accessibilityRole="button"
+              accessibilityLabel={x.label} accessibilityState={{ selected: chosen }} aria-selected={chosen} disabled={Boolean(active.savingDraft)} onPress={() => store.setDraftSection(d, x.slug)}
               style={{ minHeight: 36, paddingHorizontal: 10, justifyContent: "center", borderRadius: 12, borderWidth: 1, borderColor: chosen ? t.accent : t.line, backgroundColor: chosen ? t.soft : t.panel }}>
               <Text style={{ color: chosen ? t.accent : t.text, fontSize: 13 }}>{x.name}</Text></Pressable>; })}
           </View>

@@ -370,9 +370,26 @@ test("a proposed note carries the section the model chose, and the schema lists 
   const tool = JSON.parse(request.mock.calls[0][1].body).tools.find((t: any) => t.name === "draft_memory_fact");
   expect(tool.parameters.required).toEqual(["title", "body", "section", "kind", "person", "date"]);
   expect(tool.parameters.properties.kind.enum).not.toContain("document");
-  expect(tool.parameters.properties.section.enum).not.toContain("documents");
+  expect(tool.parameters.properties.section.description).not.toContain("Документы");
   const system = JSON.parse(request.mock.calls[0][1].body).input[0].content;
-  expect(system).toContain("people — Люди");
+  expect(system).toContain("«Люди» — Близкие");
+});
+
+test("the model sees sections the user created, a named one is matched by name, a missing one is offered for creation", async () => {
+  const propose = jest.fn();
+  const sections = [{ slug: "notes", name: "Заметки" }, { slug: "section-abc", name: "Рецепты", own: true }];
+  const request = jest.fn()
+    .mockResolvedValueOnce(toolResponse("draft_memory_fact", { title: "Борщ", body: "Свёкла и капуста", section: "рецепты", kind: "note", person: null, date: null }))
+    .mockResolvedValueOnce(toolResponse("draft_memory_fact", { title: "Велосипед", body: "Сменить цепь", section: "«Гараж»", kind: "note", person: null, date: null }))
+    .mockResolvedValueOnce(toolResponse("draft_memory_fact", { title: "Полис", body: "Номер", section: "Документы", kind: "note", person: null, date: null }))
+    .mockResolvedValueOnce(final());
+  await start({}, request, { propose, sections });
+  expect(propose.mock.calls[0][0]).toEqual({ title: "Борщ", body: "Свёкла и капуста", section: "section-abc", kind: "note" });
+  expect(propose.mock.calls[1][0]).toEqual({ title: "Велосипед", body: "Сменить цепь", newSection: "Гараж", kind: "note" });
+  expect(propose.mock.calls[2][0]).toEqual({ title: "Полис", body: "Номер", kind: "note" });
+  const body = JSON.parse(request.mock.calls[0][1].body);
+  expect(body.input[0].content).toContain("«Рецепты» (создан пользователем)");
+  expect(body.tools.find((t: any) => t.name === "draft_memory_fact").parameters.properties.section.description).toContain("«Рецепты»");
 });
 
 test("a proposed fact carries its type, person and date; invalid values are dropped, never trusted", async () => {

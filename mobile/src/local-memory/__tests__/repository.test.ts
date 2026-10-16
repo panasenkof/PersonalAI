@@ -233,6 +233,7 @@ test("an approved fact about someone is typed, dated and linked to that person; 
   // The second fact about her links to the same record.
   const birthday = await saveApprovedNote("guest", { title: "День рождения Ани", body: "3 мая", section: "dates", kind: "event", person: "аня", date: "2027-05-03" }, repo);
   expect((await repo.entity(birthday))!.payload.date).toBe("2027-05-03");
+  expect((await repo.entity(birthday))!.valid_from).toBe("2027-05-03");
   expect((await repo.relationsForEntity(anya.id)).map(r => r.source_entity_id).sort()).toEqual([coffee, birthday].sort());
   expect((await repo.entities({ kind: "person" })).items).toHaveLength(1);
   // A person record keeps the name it was proposed with as a name to search by.
