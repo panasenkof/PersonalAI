@@ -2,9 +2,11 @@ import * as FileSystem from "expo-file-system/legacy";
 import { createVideoPlayer } from "expo-video";
 import { ImageManipulator } from "expo-image-manipulator";
 import { extractMedia } from "../extract";
+import { getWhisperStatus, transcribeAudioFile } from "../whisper";
 import { defaultDirectPreferences } from "../../direct-agent/settings";
 jest.mock("expo-file-system/legacy", () => ({ getInfoAsync: jest.fn(), readAsStringAsync: jest.fn(), deleteAsync: jest.fn(), EncodingType: { Base64: "base64" } }));
 jest.mock("expo-video", () => ({ createVideoPlayer: jest.fn() }));
+jest.mock("../whisper", () => ({ getWhisperStatus: jest.fn(() => ({ state: "absent" })), transcribeAudioFile: jest.fn() }));
 jest.mock("expo-image-manipulator", () => ({ ImageManipulator: { manipulate: jest.fn() }, SaveFormat: { JPEG: "jpeg" } }));
 const mockPlayer = { muted: false, release: jest.fn(), generateThumbnailsAsync: jest.fn(), replaceAsync: jest.fn(),
   listeners: {} as Record<string, (e: any) => void>,
@@ -54,4 +56,17 @@ test("provider errors cannot expose an echoed key and cancellation prevents egre
   const aborter = new AbortController(); aborter.abort(); transport.mockClear();
   await expect(extractMedia({ uri: "file:///cache/photo.png", name: "photo.png" }, settings, true, aborter.signal, transport as unknown as typeof fetch)).rejects.toThrow("остановлен");
   expect(transport).not.toHaveBeenCalled();
+});
+
+test("with Whisper downloaded, audio is transcribed on the phone without approval and nothing is sent", async () => {
+  (getWhisperStatus as jest.Mock).mockReturnValueOnce({ state: "ready", id: "base" });
+  (transcribeAudioFile as jest.Mock).mockResolvedValueOnce("Купить молоко");
+  const transport = jest.fn();
+  expect(await extractMedia({ uri: "file:///cache/voice.m4a", name: "voice.m4a", mimeType: "audio/mp4" }, settings, false, undefined, transport as unknown as typeof fetch)).toBe("Купить молоко");
+  expect(transport).not.toHaveBeenCalled();
+});
+test("without Whisper a service that cannot transcribe points to the on-device model", async () => {
+  const transport = jest.fn(async () => ({ ok: false, status: 404 }));
+  await expect(extractMedia({ uri: "file:///cache/voice.m4a", name: "voice.m4a" }, { ...settings, provider: "openai-compatible", baseUrl: "https://api.deepseek.com" }, true, undefined, transport as unknown as typeof fetch))
+    .rejects.toThrow("Голос без интернета");
 });

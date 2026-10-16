@@ -45,7 +45,6 @@ export function DirectAgentSettingsScreen() {
   const [searching, setSearching] = useState(false);
   const [searchCheck, setSearchCheck] = useState<SearchCheck | null>(null);
   const searchAbort = useRef<AbortController | null>(null);
-  const [more, setMore] = useState(false);
   const [usage, setUsage] = useState<{ text: string; ok: boolean } | null>(null);
   const [usageTick, setUsageTick] = useState(0);
 
@@ -245,33 +244,19 @@ export function DirectAgentSettingsScreen() {
           </> : <Text style={small}>Помощник всегда сначала ищет в памяти телефона. С поиском он сообщит, что в памяти пусто, и поищет в интернете.</Text>}
         </View>
 
-        <Pressable accessibilityRole="button" accessibilityLabel={more ? "Скрыть дополнительные настройки" : "Дополнительные настройки"} onPress={() => setMore(m => !m)}
-          style={{ minHeight: 44, justifyContent: "center" }}>
-          <Text style={{ color: t.accent }}>{more ? "▾ Дополнительно" : "▸ Дополнительно"}</Text>
-        </Pressable>
-        {more ? <View style={card}>
-          {type === "openai" ? <>
-            <Text style={label}>Модель распознавания аудио</Text>
-            <TextInput editable={!busy} accessibilityLabel="Модель распознавания аудио" value={selected.transcriptionModel || "whisper-1"} autoCapitalize="none" autoCorrect={false}
-              onChangeText={transcriptionModel => update({ transcriptionModel })} style={field} />
-            <Text style={small}>Для импорта аудиофайлов, если сервис умеет распознавать речь (у DeepSeek такого нет).</Text>
-          </> : null}
-          <Text style={small}>До 4 обращений к модели за вопрос, до 4000 выходных токенов на обращение (8000 для моделей с рассуждением). Денежный бюджет задаётся у провайдера.</Text>
-          {value.connections.length > 1 ? <Pressable accessibilityRole="button" disabled={busy} accessibilityLabel="Удалить подключение" style={{ minHeight: 44, justifyContent: "center" }}
-            onPress={() => Alert.alert("Удалить подключение «" + selected.name + "»?", "Изменение вступит в силу после сохранения.", [
-              { text: "Отмена", style: "cancel" }, { text: "Удалить", style: "destructive", onPress: () => {
-                const rest = value.connections.filter(c => c.id !== selectedId);
-                setValue({ activeId: rest.some(c => c.id === value.activeId) ? value.activeId : rest[0].id, connections: rest }); choose(rest[0].id);
-              } },
-            ])}><Text style={{ color: t.err }}>Удалить это подключение</Text></Pressable> : null}
-        </View> : null}
-
         {notice ? <Text accessibilityRole="alert" style={{ color: t.err }}>{notice}</Text> : null}
         <Pressable accessibilityRole="button" disabled={busy} onPress={() => void save()}
           style={{ minHeight: 52, justifyContent: "center", alignItems: "center", backgroundColor: t.accent, borderRadius: 18 }}>
           <Text style={{ color: "#fff", fontWeight: "700" }}>{busy ? "Сохранение…" : "Сохранить настройки"}</Text>
         </Pressable>
-        <Text style={small}>Сохранение делает выбранное подключение активным.</Text>
+        <Text style={small}>Сохранение делает выбранное подключение активным. До 4 обращений к модели за вопрос, до 4000 выходных токенов на обращение (8000 для моделей с рассуждением); денежный бюджет задаётся у провайдера.</Text>
+        {value.connections.length > 1 ? <Pressable accessibilityRole="button" disabled={busy} accessibilityLabel="Удалить подключение" style={{ minHeight: 44, justifyContent: "center" }}
+          onPress={() => Alert.alert("Удалить подключение «" + selected.name + "»?", "Изменение вступит в силу после сохранения.", [
+            { text: "Отмена", style: "cancel" }, { text: "Удалить", style: "destructive", onPress: () => {
+              const rest = value.connections.filter(c => c.id !== selectedId);
+              setValue({ activeId: rest.some(c => c.id === value.activeId) ? value.activeId : rest[0].id, connections: rest }); choose(rest[0].id);
+            } },
+          ])}><Text style={{ color: t.err }}>Удалить это подключение</Text></Pressable> : null}
       </> : null}
       {notice && !value ? <><Text accessibilityRole="alert" style={{ color: t.err }}>{notice}</Text>
         <Pressable accessibilityRole="button" onPress={() => setRetry(x => x + 1)} style={{ minHeight: 44 }}><Text style={{ color: t.accent }}>Повторить загрузку</Text></Pressable></> : null}
