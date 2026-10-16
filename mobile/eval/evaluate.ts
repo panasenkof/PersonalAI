@@ -5,7 +5,8 @@ import { ensureSections, sectionBySlug } from "../src/local-memory/sections";
 import { searchApprovedNotes } from "../src/direct-agent/memory";
 import { prepareDirectContext } from "../src/direct-agent/context";
 import { defaultDirectPreferences } from "../src/direct-agent/settings";
-import { EVAL_NOTES, EVAL_QUESTIONS, EVAL_TARGETS } from "./memory-fixture";
+import { EVAL_MODEL_TERMS, EVAL_NOTES, EVAL_QUESTIONS, EVAL_TARGETS } from "./memory-fixture";
+import { enrichPending } from "../src/direct-agent/enrich";
 import type { EvalCategory } from "./memory-fixture";
 
 class NodeSqlite {
@@ -21,7 +22,9 @@ export type QuestionResult = { q: string; category: EvalCategory; ok: boolean; f
 export type CategoryScore = { category: EvalCategory; passed: number; total: number; rate: number; target: number; when: string };
 export type EvalReport = { results: QuestionResult[]; scores: CategoryScore[]; extraWeb: number };
 
-export async function evaluateMemorySearch(): Promise<EvalReport> {
+/** `withTerms`: index words from the model (п. 12) are added first, through
+ * the same enrichment code the app runs, with EVAL_MODEL_TERMS as answers. */
+export async function evaluateMemorySearch(options: { withTerms?: boolean } = {}): Promise<EvalReport> {
   const { SCHEMA_SQL } = require("../src/local-memory/storage");
   const repo = new SqliteMemoryRepository(new NodeSqlite(SCHEMA_SQL) as never);
   const sections = await ensureSections(repo);
@@ -33,6 +36,17 @@ export async function evaluateMemorySearch(): Promise<EvalReport> {
       payload: { type: "note", title: note.title, body: note.body }, sensitivity: col.sensitivity === "unclassified" ? "inherit" : col.sensitivity, source_kind: "user" });
     idOf.set(saved.id, note.id);
     if (sectionBySlug(note.section)?.sensitivity !== "standard") privateIds.add(note.id);
+  }
+  if (options.withTerms) {
+    const byTitle = new Map(EVAL_NOTES.map(n => [n.title, EVAL_MODEL_TERMS[n.id]]));
+    const transport = (async (_url: string, init: RequestInit) => {
+      const title = /Название: (.*)/.exec(JSON.parse(String(init.body)).messages[1].content)?.[1] || "";
+      const answer = byTitle.get(title);
+      if (!answer) throw new Error("eval: a record outside the fixture was sent: " + title);
+      return { ok: true, status: 200, json: async () => ({ choices: [{ message: { role: "assistant", content: JSON.stringify(answer) } }] }) };
+    }) as unknown as typeof fetch;
+    const settings = { ...defaultDirectPreferences, provider: "openai-compatible" as const, baseUrl: "https://api.deepseek.com/v1", model: "deepseek-chat", apiKey: "eval", webSearchKey: "" };
+    for (let pass = 0; pass < 5; pass++) { const r = await enrichPending(repo, settings, { transport, limit: 50 }); if (r.error) throw new Error(r.error); if (!r.done) break; }
   }
   const results: QuestionResult[] = [];
   let extraWeb = 0;

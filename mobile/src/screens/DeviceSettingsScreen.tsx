@@ -9,6 +9,7 @@ import { loadDirectConnections } from "../direct-agent/settings";
 import type { RootStackParams } from "../navigation";
 import { useTheme } from "../theme";
 import { VoiceModelCard } from "../components/VoiceModelCard";
+import { SmartSearchCard } from "../components/SmartSearchCard";
 
 export function DeviceSettingsScreen() {
   const profile = useProfile();
@@ -31,6 +32,7 @@ export function DeviceSettingsScreen() {
       <Text numberOfLines={2} style={{ color: t.accent }}>{model}</Text>
       <Text style={{ color: t.muted, lineHeight: 20 }}>Сохранённые сервисы, адреса, ключи и интернет-поиск.</Text>
     </Pressable>
+    <SmartSearchCard />
     <VoiceModelCard />
     <Pressable accessibilityRole="button" accessibilityLabel="Резервные копии" style={card} onPress={() => navigation.navigate("MemoryBackup")}>
       <Text style={{ color: t.text, fontSize: 19, fontWeight: "700" }}>Резервные копии →</Text>

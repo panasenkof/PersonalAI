@@ -35,6 +35,12 @@ export function waitForApplicationSession(signal?: AbortSignal): Promise<void> {
     signal?.addEventListener("abort", abort, { once: true });
   });
 }
+/** Background work (index words, vectors) stops when the app locks. */
+export function onLocalMemorySessionChange(listener: (unlocked: boolean) => void): () => void {
+  sessionListeners.add(listener);
+  return () => { sessionListeners.delete(listener); };
+}
+export const localMemorySessionUnlocked = () => applicationSessionUnlocked;
 const requireApplicationSession = () => { if (!applicationSessionUnlocked) throw new Error("application_locked"); };
 export const LOCAL_MEMORY_SCHEMA_VERSION = 3;
 const KIND_CHECK = `CHECK(kind IN (${MEMORY_KINDS.map(k => `'${k}'`).join(",")}))`;

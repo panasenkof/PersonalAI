@@ -17,6 +17,7 @@ import { withNativeInteraction } from "../security/native-interaction";
 import { memoryErrorMessage } from "../local-memory/errors";
 import { useTheme } from "../theme";
 import { useWhisperStatus } from "../media/whisper";
+import { scheduleIndexTerms } from "../direct-agent/enrich-runner";
 
 export function MemoryImportScreen() {
   const whisper = useWhisperStatus();
@@ -87,6 +88,7 @@ export function MemoryImportScreen() {
         payload: { type: "note", title: title.trim().slice(0, 160), body: body.trim(), source_file: file.name, source_media: kind },
         sensitivity: classification, source_kind: "user", source_ref: "device-import",
       });
+      scheduleIndexTerms(profile);
       if (alive.current) navigation.goBack();
     } catch (e) { if (alive.current) setNotice("Не удалось сохранить: " + memoryErrorMessage(e)); }
     finally { if (alive.current) setBusy(false); }
