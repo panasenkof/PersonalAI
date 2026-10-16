@@ -63,7 +63,8 @@ export const writeAsStringAsync = async () => {};
 
 // react-native-executorch, react-native-audio-api, react-native-blob-util: on-device
 // Whisper is unsupported on the web, so these are never called in the browser check.
-export const models = { speechToText: { WHISPER: {} } };
+export const models = { speechToText: { WHISPER: {} }, textEmbeddings: { PARAPHRASE_MULTILINGUAL_MINILM_L12_V2: {} } };
+export const createTextEmbedder = async () => { throw new Error("Embeddings are not available on the web"); };
 export const setTelemetryEnabled = () => {};
 export const download = async (config: unknown) => config;
 export const createFsmnVoiceActivityDetector = async () => { throw new Error("VAD is not available on the web"); };

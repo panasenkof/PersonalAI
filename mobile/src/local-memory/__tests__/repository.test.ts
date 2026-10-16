@@ -241,3 +241,33 @@ test("an approved fact about someone is typed, dated and linked to that person; 
   expect(await repo.aliases(boss)).toEqual(["Елена Сергеевна"]);
   expect((await searchApprovedNotes("guest", "Что знаешь про Елену?", repo)).map((n: any) => n.id)).toContain(boss);
 });
+
+test("vectors: pending chunks, saved vectors, staleness on edit, and search by meaning fused with words", async () => {
+  const fake = new FakeSqlite();
+  const repo = new SqliteMemoryRepository(fake as never);
+  const people = await repo.createCollection({ name: "Люди", slug: "people", sensitivity: "standard" });
+  const docs = await repo.createCollection({ name: "Документы", slug: "documents", sensitivity: "sensitive" });
+  const coffee = await repo.createEntity({ collection_id: people.id, domain: "notes", title: "Что любит Аня", payload: { body: "Обожает капучино" } });
+  const roads = await repo.createEntity({ collection_id: people.id, domain: "notes", title: "Дорога", payload: { body: "Пробки на мосту" } });
+  const polis = await repo.createEntity({ collection_id: docs.id, domain: "notes", title: "ОСАГО", payload: { body: "Полис до мая" }, sensitivity: "sensitive" });
+  // A toy model: «угощение/кофе» lies along x, «дорога» along y, «страховка» along z.
+  const embed = (text: string) => /кофе|капучино|угост/i.test(text) ? Float32Array.from([1, 0.1, 0]) : /Дорога|Пробки/.test(text) ? Float32Array.from([0, 1, 0]) : Float32Array.from([0, 0, 1]);
+  const pending = await repo.pendingVectorChunks("toy", 50);
+  expect(pending.map(p => p.text).sort()).toEqual(["ОСАГО\nПолис до мая", "Дорога\nПробки на мосту", "Что любит Аня\nОбожает капучино"].sort());
+  expect(await repo.saveVectors("toy", pending.map(p => ({ chunkId: p.chunkId, vector: embed(p.text), hash: p.hash })))).toBe(3);
+  expect(await repo.vectorStatus("toy")).toEqual({ done: 3, total: 3 });
+  expect(await repo.pendingVectorChunks("toy")).toEqual([]);
+  // A title change makes that chunk's vector stale.
+  await repo.reviseEntity(roads.id, 1, { title: "Дорога на работу", body: "Пробки на мосту" }, "Уточнение");
+  expect((await repo.pendingVectorChunks("toy")).map(p => p.text)).toEqual(["Дорога на работу\nПробки на мосту"]);
+  // «Чем угостить Аню?» shares no word with «Обожает капучино»; the vector finds it.
+  const question = { model: "toy", values: Float32Array.from([1, 0, 0]) };
+  const hits = await repo.searchMemory("Чем угостить гостью?", { vector: question });
+  expect(hits[0].entity.id).toBe(coffee.id);
+  expect(hits[0].chunk).toBe("Обожает капучино");
+  // Unrelated records stay out (below the similarity threshold), and filters still apply.
+  expect(hits.map(h => h.entity.id)).not.toContain(roads.id);
+  expect((await repo.searchMemory("страховка", { vector: { model: "toy", values: Float32Array.from([0, 0, 1]) }, collectionIds: [people.id] })).map(h => h.entity.id)).not.toContain(polis.id);
+  // Without a vector the word search is unchanged.
+  expect(await repo.searchMemory("Чем угостить гостью?")).toEqual([]);
+});

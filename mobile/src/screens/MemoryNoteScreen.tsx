@@ -18,6 +18,7 @@ import { MEMORY_KINDS, defaultKind } from "../local-memory/search-index";
 import type { MemoryKind } from "../local-memory/search-index";
 import { KIND_NAMES } from "../direct-agent/fact-tool";
 import { scheduleIndexTerms } from "../direct-agent/enrich-runner";
+import { scheduleVectors } from "../media/vector-runner";
 
 /** «Маша, Мария Петровна» → ["Маша", "Мария Петровна"]. */
 const splitNames = (text: string) => text.split(/[,;\n]/).map(n => n.trim()).filter(Boolean);
@@ -107,7 +108,7 @@ export function MemoryNoteScreen() {
       sensitivity: "inherit", source_kind: "user", source_ref: "device" });
     if (splitNames(names).join(",") !== splitNames(base.names).join(",")) await db.setAliases(saved.id, splitNames(names));
     if (terms.trim() !== base.terms.trim()) await db.setIndexTerms(saved.id, splitNames(terms), "user");
-    if (profile) scheduleIndexTerms(profile);
+    if (profile) { scheduleIndexTerms(profile); scheduleVectors(profile); }
     if (alive.current) setLeaving(true);
   });
   const loadDetails = () => run(async db => {
