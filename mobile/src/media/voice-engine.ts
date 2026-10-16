@@ -3,7 +3,9 @@ import { useSyncExternalStore } from "react";
 
 export type VoiceEngine = "system" | "whisper";
 type Preference = VoiceEngine | "auto";
-type VoiceEngineState = { loaded: boolean; preference: Preference; saving: boolean; error: string };
+/** `pending` is the choice being saved: the screen shows it at once, so the
+ * switch never flickers back to the old engine while the write completes. */
+type VoiceEngineState = { loaded: boolean; preference: Preference; saving: boolean; error: string; pending?: VoiceEngine };
 const KEY = "pia.voice.engine.v1";
 let state: VoiceEngineState = { loaded: false, preference: "auto", saving: false, error: "" };
 let initialized: Promise<void> | null = null;
@@ -36,15 +38,15 @@ export function useVoiceEngine(): VoiceEngineState {
 export async function setVoiceEngine(engine: VoiceEngine): Promise<void> {
   await initVoiceEngine();
   const request = ++revision;
-  publish({ saving: true, error: "" });
+  publish({ saving: true, error: "", pending: engine });
   const write = writes.catch(() => {}).then(() => SecureStore.setItemAsync(KEY, engine));
   writes = write;
   try {
     await write;
-    publish({ preference: engine, ...(request === revision ? { saving: false } : {}) });
+    publish({ preference: engine, ...(request === revision ? { saving: false, pending: undefined } : {}) });
   } catch {
     const message = "Не удалось сохранить способ распознавания. Попробуйте выбрать его ещё раз.";
-    if (request === revision) publish({ saving: false, error: message });
+    if (request === revision) publish({ saving: false, error: message, pending: undefined });
     throw new Error(message);
   }
 }

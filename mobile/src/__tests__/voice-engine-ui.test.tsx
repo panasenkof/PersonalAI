@@ -36,13 +36,16 @@ test("the settings switch uses the system service even with Whisper downloaded, 
   fireEvent.press(v.getByLabelText("Системное распознавание"));
   await waitFor(() => expect(v.getByLabelText("Системное распознавание").props.accessibilityState.checked).toBe(true));
   expect(SecureStore.setItemAsync).toHaveBeenLastCalledWith("pia.voice.engine.v1", "system");
-  expect(v.getByText("Скачано: Whisper base.")).toBeTruthy();
+  // Whisper settings are hidden for the system engine; the model stays downloaded.
+  expect(v.queryByText("Скачано: Whisper base.")).toBeNull();
+  expect(v.queryByLabelText("Удалить модель распознавания")).toBeNull();
   fireEvent.press(v.getByRole("button", { name: "Голосовой ввод" }));
   await waitFor(() => expect(Speech.start).toHaveBeenCalledTimes(1));
   expect(startWhisperDictation).not.toHaveBeenCalled();
   act(() => mockEvents.end({}));
   fireEvent.press(v.getByLabelText("Whisper на телефоне"));
   await waitFor(() => expect(v.getByLabelText("Whisper на телефоне").props.accessibilityState.checked).toBe(true));
+  expect(v.getByText("Скачано: Whisper base.")).toBeTruthy();
   fireEvent.press(v.getByRole("button", { name: "Голосовой ввод" }));
   await waitFor(() => expect(startWhisperDictation).toHaveBeenCalledTimes(1));
   expect(Speech.start).toHaveBeenCalledTimes(1);
@@ -87,4 +90,17 @@ test("unsupported Whisper explains how to choose the system engine", () => {
   fireEvent.press(v.getByRole("button", { name: "Голосовой ввод" }));
   expect(error).toHaveBeenCalledWith(expect.stringContaining("недоступен на этом телефоне"));
   expect(Speech.start).not.toHaveBeenCalled();
+});
+
+test("the new choice shows at once while it is being saved, without flicker back to the old engine", async () => {
+  let finish!: () => void;
+  (SecureStore.setItemAsync as jest.Mock).mockReturnValueOnce(new Promise<void>(resolve => { finish = resolve; }));
+  const v = render(<Inputs />);
+  fireEvent.press(v.getByLabelText("Системное распознавание"));
+  await waitFor(() => expect(v.getByLabelText("Системное распознавание").props.accessibilityState.checked).toBe(true));
+  expect(v.queryByText("Голос без интернета")).toBeNull();
+  expect(v.queryByText("Сохраняю выбор…")).toBeNull();
+  await act(async () => finish());
+  expect(v.getByLabelText("Системное распознавание").props.accessibilityState.checked).toBe(true);
+  expect(v.queryByText("Голос без интернета")).toBeNull();
 });

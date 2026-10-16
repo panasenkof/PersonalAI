@@ -11,7 +11,8 @@ export function VoiceModelCard() {
   const t = useTheme();
   const status = useWhisperStatus();
   const voice = useVoiceEngine();
-  const selected = resolveVoiceEngine(voice.preference, status.state === "ready");
+  // The choice being saved is shown immediately; Whisper settings appear only for Whisper.
+  const selected = voice.pending ?? resolveVoiceEngine(voice.preference, status.state === "ready");
   const [choice, setChoice] = useState<WhisperId>("base");
   const current = status.state === "ready" || status.state === "downloading" ? status.id : undefined;
   const picked = WHISPER_CHOICES.find(c => c.id === choice)!;
@@ -32,19 +33,22 @@ export function VoiceModelCard() {
         { id: "whisper", name: "Whisper на телефоне", detail: "Без интернета. Нужна скачанная модель ниже." },
       ] as const).map(option => {
         const checked = voice.loaded && selected === option.id;
-        const disabled = !voice.loaded || voice.saving || option.id === "whisper" && status.state === "unsupported";
+        const unavailable = option.id === "whisper" && status.state === "unsupported";
+        const disabled = !voice.loaded || voice.saving || unavailable;
         return <Pressable key={option.id} accessibilityRole="radio" accessibilityLabel={option.name} aria-checked={checked} accessibilityState={{ disabled }} disabled={disabled}
           onPress={() => { void setVoiceEngine(option.id).catch(() => {}); }}
-          style={{ minHeight: 56, padding: 12, gap: 4, borderRadius: 14, borderWidth: 1, borderColor: checked ? t.accent : t.line, backgroundColor: checked ? t.soft : t.panel, opacity: disabled ? 0.5 : 1 }}>
+          style={{ minHeight: 56, padding: 12, gap: 4, borderRadius: 14, borderWidth: 1, borderColor: checked ? t.accent : t.line, backgroundColor: checked ? t.soft : t.panel, opacity: unavailable ? 0.5 : 1 }}>
           <Text style={{ color: checked ? t.accent : t.text, fontWeight: "600" }}>{checked ? "● " : "○ "}{option.name}</Text>
           <Text style={{ color: t.muted, fontSize: 12, lineHeight: 17 }}>{option.detail}</Text>
         </Pressable>;
       })}
     </View>
-    {!voice.loaded || voice.saving ? <Text style={{ color: t.muted }}>{voice.saving ? "Сохраняю выбор…" : "Загружаю настройки голоса…"}</Text> : null}
+    {!voice.loaded ? <Text style={{ color: t.muted }}>Загружаю настройки голоса…</Text> : null}
     {voice.error ? <Text accessibilityRole="alert" style={{ color: t.err }}>{voice.error}</Text> : null}
     {voice.loaded && !voice.error && selected === "whisper" && status.state !== "ready" && status.state !== "unsupported" ?
       <Text style={{ color: t.accent }}>Для диктовки Whisper скачайте модель ниже или дождитесь завершения скачивания.</Text> : null}
+    {selected === "system" && status.state === "downloading" ? <Text style={{ color: t.muted }}>Модель Whisper скачивается в фоне: {status.progress}%.</Text> : null}
+    {voice.loaded && selected === "whisper" ? <>
     <Text style={{ color: t.text, fontSize: 16, fontWeight: "700", marginTop: 6 }}>Голос без интернета</Text>
     {status.state === "unsupported" ? <Text style={{ color: t.muted, lineHeight: 20 }}>Распознавание речи на самом телефоне требует Android 13 или новее (iOS 17). На этом телефоне голосовой ввод работает через системную службу.</Text> : <>
       <Text style={{ color: t.muted, lineHeight: 20 }}>Модель Whisper распознаёт русскую речь прямо на телефоне — без Google и без интернета. Скачивается один раз.</Text>
@@ -71,5 +75,6 @@ export function VoiceModelCard() {
         </View>
       </>}
     </>}
+    </> : null}
   </View>;
 }

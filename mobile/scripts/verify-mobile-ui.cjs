@@ -129,6 +129,7 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       assert.equal(await page.getByRole('radio', { name: 'Системное распознавание', exact: true }).getAttribute('aria-checked'), 'true');
       // A web browser cannot run native Whisper; unsupported devices explain it.
       assert.equal(await page.getByRole('radio', { name: 'Whisper на телефоне', exact: true }).isDisabled(), true);
+      assert.equal(await page.getByText('Голос без интернета', { exact: true }).count(), 0, 'Whisper settings are hidden for the system engine');
       if (process.env.SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, `voice-settings-${width}.png`) });
 
       await page.getByLabel('Вкладка Главная', { exact: true }).click();
