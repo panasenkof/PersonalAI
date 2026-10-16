@@ -31,7 +31,7 @@ async function setup() {
 test("the answer is read even inside a code block; anything that is not a short string is dropped", () => {
   expect(parseSuggestion('Вот:\n```json\n{"terms":["автомобиль","автомобиль"," шкода ", 5, "' + "x".repeat(50) + '"],"people":["Аня"]}\n```'))
     .toEqual({ terms: ["автомобиль", "шкода"], people: ["Аня"] });
-  expect(() => parseSuggestion("не знаю")).toThrow("не вернула");
+  expect(() => parseSuggestion("не знаю")).toThrow("не списком слов: «не знаю»");
 });
 
 test("one request without tools; the key is sent only in the header and the record is marked as data", async () => {
@@ -85,4 +85,24 @@ test("«Документы» are never sent; an edit makes the record pending ag
   const pass = await enrichPending(repo, settings, { transport: failing as unknown as typeof fetch });
   expect(pass.failed).toBe(1); expect(pass.error).toContain("401");
   expect(await repo.staleIndexTerms(MODEL_TERMS_SOURCE)).toEqual([car.id]);
+});
+
+const cut = (content: string, reasoning = "") => ({ ok: true, status: 200, json: async () => ({ choices: [{ finish_reason: "length", message: { role: "assistant", content, reasoning_content: reasoning } }] }) });
+test("a thinking model that ran out of tokens is asked again with more room", async () => {
+  const transport = jest.fn()
+    .mockResolvedValueOnce(cut("", "Подумаем, какие слова…"))
+    .mockResolvedValueOnce(reply('{"terms":["автомобиль"],"people":[]}'));
+  const thinking = { ...settings, model: "deepseek-v4-pro" };
+  expect(await suggestIndexTerms(thinking, { title: "Машина", body: "Шкода", section: "Обо мне" }, transport as unknown as typeof fetch))
+    .toEqual({ terms: ["автомобиль"], people: [] });
+  const limits = transport.mock.calls.map(([, init]: any) => JSON.parse(String(init.body)).max_tokens);
+  expect(limits[1]).toBeGreaterThan(limits[0]);
+});
+test("an answer left only in the reasoning is used; an empty one names the model and what to do", async () => {
+  const onlyReasoning = jest.fn(async () => ({ ok: true, status: 200, json: async () => ({ choices: [{ finish_reason: "stop", message: { role: "assistant", content: "", reasoning_content: 'Итог: {"terms":["авто"],"people":[]}' } }] }) }));
+  expect((await suggestIndexTerms(settings, { title: "Машина", body: "Шкода", section: "Обо мне" }, onlyReasoning as unknown as typeof fetch)).terms).toEqual(["авто"]);
+  const alwaysCut = jest.fn(async () => cut(""));
+  await expect(suggestIndexTerms({ ...settings, model: "deepseek-v4-pro" }, { title: "Машина", body: "Шкода", section: "Обо мне" }, alwaysCut as unknown as typeof fetch))
+    .rejects.toThrow("deepseek-v4-pro рассуждала дольше лимита");
+  expect(alwaysCut).toHaveBeenCalledTimes(2);
 });
