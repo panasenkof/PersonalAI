@@ -32,3 +32,17 @@ test("search steps: the phrase, words without helper words, then stems; a questi
   expect(searchSteps("Что ты знаешь обо мне?")).toEqual([{ term: "", prefix: false, weight: 1 }]);
   expect(searchSteps("a")).toEqual([]);
 });
+
+test("sections for proposals: the user's own are included, «Документы», secret and unclassified never", () => {
+  const { proposableSections, factProposal, restoredProposal, findSection } = require("../../direct-agent/fact-tool");
+  const col = (slug: string, name: string, sensitivity: string) => ({ id: slug, slug, name, sensitivity, description: null, created_at: "" });
+  const sections = proposableSections([col("notes", "Заметки", "standard"), col("documents", "Документы", "sensitive"),
+    col("section-1", "Рецепты", "standard"), col("section-2", "Тайное", "secret"), col("section-3", "Старое", "unclassified")]);
+  expect(sections.map((s: any) => s.name)).toEqual(["Заметки", "Рецепты"]);
+  expect(sections[1]).toMatchObject({ own: true });
+  expect(findSection("рецепты", sections).slug).toBe("section-1");
+  expect(findSection("«Рецепты»", sections).slug).toBe("section-1");
+  expect(factProposal({ title: "a", body: "b", section: "null" }, sections)).toEqual({ title: "a", body: "b" });
+  expect(restoredProposal({ section: "section-1", newSection: "  ", kind: "event", date: "2026-13-01" })).toEqual({ section: "section-1", kind: "event" });
+  expect(restoredProposal({ section: "documents", newSection: "Гараж" })).toEqual({ newSection: "Гараж" });
+});

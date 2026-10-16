@@ -1,14 +1,26 @@
 import { localMemoryRepository } from "../local-memory/repository";
 import type { MemoryRepository } from "../local-memory/types";
-import { ensureSections, isSectionSlug } from "../local-memory/sections";
+import { ensureSections, orderCollections } from "../local-memory/sections";
 import { normalizeAlias as normalizeName } from "../local-memory/search-index";
-import { PROPOSABLE_KINDS } from "./fact-tool";
-import type { NoteProposal } from "./fact-tool";
+import { DEFAULT_SECTIONS, PROPOSABLE_KINDS, findSection, proposableSections } from "./fact-tool";
+import type { MemorySection, NoteProposal } from "./fact-tool";
 
 /** `section` is the name of the memory section the note lives in. */
 export type MemorySnippet = { id: string; title: string; body: string; section?: string };
 export { FACT_TOOL_NAME, KIND_NAMES, PROPOSABLE_KINDS, factProposal } from "./fact-tool";
-export type { NoteProposal, ProposableKind } from "./fact-tool";
+export type { MemorySection, NoteProposal, ProposableKind } from "./fact-tool";
+
+/** The user's sections the assistant may propose records for, including the
+ * ones the user created. Read-only: a built-in section that does not exist yet
+ * is listed anyway and created only when a record is saved into it. */
+export async function proposableMemorySections(profile: string, repository?: MemoryRepository): Promise<MemorySection[]> {
+  const db = repository || await localMemoryRepository(profile);
+  const collections = orderCollections(await db.listCollections());
+  const existing = proposableSections(collections);
+  const missing = DEFAULT_SECTIONS.filter(d => !collections.some(c => c.slug === d.slug));
+  const builtin = (slug: string) => DEFAULT_SECTIONS.findIndex(d => d.slug === slug);
+  return [...existing, ...missing].sort((a, b) => (builtin(a.slug) < 0 ? 99 : builtin(a.slug)) - (builtin(b.slug) < 0 ? 99 : builtin(b.slug)));
+}
 
 /** A word without its Russian ending; the search itself lives in local-memory/query. */
 export { wordStem } from "../local-memory/query";
@@ -52,8 +64,16 @@ export async function saveApprovedNote(
   if (!title && !body) throw new Error("Пустую заметку сохранить нельзя");
   const db = repository || await localMemoryRepository(profile);
   const all = await ensureSections(db);
-  const slug = isSectionSlug(proposal.section) ? proposal.section : "notes";
-  const col = all.find(c => c.slug === slug) || all.find(c => c.slug === "notes");
+  let col = proposal.section ? all.find(c => c.slug === proposal.section) : undefined;
+  const requested = proposal.newSection?.trim().slice(0, 60);
+  if (!col && requested) {
+    // The user confirmed a section that did not exist when it was proposed;
+    // it may have been created since, so look it up by name first.
+    const existing = findSection(requested, all.map(c => ({ slug: c.slug, name: c.name })));
+    col = existing ? all.find(c => c.slug === existing.slug) :
+      await db.createCollection({ name: requested, slug: "section-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8), sensitivity: "standard" });
+  }
+  col ||= all.find(c => c.slug === "notes");
   if (!col) throw new Error("Раздел для заметки не найден");
   // A proposal may land in a personal section (e.g. documents) but never in a
   // secret or unclassified one: those are only filled by the user directly.
@@ -64,6 +84,7 @@ export async function saveApprovedNote(
     payload: { type: "note", title, body, ...(proposal.date ? { date: proposal.date } : {}) },
     sensitivity: col.sensitivity, source_kind: "user", source_ref: "device-approved-agent",
     ...(kind ? { kind } : {}),
+    ...(proposal.date ? { valid_from: proposal.date } : {}),
   });
   const person = proposal.person?.trim();
   // A fact about someone is linked to that person's record; a person seen for

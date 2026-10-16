@@ -92,3 +92,31 @@ test("a long record sends the chunk that matched, not its beginning", async () =
   expect(await searchApprovedNotes("guest", "где ключи", repo as unknown as MemoryRepository))
     .toEqual([{ id: "long", title: "Дневник", body: "Ключи у соседа.", section: "Заметки" }]);
 });
+
+test("a proposal goes to the user's own section, or creates the section the user asked for on save", async () => {
+  const repo = fake();
+  repo.listCollections.mockResolvedValue([
+    { id: "standard", slug: "notes", name: "Заметки", sensitivity: "standard" },
+    { id: "recipes", slug: "section-1", name: "Рецепты", sensitivity: "standard" },
+  ]);
+  await saveApprovedNote("guest", { title: "Борщ", body: "Свёкла", section: "section-1" }, repo as unknown as MemoryRepository);
+  expect(repo.createEntity).toHaveBeenLastCalledWith(expect.objectContaining({ collection_id: "recipes" }));
+  // A section that was proposed as new but already exists by name is reused.
+  await saveApprovedNote("guest", { title: "Щи", body: "Капуста", newSection: "рецепты" }, repo as unknown as MemoryRepository);
+  expect(repo.createEntity).toHaveBeenLastCalledWith(expect.objectContaining({ collection_id: "recipes" }));
+  await saveApprovedNote("guest", { title: "Цепь", body: "Сменить", newSection: "Гараж" }, repo as unknown as MemoryRepository);
+  expect(repo.createCollection).toHaveBeenLastCalledWith(expect.objectContaining({ name: "Гараж", sensitivity: "standard" }));
+  expect(repo.createEntity).toHaveBeenLastCalledWith(expect.objectContaining({ title: "Цепь" }));
+});
+
+test("listing sections for the model never writes to memory", async () => {
+  const { proposableMemorySections } = require("../memory");
+  const repo = fake();
+  repo.listCollections.mockResolvedValue([
+    { id: "r", slug: "section-1", name: "Рецепты", sensitivity: "standard", created_at: "2026-10-16" },
+    { id: "n", slug: "notes", name: "Заметки", sensitivity: "standard", created_at: "2026-10-15" },
+  ]);
+  const sections = await proposableMemorySections("guest", repo as unknown as MemoryRepository);
+  expect(repo.createCollection).not.toHaveBeenCalled();
+  expect(sections.map((s: any) => s.name)).toEqual(["Обо мне", "Люди", "Дела и проекты", "Предпочтения", "Важные даты", "Заметки", "Рецепты"]);
+});

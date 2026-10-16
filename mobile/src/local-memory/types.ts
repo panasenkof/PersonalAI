@@ -46,6 +46,8 @@ export type NewEntity = {
   source_kind?: string | null; source_ref?: string | null;
   /** Default: from the section («Люди» → person, «Важные даты» → event…). */
   kind?: MemoryKind;
+  /** When the fact starts to hold, e.g. the date of an event (ISO). */
+  valid_from?: string | null;
 };
 export type NewObservation = {
   entity_id: string; kind: string; payload: Record<string, unknown>;
