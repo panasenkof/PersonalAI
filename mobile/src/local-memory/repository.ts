@@ -3,8 +3,11 @@ import type * as SQLite from "expo-sqlite";
 
 import { openLocalMemory, withLocalMemoryDatabase } from "./storage";
 import { withUnlockedTransaction } from "./transaction";
+import { defaultKind, indexEntity, isMemoryKind, normalizeAlias } from "./search-index";
+import type { MemoryKind } from "./search-index";
+import { ftsPhrase, searchSteps } from "./query";
 import type {
-  CollectionRecord, EntityRecord, MemoryPage, MemoryRepository, NewEntity, NewObservation,
+  CollectionRecord, EntityRecord, MemoryHit, MemoryPage, MemoryRepository, NewEntity, NewObservation,
   ObservationRecord, RelationRecord, RevisionRecord, RecordSensitivity,
 } from "./types";
 import { MemoryAccessError, MemoryConflictError } from "./types";
@@ -24,6 +27,7 @@ const entityFrom = (row: Row): EntityRecord => ({
   source_ref: TEXT(row.source_ref), valid_from: TEXT(row.valid_from),
   valid_until: TEXT(row.valid_until), created_at: String(row.created_at),
   updated_at: String(row.updated_at), record_version: Number(row.record_version),
+  kind: isMemoryKind(row.kind) ? row.kind : "note",
 });
 const obsFrom = (row: Row): ObservationRecord => ({
   id: String(row.id), entity_id: String(row.entity_id), kind: String(row.kind),
@@ -46,6 +50,18 @@ function safeReason(reason: string) {
 function kindAllowed(kind: string) {
   if (!/^[a-z][a-z0-9_]{0,63}$/.test(kind)) throw new Error("invalid_relation_kind");
 }
+function checkedKind(kind: unknown): MemoryKind {
+  if (!isMemoryKind(kind)) throw new Error("invalid_memory_kind");
+  return kind;
+}
+/** Index words: each 2–40 letters, up to 40 of them, from the user or a model. */
+function checkedTerms(terms: string[]): string {
+  const words = [...new Set(terms.flatMap(t => String(t).toLowerCase().split(/[^\p{L}\p{N}-]+/u))
+    .filter(w => w.length >= 2 && w.length <= 40))].slice(0, 40);
+  return words.join(" ");
+}
+// bm25 column weights: entity_id, chunk_id, title, body, terms, aliases.
+const RANK = "bm25(memory_search_fts, 0, 0, 4, 1, 2, 4)";
 function validPayload(payload: Record<string, unknown>) {
   if (payload === null || Array.isArray(payload) || typeof payload !== "object") {
     throw new Error("invalid_memory_payload");
@@ -91,12 +107,13 @@ export class SqliteMemoryRepository implements MemoryRepository {
     return row ? entityFrom(row) : null;
   }
 
-  async entities(options: { collection_id?: string; domain?: string; limit?: number; offset?: number } = {}): Promise<MemoryPage<EntityRecord>> {
+  async entities(options: { collection_id?: string; domain?: string; kind?: MemoryKind; limit?: number; offset?: number } = {}): Promise<MemoryPage<EntityRecord>> {
     const [limit, offset] = bounds(options.limit, options.offset);
     const filters: string[] = [];
     const params: string[] = [];
     if (options.collection_id) { filters.push("collection_id = ?"); params.push(options.collection_id); }
     if (options.domain) { filters.push("domain = ?"); params.push(options.domain); }
+    if (options.kind) { filters.push("kind = ?"); params.push(checkedKind(options.kind)); }
     const sql = `SELECT * FROM memory_entities${filters.length ? " WHERE " + filters.join(" AND ") : ""}
       ORDER BY created_at DESC, id LIMIT ? OFFSET ?`;
     const rows = await this.db.getAllAsync<Row>(sql, [...params, limit + 1, offset]);
@@ -105,9 +122,10 @@ export class SqliteMemoryRepository implements MemoryRepository {
 
   async createEntity(item: NewEntity): Promise<EntityRecord> {
     const collection = await this.db.getFirstAsync<Row>(
-      "SELECT id FROM memory_collections WHERE id = ?", [item.collection_id],
+      "SELECT id, slug FROM memory_collections WHERE id = ?", [item.collection_id],
     );
     if (!collection) throw new MemoryAccessError("collection_not_found");
+    const kind = item.kind === undefined ? defaultKind(TEXT(collection.slug)) : checkedKind(item.kind);
     const timestamp = now();
     const id = uid(), payload = clone(item.payload);
     const record: EntityRecord = {
@@ -117,23 +135,18 @@ export class SqliteMemoryRepository implements MemoryRepository {
       record_status: "active", sensitivity: item.sensitivity ?? "inherit",
       source_kind: item.source_kind ?? null, source_ref: item.source_ref ?? null,
       valid_from: null, valid_until: null,
-      created_at: timestamp, updated_at: timestamp, record_version: 1,
+      created_at: timestamp, updated_at: timestamp, record_version: 1, kind,
     };
     await withUnlockedTransaction(this.db, async tx => {
       await tx.runAsync(
         `INSERT INTO memory_entities(id, collection_id, domain, schema_version, title, payload_json,
           record_status, sensitivity, source_kind, source_ref, valid_from, valid_until,
-          created_at, updated_at, record_version) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          created_at, updated_at, record_version, kind) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [id, record.collection_id, record.domain, record.schema_version, record.title,
           validPayload(payload), record.record_status, record.sensitivity,
-          record.source_kind, record.source_ref, null, null, timestamp, timestamp, 1],
+          record.source_kind, record.source_ref, null, null, timestamp, timestamp, 1, kind],
       );
-      if (record.domain === "notes") {
-        await tx.runAsync(
-          "INSERT INTO memory_notes_fts(entity_id,title,body) VALUES (?,?,?)",
-          [id, record.title ?? "", String(record.payload.body ?? "")],
-        );
-      }
+      await indexEntity(tx, id, timestamp);
     });
     return record;
   }
@@ -174,13 +187,7 @@ export class SqliteMemoryRepository implements MemoryRepository {
         [uid(), "entity", id, null, after.record_version, reason.trim(), "user",
           JSON.stringify(before), JSON.stringify(after), timestamp],
       );
-      if (before.domain === "notes") {
-        await tx.runAsync("DELETE FROM memory_notes_fts WHERE entity_id=?", [id]);
-        await tx.runAsync(
-          "INSERT INTO memory_notes_fts(entity_id,title,body) VALUES (?,?,?)",
-          [id, title ?? "", String(payload.body ?? "")],
-        );
-      }
+      await indexEntity(tx, id, timestamp);
       updated = after;
     });
     if (!updated) throw new Error("revision_not_committed");
@@ -332,28 +339,168 @@ export class SqliteMemoryRepository implements MemoryRepository {
     }));
   }
 
+  /** Changes the record's type (fact, person, event…) with a revision. */
+  async setEntityKind(id: string, expectedVersion: number, kind: MemoryKind): Promise<EntityRecord> {
+    const next = checkedKind(kind);
+    let updated: EntityRecord | null = null;
+    await withUnlockedTransaction(this.db, async tx => {
+      const row = await tx.getFirstAsync<Row>("SELECT * FROM memory_entities WHERE id=?", [id]);
+      if (!row) throw new MemoryAccessError("entity_not_found");
+      const before = entityFrom(row);
+      if (before.record_version !== expectedVersion) throw new MemoryConflictError("stale_memory_version");
+      const timestamp = now();
+      const result = await tx.runAsync(
+        "UPDATE memory_entities SET kind=?,record_version=record_version+1,updated_at=? WHERE id=? AND record_version=?",
+        [next, timestamp, id, expectedVersion],
+      );
+      if (result.changes !== 1) throw new MemoryConflictError("stale_memory_version");
+      const after = { ...before, kind: next, record_version: before.record_version + 1, updated_at: timestamp };
+      await tx.runAsync(
+        `INSERT INTO memory_revisions(id,record_type,entity_id,observation_id,version,reason,actor_kind,before_json,after_json,created_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?)`,
+        [uid(), "entity", id, null, after.record_version, "Смена типа записи", "user", JSON.stringify(before), JSON.stringify(after), timestamp],
+      );
+      updated = after;
+    });
+    if (!updated) throw new Error("revision_not_committed");
+    return updated;
+  }
+
+  /** Names and nicknames a record is also found by («Маша», «Мария Петровна»). */
+  async aliases(entityId: string): Promise<string[]> {
+    const rows = await this.db.getAllAsync<Row>("SELECT alias FROM memory_aliases WHERE entity_id=? ORDER BY normalized", [entityId]);
+    return rows.map(r => String(r.alias));
+  }
+
+  /** Replaces the record's names; up to 20, each up to 80 characters. */
+  async setAliases(entityId: string, aliases: string[]): Promise<string[]> {
+    const unique = new Map<string, string>();
+    for (const raw of aliases) {
+      const alias = String(raw).replace(/\s+/g, " ").trim();
+      if (!alias) continue;
+      if (alias.length > 80) throw new Error("invalid_memory_alias");
+      if (!unique.has(normalizeAlias(alias))) unique.set(normalizeAlias(alias), alias);
+    }
+    if (unique.size > 20) throw new Error("too_many_memory_aliases");
+    await withUnlockedTransaction(this.db, async tx => {
+      if (!await tx.getFirstAsync<Row>("SELECT id FROM memory_entities WHERE id=?", [entityId])) throw new MemoryAccessError("entity_not_found");
+      await tx.runAsync("DELETE FROM memory_aliases WHERE entity_id=?", [entityId]);
+      for (const [normalized, alias] of unique) {
+        await tx.runAsync("INSERT INTO memory_aliases(entity_id,alias,normalized) VALUES (?,?,?)", [entityId, alias, normalized]);
+      }
+      await indexEntity(tx, entityId);
+    });
+    return [...unique.values()];
+  }
+
+  /** Records with exactly this name or title, e.g. the person a fact is about.
+   * SQLite lower() is ASCII-only, so titles are matched through the index and
+   * compared here. */
+  async entitiesByAlias(name: string, kind?: MemoryKind): Promise<EntityRecord[]> {
+    const normalized = normalizeAlias(name);
+    if (!normalized) return [];
+    const rows = await this.db.getAllAsync<Row>(
+      `SELECT e.* FROM memory_entities e WHERE e.record_status='active' ${kind ? "AND e.kind=?" : ""}
+       AND (e.id IN (SELECT entity_id FROM memory_aliases WHERE normalized=?)
+         OR e.id IN (SELECT entity_id FROM memory_search_fts WHERE memory_search_fts MATCH ?))
+       ORDER BY e.updated_at DESC, e.id LIMIT 50`,
+      [...(kind ? [checkedKind(kind)] : []), normalized, "title : " + ftsPhrase(normalized)],
+    );
+    const named = new Set((await this.db.getAllAsync<Row>("SELECT entity_id FROM memory_aliases WHERE normalized=?", [normalized])).map(r => String(r.entity_id)));
+    return rows.filter(r => named.has(String(r.id)) || normalizeAlias(String(r.title ?? "")) === normalized).slice(0, 20).map(entityFrom);
+  }
+
+  /** Index words by source: `user` or `model:<name>`. */
+  async indexTerms(entityId: string): Promise<Array<{ source: string; terms: string[] }>> {
+    const rows = await this.db.getAllAsync<Row>("SELECT source, terms FROM memory_index_terms WHERE entity_id=? ORDER BY source", [entityId]);
+    return rows.map(r => ({ source: String(r.source), terms: String(r.terms).split(" ").filter(Boolean) }));
+  }
+
+  /** Replaces the index words from one source; an empty list removes them. */
+  async setIndexTerms(entityId: string, terms: string[], source: string): Promise<string[]> {
+    if (!/^(user|model:[a-z0-9._-]{1,60})$/i.test(source)) throw new Error("invalid_index_terms_source");
+    const words = checkedTerms(terms);
+    await withUnlockedTransaction(this.db, async tx => {
+      if (!await tx.getFirstAsync<Row>("SELECT id FROM memory_entities WHERE id=?", [entityId])) throw new MemoryAccessError("entity_not_found");
+      await tx.runAsync("DELETE FROM memory_index_terms WHERE entity_id=? AND source=?", [entityId, source]);
+      if (words) await tx.runAsync("INSERT INTO memory_index_terms(entity_id,terms,source,created_at) VALUES (?,?,?,?)", [entityId, words, source, now()]);
+      await indexEntity(tx, entityId);
+    });
+    return words.split(" ").filter(Boolean);
+  }
+
   /** `prefix` matches words that start with the query (a word stem without its
    * ending), so «машин» finds «машина», «машину» and «машиной». Results with a
-   * query are ranked by relevance (bm25), then by date. */
+   * query are ranked by relevance (bm25 over title, text, index words and
+   * names), then by date. */
   async searchNotes(query: string, limit = 50, offset = 0, filters: { collectionId?: string; status?: "active" | "archived"; prefix?: boolean } = {}): Promise<EntityRecord[]> {
     const count = Math.min(100, Math.max(1, Math.trunc(limit)));
     const start = Math.max(0, Math.trunc(offset));
     const term = query.trim();
     const status = filters.status || "active";
     if (status !== "active" && status !== "archived") throw new Error("invalid_record_status");
-    // FTS5 MATCH accepts an entire quoted phrase: escape embedded quotes to
-    // avoid treating user input as operators or exposing query syntax errors.
-    const phrase = '"' + term.replace(/"/g, '""') + '"' + (filters.prefix ? "*" : "");
-    const rows = await this.db.getAllAsync<Row>(
-      `SELECT e.* FROM memory_entities e
-       ${term ? "JOIN memory_notes_fts f ON f.entity_id=e.id" : ""}
-       WHERE e.domain='notes' AND e.record_status=?
-       ${filters.collectionId ? "AND e.collection_id=?" : ""}
-       ${term ? "AND memory_notes_fts MATCH ?" : ""}
-       ORDER BY ${term ? "bm25(memory_notes_fts), " : ""}e.updated_at DESC, e.id LIMIT ? OFFSET ?`,
-      [status, ...(filters.collectionId ? [filters.collectionId] : []), ...(term ? [phrase] : []), count, start],
-    );
-    return rows.map(entityFrom);
+    const rows = await this.matches(term, filters.prefix ?? false, {
+      status, collectionIds: filters.collectionId ? [filters.collectionId] : undefined, limit: count, offset: start,
+    });
+    return rows.map(r => entityFrom(r));
+  }
+
+  /** One FTS search grouped by record: the best chunk of each record. */
+  private async matches(term: string, prefix: boolean, options: {
+    status: "active" | "archived"; collectionIds?: string[]; sensitivities?: string[]; limit: number; offset: number;
+  }): Promise<Row[]> {
+    const filters = ["e.domain='notes'", "e.record_status=?"];
+    const params: SQLite.SQLiteBindValue[] = [options.status];
+    if (options.collectionIds) {
+      if (!options.collectionIds.length) return [];
+      filters.push(`e.collection_id IN (${options.collectionIds.map(() => "?").join(",")})`); params.push(...options.collectionIds);
+    }
+    if (options.sensitivities) {
+      filters.push(`e.sensitivity IN (${options.sensitivities.map(() => "?").join(",")})`); params.push(...options.sensitivities);
+    }
+    if (!term) return this.db.getAllAsync<Row>(
+      `SELECT e.*, NULL AS match_chunk FROM memory_entities e WHERE ${filters.join(" AND ")}
+       ORDER BY e.updated_at DESC, e.id LIMIT ? OFFSET ?`, [...params, options.limit, options.offset]);
+    // FTS5 ranking functions cannot run in a flattened subquery, hence MATERIALIZED.
+    return this.db.getAllAsync<Row>(
+      `WITH hits AS MATERIALIZED (
+         SELECT entity_id, chunk_id, ${RANK} AS score FROM memory_search_fts WHERE memory_search_fts MATCH ?
+       ), best AS (SELECT entity_id, chunk_id, min(score) AS score FROM hits GROUP BY entity_id)
+       SELECT e.*, best.chunk_id AS match_chunk FROM best JOIN memory_entities e ON e.id=best.entity_id
+       WHERE ${filters.join(" AND ")}
+       ORDER BY best.score, e.updated_at DESC, e.id LIMIT ? OFFSET ?`,
+      [ftsPhrase(term, prefix), ...params, options.limit, options.offset]);
+  }
+
+  /** The assistant's memory search: the whole phrase, each word, each stem and
+   * names, every search over title, text, index words and names. A record
+   * found by more of them ranks higher. Each hit carries its best chunk.
+   * Only the given sections and sensitivities are searched. */
+  async searchMemory(query: string, options: { collectionIds?: string[]; sensitivities?: string[]; limit?: number } = {}): Promise<MemoryHit[]> {
+    const limit = Math.min(20, Math.max(1, Math.trunc(options.limit ?? 5)));
+    const scored = new Map<string, { row: Row; score: number; order: number; chunk: string | null; weight: number }>();
+    for (const step of searchSteps(query)) {
+      const rows = await this.matches(step.term, step.prefix, {
+        status: "active", collectionIds: options.collectionIds, sensitivities: options.sensitivities, limit: 8, offset: 0,
+      });
+      for (const row of rows) {
+        const id = String(row.id);
+        const found = scored.get(id) || { row, score: 0, order: scored.size, chunk: null, weight: 0 };
+        found.score += step.weight;
+        // The chunk of the most specific search that found the record.
+        if (step.weight > found.weight && row.match_chunk) { found.chunk = String(row.match_chunk); found.weight = step.weight; }
+        scored.set(id, found);
+      }
+    }
+    const top = [...scored.values()].sort((a, b) => b.score - a.score || a.order - b.order).slice(0, limit);
+    const hits: MemoryHit[] = [];
+    for (const item of top) {
+      const chunk = await this.db.getFirstAsync<Row>(
+        item.chunk ? "SELECT text FROM memory_chunks WHERE id=?" : "SELECT text FROM memory_chunks WHERE entity_id=? ORDER BY ord LIMIT 1",
+        [item.chunk ?? String(item.row.id)]);
+      hits.push({ entity: entityFrom(item.row), score: item.score, chunk: TEXT(chunk?.text) ?? "" });
+    }
+    return hits;
   }
 }
 

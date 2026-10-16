@@ -186,10 +186,15 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByLabel('Открыть заметку Индейка', { exact: true }).waitFor();
       await page.getByLabel('Открыть заметку Индейка', { exact: true }).click();
       await page.getByLabel('Текст заметки', { exact: true }).fill('Чеснок, паприка и перец');
+      // Schema v3: the record type and other names are edited with the text.
+      await page.getByLabel('Тип записи: Факт', { exact: true }).click();
+      await page.getByLabel('Другие имена и прозвища', { exact: true }).fill('Индюшка, индюк');
       await page.getByLabel('Сохранить запись', { exact: true }).click();
       await page.getByLabel('Открыть заметку Индейка', { exact: true }).click();
+      assert.equal(await page.getByLabel('Другие имена и прозвища', { exact: true }).inputValue(), 'Индюшка, индюк');
+      assert.equal(await page.getByLabel('Тип записи: Факт', { exact: true }).getAttribute('aria-selected'), 'true', 'The chosen record type is kept');
       await page.getByLabel('История, события и связи', { exact: true }).click();
-      await page.getByText('История изменений · версия 2', { exact: true }).waitFor();
+      await page.getByText('История изменений · версия 3', { exact: true }).waitFor();
       await page.getByLabel('Архивировать запись', { exact: true }).click();
       assert.equal(await page.getByLabel('Открыть заметку Индейка', { exact: true }).count(), 0);
       await page.getByLabel('Открыть архив', { exact: true }).click();

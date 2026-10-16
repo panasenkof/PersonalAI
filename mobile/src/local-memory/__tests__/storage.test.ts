@@ -219,10 +219,12 @@ test("revoking the application session blocks even a previously open connection"
 test("a retained repository reopens after close and cannot use the old native handle", async () => {
   const repo = await localMemoryRepository("guest");
   const first = databases[0];
+  // Opening reads the schema (the v3 upgrade); count only what follows.
+  const before = first.getAllAsync.mock.calls.length;
   await closeLocalMemory();
   await expect(repo.listCollections()).resolves.toEqual([]);
-  expect(first.getAllAsync).not.toHaveBeenCalled();
-  expect(databases[1].getAllAsync).toHaveBeenCalledTimes(1);
+  expect(first.getAllAsync).toHaveBeenCalledTimes(before);
+  expect(databases[1].getAllAsync).toHaveBeenCalledWith("SELECT * FROM memory_collections ORDER BY created_at, id");
 });
 
 test("closing memory waits for the complete repository operation", async () => {

@@ -12,6 +12,7 @@ let mockDirectory: string;
 const mockVault = new Map<string, string>();
 const mockConnections: any[] = [];
 let mockMigrationFailure = false;
+let mockIndexFailure = false;
 jest.mock("expo-sqlite", () => ({
   openDatabaseAsync: jest.fn(),
   get defaultDatabaseDirectory() { return mockDirectory; },
@@ -33,7 +34,7 @@ jest.mock("expo-crypto", () => ({
 beforeEach(async () => {
   await closeLocalMemory(); authorizeLocalMemorySession();
   mockDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "persai-upgrade-"));
-  mockVault.clear(); mockConnections.length = 0; mockMigrationFailure = false;
+  mockVault.clear(); mockConnections.length = 0; mockMigrationFailure = false; mockIndexFailure = false;
   (SQLite.openDatabaseAsync as jest.Mock).mockImplementation(async (name: string) => {
     const sqlite = new DatabaseSync(path.join(mockDirectory, name));
     const connection = {
@@ -41,7 +42,10 @@ beforeEach(async () => {
       getFirstAsync: async (sql: string, params: unknown[] = []) => sql === "PRAGMA cipher_version"
         ? { cipher_version: "bridge-fixture" } : sqlite.prepare(sql).get(...params) ?? null,
       getAllAsync: async (sql: string, params: unknown[] = []) => sqlite.prepare(sql).all(...params),
-      runAsync: async (sql: string, params: unknown[] = []) => sqlite.prepare(sql).run(...params),
+      runAsync: async (sql: string, params: unknown[] = []) => {
+        if (mockIndexFailure && sql.startsWith("INSERT INTO memory_search_fts")) throw new Error("simulated_index_failure");
+        return sqlite.prepare(sql).run(...params);
+      },
       execAsync: async (sql: string) => {
         sqlite.exec(sql);
         if (mockMigrationFailure && sql.includes("CREATE TABLE IF NOT EXISTS direct_conversations")) {
@@ -94,7 +98,7 @@ test.each([false, true])("upgrading an installed v1 database (chats=%s) opens a 
   expect(await repo.revisions("entity", "note")).toHaveLength(1);
   expect(await repo.listCollections()).toMatchObject([{ id: "recipes", name: "Рецепты" }]);
   expect(mockVault.get(identity.keyName)).toBe("6".repeat(64));
-  expect(mockConnections[0].sqlite.prepare("PRAGMA user_version").get()).toMatchObject({ user_version: 2 });
+  expect(mockConnections[0].sqlite.prepare("PRAGMA user_version").get()).toMatchObject({ user_version: 3 });
   await closeLocalMemory();
   const reopened = conversationRepository("guest");
   expect((await reopened.load()).find(c => c.question === "Можно ввести сообщение")).toBeTruthy();
@@ -112,4 +116,63 @@ test("an interrupted upgrade rolls back its version and can be retried without r
   existing.close(); mockMigrationFailure = false;
   expect(await conversationRepository("guest").load()).toEqual([]);
   expect(mockVault.get(identity.keyName)).toBe("6".repeat(64));
+});
+
+const LONG_BODY = [
+  "Летом ездили на дачу к родителям, собирали малину и смородину.",
+  "Осенью перекрасили забор: зелёная краска, две банки.",
+  "Ключи от гаража лежат у соседа Петра в синей коробке.",
+].map(p => p + " " + "Подробности поездки и погоды. ".repeat(14)).join("\n\n");
+
+async function installationV2() {
+  const identity = await localMemoryIdentity("guest");
+  const legacy = new DatabaseSync(path.join(mockDirectory, identity.databaseName));
+  legacy.exec(fs.readFileSync(path.join(__dirname, "fixtures/v2-memory.sql"), "utf8"));
+  const note = (id: string, collection: string, title: string, body: string) => {
+    legacy.prepare(`INSERT INTO memory_entities(id,collection_id,domain,title,payload_json,sensitivity,created_at,updated_at)
+      VALUES (?,?,'notes',?,?,'standard','2026-10-14','2026-10-14')`).run(id, collection, title, JSON.stringify({ type: "note", title, body }));
+    legacy.prepare("INSERT INTO memory_notes_fts VALUES (?,?,?)").run(id, title, body);
+  };
+  legacy.exec(`INSERT INTO memory_collections VALUES ('people','Люди','people',NULL,'standard','2026-10-14');
+    INSERT INTO memory_collections VALUES ('notes','Заметки','notes',NULL,'standard','2026-10-14');`);
+  note("masha", "people", "Маша", "Племянница, 7 лет, любит рисовать");
+  note("dacha", "notes", "Дача", LONG_BODY);
+  legacy.prepare("INSERT INTO direct_conversations VALUES (?,?,?,?,?)").run("chat", "Диалог", JSON.stringify({ id: "chat", title: "Диалог", createdAt: "2026-10-14", updatedAt: "2026-10-14", rows: [], drafts: [], question: "" }), "2026-10-14", "2026-10-14");
+  legacy.close();
+  mockVault.set(identity.keyName, "7".repeat(64));
+  mockVault.set(identity.keyName + ".initialized", "yes");
+  return identity;
+}
+
+test("upgrading v2 to v3 types the records, splits long text into chunks and searches through one index", async () => {
+  await installationV2();
+  const repo = await localMemoryRepository("guest");
+  const db = mockConnections[0].sqlite;
+  expect(db.prepare("PRAGMA user_version").get()).toMatchObject({ user_version: 3 });
+  expect(await repo.entity("masha")).toMatchObject({ kind: "person", title: "Маша", record_version: 1 });
+  expect(await repo.entity("dacha")).toMatchObject({ kind: "note" });
+  expect(db.prepare("SELECT count(*) AS n FROM memory_chunks WHERE entity_id='dacha'").get().n).toBeGreaterThan(1);
+  expect(db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE name='memory_notes_fts'").get()).toMatchObject({ n: 0 });
+  // Every record kept, and it is found by another word form and by «ё» written as «е».
+  expect((await repo.searchNotes("племянница"))[0].id).toBe("masha");
+  expect((await repo.searchNotes("зеленая"))[0].id).toBe("dacha");
+  const [hit] = await repo.searchMemory("Где ключи от гаража?");
+  expect(hit.entity.id).toBe("dacha");
+  expect(hit.chunk).toContain("Ключи от гаража");
+  expect(hit.chunk).not.toContain("малину");
+  expect(await conversationRepository("guest").load()).toHaveLength(1);
+});
+
+test("a failure while building the v3 index rolls back to an intact v2 database, and the next start upgrades", async () => {
+  const identity = await installationV2(); mockIndexFailure = true;
+  await expect(openLocalMemory("guest")).rejects.toThrow("simulated_index_failure");
+  const existing = new DatabaseSync(path.join(mockDirectory, identity.databaseName));
+  expect(existing.prepare("PRAGMA user_version").get()).toMatchObject({ user_version: 2 });
+  expect(existing.prepare("SELECT count(*) AS n FROM sqlite_master WHERE name IN ('memory_chunks','memory_search_fts')").get()).toMatchObject({ n: 0 });
+  expect(existing.prepare("SELECT count(*) AS n FROM pragma_table_info('memory_entities') WHERE name='kind'").get()).toMatchObject({ n: 0 });
+  expect(existing.prepare("SELECT count(*) AS n FROM memory_notes_fts WHERE memory_notes_fts MATCH 'малину'").get()).toMatchObject({ n: 1 });
+  existing.close(); mockIndexFailure = false;
+  const repo = await localMemoryRepository("guest");
+  expect((await repo.searchNotes("малину"))[0].id).toBe("dacha");
+  expect(mockVault.get(identity.keyName)).toBe("7".repeat(64));
 });
