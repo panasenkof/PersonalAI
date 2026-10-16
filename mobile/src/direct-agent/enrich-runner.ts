@@ -6,7 +6,7 @@ import { useSyncExternalStore } from "react";
 import { localMemoryRepository } from "../local-memory/repository";
 import { localMemorySessionUnlocked, onLocalMemorySessionChange } from "../local-memory/storage";
 import { loadDirectConnections } from "./settings";
-import { MODEL_TERMS_SOURCE, canEnrich, enrichPending } from "./enrich";
+import { MODEL_TERMS_SOURCE, canEnrich, enrichPending, indexTermsModel } from "./enrich";
 
 export type EnrichState = {
   loaded: boolean; enabled: boolean; running: boolean;
@@ -60,7 +60,7 @@ async function run(profile: string): Promise<void> {
     const connections = await loadDirectConnections(profile);
     const settings = connections.connections.find(c => c.id === connections.activeId);
     if (!canEnrich(settings)) { publish({ error: "Нет подключения к модели: Настройки → Модели и подключения." }); return; }
-    publish({ model: settings.name + " · " + settings.model });
+    publish({ model: settings.name + " · " + indexTermsModel(settings).model });
     const repo = await localMemoryRepository(profile);
     for (let pass = 0; pass < 50 && !aborter.signal.aborted && state.enabled; pass++) {
       again = false;
