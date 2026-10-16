@@ -1,7 +1,7 @@
 import { toByteArray } from "base64-js";
 import type { DirectAgentSettings, SearchProvider } from "./settings";
 import { searchKeyOf } from "./settings";
-import { SHORT_TIMEOUTS, fetchWithTimeout, httpError, providerDetail } from "./net";
+import { ModelRequestError, SHORT_TIMEOUTS, fetchWithTimeout, httpError, providerDetail } from "./net";
 export type WebContext = { context: string; sources: string[] };
 type SearchResult = { title?: string; url?: string; description?: string };
 const safe = (value: unknown, limit: number) => typeof value === "string" ? value.slice(0, limit) : "";
@@ -37,6 +37,25 @@ export function parseYandexXml(xml: string): SearchResult[] {
   return results;
 }
 
+/** Yandex Cloud answers access problems with 401/403 and a gRPC code. These are
+ * set-up mistakes in the console, never a blocked country, so the message lists
+ * exactly what to check. */
+export function yandexHttpError(status: number, detail: { code?: string; message?: string }, folder?: string): Error {
+  const host = "searchapi.api.cloud.yandex.net";
+  const said = [detail.code, detail.message].filter(Boolean).join(": ");
+  const tail = said ? ` Ответ сервиса: «${said}».` : "";
+  const text = `${detail.code || ""} ${detail.message || ""}`;
+  if (status === 403 || /PermissionDenied/i.test(text)) return new ModelRequestError("http",
+    `${host}: Яндекс принял ключ, но у него нет прав на поиск (HTTP ${status}).${tail} Проверьте в консоли Yandex Cloud: ` +
+    `1) в каталоге ${folder ? "«" + folder + "»" : "из настроек"} → «Права доступа» у сервисного аккаунта есть роль search-api.webSearch.user; ` +
+    "2) API-ключ создан у этого же сервисного аккаунта и с областью действия yc.search-api.execute; " +
+    "3) идентификатор каталога — тот, где назначена роль (не идентификатор облака); " +
+    "4) к облаку привязан активный платёжный аккаунт. Роль начинает действовать через 1–2 минуты.", host, status);
+  if (status === 401 || /Unauthenticated|api key/i.test(text)) return new ModelRequestError("http",
+    `${host}: ключ не принят (HTTP ${status}).${tail} Скопируйте секрет API-ключа сервисного аккаунта (начинается с AQVN) целиком — он показывается один раз при создании.`, host, status);
+  return httpError(status, host, detail);
+}
+
 /** Search for the prompt with the connection's own search service. A failure
  * throws a message naming the host and the reason; the caller answers without it. */
 export async function fetchWebContext(
@@ -64,7 +83,7 @@ export async function fetchWebContext(
     }, SHORT_TIMEOUTS, secrets);
     if (!response.ok) {
       const body = await response.text().catch(() => "");
-      throw httpError(response.status, "searchapi.api.cloud.yandex.net", providerDetail(body, secrets));
+      throw yandexHttpError(response.status, providerDetail(body, secrets), settings.searchFolderId);
     }
     let raw: string;
     try {
