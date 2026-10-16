@@ -15,6 +15,17 @@ import type { CollectionRecord, EntityRecord, MemoryRepository } from "../local-
 export const MODEL_TERMS_SOURCE = "model:auto";
 export type IndexSuggestion = { terms: string[]; people: string[] };
 
+/** DeepSeek's own API (api.deepseek.com): index words need no reasoning, so
+ * they go to the fast model with thinking switched off and JSON output on —
+ * same address and key as the chat. Official parameters, api-docs.deepseek.com. */
+export const DEEPSEEK_FAST_MODEL = "deepseek-flash";
+export function indexTermsModel(settings: Pick<DirectAgentSettings, "baseUrl" | "model" | "provider">): { model: string; deepseek: boolean } {
+  let host = "";
+  try { host = new URL(settings.baseUrl).host.toLowerCase(); } catch { /* invalid address is reported by validateBaseUrl */ }
+  const deepseek = settings.provider !== "anthropic" && (host === "api.deepseek.com" || host.endsWith(".deepseek.com"));
+  return { model: deepseek ? DEEPSEEK_FAST_MODEL : settings.model, deepseek };
+}
+
 const INSTRUCTIONS = "Ты помогаешь искать записи в личной памяти пользователя. Для записи ниже подбери слова, " +
   "по которым пользователь будет её искать, хотя в тексте их нет: синонимы и родственные слова (машина → автомобиль, " +
   "начальник → шеф, руководитель), обобщения (капучино → кофе, напиток), кем приходятся люди (сестра, брат, жена, " +
@@ -50,7 +61,8 @@ export function parseSuggestion(text: string): IndexSuggestion {
 export async function suggestIndexTerms(settings: DirectAgentSettings, record: { title: string; body: string; section: string },
   transport?: typeof fetch, signal?: AbortSignal): Promise<IndexSuggestion> {
   if (!canEnrich(settings)) throw new Error("Нет подключения к модели: Настройки → Модели и подключения.");
-  const model = validateModel(settings.model);
+  const choice = indexTermsModel(settings);
+  const model = validateModel(choice.model);
   const anthropic = settings.provider === "anthropic";
   const url = validateBaseUrl(settings.baseUrl, settings.provider) + (anthropic ? "/messages" : "/chat/completions");
   const content = "Раздел: " + record.section.slice(0, 60) + "\nНазвание: " + record.title.slice(0, 160) + "\nТекст: " + record.body.slice(0, 3000);
@@ -63,7 +75,8 @@ export async function suggestIndexTerms(settings: DirectAgentSettings, record: {
   const ask = async (maxTokens: number) => {
     const payload = anthropic
       ? { model, system: INSTRUCTIONS, max_tokens: maxTokens, messages: [{ role: "user", content }] }
-      : { model, max_tokens: maxTokens, messages: [{ role: "system", content: INSTRUCTIONS }, { role: "user", content }] };
+      : { model, max_tokens: maxTokens, messages: [{ role: "system", content: INSTRUCTIONS }, { role: "user", content }],
+          ...(choice.deepseek ? { thinking: { type: "disabled" }, response_format: { type: "json_object" } } : {}) };
     const options = { settings, transport, signal, prompt: "", history: [], lookup: async () => [], propose: () => {},
       timeouts: REASONING_TIMEOUTS } as unknown as DirectAgentOptions;
     const data = await requestModel(options, url, headers, payload, anthropic ? "anthropic" : "chat", true) as any;
@@ -80,7 +93,7 @@ export async function suggestIndexTerms(settings: DirectAgentSettings, record: {
   const fromReasoning = answer.reasoning.match(/\{[^{}]*"terms"[^{}]*\}/g)?.pop();
   if (fromReasoning) return parseSuggestion(fromReasoning);
   throw new Error(answer.cut
-    ? `Модель ${model} рассуждала дольше лимита и не успела ответить. Выберите для подключения модель без рассуждений (например, deepseek-chat) или повторите позже.`
+    ? `Модель ${model} рассуждала дольше лимита и не успела ответить. Выберите для подключения модель без рассуждений или повторите позже.`
     : `Модель ${model} вернула пустой ответ вместо слов для поиска. Повторите позже или выберите другую модель.`);
 }
 

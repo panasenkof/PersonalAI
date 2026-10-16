@@ -205,7 +205,7 @@ export function DirectAgentSettingsScreen() {
             value={selected.apiKey} onChangeText={apiKey => update({ apiKey })} placeholder={/^http:\/\//.test(selected.baseUrl) ? "Не нужен для локальной модели" : "Ключ этого сервиса"} placeholderTextColor={t.muted} style={field} />
           <Text style={label}>Модель</Text>
           <TextInput editable={!busy} accessibilityLabel="Название модели" autoCapitalize="none" autoCorrect={false} value={selected.model}
-            onChangeText={model => update({ model })} placeholder="Например, deepseek-chat" placeholderTextColor={t.muted} style={field} />
+            onChangeText={model => update({ model })} placeholder="Например, deepseek-flash" placeholderTextColor={t.muted} style={field} />
           <Pressable accessibilityRole="button" accessibilityLabel="Проверить связь" disabled={busy || checking} onPress={() => void runCheck()}
             style={{ minHeight: 46, justifyContent: "center", alignItems: "center", borderRadius: 16, borderWidth: 1, borderColor: t.accent }}>
             {checking ? <ActivityIndicator accessibilityLabel="Проверка связи" /> : <Text style={{ color: t.accent, fontWeight: "700" }}>Проверить связь</Text>}

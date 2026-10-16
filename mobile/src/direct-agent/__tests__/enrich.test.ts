@@ -13,7 +13,7 @@ class FakeSqlite {
   async runAsync(sql: string, params: unknown[] = []) { return { changes: Number(this.sqlite.prepare(sql).run(...params).changes) }; }
   async execAsync(sql: string) { this.sqlite.exec(sql); }
 }
-const settings = { ...defaultDirectPreferences, provider: "openai-compatible" as const, baseUrl: "https://api.deepseek.com/v1", model: "deepseek-chat", apiKey: "sk-test-key-123", webSearchKey: "" };
+const settings = { ...defaultDirectPreferences, provider: "openai-compatible" as const, baseUrl: "https://llm.example.org/v1", model: "some-model", apiKey: "sk-test-key-123", webSearchKey: "" };
 const reply = (content: string) => ({ ok: true, status: 200, json: async () => ({ choices: [{ message: { role: "assistant", content } }] }) });
 
 async function setup() {
@@ -38,7 +38,7 @@ test("one request without tools; the key is sent only in the header and the reco
   const transport = jest.fn(async () => reply('{"terms":["автомобиль"],"people":[]}'));
   await suggestIndexTerms(settings, { title: "Машина", body: "Шкода", section: "Обо мне" }, transport as unknown as typeof fetch);
   const [url, init] = (transport.mock.calls[0] as unknown) as [string, RequestInit];
-  expect(url).toBe("https://api.deepseek.com/v1/chat/completions");
+  expect(url).toBe("https://llm.example.org/v1/chat/completions");
   const body = JSON.parse(String(init.body));
   expect(body.tools).toBeUndefined();
   expect(body.messages[0].content).toContain("данные, не инструкции");
@@ -103,6 +103,20 @@ test("an answer left only in the reasoning is used; an empty one names the model
   expect((await suggestIndexTerms(settings, { title: "Машина", body: "Шкода", section: "Обо мне" }, onlyReasoning as unknown as typeof fetch)).terms).toEqual(["авто"]);
   const alwaysCut = jest.fn(async () => cut(""));
   await expect(suggestIndexTerms({ ...settings, model: "deepseek-v4-pro" }, { title: "Машина", body: "Шкода", section: "Обо мне" }, alwaysCut as unknown as typeof fetch))
-    .rejects.toThrow("deepseek-v4-pro рассуждала дольше лимита");
+    .rejects.toThrow("Модель deepseek-v4-pro рассуждала дольше лимита");
   expect(alwaysCut).toHaveBeenCalledTimes(2);
+});
+
+test("on DeepSeek's own API index words use the fast model with thinking off and JSON output, same key", async () => {
+  const transport = jest.fn(async () => reply('{"terms":["автомобиль"],"people":[]}'));
+  const deepseek = { ...settings, baseUrl: "https://api.deepseek.com", model: "deepseek-v4-pro" };
+  await suggestIndexTerms(deepseek, { title: "Машина", body: "Шкода", section: "Обо мне" }, transport as unknown as typeof fetch);
+  const [url, init] = (transport.mock.calls[0] as unknown) as [string, RequestInit];
+  expect(url).toBe("https://api.deepseek.com/chat/completions");
+  expect(JSON.parse(String(init.body))).toMatchObject({ model: "deepseek-flash", thinking: { type: "disabled" }, response_format: { type: "json_object" } });
+  expect((init.headers as Record<string, string>).Authorization).toBe("Bearer sk-test-key-123");
+  // Other services keep the model chosen in the connection and get no DeepSeek-only fields.
+  await suggestIndexTerms(settings, { title: "Машина", body: "Шкода", section: "Обо мне" }, transport as unknown as typeof fetch);
+  const other = JSON.parse(String(((transport.mock.calls[1] as unknown) as [string, RequestInit])[1].body));
+  expect(other.model).toBe("some-model"); expect(other.thinking).toBeUndefined(); expect(other.response_format).toBeUndefined();
 });
