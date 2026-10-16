@@ -108,3 +108,15 @@ test("a proposal goes to the user's own section, or creates the section the user
   expect(repo.createCollection).toHaveBeenLastCalledWith(expect.objectContaining({ name: "Гараж", sensitivity: "standard" }));
   expect(repo.createEntity).toHaveBeenLastCalledWith(expect.objectContaining({ title: "Цепь" }));
 });
+
+test("listing sections for the model never writes to memory", async () => {
+  const { proposableMemorySections } = require("../memory");
+  const repo = fake();
+  repo.listCollections.mockResolvedValue([
+    { id: "r", slug: "section-1", name: "Рецепты", sensitivity: "standard", created_at: "2026-10-16" },
+    { id: "n", slug: "notes", name: "Заметки", sensitivity: "standard", created_at: "2026-10-15" },
+  ]);
+  const sections = await proposableMemorySections("guest", repo as unknown as MemoryRepository);
+  expect(repo.createCollection).not.toHaveBeenCalled();
+  expect(sections.map((s: any) => s.name)).toEqual(["Обо мне", "Люди", "Дела и проекты", "Предпочтения", "Важные даты", "Заметки", "Рецепты"]);
+});

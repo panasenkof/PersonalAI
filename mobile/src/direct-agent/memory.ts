@@ -1,8 +1,8 @@
 import { localMemoryRepository } from "../local-memory/repository";
 import type { MemoryRepository } from "../local-memory/types";
-import { ensureSections } from "../local-memory/sections";
+import { ensureSections, orderCollections } from "../local-memory/sections";
 import { normalizeAlias as normalizeName } from "../local-memory/search-index";
-import { PROPOSABLE_KINDS, findSection, proposableSections } from "./fact-tool";
+import { DEFAULT_SECTIONS, PROPOSABLE_KINDS, findSection, proposableSections } from "./fact-tool";
 import type { MemorySection, NoteProposal } from "./fact-tool";
 
 /** `section` is the name of the memory section the note lives in. */
@@ -11,10 +11,15 @@ export { FACT_TOOL_NAME, KIND_NAMES, PROPOSABLE_KINDS, factProposal } from "./fa
 export type { MemorySection, NoteProposal, ProposableKind } from "./fact-tool";
 
 /** The user's sections the assistant may propose records for, including the
- * ones the user created. Built-in sections are created if missing. */
+ * ones the user created. Read-only: a built-in section that does not exist yet
+ * is listed anyway and created only when a record is saved into it. */
 export async function proposableMemorySections(profile: string, repository?: MemoryRepository): Promise<MemorySection[]> {
   const db = repository || await localMemoryRepository(profile);
-  return proposableSections(await ensureSections(db));
+  const collections = orderCollections(await db.listCollections());
+  const existing = proposableSections(collections);
+  const missing = DEFAULT_SECTIONS.filter(d => !collections.some(c => c.slug === d.slug));
+  const builtin = (slug: string) => DEFAULT_SECTIONS.findIndex(d => d.slug === slug);
+  return [...existing, ...missing].sort((a, b) => (builtin(a.slug) < 0 ? 99 : builtin(a.slug)) - (builtin(b.slug) < 0 ? 99 : builtin(b.slug)));
 }
 
 /** A word without its Russian ending; the search itself lives in local-memory/query. */
