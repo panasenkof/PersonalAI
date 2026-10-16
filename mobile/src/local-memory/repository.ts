@@ -423,10 +423,35 @@ export class SqliteMemoryRepository implements MemoryRepository {
     await withUnlockedTransaction(this.db, async tx => {
       if (!await tx.getFirstAsync<Row>("SELECT id FROM memory_entities WHERE id=?", [entityId])) throw new MemoryAccessError("entity_not_found");
       await tx.runAsync("DELETE FROM memory_index_terms WHERE entity_id=? AND source=?", [entityId, source]);
-      if (words) await tx.runAsync("INSERT INTO memory_index_terms(entity_id,terms,source,created_at) VALUES (?,?,?,?)", [entityId, words, source, now()]);
+      // A model's empty answer is kept too: it marks the record as done.
+      if (words || source.startsWith("model:")) await tx.runAsync("INSERT INTO memory_index_terms(entity_id,terms,source,created_at) VALUES (?,?,?,?)", [entityId, words, source, now()]);
       await indexEntity(tx, entityId);
     });
     return words.split(" ").filter(Boolean);
+  }
+
+  /** How many enrichable records have current index words from `source`, and how many wait. */
+  async indexTermsStatus(source: string): Promise<{ done: number; pending: number }> {
+    const row = await this.db.getFirstAsync<Row>(
+      `SELECT sum(CASE WHEN t.entity_id IS NOT NULL AND t.created_at >= e.updated_at THEN 1 ELSE 0 END) AS done,
+              sum(CASE WHEN t.entity_id IS NULL OR t.created_at < e.updated_at THEN 1 ELSE 0 END) AS pending
+       FROM memory_entities e JOIN memory_collections c ON c.id=e.collection_id
+       LEFT JOIN memory_index_terms t ON t.entity_id=e.id AND t.source=?
+       WHERE e.record_status='active' AND e.domain='notes' AND c.sensitivity='standard' AND c.slug<>'documents'
+         AND e.sensitivity IN ('standard','inherit')`, [source]);
+    return { done: Number(row?.done ?? 0), pending: Number(row?.pending ?? 0) };
+  }
+
+  /** Active records of ordinary sections whose index words from `source` are
+   * missing or older than their last edit, oldest first. */
+  async staleIndexTerms(source: string, limit = 20): Promise<string[]> {
+    const rows = await this.db.getAllAsync<Row>(
+      `SELECT e.id FROM memory_entities e JOIN memory_collections c ON c.id=e.collection_id
+       LEFT JOIN memory_index_terms t ON t.entity_id=e.id AND t.source=?
+       WHERE e.record_status='active' AND e.domain='notes' AND c.sensitivity='standard' AND c.slug<>'documents'
+         AND e.sensitivity IN ('standard','inherit') AND (t.entity_id IS NULL OR t.created_at < e.updated_at)
+       ORDER BY e.updated_at, e.id LIMIT ?`, [source, Math.min(200, Math.max(1, Math.trunc(limit)))]);
+    return rows.map(r => String(r.id));
   }
 
   /** `prefix` matches words that start with the query (a word stem without its
@@ -446,7 +471,7 @@ export class SqliteMemoryRepository implements MemoryRepository {
   }
 
   /** One FTS search grouped by record: the best chunk of each record. */
-  private async matches(term: string, prefix: boolean, options: {
+  private async matches(term: string, prefix: boolean | { prefix: boolean; column?: "terms" }, options: {
     status: "active" | "archived"; collectionIds?: string[]; sensitivities?: string[]; limit: number; offset: number;
   }): Promise<Row[]> {
     const filters = ["e.domain='notes'", "e.record_status=?"];
@@ -469,7 +494,22 @@ export class SqliteMemoryRepository implements MemoryRepository {
        SELECT e.*, best.chunk_id AS match_chunk FROM best JOIN memory_entities e ON e.id=best.entity_id
        WHERE ${filters.join(" AND ")}
        ORDER BY best.score, e.updated_at DESC, e.id LIMIT ? OFFSET ?`,
-      [ftsPhrase(term, prefix), ...params, options.limit, options.offset]);
+      [typeof prefix === "boolean" ? ftsPhrase(term, prefix) : ftsPhrase(term, prefix.prefix, prefix.column), ...params, options.limit, options.offset]);
+  }
+
+  /** Active records linked to a person as «about», within the same filters. */
+  private async linkedFacts(personId: string, options: { collectionIds?: string[]; sensitivities?: string[] }): Promise<Row[]> {
+    const filters = ["e.domain='notes'", "e.record_status='active'"];
+    const params: SQLite.SQLiteBindValue[] = [personId];
+    if (options.collectionIds) {
+      if (!options.collectionIds.length) return [];
+      filters.push(`e.collection_id IN (${options.collectionIds.map(() => "?").join(",")})`); params.push(...options.collectionIds);
+    }
+    if (options.sensitivities) { filters.push(`e.sensitivity IN (${options.sensitivities.map(() => "?").join(",")})`); params.push(...options.sensitivities); }
+    return this.db.getAllAsync<Row>(
+      `SELECT e.*, NULL AS match_chunk FROM memory_relations r JOIN memory_entities e ON e.id=r.source_entity_id
+       WHERE r.kind='about' AND r.target_entity_id=? AND ${filters.join(" AND ")}
+       ORDER BY e.updated_at DESC LIMIT 8`, params);
   }
 
   /** The assistant's memory search: the whole phrase, each word, each stem and
@@ -480,7 +520,7 @@ export class SqliteMemoryRepository implements MemoryRepository {
     const limit = Math.min(20, Math.max(1, Math.trunc(options.limit ?? 5)));
     const scored = new Map<string, { row: Row; score: number; order: number; chunk: string | null; weight: number }>();
     for (const step of searchSteps(query)) {
-      const rows = await this.matches(step.term, step.prefix, {
+      const rows = await this.matches(step.term, { prefix: step.prefix, column: step.column }, {
         status: "active", collectionIds: options.collectionIds, sensitivities: options.sensitivities, limit: 8, offset: 0,
       });
       for (const row of rows) {
@@ -489,6 +529,17 @@ export class SqliteMemoryRepository implements MemoryRepository {
         found.score += step.weight;
         // The chunk of the most specific search that found the record.
         if (step.weight > found.weight && row.match_chunk) { found.chunk = String(row.match_chunk); found.weight = step.weight; }
+        scored.set(id, found);
+      }
+    }
+    // Through people (п. 12): a found person brings the facts about them —
+    // «что любит сестра» finds Аня by «сестра», then her «любит капучино».
+    const people = [...scored.values()].filter(v => v.row.kind === "person").sort((a, b) => b.score - a.score).slice(0, 3);
+    for (const person of people) {
+      for (const row of await this.linkedFacts(String(person.row.id), options)) {
+        const id = String(row.id);
+        const found = scored.get(id) || { row, score: 0, order: scored.size, chunk: null, weight: 0 };
+        found.score += Math.max(1, person.score * 0.75);
         scored.set(id, found);
       }
     }

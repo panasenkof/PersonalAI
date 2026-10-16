@@ -75,6 +75,8 @@ export interface MemoryRepository {
   entitiesByAlias(name: string, kind?: MemoryKind): Promise<EntityRecord[]>;
   indexTerms(entityId: string): Promise<Array<{ source: string; terms: string[] }>>;
   setIndexTerms(entityId: string, terms: string[], source: string): Promise<string[]>;
+  staleIndexTerms(source: string, limit?: number): Promise<string[]>;
+  indexTermsStatus(source: string): Promise<{ done: number; pending: number }>;
   searchMemory(query: string, options?: { collectionIds?: string[]; sensitivities?: string[]; limit?: number }): Promise<MemoryHit[]>;
   searchNotes(query: string, limit?: number, offset?: number, filters?: { collectionId?: string; status?: "active" | "archived"; prefix?: boolean }): Promise<EntityRecord[]>;
 }

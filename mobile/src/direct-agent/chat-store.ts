@@ -41,7 +41,8 @@ export class DirectChatStore {
   private lifetime = new AbortController();
   private writes: Promise<void> = Promise.resolve();
   private repository: ConversationRepository;
-  constructor(private profile: string, repository?: ConversationRepository, private runner = runDirectAgent) {
+  /** `afterSave` runs after an approved record is saved (index words in the background). */
+  constructor(private profile: string, repository?: ConversationRepository, private runner = runDirectAgent, private afterSave?: () => void) {
     this.repository = repository || conversationRepository(profile, count => { this.skipped = count; });
   }
   getSnapshot = () => this.snapshot;
@@ -235,6 +236,7 @@ export class DirectChatStore {
     try {
       await saveApprovedNote(this.profile, draft);
       if (draft.newSection && !draft.section) void this.refreshSections();
+      this.afterSave?.();
       const latest = this.snapshot.conversations.find(x => x.id === c.id);
       if (latest) this.update(c.id, { drafts: latest.drafts.filter(d => d.id !== draft.id), rows: [...latest.rows,
         { id: Crypto.randomUUID(), role: "info", text: "Сохранено в разделе «" + draftSectionName(draft, this.snapshot.sections) + "»" +

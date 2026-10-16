@@ -17,6 +17,7 @@ import { ensureSections } from "../local-memory/sections";
 import { MEMORY_KINDS, defaultKind } from "../local-memory/search-index";
 import type { MemoryKind } from "../local-memory/search-index";
 import { KIND_NAMES } from "../direct-agent/fact-tool";
+import { scheduleIndexTerms } from "../direct-agent/enrich-runner";
 
 /** «Маша, Мария Петровна» → ["Маша", "Мария Петровна"]. */
 const splitNames = (text: string) => text.split(/[,;\n]/).map(n => n.trim()).filter(Boolean);
@@ -34,16 +35,18 @@ export function MemoryNoteScreen() {
   const [collectionId, setCollectionId] = useState(route.params?.collectionId);
   const [title, setTitle] = useState(""); const [body, setBody] = useState("");
   const [kind, setKind] = useState<MemoryKind>("note"); const [names, setNames] = useState("");
+  const [terms, setTerms] = useState(""); const [modelTerms, setModelTerms] = useState<string[]>([]);
   const [loading, setLoading] = useState(true); const [busy, setBusy] = useState(false); const [error, setError] = useState("");
   const [retry, setRetry] = useState(0); const [leaving, setLeaving] = useState(false);
   const [sectionOpen, setSectionOpen] = useState(false); const [details, setDetails] = useState(false);
   const [history, setHistory] = useState<RevisionRecord[]>([]); const [events, setEvents] = useState<ObservationRecord[]>([]);
   const [relations, setRelations] = useState<RelationRecord[]>([]); const [related, setRelated] = useState<EntityRecord[]>([]);
   const [eventText, setEventText] = useState(""); const [linkOpen, setLinkOpen] = useState(false); const [linkSearch, setLinkSearch] = useState("");
-  const baseline = useRef({ title: "", body: "", collectionId: route.params?.collectionId, kind: "note" as MemoryKind, names: "" });
+  const baseline = useRef({ title: "", body: "", collectionId: route.params?.collectionId, kind: "note" as MemoryKind, names: "", terms: "" });
   const kindTouched = useRef(false);
   const dirty = title !== baseline.current.title || body !== baseline.current.body || collectionId !== baseline.current.collectionId ||
-    kind !== baseline.current.kind || splitNames(names).join(",") !== splitNames(baseline.current.names).join(",");
+    kind !== baseline.current.kind || splitNames(names).join(",") !== splitNames(baseline.current.names).join(",") ||
+    terms.trim() !== baseline.current.terms.trim();
   usePreventRemove(!leaving && (busy || dirty), ({ data }) => {
     if (busy) { setError("Дождитесь завершения сохранения."); return; }
     Alert.alert("Изменения не сохранены", "Закрыть запись без сохранения?", [
@@ -66,8 +69,11 @@ export function MemoryNoteScreen() {
       const initialCollection = note?.collection_id || route.params?.collectionId;
       const initialKind = note?.kind || defaultKind(sections.find(c => c.id === initialCollection)?.slug);
       const initialNames = note ? (await db.aliases(note.id)).join(", ") : "";
+      const indexTerms = note ? await db.indexTerms(note.id) : [];
+      const initialTerms = (indexTerms.find(x => x.source === "user")?.terms || []).join(", ");
       if (!alive.current) return;
-      baseline.current = { title: initialTitle, body: initialBody, collectionId: initialCollection, kind: initialKind, names: initialNames };
+      baseline.current = { title: initialTitle, body: initialBody, collectionId: initialCollection, kind: initialKind, names: initialNames, terms: initialTerms };
+      setTerms(initialTerms); setModelTerms(indexTerms.filter(x => x.source.startsWith("model:")).flatMap(x => x.terms));
       kindTouched.current = false;
       setTitle(initialTitle); setBody(initialBody); setCollectionId(initialCollection); setKind(initialKind); setNames(initialNames);
     })().catch(e => { if (alive.current) setError(memoryErrorMessage(e)); }).finally(() => { if (alive.current) setLoading(false); });
@@ -100,6 +106,8 @@ export function MemoryNoteScreen() {
     } else saved = await db.createEntity({ collection_id: collection, domain: "notes", title: finalTitle, payload, kind,
       sensitivity: "inherit", source_kind: "user", source_ref: "device" });
     if (splitNames(names).join(",") !== splitNames(base.names).join(",")) await db.setAliases(saved.id, splitNames(names));
+    if (terms.trim() !== base.terms.trim()) await db.setIndexTerms(saved.id, splitNames(terms), "user");
+    if (profile) scheduleIndexTerms(profile);
     if (alive.current) setLeaving(true);
   });
   const loadDetails = () => run(async db => {
@@ -134,6 +142,9 @@ export function MemoryNoteScreen() {
         <TextInput accessibilityLabel="Другие имена и прозвища" value={names} onChangeText={setNames} editable={!busy} maxLength={600}
           placeholder={kind === "person" ? "Другие имена через запятую: Маша, Мария Петровна" : "Другие названия через запятую (по желанию)"} placeholderTextColor={t.muted} style={field} />
         <Text style={{ color: t.muted, fontSize: 12 }}>По этим именам запись тоже находится в поиске.</Text>
+        <TextInput accessibilityLabel="Слова для поиска" value={terms} onChangeText={setTerms} editable={!busy} maxLength={600}
+          placeholder="Слова для поиска через запятую: автомобиль, шкода" placeholderTextColor={t.muted} style={field} />
+        {modelTerms.length ? <Text accessibilityLabel="Слова, подобранные моделью" style={{ color: t.muted, fontSize: 12, lineHeight: 18 }}>Подобрала модель: {modelTerms.join(", ")}. Обновятся после правки текста.</Text> : null}
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}><VoiceInput value={body} onChange={setBody} disabled={busy} onError={setError} /><Text style={{ color: t.muted }}>Надиктовать запись</Text></View>
         <Pressable accessibilityRole="button" accessibilityLabel="Сохранить запись" disabled={busy || (!title.trim() && !body.trim())} onPress={() => void save()} style={{ ...button, backgroundColor: t.accent, alignItems: "center" }}><Text style={{ color: "#fff", fontWeight: "700" }}>{busy ? "Сохранение…" : "Сохранить запись"}</Text></Pressable>
         {selected ? <>

@@ -46,3 +46,8 @@ test("sections for proposals: the user's own are included, «Документы�
   expect(restoredProposal({ section: "section-1", newSection: "  ", kind: "event", date: "2026-13-01" })).toEqual({ section: "section-1", kind: "event" });
   expect(restoredProposal({ section: "documents", newSection: "Гараж" })).toEqual({ newSection: "Гараж" });
 });
+
+test("a three-letter stem is searched only among index words and names", () => {
+  expect(searchSteps("Как зовут моего шефа?")).toContainEqual({ term: "шеф", prefix: true, weight: 1, column: "terms" });
+  expect(ftsPhrase("шеф", true, "terms")).toBe('{terms aliases} : "шеф"*');
+});

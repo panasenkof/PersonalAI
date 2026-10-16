@@ -22,6 +22,8 @@ export const waitForApplicationSession = async (signal?: AbortSignal) => {
 export const authorizeLocalMemorySession = () => { stats.authorized = true; sessionListeners.forEach(fn => fn()); };
 export const revokeLocalMemorySession = () => { stats.authorized = false; };
 export const closeLocalMemory = async () => { stats.closes++; };
+export const onLocalMemorySessionChange = (_listener: (unlocked: boolean) => void) => () => {};
+export const localMemorySessionUnlocked = () => Boolean(stats.authorized);
 export const cacheDirectory = "file:///qa-cache/";
 export const EncodingType = { Base64: "base64" };
 export const getInfoAsync = async () => ({ exists: true, isDirectory: false, size: 100 });
