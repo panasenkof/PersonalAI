@@ -39,14 +39,14 @@ test("the settings switch uses the system service even with Whisper downloaded, 
   // Whisper settings are hidden for the system engine; the model stays downloaded.
   expect(v.queryByText("Скачано: Whisper base.")).toBeNull();
   expect(v.queryByLabelText("Удалить модель распознавания")).toBeNull();
-  fireEvent.press(v.getByRole("button", { name: "Голосовой ввод" }));
+  fireEvent.press(v.getByLabelText("Голосовой ввод"));
   await waitFor(() => expect(Speech.start).toHaveBeenCalledTimes(1));
   expect(startWhisperDictation).not.toHaveBeenCalled();
   act(() => mockEvents.end({}));
   fireEvent.press(v.getByLabelText("Whisper на телефоне"));
   await waitFor(() => expect(v.getByLabelText("Whisper на телефоне").props.accessibilityState.checked).toBe(true));
   expect(v.getByText("Скачано: Whisper base.")).toBeTruthy();
-  fireEvent.press(v.getByRole("button", { name: "Голосовой ввод" }));
+  fireEvent.press(v.getByLabelText("Голосовой ввод"));
   await waitFor(() => expect(startWhisperDictation).toHaveBeenCalledTimes(1));
   expect(Speech.start).toHaveBeenCalledTimes(1);
   expect(downloadWhisper).not.toHaveBeenCalled(); expect(deleteWhisper).not.toHaveBeenCalled();
@@ -54,19 +54,19 @@ test("the settings switch uses the system service even with Whisper downloaded, 
 });
 test("switching during dictation cancels the old engine and ignores its late result", async () => {
   const changed = jest.fn(); const v = render(<Inputs onChange={changed} />);
-  fireEvent.press(v.getByRole("button", { name: "Голосовой ввод" }));
+  fireEvent.press(v.getByLabelText("Голосовой ввод"));
   await waitFor(() => expect(startWhisperDictation).toHaveBeenCalled());
   fireEvent.press(v.getByLabelText("Системное распознавание"));
   await waitFor(() => expect(mockSession.stop).toHaveBeenCalledTimes(1));
   act(() => mockCallbacks.text!("Запоздалый текст"));
   expect(changed).not.toHaveBeenCalled();
-  expect(v.getByRole("button", { name: "Голосовой ввод" })).toBeTruthy();
+  expect(v.getByLabelText("Голосовой ввод")).toBeTruthy();
   expect(deleteWhisper).not.toHaveBeenCalled();
 });
 test("an explicitly selected missing Whisper asks for its model without silently starting the system service", async () => {
   mockStatus.current = { state: "absent" };
   const error = jest.fn(); const v = render(<Inputs error={error} />);
-  fireEvent.press(v.getByRole("button", { name: "Голосовой ввод" }));
+  fireEvent.press(v.getByLabelText("Голосовой ввод"));
   expect(error).toHaveBeenCalledWith(expect.stringContaining("Скачайте модель"));
   expect(Speech.start).not.toHaveBeenCalled(); expect(startWhisperDictation).not.toHaveBeenCalled();
   expect(v.getByLabelText("Скачать модель распознавания")).toBeTruthy();
@@ -76,7 +76,7 @@ test("switching away while system permission is pending cancels the old startup"
   let grant!: (p: { granted: boolean }) => void;
   (Speech.requestPermissionsAsync as jest.Mock).mockReturnValueOnce(new Promise(resolve => { grant = resolve; }));
   const v = render(<Inputs />);
-  fireEvent.press(v.getByRole("button", { name: "Голосовой ввод" }));
+  fireEvent.press(v.getByLabelText("Голосовой ввод"));
   await waitFor(() => expect(Speech.requestPermissionsAsync).toHaveBeenCalled());
   fireEvent.press(v.getByLabelText("Whisper на телефоне"));
   await waitFor(() => expect(v.getByLabelText("Whisper на телефоне").props.accessibilityState.checked).toBe(true));
@@ -87,7 +87,7 @@ test("switching away while system permission is pending cancels the old startup"
 test("unsupported Whisper explains how to choose the system engine", () => {
   mockStatus.current = { state: "unsupported" };
   const error = jest.fn(); const v = render(<Inputs error={error} />);
-  fireEvent.press(v.getByRole("button", { name: "Голосовой ввод" }));
+  fireEvent.press(v.getByLabelText("Голосовой ввод"));
   expect(error).toHaveBeenCalledWith(expect.stringContaining("недоступен на этом телефоне"));
   expect(Speech.start).not.toHaveBeenCalled();
 });
