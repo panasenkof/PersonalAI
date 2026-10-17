@@ -75,7 +75,7 @@ test("«открой первую ссылку» reads the first source of the p
     if (url === DEEPSEEK_FETCH_URL) return json({ title: "Новость", content: "Текст новости" });
     const body = JSON.parse(String(init.body));
     if (++turn === 1) {
-      expect(body.messages[0].content).toContain("1. https://news.example/a");
+      expect(body.messages[body.messages.length - 1].content).toContain("1. https://news.example/a");
       return json({ choices: [{ message: { role: "assistant", content: null, tool_calls: [
         { id: "a", type: "function", function: { name: "read_web_page", arguments: JSON.stringify({ url: "https://news.example/a" }) } }] } }] });
     }

@@ -2,7 +2,10 @@ import { withLocalMemoryDatabase } from "../local-memory/storage";
 import type { NoteProposal } from "./memory";
 import { restoredProposal } from "./fact-tool";
 
-export type ChatRow = { id: string; role: "user" | "assistant" | "info"; text: string; sources?: string[] };
+/** `memory`: records the answer used, with how each was found («Из памяти»). */
+export type ChatMemoryRef = { id: string; title: string; section?: string; via: "search" | "rewrite" | "assistant" };
+export type ChatRow = { id: string; role: "user" | "assistant" | "info"; text: string; sources?: string[]; memory?: ChatMemoryRef[] };
+const VIA = new Set(["search", "rewrite", "assistant"]);
 export type ChatDraft = NoteProposal & { id: string };
 export type SavedConversation = {
   id: string; title: string; createdAt: string; updatedAt: string;
@@ -27,7 +30,9 @@ export function parseConversation(json: string): SavedConversation | null {
   const rows: ChatRow[] = (Array.isArray(value.rows) ? value.rows : []).flatMap((r: any): ChatRow[] => {
     if (!r || typeof r.id !== "string" || typeof r.text !== "string" || !ROLES.has(r.role)) return [];
     const sources = Array.isArray(r.sources) ? r.sources.filter((url: unknown) => typeof url === "string" && url.startsWith("https://")) : undefined;
-    return [{ id: r.id, role: r.role, text: r.text, ...(sources?.length ? { sources } : {}) }];
+    const memory = Array.isArray(r.memory) ? r.memory.filter((m: any) => m && typeof m.id === "string" && typeof m.title === "string" && VIA.has(m.via))
+      .slice(0, 8).map((m: any) => ({ id: m.id, title: m.title.slice(0, 160), via: m.via, ...(typeof m.section === "string" ? { section: m.section.slice(0, 60) } : {}) })) : undefined;
+    return [{ id: r.id, role: r.role, text: r.text, ...(sources?.length ? { sources } : {}), ...(memory?.length ? { memory } : {}) }];
   });
   const drafts: ChatDraft[] = (Array.isArray(value.drafts) ? value.drafts : []).filter((d: any) =>
     d && typeof d.id === "string" && typeof d.title === "string" && typeof d.body === "string")

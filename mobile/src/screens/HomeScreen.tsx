@@ -105,6 +105,11 @@ export function HomeScreen() {
         borderWidth: item.role === "assistant" ? 1 : 0, borderColor: t.line, borderRadius: 20, padding: 15, gap: 10 }}>
         {item.role === "assistant" ? <MarkdownText text={item.text} style={{ color: t.text, lineHeight: 23 }} /> :
           <Text selectable style={{ color: item.role === "user" ? t.userText : item.role === "info" ? t.muted : t.text, lineHeight: 23 }}>{item.text}</Text>}
+        {item.memory?.length ? <View style={{ gap: 4 }}><Text style={{ color: t.muted, fontSize: 12 }}>Из памяти</Text>
+          {item.memory.map(m => <Pressable key={m.id} accessibilityRole="link" accessibilityLabel={"Открыть запись " + m.title}
+            onPress={() => navigation.navigate("MemoryNote", { entityId: m.id })} style={{ minHeight: 40, justifyContent: "center" }}>
+            <Text numberOfLines={1} style={{ color: t.accent }}>{m.title}<Text style={{ color: t.muted, fontSize: 12 }}>{(m.section ? " · " + m.section : "") + (m.via === "rewrite" ? " · найдено другими словами" : m.via === "assistant" ? " · нашёл помощник" : "")}</Text></Text>
+          </Pressable>)}</View> : null}
         {item.sources?.length ? <View style={{ gap: 4 }}><Text style={{ color: t.muted, fontSize: 12 }}>Источники</Text>{item.sources.map(url => <Pressable key={url} accessibilityRole="link" onPress={() => void Linking.openURL(url).catch(() => setNotice("Не удалось открыть ссылку."))} style={{ minHeight: 44, justifyContent: "center" }}>
           <Text numberOfLines={2} style={{ color: t.accent, textDecorationLine: "underline" }}>{url}</Text>
         </Pressable>)}</View> : null}

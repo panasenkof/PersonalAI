@@ -51,6 +51,8 @@ export function searchKeyOf(settings: Pick<DirectAgentSettings, "searchKeys" | "
   const own = settings.searchKeys ? settings.searchKeys[provider] || "" : settings.webSearchKey;
   return own || (provider === "deepseek" && settings.apiKey && isDeepSeekApi(settings.baseUrl || "") ? settings.apiKey : "");
 }
+/** Yandex AI Studio model URIs carry the cloud folder: gpt://<folder>/… */
+export const yandexFolder = (model: string): string | null => /^gpt:\/\/([a-zA-Z0-9_-]+)\//.exec(model)?.[1] || null;
 export const isDeepSeekApi = (baseUrl: string): boolean => {
   try { const host = new URL(baseUrl).host.toLowerCase(); return host === "api.deepseek.com" || host.endsWith(".deepseek.com"); } catch { return false; }
 };
