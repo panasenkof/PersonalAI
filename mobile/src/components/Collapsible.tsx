@@ -8,9 +8,9 @@ import { useTheme } from "../theme";
 const KEY = "pia.ui.open-groups.v1";
 let remembered: Record<string, boolean> | null = null;
 let loading: Promise<Record<string, boolean>> | null = null;
-const load = () => loading ??= SecureStore.getItemAsync(KEY)
-  .then(raw => (remembered = raw ? JSON.parse(raw) : {}) as Record<string, boolean>)
-  .catch(() => (remembered = {}));
+const load = (): Promise<Record<string, boolean>> => loading ??= SecureStore.getItemAsync(KEY)
+  .then(raw => { const value: Record<string, boolean> = raw ? JSON.parse(raw) : {}; remembered = value; return value; })
+  .catch(() => { const value: Record<string, boolean> = {}; remembered = value; return value; });
 function remember(id: string, open: boolean) {
   remembered = { ...(remembered || {}), [id]: open };
   void SecureStore.setItemAsync(KEY, JSON.stringify(remembered)).catch(() => undefined);
