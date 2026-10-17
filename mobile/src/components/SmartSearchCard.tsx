@@ -5,6 +5,7 @@ import { refreshVectorStatus, scheduleVectors, stopVectors, useVectorState } fro
 import { useProfile } from "../profile/ProfileContext";
 import { loadIndexTermsPreference, refreshIndexTermsStatus, scheduleIndexTerms, setIndexTermsEnabled, useEnrichState } from "../direct-agent/enrich-runner";
 import { useTheme } from "../theme";
+import { Collapsible } from "./Collapsible";
 
 /** «Умный поиск по памяти»: index words from the user's model (п. 12) and
  * search by meaning with a model on the phone (п. 13). */
@@ -26,9 +27,10 @@ export function SmartSearchCard() {
     { text: "Отмена", style: "cancel" }, { text: "Скачать", onPress: () => void downloadEmbedder() }]);
   const confirmDelete = () => Alert.alert("Удалить модель поиска по смыслу?", "Освободится место на телефоне. Поиск продолжит работать по словам.", [
     { text: "Отмена", style: "cancel" }, { text: "Удалить", style: "destructive", onPress: () => { stopVectors(); void deleteEmbedder(); } }]);
-  const card = { backgroundColor: t.panel, padding: 20, gap: 10, borderRadius: 22, borderWidth: 1, borderColor: t.line };
-  return <View style={card} accessibilityLabel="Умный поиск по памяти">
-    <Text style={{ color: t.text, fontSize: 19, fontWeight: "700" }}>Умный поиск по памяти</Text>
+  const summary = [enrich.enabled ? `слова для поиска: ${enrich.done}${enrich.pending ? ", ждут " + enrich.pending : ""}` : "слова для поиска выключены",
+    model.state === "ready" ? `по смыслу: ${vectors.done} из ${vectors.total}` : model.state === "downloading" ? `модель скачивается ${model.progress}%` :
+    model.state === "unsupported" ? "" : "по смыслу: модель не скачана"].filter(Boolean).join(" · ");
+  return <Collapsible id="settings.smart-search" title="Умный поиск по памяти" summary={(enrich.error || vectors.error ? "⚠ " : "") + summary}>
     <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
       <View style={{ flex: 1, gap: 4 }}>
         <Text style={{ color: t.text, fontWeight: "600" }}>Слова для поиска</Text>
@@ -67,5 +69,5 @@ export function SmartSearchCard() {
           <Text style={{ color: "#fff", fontWeight: "700" }}>Скачать модель · около {EMBEDDER_APPROX_MB} МБ</Text></Pressable>
       </>}
     </>}
-  </View>;
+  </Collapsible>;
 }

@@ -5,9 +5,10 @@ import type { WhisperId } from "../media/whisper-core";
 import { cancelWhisperDownload, deleteWhisper, downloadWhisper, useWhisperStatus } from "../media/whisper";
 import { resolveVoiceEngine, setVoiceEngine, useVoiceEngine } from "../media/voice-engine";
 import { useTheme } from "../theme";
+import { Collapsible } from "./Collapsible";
 
 /** Dictation engine choice and independently managed on-device Whisper model. */
-export function VoiceModelCard() {
+export function VoiceModelCard({ defaultOpen = false }: { defaultOpen?: boolean } = {}) {
   const t = useTheme();
   const status = useWhisperStatus();
   const voice = useVoiceEngine();
@@ -16,7 +17,6 @@ export function VoiceModelCard() {
   const [choice, setChoice] = useState<WhisperId>("base");
   const current = status.state === "ready" || status.state === "downloading" ? status.id : undefined;
   const picked = WHISPER_CHOICES.find(c => c.id === choice)!;
-  const card = { backgroundColor: t.panel, padding: 20, gap: 10, borderRadius: 22, borderWidth: 1, borderColor: t.line };
   const button = (primary: boolean) => ({ minHeight: 46, paddingHorizontal: 16, justifyContent: "center" as const, alignItems: "center" as const,
     borderRadius: 16, borderWidth: 1, borderColor: t.accent, backgroundColor: primary ? t.accent : t.panel });
   const confirmDownload = () => Alert.alert("Скачать " + picked.name + "?", `Около ${picked.approxMb} МБ, лучше по Wi-Fi. Модель хранится только на телефоне; речь никуда не отправляется.`, [
@@ -24,8 +24,9 @@ export function VoiceModelCard() {
   const confirmDelete = () => Alert.alert("Удалить модель распознавания?", "Освободится место на телефоне. Чтобы диктовать без скачанной модели, выберите системное распознавание.", [
     { text: "Отмена", style: "cancel" }, { text: "Удалить", style: "destructive", onPress: () => void deleteWhisper() }]);
 
-  return <View style={card} accessibilityLabel="Настройки голосового ввода">
-    <Text style={{ color: t.text, fontSize: 19, fontWeight: "700" }}>Голосовой ввод</Text>
+  const summary = (selected === "whisper" ? "Whisper на телефоне" : "Системное распознавание") +
+    (status.state === "ready" ? " · модель " + (WHISPER_CHOICES.find(c => c.id === status.id)?.name || "") + " скачана" : status.state === "downloading" ? ` · скачивается ${status.progress}%` : "");
+  return <Collapsible id="settings.voice" title="Голосовой ввод" summary={summary} defaultOpen={defaultOpen}>
     <Text style={{ color: t.muted, lineHeight: 20 }}>Выберите способ диктовки для чата и заметок. Выбор сохраняется; скачанную модель Whisper можно использовать снова в любой момент.</Text>
     <View accessibilityRole="radiogroup" accessibilityLabel="Способ распознавания речи" style={{ gap: 8 }}>
       {([
@@ -76,5 +77,5 @@ export function VoiceModelCard() {
       </>}
     </>}
     </> : null}
-  </View>;
+  </Collapsible>;
 }

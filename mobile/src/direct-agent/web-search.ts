@@ -11,6 +11,40 @@ export const searchProviderOf = (settings: Pick<DirectAgentSettings, "searchProv
   settings.searchProvider || (settings.provider === "openai" ? "builtin" : "tavily");
 
 export const YANDEX_SEARCH_URL = "https://searchapi.api.cloud.yandex.net/v2/web/search";
+/** DeepSeek Search & Fetch API (api-docs.deepseek.com/guides/search): billed per
+ * successful request, about $0.75 per 1000; 5 requests a second per account. */
+export const DEEPSEEK_SEARCH_URL = "https://api.deepseek.com/v1/tools/search";
+export const DEEPSEEK_FETCH_URL = "https://api.deepseek.com/v1/tools/fetch";
+const DEEPSEEK_HOST = "api.deepseek.com";
+
+/** DeepSeek answers 401 for a wrong key, 402 when the balance is empty, 429 over the limit. */
+export function deepseekHttpError(status: number, detail: { code?: string; message?: string }): Error {
+  const said = [detail.code, detail.message].filter(Boolean).join(": ");
+  const tail = said ? ` Ответ сервиса: «${said}».` : "";
+  if (status === 401) return new ModelRequestError("http", `${DEEPSEEK_HOST}: ключ не принят (HTTP 401).${tail} Проверьте ключ DeepSeek в настройках поиска или подключения.`, DEEPSEEK_HOST, status);
+  if (status === 402) return new ModelRequestError("http", `${DEEPSEEK_HOST}: на счёте DeepSeek закончились деньги (HTTP 402).${tail} Пополните баланс на platform.deepseek.com.`, DEEPSEEK_HOST, status);
+  if (status === 429) return new ModelRequestError("http", `${DEEPSEEK_HOST}: слишком много поисковых запросов (HTTP 429).${tail} Повторите через несколько секунд.`, DEEPSEEK_HOST, status);
+  return httpError(status, DEEPSEEK_HOST, detail);
+}
+
+/** Reads one web page through DeepSeek Fetch: its title and text as Markdown. */
+export async function fetchWebPage(url: string, key: string, transport: typeof fetch = fetch, signal?: AbortSignal): Promise<{ title: string; content: string }> {
+  if (!key) throw new Error("Нет ключа DeepSeek для чтения страниц.");
+  const target = new URL(url);
+  if (target.protocol !== "https:" && target.protocol !== "http:" || target.username || target.password) throw new Error("Можно открыть только обычную ссылку http(s) без логина и пароля.");
+  const response = await fetchWithTimeout(transport, DEEPSEEK_FETCH_URL, {
+    method: "POST", signal,
+    headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: "Bearer " + key },
+    body: JSON.stringify({ url: target.toString().slice(0, 8192) }),
+  }, { connectMs: 20_000, idleMs: 30_000, totalMs: 30_000 }, [key]);
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw deepseekHttpError(response.status, providerDetail(body, [key]));
+  }
+  let data: { title?: unknown; content?: unknown };
+  try { data = await response.json(); } catch { throw new Error(DEEPSEEK_HOST + ": страница не прочиталась. Повторите позже."); }
+  return { title: safe(data.title, 200), content: safe(data.content, 8000) };
+}
 
 const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'" };
 const decodeEntities = (text: string) => text.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (all, e: string) =>
@@ -68,7 +102,25 @@ export async function fetchWebContext(
   const key = searchKeyOf(settings, provider);
   const secrets = [key];
   let results: SearchResult[];
-  if (provider === "yandex") {
+  if (provider === "deepseek") {
+    if (!key) throw new Error("Введите ключ DeepSeek для поиска или выберите подключение DeepSeek.");
+    const query = prompt.replace(/\s+/g, " ").trim().slice(0, 128);
+    const response = await fetchWithTimeout(transport, DEEPSEEK_SEARCH_URL, {
+      method: "POST", signal,
+      headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: "Bearer " + key },
+      body: JSON.stringify({ query, ori_question: query, count: 6, need_content: false }),
+    }, SHORT_TIMEOUTS, secrets);
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      throw deepseekHttpError(response.status, providerDetail(body, secrets));
+    }
+    let data: { results?: Array<{ title?: string; url?: string; summary?: string; snippet?: string; date?: string | null }> };
+    try { data = await response.json(); }
+    catch { throw new Error(DEEPSEEK_HOST + ": ответ пришёл, но это не результаты поиска. Повторите позже."); }
+    // `summary` is written for models (600–800 characters); the date helps with fresh facts.
+    results = (Array.isArray(data.results) ? data.results : []).map(r => ({ title: r.title, url: r.url,
+      description: (r.date ? r.date.slice(0, 10) + ". " : "") + (r.summary || r.snippet || "") }));
+  } else if (provider === "yandex") {
     if (!key) throw new Error("Введите API-ключ Yandex Cloud для поиска.");
     if (!settings.searchFolderId) throw new Error("Введите идентификатор каталога Yandex Cloud (folder ID).");
     // Synchronous search; billed per request (about 0.49 ₽ in 2026).
