@@ -147,6 +147,7 @@ export class DirectChatStore {
     const prompt = current.question.trim();
     const aborter = new AbortController();
     this.requests.set(id, aborter);
+    const previousSources = [...current.rows].reverse().filter(r => r.role === "assistant" && r.sources?.length).slice(0, 3).flatMap(r => r.sources!).slice(0, 15);
     const history = current.rows.filter(r => r.role !== "info").slice(-8)
       .map(r => ({ role: r.role as "user" | "assistant", content: r.text }));
     this.publish({ error: "" });
@@ -175,7 +176,7 @@ export class DirectChatStore {
       const sections = await this.refreshSections();
       if (aborter.signal.aborted) throw new Error("aborted");
       modelStarted = true;
-      const result = await this.runner({ settings, prompt, history, signal: aborter.signal, onText, sections,
+      const result = await this.runner({ settings, prompt, history, previousSources, signal: aborter.signal, onText, sections,
         lookup: query => searchApprovedNotes(this.profile, query),
         notify: text => {
           const c = this.snapshot.conversations.find(c => c.id === id);

@@ -47,6 +47,7 @@ export function pageReader(options: DirectAgentOptions, sources: string[]): { ke
   const allowed = new Set<string>();
   const add = (raw: string) => { try { const u = new URL(raw); if (u.protocol === "https:" || u.protocol === "http:") { u.hash = ""; allowed.add(u.toString()); } } catch { /* not a link */ } };
   sources.forEach(add);
+  (options.previousSources || []).forEach(add);
   for (const match of options.prompt.match(/https?:\/\/[^\s<>«»"]+/g) || []) add(match.replace(/[.,;:!?)]+$/, ""));
   return { key, allowed };
 }

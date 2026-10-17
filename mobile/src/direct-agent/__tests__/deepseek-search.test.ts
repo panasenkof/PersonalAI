@@ -66,3 +66,28 @@ test("other search services get no page-reading tool", async () => {
   await runDirectAgent({ settings: { ...deepseek, searchProvider: "tavily", searchKeys: { tavily: "tvly-1" } }, prompt: "новости сегодня", history: [],
     transport: transport as unknown as typeof fetch, lookup: async () => [], propose: () => {} });
 });
+
+test("«открой первую ссылку» reads the first source of the previous answer without a new search", async () => {
+  const calls: string[] = [];
+  let turn = 0;
+  const transport = jest.fn(async (url: string, init: RequestInit) => {
+    calls.push(url);
+    if (url === DEEPSEEK_FETCH_URL) return json({ title: "Новость", content: "Текст новости" });
+    const body = JSON.parse(String(init.body));
+    if (++turn === 1) {
+      expect(body.messages[0].content).toContain("1. https://news.example/a");
+      return json({ choices: [{ message: { role: "assistant", content: null, tool_calls: [
+        { id: "a", type: "function", function: { name: "read_web_page", arguments: JSON.stringify({ url: "https://news.example/a" }) } }] } }] });
+    }
+    expect(JSON.parse(body.messages.find((m: any) => m.role === "tool").content)).toMatchObject({ title: "Новость" });
+    return json({ choices: [{ message: { role: "assistant", content: "Пересказ" } }] });
+  });
+  const notices: string[] = [];
+  const result = await runDirectAgent({ settings: deepseek, prompt: "Открой первую ссылку и перескажи", history: [],
+    previousSources: ["https://news.example/a", "https://news.example/b"], notify: t => notices.push(t),
+    transport: transport as unknown as typeof fetch, lookup: async () => [], propose: () => {} });
+  expect(result.text).toBe("Пересказ");
+  expect(calls).not.toContain(DEEPSEEK_SEARCH_URL);
+  expect(calls).toContain(DEEPSEEK_FETCH_URL);
+  expect(notices.join(" ")).not.toContain("Ищу в интернете");
+});

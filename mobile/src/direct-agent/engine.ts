@@ -17,6 +17,9 @@ export type DirectAgentOptions = {
   settings: DirectAgentSettings;
   prompt: string;
   history: AgentTurn[];
+  /** Links of the sources shown under earlier answers of this conversation,
+   * newest answer first: «открой первую ссылку» means the first of them. */
+  previousSources?: string[];
   signal?: AbortSignal;
   lookup: (query: string) => Promise<MemorySnippet[]>;
   propose: (note: NoteProposal) => void;
