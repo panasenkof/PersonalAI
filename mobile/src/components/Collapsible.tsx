@@ -25,7 +25,7 @@ export function Collapsible({ id, title, summary, defaultOpen = false, children,
   useEffect(() => { let alive = true; void load().then(r => { if (alive && r[id] !== undefined) setOpen(r[id]); }); return () => { alive = false; }; }, [id]);
   const toggle = () => { setOpen(v => { remember(id, !v); return !v; }); };
   const box = card ? { backgroundColor: t.panel, padding: 20, gap: 10, borderRadius: 22, borderWidth: 1, borderColor: t.line } : { gap: 10 };
-  return <View style={box} accessibilityLabel={title}>
+  return <View style={box}>
     <Pressable accessibilityRole="button" accessibilityLabel={(open ? "Свернуть: " : "Развернуть: ") + title} accessibilityState={{ expanded: open }}
       aria-expanded={open} onPress={toggle} style={{ flexDirection: "row", alignItems: "center", gap: 10, minHeight: 44 }}>
       <View style={{ flex: 1, gap: 2 }}>
