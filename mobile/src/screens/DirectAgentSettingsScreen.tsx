@@ -6,7 +6,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, Switch, Text, TextInput, View } from "react-native";
 import { useProfile } from "../profile/ProfileContext";
-import { PROVIDER_PRESETS, apiTypeOf, connectionFromPreset, defaultBaseUrl, loadDirectConnections, newDirectConnection, providerFor, saveDirectConnections, searchKeyOf } from "../direct-agent/settings";
+import { PROVIDER_PRESETS, apiTypeOf, isDeepSeekApi, connectionFromPreset, defaultBaseUrl, loadDirectConnections, newDirectConnection, providerFor, saveDirectConnections, searchKeyOf } from "../direct-agent/settings";
 import { checkConnection, checkWebSearch } from "../direct-agent/check";
 import type { ConnectionCheck, SearchCheck } from "../direct-agent/check";
 import type { ApiType, DirectConnection, DirectConnections, KeyedSearch, ProviderPreset, SearchKeys, SearchProvider } from "../direct-agent/settings";
@@ -14,6 +14,7 @@ import { yandexFolder } from "../direct-agent/compatible";
 import { fetchTavilyUsage, formatTavilyUsage } from "../direct-agent/web-search";
 import type { RootStackParams } from "../navigation";
 import { useTheme } from "../theme";
+import { Collapsible } from "../components/Collapsible";
 
 const API_TYPES: Array<{ id: ApiType; name: string; hint: string }> = [
   { id: "openai", name: "OpenAI-совместимый", hint: "DeepSeek, YandexGPT, OpenRouter, OpenAI, Ollama, LM Studio и большинство других сервисов." },
@@ -21,6 +22,7 @@ const API_TYPES: Array<{ id: ApiType; name: string; hint: string }> = [
 ];
 const SEARCH_OPTIONS: Array<{ id: SearchProvider; name: string; hint: string }> = [
   { id: "yandex", name: "Яндекс", hint: "Работает из России, около 0,49 ₽ за поиск со счёта Yandex Cloud. Нужны API-ключ сервисного аккаунта (роль «search-api.webSearch.user», область «yc.search-api.execute») и идентификатор каталога." },
+  { id: "deepseek", name: "DeepSeek", hint: "Поиск DeepSeek: около $0,75 за 1000 успешных запросов со счёта DeepSeek, неудачные и пустые не оплачиваются. Если подключение — DeepSeek, отдельный ключ не нужен. Модель может прочитать страницу из результатов целиком (DeepSeek Fetch, по той же цене)." },
   { id: "tavily", name: "Tavily", hint: "Бесплатно 1000 поисков в месяц, ключ — на tavily.com. Из России отвечает отказом (HTTP 403) — работает только через VPN." },
   { id: "builtin", name: "Встроенный OpenAI", hint: "Поиск самой модели OpenAI; оплачивается OpenAI." },
 ];
@@ -144,7 +146,6 @@ export function DirectAgentSettingsScreen() {
   const label = { color: t.text, fontWeight: "600" as const };
   const small = { color: t.muted, fontSize: 12, lineHeight: 17 };
   const card = { backgroundColor: t.soft, padding: 16, borderRadius: 22, gap: 10 };
-  const section = { color: t.text, fontSize: 18, fontWeight: "800" as const, marginTop: 6 };
   const chip = (on: boolean) => ({ minHeight: 44, paddingHorizontal: 14, justifyContent: "center" as const, borderRadius: 14,
     borderWidth: 1, borderColor: on ? t.accent : t.line, backgroundColor: on ? t.panel : t.bg });
   const host = (url: string) => { try { return new URL(url).host; } catch { return url; } };
@@ -173,7 +174,7 @@ export function DirectAgentSettingsScreen() {
           </Pressable>
         </View>
 
-        <Text style={section}>Модель</Text>
+        <Collapsible id="connection.model" card={false} defaultOpen title="Модель" summary={(selected.model || "модель не указана") + " · " + host(selected.baseUrl) + (selected.apiKey ? " · ключ введён" : "")}>
         <View style={card}>
           <Text style={label}>Тип API</Text>
           <View style={{ flexDirection: "row", gap: 8 }}>
@@ -212,8 +213,9 @@ export function DirectAgentSettingsScreen() {
           </Pressable>
           {check ? <Text selectable accessibilityRole="alert" style={{ color: check.ok ? t.ok : t.err }}>{check.ok ? "Связь есть. Модель ответила: «" + check.reply + "»" : check.message}</Text> : null}
         </View>
+        </Collapsible>
 
-        <Text style={section}>Интернет-поиск</Text>
+        <Collapsible id="connection.search" card={false} title="Интернет-поиск" summary={selected.allowWeb ? "Включён · " + SEARCH_OPTIONS.find(o => o.id === search)!.name : "Выключен"}>
         <View style={card}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
             <Text style={{ color: t.text, flex: 1 }}>Искать в интернете, если в памяти ничего нет</Text>
@@ -230,6 +232,9 @@ export function DirectAgentSettingsScreen() {
             {search === "tavily" ? <TextInput editable={!busy} accessibilityLabel="Ключ Tavily" secureTextEntry autoCapitalize="none" autoCorrect={false}
               value={keys.tavily || ""} onChangeText={key => setSearchKey("tavily", key)} placeholder="Ключ Tavily (tvly-…)" placeholderTextColor={t.muted} style={field} /> : null}
             {search === "tavily" && usage ? <Text selectable accessibilityLabel="Остаток запросов Tavily" style={{ color: usage.ok ? t.muted : t.err, fontSize: 13 }}>{usage.text}</Text> : null}
+            {search === "deepseek" ? <TextInput editable={!busy} accessibilityLabel="Ключ DeepSeek для поиска" secureTextEntry autoCapitalize="none" autoCorrect={false}
+              value={keys.deepseek || ""} onChangeText={key => setSearchKey("deepseek", key)}
+              placeholder={isDeepSeekApi(selected.baseUrl) ? "Не нужен: используется ключ подключения" : "Ключ DeepSeek (sk-…)"} placeholderTextColor={t.muted} style={field} /> : null}
             {search === "yandex" ? <>
               <TextInput editable={!busy} accessibilityLabel="API-ключ Yandex Cloud для поиска" secureTextEntry autoCapitalize="none" autoCorrect={false}
                 value={keys.yandex || ""} onChangeText={key => setSearchKey("yandex", key)} placeholder="API-ключ Yandex Cloud (AQVN…)" placeholderTextColor={t.muted} style={field} />
@@ -243,6 +248,7 @@ export function DirectAgentSettingsScreen() {
             {searchCheck ? <Text selectable accessibilityRole="alert" style={{ color: searchCheck.ok ? t.ok : t.err }}>{searchCheck.ok ? "Поиск работает: найдено ссылок — " + searchCheck.count + (searchCheck.first ? ", первая: " + searchCheck.first : "") + "." : searchCheck.message}</Text> : null}
           </> : <Text style={small}>Помощник всегда сначала ищет в памяти телефона. С поиском он сообщит, что в памяти пусто, и поищет в интернете.</Text>}
         </View>
+        </Collapsible>
 
         {notice ? <Text accessibilityRole="alert" style={{ color: t.err }}>{notice}</Text> : null}
         <Pressable accessibilityRole="button" disabled={busy} onPress={() => void save()}

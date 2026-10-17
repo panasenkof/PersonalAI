@@ -29,7 +29,7 @@ beforeEach(async () => {
   await setVoiceEngine("whisper"); jest.clearAllMocks(); mockStatus.current = { state: "ready", id: "base" };
 });
 function Inputs({ onChange = jest.fn(), error = jest.fn() }) {
-  return <><VoiceModelCard /><VoiceInput value="План" onChange={onChange} onError={error} /></>;
+  return <><VoiceModelCard defaultOpen /><VoiceInput value="План" onChange={onChange} onError={error} /></>;
 }
 test("the settings switch uses the system service even with Whisper downloaded, then switches back without downloading or deleting", async () => {
   const v = render(<Inputs />);

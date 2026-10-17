@@ -72,6 +72,9 @@ test("first-run setup opens straight on the chosen provider", async () => {
 });
 test("each search service keeps its own key when switching", async () => {
   const v = render(<DirectAgentSettingsScreen />); await waitFor(() => v.getByLabelText("Адрес API LLM"));
+  // The search group is folded; its summary says whether search is on.
+  expect(v.queryByLabelText("Разрешить веб-поиск")).toBeNull();
+  fireEvent.press(v.getByLabelText("Развернуть: Интернет-поиск"));
   fireEvent(v.getByLabelText("Разрешить веб-поиск"), "valueChange", true);
   fireEvent.press(v.getByLabelText("Поиск Tavily"));
   fireEvent.changeText(v.getByLabelText("Ключ Tavily"), "tvly-1");
@@ -79,12 +82,14 @@ test("each search service keeps its own key when switching", async () => {
   expect(v.getByLabelText("API-ключ Yandex Cloud для поиска").props.value).toBe("");
   fireEvent.changeText(v.getByLabelText("API-ключ Yandex Cloud для поиска"), "AQVN-1");
   fireEvent.changeText(v.getByLabelText("Идентификатор каталога Yandex Cloud"), "b1gfolder");
+  fireEvent.press(v.getByLabelText("Поиск DeepSeek"));
+  fireEvent.changeText(v.getByLabelText("Ключ DeepSeek для поиска"), "sk-ds-1");
   fireEvent.press(v.getByLabelText("Поиск Tavily"));
   expect(v.getByLabelText("Ключ Tavily").props.value).toBe("tvly-1");
   fireEvent.press(v.getByText("Сохранить настройки"));
   await waitFor(() => expect(mockBack).toHaveBeenCalledTimes(1));
   expect(saveDirectConnections).toHaveBeenCalledWith("guest", expect.objectContaining({ connections: expect.arrayContaining([
-    expect.objectContaining({ id: "one", searchProvider: "tavily", webSearchKey: "tvly-1", searchKeys: { tavily: "tvly-1", yandex: "AQVN-1" }, searchFolderId: "b1gfolder" }),
+    expect.objectContaining({ id: "one", searchProvider: "tavily", webSearchKey: "tvly-1", searchKeys: { tavily: "tvly-1", yandex: "AQVN-1", deepseek: "sk-ds-1" }, searchFolderId: "b1gfolder" }),
   ]) }));
 });
 test("two API types: switching to Anthropic sets its address and asks for a new key", async () => {

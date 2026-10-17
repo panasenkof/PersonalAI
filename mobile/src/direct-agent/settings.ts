@@ -13,12 +13,12 @@ export type DirectAgentPreferences = {
   /** Yandex Cloud folder ID for Yandex Search API; not a secret. */
   searchFolderId?: string;
 };
-export type SearchProvider = "tavily" | "yandex" | "builtin";
-export const SEARCH_PROVIDERS: SearchProvider[] = ["tavily", "yandex", "builtin"];
+export type SearchProvider = "tavily" | "yandex" | "deepseek" | "builtin";
+export const SEARCH_PROVIDERS: SearchProvider[] = ["tavily", "yandex", "deepseek", "builtin"];
 /** Bing ("public") and Brave were removed: a saved choice becomes Tavily, and a
  * Brave key is never sent to another service. */
 export function migrateSearchProvider(value: unknown): { provider: SearchProvider; dropKey: boolean } {
-  if (value === "tavily" || value === "yandex" || value === "builtin") return { provider: value, dropKey: false };
+  if (value === "tavily" || value === "yandex" || value === "deepseek" || value === "builtin") return { provider: value, dropKey: false };
   return { provider: "tavily", dropKey: value === "brave" || value === undefined };
 }
 const validFolder = (value: unknown) => typeof value === "string" && /^[a-z0-9]{1,50}$/i.test(value.trim()) ? value.trim() : "";
@@ -29,7 +29,7 @@ export type DirectAgentSettings = DirectAgentPreferences & {
   /** One key per search service; switching services keeps each key. */
   searchKeys?: SearchKeys;
 };
-export type KeyedSearch = "tavily" | "yandex";
+export type KeyedSearch = "tavily" | "yandex" | "deepseek";
 export type SearchKeys = Partial<Record<KeyedSearch, string>>;
 /** The stored search secret: JSON with one key per service, or (before October
  * 2026) a bare key that belonged to the connection's selected service. */
@@ -38,16 +38,22 @@ export function parseSearchKeys(raw: string | null, provider: SearchProvider): S
   if (raw.startsWith("{")) try {
     const data = JSON.parse(raw) as Record<string, unknown>;
     const keys: SearchKeys = {};
-    for (const id of ["tavily", "yandex"] as const) if (typeof data[id] === "string" && data[id]) keys[id] = data[id] as string;
+    for (const id of ["tavily", "yandex", "deepseek"] as const) if (typeof data[id] === "string" && data[id]) keys[id] = data[id] as string;
     return keys;
   } catch { return {}; }
   return provider === "tavily" || provider === "yandex" ? { [provider]: raw } : {};
 }
-/** The key for the selected search service, never another service's key. */
-export function searchKeyOf(settings: Pick<DirectAgentSettings, "searchKeys" | "webSearchKey">, provider: SearchProvider): string {
+/** The key for the selected search service, never another service's key.
+ * DeepSeek search may use the connection's own key when the connection is
+ * DeepSeek itself: the same account pays for both. */
+export function searchKeyOf(settings: Pick<DirectAgentSettings, "searchKeys" | "webSearchKey"> & Partial<Pick<DirectAgentSettings, "apiKey" | "baseUrl">>, provider: SearchProvider): string {
   if (provider === "builtin") return "";
-  return settings.searchKeys ? settings.searchKeys[provider] || "" : settings.webSearchKey;
+  const own = settings.searchKeys ? settings.searchKeys[provider] || "" : settings.webSearchKey;
+  return own || (provider === "deepseek" && settings.apiKey && isDeepSeekApi(settings.baseUrl || "") ? settings.apiKey : "");
 }
+export const isDeepSeekApi = (baseUrl: string): boolean => {
+  try { const host = new URL(baseUrl).host.toLowerCase(); return host === "api.deepseek.com" || host.endsWith(".deepseek.com"); } catch { return false; }
+};
 
 /** The user picks one of two API types; an OpenAI-compatible connection to
  * api.openai.com uses OpenAI's own Responses protocol (and its built-in search). */
@@ -270,8 +276,9 @@ export async function saveDirectConnections(profile: string, value: DirectConnec
     const rawKeys: SearchKeys = item.searchKeys ? { ...item.searchKeys } :
       searchProvider !== "builtin" && item.webSearchKey ? { [searchProvider]: item.webSearchKey } : {};
     const searchKeys: SearchKeys = {};
-    for (const id of ["tavily", "yandex"] as const) if (rawKeys[id]?.trim()) searchKeys[id] = validateSecret(rawKeys[id]!);
-    const activeSearchKey = searchKeyOf({ searchKeys, webSearchKey: "" }, searchProvider);
+    for (const id of ["tavily", "yandex", "deepseek"] as const) if (rawKeys[id]?.trim()) searchKeys[id] = validateSecret(rawKeys[id]!);
+    const activeSearchKey = searchKeyOf({ searchKeys, webSearchKey: "", apiKey: item.apiKey, baseUrl: item.baseUrl }, searchProvider);
+    if (item.allowWeb && searchProvider === "deepseek" && !activeSearchKey) throw new Error("Введите ключ DeepSeek для поиска или выберите подключение DeepSeek");
     if (item.allowWeb && searchProvider === "tavily" && !activeSearchKey) throw new Error("Введите ключ Tavily");
     if (item.allowWeb && searchProvider === "yandex" && !activeSearchKey) throw new Error("Введите API-ключ Yandex Cloud для поиска");
     const searchFolderId = (item.searchFolderId || "").trim();

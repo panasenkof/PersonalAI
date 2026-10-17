@@ -124,6 +124,8 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByLabel('Вкладка Память', { exact: true }).click();
       await page.getByLabel('Вкладка Настройки', { exact: true }).click();
       assert.equal(await page.getByText('Безопасность', { exact: true }).count(), 0);
+      // Settings groups are folded; the voice group opens and stays open after a reload.
+      await page.getByLabel('Развернуть: Голосовой ввод', { exact: true }).click();
       await page.getByRole('radio', { name: 'Системное распознавание', exact: true }).click();
       await page.waitForFunction(() => localStorage.getItem('pia.voice.engine.v1') === 'system' && document.querySelector('[role="radio"][aria-label="Системное распознавание"]')?.getAttribute('aria-checked') === 'true');
       assert.equal(await page.getByRole('radio', { name: 'Системное распознавание', exact: true }).getAttribute('aria-checked'), 'true');
