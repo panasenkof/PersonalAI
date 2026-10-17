@@ -1,7 +1,8 @@
 import type { DirectAgentSettings } from "./settings";
 import { anonymousLocalAllowed, validateBaseUrl, validateModel } from "./settings";
 import { runCompatibleAgent } from "./compatible";
-import { prepareDirectContext } from "./context";
+import { prepareDirectContext, usedNotes, withData } from "./context";
+import type { UsedNote } from "./context";
 import { requestModel } from "./request";
 import type { Phase, XhrFactory } from "./stream";
 import type { Timeouts } from "./net";
@@ -12,11 +13,18 @@ import type { MemorySection } from "./fact-tool";
 
 export type AgentTurn = { role: "user" | "assistant"; content: string };
 /** `notice` is shown to the user before the answer, e.g. why web search failed. */
-export type DirectResult = { text: string; sources: string[]; requests: number; notice?: string };
+/** `memory`: the records the answer was based on, shown under it («Из памяти»). */
+export type DirectResult = { text: string; sources: string[]; requests: number; notice?: string; memory?: UsedNote[] };
+
 export type DirectAgentOptions = {
   settings: DirectAgentSettings;
   prompt: string;
   history: AgentTurn[];
+  /** Links of the sources shown under earlier answers of this conversation,
+   * newest answer first: «открой первую ссылку» means the first of them. */
+  previousSources?: string[];
+  /** Ask the model for other search words when memory finds nothing (п. 14). */
+  rewrite?: boolean;
   signal?: AbortSignal;
   lookup: (query: string) => Promise<MemorySnippet[]>;
   propose: (note: NoteProposal) => void;
@@ -131,13 +139,15 @@ export async function runDirectAgent(options: DirectAgentOptions): Promise<Direc
   if (!prompt) throw new Error("Введите вопрос");
   const web = await prepareDirectContext(options);
   const input: unknown[] = [
-    { role: "system", content: systemPrompt(options.sections) + (web.context ? "\n" + web.context : "") },
+    { role: "system", content: systemPrompt(options.sections) },
     ...options.history.slice(-8).map(h => ({ role: h.role, content: usableString(h.content, 2000) })),
-    { role: "user", content: prompt },
+    { role: "user", content: withData(web.context, prompt) },
   ];
   const tools: object[] = localTools(options.sections);
   if (web.builtinWeb) tools.push({ type: "web_search", search_context_size: "low", external_web_access: true });
   const collected = new Set<string>(web.sources);
+  const used = new Map(web.used.map(n => [n.id, n]));
+  const memory = () => [...used.values()].slice(0, 8);
   const reasoning = isReasoningModel(settings.model);
 
   for (let attempt = 1; attempt <= MAX_DIRECT_REQUESTS; attempt++) {
@@ -156,7 +166,7 @@ export async function runDirectAgent(options: DirectAgentOptions): Promise<Direc
     if (data.status === "incomplete") {
       // Keep whatever the model managed to write instead of losing the answer.
       const partial = extractText(data);
-      if (partial) return { text: partial + TRUNCATED_NOTE, sources: [...new Set([...collected, ...collectSources(data.output)])].slice(0, 8), requests: attempt, ...(web.webError ? { notice: "⚠ Интернет-поиск не удался — " + web.webError + " Ответ дан без интернета." } : {}) };
+      if (partial) return { text: partial + TRUNCATED_NOTE, sources: [...new Set([...collected, ...collectSources(data.output)])].slice(0, 8), requests: attempt, memory: memory(), ...(web.webError ? { notice: "⚠ Интернет-поиск не удался — " + web.webError + " Ответ дан без интернета." } : {}) };
       throw new Error(data.incomplete_details?.reason === "max_output_tokens"
         ? "Модель израсходовала лимит ответа, не успев ответить. Уточните или сократите вопрос."
         : "Модель не закончила ответ. Повторите запрос.");
@@ -170,7 +180,7 @@ export async function runDirectAgent(options: DirectAgentOptions): Promise<Direc
     if (!calls.length) {
       const text = extractText(data);
       if (!text) throw new Error("Модель не вернула текст ответа");
-      return { text, sources: [...collected].slice(0, 8), requests: attempt, ...(web.webError ? { notice: "⚠ Интернет-поиск не удался — " + web.webError + " Ответ дан без интернета." } : {}) };
+      return { text, sources: [...collected].slice(0, 8), requests: attempt, memory: memory(), ...(web.webError ? { notice: "⚠ Интернет-поиск не удался — " + web.webError + " Ответ дан без интернета." } : {}) };
     }
     if (attempt === MAX_DIRECT_REQUESTS) {
       throw new Error("Достигнут лимит обращений к LLM за один вопрос");
@@ -184,7 +194,9 @@ export async function runDirectAgent(options: DirectAgentOptions): Promise<Direc
         if (call.name === "search_local_notes") {
           const query = usableString(args.query, 120).trim();
           status?.("Поиск в памяти телефона");
-          result = { notes: query.length >= 2 ? await lookup(query) : [] };
+          const found = query.length >= 2 ? await lookup(query) : [];
+          for (const n of usedNotes(found, "assistant")) if (!used.has(n.id)) used.set(n.id, n);
+          result = { notes: found };
         } else if (call.name === FACT_TOOL_NAME || call.name === "draft_local_note") {
           propose(factProposal(args, options.sections));
           result = { status: "awaiting_user_confirmation", saved: false };
