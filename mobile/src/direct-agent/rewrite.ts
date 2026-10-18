@@ -5,6 +5,7 @@
  * never memory contents. */
 import type { DirectAgentSettings } from "./settings";
 import { askHelperModel } from "./helper-model";
+import type { DiagnosticTrace } from "./diagnostics";
 import type { MemorySnippet } from "./memory";
 
 export type QuestionRewrite = { queries: string[]; section?: string; person?: string };
@@ -29,9 +30,9 @@ export function parseRewrite(text: string): QuestionRewrite {
   return { queries, ...(section ? { section } : {}), ...(person ? { person } : {}) };
 }
 
-export async function rewriteQuestion(settings: DirectAgentSettings, question: string, transport?: typeof fetch, signal?: AbortSignal): Promise<QuestionRewrite> {
+export async function rewriteQuestion(settings: DirectAgentSettings, question: string, transport?: typeof fetch, signal?: AbortSignal, diagnostic?: DiagnosticTrace): Promise<QuestionRewrite> {
   const answer = await askHelperModel(settings, INSTRUCTIONS, "Вопрос: " + question.slice(0, 500), {
-    transport, signal, jsonKey: "queries", task: "вариантов запроса", timeouts: REWRITE_TIMEOUTS, maxTokens: 600 });
+    transport, signal, jsonKey: "queries", task: "вариантов запроса", timeouts: REWRITE_TIMEOUTS, maxTokens: 600, diagnostic });
   return parseRewrite(answer);
 }
 
