@@ -119,3 +119,16 @@ test("a checkpoint across multiple chats cannot overwrite a reply completed whil
   secondAnswer.resolve({ text: "Второй ответ", sources: [], requests: 1 }); await sendingSecond;
   expect(records.get(first)?.rows.at(-1)?.text).toBe("Первый ответ"); expect(records.get(first)?.interrupted).toBe(false); store.dispose();
 });
+
+test("an overlong pasted note is rejected before sending and the unsent text stays editable", async () => {
+  const { repo } = repository(); const runner = jest.fn(); const store = new DirectChatStore("guest", repo, runner);
+  await store.initialize();
+  const prompt = "Рецепт ".repeat(3500);
+  store.setQuestion(prompt);
+  await store.send(settings);
+  expect(runner).not.toHaveBeenCalled();
+  expect(store.getSnapshot().error).toContain("24 000");
+  expect(store.getSnapshot().conversations[0].question).toBe(prompt);
+  expect(store.getSnapshot().conversations[0].rows).toHaveLength(0);
+  store.dispose();
+});

@@ -2,6 +2,7 @@ import * as Crypto from "expo-crypto";
 import { runDirectAgent } from "./engine";
 import { hostOf } from "./net";
 import { proposableMemorySections, saveApprovedNote, searchApprovedNotes } from "./memory";
+import { MAX_USER_PROMPT_CHARS } from "./limits";
 import { DEFAULT_SECTIONS } from "./fact-tool";
 import type { MemorySection } from "./fact-tool";
 import { conversationRepository } from "./conversations";
@@ -145,6 +146,10 @@ export class DirectChatStore {
     const current = this.snapshot.conversations.find(c => c.id === id);
     if (!id || !current || current.busy || current.deleting || !current.question.trim() || this.disposed) return;
     const prompt = current.question.trim();
+    if (prompt.length > MAX_USER_PROMPT_CHARS) {
+      this.publish({ error: "Сообщение длиннее 24 000 символов. Разделите его на части: текст не отправлен и не обрезан." });
+      return;
+    }
     const aborter = new AbortController();
     this.requests.set(id, aborter);
     const previousSources = [...current.rows].reverse().filter(r => r.role === "assistant" && r.sources?.length).slice(0, 3).flatMap(r => r.sources!).slice(0, 15);
