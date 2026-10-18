@@ -4,23 +4,13 @@ import { anonymousLocalAllowed, validateBaseUrl, validateModel } from "./setting
 
 import type { WebContext } from "./web-search";
 export { fetchWebContext } from "./web-search";
-import { createWebTools } from "./web-tools";
+import { createToolCatalog } from "./tool-catalog";
 import { DIALOGUE_GUIDE, dialogueHistory } from "./dialogue";
-import { prepareDirectContext, usedNotes, withData } from "./context";
-import type { UsedNote } from "./context";
+import { prepareDirectContext, withData } from "./context";
 import { requestModel } from "./request";
-import { FACT_TOOL_DESCRIPTION, FACT_TOOL_NAME, factGuide, factProposal, factToolParameters } from "./fact-tool";
+import { factGuide } from "./fact-tool";
 import type { MemorySection } from "./fact-tool";
 import { MAX_DIRECT_REPLY_TOKENS, MAX_USER_PROMPT_CHARS, TRUNCATED_NOTE } from "./limits";
-type ToolDefinition = { name: string; description: string; parameters: object };
-const definitions = (sections?: MemorySection[]): ToolDefinition[] => [
-  {
-    name: "search_local_notes", description: "Найти обычные заметки на телефоне по 1–3 ключевым словам",
-    parameters: { type: "object", properties: { query: { type: "string" } },
-      required: ["query"], additionalProperties: false },
-  },
-  { name: FACT_TOOL_NAME, description: FACT_TOOL_DESCRIPTION, parameters: factToolParameters(sections) },
-];
 const MAX_CALLS = 4;
 const MAX_OUTPUT_TOKENS = MAX_DIRECT_REPLY_TOKENS;
 const system = (sections?: MemorySection[]) => "Ты PersAI, персональный ИИ-помощник. Никогда не придумывай содержимое памяти. " +
@@ -34,42 +24,6 @@ const safe = (value: unknown, limit: number) => typeof value === "string" ? valu
 export { yandexFolder } from "./settings";
 import { yandexFolder } from "./settings";
 
-const webTools = new WeakMap<DirectAgentOptions, ReturnType<typeof createWebTools>>();
-const memoryOf = new WeakMap<DirectAgentOptions, Map<string, UsedNote>>();
-
-async function runTool(
-  name: string, args: unknown, options: DirectAgentOptions,
-): Promise<object> {
-  options.diagnostic?.("llm.tool_requested", { name, argumentsChars: JSON.stringify(args)?.length || 0 },
-    { arguments: JSON.stringify(args) || "" });
-  try {
-    if (!args || typeof args !== "object" || Array.isArray(args)) throw new Error("invalid_tool_args");
-    const values = args as Record<string, unknown>;
-    if (name === "search_local_notes") {
-      const query = safe(values.query, 120).trim();
-      options.status?.("Поиск в памяти телефона");
-      const found = query.length >= 2 ? await options.lookup(query) : [];
-      options.diagnostic?.("memory.tool_search", { queryChars: query.length, found: found.length,
-        noteIds: found.map(n => n.id), excerptCount: found.filter(n => n.excerptOnly).length }, { query });
-      const used = memoryOf.get(options);
-      if (used) for (const n of usedNotes(found, "assistant")) if (!used.has(n.id)) used.set(n.id, n);
-      webTools.get(options)?.addNotes(found);
-      return { notes: found };
-    }
-    if (name === "search_web" || name === "read_web_page") {
-      return await webTools.get(options)?.run(name, values) || { error: "tool_not_allowed" };
-    }
-    if (name === FACT_TOOL_NAME || name === "draft_local_note") {
-      options.diagnostic?.("memory.tool_draft", { name });
-      options.propose(factProposal(values, options.sections));
-      return { status: "awaiting_user_confirmation", saved: false };
-    }
-    return { error: "tool_not_allowed" };
-  } catch {
-    options.diagnostic?.("llm.tool_failed", { name });
-    return { error: "tool_failed_or_unavailable" };
-  }
-}
 function apiEndpoint(settings: DirectAgentSettings): string {
   const base = validateBaseUrl(settings.baseUrl, settings.provider);
   return base + (settings.provider === "anthropic" ? "/messages" : "/chat/completions");
@@ -94,11 +48,9 @@ export async function runCompatibleAgent(options: DirectAgentOptions): Promise<D
     used: search.used.length, builtinWeb: search.builtinWeb, webFailed: Boolean(search.webError) });
   const sources = search.sources;
   const messages: Array<Record<string, unknown>> = conversation(options, search);
-  memoryOf.set(options, new Map(search.used.map(n => [n.id, n])));
-  const memory = () => [...(memoryOf.get(options)?.values() || [])].slice(0, 8);
-  const web = createWebTools(options, sources, search.notes);
-  webTools.set(options, web);
-  const tools = [...definitions(options.sections), ...web.definitions];
+  const catalog = createToolCatalog(options, sources, search.notes, search.used);
+  const memory = catalog.memory;
+  const tools = catalog.definitions;
   options.diagnostic?.("agent.tools_available", { names: tools.map(t => t.name) });
   const anthropic = settings.provider === "anthropic";
 
@@ -138,7 +90,7 @@ export async function runCompatibleAgent(options: DirectAgentOptions): Promise<D
       if (!calls.length) {
         const answer = blocks.filter(block => block.type === "text").map(block => safe(block.text, 24000)).join("\n").trim();
         if (!answer) throw new Error("Модель не вернула текст ответа");
-        return { text: answer + (data.stop_reason === "max_tokens" ? TRUNCATED_NOTE : ""), sources, requests: attempt, memory: memory(), ...(search.webError && !sources.length ? { notice: "⚠ Интернет-поиск не удался — " + search.webError + " Ответ дан без интернета." } : {}) };
+        return { text: answer + (data.stop_reason === "max_tokens" ? TRUNCATED_NOTE : ""), sources, requests: attempt, memory: memory(), ...catalog.finish(), ...(search.webError && !sources.length ? { notice: "⚠ Интернет-поиск не удался — " + search.webError + " Ответ дан без интернета." } : {}) };
       }
       if (attempt === MAX_CALLS || calls.length > 5) throw new Error("Достигнут лимит обращений к LLM за один вопрос");
       messages.push({ role: "assistant", content: blocks });
@@ -146,7 +98,7 @@ export async function runCompatibleAgent(options: DirectAgentOptions): Promise<D
       for (const call of calls) {
         if (signal?.aborted) throw new Error("Запрос остановлен");
         if (!call.id || typeof call.id !== "string") throw new Error("Некорректный вызов инструмента");
-        const toolResult = await runTool(call.name, call.input, options);
+        const toolResult = await catalog.run(call.name, call.input);
         options.diagnostic?.("llm.tool_result", { name: call.name, failed: "error" in toolResult,
           chars: JSON.stringify(toolResult).length }, { result: JSON.stringify(toolResult) });
         results.push({ type: "tool_result", tool_use_id: call.id,
@@ -163,7 +115,7 @@ export async function runCompatibleAgent(options: DirectAgentOptions): Promise<D
       if (!calls.length) {
         const answer = safe(message.content, 24000).trim();
         if (!answer) throw new Error("Модель не вернула текст ответа");
-        return { text: answer + (data.choices?.[0]?.finish_reason === "length" ? TRUNCATED_NOTE : ""), sources, requests: attempt, memory: memory(), ...(search.webError && !sources.length ? { notice: "⚠ Интернет-поиск не удался — " + search.webError + " Ответ дан без интернета." } : {}) };
+        return { text: answer + (data.choices?.[0]?.finish_reason === "length" ? TRUNCATED_NOTE : ""), sources, requests: attempt, memory: memory(), ...catalog.finish(), ...(search.webError && !sources.length ? { notice: "⚠ Интернет-поиск не удался — " + search.webError + " Ответ дан без интернета." } : {}) };
       }
       if (attempt === MAX_CALLS || calls.length > 5) throw new Error("Достигнут лимит обращений к LLM за один вопрос");
       messages.push({ role: "assistant", content: message.content ?? null, tool_calls: calls });
@@ -174,7 +126,7 @@ export async function runCompatibleAgent(options: DirectAgentOptions): Promise<D
         }
         let args: unknown;
         try { args = JSON.parse(call.function.arguments); } catch { args = null; }
-        const toolResult = await runTool(call.function.name, args, options);
+        const toolResult = await catalog.run(call.function.name, args);
         options.diagnostic?.("llm.tool_result", { name: call.function.name, failed: "error" in toolResult,
           chars: JSON.stringify(toolResult).length }, { result: JSON.stringify(toolResult) });
         messages.push({ role: "tool", tool_call_id: call.id,

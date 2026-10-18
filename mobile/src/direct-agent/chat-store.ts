@@ -1,4 +1,6 @@
 import * as Crypto from "expo-crypto";
+import { beginTask, mergeTaskReceipts, recordEvidence } from "./task-state";
+import { webPreference } from "./dialogue";
 import { runDirectAgent } from "./engine";
 import { diagnosticTrace, redactDiagnostic } from "./diagnostics";
 import { MAX_USER_PROMPT_CHARS } from "./limits";
@@ -94,7 +96,7 @@ export class DirectChatStore {
       await waitForApplicationSession(this.lifetime.signal);
       const records = await this.repository.load();
       const conversations: LiveConversation[] = records.map(c => ({
-        ...c, question: c.question || "", busy: false, progress: "", interrupted: false,
+        ...c, ...(c.taskState?.turnStatus === "running" ? { taskState: { ...c.taskState, turnStatus: "interrupted" as const } } : {}), question: c.question || "", busy: false, progress: "", interrupted: false,
         rows: c.interrupted ? [...c.rows, { id: Crypto.randomUUID(), role: "info" as const,
           text: "Приложение закрылось до завершения ответа. Можно отправить вопрос повторно." }] : c.rows,
       }));
@@ -158,9 +160,10 @@ export class DirectChatStore {
     const previousSources = [...current.rows].reverse().filter(r => r.role === "assistant" && r.sources?.length).slice(0, 3).flatMap(r => r.sources!).slice(0, 15);
     const history = current.rows.filter(r => r.role !== "info").slice(-8)
       .map(r => ({ role: r.role as "user" | "assistant", content: r.text }));
+    const taskState = { ...beginTask(current.taskState, prompt), webPreference: webPreference({ prompt, history, taskState: current.taskState }) };
     this.publish({ error: "" });
     const pending = this.update(id, {
-      question: "", busy: true, progress: "Сохраняю вопрос…", updatedAt: new Date().toISOString(),
+      taskState, question: "", busy: true, progress: "Сохраняю вопрос…", updatedAt: new Date().toISOString(),
       title: current.rows.length ? current.title : prompt.slice(0, 60),
       rows: [...current.rows, { id: Crypto.randomUUID(), role: "user", text: prompt }],
     })!;
@@ -188,7 +191,11 @@ export class DirectChatStore {
       trace("turn.sections_ready", { count: sections.length });
       if (aborter.signal.aborted) throw new Error("aborted");
       modelStarted = true;
-      const result = await this.runner({ settings, prompt, history, previousSources, rewrite: true, signal: aborter.signal, onText, sections,
+      const result = await this.runner({ settings, prompt, history, previousSources, taskState, pendingNotes: current.drafts,
+        onTaskState: next => {
+          const active = this.snapshot.conversations.find(c => c.id === id);
+          if (active && !aborter.signal.aborted) this.update(id, { taskState: mergeTaskReceipts(next, active.taskState) }, true);
+        }, rewrite: true, signal: aborter.signal, onText, sections,
         diagnostic: trace,
         lookup: query => searchApprovedNotes(this.profile, query),
         notify: text => {
@@ -208,7 +215,11 @@ export class DirectChatStore {
           trace("memory.proposal", { section: note.section || null, newSection: Boolean(note.newSection),
             titleChars: note.title.length, bodyChars: note.body.length }, { title: note.title, body: note.body });
           const c = this.snapshot.conversations.find(c => c.id === id);
-          if (c && !aborter.signal.aborted) this.update(id, { drafts: [...c.drafts, { ...note, id: Crypto.randomUUID() }] }, true);
+          if (c && !aborter.signal.aborted) {
+            const draftId = Crypto.randomUUID();
+            this.update(id, { drafts: [...c.drafts, { ...note, id: draftId }] }, true);
+            return draftId;
+          }
         },
       });
       const c = this.snapshot.conversations.find(c => c.id === id);
@@ -217,7 +228,8 @@ export class DirectChatStore {
       trace("turn.completed", { elapsedMs: Date.now() - startedAt, requests: result.requests,
         answerChars: result.text.length, sources: result.sources.length, memoryRefs: result.memory?.length || 0 },
         { answer: result.text, sources: result.sources.join("\n") });
-      this.update(id, { rows: [...c.rows,
+      this.update(id, { taskState: mergeTaskReceipts({ ...(result.taskState || c.taskState || taskState), turnStatus: "answered" }, c.taskState), rows: [...c.rows,
+        ...(result.proposalIds?.some(id => c.drafts.some(d => d.id === id)) ? [{ id: Crypto.randomUUID(), role: "info" as const, text: "Запись подготовлена, но ещё не сохранена. Подтвердите её в карточке предложения." }] : []),
         ...(result.notice ? [{ id: Crypto.randomUUID(), role: "info" as const, text: result.notice }] : []),
         { id: Crypto.randomUUID(), role: "assistant", text: result.text, sources: result.sources, ...(result.memory?.length ? { memory: result.memory } : {}) }],
         updatedAt: new Date().toISOString() });
@@ -227,6 +239,7 @@ export class DirectChatStore {
         { error: redactDiagnostic(String((e as Error)?.message || e)).slice(0, 500) });
       const c = this.snapshot.conversations.find(c => c.id === id);
       if (c && !this.disposed) this.update(id, {
+        taskState: { ...(c.taskState || taskState), turnStatus: "interrupted" },
         ...(!modelStarted && !aborter.signal.aborted ? { question: c.question || prompt } : {}),
         rows: [...c.rows, { id: Crypto.randomUUID(), role: "info",
           text: aborter.signal.aborted ? "Запрос остановлен" : !modelStarted ? "Запрос не отправлен: не удалось сохранить историю." : String((e as Error).message) }],
@@ -252,18 +265,23 @@ export class DirectChatStore {
   }
   dismiss(draft: ChatDraft) {
     const c = this.snapshot.conversations.find(c => c.id === this.snapshot.activeId);
-    if (c && c.savingDraft !== draft.id) this.update(c.id, { drafts: c.drafts.filter(d => d.id !== draft.id) }, true);
+    if (c && c.savingDraft !== draft.id && c.drafts.some(d => d.id === draft.id)) this.update(c.id, {
+      drafts: c.drafts.filter(d => d.id !== draft.id),
+      ...(c.taskState ? { taskState: recordEvidence(c.taskState, { tool: "draft_memory_fact", outcome: "dismissed", subject: draft.id, excerpt: draft.title }) } : {}),
+    }, true);
   }
   async approve(draft: ChatDraft) {
     const c = this.snapshot.conversations.find(c => c.id === this.snapshot.activeId);
-    if (!c || c.savingDraft || c.deleting) return;
+    if (!c || c.savingDraft || c.deleting || !c.drafts.some(d => d.id === draft.id)) return;
     this.update(c.id, { savingDraft: draft.id });
     try {
       await saveApprovedNote(this.profile, draft);
       if (draft.newSection && !draft.section) void this.refreshSections();
       this.afterSave?.();
       const latest = this.snapshot.conversations.find(x => x.id === c.id);
-      if (latest) this.update(c.id, { drafts: latest.drafts.filter(d => d.id !== draft.id), rows: [...latest.rows,
+      if (latest) this.update(c.id, {
+        ...(latest.taskState ? { taskState: recordEvidence(latest.taskState, { tool: "draft_memory_fact", outcome: "saved", subject: draft.id, excerpt: draft.title }) } : {}),
+        drafts: latest.drafts.filter(d => d.id !== draft.id), rows: [...latest.rows,
         { id: Crypto.randomUUID(), role: "info", text: "Сохранено в разделе «" + draftSectionName(draft, this.snapshot.sections) + "»" +
           (draft.person && draft.kind !== "person" ? " и связано с записью «" + draft.person + "» в «Люди»." : ".") }] }, true);
     } catch { this.publish({ error: "Не удалось сохранить заметку. Повторите попытку." }); }
