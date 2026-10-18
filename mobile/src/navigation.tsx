@@ -14,6 +14,7 @@ import { LocalMemoryScreen } from "./screens/LocalMemoryScreen";
 import { MemoryNoteScreen } from "./screens/MemoryNoteScreen";
 import { MemoryBackupScreen } from "./screens/MemoryBackupScreen";
 import { DeviceSettingsScreen } from "./screens/DeviceSettingsScreen";
+import { DiagnosticLogsScreen } from "./screens/DiagnosticLogsScreen";
 import { useTheme } from "./theme";
 
 export type TabParams = { Home: undefined; LocalMemory: undefined; Settings: undefined };
@@ -24,6 +25,7 @@ export type RootStackParams = {
   MemoryNote: { entityId?: string; collectionId?: string };
   MemoryBackup: undefined;
   MemoryImport: undefined;
+  DiagnosticLogs: undefined;
 };
 const Stack = createNativeStackNavigator<RootStackParams>();
 const Tab = createBottomTabNavigator<TabParams>();
@@ -69,6 +71,7 @@ export function RootNavigator() {
         <Stack.Screen name="MemoryNote" component={MemoryNoteScreen} options={{ title: "Запись" }} />
         <Stack.Screen name="MemoryBackup" component={MemoryBackupScreen} options={{ title: "Резервные копии" }} />
         <Stack.Screen name="ModelConnections" component={DirectAgentSettingsScreen} options={{ title: "Модели и подключения" }} />
+        <Stack.Screen name="DiagnosticLogs" component={DiagnosticLogsScreen} options={{ title: "Диагностика" }} />
       </Stack.Navigator>
     </NavigationContainer>
   );

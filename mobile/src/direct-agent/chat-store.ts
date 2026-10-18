@@ -1,8 +1,9 @@
 import * as Crypto from "expo-crypto";
 import { runDirectAgent } from "./engine";
+import { diagnosticTrace, redactDiagnostic } from "./diagnostics";
+import { MAX_USER_PROMPT_CHARS } from "./limits";
 import { hostOf } from "./net";
 import { proposableMemorySections, saveApprovedNote, searchApprovedNotes } from "./memory";
-import { MAX_USER_PROMPT_CHARS } from "./limits";
 import { DEFAULT_SECTIONS } from "./fact-tool";
 import type { MemorySection } from "./fact-tool";
 import { conversationRepository } from "./conversations";
@@ -150,6 +151,8 @@ export class DirectChatStore {
       this.publish({ error: "Сообщение длиннее 24 000 символов. Разделите его на части: текст не отправлен и не обрезан." });
       return;
     }
+    const trace = diagnosticTrace(this.profile, id, Crypto.randomUUID());
+    const startedAt = Date.now();
     const aborter = new AbortController();
     this.requests.set(id, aborter);
     const previousSources = [...current.rows].reverse().filter(r => r.role === "assistant" && r.sources?.length).slice(0, 3).flatMap(r => r.sources!).slice(0, 15);
@@ -163,6 +166,8 @@ export class DirectChatStore {
     })!;
     let modelStarted = false;
     const host = hostOf(settings.baseUrl || "https://api.openai.com/v1");
+    trace("turn.start", { provider: settings.provider, model: settings.model, host, promptChars: prompt.length,
+      historyTurns: history.length, previousSources: previousSources.length, webEnabled: settings.allowWeb }, { prompt });
     let stage = "";
     // Repaint at most every 60 ms while tokens arrive.
     let latest = ""; let paint: ReturnType<typeof setTimeout> | null = null;
@@ -174,27 +179,34 @@ export class DirectChatStore {
     try {
       // Persist the submitted question before spending a model request.
       await this.persist(pending);
+      trace("turn.question_persisted");
       if (this.disposed) return;
       if (aborter.signal.aborted) throw new Error("aborted");
       // The model must see the sections as they are now, including ones the
       // user created a minute ago in the memory screen.
       const sections = await this.refreshSections();
+      trace("turn.sections_ready", { count: sections.length });
       if (aborter.signal.aborted) throw new Error("aborted");
       modelStarted = true;
       const result = await this.runner({ settings, prompt, history, previousSources, rewrite: true, signal: aborter.signal, onText, sections,
+        diagnostic: trace,
         lookup: query => searchApprovedNotes(this.profile, query),
         notify: text => {
+          trace("turn.notice", { chars: text.length }, { notice: text });
           const c = this.snapshot.conversations.find(c => c.id === id);
           if (c && !aborter.signal.aborted) this.update(id, { rows: [...c.rows, { id: Crypto.randomUUID(), role: "info", text }] }, true);
         },
-        status: progress => { stage = progress; if (!aborter.signal.aborted) this.update(id, { progress, progressSince: Date.now() }); },
+        status: progress => { stage = progress; trace("turn.stage", { stage: progress }); if (!aborter.signal.aborted) this.update(id, { progress, progressSince: Date.now() }); },
         // "Запрос к LLM (1/4): подключаюсь к api.openai.com…" — the step and its network stage.
         phase: phase => {
+          trace("turn.network_phase", { phase });
           if (aborter.signal.aborted) return;
           const detail = phase === "connecting" ? "подключаюсь к " + host + "…" : phase === "waiting" ? "модель думает…" : "пишет ответ…";
           this.update(id, { progress: stage ? stage + ": " + detail : detail[0].toUpperCase() + detail.slice(1), progressSince: Date.now() });
         },
         propose: note => {
+          trace("memory.proposal", { section: note.section || null, newSection: Boolean(note.newSection),
+            titleChars: note.title.length, bodyChars: note.body.length }, { title: note.title, body: note.body });
           const c = this.snapshot.conversations.find(c => c.id === id);
           if (c && !aborter.signal.aborted) this.update(id, { drafts: [...c.drafts, { ...note, id: Crypto.randomUUID() }] }, true);
         },
@@ -202,11 +214,17 @@ export class DirectChatStore {
       const c = this.snapshot.conversations.find(c => c.id === id);
       if (!c || this.disposed) return;
       if (aborter.signal.aborted) throw new Error("aborted");
+      trace("turn.completed", { elapsedMs: Date.now() - startedAt, requests: result.requests,
+        answerChars: result.text.length, sources: result.sources.length, memoryRefs: result.memory?.length || 0 },
+        { answer: result.text, sources: result.sources.join("\n") });
       this.update(id, { rows: [...c.rows,
         ...(result.notice ? [{ id: Crypto.randomUUID(), role: "info" as const, text: result.notice }] : []),
         { id: Crypto.randomUUID(), role: "assistant", text: result.text, sources: result.sources, ...(result.memory?.length ? { memory: result.memory } : {}) }],
         updatedAt: new Date().toISOString() });
     } catch (e) {
+      trace("turn.failed", { elapsedMs: Date.now() - startedAt, aborted: aborter.signal.aborted,
+        modelStarted, errorType: (e as Error)?.name || "Error" },
+        { error: redactDiagnostic(String((e as Error)?.message || e)).slice(0, 500) });
       const c = this.snapshot.conversations.find(c => c.id === id);
       if (c && !this.disposed) this.update(id, {
         ...(!modelStarted && !aborter.signal.aborted ? { question: c.question || prompt } : {}),
@@ -214,6 +232,7 @@ export class DirectChatStore {
           text: aborter.signal.aborted ? "Запрос остановлен" : !modelStarted ? "Запрос не отправлен: не удалось сохранить историю." : String((e as Error).message) }],
       });
     } finally {
+      trace("turn.finished", { elapsedMs: Date.now() - startedAt });
       this.requests.delete(id);
       if (paint) clearTimeout(paint);
       const final = this.update(id, { busy: false, progress: "", progressSince: undefined, streamText: undefined });
