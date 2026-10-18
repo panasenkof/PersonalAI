@@ -124,8 +124,8 @@ test("listing sections for the model never writes to memory", async () => {
 
 test("a saved recipe longer than 900 characters is returned in full, including its ending", async () => {
   const repo = fake();
-  const recipe = "Красная рыба под шубой.\\n" + "Описание и подготовка. ".repeat(70) +
-    "\\nИнгредиенты:\\nрыба, картофель, яйца\\nСлои:\\nрыба, картофель, яйца\\nЗаправка: майонез.";
+  const recipe = "Красная рыба под шубой.\n" + "Описание и подготовка. ".repeat(70) +
+    "\nИнгредиенты:\nрыба, картофель, яйца\nСлои:\nрыба, картофель, яйца\nЗаправка: майонез.";
   repo.searchMemory.mockResolvedValueOnce([{ entity: { id: "recipe", collection_id: "standard", sensitivity: "standard",
     record_status: "active", title: "Красная рыба под шубой", payload: { body: recipe } },
     chunk: "Красная рыба под шубой.", score: 3 }] as never);
@@ -154,7 +154,7 @@ test("full notes share a bounded model context and overflow notes are marked as 
 test("approved and model-proposed notes over 4000 characters are never silently cut", async () => {
   const { factProposal, MAX_NOTE_BODY_CHARS } = require("../fact-tool");
   const repo = fake();
-  const body = "Ингредиенты:\\n" + "Помидоры, рыба, лук. ".repeat(300) + "\\nПоследний слой: яйца.";
+  const body = "Ингредиенты:\n" + "Помидоры, рыба, лук. ".repeat(300) + "\nПоследний слой: яйца.";
   expect(body.length).toBeGreaterThan(4000);
   expect(factProposal({ title: "Салат", body }).body).toBe(body);
   await saveApprovedNote("guest", { title: "Салат", body }, repo as unknown as MemoryRepository);
