@@ -11,7 +11,7 @@ import type { UsedNote } from "./context";
 import { requestModel } from "./request";
 import { FACT_TOOL_DESCRIPTION, FACT_TOOL_NAME, factGuide, factProposal, factToolParameters } from "./fact-tool";
 import type { MemorySection } from "./fact-tool";
-import { MAX_DIRECT_REPLY_TOKENS, TRUNCATED_NOTE } from "./limits";
+import { MAX_DIRECT_REPLY_TOKENS, MAX_USER_PROMPT_CHARS, TRUNCATED_NOTE } from "./limits";
 type ToolDefinition = { name: string; description: string; parameters: object };
 const definitions = (sections?: MemorySection[]): ToolDefinition[] => [
   {
@@ -106,7 +106,7 @@ function conversation(options: DirectAgentOptions, search: WebContext) {
   return [
     { role: "system", content: system(options.sections) },
     ...options.history.slice(-8).map(turn => ({ role: turn.role, content: safe(turn.content, 2000) })),
-    { role: "user", content: withData(search.context, options.prompt.trim().slice(0, 4000)) },
+    { role: "user", content: withData(search.context, options.prompt.trim()) },
   ];
 }
 
@@ -114,6 +114,7 @@ export async function runCompatibleAgent(options: DirectAgentOptions): Promise<D
   const { settings, signal } = options;
   if (!settings.model || (!settings.apiKey && !anonymousLocalAllowed(settings))) throw new Error("Сначала укажите API-ключ и модель");
   if (!options.prompt.trim()) throw new Error("Введите вопрос");
+  if (options.prompt.trim().length > MAX_USER_PROMPT_CHARS) throw new Error("Сообщение слишком длинное. Разделите текст на части.");
   const endpoint = apiEndpoint(settings);
   const model = validateModel(settings.model);
   const search = await prepareDirectContext(options);
