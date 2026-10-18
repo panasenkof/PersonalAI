@@ -1,5 +1,7 @@
 import { withLocalMemoryDatabase } from "../local-memory/storage";
 import type { NoteProposal } from "./memory";
+import { parseTaskState } from "./task-state";
+import type { TaskState } from "./task-state";
 import { restoredProposal } from "./fact-tool";
 
 /** `memory`: records the answer used, with how each was found («Из памяти»). */
@@ -9,7 +11,7 @@ const VIA = new Set(["search", "rewrite", "assistant"]);
 export type ChatDraft = NoteProposal & { id: string };
 export type SavedConversation = {
   id: string; title: string; createdAt: string; updatedAt: string;
-  rows: ChatRow[]; drafts: ChatDraft[]; question: string; interrupted?: boolean;
+  rows: ChatRow[]; drafts: ChatDraft[]; question: string; interrupted?: boolean; taskState?: TaskState;
 };
 export interface ConversationRepository {
   load(): Promise<SavedConversation[]>;
@@ -45,6 +47,7 @@ export function parseConversation(json: string): SavedConversation | null {
     id: value.id, title: typeof value.title === "string" && value.title ? value.title : "Диалог",
     createdAt: value.createdAt, updatedAt: value.updatedAt, rows, drafts,
     question: typeof value.question === "string" ? value.question : "",
+    ...(parseTaskState(value.taskState) ? { taskState: parseTaskState(value.taskState) } : {}),
     ...(value.interrupted === true ? { interrupted: true } : {}),
   };
 }

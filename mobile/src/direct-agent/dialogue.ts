@@ -9,19 +9,22 @@ export const DIALOGUE_GUIDE =
   "Для личных сведений используй память; для свежих фактов, внешних источников и недостающих сведений — разрешённый интернет-поиск. " +
   "Поисковый запрос формулируй полно, с учётом истории, а не как короткую реплику пользователя. Не отправляй личные данные из памяти поисковику без необходимости и разрешения пользователя. " +
   "После ошибки чтения ссылки попробуй поиск по теме, если он разрешён. Не повторяй без изменений неудачный вызов. " +
+  "Для сложного продолжения используй update_task_state, чтобы сохранить цель, выбор и открытые вопросы; при смене темы очисти прежний выбор. Статусы действий устанавливает приложение, не твоя уверенность. " +
   "Если нужен конкретный источник, не подменяй его своим вариантом. Отличай прочитанное от предположений, приводи ссылки только на полученные источники. ";
 
 const DENY = /не\s+(?:ищи|искать|используй|использовать).{0,25}(?:интернет|поиск)|без\s+интернета|\b(?:no web|without internet)\b/iu;
 const ALLOW = /(?:ищи|поищи|найди|используй|можно|разрешаю).{0,25}(?:интернет|в сети)|\bsearch (?:the )?web\b/iu;
-export function webAllowed(options: DirectAgentOptions): boolean {
-  if (!options.settings.allowWeb) return false;
-  let allowed = true;
-  for (const turn of [...options.history, { role: "user", content: options.prompt }]) {
+export function webPreference(options: Pick<DirectAgentOptions, "prompt" | "history" | "taskState">): "allow" | "deny" {
+  let allowed = options.taskState?.webPreference !== "deny";
+  for (const turn of [...(options.taskState?.webPreference ? [] : options.history), { role: "user", content: options.prompt }]) {
     if (turn.role !== "user") continue;
     if (DENY.test(turn.content)) allowed = false;
     else if (ALLOW.test(turn.content)) allowed = true;
   }
-  return allowed;
+  return allowed ? "allow" : "deny";
+}
+export function webAllowed(options: DirectAgentOptions): boolean {
+  return options.settings.allowWeb && webPreference(options) === "allow";
 }
 
 /** Keep the end (often an offered next action) as well as the beginning. */

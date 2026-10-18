@@ -41,7 +41,7 @@ test("serverless requests always provide memory tools and keep web off until ena
   // gpt-4.1-mini is not a reasoning model: OpenAI rejects reasoning.encrypted_content for it.
   expect(body.include).not.toContain("reasoning.encrypted_content");
   expect(body.max_output_tokens).toBe(4000);
-  expect(body.tools.map((tool: any) => tool.name)).toEqual(["search_local_notes", "draft_memory_fact"]);
+  expect(body.tools.map((tool: any) => tool.name)).toEqual(["search_local_notes", "draft_memory_fact", "update_task_state"]);
   expect(request.mock.calls[0][1].headers.Authorization).toBe("Bearer test-key-only");
   expect(JSON.stringify(body)).not.toContain("test-key-only");
 });
@@ -89,7 +89,7 @@ test("local-memory tool uses only approved callback and replays tool output", as
   expect(first.tools).toContainEqual(expect.objectContaining({ type: "function", name: "search_local_notes" }));
   const second = JSON.parse(request.mock.calls[1][1].body);
   expect(second.input).toContainEqual(expect.objectContaining({
-    type: "function_call_output", call_id: "tool1", output: JSON.stringify({ notes: [{ id: "1", title: "Вкусы", body: "Люблю пасту" }] }),
+    type: "function_call_output", call_id: "tool1", output: JSON.stringify({ notes: [{ id: "1", title: "Вкусы", body: "Люблю пасту" }], outcome: "found" }),
   }));
 });
 
@@ -113,7 +113,7 @@ test("model can propose a memory note but never writes it directly", async () =>
   expect(propose).toHaveBeenCalledWith({ title: "Вкус", body: "Люблю пасту" });
   const second = JSON.parse(request.mock.calls[1][1].body);
   expect(second.input).toContainEqual(expect.objectContaining({
-    type: "function_call_output", output: JSON.stringify({ status: "awaiting_user_confirmation", saved: false }),
+    type: "function_call_output", output: JSON.stringify({ status: "awaiting_user_confirmation", saved: false, outcome: "pending_confirmation" }),
   }));
 });
 
@@ -269,7 +269,7 @@ test("Chat Completions tool call creates a draft but never saves without approva
   const next = JSON.parse(response.mock.calls[1][1].body);
   expect(next.messages).toContainEqual(expect.objectContaining({
     role: "tool", tool_call_id: "call_a",
-    content: JSON.stringify({ status: "awaiting_user_confirmation", saved: false }),
+    content: JSON.stringify({ status: "awaiting_user_confirmation", saved: false, outcome: "pending_confirmation" }),
   }));
 });
 

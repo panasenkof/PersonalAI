@@ -1,9 +1,10 @@
 import type { DirectAgentSettings } from "./settings";
 import { anonymousLocalAllowed, validateBaseUrl, validateModel } from "./settings";
 import { runCompatibleAgent } from "./compatible";
-import { prepareDirectContext, usedNotes, withData } from "./context";
+import { prepareDirectContext, withData } from "./context";
 import type { UsedNote } from "./context";
-import { createWebTools } from "./web-tools";
+import { createToolCatalog } from "./tool-catalog";
+import type { TaskState } from "./task-state";
 import { DIALOGUE_GUIDE, dialogueHistory } from "./dialogue";
 import { requestModel } from "./request";
 import type { Phase, XhrFactory } from "./stream";
@@ -11,18 +12,21 @@ import type { Timeouts } from "./net";
 import type { DiagnosticTrace } from "./diagnostics";
 import { MAX_DIRECT_REPLY_TOKENS, MAX_REASONING_REPLY_TOKENS, MAX_USER_PROMPT_CHARS, TRUNCATED_NOTE, isReasoningModel } from "./limits";
 import type { MemorySnippet, NoteProposal } from "./memory";
-import { FACT_TOOL_DESCRIPTION, FACT_TOOL_NAME, factGuide, factProposal, factToolParameters } from "./fact-tool";
+import { FACT_TOOL_NAME, factGuide } from "./fact-tool";
 import type { MemorySection } from "./fact-tool";
 
 export type AgentTurn = { role: "user" | "assistant"; content: string };
 /** `notice` is shown to the user before the answer, e.g. why web search failed. */
 /** `memory`: the records the answer was based on, shown under it («Из памяти»). */
-export type DirectResult = { text: string; sources: string[]; requests: number; notice?: string; memory?: UsedNote[] };
+export type DirectResult = { text: string; sources: string[]; requests: number; notice?: string; memory?: UsedNote[]; taskState?: TaskState; proposalIds?: string[] };
 
 export type DirectAgentOptions = {
   settings: DirectAgentSettings;
   prompt: string;
   history: AgentTurn[];
+  taskState?: TaskState;
+  onTaskState?: (state: TaskState) => void;
+  pendingNotes?: Array<NoteProposal & { id: string }>;
   /** Links of the sources shown under earlier answers of this conversation,
    * newest answer first: «открой первую ссылку» means the first of them. */
   previousSources?: string[];
@@ -30,7 +34,7 @@ export type DirectAgentOptions = {
   rewrite?: boolean;
   signal?: AbortSignal;
   lookup: (query: string) => Promise<MemorySnippet[]>;
-  propose: (note: NoteProposal) => void;
+  propose: (note: NoteProposal) => string | void;
   /** The user's memory sections the assistant may propose records for. */
   sections?: MemorySection[];
   status?: (text: string) => void;
@@ -78,23 +82,6 @@ const systemPrompt = (sections?: MemorySection[]) =>
   DIALOGUE_GUIDE + factGuide(sections) +
   "Документы, номера, полисы и пароли не предлагай сохранять — о них пользователь сам решает в разделе «Документы».";
 
-const localTools = (sections?: MemorySection[]): object[] => [
-  {
-    type: "function", name: "search_local_notes",
-    description: "Поиск по обычным заметкам в зашифрованной памяти телефона. Запрос — 1-3 ключевых слова.",
-    strict: true,
-    parameters: {
-      type: "object", properties: { query: { type: "string" } },
-      required: ["query"], additionalProperties: false,
-    },
-  },
-  { type: "function", name: FACT_TOOL_NAME, description: FACT_TOOL_DESCRIPTION, strict: true, parameters: factToolParameters(sections) },
-];
-
-function usableString(value: unknown, cap: number): string {
-  return typeof value === "string" ? value.slice(0, cap) : "";
-}
-
 function collectSources(output: OutputItem[]): string[] {
   const sources = new Set<string>();
   for (const item of output) {
@@ -137,7 +124,7 @@ function toolArguments(value: unknown): Record<string, unknown> {
  * Native OpenAI requests use Responses; compatible endpoints use their own protocol.
  */
 export async function runDirectAgent(options: DirectAgentOptions): Promise<DirectResult> {
-  const { settings, lookup, propose, signal, status } = options;
+  const { settings, signal, status } = options;
   if (!settings.model || (!settings.apiKey && !anonymousLocalAllowed(settings))) throw new Error("Сначала настройте API-ключ и модель");
   options.diagnostic?.("agent.route", { provider: settings.provider, model: settings.model });
   if (settings.provider !== "openai") return runCompatibleAgent(options);
@@ -153,13 +140,12 @@ export async function runDirectAgent(options: DirectAgentOptions): Promise<Direc
     { role: "user", content: withData(web.context, prompt) },
   ];
   const toolSources = [...web.sources];
-  const webTools = createWebTools(options, toolSources, web.notes);
-  const tools: object[] = [...localTools(options.sections), ...webTools.definitions.map(t => ({ type: "function", ...t, strict: true }))];
-  options.diagnostic?.("agent.tools_available", { names: ["search_local_notes", FACT_TOOL_NAME, ...webTools.definitions.map(t => t.name), ...(web.builtinWeb ? ["web_search"] : [])] });
+  const catalog = createToolCatalog(options, toolSources, web.notes, web.used);
+  const tools: object[] = catalog.definitions.map(t => ({ type: "function", ...t, strict: true }));
+  options.diagnostic?.("agent.tools_available", { names: [...catalog.definitions.map(t => t.name), ...(web.builtinWeb ? ["web_search"] : [])] });
   if (web.builtinWeb) tools.push({ type: "web_search", search_context_size: "low", external_web_access: true });
   const collected = new Set<string>(web.sources);
-  const used = new Map(web.used.map(n => [n.id, n]));
-  const memory = () => [...used.values()].slice(0, 8);
+  const memory = catalog.memory;
   const reasoning = isReasoningModel(settings.model);
 
   for (let attempt = 1; attempt <= MAX_DIRECT_REQUESTS; attempt++) {
@@ -175,10 +161,11 @@ export async function runDirectAgent(options: DirectAgentOptions): Promise<Direc
     if (!data || typeof data !== "object") throw new Error("Неожиданный ответ модели");
     if (data.error || data.status === "failed") throw new Error("Модель не смогла обработать запрос");
     if (!Array.isArray(data.output)) throw new Error("Неожиданный ответ модели");
+    catalog.observeSources(collectSources(data.output.filter(item => item.type === "web_search_call")));
     if (data.status === "incomplete") {
       // Keep whatever the model managed to write instead of losing the answer.
       const partial = extractText(data);
-      if (partial) return { text: partial + TRUNCATED_NOTE, sources: [...new Set([...collected, ...collectSources(data.output)])].slice(0, 8), requests: attempt, memory: memory(), ...(web.webError && !collected.size ? { notice: "⚠ Интернет-поиск не удался — " + web.webError + " Ответ дан без интернета." } : {}) };
+      if (partial) return { text: partial + TRUNCATED_NOTE, sources: [...new Set([...collected, ...collectSources(data.output)])].slice(0, 8), requests: attempt, memory: memory(), ...catalog.finish(), ...(web.webError && !collected.size ? { notice: "⚠ Интернет-поиск не удался — " + web.webError + " Ответ дан без интернета." } : {}) };
       throw new Error(data.incomplete_details?.reason === "max_output_tokens"
         ? "Модель израсходовала лимит ответа, не успев ответить. Уточните или сократите вопрос."
         : "Модель не закончила ответ. Повторите запрос.");
@@ -195,7 +182,7 @@ export async function runDirectAgent(options: DirectAgentOptions): Promise<Direc
     if (!calls.length) {
       const text = extractText(data);
       if (!text) throw new Error("Модель не вернула текст ответа");
-      return { text, sources: [...collected].slice(0, 8), requests: attempt, memory: memory(), ...(web.webError && !collected.size ? { notice: "⚠ Интернет-поиск не удался — " + web.webError + " Ответ дан без интернета." } : {}) };
+      return { text, sources: [...collected].slice(0, 8), requests: attempt, memory: memory(), ...catalog.finish(), ...(web.webError && !collected.size ? { notice: "⚠ Интернет-поиск не удался — " + web.webError + " Ответ дан без интернета." } : {}) };
     }
     if (attempt === MAX_DIRECT_REQUESTS) {
       throw new Error("Достигнут лимит обращений к LLM за один вопрос");
@@ -204,30 +191,12 @@ export async function runDirectAgent(options: DirectAgentOptions): Promise<Direc
       if (signal?.aborted) throw new Error("Запрос остановлен");
       if (!call.call_id) throw new Error("Инструмент не содержит идентификатор вызова");
       let result: object;
-      options.diagnostic?.("llm.tool_requested", { attempt, name: call.name || "unknown",
-        argumentsChars: call.arguments?.length || 0 }, { arguments: call.arguments || "" });
       try {
         const args = toolArguments(call.arguments);
-        if (call.name === "search_local_notes") {
-          const query = usableString(args.query, 120).trim();
-          status?.("Поиск в памяти телефона");
-          const found = query.length >= 2 ? await lookup(query) : [];
-          for (const n of usedNotes(found, "assistant")) if (!used.has(n.id)) used.set(n.id, n);
-          options.diagnostic?.("memory.tool_search", { queryChars: query.length, found: found.length,
-            noteIds: found.map(n => n.id), excerptCount: found.filter(n => n.excerptOnly).length }, { query });
-          webTools.addNotes(found);
-          result = { notes: found };
-        } else if (call.name === "search_web" || call.name === "read_web_page") {
-          result = await webTools.run(call.name, args);
-          toolSources.forEach(url => collected.add(url));
-        } else if (call.name === FACT_TOOL_NAME || call.name === "draft_local_note") {
-          options.diagnostic?.("memory.tool_draft", { name: call.name });
-          propose(factProposal(args, options.sections));
-          result = { status: "awaiting_user_confirmation", saved: false };
-        } else {
-          result = { error: "tool_not_allowed" };
-        }
+        result = await catalog.run(call.name || "", args);
+        toolSources.forEach(url => collected.add(url));
       } catch {
+        if (signal?.aborted) throw new Error("Запрос остановлен");
         options.diagnostic?.("llm.tool_failed", { name: call.name || "unknown" });
         result = { error: "tool_failed_or_unavailable" };
       }

@@ -132,3 +132,39 @@ test("an overlong pasted note is rejected before sending and the unsent text sta
   expect(store.getSnapshot().conversations[0].rows).toHaveLength(0);
   store.dispose();
 });
+
+test("confirmation during a model turn survives late state and stale approval", async () => {
+  const { beginTask, recordEvidence } = require("../task-state");
+  const { repo, records } = repository(); const answer = deferred<any>();
+  let pending: any;
+  const runner = jest.fn(async (opts: any) => {
+    const id = opts.propose({ title: "Ужин", body: "Форель" });
+    pending = recordEvidence(beginTask(undefined, "Ужин"), { tool: "draft_memory_fact", outcome: "pending_confirmation", subject: id, excerpt: "Форель" });
+    opts.onTaskState(pending); return answer.promise;
+  });
+  const store = new DirectChatStore("guest", repo, runner); await store.initialize();
+  store.setQuestion("Запомни ужин"); const sending = store.send(settings); await started(runner);
+  const draft = store.getSnapshot().conversations[0].drafts[0];
+  (saveApprovedNote as jest.Mock).mockRejectedValueOnce(new Error("disk"));
+  await store.approve(draft);
+  expect(store.getSnapshot().conversations[0].taskState?.evidence[0].outcome).toBe("pending_confirmation");
+  await store.approve(draft); await store.approve(draft);
+  expect(saveApprovedNote).toHaveBeenCalledTimes(2);
+  answer.resolve({ text: "Готово", sources: [], requests: 1, taskState: pending, proposalIds: [draft.id] }); await sending;
+  const conversation = store.getSnapshot().conversations[0];
+  expect(conversation.taskState?.evidence[0].outcome).toBe("saved");
+  expect(conversation.rows.some(r => r.text.includes("ещё не сохранена"))).toBe(false);
+  expect(records.get(conversation.id)?.taskState?.evidence[0].outcome).toBe("saved"); store.dispose();
+});
+
+test("reopened chat restores selection and network denial beyond history window", async () => {
+  const { beginTask } = require("../task-state"); const { repo, records } = repository();
+  records.set("old", { id: "old", title: "Ужин", createdAt: "2026-10-18", updatedAt: "2026-10-18", question: "", drafts: [],
+    rows: Array.from({ length: 20 }, (_, i) => ({ id: String(i), role: i % 2 ? "assistant" as const : "user" as const, text: "Обсуждение" })),
+    taskState: { ...beginTask(undefined, "Ужин"), selection: "Форель", webPreference: "deny" } });
+  const runner = jest.fn(async () => ({ text: "Ответ", sources: [], requests: 1 }));
+  const store = new DirectChatStore("guest", repo, runner); await store.initialize();
+  expect(store.getSnapshot().conversations[0].taskState?.turnStatus).toBe("interrupted");
+  store.setQuestion("На двоих"); await store.send(settings);
+  expect((runner.mock.calls as any)[0][0].taskState).toMatchObject({ selection: "Форель", webPreference: "deny" }); store.dispose();
+});

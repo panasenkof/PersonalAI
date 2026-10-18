@@ -84,3 +84,17 @@ test("long history keeps the beginning and last proposal", () => {
   const result = dialogueHistory([{ role: "assistant", content }])[0].content;
   expect(result).toContain("Начало"); expect(result).toContain("Предлагаю второй вариант"); expect(result.length).toBeLessThan(6100);
 });
+
+test.each(["openai-compatible", "anthropic", "openai"] as const)("%s updates working state and passes it into the next turn", async provider => {
+  let step = 0;
+  const transport = jest.fn(async (_url: string, init: RequestInit) => {
+    if (++step === 1) return reply(provider, "update_task_state", { goal: "Ужин на двоих", selection: "Форель", openQuestions: [] });
+    if (step === 3) expect(String(init.body)).toContain("Форель");
+    return reply(provider);
+  });
+  const options = { ...opts(), settings: { ...settings, provider, allowWeb: false, baseUrl: provider === "openai" ? "https://api.openai.com/v1" : provider === "anthropic" ? "https://api.anthropic.com/v1" : settings.baseUrl }, transport: transport as unknown as typeof fetch };
+  const first = await runDirectAgent(options);
+  expect(first.taskState).toMatchObject({ goal: "Ужин на двоих", selection: "Форель", turnStatus: "answered" });
+  const second = await runDirectAgent({ ...options, prompt: "Без огурцов", history: [], lookup: async () => [], taskState: first.taskState });
+  expect(second.taskState?.selection).toBe("Форель"); expect(step).toBe(3);
+});
