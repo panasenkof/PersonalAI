@@ -210,14 +210,16 @@ export class DirectChatStore {
       if (!c || this.disposed) return;
       if (aborter.signal.aborted) throw new Error("aborted");
       trace("turn.completed", { elapsedMs: Date.now() - startedAt, requests: result.requests,
-        answerChars: result.text.length, sources: result.sources.length, memoryRefs: result.memory?.length || 0 }, { answer: result.text });
+        answerChars: result.text.length, sources: result.sources.length, memoryRefs: result.memory?.length || 0 },
+        { answer: result.text, sources: result.sources.join("\n") });
       this.update(id, { rows: [...c.rows,
         ...(result.notice ? [{ id: Crypto.randomUUID(), role: "info" as const, text: result.notice }] : []),
         { id: Crypto.randomUUID(), role: "assistant", text: result.text, sources: result.sources, ...(result.memory?.length ? { memory: result.memory } : {}) }],
         updatedAt: new Date().toISOString() });
     } catch (e) {
       trace("turn.failed", { elapsedMs: Date.now() - startedAt, aborted: aborter.signal.aborted,
-        modelStarted, error: redactDiagnostic(String((e as Error)?.message || e)).slice(0, 500) });
+        modelStarted, errorType: (e as Error)?.name || "Error" },
+        { error: redactDiagnostic(String((e as Error)?.message || e)).slice(0, 500) });
       const c = this.snapshot.conversations.find(c => c.id === id);
       if (c && !this.disposed) this.update(id, {
         ...(!modelStarted && !aborter.signal.aborted ? { question: c.question || prompt } : {}),
