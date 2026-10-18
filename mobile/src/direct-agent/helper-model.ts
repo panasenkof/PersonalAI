@@ -4,6 +4,7 @@
  * Official parameters: api-docs.deepseek.com. */
 import type { DirectAgentOptions } from "./engine";
 import type { DirectAgentSettings } from "./settings";
+import type { DiagnosticTrace } from "./diagnostics";
 import { validateBaseUrl, validateModel, yandexFolder } from "./settings";
 import { REASONING_TIMEOUTS } from "./net";
 import type { Timeouts } from "./net";
@@ -24,8 +25,9 @@ export function indexTermsModel(settings: Pick<DirectAgentSettings, "baseUrl" | 
  * returns the answer text, or the last JSON object containing `jsonKey` from
  * the reasoning when the server put the answer only there. */
 export async function askHelperModel(settings: DirectAgentSettings, instructions: string, content: string,
-  options: { transport?: typeof fetch; signal?: AbortSignal; jsonKey: string; task: string; timeouts?: Timeouts; maxTokens?: number }): Promise<string> {
+  options: { transport?: typeof fetch; signal?: AbortSignal; jsonKey: string; task: string; timeouts?: Timeouts; maxTokens?: number; diagnostic?: DiagnosticTrace }): Promise<string> {
   const choice = indexTermsModel(settings);
+  options.diagnostic?.("llm.helper_started", { task: options.task, model: choice.model });
   const model = validateModel(choice.model);
   const anthropic = settings.provider === "anthropic";
   const url = validateBaseUrl(settings.baseUrl, settings.provider) + (anthropic ? "/messages" : "/chat/completions");
@@ -41,7 +43,7 @@ export async function askHelperModel(settings: DirectAgentSettings, instructions
       : { model, max_tokens: maxTokens, messages: [{ role: "system", content: instructions }, { role: "user", content }],
           ...(choice.deepseek ? { thinking: { type: "disabled" }, response_format: { type: "json_object" } } : {}) };
     const request = { settings, transport: options.transport, signal: options.signal, prompt: "", history: [], lookup: async () => [], propose: () => {},
-      timeouts: options.timeouts || REASONING_TIMEOUTS } as unknown as DirectAgentOptions;
+      timeouts: options.timeouts || REASONING_TIMEOUTS, diagnostic: options.diagnostic } as unknown as DirectAgentOptions;
     const data = await requestModel(request, url, headers, payload, anthropic ? "anthropic" : "chat", true) as any;
     return anthropic
       ? { text: Array.isArray(data?.content) ? data.content.filter((b: any) => b?.type === "text").map((b: any) => String(b.text)).join("\n") : "",
@@ -50,8 +52,14 @@ export async function askHelperModel(settings: DirectAgentSettings, instructions
           cut: data?.choices?.[0]?.finish_reason === "length" };
   };
   let answer = await ask(options.maxTokens ?? 1500);
-  if (!answer.text.trim() && answer.cut) answer = await ask(6000);
-  if (answer.text.trim()) return answer.text;
+  if (!answer.text.trim() && answer.cut) {
+    options.diagnostic?.("llm.helper_retry", { task: options.task, reason: "output_cut" });
+    answer = await ask(6000);
+  }
+  if (answer.text.trim()) {
+    options.diagnostic?.("llm.helper_completed", { task: options.task, replyChars: answer.text.length }, { response: answer.text });
+    return answer.text;
+  }
   const fromReasoning = answer.reasoning.match(new RegExp('\\{[^{}]*"' + options.jsonKey + '"[^{}]*\\}', "g"))?.pop();
   if (fromReasoning) return fromReasoning;
   throw new Error(answer.cut
