@@ -35,8 +35,9 @@ export async function prepareDirectContext(options: DirectAgentOptions & { now?:
   let memoryError = false;
   {
     status?.("Сначала проверяю память телефона");
-    try { notes = await options.lookup(options.prompt.slice(0, 120)); }
-    catch { memoryError = true; }
+    try { notes = await options.lookup(options.prompt.slice(0, 120));
+      options.diagnostic?.("memory.initial_search", { found: notes.length, queryChars: Math.min(options.prompt.length, 120) }); }
+    catch { memoryError = true; options.diagnostic?.("memory.initial_search_failed"); }
     check();
   }
   let used = usedNotes(notes, "search");
@@ -46,12 +47,16 @@ export async function prepareDirectContext(options: DirectAgentOptions & { now?:
   if (!notes.length && !memoryError && options.rewrite && !asksAboutLink && settings.model && (settings.apiKey || anonymousLocalAllowed(settings)) &&
       !/(?:помнишь|знаешь|расскажи).*(?:обо? мне|про меня)|кто я\b/iu.test(options.prompt)) {
     status?.("Ищу в памяти другими словами");
+    options.diagnostic?.("memory.rewrite_started");
     try {
       const rewrite = await rewriteQuestion(settings, options.prompt, options.transport, signal);
       check();
+      options.diagnostic?.("memory.rewrite_result", { alternativeQueries: rewrite.queries.length, personDetected: Boolean(rewrite.person) },
+        { queries: rewrite.queries.join(" | ") });
       if (rewrite.queries.length || rewrite.person) notes = await searchRewritten(rewrite, q => options.lookup(q));
       used = usedNotes(notes, "rewrite");
-    } catch (e) { check(); }
+      options.diagnostic?.("memory.rewrite_search", { found: notes.length });
+    } catch (e) { options.diagnostic?.("memory.rewrite_failed"); check(); }
   }
   // Order: memory first, by every search it supports; the internet only when
   // memory has nothing (or the question asks for current information).
@@ -63,6 +68,12 @@ export async function prepareDirectContext(options: DirectAgentOptions & { now?:
   // A request to open a link already shown reads that page instead of searching again.
   const openLink = asksAboutLink;
   const useWeb = settings.allowWeb && !denyWeb && !aboutMe && !openLink && (!notes.length || explicitWeb);
+  options.diagnostic?.("context.search_decision", {
+    memoryFound: notes.length, memoryError, webSettingEnabled: settings.allowWeb, explicitWeb,
+    aboutMe, denyWeb, openLink, useWeb,
+    reason: !settings.allowWeb ? "disabled" : denyWeb ? "user_denied" : aboutMe ? "personal_memory_only" :
+      openLink ? "previous_link" : notes.length && !explicitWeb ? "memory_sufficient" : "search_needed",
+  });
   if (memoryError) options.notify?.("Память телефона сейчас недоступна, поэтому записи не проверены." + (useWeb ? " Ищу в интернете." : ""));
   else if (openLink) { /* about a link from an earlier answer: no memory notice */ }
   else if (!notes.length) options.notify?.("В памяти ничего не нашлось." + (
@@ -79,8 +90,10 @@ export async function prepareDirectContext(options: DirectAgentOptions & { now?:
   if (useWeb && !builtinWeb) {
     // A failed search never costs the answer: the model replies without it and
     // the user sees exactly why the search failed.
-    try { web = await fetchWebContext(options.prompt, settings, options.transport || fetch, signal); }
-    catch (e) { check(); webError = String((e as Error)?.message || e); }
+    try { web = await fetchWebContext(options.prompt, settings, options.transport || fetch, signal);
+      options.diagnostic?.("web.search_result", { sources: web.sources.length, contextChars: web.context.length }); }
+    catch (e) { check(); webError = String((e as Error)?.message || e);
+      options.diagnostic?.("web.search_failed", { errorKind: (e as Error)?.name || "Error" }); }
   }
   check();
   const context = [
