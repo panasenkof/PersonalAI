@@ -7,7 +7,7 @@ import { requestModel } from "./request";
 import type { Phase, XhrFactory } from "./stream";
 import type { Timeouts } from "./net";
 import type { DiagnosticTrace } from "./diagnostics";
-import { MAX_DIRECT_REPLY_TOKENS, MAX_REASONING_REPLY_TOKENS, TRUNCATED_NOTE, isReasoningModel } from "./limits";
+import { MAX_DIRECT_REPLY_TOKENS, MAX_REASONING_REPLY_TOKENS, MAX_USER_PROMPT_CHARS, TRUNCATED_NOTE, isReasoningModel } from "./limits";
 import type { MemorySnippet, NoteProposal } from "./memory";
 import { FACT_TOOL_DESCRIPTION, FACT_TOOL_NAME, factGuide, factProposal, factToolParameters } from "./fact-tool";
 import type { MemorySection } from "./fact-tool";
@@ -125,7 +125,7 @@ function extractText(response: Response): string {
     .map(c => c.text || "").join("\n").trim();
 }
 function toolArguments(value: unknown): Record<string, unknown> {
-  if (typeof value !== "string" || value.length > 5000) throw new Error("Некорректные аргументы инструмента");
+  if (typeof value !== "string" || value.length > 120_000) throw new Error("Некорректные аргументы инструмента");
   const obj: unknown = JSON.parse(value);
   if (!obj || typeof obj !== "object" || Array.isArray(obj)) throw new Error("Некорректные аргументы инструмента");
   return obj as Record<string, unknown>;
@@ -139,8 +139,9 @@ export async function runDirectAgent(options: DirectAgentOptions): Promise<Direc
   if (!settings.model || (!settings.apiKey && !anonymousLocalAllowed(settings))) throw new Error("Сначала настройте API-ключ и модель");
   options.diagnostic?.("agent.route", { provider: settings.provider, model: settings.model });
   if (settings.provider !== "openai") return runCompatibleAgent(options);
-  const prompt = options.prompt.trim().slice(0, 4000);
+  const prompt = options.prompt.trim();
   if (!prompt) throw new Error("Введите вопрос");
+  if (prompt.length > MAX_USER_PROMPT_CHARS) throw new Error("Сообщение слишком длинное. Разделите текст на части.");
   const web = await prepareDirectContext(options);
   options.diagnostic?.("agent.context", { chars: web.context.length, notes: web.notes.length,
     used: web.used.length, webSources: web.sources.length, builtinWeb: web.builtinWeb, webFailed: Boolean(web.webError) });
