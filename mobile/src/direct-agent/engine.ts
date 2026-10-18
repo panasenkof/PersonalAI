@@ -6,6 +6,7 @@ import type { UsedNote } from "./context";
 import { requestModel } from "./request";
 import type { Phase, XhrFactory } from "./stream";
 import type { Timeouts } from "./net";
+import type { DiagnosticTrace } from "./diagnostics";
 import { MAX_DIRECT_REPLY_TOKENS, MAX_REASONING_REPLY_TOKENS, TRUNCATED_NOTE, isReasoningModel } from "./limits";
 import type { MemorySnippet, NoteProposal } from "./memory";
 import { FACT_TOOL_DESCRIPTION, FACT_TOOL_NAME, factGuide, factProposal, factToolParameters } from "./fact-tool";
@@ -42,6 +43,8 @@ export type DirectAgentOptions = {
   streamXhr?: XhrFactory;
   /** Test hook: shorter time limits. */
   timeouts?: Timeouts;
+  /** Temporary, opt-in structured diagnostics; no-op when disabled. */
+  diagnostic?: DiagnosticTrace;
 };
 
 type OutputItem = {
@@ -134,10 +137,13 @@ function toolArguments(value: unknown): Record<string, unknown> {
 export async function runDirectAgent(options: DirectAgentOptions): Promise<DirectResult> {
   const { settings, lookup, propose, signal, status } = options;
   if (!settings.model || (!settings.apiKey && !anonymousLocalAllowed(settings))) throw new Error("Сначала настройте API-ключ и модель");
+  options.diagnostic?.("agent.route", { provider: settings.provider, model: settings.model });
   if (settings.provider !== "openai") return runCompatibleAgent(options);
   const prompt = options.prompt.trim().slice(0, 4000);
   if (!prompt) throw new Error("Введите вопрос");
   const web = await prepareDirectContext(options);
+  options.diagnostic?.("agent.context", { chars: web.context.length, notes: web.notes.length,
+    used: web.used.length, webSources: web.sources.length, builtinWeb: web.builtinWeb, webFailed: Boolean(web.webError) });
   const input: unknown[] = [
     { role: "system", content: systemPrompt(options.sections) },
     ...options.history.slice(-8).map(h => ({ role: h.role, content: usableString(h.content, 2000) })),
@@ -177,6 +183,9 @@ export async function runDirectAgent(options: DirectAgentOptions): Promise<Direc
     // Reasoning items without encrypted content cannot be replayed.
     input.push(...(reasoning ? data.output : data.output.filter(item => item.type !== "reasoning")));
     const calls = data.output.filter(i => i.type === "function_call");
+    options.diagnostic?.("llm.response", { protocol: "responses", attempt, status: data.status || "unknown",
+      outputItems: data.output.length, toolCalls: calls.length, sources: collected.size,
+      incompleteReason: data.incomplete_details?.reason || null });
     if (!calls.length) {
       const text = extractText(data);
       if (!text) throw new Error("Модель не вернула текст ответа");
@@ -189,6 +198,8 @@ export async function runDirectAgent(options: DirectAgentOptions): Promise<Direc
       if (signal?.aborted) throw new Error("Запрос остановлен");
       if (!call.call_id) throw new Error("Инструмент не содержит идентификатор вызова");
       let result: object;
+      options.diagnostic?.("llm.tool_requested", { attempt, name: call.name || "unknown",
+        argumentsChars: call.arguments?.length || 0 }, { arguments: call.arguments || "" });
       try {
         const args = toolArguments(call.arguments);
         if (call.name === "search_local_notes") {
@@ -196,16 +207,21 @@ export async function runDirectAgent(options: DirectAgentOptions): Promise<Direc
           status?.("Поиск в памяти телефона");
           const found = query.length >= 2 ? await lookup(query) : [];
           for (const n of usedNotes(found, "assistant")) if (!used.has(n.id)) used.set(n.id, n);
+          options.diagnostic?.("memory.tool_search", { queryChars: query.length, found: found.length }, { query });
           result = { notes: found };
         } else if (call.name === FACT_TOOL_NAME || call.name === "draft_local_note") {
+          options.diagnostic?.("memory.tool_draft", { name: call.name });
           propose(factProposal(args, options.sections));
           result = { status: "awaiting_user_confirmation", saved: false };
         } else {
           result = { error: "tool_not_allowed" };
         }
       } catch {
+        options.diagnostic?.("llm.tool_failed", { name: call.name || "unknown" });
         result = { error: "tool_failed_or_unavailable" };
       }
+      options.diagnostic?.("llm.tool_result", { name: call.name || "unknown",
+        failed: "error" in result, chars: JSON.stringify(result).length }, { result: JSON.stringify(result) });
       input.push({ type: "function_call_output", call_id: call.call_id, output: JSON.stringify(result) });
     }
     // Refuse to accidentally omit any extra calls and break the input chain.
