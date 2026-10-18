@@ -207,7 +207,8 @@ export async function runDirectAgent(options: DirectAgentOptions): Promise<Direc
           status?.("Поиск в памяти телефона");
           const found = query.length >= 2 ? await lookup(query) : [];
           for (const n of usedNotes(found, "assistant")) if (!used.has(n.id)) used.set(n.id, n);
-          options.diagnostic?.("memory.tool_search", { queryChars: query.length, found: found.length }, { query });
+          options.diagnostic?.("memory.tool_search", { queryChars: query.length, found: found.length,
+            noteIds: found.map(n => n.id), excerptCount: found.filter(n => n.excerptOnly).length }, { query });
           result = { notes: found };
         } else if (call.name === FACT_TOOL_NAME || call.name === "draft_local_note") {
           options.diagnostic?.("memory.tool_draft", { name: call.name });
