@@ -407,3 +407,28 @@ test("a proposed fact carries its type, person and date; invalid values are drop
   expect(propose).toHaveBeenCalledWith({ title: "Аня любит кофе", body: "Сестра Аня пьёт капучино", section: "people", kind: "preference", person: "Аня" });
   expect(propose).toHaveBeenCalledWith({ title: "Паспорт", body: "Номер" });
 });
+
+test("long note proposals are preserved through Responses tool arguments", async () => {
+  const longBody = "Ингредиенты и слои. ".repeat(350) + "Конец рецепта.";
+  expect(JSON.stringify({ title: "Рецепт", body: longBody }).length).toBeGreaterThan(5000);
+  const transport = jest.fn().mockResolvedValueOnce(toolResponse("draft_memory_fact", { title: "Рецепт", body: longBody }))
+    .mockResolvedValueOnce(final("Предложил сохранить рецепт"));
+  const propose = jest.fn();
+  await start({}, transport, { propose });
+  expect(propose).toHaveBeenCalledWith(expect.objectContaining({ title: "Рецепт", body: longBody }));
+});
+
+test("neither Responses nor compatible endpoints silently slice a long submitted transcript", async () => {
+  const prompt = "Текст рецепта. ".repeat(400) + "Заправка в самом конце.";
+  expect(prompt.length).toBeGreaterThan(4000);
+  const request = jest.fn().mockResolvedValue(final());
+  await start({}, request, { prompt });
+  const sent = JSON.parse(request.mock.calls[0][1].body);
+  expect(sent.input.at(-1).content).toContain("Заправка в самом конце.");
+
+  const response = jest.fn().mockResolvedValue({ ok: true, status: 200,
+    json: async () => ({ choices: [{ message: { role: "assistant", content: "Получено" } }] }) });
+  await start({ provider: "openai-compatible", baseUrl: "https://example.com/v1", model: "test-model" }, response, { prompt });
+  const compatible = JSON.parse(response.mock.calls[0][1].body);
+  expect(compatible.messages.at(-1).content).toContain("Заправка в самом конце.");
+});

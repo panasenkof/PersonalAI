@@ -3,11 +3,15 @@ import type { MemoryRepository } from "../local-memory/types";
 import { ensureSections, orderCollections } from "../local-memory/sections";
 import { VECTOR_MODEL } from "../local-memory/vectors";
 import { normalizeAlias as normalizeName } from "../local-memory/search-index";
-import { DEFAULT_SECTIONS, PROPOSABLE_KINDS, findSection, proposableSections } from "./fact-tool";
+import { DEFAULT_SECTIONS, MAX_NOTE_BODY_CHARS, PROPOSABLE_KINDS, findSection, proposableSections } from "./fact-tool";
 import type { MemorySection, NoteProposal } from "./fact-tool";
 
 /** `section` is the name of the memory section the note lives in. */
-export type MemorySnippet = { id: string; title: string; body: string; section?: string };
+export type MemorySnippet = { id: string; title: string; body: string; section?: string; excerptOnly?: boolean; totalChars?: number };
+/** Return complete ordinary notes when possible, but bound the total data sent to an external LLM. */
+const FULL_NOTE_CHARS = 12_000;
+const MAX_CONTEXT_NOTE_CHARS = 24_000;
+const EXCERPT_CHARS = 900;
 export { FACT_TOOL_NAME, KIND_NAMES, PROPOSABLE_KINDS, factProposal } from "./fact-tool";
 export type { MemorySection, NoteProposal, ProposableKind } from "./fact-tool";
 
@@ -51,14 +55,23 @@ export async function searchApprovedNotes(
   const values = embed ? await embed(query.trim().slice(0, 500)).catch(() => null) : null;
   const hits = await db.searchMemory(query, { collectionIds: standards, sensitivities: ["standard", "inherit"], limit: 5,
     ...(values ? { vector: { model: VECTOR_MODEL, values } } : {}) });
-  return hits.filter(({ entity }) => standards.includes(entity.collection_id) && entity.record_status === "active" &&
-    ["standard", "inherit"].includes(entity.sensitivity)).map(({ entity, chunk }) => {
+  const allowed = hits.filter(({ entity }) => standards.includes(entity.collection_id) && entity.record_status === "active" &&
+    ["standard", "inherit"].includes(entity.sensitivity));
+  let remaining = MAX_CONTEXT_NOTE_CHARS;
+  return allowed.map(({ entity, chunk }, index) => {
     const section = collections.find(c => c.id === entity.collection_id)?.name;
-    const body = String(entity.payload.body || "");
+    const body = typeof entity.payload.body === "string" ? entity.payload.body : "";
+    // Reserve room for the matching excerpt of every later result, even if the
+    // first notes are long. Never present an excerpt as the complete stored note.
+    const available = Math.max(0, remaining - (allowed.length - index - 1) * EXCERPT_CHARS);
+    const complete = body.length <= FULL_NOTE_CHARS && body.length <= available;
+    const text = complete ? body : (chunk || body).slice(0, Math.min(EXCERPT_CHARS, available));
+    remaining -= text.length;
     return {
       id: entity.id,
       title: String(entity.title || "").slice(0, 160),
-      body: (body.length <= 900 || !chunk ? body : chunk).slice(0, 900),
+      body: text,
+      ...(complete ? {} : { excerptOnly: true, totalChars: body.length }),
       ...(section ? { section: section.slice(0, 60) } : {}),
     };
   });
@@ -68,7 +81,8 @@ export async function saveApprovedNote(
   profile: string, proposal: NoteProposal, repository?: MemoryRepository,
 ): Promise<string> {
   const title = proposal.title.trim().slice(0, 160);
-  const body = proposal.body.trim().slice(0, 4000);
+  const body = proposal.body.trim();
+  if (body.length > MAX_NOTE_BODY_CHARS) throw new Error("Заметка слишком длинная (максимум 60 000 символов). Разделите её на части.");
   if (!title && !body) throw new Error("Пустую заметку сохранить нельзя");
   const db = repository || await localMemoryRepository(profile);
   const all = await ensureSections(db);

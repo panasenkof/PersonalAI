@@ -23,6 +23,8 @@ export const KIND_NAMES: Record<MemoryKind, string> = {
   fact: "Факт", person: "Человек", event: "Событие", preference: "Предпочтение", document: "Документ", note: "Заметка",
 };
 export const FACT_TOOL_NAME = "draft_memory_fact";
+/** Same size as text imported through the mobile memory screen. Never silently trim a proposed note. */
+export const MAX_NOTE_BODY_CHARS = 60_000;
 export const FACT_TOOL_DESCRIPTION = "Предложить пользователю одну запись в памяти — один факт, человек, событие или предпочтение; " +
   "никогда не сохраняет автоматически, только после подтверждения пользователя.";
 
@@ -93,7 +95,9 @@ function optional(args: Record<string, unknown>) {
  * model; anything unexpected is dropped, never trusted. «Документы» are never
  * a target, even if a model names them. */
 export function factProposal(args: Record<string, unknown>, sections: MemorySection[] = DEFAULT_SECTIONS): NoteProposal {
-  const title = text(args.title, 160), body = text(args.body, 4000);
+  const title = text(args.title, 160);
+  const body = typeof args.body === "string" ? args.body.trim() : "";
+  if (body.length > MAX_NOTE_BODY_CHARS) throw new Error("note_body_too_long");
   if (!title && !body) throw new Error("empty_note");
   const requested = text(args.section, 80);
   const found = requested && !isDocuments(requested) ? findSection(requested, sections) : undefined;
