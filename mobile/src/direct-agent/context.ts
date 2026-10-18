@@ -52,7 +52,7 @@ export async function prepareDirectContext(options: DirectAgentOptions & { now?:
     status?.("Ищу в памяти другими словами");
     options.diagnostic?.("memory.rewrite_started");
     try {
-      const rewrite = await rewriteQuestion(settings, options.prompt, options.transport, signal);
+      const rewrite = await rewriteQuestion(settings, options.prompt, options.transport, signal, options.diagnostic);
       check();
       options.diagnostic?.("memory.rewrite_result", { alternativeQueries: rewrite.queries.length, personDetected: Boolean(rewrite.person) },
         { queries: rewrite.queries.join(" | ") });
