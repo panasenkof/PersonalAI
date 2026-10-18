@@ -428,7 +428,7 @@ test("neither Responses nor compatible endpoints silently slice a long submitted
 
   const response = jest.fn().mockResolvedValue({ ok: true, status: 200,
     json: async () => ({ choices: [{ message: { role: "assistant", content: "Получено" } }] }) });
-  await start({ provider: "compatible", baseUrl: "https://example.com/v1", model: "test-model" }, response, { prompt });
+  await start({ provider: "openai-compatible", baseUrl: "https://example.com/v1", model: "test-model" }, response, { prompt });
   const compatible = JSON.parse(response.mock.calls[0][1].body);
   expect(compatible.messages.at(-1).content).toContain("Заправка в самом конце.");
 });
