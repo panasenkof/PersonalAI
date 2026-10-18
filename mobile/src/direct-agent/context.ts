@@ -36,7 +36,10 @@ export async function prepareDirectContext(options: DirectAgentOptions & { now?:
   {
     status?.("Сначала проверяю память телефона");
     try { notes = await options.lookup(options.prompt.slice(0, 120));
-      options.diagnostic?.("memory.initial_search", { found: notes.length, queryChars: Math.min(options.prompt.length, 120) }); }
+      options.diagnostic?.("memory.initial_search", { found: notes.length,
+        noteIds: notes.map(n => n.id), excerptCount: notes.filter(n => n.excerptOnly).length,
+        totalBodyChars: notes.reduce((sum, n) => sum + n.body.length, 0),
+        queryChars: Math.min(options.prompt.length, 120) }); }
     catch { memoryError = true; options.diagnostic?.("memory.initial_search_failed"); }
     check();
   }
@@ -55,7 +58,7 @@ export async function prepareDirectContext(options: DirectAgentOptions & { now?:
         { queries: rewrite.queries.join(" | ") });
       if (rewrite.queries.length || rewrite.person) notes = await searchRewritten(rewrite, q => options.lookup(q));
       used = usedNotes(notes, "rewrite");
-      options.diagnostic?.("memory.rewrite_search", { found: notes.length });
+      options.diagnostic?.("memory.rewrite_search", { found: notes.length, noteIds: notes.map(n => n.id) });
     } catch (e) { options.diagnostic?.("memory.rewrite_failed"); check(); }
   }
   // Order: memory first, by every search it supports; the internet only when
