@@ -32,6 +32,10 @@ export function DeviceSettingsScreen() {
       <Text numberOfLines={2} style={{ color: t.accent }}>{model}</Text>
       <Text style={{ color: t.muted, lineHeight: 20 }}>Сохранённые сервисы, адреса, ключи и интернет-поиск.</Text>
     </Pressable>
+    <Pressable accessibilityRole="button" accessibilityLabel="Диагностика диалогов" style={card} onPress={() => navigation.navigate("DiagnosticLogs")}>
+      <Text style={{ color: t.text, fontSize: 19, fontWeight: "700" }}>Диагностика диалогов →</Text>
+      <Text style={{ color: t.muted, lineHeight: 20 }}>Временные журналы работы LLM: включить запись, посмотреть файлы, передать для анализа и удалить.</Text>
+    </Pressable>
     <SmartSearchCard />
     <VoiceModelCard />
     <Pressable accessibilityRole="button" accessibilityLabel="Резервные копии" style={card} onPress={() => navigation.navigate("MemoryBackup")}>
