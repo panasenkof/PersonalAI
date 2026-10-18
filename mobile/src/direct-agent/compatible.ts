@@ -68,7 +68,8 @@ async function runTool(
       const query = safe(values.query, 120).trim();
       options.status?.("Поиск в памяти телефона");
       const found = query.length >= 2 ? await options.lookup(query) : [];
-      options.diagnostic?.("memory.tool_search", { queryChars: query.length, found: found.length }, { query });
+      options.diagnostic?.("memory.tool_search", { queryChars: query.length, found: found.length,
+        noteIds: found.map(n => n.id), excerptCount: found.filter(n => n.excerptOnly).length }, { query });
       const used = memoryOf.get(options);
       if (used) for (const n of usedNotes(found, "assistant")) if (!used.has(n.id)) used.set(n.id, n);
       return { notes: found };
