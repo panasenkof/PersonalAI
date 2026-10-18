@@ -3,6 +3,8 @@ import { anonymousLocalAllowed, validateBaseUrl, validateModel } from "./setting
 import { runCompatibleAgent } from "./compatible";
 import { prepareDirectContext, usedNotes, withData } from "./context";
 import type { UsedNote } from "./context";
+import { createWebTools } from "./web-tools";
+import { DIALOGUE_GUIDE, dialogueHistory } from "./dialogue";
 import { requestModel } from "./request";
 import type { Phase, XhrFactory } from "./stream";
 import type { Timeouts } from "./net";
@@ -73,7 +75,7 @@ const systemPrompt = (sections?: MemorySection[]) =>
   "Для актуальных фактов используй web_search, если разрешён, и приводите ссылки на источники. " +
   "Если веб-поиск отключён, прямо сообщи, что текущие факты не проверены." +
   "Запоминай всё важное, что пользователь рассказывает о себе, и раскладывай по разделам памяти. " +
-  factGuide(sections) +
+  DIALOGUE_GUIDE + factGuide(sections) +
   "Документы, номера, полисы и пароли не предлагай сохранять — о них пользователь сам решает в разделе «Документы».";
 
 const localTools = (sections?: MemorySection[]): object[] => [
@@ -147,10 +149,13 @@ export async function runDirectAgent(options: DirectAgentOptions): Promise<Direc
     used: web.used.length, webSources: web.sources.length, builtinWeb: web.builtinWeb, webFailed: Boolean(web.webError) });
   const input: unknown[] = [
     { role: "system", content: systemPrompt(options.sections) },
-    ...options.history.slice(-8).map(h => ({ role: h.role, content: usableString(h.content, 2000) })),
+    ...dialogueHistory(options.history),
     { role: "user", content: withData(web.context, prompt) },
   ];
-  const tools: object[] = localTools(options.sections);
+  const toolSources = [...web.sources];
+  const webTools = createWebTools(options, toolSources, web.notes);
+  const tools: object[] = [...localTools(options.sections), ...webTools.definitions.map(t => ({ type: "function", ...t, strict: true }))];
+  options.diagnostic?.("agent.tools_available", { names: ["search_local_notes", FACT_TOOL_NAME, ...webTools.definitions.map(t => t.name), ...(web.builtinWeb ? ["web_search"] : [])] });
   if (web.builtinWeb) tools.push({ type: "web_search", search_context_size: "low", external_web_access: true });
   const collected = new Set<string>(web.sources);
   const used = new Map(web.used.map(n => [n.id, n]));
@@ -173,12 +178,12 @@ export async function runDirectAgent(options: DirectAgentOptions): Promise<Direc
     if (data.status === "incomplete") {
       // Keep whatever the model managed to write instead of losing the answer.
       const partial = extractText(data);
-      if (partial) return { text: partial + TRUNCATED_NOTE, sources: [...new Set([...collected, ...collectSources(data.output)])].slice(0, 8), requests: attempt, memory: memory(), ...(web.webError ? { notice: "⚠ Интернет-поиск не удался — " + web.webError + " Ответ дан без интернета." } : {}) };
+      if (partial) return { text: partial + TRUNCATED_NOTE, sources: [...new Set([...collected, ...collectSources(data.output)])].slice(0, 8), requests: attempt, memory: memory(), ...(web.webError && !collected.size ? { notice: "⚠ Интернет-поиск не удался — " + web.webError + " Ответ дан без интернета." } : {}) };
       throw new Error(data.incomplete_details?.reason === "max_output_tokens"
         ? "Модель израсходовала лимит ответа, не успев ответить. Уточните или сократите вопрос."
         : "Модель не закончила ответ. Повторите запрос.");
     }
-    for (const url of collectSources(data.output)) collected.add(url);
+    for (const url of [...collectSources(data.output), ...toolSources]) collected.add(url);
     // With store:false the entire output (including encrypted reasoning state)
     // must be replayed to continue the tool loop.
     // Reasoning items without encrypted content cannot be replayed.
@@ -190,7 +195,7 @@ export async function runDirectAgent(options: DirectAgentOptions): Promise<Direc
     if (!calls.length) {
       const text = extractText(data);
       if (!text) throw new Error("Модель не вернула текст ответа");
-      return { text, sources: [...collected].slice(0, 8), requests: attempt, memory: memory(), ...(web.webError ? { notice: "⚠ Интернет-поиск не удался — " + web.webError + " Ответ дан без интернета." } : {}) };
+      return { text, sources: [...collected].slice(0, 8), requests: attempt, memory: memory(), ...(web.webError && !collected.size ? { notice: "⚠ Интернет-поиск не удался — " + web.webError + " Ответ дан без интернета." } : {}) };
     }
     if (attempt === MAX_DIRECT_REQUESTS) {
       throw new Error("Достигнут лимит обращений к LLM за один вопрос");
@@ -210,7 +215,11 @@ export async function runDirectAgent(options: DirectAgentOptions): Promise<Direc
           for (const n of usedNotes(found, "assistant")) if (!used.has(n.id)) used.set(n.id, n);
           options.diagnostic?.("memory.tool_search", { queryChars: query.length, found: found.length,
             noteIds: found.map(n => n.id), excerptCount: found.filter(n => n.excerptOnly).length }, { query });
+          webTools.addNotes(found);
           result = { notes: found };
+        } else if (call.name === "search_web" || call.name === "read_web_page") {
+          result = await webTools.run(call.name, args);
+          toolSources.forEach(url => collected.add(url));
         } else if (call.name === FACT_TOOL_NAME || call.name === "draft_local_note") {
           options.diagnostic?.("memory.tool_draft", { name: call.name });
           propose(factProposal(args, options.sections));
