@@ -86,11 +86,12 @@ test("documents stay personal and an unknown section falls back to notes", async
 
 test("a long record sends the chunk that matched, not its beginning", async () => {
   const repo = fake();
-  const long = "Начало. ".repeat(200);
+  const long = "Начало. ".repeat(2000);
   repo.searchMemory.mockResolvedValueOnce([{ entity: { id: "long", collection_id: "standard", sensitivity: "standard", record_status: "active",
     title: "Дневник", payload: { body: long + "Ключи у соседа." } }, chunk: "Ключи у соседа.", score: 3 }] as never);
   expect(await searchApprovedNotes("guest", "где ключи", repo as unknown as MemoryRepository))
-    .toEqual([{ id: "long", title: "Дневник", body: "Ключи у соседа.", section: "Заметки" }]);
+    .toEqual([{ id: "long", title: "Дневник", body: "Ключи у соседа.", excerptOnly: true,
+      totalChars: (long + "Ключи у соседа.").length, section: "Заметки" }]);
 });
 
 test("a proposal goes to the user's own section, or creates the section the user asked for on save", async () => {
@@ -119,4 +120,46 @@ test("listing sections for the model never writes to memory", async () => {
   const sections = await proposableMemorySections("guest", repo as unknown as MemoryRepository);
   expect(repo.createCollection).not.toHaveBeenCalled();
   expect(sections.map((s: any) => s.name)).toEqual(["Обо мне", "Люди", "Дела и проекты", "Предпочтения", "Важные даты", "Заметки", "Рецепты"]);
+});
+
+test("a saved recipe longer than 900 characters is returned in full, including its ending", async () => {
+  const repo = fake();
+  const recipe = "Красная рыба под шубой.\\n" + "Описание и подготовка. ".repeat(70) +
+    "\\nИнгредиенты:\\nрыба, картофель, яйца\\nСлои:\\nрыба, картофель, яйца\\nЗаправка: майонез.";
+  repo.searchMemory.mockResolvedValueOnce([{ entity: { id: "recipe", collection_id: "standard", sensitivity: "standard",
+    record_status: "active", title: "Красная рыба под шубой", payload: { body: recipe } },
+    chunk: "Красная рыба под шубой.", score: 3 }] as never);
+  expect(recipe.length).toBeGreaterThan(900);
+  const found = await searchApprovedNotes("guest", "рыба под шубой", repo as unknown as MemoryRepository);
+  expect(found).toEqual([{ id: "recipe", title: "Красная рыба под шубой", body: recipe, section: "Заметки" }]);
+  expect(found[0].body).toContain("Заправка: майонез");
+});
+
+test("full notes share a bounded model context and overflow notes are marked as excerpts", async () => {
+  const repo = fake();
+  const long = "Рецепт с ингредиентами и слоями. ".repeat(300);
+  repo.searchMemory.mockResolvedValueOnce([1, 2, 3, 4, 5].map(i => ({
+    entity: { id: String(i), collection_id: "standard", sensitivity: "standard", record_status: "active",
+      title: "Рецепт " + i, payload: { body: long } },
+    chunk: "Ингредиенты рецепта " + i, score: 3,
+  })) as never);
+  const found = await searchApprovedNotes("guest", "рецепт", repo as unknown as MemoryRepository);
+  expect(found).toHaveLength(5);
+  expect(found.map(n => n.body.length).reduce((sum, n) => sum + n, 0)).toBeLessThanOrEqual(24_000);
+  expect(found[0].body).toBe(long);
+  expect(found.some(n => n.excerptOnly)).toBe(true);
+  for (const note of found.filter(n => n.excerptOnly)) expect(note.totalChars).toBe(long.length);
+});
+
+test("approved and model-proposed notes over 4000 characters are never silently cut", async () => {
+  const { factProposal, MAX_NOTE_BODY_CHARS } = require("../fact-tool");
+  const repo = fake();
+  const body = "Ингредиенты:\\n" + "Помидоры, рыба, лук. ".repeat(300) + "\\nПоследний слой: яйца.";
+  expect(body.length).toBeGreaterThan(4000);
+  expect(factProposal({ title: "Салат", body }).body).toBe(body);
+  await saveApprovedNote("guest", { title: "Салат", body }, repo as unknown as MemoryRepository);
+  expect(repo.createEntity).toHaveBeenCalledWith(expect.objectContaining({ payload: { type: "note", title: "Салат", body } }));
+  expect(() => factProposal({ title: "Салат", body: "A".repeat(MAX_NOTE_BODY_CHARS + 1) })).toThrow("note_body_too_long");
+  await expect(saveApprovedNote("guest", { title: "Салат", body: "A".repeat(MAX_NOTE_BODY_CHARS + 1) },
+    repo as unknown as MemoryRepository)).rejects.toThrow("слишком длинная");
 });
