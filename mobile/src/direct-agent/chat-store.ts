@@ -1,6 +1,7 @@
 import * as Crypto from "expo-crypto";
 import { runDirectAgent } from "./engine";
 import { diagnosticTrace, redactDiagnostic } from "./diagnostics";
+import { MAX_USER_PROMPT_CHARS } from "./limits";
 import { hostOf } from "./net";
 import { proposableMemorySections, saveApprovedNote, searchApprovedNotes } from "./memory";
 import { DEFAULT_SECTIONS } from "./fact-tool";
@@ -146,6 +147,10 @@ export class DirectChatStore {
     const current = this.snapshot.conversations.find(c => c.id === id);
     if (!id || !current || current.busy || current.deleting || !current.question.trim() || this.disposed) return;
     const prompt = current.question.trim();
+    if (prompt.length > MAX_USER_PROMPT_CHARS) {
+      this.publish({ error: "Сообщение длиннее 24 000 символов. Разделите его на части: текст не отправлен и не обрезан." });
+      return;
+    }
     const trace = diagnosticTrace(this.profile, id, Crypto.randomUUID());
     const startedAt = Date.now();
     const aborter = new AbortController();
