@@ -25,7 +25,7 @@ export function indexTermsModel(settings: Pick<DirectAgentSettings, "baseUrl" | 
  * returns the answer text, or the last JSON object containing `jsonKey` from
  * the reasoning when the server put the answer only there. */
 export async function askHelperModel(settings: DirectAgentSettings, instructions: string, content: string,
-  options: { transport?: typeof fetch; signal?: AbortSignal; jsonKey: string; task: string; timeouts?: Timeouts; maxTokens?: number; diagnostic?: DiagnosticTrace }): Promise<string> {
+  options: { transport?: typeof fetch; signal?: AbortSignal; jsonKey: string; task: string; timeouts?: Timeouts; maxTokens?: number; diagnostic?: DiagnosticTrace; singleAttempt?: boolean }): Promise<string> {
   const choice = indexTermsModel(settings);
   options.diagnostic?.("llm.helper_started", { task: options.task, model: choice.model });
   const model = validateModel(choice.model);
@@ -52,6 +52,9 @@ export async function askHelperModel(settings: DirectAgentSettings, instructions
           cut: data?.choices?.[0]?.finish_reason === "length" };
   };
   let answer = await ask(options.maxTokens ?? 1500);
+  // Editing a draft must never accept a truncated answer or silently spend a
+  // second request. Other helpers retain their existing recovery behavior.
+  if (options.singleAttempt && answer.cut) throw new Error("Ответ модели обрезан по лимиту длины. Исходный текст сохранён.");
   if (!answer.text.trim() && answer.cut) {
     options.diagnostic?.("llm.helper_retry", { task: options.task, reason: "output_cut" });
     answer = await ask(6000);
@@ -61,7 +64,7 @@ export async function askHelperModel(settings: DirectAgentSettings, instructions
     return answer.text;
   }
   const fromReasoning = answer.reasoning.match(new RegExp('\\{[^{}]*"' + options.jsonKey + '"[^{}]*\\}', "g"))?.pop();
-  if (fromReasoning) return fromReasoning;
+  if (fromReasoning && !options.singleAttempt) return fromReasoning;
   throw new Error(answer.cut
     ? `Модель ${model} рассуждала дольше лимита и не успела ответить. Выберите для подключения модель без рассуждений или повторите позже.`
     : `Модель ${model} вернула пустой ответ вместо ${options.task}. Повторите позже или выберите другую модель.`);

@@ -20,7 +20,7 @@ export const resetActionHints = () => { explainedByTap.clear(); };
 export function IconAction({ icon, label, accessibilityLabel, hint, onPress, disabled = false,
   emphasized = false, hintAbove = false, hintAlign = "end" }: {
   icon: React.ComponentProps<typeof Feather>["name"]; label: string; accessibilityLabel: string;
-  hint: string; onPress: () => void; disabled?: boolean; emphasized?: boolean; hintAbove?: boolean; hintAlign?: "start" | "end";
+  hint: string; onPress: () => void; disabled?: boolean; emphasized?: boolean; hintAbove?: boolean; hintAlign?: "start" | "center" | "end";
 }) {
   const t = useTheme(); const owner = useId();
   const visible = useSyncExternalStore(subscribe, currentHint, currentHint);
@@ -40,7 +40,7 @@ export function IconAction({ icon, label, accessibilityLabel, hint, onPress, dis
       <Feather name={icon} size={21} color={emphasized && !disabled ? "#fff" : t.accent} />
       <Text style={{ fontSize: 11, fontWeight: "600", color: emphasized && !disabled ? "#fff" : t.accent }}>{label}</Text>
     </Pressable>
-    {help ? <View testID="action-hint" pointerEvents="none" style={{ position: "absolute", ...(hintAlign === "start" ? { left: 0 } : { right: 0 }), ...(hintAbove ? { bottom: "100%", marginBottom: 6 } : { top: "100%", marginTop: 6 }), width: 200,
+    {help ? <View testID="action-hint" pointerEvents="none" style={{ position: "absolute", ...(hintAlign === "start" ? { left: 0 } : hintAlign === "center" ? { left: "50%", transform: [{ translateX: -100 }] } : { right: 0 }), ...(hintAbove ? { bottom: "100%", marginBottom: 6 } : { top: "100%", marginTop: 6 }), width: 200,
       padding: 10, backgroundColor: t.soft, borderWidth: 1, borderColor: t.line, borderRadius: 12, elevation: 8 }}>
       <Text accessibilityLiveRegion="polite" style={{ color: t.text, fontSize: 12, lineHeight: 17 }}>{help}</Text>
     </View> : null}

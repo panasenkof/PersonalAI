@@ -23,8 +23,9 @@ function recognitionService(): ServiceChoice | undefined {
 
 /** Each mounted input owns one draft. Unmounting (including clearing the draft
  * or changing conversations) invalidates permission requests and late results. */
-export function VoiceInput({ value, onChange, disabled = false, onError, showLabel = false }: {
+export function VoiceInput({ value, onChange, disabled = false, onError, showLabel = false, onBegin, onActiveChange }: {
   value: string; onChange: (text: string) => void; disabled?: boolean; onError: (message: string) => void; showLabel?: boolean;
+  onBegin?: () => void; onActiveChange?: (active: boolean) => void;
 }) {
   const t = useTheme();
   const whisper = useWhisperStatus();
@@ -43,6 +44,8 @@ export function VoiceInput({ value, onChange, disabled = false, onError, showLab
   const service = useRef<ServiceChoice | undefined>(undefined);
   const [offerNetwork, setOfferNetwork] = useState(false);
   const [phase, setPhase] = useState<"idle" | "starting" | "listening" | "finishing">("idle");
+  useEffect(() => { onActiveChange?.(phase !== "idle"); }, [phase, onActiveChange]);
+  useEffect(() => () => onActiveChange?.(false), [onActiveChange]);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const watchdog = useRef<ReturnType<typeof setTimeout> | null>(null);
   const finalTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -144,6 +147,7 @@ export function VoiceInput({ value, onChange, disabled = false, onError, showLab
         "Выбран Whisper. Скачайте модель: Настройки → Голосовой ввод → Голос без интернета. Или выберите системное распознавание.");
       return;
     }
+    onBegin?.();
     const token = ++generation.current;
     starting.current = true; setPhase("starting");
     if (selectedEngine === "whisper" && !network) return startWhisper(token);

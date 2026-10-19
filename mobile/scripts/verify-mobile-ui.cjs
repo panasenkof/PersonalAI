@@ -38,6 +38,26 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       const errors = []; page.on('pageerror', error => { errors.push(error.message); console.error('UI runtime:', error.message); if (process.env.GITHUB_ACTIONS) console.log('::warning title=UI runtime::' + String(error.message).slice(0, 500).replace(/\n/g, '%0A')); });
       let replyNumber = 0;
       let releaseReply;
+      let normalizationCalls = 0;
+      let normalizationMode = 'normal';
+      let releaseNormalization;
+      await page.route('**/v1/chat/completions', async route => {
+        const body = route.request().postDataJSON();
+        if (!body.messages?.[0]?.content?.includes('normalized_text')) {
+          await route.fulfill({ json: { choices: [{ message: { content: '{"queries":[],"terms":[],"people":[]}' } }] } }); return;
+        }
+        normalizationCalls++;
+        assert.equal(body.tools, undefined, 'Draft correction never receives tools');
+        assert.equal(body.messages.length, 2, 'Draft correction never receives conversation history');
+        const draft = JSON.parse(body.messages[1].content).draft;
+        const mode = normalizationMode;
+        if (mode === 'hold') await new Promise(resolve => { releaseNormalization = resolve; });
+        if (mode === 'fail') {
+          await route.fulfill({ status: 503, json: { error: { message: 'Temporarily unavailable' } } }); return;
+        }
+        const normalized = draft.trim().charAt(0).toUpperCase() + draft.trim().slice(1) + '.';
+        await route.fulfill({ json: { choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({ normalized_text: normalized }) } }] } }).catch(() => {});
+      });
       await page.route('**/v1/responses', async route => {
         replyNumber++;
         await new Promise(resolve => { releaseReply = resolve; });
@@ -90,10 +110,56 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       assert.equal(await prompt.inputValue(), '');
       assert.equal(await prompt.evaluate(el => document.activeElement === el), true, 'Clear keeps keyboard focus in the composer');
       assert.equal(await page.getByLabel('Очистить сообщение', { exact: true }).count(), 0);
+      assert.equal(await page.getByLabel('Улучшить текст', { exact: true }).isDisabled(), true);
+      const originalDraft = 'нужно купить молоко и хлеб';
+      await prompt.fill(originalDraft);
+      await page.getByLabel('Улучшить текст', { exact: true }).click();
+      await page.getByLabel('Вернуть исходный текст', { exact: true }).waitFor();
+      assert.equal(await prompt.inputValue(), 'Нужно купить молоко и хлеб.');
+      assert.equal(replyNumber, 0, 'Improvement never sends a chat message');
+      const improveButton = await page.getByLabel('Вернуть исходный текст', { exact: true }).boundingBox();
+      const micButton = await page.getByLabel('Голосовой ввод', { exact: true }).boundingBox();
+      assert(improveButton.x > micButton.x && improveButton.x - micButton.x - micButton.width < 12, 'Improvement is next to the microphone');
+      assert(improveButton.x + improveButton.width <= width, 'Improvement fits on a narrow phone');
+      const improveHint = await page.getByTestId('action-hint').boundingBox();
+      assert(improveHint.x >= 0 && improveHint.x + improveHint.width <= width, 'Improvement hint stays inside the viewport');
+      if (process.env.SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, `draft-improved-${width}.png`) });
+      await page.getByLabel('Вернуть исходный текст', { exact: true }).click();
+      assert.equal(await prompt.inputValue(), originalDraft);
+      await page.getByLabel('Улучшить текст', { exact: true }).click();
+      assert.equal(await prompt.inputValue(), 'Нужно купить молоко и хлеб.');
+      assert.equal(normalizationCalls, 1, 'Toggling two versions does not spend more model calls');
+
+      normalizationMode = 'hold';
+      await prompt.fill('старый черновик');
+      await page.getByLabel('Улучшить текст', { exact: true }).click();
+      await page.getByLabel('Отменить улучшение текста', { exact: true }).waitFor();
+      await page.waitForFunction(() => document.body.textContent.includes('Улучшаю текст'));
+      await prompt.fill('ручная правка');
+      await page.getByLabel('Улучшить текст', { exact: true }).waitFor();
+      releaseNormalization();
+      await page.clock.runFor(100);
+      assert.equal(await prompt.inputValue(), 'ручная правка', 'A late correction cannot overwrite manual edits');
+      await page.getByLabel('Улучшить текст', { exact: true }).click();
+      await page.getByLabel('Отменить улучшение текста', { exact: true }).waitFor();
+      await page.getByLabel('Отменить улучшение текста', { exact: true }).click();
+      releaseNormalization();
+      await page.clock.runFor(100);
+      assert.equal(await prompt.inputValue(), 'ручная правка', 'Cancellation keeps the original draft');
+
+      normalizationMode = 'fail';
+      await page.getByLabel('Улучшить текст', { exact: true }).click();
+      await page.getByText(/Не удалось улучшить текст/).waitFor();
+      assert.equal(await prompt.inputValue(), 'ручная правка', 'A failed service keeps the original');
+      normalizationMode = 'normal';
+      await page.getByLabel('Улучшить текст', { exact: true }).click();
+      await page.getByLabel('Вернуть исходный текст', { exact: true }).waitFor();
+      await page.getByLabel('Очистить сообщение', { exact: true }).click();
       // Clear an active recording, then deliver the service's stale callback.
       await page.evaluate(() => { window.__qa.holdSpeech = true; });
       await page.getByLabel('Голосовой ввод', { exact: true }).click();
       await page.getByLabel('Остановить диктовку', { exact: true }).waitFor();
+      assert.equal(await page.getByLabel('Улучшить текст', { exact: true }).isDisabled(), true, 'An unfinished transcript cannot be improved');
       await page.evaluate(() => window.__speechEvent('result', { results: [{ transcript: 'Удалить эту диктовку' }], isFinal: false }));
       await page.getByLabel('Очистить сообщение', { exact: true }).click();
       await page.waitForFunction(() => window.__qa.speechAborts === 1);
