@@ -3,10 +3,12 @@ import type { ConversationRepository, SavedConversation } from "../conversations
 import { defaultDirectPreferences } from "../settings";
 import { saveApprovedNote } from "../memory";
 import { waitForApplicationSession } from "../../local-memory/storage";
+import { loadModelCallLimit } from "../agent-preferences";
 
 jest.mock("../../local-memory/storage", () => ({ waitForApplicationSession: jest.fn(async () => {}), withLocalMemoryDatabase: jest.fn() }));
 jest.mock("../memory", () => ({ searchApprovedNotes: jest.fn(async () => []), saveApprovedNote: jest.fn(async () => "note") }));
 jest.mock("expo-crypto", () => ({ randomUUID: () => "id-" + Math.random().toString(36).slice(2) }));
+jest.mock("../agent-preferences", () => ({ loadModelCallLimit: jest.fn(async () => 4) }));
 const settings = { ...defaultDirectPreferences, apiKey: "secret-key", webSearchKey: "search-secret" };
 function repository() {
   const records = new Map<string, SavedConversation>();
@@ -24,7 +26,30 @@ function deferred<T>() {
 }
 const turn = () => deferred<{ text: string; sources: string[]; requests: number }>();
 const started = async (runner: jest.Mock) => { for (let i = 0; i < 20 && !runner.mock.calls.length; i++) await Promise.resolve(); expect(runner).toHaveBeenCalledTimes(1); };
-beforeEach(() => { jest.clearAllMocks(); (waitForApplicationSession as jest.Mock).mockResolvedValue(undefined); });
+beforeEach(() => { jest.clearAllMocks(); (waitForApplicationSession as jest.Mock).mockResolvedValue(undefined); (loadModelCallLimit as jest.Mock).mockResolvedValue(4); });
+
+test("the saved call limit is captured per message and re-read for the next one", async () => {
+  const { repo } = repository(); const answer = turn();
+  const runner = jest.fn().mockReturnValueOnce(answer.promise).mockResolvedValue({ text: "Ответ", sources: [], requests: 1 });
+  const store = new DirectChatStore("guest", repo, runner); await store.initialize();
+  (loadModelCallLimit as jest.Mock).mockResolvedValue(2);
+  store.setQuestion("Первый"); const first = store.send(settings); await started(runner);
+  expect(runner.mock.calls[0][0].maxRequests).toBe(2);
+  (loadModelCallLimit as jest.Mock).mockResolvedValue(7);
+  expect(runner.mock.calls[0][0].maxRequests).toBe(2);
+  answer.resolve({ text: "Ответ", sources: [], requests: 1 }); await first;
+  store.setQuestion("Второй"); await store.send(settings);
+  expect(runner.mock.calls[1][0].maxRequests).toBe(7); store.dispose();
+});
+test("an unreadable limit preserves the draft and spends no model call", async () => {
+  const { repo } = repository(); const runner = jest.fn();
+  const store = new DirectChatStore("guest", repo, runner); await store.initialize();
+  (loadModelCallLimit as jest.Mock).mockRejectedValueOnce(new Error("corrupt_limit"));
+  store.setQuestion("Вопрос"); await store.send(settings);
+  expect(runner).not.toHaveBeenCalled();
+  expect(store.getSnapshot().conversations[0].question).toBe("Вопрос");
+  expect(store.getSnapshot().conversations[0].rows.at(-1)?.text).toContain("прочитать лимит"); store.dispose();
+});
 
 test("retrying a failed history load clears its error and enables a new conversation and message input", async () => {
   const { repo } = repository();

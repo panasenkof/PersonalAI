@@ -18,6 +18,7 @@ import { PromptInput } from "../components/PromptInput";
 import { useTheme } from "../theme";
 import { MarkdownText } from "../components/Markdown";
 import { KIND_NAMES } from "../direct-agent/fact-tool";
+import { useDraftNormalization } from "../direct-agent/use-draft-normalization";
 
 export function HomeScreen() {
   const t = useTheme();
@@ -31,6 +32,8 @@ export function HomeScreen() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historySearch, setHistorySearch] = useState("");
   const [voiceReset, setVoiceReset] = useState(0);
+  const [dictating, setDictating] = useState(false);
+  const normalization = useDraftNormalization(store, profile, setNotice);
   const list = useRef<FlatList<ChatRow>>(null);
   useFocusEffect(useCallback(() => {
     let alive = true;
@@ -140,11 +143,18 @@ export function HomeScreen() {
       {error && ready ? <Pressable accessibilityRole="button" onPress={() => void store.checkpoint().catch(() => {})} style={{ minHeight: 44, justifyContent: "center" }}><Text style={{ color: t.accent }}>Повторить сохранение истории</Text></Pressable> : null}</View> : null}
     {!canSend && ready && !(needsSetup && !active?.rows.length) ? <Pressable accessibilityRole="button" onPress={() => openConnections()} style={{ paddingHorizontal: 16, minHeight: 44, justifyContent: "center" }}><Text style={{ color: t.accent }}>Добавьте модель в настройках подключений →</Text></Pressable> : null}
     <View style={{ zIndex: 3, padding: 10, gap: 5, backgroundColor: t.panel, borderTopWidth: 1, borderColor: t.line }}>
-      <PromptInput value={question} onChange={value => store.setQuestion(value)} onClear={() => setVoiceReset(n => n + 1)} editable={ready} />
+      <PromptInput value={question} onChange={value => store.setQuestion(value)} onClear={() => { normalization.reset(); setVoiceReset(n => n + 1); }} editable={ready} />
       <View style={{ zIndex: 1, flexDirection: "row", alignItems: "center", gap: 6 }}>
         <IconAction icon="plus" label="Файл" accessibilityLabel="Добавить сведения из файла" hint="Добавить в память сведения из текста, фото, аудио или видео." hintAbove hintAlign="start" onPress={() => navigation.navigate("MemoryImport")} />
-        <VoiceInput key={`${active?.id}:${voiceReset}`} value={question} onChange={value => { if (store.getSnapshot().activeId === active?.id) store.setQuestion(value); }} disabled={!ready} onError={setNotice} showLabel />
-        <Text style={{ flex: 1, color: t.muted, fontSize: 11 }} numberOfLines={1}>{busy ? "Можно перейти в другую вкладку" : ""}</Text>
+        <VoiceInput key={`${active?.id}:${voiceReset}`} value={question} onChange={value => { if (store.getSnapshot().activeId === active?.id) store.setQuestion(value); }} disabled={!ready} onError={setNotice} showLabel onBegin={normalization.reset} onActiveChange={setDictating} />
+        <IconAction icon={normalization.busy ? "x" : normalization.normalized ? "rotate-ccw" : "edit-3"}
+          label={normalization.busy ? "Отмена" : normalization.normalized ? "Исходный" : "Улучшить"}
+          accessibilityLabel={normalization.busy ? "Отменить улучшение текста" : normalization.normalized ? "Вернуть исходный текст" : "Улучшить текст"}
+          hint={normalization.busy ? "Отменить улучшение: исходный текст останется." : normalization.normalized ? "Вернуть текст до улучшения. Повторное нажатие снова покажет исправленный вариант без запроса к LLM." : normalization.alternate ? "Показать исправленный вариант без нового запроса к LLM." : "Исправить ошибки и пунктуацию всего черновика через выбранное подключение LLM. Один дополнительный запрос; сообщение не отправляется."}
+          hintAbove hintAlign="center" emphasized={normalization.normalized}
+          disabled={!ready || dictating || (!normalization.busy && (!question.trim() || (!normalization.alternate && !canSend)))}
+          onPress={() => void normalization.toggle(settings)} />
+        <Text style={{ flex: 1, minWidth: 0, color: t.muted, fontSize: 11 }} numberOfLines={2} accessibilityLiveRegion="polite">{normalization.busy ? "Улучшаю текст…" : busy ? "Можно перейти в другую вкладку" : ""}</Text>
         <IconAction icon={busy ? "square" : "arrow-up"} label={busy ? "Стоп" : "Отправить"} accessibilityLabel={busy ? "Остановить запрос" : "Отправить запрос"}
           hint={busy ? "Остановить ответ ИИ в этом диалоге." : "Отправить написанное сообщение выбранной модели."} hintAbove emphasized={!busy}
           disabled={!busy && (!canSend || !question.trim())} onPress={() => { if (busy) store.stop(); else if (settings) { setVoiceReset(n => n + 1); void store.send(settings); } }} />
