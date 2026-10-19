@@ -255,7 +255,7 @@ export function DirectAgentSettingsScreen() {
           style={{ minHeight: 52, justifyContent: "center", alignItems: "center", backgroundColor: t.accent, borderRadius: 18 }}>
           <Text style={{ color: "#fff", fontWeight: "700" }}>{busy ? "Сохранение…" : "Сохранить настройки"}</Text>
         </Pressable>
-        <Text style={small}>Сохранение делает выбранное подключение активным. До 4 обращений к модели за вопрос, до 4000 выходных токенов на обращение (8000 для моделей с рассуждением); денежный бюджет задаётся у провайдера.</Text>
+        <Text style={small}>Сохранение делает выбранное подключение активным. Число обращений к модели на сообщение задаётся в Настройки → Работа ИИ. До 4000 выходных токенов на обращение (8000 для моделей с рассуждением); денежный бюджет задаётся у провайдера.</Text>
         {value.connections.length > 1 ? <Pressable accessibilityRole="button" disabled={busy} accessibilityLabel="Удалить подключение" style={{ minHeight: 44, justifyContent: "center" }}
           onPress={() => Alert.alert("Удалить подключение «" + selected.name + "»?", "Изменение вступит в силу после сохранения.", [
             { text: "Отмена", style: "cancel" }, { text: "Удалить", style: "destructive", onPress: () => {

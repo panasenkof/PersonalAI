@@ -10,8 +10,7 @@ import { prepareDirectContext, withData } from "./context";
 import { requestModel } from "./request";
 import { factGuide } from "./fact-tool";
 import type { MemorySection } from "./fact-tool";
-import { MAX_DIRECT_REPLY_TOKENS, MAX_USER_PROMPT_CHARS, TRUNCATED_NOTE } from "./limits";
-const MAX_CALLS = 4;
+import { DEFAULT_MODEL_CALL_LIMIT, MAX_DIRECT_REPLY_TOKENS, MAX_USER_PROMPT_CHARS, TRUNCATED_NOTE, validateModelCallLimit } from "./limits";
 const MAX_OUTPUT_TOKENS = MAX_DIRECT_REPLY_TOKENS;
 const system = (sections?: MemorySection[]) => "Ты PersAI, персональный ИИ-помощник. Никогда не придумывай содержимое памяти. " +
   "Заметки сохраняются только после подтверждения пользователя. " +
@@ -38,6 +37,8 @@ function conversation(options: DirectAgentOptions, search: WebContext) {
 
 export async function runCompatibleAgent(options: DirectAgentOptions): Promise<DirectResult> {
   const { settings, signal } = options;
+  const maxRequests = validateModelCallLimit(options.maxRequests ?? DEFAULT_MODEL_CALL_LIMIT);
+  options.diagnostic?.("agent.call_limit", { maxRequests });
   if (!settings.model || (!settings.apiKey && !anonymousLocalAllowed(settings))) throw new Error("Сначала укажите API-ключ и модель");
   if (!options.prompt.trim()) throw new Error("Введите вопрос");
   if (options.prompt.trim().length > MAX_USER_PROMPT_CHARS) throw new Error("Сообщение слишком длинное. Разделите текст на части.");
@@ -54,9 +55,9 @@ export async function runCompatibleAgent(options: DirectAgentOptions): Promise<D
   options.diagnostic?.("agent.tools_available", { names: tools.map(t => t.name) });
   const anthropic = settings.provider === "anthropic";
 
-  for (let attempt = 1; attempt <= MAX_CALLS; attempt++) {
+  for (let attempt = 1; attempt <= maxRequests; attempt++) {
     if (signal?.aborted) throw new Error("Запрос остановлен");
-    options.status?.("Запрос к LLM (" + attempt + "/" + MAX_CALLS + ")");
+    options.status?.("Запрос к LLM (" + attempt + "/" + maxRequests + ")");
     const payload = anthropic
       ? {
           model, system: String(messages[0].content), max_tokens: MAX_OUTPUT_TOKENS,
@@ -92,7 +93,7 @@ export async function runCompatibleAgent(options: DirectAgentOptions): Promise<D
         if (!answer) throw new Error("Модель не вернула текст ответа");
         return { text: answer + (data.stop_reason === "max_tokens" ? TRUNCATED_NOTE : ""), sources, requests: attempt, memory: memory(), ...catalog.finish(), ...(search.webError && !sources.length ? { notice: "⚠ Интернет-поиск не удался — " + search.webError + " Ответ дан без интернета." } : {}) };
       }
-      if (attempt === MAX_CALLS || calls.length > 5) throw new Error("Достигнут лимит обращений к LLM за один вопрос");
+      if (attempt === maxRequests || calls.length > 5) throw new Error("Достигнут лимит обращений к LLM за один вопрос: " + maxRequests + ". Изменить его можно в настройках.");
       messages.push({ role: "assistant", content: blocks });
       const results: Array<Record<string, unknown>> = [];
       for (const call of calls) {
@@ -117,7 +118,7 @@ export async function runCompatibleAgent(options: DirectAgentOptions): Promise<D
         if (!answer) throw new Error("Модель не вернула текст ответа");
         return { text: answer + (data.choices?.[0]?.finish_reason === "length" ? TRUNCATED_NOTE : ""), sources, requests: attempt, memory: memory(), ...catalog.finish(), ...(search.webError && !sources.length ? { notice: "⚠ Интернет-поиск не удался — " + search.webError + " Ответ дан без интернета." } : {}) };
       }
-      if (attempt === MAX_CALLS || calls.length > 5) throw new Error("Достигнут лимит обращений к LLM за один вопрос");
+      if (attempt === maxRequests || calls.length > 5) throw new Error("Достигнут лимит обращений к LLM за один вопрос: " + maxRequests + ". Изменить его можно в настройках.");
       messages.push({ role: "assistant", content: message.content ?? null, tool_calls: calls });
       for (const call of calls) {
         if (signal?.aborted) throw new Error("Запрос остановлен");

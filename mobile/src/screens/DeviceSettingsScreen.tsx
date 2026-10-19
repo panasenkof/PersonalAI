@@ -2,7 +2,7 @@ import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import Constants from "expo-constants";
 import React, { useCallback, useState } from "react";
-import { Pressable, ScrollView, Text } from "react-native";
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useProfile } from "../profile/ProfileContext";
 import { loadDirectConnections } from "../direct-agent/settings";
@@ -10,6 +10,7 @@ import type { RootStackParams } from "../navigation";
 import { useTheme } from "../theme";
 import { VoiceModelCard } from "../components/VoiceModelCard";
 import { SmartSearchCard } from "../components/SmartSearchCard";
+import { AgentLimitsCard } from "../components/AgentLimitsCard";
 
 export function DeviceSettingsScreen() {
   const profile = useProfile();
@@ -25,7 +26,8 @@ export function DeviceSettingsScreen() {
     return () => { alive = false; };
   }, [profile]));
   const card = { backgroundColor: t.panel, padding: 20, gap: 10, borderRadius: 22, borderWidth: 1, borderColor: t.line };
-  return <ScrollView style={{ flex: 1, backgroundColor: t.bg }} contentContainerStyle={{ padding: 18, gap: 16, paddingBottom: insets.bottom + 24 }}>
+  return <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
+    <ScrollView style={{ flex: 1, backgroundColor: t.bg }} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentContainerStyle={{ padding: 18, gap: 16, paddingBottom: insets.bottom + 24 }}>
     <Text style={{ color: t.muted, lineHeight: 22 }}>Всё для работы вашего помощника.</Text>
     <Pressable accessibilityRole="button" accessibilityLabel="Модели и подключения" style={card} onPress={() => navigation.navigate("ModelConnections")}>
       <Text style={{ color: t.text, fontSize: 19, fontWeight: "700" }}>Модели и подключения →</Text>
@@ -36,6 +38,7 @@ export function DeviceSettingsScreen() {
       <Text style={{ color: t.text, fontSize: 19, fontWeight: "700" }}>Диагностика диалогов →</Text>
       <Text style={{ color: t.muted, lineHeight: 20 }}>Временные журналы работы LLM: включить запись, посмотреть файлы, передать для анализа и удалить.</Text>
     </Pressable>
+    <AgentLimitsCard key={profile} />
     <SmartSearchCard />
     <VoiceModelCard />
     <Pressable accessibilityRole="button" accessibilityLabel="Резервные копии" style={card} onPress={() => navigation.navigate("MemoryBackup")}>
@@ -43,5 +46,5 @@ export function DeviceSettingsScreen() {
       <Text style={{ color: t.muted, lineHeight: 20 }}>Сохранить записи и диалоги или перенести их на другой телефон.</Text>
     </Pressable>
     <Text style={{ color: t.muted, fontSize: 12 }}>PersAI {Constants.expoConfig?.version || "—"} · {String(Constants.expoConfig?.extra?.buildSha || "—").slice(0, 7)}</Text>
-  </ScrollView>;
+  </ScrollView></KeyboardAvoidingView>;
 }

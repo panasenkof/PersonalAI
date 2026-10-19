@@ -10,7 +10,7 @@ import { requestModel } from "./request";
 import type { Phase, XhrFactory } from "./stream";
 import type { Timeouts } from "./net";
 import type { DiagnosticTrace } from "./diagnostics";
-import { MAX_DIRECT_REPLY_TOKENS, MAX_REASONING_REPLY_TOKENS, MAX_USER_PROMPT_CHARS, TRUNCATED_NOTE, isReasoningModel } from "./limits";
+import { DEFAULT_MODEL_CALL_LIMIT, MAX_DIRECT_REPLY_TOKENS, MAX_REASONING_REPLY_TOKENS, MAX_USER_PROMPT_CHARS, TRUNCATED_NOTE, isReasoningModel, validateModelCallLimit } from "./limits";
 import type { MemorySnippet, NoteProposal } from "./memory";
 import { FACT_TOOL_NAME, factGuide } from "./fact-tool";
 import type { MemorySection } from "./fact-tool";
@@ -51,6 +51,8 @@ export type DirectAgentOptions = {
   timeouts?: Timeouts;
   /** Temporary, opt-in structured diagnostics; no-op when disabled. */
   diagnostic?: DiagnosticTrace;
+  /** Main model calls for this message, captured from the device settings. */
+  maxRequests?: number;
 };
 
 type OutputItem = {
@@ -68,7 +70,7 @@ type Response = {
   output_text?: string;
   error?: { message?: string };
 };
-export const MAX_DIRECT_REQUESTS = 4;
+export const MAX_DIRECT_REQUESTS = DEFAULT_MODEL_CALL_LIMIT;
 export { MAX_DIRECT_REPLY_TOKENS, MAX_REASONING_REPLY_TOKENS, TRUNCATED_NOTE, isReasoningModel };
 const systemPrompt = (sections?: MemorySection[]) =>
   "Ты персональный помощник PersAI, работающий на телефоне пользователя. " +
@@ -128,6 +130,8 @@ export async function runDirectAgent(options: DirectAgentOptions): Promise<Direc
   if (!settings.model || (!settings.apiKey && !anonymousLocalAllowed(settings))) throw new Error("Сначала настройте API-ключ и модель");
   options.diagnostic?.("agent.route", { provider: settings.provider, model: settings.model });
   if (settings.provider !== "openai") return runCompatibleAgent(options);
+  const maxRequests = validateModelCallLimit(options.maxRequests ?? DEFAULT_MODEL_CALL_LIMIT);
+  options.diagnostic?.("agent.call_limit", { maxRequests });
   const prompt = options.prompt.trim();
   if (!prompt) throw new Error("Введите вопрос");
   if (prompt.length > MAX_USER_PROMPT_CHARS) throw new Error("Сообщение слишком длинное. Разделите текст на части.");
@@ -148,9 +152,9 @@ export async function runDirectAgent(options: DirectAgentOptions): Promise<Direc
   const memory = catalog.memory;
   const reasoning = isReasoningModel(settings.model);
 
-  for (let attempt = 1; attempt <= MAX_DIRECT_REQUESTS; attempt++) {
+  for (let attempt = 1; attempt <= maxRequests; attempt++) {
     if (signal?.aborted) throw new Error("Запрос остановлен");
-    status?.("Запрос к LLM (" + attempt + "/" + MAX_DIRECT_REQUESTS + ")");
+    status?.("Запрос к LLM (" + attempt + "/" + maxRequests + ")");
     const data = await requestModel(options, validateBaseUrl(settings.baseUrl || "https://api.openai.com/v1", "openai") + "/responses",
       { Authorization: "Bearer " + settings.apiKey, "Content-Type": "application/json" },
       {
@@ -184,8 +188,8 @@ export async function runDirectAgent(options: DirectAgentOptions): Promise<Direc
       if (!text) throw new Error("Модель не вернула текст ответа");
       return { text, sources: [...collected].slice(0, 8), requests: attempt, memory: memory(), ...catalog.finish(), ...(web.webError && !collected.size ? { notice: "⚠ Интернет-поиск не удался — " + web.webError + " Ответ дан без интернета." } : {}) };
     }
-    if (attempt === MAX_DIRECT_REQUESTS) {
-      throw new Error("Достигнут лимит обращений к LLM за один вопрос");
+    if (attempt === maxRequests) {
+      throw new Error("Достигнут лимит обращений к LLM за один вопрос: " + maxRequests + ". Изменить его можно в настройках.");
     }
     for (const call of calls.slice(0, 5)) {
       if (signal?.aborted) throw new Error("Запрос остановлен");

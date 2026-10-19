@@ -4,6 +4,7 @@ import { webPreference } from "./dialogue";
 import { runDirectAgent } from "./engine";
 import { diagnosticTrace, redactDiagnostic } from "./diagnostics";
 import { MAX_USER_PROMPT_CHARS } from "./limits";
+import { loadModelCallLimit } from "./agent-preferences";
 import { hostOf } from "./net";
 import { proposableMemorySections, saveApprovedNote, searchApprovedNotes } from "./memory";
 import { DEFAULT_SECTIONS } from "./fact-tool";
@@ -168,6 +169,7 @@ export class DirectChatStore {
       rows: [...current.rows, { id: Crypto.randomUUID(), role: "user", text: prompt }],
     })!;
     let modelStarted = false;
+    let beforeModelError = "Запрос не отправлен: не удалось сохранить историю.";
     const host = hostOf(settings.baseUrl || "https://api.openai.com/v1");
     trace("turn.start", { provider: settings.provider, model: settings.model, host, promptChars: prompt.length,
       historyTurns: history.length, previousSources: previousSources.length, webEnabled: settings.allowWeb }, { prompt });
@@ -190,8 +192,11 @@ export class DirectChatStore {
       const sections = await this.refreshSections();
       trace("turn.sections_ready", { count: sections.length });
       if (aborter.signal.aborted) throw new Error("aborted");
+      beforeModelError = "Запрос не отправлен: не удалось прочитать лимит обращений к LLM. Откройте Настройки → Работа ИИ и сохраните лимит.";
+      const maxRequests = await loadModelCallLimit(this.profile);
+      if (this.disposed || aborter.signal.aborted) throw new Error("aborted");
       modelStarted = true;
-      const result = await this.runner({ settings, prompt, history, previousSources, taskState, pendingNotes: current.drafts,
+      const result = await this.runner({ settings, maxRequests, prompt, history, previousSources, taskState, pendingNotes: current.drafts,
         onTaskState: next => {
           const active = this.snapshot.conversations.find(c => c.id === id);
           if (active && !aborter.signal.aborted) this.update(id, { taskState: mergeTaskReceipts(next, active.taskState) }, true);
@@ -242,7 +247,7 @@ export class DirectChatStore {
         taskState: { ...(c.taskState || taskState), turnStatus: "interrupted" },
         ...(!modelStarted && !aborter.signal.aborted ? { question: c.question || prompt } : {}),
         rows: [...c.rows, { id: Crypto.randomUUID(), role: "info",
-          text: aborter.signal.aborted ? "Запрос остановлен" : !modelStarted ? "Запрос не отправлен: не удалось сохранить историю." : String((e as Error).message) }],
+          text: aborter.signal.aborted ? "Запрос остановлен" : !modelStarted ? beforeModelError : String((e as Error).message) }],
       });
     } finally {
       trace("turn.finished", { elapsedMs: Date.now() - startedAt });
