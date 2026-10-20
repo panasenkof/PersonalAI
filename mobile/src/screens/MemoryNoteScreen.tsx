@@ -23,6 +23,7 @@ import { scheduleVectors } from "../media/vector-runner";
 /** «Маша, Мария Петровна» → ["Маша", "Мария Петровна"]. */
 const splitNames = (text: string) => text.split(/[,;\n]/).map(n => n.trim()).filter(Boolean);
 import type { RootStackParams } from "../navigation";
+import { AttachmentView } from "../media/AttachmentView";
 import { useTheme } from "../theme";
 
 export function MemoryNoteScreen() {
@@ -148,6 +149,7 @@ export function MemoryNoteScreen() {
         {modelTerms.length ? <Text accessibilityLabel="Слова, подобранные моделью" style={{ color: t.muted, fontSize: 12, lineHeight: 18 }}>Подобрала модель: {modelTerms.join(", ")}. Обновятся после правки текста.</Text> : null}
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}><VoiceInput value={body} onChange={setBody} disabled={busy} onError={setError} /><Text style={{ color: t.muted }}>Надиктовать запись</Text></View>
         <Pressable accessibilityRole="button" accessibilityLabel="Сохранить запись" disabled={busy || (!title.trim() && !body.trim())} onPress={() => void save()} style={{ ...button, backgroundColor: t.accent, alignItems: "center" }}><Text style={{ color: "#fff", fontWeight: "700" }}>{busy ? "Сохранение…" : "Сохранить запись"}</Text></Pressable>
+        {selected && profile ? <AttachmentView profile={profile} entityId={selected.id} /> : null}
         {selected ? <>
           <Pressable accessibilityRole="button" accessibilityLabel="История, события и связи" accessibilityState={{ expanded: details }} onPress={() => details ? setDetails(false) : void loadDetails()} style={{ ...button, backgroundColor: t.soft }}><Text style={{ color: t.text }}>История, события и связи {details ? "⌃" : "⌄"}</Text></Pressable>
           {details ? <View style={{ gap: 12, padding: 16, borderWidth: 1, borderColor: t.line, borderRadius: 20 }}>

@@ -9,7 +9,7 @@ jest.mock("expo-file-system/legacy", () => ({
 }));
 jest.mock("expo-sharing", () => ({ isAvailableAsync: jest.fn(), shareAsync: jest.fn() }));
 jest.mock("../storage", () => ({
-  LOCAL_MEMORY_SCHEMA_VERSION: 3,
+  LOCAL_MEMORY_SCHEMA_VERSION: 4,
   withLocalMemoryDatabase: jest.fn(async (_id: string, task: (db: unknown) => Promise<unknown>) => task(mockDb)),
 }));
 
@@ -81,7 +81,7 @@ test("export SQLCipher-encrypts a new independent file before sharing and erases
     "/cache/pia-encrypted-random-id.db", code,
   ]);
   expect(mockDb.getFirstAsync).toHaveBeenCalledWith("SELECT sqlcipher_export('pia_export')");
-  expect(mockDb.execAsync).toHaveBeenCalledWith("PRAGMA pia_export.user_version = 3");
+  expect(mockDb.execAsync).toHaveBeenCalledWith("PRAGMA pia_export.user_version = 4");
   expect(mockDb.execAsync).toHaveBeenCalledWith("DETACH DATABASE pia_export");
   expect(Sharing.shareAsync).toHaveBeenCalledTimes(1);
   expect(FS.deleteAsync).toHaveBeenCalledWith("file:///cache/pia-encrypted-random-id.db", {
@@ -146,7 +146,7 @@ test("rejects unknown schema or oversized import before any transaction", async 
     .rejects.toThrow("incompatible_backup_schema");
   expect(mockDb.execAsync.mock.calls.some(([sql]: string[]) => sql.startsWith("INSERT INTO"))).toBe(false);
   (FS.getInfoAsync as jest.Mock).mockResolvedValueOnce({
-    exists: true, size: 200 * 1024 * 1024, isDirectory: false,
+    exists: true, size: 3 * 1024 * 1024 * 1024, isDirectory: false,
   });
   await expect(restoreEncryptedBackup("guest", "file:///huge.db", code))
     .rejects.toThrow("invalid_backup_size");
@@ -190,9 +190,21 @@ test.each([1, 2, 3])("restores deployed schema v%s including chats into the upgr
   expect(mockDb.execAsync.mock.calls.map(([sql]) => sql)).toContainEqual(expect.stringContaining("INSERT OR IGNORE INTO direct_conversations"));
 });
 
-test.each([0, 4])("rejects unsupported backup schema v%s before copying any memory", async version => {
+test.each([0, 5])("rejects unsupported backup schema v%s before copying any memory", async version => {
   const read = mockDb.getFirstAsync.getMockImplementation()!;
   mockDb.getFirstAsync.mockImplementation(async sql => sql === "PRAGMA pia_import.user_version" ? { user_version: version } : read(sql));
   await expect(restoreEncryptedBackup("guest", "file:///backup.db", code)).rejects.toThrow("incompatible_backup_version");
   expect(mockDb.execAsync.mock.calls.some(([sql]) => sql.startsWith("INSERT INTO"))).toBe(false);
+});
+
+
+test("v4 restores original metadata and bytes in the same transaction", async () => {
+  const read = mockDb.getFirstAsync.getMockImplementation()!;
+  mockDb.getFirstAsync.mockImplementation(async sql => sql === "PRAGMA pia_import.user_version" ? { user_version: 4 } : read(sql));
+  tablesOnce([...names, "memory_attachments", "memory_attachment_parts"]);
+  await restoreEncryptedBackup("guest", "file:///backup.db", code);
+  const statements = mockDb.execAsync.mock.calls.map(([sql]) => sql);
+  expect(statements).toContain("INSERT INTO memory_attachments SELECT * FROM pia_import.memory_attachments");
+  expect(statements).toContain("INSERT INTO memory_attachment_parts SELECT * FROM pia_import.memory_attachment_parts");
+  expect(statements.indexOf("COMMIT")).toBeGreaterThan(statements.indexOf("INSERT INTO memory_attachment_parts SELECT * FROM pia_import.memory_attachment_parts"));
 });

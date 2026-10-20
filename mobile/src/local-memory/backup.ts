@@ -29,8 +29,8 @@ const V3_TABLES = {
 } as const;
 const ENTITY_COLUMNS = "id,collection_id,domain,schema_version,title,payload_json,record_status,sensitivity," +
   "source_kind,source_ref,valid_from,valid_until,created_at,updated_at,record_version";
-export const RESTORABLE_VERSIONS = [1, 2, 3];
-const MAX_BACKUP_BYTES = 150 * 1024 * 1024;
+export const RESTORABLE_VERSIONS = [1, 2, 3, 4];
+const MAX_BACKUP_BYTES = 2 * 1024 * 1024 * 1024;
 
 function checkedRecoveryCode(value: string): string {
   const code = value.trim().toLowerCase();
@@ -183,6 +183,12 @@ export async function restoreEncryptedBackup(
           if (!typed) await tx.execAsync("UPDATE memory_entities SET kind='person' WHERE collection_id IN (SELECT id FROM memory_collections WHERE slug='people')");
           for (const [table, columns] of Object.entries(V3_TABLES)) {
             if (available.has(table)) await tx.execAsync(`INSERT INTO ${table}(${columns}) SELECT ${columns} FROM pia_import.${table}`);
+          }
+          if (version.user_version >= 4) {
+            for (const table of ["memory_attachments", "memory_attachment_parts"] as const) {
+              if (!available.has(table)) throw new Error("incompatible_backup_schema");
+              await tx.execAsync(`INSERT INTO ${table} SELECT * FROM pia_import.${table}`);
+            }
           }
           // Chunks and the search index are derived: rebuilt here from the
           // restored records, so a backup can never carry a mismatched index.

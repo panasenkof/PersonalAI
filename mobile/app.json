@@ -12,7 +12,29 @@
     "plugins": [
       "expo-secure-store",
       "expo-status-bar",
-      "expo-sharing",
+      [
+        "expo-sharing",
+        {
+          "android": {
+            "enabled": true,
+            "singleShareMimeTypes": [
+              "image/*",
+              "audio/*",
+              "video/*",
+              "text/*",
+              "application/json"
+            ],
+            "multipleShareMimeTypes": [
+              "image/*",
+              "audio/*",
+              "video/*"
+            ]
+          },
+          "ios": {
+            "enabled": false
+          }
+        }
+      ],
       [
         "expo-local-authentication",
         {
@@ -69,6 +91,7 @@
         "backgroundColor": "#F8FAFF"
       }
     },
-    "description": "Ваш помощник для диалогов, документов и личной базы знаний"
+    "description": "Ваш помощник для диалогов, документов и личной базы знаний",
+    "scheme": "persai"
   }
 }

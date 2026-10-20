@@ -11,17 +11,10 @@ import type { Timeouts } from "../direct-agent/net";
 /** Uploading audio or images and reading them can take a few minutes. */
 const LONG_TIMEOUTS: Timeouts = { connectMs: 30_000, idleMs: 180_000, totalMs: 180_000 };
 
-export type ImportFile = { uri: string; name: string; mimeType?: string | null; size?: number; duration?: number };
-export type MediaKind = "image" | "audio" | "video" | "text";
-export function mediaKind(file: ImportFile): MediaKind {
-  const mime = file.mimeType || "";
-  const ext = file.name.split(".").pop()?.toLowerCase();
-  if (mime.startsWith("image/") || ["jpg", "jpeg", "png", "webp", "gif"].includes(ext || "")) return "image";
-  if (mime.startsWith("audio/") || ["mp3", "m4a", "wav", "ogg", "flac", "aac"].includes(ext || "")) return "audio";
-  if (mime.startsWith("video/") || ["mp4", "mov", "webm", "mkv"].includes(ext || "")) return "video";
-  if (mime.startsWith("text/") || ["txt", "md", "csv", "json", "log", "srt", "vtt"].includes(ext || "")) return "text";
-  throw new Error("Выберите изображение, аудио, видео или текстовый файл.");
-}
+import { mediaKind } from "./kinds";
+import type { ImportFile, MediaKind } from "./kinds";
+export { mediaKind } from "./kinds";
+export type { ImportFile, MediaKind } from "./kinds";
 function check(signal?: AbortSignal) { if (signal?.aborted) throw new Error("Разбор файла остановлен"); }
 async function fileSize(file: ImportFile, max: number) {
   // Imports are local files, never untrusted remote URLs with credentials.

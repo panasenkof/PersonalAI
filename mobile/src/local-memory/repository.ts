@@ -121,7 +121,7 @@ export class SqliteMemoryRepository implements MemoryRepository {
     return page(rows.map(entityFrom), limit, offset);
   }
 
-  async createEntity(item: NewEntity): Promise<EntityRecord> {
+  async createEntity(item: NewEntity, writeAttachment?: (tx: SQL, entityId: string) => Promise<void>): Promise<EntityRecord> {
     const collection = await this.db.getFirstAsync<Row>(
       "SELECT id, slug FROM memory_collections WHERE id = ?", [item.collection_id],
     );
@@ -148,6 +148,7 @@ export class SqliteMemoryRepository implements MemoryRepository {
           record.source_kind, record.source_ref, record.valid_from, null, timestamp, timestamp, 1, kind],
       );
       await indexEntity(tx, id, timestamp);
+      if (writeAttachment) await writeAttachment(tx, id);
     });
     return record;
   }
