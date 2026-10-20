@@ -3,7 +3,8 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, Linking, Platform, Pressable, Text, View } from 'react-native';
 import * as Sharing from 'expo-sharing';
 import * as Crypto from 'expo-crypto';
-import { File } from 'expo-file-system';
+import { Directory, File, Paths } from 'expo-file-system';
+import { copyAsync } from 'expo-file-system/legacy';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useProfile } from '../profile/ProfileContext';
 import { useApplicationVisible } from '../security/visibility';
@@ -20,14 +21,26 @@ export async function receiveShares(profile: string, payloads: Sharing.SharePayl
     const text = payload.shareType === 'text' || payload.shareType === 'url';
     if (!payload.value || (text && payload.value.length > 60_000)) throw new Error('Пустой или слишком длинный входящий текст (максимум 60 000 символов).');
     let stage = 'SHARE-HASH';
+    let staged: File | undefined;
     try {
       const receipt = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, JSON.stringify(payload));
       stage = 'SHARE-FILE';
-      const file = text ? undefined : new File(payload.value);
+      const original = text ? undefined : new File(payload.value);
+      if (original && payload.value.startsWith('content://')) {
+        // Generic Gallery/FileProvider URIs are not SAF document/tree URIs.
+        // Legacy copy uses ContentResolver.openInputStream without DocumentFile metadata.
+        stage = 'SHARE-COPY';
+        const dir = new Directory(Paths.cache, 'persai-incoming');
+        dir.create({ intermediates: true, idempotent: true });
+        staged = new File(dir, Crypto.randomUUID());
+        await copyAsync({ from: payload.value, to: staged.uri });
+        if (signal?.aborted || !localMemorySessionUnlocked()) throw new Error('Приём остановлен. Повторите после разблокировки.');
+      }
+      const file = staged || original;
       stage = text ? 'SHARE-SAVE-TEXT' : 'SHARE-SAVE-MEDIA';
       ids.push(await saveMediaNote(profile, {
-        file: file ? { uri: file.uri, name: file.name || 'Входящий файл', mimeType: payload.mimeType } : undefined,
-        title: file?.name || (payload.shareType === 'url' ? 'Ссылка' : payload.value.split('\n')[0].slice(0, 160)),
+        file: file ? { uri: file.uri, name: original?.name || 'Входящий файл', mimeType: payload.mimeType } : undefined,
+        title: original?.name || (payload.shareType === 'url' ? 'Ссылка' : payload.value.split('\n')[0].slice(0, 160)),
         body: text ? payload.value : '', sensitivity: 'sensitive', receipt,
       }, signal));
     } catch (error) {
@@ -35,6 +48,8 @@ export async function receiveShares(profile: string, payloads: Sharing.SharePayl
       const fallback = memoryErrorMessage(undefined);
       // Only a fixed stage code leaves this boundary: native errors can contain private URIs or SQL.
       throw new Error(`${message === fallback ? 'Не удалось сохранить материал.' : message} Код: ${stage}; элемент ${ids.length + 1}/${payloads.length}.`);
+    } finally {
+      if (staged?.exists) staged.delete();
     }
   }
   return ids;
