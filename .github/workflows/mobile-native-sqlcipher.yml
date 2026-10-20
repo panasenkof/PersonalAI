@@ -22,6 +22,7 @@ jobs:
     env:
       # Phones are arm64; skipping emulator ABIs halves native compile time.
       ORG_GRADLE_PROJECT_reactNativeArchitectures: arm64-v8a
+      RNET_TARGET: android-arm64-v8a
     defaults:
       run:
         working-directory: mobile

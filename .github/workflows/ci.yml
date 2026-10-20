@@ -24,6 +24,9 @@ jobs:
           cache: npm
           cache-dependency-path: mobile/package-lock.json
       - name: Install
+        env:
+          # JS tests and bundle do not execute the native runtime. Native CI downloads it separately.
+          RNET_SKIP_DOWNLOAD: '1'
         run: npm ci --no-audit --no-fund
       - name: Typecheck
         run: npx tsc --noEmit
