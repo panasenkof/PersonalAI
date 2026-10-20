@@ -10,7 +10,11 @@ export const MAX_ORIGINAL_BYTES = 80 * 1024 * 1024;
 const PART_BYTES = 256 * 1024;
 export type Attachment = { id: string; entity_id: string; name: string; mime: string; size: number };
 const previewDirectory = () => new Directory(Paths.cache, 'persai-previews');
-export function clearAttachmentPreviews() { const dir = previewDirectory(); if (dir.exists) dir.delete(); }
+export function clearAttachmentPreviews() {
+  for (const dir of [previewDirectory(), new Directory(Paths.cache, 'persai-incoming')]) {
+    if (dir.exists) dir.delete();
+  }
+}
 function check(signal?: AbortSignal) {
   if (signal?.aborted) throw new Error('Сохранение файла остановлено.');
   if (!localMemorySessionUnlocked()) throw new Error('application_locked');
