@@ -7,6 +7,10 @@ on:
       - "mobile/**"
       - ".github/workflows/mobile-native-sqlcipher.yml"
 
+concurrency:
+  group: native-sqlcipher-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -18,6 +22,7 @@ jobs:
     env:
       # Phones are arm64; skipping emulator ABIs halves native compile time.
       ORG_GRADLE_PROJECT_reactNativeArchitectures: arm64-v8a
+      RNET_TARGET: android-arm64-v8a
     defaults:
       run:
         working-directory: mobile
@@ -32,6 +37,10 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+      - name: Reuse trusted Gradle cache (PR cannot write)
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: true
       - uses: android-actions/setup-android@v3
         with:
           # The Android SDK removed the obsolete "tools" package, which this
@@ -43,8 +52,6 @@ jobs:
         run: npx expo prebuild --platform android --no-install --clean
       - name: Local models over http:// are allowed by the manifest
         run: grep -q 'android:usesCleartextTraffic="true"' android/app/src/main/AndroidManifest.xml
-      - name: Compile Android debug APK with native modules
-        run: cd android && ./gradlew :app:assembleDebug --no-daemon --stacktrace
       - name: Compile standalone release APK with an ephemeral CI-only signing key
         env:
           PIA_ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/pia-ephemeral-qa.p12
@@ -59,7 +66,7 @@ jobs:
             -dname 'CN=PersAI CI Test,O=Ephemeral QA,C=US'
           node scripts/prepare-android-release.cjs
           cd android
-          ./gradlew :app:assembleRelease --no-daemon --stacktrace
+          ./gradlew :app:assembleRelease --build-cache --no-configuration-cache --no-daemon --stacktrace
           test -s app/build/outputs/apk/release/app-release.apk
           unzip -Z1 app/build/outputs/apk/release/app-release.apk | grep -Fx 'assets/index.android.bundle'
           apksigner="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
@@ -68,7 +75,7 @@ jobs:
 
       - name: Validate native APK archive
         run: |
-          APK=android/app/build/outputs/apk/debug/app-debug.apk
+          APK=android/app/build/outputs/apk/release/app-release.apk
           test -s "$APK"
           unzip -t "$APK" >/dev/null
           # On-device Whisper: the ExecuTorch runtime and its CPU backend are packaged.
@@ -76,10 +83,3 @@ jobs:
             unzip -Z1 "$APK" | grep -Fx "lib/arm64-v8a/$lib"
           done
           echo "APK generated and archive verified: $APK"
-      - name: Store APK for on-device SQLCipher runtime QA
-        uses: actions/upload-artifact@v4
-        with:
-          name: pia-sqlcipher-debug-apk
-          path: mobile/android/app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
-          retention-days: 7
