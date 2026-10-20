@@ -13,6 +13,10 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
     build.onResolve({ filter: /^react-native$/ }, () => ({ path: path.join(qa, 'native.ts') }));
     build.onResolve({ filter: /^react-native-safe-area-context$/ }, () => ({ path: path.join(qa, 'safe-area.tsx') }));
     build.onResolve({ filter: /^\.\/conversations$/ }, args => args.importer.includes('/direct-agent/') ? ({ path: path.join(qa, 'conversations.ts') }) : undefined);
+    // UI acceptance runs without SQLCipher: only the file-import screen gets
+    // a browser-backed save implementation; native attachment code remains real.
+    build.onResolve({ filter: /^\.\.\/media\/attachments$/ }, args =>
+      args.importer.includes('/screens/MemoryImportScreen.') ? ({ path: path.join(qa, 'media-attachments.ts') }) : undefined);
     build.onResolve({ filter: /^\.\/storage$/ }, args => args.importer.includes('/local-memory/') ? ({ path: path.join(qa, 'adapters.tsx') }) : undefined);
     build.onResolve({ filter: /local-memory\/storage$/ }, () => ({ path: path.join(qa, 'adapters.tsx') }));
     build.onResolve({ filter: /local-memory\/repository$/ }, () => ({ path: path.join(qa, 'repository.ts') }));
