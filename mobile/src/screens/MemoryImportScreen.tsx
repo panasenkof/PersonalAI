@@ -9,7 +9,7 @@ import { ActivityIndicator, Image, KeyboardAvoidingView, Platform, Pressable, Sc
 import { useProfile } from "../profile/ProfileContext";
 import { loadDirectConnections, anonymousLocalAllowed, defaultDirectPreferences } from "../direct-agent/settings";
 import type { DirectConnection } from "../direct-agent/settings";
-import { localMemoryRepository } from "../local-memory/repository";
+import { saveMediaNote } from "../media/attachments";
 import { extractMedia, mediaKind } from "../media/extract";
 import type { ImportFile } from "../media/extract";
 import type { RootStackParams } from "../navigation";
@@ -78,17 +78,11 @@ export function MemoryImportScreen() {
     finally { if (alive.current) setBusy(false); if (controller.current === aborter) controller.current = null; }
   }
   async function save() {
-    if (!profile || !file || busy || !body.trim()) return;
+    if (!profile || !file || busy) return;
     setBusy(true); setNotice("");
     try {
-      const repo = await localMemoryRepository(profile);
-      const cols = await repo.listCollections();
-      let col = cols.find(c => c.slug === "notes");
-      if (!col) col = await repo.createCollection({ name: "Заметки", slug: "notes", sensitivity: "standard" });
-      await repo.createEntity({ collection_id: col.id, domain: "notes", title: title.trim().slice(0, 160),
-        payload: { type: "note", title: title.trim().slice(0, 160), body: body.trim(), source_file: file.name, source_media: kind },
-        sensitivity: classification, source_kind: "user", source_ref: "device-import",
-      });
+      const aborter = new AbortController(); controller.current = aborter;
+      await saveMediaNote(profile, { file, title, body, sensitivity: classification }, aborter.signal);
       scheduleIndexTerms(profile); scheduleVectors(profile);
       if (alive.current) navigation.goBack();
     } catch (e) { if (alive.current) setNotice("Не удалось сохранить: " + memoryErrorMessage(e)); }
@@ -97,7 +91,7 @@ export function MemoryImportScreen() {
   return <KeyboardAvoidingView style={{ flex: 1, backgroundColor: t.bg }} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={header}>
     <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentContainerStyle={{ padding: 18, gap: 15, paddingBottom: insets.bottom + 24 }}>
       <Text style={{ color: t.text, fontSize: 27, fontWeight: "800" }}>Сведения из файла</Text>
-      <Text style={{ color: t.muted, lineHeight: 21 }}>Извлеките текст и полезные сведения, проверьте результат и сохраните заметку в памяти телефона.</Text>
+      <Text style={{ color: t.muted, lineHeight: 21 }}>Сохраните оригинал в памяти телефона. Разбор и добавление текста необязательны.</Text>
       <Pressable disabled={busy} accessibilityRole="button" accessibilityLabel="Выбрать файл для памяти" style={button} onPress={() => void pick()}>
         <Text style={{ color: "#fff", fontWeight: "700" }}>{file ? "Выбрать другой файл" : "Выбрать фото, аудио, видео или текст"}</Text>
       </Pressable>
@@ -122,17 +116,17 @@ export function MemoryImportScreen() {
           <Text style={{ color: "#fff", fontWeight: "700" }}>{kind === "text" ? "Прочитать текст на телефоне" : localAudio ? "Распознать речь на телефоне" : "Передать файл провайдеру и разобрать"}</Text>
         </Pressable>
       </View> : null}
-      {busy ? <><ActivityIndicator /><Pressable accessibilityRole="button" onPress={() => controller.current?.abort()} style={{ minHeight: 44 }}><Text style={{ color: t.err }}>Остановить разбор</Text></Pressable></> : null}
+      {busy ? <><ActivityIndicator /><Pressable accessibilityRole="button" onPress={() => controller.current?.abort()} style={{ minHeight: 44 }}><Text style={{ color: t.err }}>Остановить</Text></Pressable></> : null}
       {notice ? <Text accessibilityRole="alert" style={{ color: t.muted }}>{notice}</Text> : null}
       {file ? <>
         <Text style={{ color: t.text, fontWeight: "600" }}>Название заметки</Text>
         <TextInput accessibilityLabel="Название импортируемой заметки" editable={!busy} value={title} onChangeText={setTitle} style={field} />
         <Text style={{ color: t.text, fontWeight: "600" }}>Проверьте сведения</Text>
         <TextInput accessibilityLabel="Сведения из файла" editable={!busy} multiline value={body} onChangeText={setBody} maxLength={60_000} style={[field, { minHeight: 200, textAlignVertical: "top" }]} placeholder="Результат разбора или ваш текст" placeholderTextColor={t.muted} />
-        <Pressable disabled={busy || !body.trim()} accessibilityRole="button" accessibilityLabel="Сохранить сведения в память" style={[button, { opacity: body.trim() ? 1 : .5 }]} onPress={() => void save()}>
+        <Pressable disabled={busy} accessibilityRole="button" accessibilityLabel="Сохранить сведения в память" style={[button, { opacity: busy ? .5 : 1 }]} onPress={() => void save()}>
           <Text style={{ color: "#fff", fontWeight: "700" }}>Сохранить сведения в память</Text>
         </Pressable>
-        <Text style={{ color: t.muted, fontSize: 12 }}>Сохраняется текст и имя источника. Исходный медиафайл в резервную копию заметок не входит.</Text>
+        <Text style={{ color: t.muted, fontSize: 12 }}>Оригинал сохраняется на телефоне в зашифрованной памяти и входит в резервную копию. Текст можно добавить сейчас или позже. Максимум — 80 МБ на файл.</Text>
       </> : null}
     </ScrollView>
   </KeyboardAvoidingView>;

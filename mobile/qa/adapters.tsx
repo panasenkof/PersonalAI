@@ -54,7 +54,7 @@ export function useSpeechRecognitionEvent(event: string, fn: (value: any) => voi
 }
 export default { expoConfig: { version: "0.3.0-qa", extra: { apiBase: "", buildSha: "qa" } } };
 
-export const LOCAL_MEMORY_SCHEMA_VERSION = 3;
+export const LOCAL_MEMORY_SCHEMA_VERSION = 4;
 export const localMemoryIdentity = async () => ({ databaseName: "qa.db", keyName: "qa" });
 export const withLocalMemoryDatabase = async () => { throw new Error("Native SQLCipher backups require an actual phone."); };
 
@@ -73,3 +73,16 @@ export const AudioManager = { requestRecordingPermissions: async () => "Denied",
 export class AudioRecorder { onAudioReady() {} clearOnAudioReady() {} async start() { return { status: "error", message: "web" }; } async stop() {} }
 export const fs = { unlink: async () => {} };
 export class AsyncLocalStorage<T> { getStore(): T | undefined { return undefined; } run<R>(_store: T, fn: () => R): R { return fn(); } }
+
+
+// New native media interfaces: browser checks do not claim codec/SQLCipher coverage.
+export const Paths = { cache: "file:///qa-cache/" };
+export const FileMode = { ReadOnly: "r", WriteOnly: "w" };
+export class Directory { exists = false; constructor(..._parts: unknown[]) {} delete() {} }
+export class File { constructor(..._parts: unknown[]) {} }
+export const getSharedPayloads = () => [];
+export const clearSharedPayloads = () => {};
+export const getResolvedSharedPayloadsAsync = async () => [];
+export const useVideoPlayer = () => null;
+export const VideoView = () => null;
+export const shareAsync = async () => { throw new Error('Native sharing requires an actual phone.'); };

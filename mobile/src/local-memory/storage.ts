@@ -42,7 +42,7 @@ export function onLocalMemorySessionChange(listener: (unlocked: boolean) => void
 }
 export const localMemorySessionUnlocked = () => applicationSessionUnlocked;
 const requireApplicationSession = () => { if (!applicationSessionUnlocked) throw new Error("application_locked"); };
-export const LOCAL_MEMORY_SCHEMA_VERSION = 3;
+export const LOCAL_MEMORY_SCHEMA_VERSION = 4;
 const KIND_CHECK = `CHECK(kind IN (${MEMORY_KINDS.map(k => `'${k}'`).join(",")}))`;
 
 /** All memory (including full-text indexes, revisions, and WAL) is in SQLCipher. */
@@ -66,6 +66,18 @@ CREATE TABLE IF NOT EXISTS memory_entities (
   kind TEXT NOT NULL DEFAULT 'note' ${KIND_CHECK}
 );
 CREATE INDEX IF NOT EXISTS ix_memory_entities_collection ON memory_entities(collection_id, created_at);
+CREATE TABLE IF NOT EXISTS memory_attachments (
+  id TEXT PRIMARY KEY, entity_id TEXT NOT NULL REFERENCES memory_entities(id) ON DELETE CASCADE,
+  name TEXT NOT NULL, mime TEXT NOT NULL, size INTEGER NOT NULL CHECK(size > 0),
+  created_at TEXT NOT NULL, UNIQUE(entity_id)
+);
+CREATE TABLE IF NOT EXISTS memory_attachment_parts (
+  attachment_id TEXT NOT NULL REFERENCES memory_attachments(id) ON DELETE CASCADE,
+  ord INTEGER NOT NULL, bytes BLOB NOT NULL, sha256 TEXT NOT NULL, PRIMARY KEY(attachment_id, ord)
+);
+CREATE TABLE IF NOT EXISTS memory_received_shares (
+  fingerprint TEXT PRIMARY KEY, entity_id TEXT NOT NULL REFERENCES memory_entities(id) ON DELETE CASCADE
+);
 CREATE TABLE IF NOT EXISTS memory_observations (
   id TEXT PRIMARY KEY, entity_id TEXT NOT NULL REFERENCES memory_entities(id) ON DELETE CASCADE,
   kind TEXT NOT NULL, payload_json TEXT NOT NULL, occurred_at TEXT NOT NULL,

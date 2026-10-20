@@ -98,7 +98,7 @@ test.each([false, true])("upgrading an installed v1 database (chats=%s) opens a 
   expect(await repo.revisions("entity", "note")).toHaveLength(1);
   expect(await repo.listCollections()).toMatchObject([{ id: "recipes", name: "Рецепты" }]);
   expect(mockVault.get(identity.keyName)).toBe("6".repeat(64));
-  expect(mockConnections[0].sqlite.prepare("PRAGMA user_version").get()).toMatchObject({ user_version: 3 });
+  expect(mockConnections[0].sqlite.prepare("PRAGMA user_version").get()).toMatchObject({ user_version: 4 });
   await closeLocalMemory();
   const reopened = conversationRepository("guest");
   expect((await reopened.load()).find(c => c.question === "Можно ввести сообщение")).toBeTruthy();
@@ -148,7 +148,7 @@ test("upgrading v2 to v3 types the records, splits long text into chunks and sea
   await installationV2();
   const repo = await localMemoryRepository("guest");
   const db = mockConnections[0].sqlite;
-  expect(db.prepare("PRAGMA user_version").get()).toMatchObject({ user_version: 3 });
+  expect(db.prepare("PRAGMA user_version").get()).toMatchObject({ user_version: 4 });
   expect(await repo.entity("masha")).toMatchObject({ kind: "person", title: "Маша", record_version: 1 });
   expect(await repo.entity("dacha")).toMatchObject({ kind: "note" });
   expect(db.prepare("SELECT count(*) AS n FROM memory_chunks WHERE entity_id='dacha'").get().n).toBeGreaterThan(1);

@@ -3,7 +3,10 @@ import type { NavigatorScreenParams } from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { DarkTheme, DefaultTheme, NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
-import React from "react";
+import React, { useEffect } from "react";
+import { createNavigationContainerRef } from "@react-navigation/native";
+import { IncomingShares } from "./media/IncomingShares";
+import { clearAttachmentPreviews } from "./media/attachments";
 import { useColorScheme } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -27,6 +30,7 @@ export type RootStackParams = {
   MemoryImport: undefined;
   DiagnosticLogs: undefined;
 };
+const navigationRef = createNavigationContainerRef<RootStackParams>();
 const Stack = createNativeStackNavigator<RootStackParams>();
 const Tab = createBottomTabNavigator<TabParams>();
 
@@ -59,10 +63,12 @@ function Tabs() {
   );
 }
 export function RootNavigator() {
+  useEffect(() => { clearAttachmentPreviews(); }, []);
   const dark = useColorScheme() === "dark";
   const t = useTheme();
   return (
-    <NavigationContainer theme={dark ? DarkTheme : DefaultTheme}>
+    <NavigationContainer ref={navigationRef} theme={dark ? DarkTheme : DefaultTheme}>
+      <IncomingShares open={id => { if (navigationRef.isReady()) navigationRef.navigate("MemoryNote", { entityId: id }); }} />
       <Stack.Navigator screenOptions={{
         headerStyle: { backgroundColor: t.panel }, headerTintColor: t.text,
       }}>
