@@ -21,6 +21,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
       - name: Install
         run: npm ci --no-audit --no-fund
       - name: Typecheck
@@ -32,8 +34,8 @@ jobs:
         run: node --test scripts/prepare-android-release.test.cjs scripts/apk-signing-certificate.test.cjs
       - name: Expo dependency compatibility
         run: npx expo install --check
-      - name: Bundle both native platforms
-        run: npx expo export --platform android --platform ios --output-dir /tmp/native-export
+      - name: Bundle Android (current release target)
+        run: npx expo export --platform android --output-dir /tmp/native-export
       - name: Browser acceptance of production screens
         run: |
           npx playwright install --with-deps chromium

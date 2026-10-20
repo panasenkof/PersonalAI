@@ -1,4 +1,4 @@
-name: Publish Android test APK
+name: Publish Android release APK
 
 # The privileged build only checks out a successful main-branch CI commit.
 on:
@@ -11,10 +11,6 @@ permissions:
   contents: write
   actions: read
 
-concurrency:
-  group: android-test-publish
-  cancel-in-progress: false
-
 jobs:
   publish:
     name: Signed standalone APK
@@ -25,6 +21,10 @@ jobs:
        github.event.workflow_run.event == 'push' &&
        github.event.workflow_run.head_branch == 'main' &&
        github.event.workflow_run.head_repository.full_name == github.repository)
+    # Only eligible main builds enter the queue; PR workflow_run events cannot replace pending releases.
+    concurrency:
+      group: android-test-publish
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     # The Whisper runtime (react-native-executorch) compiles a large C++ library.
     timeout-minutes: 90
@@ -106,20 +106,21 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - name: Cache Gradle dependencies and reusable build outputs
+        if: steps.changes.outputs.needed == 'true'
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
+
       - uses: android-actions/setup-android@v3
         if: steps.changes.outputs.needed == 'true'
         with:
           packages: platform-tools
 
-      - name: Install exact JS dependencies and check release tooling
+      - name: Install exact JS dependencies (checks already passed in CI)
         if: steps.changes.outputs.needed == 'true'
         working-directory: mobile
-        run: |
-          npm ci --no-audit --no-fund
-          node --test scripts/prepare-android-release.test.cjs
-          node --test scripts/apk-signing-certificate.test.cjs
-          npm run typecheck
-          npm test -- --runInBand
+        run: npm ci --no-audit --no-fund
 
       - name: Compute strictly increasing Android build number
         if: steps.changes.outputs.needed == 'true'
@@ -170,7 +171,7 @@ jobs:
           PIA_ANDROID_KEY_ALIAS: ${{ secrets.PIA_ANDROID_KEY_ALIAS }}
           PIA_ANDROID_STORE_PASSWORD: ${{ secrets.PIA_ANDROID_STORE_PASSWORD }}
           PIA_ANDROID_KEY_PASSWORD: ${{ secrets.PIA_ANDROID_KEY_PASSWORD }}
-        run: ./gradlew :app:assembleRelease --no-daemon --stacktrace
+        run: ./gradlew :app:assembleRelease --build-cache --no-configuration-cache --no-daemon --stacktrace
 
       - name: Verify APK, embedded JS and signing certificate
         if: steps.changes.outputs.needed == 'true'
