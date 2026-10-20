@@ -4,6 +4,7 @@ import { Platform } from 'react-native';
 import { IncomingShares, receiveShares } from '../IncomingShares';
 import { saveMediaNote } from '../attachments';
 import * as Sharing from 'expo-sharing';
+jest.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 24, bottom: 0, left: 0, right: 0 }) }));
 let mockVisible = true;
 let mockUnlocked = true;
 jest.mock('../../profile/ProfileContext', () => ({ useProfile: () => 'guest' }));
@@ -37,4 +38,17 @@ test('failed group is retained for retry and does not claim success', async () =
   expect(Sharing.clearSharedPayloads).not.toHaveBeenCalled();
   fireEvent.press(screen.getByText('Повторить приём'));
   await waitFor(() => expect(Sharing.clearSharedPayloads).toHaveBeenCalledTimes(1));
+});
+
+test('native errors reveal only a stage code, retain payload and respect status bar', async () => {
+  (Sharing.getSharedPayloads as jest.Mock).mockReturnValue([{ shareType: 'image', value: 'content://private/photo', mimeType: 'image/jpeg' }]);
+  (saveMediaNote as jest.Mock).mockRejectedValueOnce(new Error('SQL INSERT secret content://private/photo'));
+  const screen = render(<IncomingShares open={jest.fn()} />);
+  await waitFor(() => expect(screen.getByText(/SHARE-SAVE-MEDIA/)).toBeTruthy());
+  expect(screen.queryByText(/secret/)).toBeNull();
+  expect(Sharing.clearSharedPayloads).not.toHaveBeenCalled();
+  expect(screen.getByTestId('incoming-share-notice').props.style.paddingTop).toBe(32);
+  fireEvent.press(screen.getByText('Скрыть'));
+  expect(screen.queryByTestId('incoming-share-notice')).toBeNull();
+  expect(Sharing.clearSharedPayloads).not.toHaveBeenCalled();
 });
