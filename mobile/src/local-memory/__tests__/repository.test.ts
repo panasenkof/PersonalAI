@@ -340,3 +340,52 @@ test('merge preserves originals, sources and contradictory text; undo restores o
   await expect(repo.undoNotes(again)).rejects.toThrow();
   expect((await repo.entity(a.id))?.payload.body).toBe('Новая правка');
 });
+
+
+test("semantic search rejects stale title vectors and late inference after edits", async () => {
+  const repo = new SqliteMemoryRepository(new FakeSqlite() as never);
+  const col = await repo.createCollection({ name: "Notes", slug: "notes" });
+  const note = await repo.createEntity({ collection_id: col.id, domain: "notes", title: "Coffee", payload: { body: "details" } });
+  const [old] = await repo.pendingVectorChunks("toy");
+  const vector = new Float32Array([1, 0]);
+  await repo.saveVectors("toy", [{ ...old, vector }]);
+  expect(await repo.vectorMatches("toy", vector)).toHaveLength(1);
+  await repo.reviseEntity(note.id, 1, { title: "Road", body: "details" }, "rename");
+  expect(await repo.vectorMatches("toy", vector)).toEqual([]);
+  expect(await repo.saveVectors("toy", [{ ...old, vector }])).toBe(0);
+  const [fresh] = await repo.pendingVectorChunks("toy");
+  expect(await repo.saveVectors("toy", [{ ...fresh, vector: new Float32Array([NaN, 0]) }])).toBe(0);
+  expect(await repo.saveVectors("toy", [{ ...fresh, vector }])).toBe(1);
+  await repo.reviseEntity(note.id, 2, { title: "Road", body: "changed" }, "edit during inference");
+  expect(await repo.saveVectors("toy", [{ ...fresh, vector }])).toBe(0);
+  expect(await repo.vectorMatches("toy", vector)).toEqual([]);
+});
+
+test("semantic search follows move, trash, restore, merge, undo and permanent deletion", async () => {
+  const repo = new SqliteMemoryRepository(new FakeSqlite() as never);
+  const a = await repo.createCollection({ name: "A", slug: "a" });
+  const b = await repo.createCollection({ name: "B", slug: "b" });
+  const first = await repo.createEntity({ collection_id: a.id, domain: "notes", title: "First", payload: { body: "alpha" } });
+  const second = await repo.createEntity({ collection_id: a.id, domain: "notes", title: "Second", payload: { body: "beta" } });
+  const vector = new Float32Array([1, 0]);
+  const index = async () => repo.saveVectors("toy", (await repo.pendingVectorChunks("toy")).map(c => ({ ...c, vector })));
+  const ids = async (collectionIds?: string[]) => (await repo.vectorMatches("toy", vector, { collectionIds })).map(h => h.row.id);
+  const selected = async (id: string) => (await repo.entity(id))!;
+  await index();
+  await repo.changeNotes("move", [await selected(first.id)], b.id);
+  expect(await ids([a.id])).toEqual([second.id]);
+  expect(await ids([b.id])).toEqual([first.id]);
+  await repo.changeNotes("trash", [await selected(first.id)]);
+  expect(await ids()).toEqual([second.id]);
+  await repo.changeNotes("restore", [await selected(first.id)]);
+  expect((await ids()).sort()).toEqual([first.id, second.id].sort());
+  const merge = await repo.changeNotes("merge", [await selected(first.id), await selected(second.id)]);
+  await index();
+  expect(await ids()).toEqual([first.id]);
+  await repo.undoNotes(merge);
+  await index();
+  expect((await ids()).sort()).toEqual([first.id, second.id].sort());
+  await repo.changeNotes("trash", [await selected(first.id)]);
+  await repo.purgeNotes([await selected(first.id)]);
+  expect(await ids()).toEqual([second.id]);
+});

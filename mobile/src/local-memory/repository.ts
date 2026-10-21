@@ -466,12 +466,15 @@ export class SqliteMemoryRepository implements MemoryRepository {
     return out;
   }
 
-  /** Stores vectors computed on the phone; a chunk deleted meanwhile is skipped. */
+  /** Accept results only for the current text/title: edits may race inference. */
   async saveVectors(model: string, items: Array<{ chunkId: string; vector: Float32Array; hash: string }>): Promise<number> {
     let saved = 0;
     await withUnlockedTransaction(this.db, async tx => {
       for (const item of items) {
-        if (!await tx.getFirstAsync<Row>("SELECT id FROM memory_chunks WHERE id=?", [item.chunkId])) continue;
+        const current = await tx.getFirstAsync<Row>(
+          "SELECT c.text,e.title,e.record_status FROM memory_chunks c JOIN memory_entities e ON e.id=c.entity_id WHERE c.id=?", [item.chunkId]);
+        if (!current || current.record_status !== "active" || item.hash !== embeddingHash(TEXT(current.title), String(current.text))) continue;
+        if (!item.vector.length || !item.vector.every(Number.isFinite)) continue;
         await tx.runAsync("INSERT OR REPLACE INTO memory_vectors(chunk_id,model,dim,vector,content_hash) VALUES (?,?,?,?,?)",
           [item.chunkId, model, item.vector.length, toBlob(item.vector), item.hash]);
         saved++;
@@ -506,12 +509,13 @@ export class SqliteMemoryRepository implements MemoryRepository {
     }
     if (options.sensitivities) { filters.push(`e.sensitivity IN (${options.sensitivities.map(() => "?").join(",")})`); params.push(...options.sensitivities); }
     const rows = await this.db.getAllAsync<Row>(
-      `SELECT v.chunk_id, v.vector, c.entity_id FROM memory_vectors v JOIN memory_chunks c ON c.id=v.chunk_id
+      `SELECT v.chunk_id, v.vector, v.content_hash, c.entity_id, c.text, e.title FROM memory_vectors v JOIN memory_chunks c ON c.id=v.chunk_id
        JOIN memory_entities e ON e.id=c.entity_id WHERE v.model=? AND ${filters.join(" AND ")}`, params);
     const best = new Map<string, { chunkId: string; similarity: number }>();
     for (const r of rows) {
+      if (r.content_hash !== embeddingHash(TEXT(r.title), String(r.text))) continue;
       const vector = fromBlob(r.vector);
-      if (!vector) continue;
+      if (!vector || !vector.length || !vector.every(Number.isFinite)) continue;
       const similarity = cosine(query, vector);
       if (similarity < MIN_SIMILARITY) continue;
       const id = String(r.entity_id);

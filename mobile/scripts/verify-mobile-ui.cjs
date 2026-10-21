@@ -128,7 +128,7 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByTestId('action-hint').waitFor();
       const improveHint = await page.getByTestId('action-hint').boundingBox();
       for (const label of ['Добавить сведения из файла', 'Сфотографировать и распознать', 'Голосовой ввод', 'Вернуть исходный текст', 'Отправить запрос']) {
-        const box = await page.getByLabel(label, { exact: true }).boundingBox();
+        const box = await page.getByTestId('composer-actions').getByLabel(label, { exact: true }).boundingBox();
         assert(box.x >= 0 && box.x + box.width <= width, `Composer action ${label} stays inside the viewport`);
       }
       assert(improveHint.x >= 0 && improveHint.x + improveHint.width <= width, 'Improvement hint stays inside the viewport');
