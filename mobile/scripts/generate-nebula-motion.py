@@ -13,6 +13,7 @@ import zipfile
 from pathlib import Path
 
 import cv2
+import imageio_ffmpeg
 import numpy as np
 from PIL import Image
 
@@ -42,7 +43,7 @@ def render(archive: Path, output: Path, poster: Path, size: int = 384, fps: int 
               float(rng.uniform(.35, 1)), float(rng.uniform(0, math.tau))) for _ in range(43)]
     output.parent.mkdir(parents=True, exist_ok=True)
     poster.parent.mkdir(parents=True, exist_ok=True)
-    cmd = ["ffmpeg", "-loglevel", "error", "-y", "-f", "rawvideo",
+    cmd = [imageio_ffmpeg.get_ffmpeg_exe(), "-loglevel", "error", "-y", "-f", "rawvideo",
            "-pix_fmt", "rgb24", "-s", f"{size}x{size}", "-r", str(fps),
            "-i", "pipe:0", "-an", "-vf", "format=yuv420p",
            "-c:v", "libx264", "-profile:v", "main", "-preset", "medium",
