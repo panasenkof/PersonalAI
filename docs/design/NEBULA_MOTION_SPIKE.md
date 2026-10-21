@@ -22,6 +22,8 @@
 
 **Критичный факт о SDK 57:** Expo 57 основан на RN 0.86.3 и Worklets 0.10.1; Reanimated SDK-рекомендация 4.5.x, не менять Worklets на 0.12 без отдельного апгрейда. Expo SDK 57 рекомендует Skia 2.6.2. В [expo/expo#50733](https://github.com/expo/expo/issues/50733) воспроизведена несовместимость **метода `makeImageFromView`** с React Native 0.86 из-за устаревшего вызова `dispatchOverflowDraw`; автор сообщает о фиксе в Skia >=2.11.1 / SDK 58. Это **не доказывает**, что любой shader Skia 2.6.2 не работает, но является основанием для изолированного теста и отказа от широкого upgrade в этом PR. [Expo Skia SDK57](https://docs.expo.dev/versions/v57.0.0/sdk/skia/) · [Expo 57 changelog](https://expo.dev/changelog/sdk-57) · [Reanimated Expo](https://docs.expo.dev/versions/latest/sdk/reanimated/).
 
+**Текущий уточнённый художественный выбор:** [B (детализация и объём) + C (мембраны/движение)](NEBULA_HYBRID_BC_DECISION.md). Подготовлен [QA-контракт для Skia-кандидата](NEBULA_SKIA_LAB_QA.md). Изолированный нативный код исследования НЕ заменяет требование Android release-проверки. Видео B остаётся альтернативой. При появлении версии Skia подтверждать GPU-совместимость и компиляцию SkSL реальным тестом.
+
 ## Spike 1 — исследование реального устройства
 
 1. Подтвердить оригиналы SHA-256 и неизменность пикселей базовых ассетов.
