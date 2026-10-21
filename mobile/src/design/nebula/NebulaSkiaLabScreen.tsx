@@ -1,0 +1,71 @@
+import React, { useState } from "react";
+import { Pressable, SafeAreaView, ScrollView, Text, View } from "react-native";
+import { NebulaSkiaExperiment } from "./NebulaSkiaExperiment";
+import type { NebulaPhase } from "./motion";
+import { nebulaColors, nebulaSpacing } from "./tokens";
+
+/**
+ * Manual research harness only. Exported for an INTERNAL Android test build.
+ * Intentionally NOT part of production Home, tab bar or Settings routes.
+ * A follow-up test APK must mount this component explicitly.
+ */
+const phases: NebulaPhase[] = [
+  "idle", "listening", "transcribing", "thinking", "responding", "offline", "error",
+];
+
+export function NebulaSkiaLabScreen() {
+  const [phase, setPhase] = useState<NebulaPhase>("idle");
+  const [size, setSize] = useState(168);
+  const [reduced, setReduced] = useState(false);
+  const [lowPower, setLowPower] = useState(false);
+  const [shader, setShader] = useState(true);
+  const theme = nebulaColors("dark");
+  function labToggle(text: string, active: boolean, onPress: () => void) {
+    return <Pressable accessibilityRole="button"
+      accessibilityLabel={text} accessibilityState={{ selected: active }}
+      onPress={onPress} key={text} style={{
+        minWidth: 48, minHeight: 48, padding: 12, borderWidth: 1,
+        borderRadius: 13, borderColor: theme.border,
+        backgroundColor: active ? theme.accent : theme.surfaceElevated,
+      }}>
+      <Text style={{ color: active ? theme.textOnAccent : theme.text, fontSize: 13 }}>{text}</Text>
+    </Pressable>;
+  }
+  return <SafeAreaView style={{ flex: 1, backgroundColor: theme.canvas }}>
+    <ScrollView contentContainerStyle={{ padding: nebulaSpacing.md, gap: nebulaSpacing.md }}
+      accessibilityLabel="Лаборатория Skia Nebula">
+      <Text accessibilityRole="header" style={{ color: theme.text, fontSize: 22, fontWeight: "700" }}>
+        Nebula — Skia B+C Lab
+      </Text>
+      <Text style={{ color: theme.textSecondary, lineHeight: 20 }}>
+        Только технический тест. Внешность и скорость не приняты; статусы здесь симулируются вручную,
+        к микрофону и LLM обращений нет.
+      </Text>
+      <View style={{ alignItems: "center", minHeight: 220, justifyContent: "center" }}>
+        <NebulaSkiaExperiment phase={phase} size={size}
+          reduceMotion={reduced} powerConstrained={lowPower}
+          enableNativeShader={shader} />
+      </View>
+      <Text accessibilityRole="header" style={{ color: theme.text, fontSize: 17, fontWeight: "600" }}>
+        Состояние
+      </Text>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 9 }}>
+        {phases.map(x => labToggle(x, phase === x, () => setPhase(x)))}
+      </View>
+      <Text accessibilityRole="header" style={{ color: theme.text, fontSize: 17, fontWeight: "600" }}>
+        Режим и размеры
+      </Text>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 9 }}>
+        {labToggle("44 dp", size === 44, () => setSize(44))}
+        {labToggle("168 dp", size === 168, () => setSize(168))}
+        {labToggle("Reduce Motion", reduced, () => setReduced(v => !v))}
+        {labToggle("Экономия", lowPower, () => setLowPower(v => !v))}
+        {labToggle("Skia / оригинал", shader, () => setShader(v => !v))}
+      </View>
+      <Text style={{ color: theme.textSecondary, fontSize: 12, lineHeight: 18 }}>
+        Процедурный шейдер использует исходный REF-ORB-B; сравнение с видео B,
+        FPS p50/p95 и расход батареи необходимо выполнить отдельно в реальном APK.
+      </Text>
+    </ScrollView>
+  </SafeAreaView>;
+}
