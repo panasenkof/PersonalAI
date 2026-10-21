@@ -18,15 +18,14 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install offline-frame-generation dependencies
-        run: pip install --disable-pip-version-check 'numpy==2.2.6' 'opencv-python-headless==4.11.0.86' 'Pillow==11.3.0'
+        run: pip install --disable-pip-version-check 'numpy==2.2.6' 'opencv-python-headless==4.11.0.86' 'Pillow==11.3.0' 'imageio-ffmpeg==0.6.0'
       - name: Verify ffmpeg and generate derived animated orb (NOT user original)
         run: |
-          ffmpeg -version | head -1
+          python -c 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())'
           python mobile/scripts/generate-nebula-motion.py \
             --archive docs/design/references/PersAI_Nebula_Approved_References.zip \
             --output mobile/src/design/nebula/assets/nebula-orb-rnd.mp4 \
             --poster mobile/src/design/nebula/assets/nebula-orb-rnd-poster.png
-          ffprobe -v error -show_entries format=duration,size -of json mobile/src/design/nebula/assets/nebula-orb-rnd.mp4
       - name: Self-remove bootstrap and push derived experiment assets
         run: |
           git config user.name 'github-actions[bot]'
