@@ -28,6 +28,9 @@ jobs:
           # JS tests and bundle do not execute the native runtime. Native CI downloads it separately.
           RNET_SKIP_DOWNLOAD: '1'
         run: npm ci --no-audit --no-fund
+      - name: Verify approved Nebula source artwork
+        # Prevent AI agents or image optimizers from replacing the agreed originals.
+        run: node scripts/check-nebula-references.cjs
       - name: Typecheck
         run: npx tsc --noEmit
       - name: Unit tests
