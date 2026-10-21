@@ -2,7 +2,7 @@
 - [x] Утверждено художественное правило B+C с оригиналом и SHA-256.
 - [x] Добавлены исходник SkSL и TypeScript-кандидат с семью фазами.
 - [x] Изолированный Lab Screen, не включённый в рабочую навигацию.
-- [ ] Проверить Expo pin, npm lock, TypeScript/Jest на GitHub runner.
+- [x] Проверены Expo pin, npm lock, TypeScript и Jest на GitHub runner: `@shopify/react-native-skia 2.6.2`, `react-native-reanimated 4.5.1`, `react-native-worklets 0.10.1`; 414 тестов прошли. GitHub Actions автоматически создал lockfile и проверенный PNG. **Полный CI PR после финального коммита проверяется отдельно.**
 - [ ] Проверить Android native release build (отдельное CI).
 - [ ] Смонтировать SkiaLab в внутреннем тестовом APK и записать видео.
 - [ ] Измерить FPS, память, нагрев и энергию на устройстве.
