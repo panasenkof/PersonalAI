@@ -6,7 +6,7 @@ import type { CollectionRecord } from "../local-memory/types";
 import { loadMediaPreferences } from "../media/preferences";
 import { onLocalMemorySessionChange } from "../local-memory/storage";
 import * as ImagePicker from "expo-image-picker";
-import { importLink } from "../media/link-import";
+import { importLink, linkImportErrorMessage } from "../media/link-import";
 import * as Crypto from "expo-crypto";
 import { File, Directory, Paths } from "expo-file-system";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
@@ -135,7 +135,7 @@ export function MemoryImportScreen() {
       if (!alive.current || aborter.signal.aborted) { if (result.file) await FileSystem.deleteAsync(result.file.uri, { idempotent: true }); return; }
       if (result.file) { ownedFiles.current.push(result.file.uri); setFile(result.file); setExtractedText(""); setKeepOriginal(true); setTitle(result.file.name); }
       else { setFile(null); setExtractedText(result.text || ""); setTitle("Материал по ссылке"); }
-    } catch (e) { if (alive.current) setNotice(memoryErrorMessage(e)); }
+    } catch (e) { if (alive.current) setNotice(linkImportErrorMessage(e)); }
     finally { if (alive.current) setBusy(false); }
   }
   async function pick() {
