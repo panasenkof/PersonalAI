@@ -33,11 +33,12 @@ export function IconAction({ icon, label, accessibilityLabel, hint, onPress, dis
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); dismissHint(owner); }, [owner]);
   const explain = () => {
     if (timer.current) clearTimeout(timer.current);
+    showHint({ owner, text: hint });
+    timer.current = setTimeout(() => dismissHint(owner), 2500);
     anchor.current?.measureInWindow((x, _y, width) => {
       const preferred = hintAlign === "start" ? x : hintAlign === "center" ? x + (width - hintWidth) / 2 : x + width - hintWidth;
       setHintLeft(Math.max(8, Math.min(preferred, viewportWidth - hintWidth - 8)) - x);
-      showHint({ owner, text: hint });
-      timer.current = setTimeout(() => dismissHint(owner), 2500);
+
     });
   };
   return <View ref={anchor} collapsable={false} style={{ position: "relative", zIndex: help ? 10 : 0 }}>
