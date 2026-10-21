@@ -3,9 +3,11 @@ import { fireEvent, render, waitFor } from '@testing-library/react-native';
 import { MemoryImportScreen } from '../../screens/MemoryImportScreen';
 import { saveMediaNote } from '../attachments';
 import { extractMedia } from '../extract';
+import { importLink } from '../link-import';
 const mockBack = jest.fn();
 let mockParams: any = undefined;
 jest.mock("../preferences", () => ({ loadMediaPreferences: async () => ({ visionId: "", speechId: "" }) }));
+jest.mock('../link-import', () => ({ importLink: jest.fn(), linkImportErrorMessage: (error: Error) => error.message }));
 jest.mock("../../local-memory/storage", () => ({ onLocalMemorySessionChange: () => () => {} }));
 jest.mock('../../local-memory/repository', () => ({ localMemoryRepository: async () => ({}) }));
 jest.mock('../../local-memory/sections', () => ({ ensureSections: async () => [{ id: 'notes', name: 'Заметки', slug: 'notes', sensitivity: 'standard' }] }));
@@ -69,4 +71,13 @@ test('recognition does not overwrite the user annotation', async () => {
   expect(screen.getByLabelText('Сведения из файла').props.value).toBe('Куплено для дачи');
   fireEvent.press(screen.getByLabelText('Сохранить сведения в память'));
   await waitFor(() => expect(saveMediaNote).toHaveBeenCalledWith('guest', expect.objectContaining({ body: 'Куплено для дачи', extractedText: 'На фото гарантия холодильника' }), expect.anything()));
+});
+
+test('URL download network error is not shown as a local-memory failure', async () => {
+  (importLink as jest.Mock).mockRejectedValueOnce(new Error('Не удалось загрузить ссылку (этап: соединение).'));
+  const screen = render(<MemoryImportScreen />);
+  fireEvent.changeText(screen.getByLabelText('Ссылка для импорта'), 'https://files.example.org/music.mp3');
+  fireEvent.press(screen.getByText('Загрузить по ссылке'));
+  await waitFor(() => expect(screen.getByText(/этап: соединение/)).toBeTruthy());
+  expect(screen.queryByText(/Не удалось выполнить операцию с памятью/)).toBeNull();
 });
