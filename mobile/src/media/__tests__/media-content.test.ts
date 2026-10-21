@@ -17,7 +17,7 @@ test('link import strips executable content and refuses local or credential-bear
 });
 
 describe('URL import diagnostics (user-reported MP3 from a protected site)', () => {
-  const fetchMock = nativeFetch as jest.Mock;
+  const fetchMock = nativeFetch as unknown as jest.Mock;
 
   beforeEach(() => fetchMock.mockReset());
 
