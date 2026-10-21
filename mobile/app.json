@@ -84,8 +84,7 @@
         "expo-image-picker",
         {
           "photosPermission": false,
-          "cameraPermission": "Камера нужна, чтобы сфотографировать и распознать сведения.",
-          "microphonePermission": false
+          "cameraPermission": "Камера нужна, чтобы сфотографировать и распознать сведения."
         }
       ]
     ],
@@ -97,7 +96,10 @@
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#F8FAFF"
-      }
+      },
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "description": "Ваш помощник для диалогов, документов и личной базы знаний",
     "scheme": "persai"
