@@ -15,7 +15,7 @@ export const nebulaPalette = {
     border: "#445574",
     text: "#F6F8FF",
     textSecondary: "#ABBAD8",
-    accent: "#957DFF",
+    accent: "#7051DB",
     cyan: "#30CAED",
     electric: "#376BF2",
     focus: "#72E2FA",
