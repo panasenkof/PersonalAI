@@ -1,4 +1,5 @@
 import React from "react";
+import { Text } from "react-native";
 import { fireEvent, render } from "@testing-library/react-native";
 import { NebulaAction, NebulaSection, NebulaSettingRow, NebulaSurface } from "../components";
 
@@ -23,7 +24,7 @@ describe("Nebula base components", () => {
     expect(v.getByText("Модели и API")).toBeTruthy();
   });
   it("reuses the same semantic surface for separate sections", () => {
-    const v = render(<NebulaSurface><NebulaSection title="Память">Текст заметки</NebulaSection></NebulaSurface>);
+    const v = render(<NebulaSurface><NebulaSection title="Память"><Text>Текст заметки</Text></NebulaSection></NebulaSurface>);
     expect(v.getByText("Память")).toBeTruthy();
     expect(v.getByText("Текст заметки")).toBeTruthy();
   });
