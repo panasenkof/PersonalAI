@@ -56,4 +56,8 @@ jobs:
           rm .github/workflows/nebula-skia-bootstrap.yml
           git add mobile/package-lock.json mobile/src/design/nebula/assets/nebula-orb-ref-b.png .github/workflows/nebula-skia-bootstrap.yml
           git commit -m "build(nebula): add npm-verified Skia dependencies and approved art derivative"
+          # Other documentation commits can arrive while tests run; rebase them
+          # rather than force-pushing or dropping source changes.
+          git fetch origin feat/nebula-skia-hybrid-bc-spike-20261021
+          git rebase origin/feat/nebula-skia-hybrid-bc-spike-20261021
           git push origin HEAD:refs/heads/feat/nebula-skia-hybrid-bc-spike-20261021
