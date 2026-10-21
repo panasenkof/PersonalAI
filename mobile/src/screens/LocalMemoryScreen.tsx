@@ -3,7 +3,7 @@ import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import * as Crypto from "expo-crypto";
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, FlatList, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, FlatList, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useProfile } from "../profile/ProfileContext";
 import { BottomSheet } from "../components/BottomSheet";
 import { localMemoryRepository } from "../local-memory/repository";
@@ -14,14 +14,22 @@ import { ensureSections, orderCollections, sectionBySlug } from "../local-memory
 import type { RootStackParams } from "../navigation";
 import { useTheme } from "../theme";
 
+import { mergeText, type NoteAction } from "../local-memory/note-actions";
+import { scheduleVectors } from "../media/vector-runner";
+
 export function LocalMemoryScreen() {
   const t = useTheme(); const navigation = useNavigation<NativeStackNavigationProp<RootStackParams>>();
   const profile = useProfile();
   const [collections, setCollections] = useState<CollectionRecord[]>([]);
   const [collectionId, setCollectionId] = useState<string | undefined>();
-  const [status, setStatus] = useState<"active" | "archived">("active");
+  const [status, setStatus] = useState<"active" | "archived" | "trashed">("active");
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [moveOpen, setMoveOpen] = useState(false);
+  const [mergeOpen, setMergeOpen] = useState(false);
+  const [undo, setUndo] = useState("");
   const [search, setSearch] = useState(""); const [term, setTerm] = useState("");
   const [notes, setNotes] = useState<EntityRecord[]>([]); const [more, setMore] = useState(false);
+  const selectedNotes = notes.filter(n => selectedIds.includes(n.id));
   const [loading, setLoading] = useState(true); const [busy, setBusy] = useState(false);
   const [error, setError] = useState(""); const [retry, setRetry] = useState(0);
   const [sectionOpen, setSectionOpen] = useState(false); const [sectionName, setSectionName] = useState("");
@@ -33,11 +41,21 @@ export function LocalMemoryScreen() {
     if (profile) void localMemoryRepository(profile).then(async db => {
       const [sections, page] = await Promise.all([ensureSections(db), db.searchNotes(term, 50, 0, { collectionId, status })]);
       if (request !== generation.current) return;
-      repository.current = db; setCollections(sections); setNotes(page); setMore(page.length === 50);
+      repository.current = db; void db.lastNoteOperation().then(value => { if (request === generation.current) setUndo(value); }).catch(() => {}); setCollections(sections); setNotes(page); setMore(page.length === 50);
     }).catch(e => { if (request === generation.current) { repository.current = null; setError(memoryErrorMessage(e)); } })
       .finally(() => { if (request === generation.current) setLoading(false); });
     return () => { generation.current++; repository.current = null; };
   }, [profile, term, collectionId, status, retry]));
+  async function act(action: NoteAction, target?: string) {
+    if (!repository.current || busy) return;
+    setBusy(true); setError("");
+    try {
+      const token = await repository.current.changeNotes(action, selectedNotes, target);
+      setUndo(token); setSelectedIds([]); setMoveOpen(false); setMergeOpen(false); setRetry(n => n + 1);
+      if (profile) scheduleVectors(profile);
+    } catch (e) { setError(memoryErrorMessage(e)); } finally { setBusy(false); }
+  }
+  useEffect(() => { setSelectedIds([]); }, [collectionId, term, status]);
   async function loadMore() {
     if (!repository.current || busy) return;
     const request = generation.current; setBusy(true);
@@ -58,7 +76,7 @@ export function LocalMemoryScreen() {
   }
   const button = { minHeight: 48, justifyContent: "center" as const, alignItems: "center" as const, borderRadius: 16, paddingHorizontal: 16 };
   return <View style={{ flex: 1, backgroundColor: t.bg }}>
-    <View style={{ padding: 18, paddingBottom: 10, gap: 14 }}>
+    <FlatList ListHeaderComponent={<>    <View style={{ padding: 18, paddingBottom: 10, gap: 14 }}>
       <Text style={{ color: t.text, fontSize: 27, fontWeight: "800" }}>Мои знания</Text>
       <Text style={{ color: t.muted, lineHeight: 20 }}>{(() => { const c = collections.find(x => x.id === collectionId); const def = c && sectionBySlug(c.slug);
         return def ? def.hint + "." : c ? "Ваш раздел «" + c.name + "»." : "Всё, что помощник знает о вас, разложено по разделам. Записи появляются после вашего подтверждения."; })()}</Text>
@@ -78,19 +96,44 @@ export function LocalMemoryScreen() {
         <Pressable accessibilityRole="button" accessibilityLabel={status === "active" ? "Открыть архив" : "Открыть текущие записи"} onPress={() => setStatus(s => s === "active" ? "archived" : "active")} style={{ minHeight: 44, justifyContent: "center" }}><Text style={{ color: t.accent }}>{status === "active" ? "Архив" : "Текущие записи"}</Text></Pressable>
       </View>
     </View>
+    <View style={{ paddingHorizontal: 18, gap: 8 }}>
+      <Pressable accessibilityRole="button" onPress={() => setStatus(status === "trashed" ? "active" : "trashed")} style={button}><Text style={{ color: t.accent }}>{status === "trashed" ? "Вернуться к заметкам" : "Корзина"}</Text></Pressable>
+      {status === "trashed" ? <Text style={{ color: t.muted }}>Удалённые записи хранятся до ручного восстановления. Они исключены из поиска агента.</Text> : null}
+      <Pressable accessibilityRole="button" onPress={() => setSelectedIds(selectedIds.length ? [] : notes.slice(0, 100).map(n => n.id))} style={button}><Text style={{ color: t.accent }}>{selectedIds.length ? `Снять выбор (${selectedIds.length})` : "Выбрать показанные записи"}</Text></Pressable>
+      {selectedIds.length ? <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
+        {status === "trashed" ? <>
+          <Pressable disabled={busy} style={button} onPress={() => void act("restore")}><Text style={{ color: t.accent }}>Восстановить</Text></Pressable>
+          <Pressable disabled={busy} style={button} onPress={() => Alert.alert("Удалить навсегда?", "Исчезнут выбранные записи, их оригиналы и история. Отменить это действие нельзя.\n" + selectedNotes.map(n => n.title).join("\n"), [{ text: "Отмена", style: "cancel" }, { text: "Удалить навсегда", style: "destructive", onPress: () => { if (!repository.current) return; setBusy(true); void repository.current.purgeNotes(selectedNotes).then(() => { setSelectedIds([]); setUndo(""); setRetry(n => n + 1); }).catch(e => setError(memoryErrorMessage(e))).finally(() => setBusy(false)); } }])}><Text style={{ color: t.err }}>Удалить навсегда</Text></Pressable>
+        </> : <>
+          <Pressable disabled={busy} style={button} onPress={() => setMoveOpen(true)}><Text style={{ color: t.accent }}>Перенести</Text></Pressable>
+          <Pressable disabled={busy || selectedIds.length < 2 || status !== "active"} style={button} onPress={() => setMergeOpen(true)}><Text style={{ color: t.accent }}>Объединить</Text></Pressable>
+          <Pressable disabled={busy} style={button} onPress={() => Alert.alert("В корзину?", selectedNotes.map(n => n.title || "Без названия").join("\n"), [{ text: "Отмена", style: "cancel" }, { text: "В корзину", onPress: () => void act("trash") }])}><Text style={{ color: t.err }}>Удалить</Text></Pressable>
+        </>}
+      </View> : null}
+      {undo ? <Pressable disabled={busy} style={button} onPress={() => { if (!repository.current) return; setBusy(true); void repository.current.undoNotes(undo).then(() => { setUndo(""); setRetry(n => n + 1); if (profile) scheduleVectors(profile); }).catch(e => setError(memoryErrorMessage(e))).finally(() => setBusy(false)); }}><Text style={{ color: t.accent }}>Отменить последнюю операцию</Text></Pressable> : null}
+    </View>
     {error ? <View style={{ paddingHorizontal: 18, gap: 8 }}><Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text><Pressable accessibilityRole="button" onPress={() => setRetry(n => n + 1)} style={button}><Text style={{ color: t.accent }}>Повторить загрузку</Text></Pressable></View> : null}
     {loading ? <ActivityIndicator accessibilityLabel="Загрузка записей" /> : null}
-    <FlatList data={loading ? [] : notes} keyExtractor={item => item.id} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag"
+</>} data={loading ? [] : notes} keyExtractor={item => item.id} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag"
       contentContainerStyle={{ paddingHorizontal: 18, paddingBottom: 24, gap: 10, flexGrow: 1 }}
       ListEmptyComponent={!loading && !error ? <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24, gap: 12 }}><Feather name={term ? "search" : "book-open"} size={40} color={t.accent} />
         <Text style={{ color: t.text, fontSize: 20, fontWeight: "700", textAlign: "center" }}>{term ? "Ничего не найдено" : status === "archived" ? "Архив пуст" : "Начните с важного"}</Text>
         <Text style={{ color: t.muted, textAlign: "center", lineHeight: 21 }}>{term ? "Попробуйте другое слово или раздел «Все записи»." : "Создайте запись или добавьте сведения из файла."}</Text></View> : null}
-      renderItem={({ item }) => <Pressable accessibilityRole="button" accessibilityLabel={"Открыть заметку " + (item.title || "Без названия")} onPress={() => navigation.navigate("MemoryNote", { entityId: item.id })}
+      renderItem={({ item }) => <Pressable accessibilityRole="button" accessibilityLabel={"Открыть заметку " + (item.title || "Без названия")} onLongPress={() => setSelectedIds(ids => ids.includes(item.id) ? ids.filter(id => id !== item.id) : [...ids, item.id])} onPress={() => selectedIds.length ? setSelectedIds(ids => ids.includes(item.id) ? ids.filter(id => id !== item.id) : [...ids, item.id]) : navigation.navigate("MemoryNote", { entityId: item.id })}
         style={{ borderWidth: 1, borderColor: t.line, borderRadius: 20, backgroundColor: t.panel, padding: 17, gap: 8 }}>
-        <Text numberOfLines={1} style={{ color: t.text, fontWeight: "700", fontSize: 17 }}>{item.title || "Без названия"}</Text><Text numberOfLines={2} style={{ color: t.muted, lineHeight: 21 }}>{String(item.payload.body || "")}</Text>
+        <Text numberOfLines={1} style={{ color: t.text, fontWeight: "700", fontSize: 17 }}>{selectedIds.includes(item.id) ? "☑ " : ""}{item.title || "Без названия"}</Text><Text numberOfLines={2} style={{ color: t.muted, lineHeight: 21 }}>{String(item.payload.body || "")}</Text>
         <Text style={{ color: t.muted, fontSize: 11 }}>{collections.find(c => c.id === item.collection_id)?.name || "Запись"} · {new Date(item.updated_at).toLocaleDateString()}</Text>
       </Pressable>}
       ListFooterComponent={more && !loading ? <Pressable accessibilityRole="button" accessibilityLabel="Показать ещё заметки" disabled={busy} onPress={() => void loadMore()} style={button}><Text style={{ color: t.accent }}>{busy ? "Загружаю…" : "Показать ещё"}</Text></Pressable> : null} />
+    <BottomSheet visible={moveOpen} title="Перенести выбранные записи" onClose={() => setMoveOpen(false)}>
+      <Text style={{ color: t.muted }}>{selectedNotes.map(n => n.title).join(", ")}</Text>
+      {collections.map(c => <Pressable key={c.id} disabled={busy} style={button} onPress={() => void act("move", c.id)}><Text style={{ color: t.accent }}>{c.name}</Text></Pressable>)}
+    </BottomSheet>
+    <BottomSheet visible={mergeOpen} title="Предпросмотр объединения" onClose={() => setMergeOpen(false)}>
+      <Text style={{ color: t.muted }}>Название первой выбранной записи сохраняется. Тексты остаются отдельными блоками; вложения и источники сохраняются. Противоречия не исправляются автоматически.</Text>
+      <ScrollView style={{ maxHeight: 300 }}><Text style={{ color: t.text }}>{mergeText(selectedNotes)}</Text></ScrollView>
+      <Pressable disabled={busy} style={button} onPress={() => void act("merge")}><Text style={{ color: t.accent }}>Подтвердить объединение</Text></Pressable>
+    </BottomSheet>
     <BottomSheet visible={sectionOpen} title="Новый раздел" onClose={() => setSectionOpen(false)}>
       <Text style={{ color: t.muted }}>Например: «Рецепты», «Идеи» или «Планы».</Text>
       <TextInput accessibilityLabel="Название раздела памяти" value={sectionName} onChangeText={setSectionName} maxLength={80} placeholder="Название" placeholderTextColor={t.muted} style={{ minHeight: 50, padding: 12, borderWidth: 1, borderColor: t.line, borderRadius: 16, color: t.text }} />

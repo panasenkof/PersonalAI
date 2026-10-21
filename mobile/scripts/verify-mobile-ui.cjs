@@ -125,7 +125,12 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       const micButton = await page.getByLabel('Голосовой ввод', { exact: true }).boundingBox();
       assert(improveButton.x > micButton.x && improveButton.x - micButton.x - micButton.width < 12, 'Improvement is next to the microphone');
       assert(improveButton.x + improveButton.width <= width, 'Improvement fits on a narrow phone');
+      await page.getByTestId('action-hint').waitFor();
       const improveHint = await page.getByTestId('action-hint').boundingBox();
+      for (const label of ['Добавить сведения из файла', 'Сфотографировать и распознать', 'Голосовой ввод', 'Вернуть исходный текст', 'Отправить запрос']) {
+        const box = await page.getByTestId('composer-actions').getByLabel(label, { exact: true }).boundingBox();
+        assert(box.x >= 0 && box.x + box.width <= width, `Composer action ${label} stays inside the viewport`);
+      }
       assert(improveHint.x >= 0 && improveHint.x + improveHint.width <= width, 'Improvement hint stays inside the viewport');
       if (process.env.SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, `draft-improved-${width}.png`) });
       await page.getByLabel('Вернуть исходный текст', { exact: true }).click();
@@ -313,7 +318,7 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByText('note.txt', { exact: true }).waitFor();
       assert.equal(await page.evaluate(() => window.__qa.auth), authenticationCount, 'A short file-picker switch must not ask for biometrics');
       await page.getByLabel('Извлечь сведения из файла', { exact: true }).click();
-      await page.waitForFunction(() => document.querySelector('[aria-label="Сведения из файла"]').value.includes('индейка'));
+      await page.waitForFunction(() => document.querySelector('[aria-label="Распознанное содержимое файла"]').value.includes('индейка'));
       await page.getByLabel('Сохранить сведения в память', { exact: true }).click();
       await page.getByLabel('Открыть заметку note.txt', { exact: true }).waitFor();
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, `Overflow at ${width}px`);

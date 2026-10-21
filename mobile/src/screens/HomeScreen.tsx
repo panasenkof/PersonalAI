@@ -144,8 +144,9 @@ export function HomeScreen() {
     {!canSend && ready && !(needsSetup && !active?.rows.length) ? <Pressable accessibilityRole="button" onPress={() => openConnections()} style={{ paddingHorizontal: 16, minHeight: 44, justifyContent: "center" }}><Text style={{ color: t.accent }}>Добавьте модель в настройках подключений →</Text></Pressable> : null}
     <View style={{ zIndex: 3, padding: 10, gap: 5, backgroundColor: t.panel, borderTopWidth: 1, borderColor: t.line }}>
       <PromptInput value={question} onChange={value => store.setQuestion(value)} onClear={() => { normalization.reset(); setVoiceReset(n => n + 1); }} editable={ready} />
-      <View style={{ zIndex: 1, flexDirection: "row", alignItems: "center", gap: 6 }}>
+      <View testID="composer-actions" style={{ zIndex: 1, flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
         <IconAction icon="plus" label="Файл" accessibilityLabel="Добавить сведения из файла" hint="Добавить в память сведения из текста, фото, аудио или видео." hintAbove hintAlign="start" onPress={() => navigation.navigate("MemoryImport")} />
+        <IconAction icon="camera" label="Камера" accessibilityLabel="Сфотографировать и распознать" hint="Снять фото и сохранить распознанный текст." hintAbove onPress={() => navigation.navigate("MemoryImport", { camera: true })} />
         <VoiceInput key={`${active?.id}:${voiceReset}`} value={question} onChange={value => { if (store.getSnapshot().activeId === active?.id) store.setQuestion(value); }} disabled={!ready} onError={setNotice} showLabel onBegin={normalization.reset} onActiveChange={setDictating} />
         <IconAction icon={normalization.busy ? "x" : normalization.normalized ? "rotate-ccw" : "edit-3"}
           label={normalization.busy ? "Отмена" : normalization.normalized ? "Исходный" : "Улучшить"}

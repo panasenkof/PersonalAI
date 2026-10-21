@@ -1,3 +1,4 @@
+import { changeNotes, undoNotes, purgeNotes, type NoteAction, type NoteSelection } from "./note-actions";
 import * as Crypto from "expo-crypto";
 import type * as SQLite from "expo-sqlite";
 
@@ -72,6 +73,14 @@ function validPayload(payload: Record<string, unknown>) {
 
 export class SqliteMemoryRepository implements MemoryRepository {
   constructor(private readonly db: SQL) {}
+  changeNotes(action: NoteAction, selection: NoteSelection[], collectionId?: string) { return changeNotes(this.db, action, selection, collectionId); }
+  purgeNotes(selection: NoteSelection[]) { return purgeNotes(this.db, selection); }
+  async lastNoteOperation(): Promise<string> {
+    const row = await this.db.getFirstAsync<{ reason: string }>("SELECT reason FROM memory_revisions WHERE reason LIKE 'notes:%' OR reason LIKE 'Отмена notes:%' ORDER BY created_at DESC,rowid DESC LIMIT 1");
+    return row?.reason.startsWith("notes:") ? row.reason : "";
+  }
+  undoNotes(batch: string) { return undoNotes(this.db, batch); }
+
 
   async listCollections(): Promise<CollectionRecord[]> {
     const rows = await this.db.getAllAsync<Row>(
@@ -153,7 +162,7 @@ export class SqliteMemoryRepository implements MemoryRepository {
     return record;
   }
 
-  async reviseEntity(id: string, expectedVersion: number, payload: Record<string, unknown>, reason: string, collectionId?: string): Promise<EntityRecord> {
+  async reviseEntity(id: string, expectedVersion: number, payload: Record<string, unknown>, reason: string, collectionId?: string, allowAgent = false): Promise<EntityRecord> {
     safeReason(reason);
     if (expectedVersion < 1) throw new Error("invalid_expected_version");
     const data = validPayload(payload);
@@ -173,6 +182,11 @@ export class SqliteMemoryRepository implements MemoryRepository {
         const previousLevel = previousCollection?.sensitivity;
         if (previousLevel === "secret" || previousLevel === "unclassified") sensitivity = "secret";
         else if (previousLevel === "sensitive" && sensitivity !== "secret") sensitivity = "sensitive";
+      }
+      if (allowAgent) {
+        const target = await tx.getFirstAsync<Row>("SELECT sensitivity FROM memory_collections WHERE id=?", [collection]);
+        if (target?.sensitivity !== "standard") throw new MemoryAccessError("collection_not_standard");
+        sensitivity = "standard";
       }
       const title = typeof payload.title === "string" ? payload.title : before.title;
       const timestamp = now();
@@ -452,12 +466,15 @@ export class SqliteMemoryRepository implements MemoryRepository {
     return out;
   }
 
-  /** Stores vectors computed on the phone; a chunk deleted meanwhile is skipped. */
+  /** Accept results only for the current text/title: edits may race inference. */
   async saveVectors(model: string, items: Array<{ chunkId: string; vector: Float32Array; hash: string }>): Promise<number> {
     let saved = 0;
     await withUnlockedTransaction(this.db, async tx => {
       for (const item of items) {
-        if (!await tx.getFirstAsync<Row>("SELECT id FROM memory_chunks WHERE id=?", [item.chunkId])) continue;
+        const current = await tx.getFirstAsync<Row>(
+          "SELECT c.text,e.title,e.record_status FROM memory_chunks c JOIN memory_entities e ON e.id=c.entity_id WHERE c.id=?", [item.chunkId]);
+        if (!current || current.record_status !== "active" || item.hash !== embeddingHash(TEXT(current.title), String(current.text))) continue;
+        if (!item.vector.length || !item.vector.every(Number.isFinite)) continue;
         await tx.runAsync("INSERT OR REPLACE INTO memory_vectors(chunk_id,model,dim,vector,content_hash) VALUES (?,?,?,?,?)",
           [item.chunkId, model, item.vector.length, toBlob(item.vector), item.hash]);
         saved++;
@@ -492,12 +509,13 @@ export class SqliteMemoryRepository implements MemoryRepository {
     }
     if (options.sensitivities) { filters.push(`e.sensitivity IN (${options.sensitivities.map(() => "?").join(",")})`); params.push(...options.sensitivities); }
     const rows = await this.db.getAllAsync<Row>(
-      `SELECT v.chunk_id, v.vector, c.entity_id FROM memory_vectors v JOIN memory_chunks c ON c.id=v.chunk_id
+      `SELECT v.chunk_id, v.vector, v.content_hash, c.entity_id, c.text, e.title FROM memory_vectors v JOIN memory_chunks c ON c.id=v.chunk_id
        JOIN memory_entities e ON e.id=c.entity_id WHERE v.model=? AND ${filters.join(" AND ")}`, params);
     const best = new Map<string, { chunkId: string; similarity: number }>();
     for (const r of rows) {
+      if (r.content_hash !== embeddingHash(TEXT(r.title), String(r.text))) continue;
       const vector = fromBlob(r.vector);
-      if (!vector) continue;
+      if (!vector || !vector.length || !vector.every(Number.isFinite)) continue;
       const similarity = cosine(query, vector);
       if (similarity < MIN_SIMILARITY) continue;
       const id = String(r.entity_id);
@@ -540,12 +558,12 @@ export class SqliteMemoryRepository implements MemoryRepository {
    * ending), so «машин» finds «машина», «машину» and «машиной». Results with a
    * query are ranked by relevance (bm25 over title, text, index words and
    * names), then by date. */
-  async searchNotes(query: string, limit = 50, offset = 0, filters: { collectionId?: string; status?: "active" | "archived"; prefix?: boolean } = {}): Promise<EntityRecord[]> {
+  async searchNotes(query: string, limit = 50, offset = 0, filters: { collectionId?: string; status?: "active" | "archived" | "trashed"; prefix?: boolean } = {}): Promise<EntityRecord[]> {
     const count = Math.min(100, Math.max(1, Math.trunc(limit)));
     const start = Math.max(0, Math.trunc(offset));
     const term = query.trim();
     const status = filters.status || "active";
-    if (status !== "active" && status !== "archived") throw new Error("invalid_record_status");
+    if (status !== "active" && status !== "archived" && status !== "trashed") throw new Error("invalid_record_status");
     const rows = await this.matches(term, filters.prefix ?? false, {
       status, collectionIds: filters.collectionId ? [filters.collectionId] : undefined, limit: count, offset: start,
     });
@@ -554,7 +572,7 @@ export class SqliteMemoryRepository implements MemoryRepository {
 
   /** One FTS search grouped by record: the best chunk of each record. */
   private async matches(term: string, prefix: boolean | { prefix: boolean; column?: "terms" }, options: {
-    status: "active" | "archived"; collectionIds?: string[]; sensitivities?: string[]; limit: number; offset: number;
+    status: "active" | "archived" | "trashed"; collectionIds?: string[]; sensitivities?: string[]; limit: number; offset: number;
   }): Promise<Row[]> {
     const filters = ["e.domain='notes'", "e.record_status=?"];
     const params: SQLite.SQLiteBindValue[] = [options.status];

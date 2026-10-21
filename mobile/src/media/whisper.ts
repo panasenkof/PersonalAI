@@ -255,8 +255,7 @@ export async function transcribeAudioFile(uri: string, signal?: AbortSignal): Pr
   const { decodeAudioData } = require("react-native-audio-api") as typeof import("react-native-audio-api");
   let samples: Float32Array;
   try {
-    const bytes = toByteArray(await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 }));
-    const audio = await decodeAudioData(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer, WHISPER_RATE);
+    const audio = await decodeAudioData(uri, WHISPER_RATE);
     // Stereo files are mixed down to mono.
     const channels = Array.from({ length: audio.numberOfChannels }, (_, i) => audio.getChannelData(i));
     samples = channels.length === 1 ? new Float32Array(channels[0]) : new Float32Array(audio.length).map((_, i) => channels.reduce((sum, ch) => sum + ch[i], 0) / channels.length);

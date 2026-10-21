@@ -4,12 +4,17 @@ import { MemoryImportScreen } from '../../screens/MemoryImportScreen';
 import { saveMediaNote } from '../attachments';
 import { extractMedia } from '../extract';
 const mockBack = jest.fn();
-jest.mock('@react-navigation/native', () => ({ useNavigation: () => ({ goBack: mockBack }) }));
+let mockParams: any = undefined;
+jest.mock("../preferences", () => ({ loadMediaPreferences: async () => ({ visionId: "", speechId: "" }) }));
+jest.mock("../../local-memory/storage", () => ({ onLocalMemorySessionChange: () => () => {} }));
+jest.mock('../../local-memory/repository', () => ({ localMemoryRepository: async () => ({}) }));
+jest.mock('../../local-memory/sections', () => ({ ensureSections: async () => [{ id: 'notes', name: 'Заметки', slug: 'notes', sensitivity: 'standard' }] }));
+jest.mock('@react-navigation/native', () => ({ useNavigation: () => ({ goBack: mockBack }), useRoute: () => ({ params: mockParams }), usePreventRemove: jest.fn() }));
 jest.mock('@react-navigation/elements', () => ({ useHeaderHeight: () => 56 }));
 jest.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ bottom: 24 }) }));
 jest.mock('../../profile/ProfileContext', () => ({ useProfile: () => 'guest' }));
 jest.mock('../../security/native-interaction', () => ({ withNativeInteraction: (fn: any) => fn() }));
-jest.mock('../../direct-agent/settings', () => ({ loadDirectConnections: async () => ({ connections: [], activeId: '' }), defaultDirectPreferences: {}, anonymousLocalAllowed: () => false }));
+jest.mock('../../direct-agent/settings', () => ({ loadDirectConnections: async () => ({ connections: [{ id: 'vision', name: 'Vision', apiKey: 'key', provider: 'openai', model: 'vision' }], activeId: 'vision' }), defaultDirectPreferences: {}, anonymousLocalAllowed: () => false }));
 jest.mock('../../direct-agent/enrich-runner', () => ({ scheduleIndexTerms: jest.fn() }));
 jest.mock('../vector-runner', () => ({ scheduleVectors: jest.fn() }));
 jest.mock('../whisper', () => ({ useWhisperStatus: () => ({ state: 'absent' }) }));
@@ -17,14 +22,14 @@ jest.mock('../attachments', () => ({ saveMediaNote: jest.fn(async () => 'note') 
 jest.mock('../extract', () => ({ ...jest.requireActual('../kinds'), extractMedia: jest.fn() }));
 jest.mock('expo-document-picker', () => ({ getDocumentAsync: async () => ({ canceled: false, assets: [{ uri: 'file:///cache/photo.png', name: 'photo.png', mimeType: 'image/png' }] }) }));
 jest.mock('expo-file-system/legacy', () => ({ cacheDirectory: 'file:///cache/', deleteAsync: jest.fn(async () => {}) }));
-beforeEach(() => { jest.clearAllMocks(); });
+beforeEach(() => { jest.clearAllMocks(); mockParams = undefined; });
 test('picker lets user save original without transcript, provider or network; user text stays separate', async () => {
   const screen = render(<MemoryImportScreen />);
   fireEvent.press(screen.getByLabelText('Выбрать файл для памяти'));
   await waitFor(() => expect(screen.getByText('photo.png')).toBeTruthy());
   fireEvent.press(screen.getByLabelText('Сохранить сведения в память'));
   await waitFor(() => expect(mockBack).toHaveBeenCalled());
-  expect(saveMediaNote).toHaveBeenCalledWith('guest', expect.objectContaining({ body: '', sensitivity: 'sensitive', file: expect.objectContaining({ name: 'photo.png' }) }), expect.anything());
+  expect(saveMediaNote).toHaveBeenCalledWith('guest', expect.objectContaining({ body: '', sensitivity: 'standard', file: expect.objectContaining({ name: 'photo.png' }) }), expect.anything());
   expect(extractMedia).not.toHaveBeenCalled();
 });
 test('failed save keeps original and typed text for retry', async () => {
@@ -39,4 +44,29 @@ test('failed save keeps original and typed text for retry', async () => {
   expect(screen.getByLabelText('Сведения из файла').props.value).toBe('Моя подпись');
   fireEvent.press(screen.getByLabelText('Сохранить сведения в память'));
   await waitFor(() => expect(mockBack).toHaveBeenCalled());
+});
+
+test('shared text opens an unsaved draft with a section selector and saves only on confirmation', async () => {
+  mockParams = { incoming: [{ shareType: 'text', value: 'Семейный рецепт' }, { shareType: 'url', value: 'https://example.org/recipe' }] };
+  const screen = render(<MemoryImportScreen />);
+  await waitFor(() => expect(screen.getByLabelText('Сведения из файла').props.value).toBe('Семейный рецепт'));
+  expect(saveMediaNote).not.toHaveBeenCalled();
+  fireEvent.press(screen.getByLabelText('Раздел: Заметки'));
+  fireEvent.changeText(screen.getByLabelText('Сведения из файла'), 'Рецепт с моей подписью');
+  fireEvent.press(screen.getByLabelText('Сохранить сведения в память'));
+  await waitFor(() => expect(saveMediaNote).toHaveBeenCalledWith('guest', expect.objectContaining({ body: 'Рецепт с моей подписью', collectionId: 'notes', file: undefined }), expect.anything()));
+  await waitFor(() => expect(screen.getByLabelText('Сведения из файла').props.value).toBe('https://example.org/recipe'));
+  expect(mockBack).not.toHaveBeenCalled();
+});
+test('recognition does not overwrite the user annotation', async () => {
+  (extractMedia as jest.Mock).mockResolvedValueOnce('На фото гарантия холодильника');
+  const screen = render(<MemoryImportScreen />);
+  fireEvent.press(screen.getByLabelText('Выбрать файл для памяти'));
+  await waitFor(() => expect(screen.getByText('photo.png')).toBeTruthy());
+  fireEvent.changeText(screen.getByLabelText('Сведения из файла'), 'Куплено для дачи');
+  fireEvent.press(screen.getByLabelText('Извлечь сведения из файла'));
+  await waitFor(() => expect(screen.getByLabelText('Распознанное содержимое файла').props.value).toBe('На фото гарантия холодильника'));
+  expect(screen.getByLabelText('Сведения из файла').props.value).toBe('Куплено для дачи');
+  fireEvent.press(screen.getByLabelText('Сохранить сведения в память'));
+  await waitFor(() => expect(saveMediaNote).toHaveBeenCalledWith('guest', expect.objectContaining({ body: 'Куплено для дачи', extractedText: 'На фото гарантия холодильника' }), expect.anything()));
 });

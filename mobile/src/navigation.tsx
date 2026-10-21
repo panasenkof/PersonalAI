@@ -1,4 +1,6 @@
 import Feather from "@expo/vector-icons/Feather";
+import type { SharePayload } from "expo-sharing";
+import { StackActions } from "@react-navigation/native";
 import type { NavigatorScreenParams } from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { DarkTheme, DefaultTheme, NavigationContainer } from "@react-navigation/native";
@@ -27,7 +29,7 @@ export type RootStackParams = {
   ModelConnections: { presetId?: string } | undefined;
   MemoryNote: { entityId?: string; collectionId?: string };
   MemoryBackup: undefined;
-  MemoryImport: undefined;
+  MemoryImport: { incoming?: SharePayload[]; camera?: boolean } | undefined;
   DiagnosticLogs: undefined;
 };
 const navigationRef = createNavigationContainerRef<RootStackParams>();
@@ -68,7 +70,7 @@ export function RootNavigator() {
   const t = useTheme();
   return (
     <NavigationContainer ref={navigationRef} theme={dark ? DarkTheme : DefaultTheme}>
-      <IncomingShares open={id => { if (navigationRef.isReady()) navigationRef.navigate("MemoryNote", { entityId: id }); }} />
+      <IncomingShares open={incoming => { if (!navigationRef.isReady()) return false; navigationRef.dispatch(StackActions.push("MemoryImport", { incoming })); return true; }} />
       <Stack.Navigator screenOptions={{
         headerStyle: { backgroundColor: t.panel }, headerTintColor: t.text,
       }}>

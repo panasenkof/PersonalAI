@@ -6,6 +6,7 @@ import { getWhisperStatus, transcribeAudioFile } from "../whisper";
 import { defaultDirectPreferences } from "../../direct-agent/settings";
 jest.mock("expo-file-system/legacy", () => ({ getInfoAsync: jest.fn(), readAsStringAsync: jest.fn(), deleteAsync: jest.fn(), EncodingType: { Base64: "base64" } }));
 jest.mock("expo-video", () => ({ createVideoPlayer: jest.fn() }));
+jest.mock("../video-audio", () => ({ videoAudio: jest.fn(async () => { throw new Error("Нет звуковой дорожки"); }) }));
 jest.mock("../whisper", () => ({ getWhisperStatus: jest.fn(() => ({ state: "absent" })), transcribeAudioFile: jest.fn() }));
 jest.mock("expo-image-manipulator", () => ({ ImageManipulator: { manipulate: jest.fn() }, SaveFormat: { JPEG: "jpeg" } }));
 const mockPlayer = { muted: false, release: jest.fn(), generateThumbnailsAsync: jest.fn(), replaceAsync: jest.fn(),
@@ -48,7 +49,7 @@ test("video samples across its duration and removes every extracted frame after 
   await expect(extractMedia({ uri: "file:///cache/video.mp4", name: "video.mp4", duration: 100_000 }, settings, true, undefined, transport as unknown as typeof fetch)).rejects.toThrow("HTTP 400");
   expect(mockPlayer.generateThumbnailsAsync.mock.calls[0][0]).toEqual([2, 25, 50, 75, 97]);
   expect(FileSystem.deleteAsync).toHaveBeenCalledTimes(5);
-  expect(mockPlayer.release).toHaveBeenCalledTimes(1);
+  expect(mockPlayer.release).toHaveBeenCalledTimes(2);
 });
 test("provider errors cannot expose an echoed key and cancellation prevents egress", async () => {
   const transport = jest.fn(async () => ({ ok: false, status: 401, text: async () => "secret" }));
@@ -69,4 +70,11 @@ test("without Whisper a service that cannot transcribe points to the on-device m
   const transport = jest.fn(async () => ({ ok: false, status: 404 }));
   await expect(extractMedia({ uri: "file:///cache/voice.m4a", name: "voice.m4a" }, { ...settings, provider: "openai-compatible", baseUrl: "https://api.deepseek.com" }, true, undefined, transport as unknown as typeof fetch))
     .rejects.toThrow("Голос без интернета");
+});
+
+test("video retains visual result when audio fails and labels missing speech", async () => {
+  const transport = jest.fn(async () => ({ ok: true, json: async () => ({ output_text: "На кадре рецепт" }) }));
+  const text = await extractMedia({ uri: "file:///clip.mp4", name: "clip.mp4" }, settings, true, undefined, transport as unknown as typeof fetch);
+  expect(text).toContain("Речь не распознана"); expect(text).toContain("На кадре рецепт");
+  expect(text).toContain("выборочных кадров");
 });

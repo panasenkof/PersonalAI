@@ -2,7 +2,7 @@ import { localMemoryRepository } from "../local-memory/repository";
 import type { MemoryRepository } from "../local-memory/types";
 import { ensureSections, orderCollections } from "../local-memory/sections";
 import { VECTOR_MODEL } from "../local-memory/vectors";
-import { normalizeAlias as normalizeName } from "../local-memory/search-index";
+import { memoryText, normalizeAlias as normalizeName } from "../local-memory/search-index";
 import { DEFAULT_SECTIONS, MAX_NOTE_BODY_CHARS, PROPOSABLE_KINDS, findSection, proposableSections } from "./fact-tool";
 import type { MemorySection, NoteProposal } from "./fact-tool";
 
@@ -60,7 +60,7 @@ export async function searchApprovedNotes(
   let remaining = MAX_CONTEXT_NOTE_CHARS;
   return allowed.map(({ entity, chunk }, index) => {
     const section = collections.find(c => c.id === entity.collection_id)?.name;
-    const body = typeof entity.payload.body === "string" ? entity.payload.body : "";
+    const body = memoryText(entity.payload);
     // Reserve room for the matching excerpt of every later result, even if the
     // first notes are long. Never present an excerpt as the complete stored note.
     const available = Math.max(0, remaining - (allowed.length - index - 1) * EXCERPT_CHARS);

@@ -42,7 +42,7 @@ export function onLocalMemorySessionChange(listener: (unlocked: boolean) => void
 }
 export const localMemorySessionUnlocked = () => applicationSessionUnlocked;
 const requireApplicationSession = () => { if (!applicationSessionUnlocked) throw new Error("application_locked"); };
-export const LOCAL_MEMORY_SCHEMA_VERSION = 4;
+export const LOCAL_MEMORY_SCHEMA_VERSION = 5;
 const KIND_CHECK = `CHECK(kind IN (${MEMORY_KINDS.map(k => `'${k}'`).join(",")}))`;
 
 /** All memory (including full-text indexes, revisions, and WAL) is in SQLCipher. */
@@ -69,7 +69,7 @@ CREATE INDEX IF NOT EXISTS ix_memory_entities_collection ON memory_entities(coll
 CREATE TABLE IF NOT EXISTS memory_attachments (
   id TEXT PRIMARY KEY, entity_id TEXT NOT NULL REFERENCES memory_entities(id) ON DELETE CASCADE,
   name TEXT NOT NULL, mime TEXT NOT NULL, size INTEGER NOT NULL CHECK(size > 0),
-  created_at TEXT NOT NULL, UNIQUE(entity_id)
+  created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS memory_attachment_parts (
   attachment_id TEXT NOT NULL REFERENCES memory_attachments(id) ON DELETE CASCADE,
@@ -146,6 +146,29 @@ async function upgradeToV3(tx: SQLite.SQLiteDatabase): Promise<void> {
   await tx.execAsync("CREATE INDEX IF NOT EXISTS ix_memory_entities_kind ON memory_entities(kind)");
   await reindexAll(tx);
   await tx.execAsync("DROP TABLE IF EXISTS memory_notes_fts");
+}
+
+/** Remove the old one-original-per-note restriction without cascading away bytes.
+ * Shadow tables stay inside SQLCipher; the enclosing transaction rolls back on disk-full. */
+export async function upgradeToV5(tx: Pick<SQLite.SQLiteDatabase, "execAsync">): Promise<void> {
+  await tx.execAsync(`
+    CREATE TABLE memory_attachment_parts_v5 AS SELECT * FROM memory_attachment_parts;
+    CREATE TABLE memory_attachments_v5 AS SELECT * FROM memory_attachments;
+    DROP TABLE memory_attachment_parts;
+    DROP TABLE memory_attachments;
+    CREATE TABLE memory_attachments (
+      id TEXT PRIMARY KEY, entity_id TEXT NOT NULL REFERENCES memory_entities(id) ON DELETE CASCADE,
+      name TEXT NOT NULL, mime TEXT NOT NULL, size INTEGER NOT NULL CHECK(size > 0), created_at TEXT NOT NULL
+    );
+    CREATE TABLE memory_attachment_parts (
+      attachment_id TEXT NOT NULL REFERENCES memory_attachments(id) ON DELETE CASCADE,
+      ord INTEGER NOT NULL, bytes BLOB NOT NULL, sha256 TEXT NOT NULL, PRIMARY KEY(attachment_id, ord)
+    );
+    INSERT INTO memory_attachments SELECT * FROM memory_attachments_v5;
+    INSERT INTO memory_attachment_parts SELECT * FROM memory_attachment_parts_v5;
+    DROP TABLE memory_attachment_parts_v5;
+    DROP TABLE memory_attachments_v5;
+  `);
 }
 
 /** SQLCipher is only available in custom native builds, never Expo Go.
@@ -266,6 +289,8 @@ async function initialize(profileId: string): Promise<SQLite.SQLiteDatabase> {
       await withUnlockedTransaction(db, async tx => {
         await tx.execAsync(SCHEMA_SQL);
         if (version < 3) await upgradeToV3(tx);
+        if (version === 4) await upgradeToV5(tx);
+        if (version >= 3) await reindexAll(tx);
         await tx.execAsync(`PRAGMA user_version = ${LOCAL_MEMORY_SCHEMA_VERSION}`);
       });
     }
