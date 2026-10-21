@@ -79,6 +79,14 @@
             "deploymentTarget": "17.0"
           }
         }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": false,
+          "cameraPermission": "Камера нужна, чтобы сфотографировать и распознать сведения.",
+          "microphonePermission": false
+        }
       ]
     ],
     "icon": "./assets/icon.png",

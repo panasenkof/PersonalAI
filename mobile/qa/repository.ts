@@ -8,6 +8,7 @@ export class SqliteMemoryRepository {}
 export async function localMemoryRepository(_profile: string): Promise<any> {
   if (!(window as any).__qa.authorized) throw new Error("application_locked");
   return {
+    lastNoteOperation: async () => "",
     entity: async (id: string) => notes.find(n => n.id === id) || null,
     searchNotes: async (term: string, limit = 50, offset = 0, filter: any = {}) => notes.filter(n => n.record_status === (filter.status || "active") && (!filter.collectionId || filter.collectionId === n.collection_id) && (!term || JSON.stringify(n).toLowerCase().includes(term.toLowerCase()))).slice(offset, offset + limit),
     listCollections: async () => collections,

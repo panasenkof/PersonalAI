@@ -29,7 +29,7 @@ const V3_TABLES = {
 } as const;
 const ENTITY_COLUMNS = "id,collection_id,domain,schema_version,title,payload_json,record_status,sensitivity," +
   "source_kind,source_ref,valid_from,valid_until,created_at,updated_at,record_version";
-export const RESTORABLE_VERSIONS = [1, 2, 3, 4];
+export const RESTORABLE_VERSIONS = [1, 2, 3, 4, 5];
 const MAX_BACKUP_BYTES = 2 * 1024 * 1024 * 1024;
 
 function checkedRecoveryCode(value: string): string {

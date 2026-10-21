@@ -12,7 +12,9 @@ import type { ImportFile } from "../src/media/kinds";
 export async function saveMediaNote(
   profile: string,
   input: {
-    file: ImportFile;
+    file?: ImportFile;
+    extractedText?: string;
+    collectionId?: string;
     title: string;
     body: string;
     sensitivity: "sensitive" | "standard";
@@ -20,18 +22,17 @@ export async function saveMediaNote(
   signal?: AbortSignal,
 ): Promise<string> {
   if (signal?.aborted) throw new Error("Сохранение файла остановлено.");
-  if (!input.file?.uri) throw new Error("Выберите файл.");
-  const kind = mediaKind(input.file);
+  const kind = input.file ? mediaKind(input.file) : undefined;
   const repo = await localMemoryRepository(profile);
   let collection = (await repo.listCollections()).find((item: { slug: string }) => item.slug === "notes");
   if (!collection) collection = await repo.createCollection({ name: "Заметки", slug: "notes", sensitivity: "standard" });
   if (signal?.aborted) throw new Error("Сохранение файла остановлено.");
-  const title = input.title.trim().slice(0, 160) || input.file.name;
+  const title = input.title.trim().slice(0, 160) || input.file?.name || "Материал";
   const entity = await repo.createEntity({
     collection_id: collection.id,
     domain: "notes",
     title,
-    payload: { type: "note", title, body: input.body.trim(), source_file: input.file.name, source_media: kind },
+    payload: { type: "note", title, body: input.body.trim(), extracted_text: input.extractedText || "", source_file: input.file?.name, source_media: kind },
     sensitivity: input.sensitivity,
     source_kind: "user",
     source_ref: "device-import",

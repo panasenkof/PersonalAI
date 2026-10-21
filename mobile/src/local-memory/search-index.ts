@@ -62,6 +62,11 @@ export const normalizeAlias = (alias: string): string =>
 
 const chunkId = (entityId: string, ord: number) => entityId + ":" + ord;
 
+/** Both user notes and extracted file content participate in retrieval. */
+export function memoryText(payload: Record<string, unknown>): string {
+  return [payload.body, payload.extracted_text, typeof payload.source_url === "string" ? "Источник: " + payload.source_url : ""].filter((v): v is string => typeof v === "string" && Boolean(v.trim())).join("\n\n");
+}
+
 /** Rebuilds the chunks and search rows of one record. Vectors of chunks whose
  * text changed are dropped (memory_vectors cascades) and rebuilt later. */
 export async function indexEntity(db: SQL, entityId: string, timestamp = new Date().toISOString()): Promise<void> {
@@ -69,7 +74,7 @@ export async function indexEntity(db: SQL, entityId: string, timestamp = new Dat
   await db.runAsync("DELETE FROM memory_search_fts WHERE entity_id=?", [entityId]);
   if (!entity) { await db.runAsync("DELETE FROM memory_chunks WHERE entity_id=?", [entityId]); return; }
   let body = "";
-  try { const payload = JSON.parse(String(entity.payload_json)); body = typeof payload?.body === "string" ? payload.body : ""; }
+  try { const payload = JSON.parse(String(entity.payload_json)); body = memoryText(payload); }
   catch { /* an unreadable payload is still found by its title */ }
   const title = foldText(String(entity.title ?? ""));
   const texts = chunkText(body);

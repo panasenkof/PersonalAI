@@ -3,7 +3,7 @@ import type { RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useHeaderHeight } from "@react-navigation/elements";
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, KeyboardAvoidingView, Linking, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useProfile } from "../profile/ProfileContext";
 import { BottomSheet } from "../components/BottomSheet";
@@ -12,6 +12,7 @@ import { localMemoryRepository } from "../local-memory/repository";
 import type { SqliteMemoryRepository } from "../local-memory/repository";
 import { MemoryConflictError } from "../local-memory/types";
 import type { CollectionRecord, EntityRecord, ObservationRecord, RelationRecord, RevisionRecord } from "../local-memory/types";
+import { onLocalMemorySessionChange } from "../local-memory/storage";
 import { memoryErrorMessage } from "../local-memory/errors";
 import { ensureSections } from "../local-memory/sections";
 import { MEMORY_KINDS, defaultKind } from "../local-memory/search-index";
@@ -23,6 +24,10 @@ import { scheduleVectors } from "../media/vector-runner";
 /** «Маша, Мария Петровна» → ["Маша", "Мария Петровна"]. */
 const splitNames = (text: string) => text.split(/[,;\n]/).map(n => n.trim()).filter(Boolean);
 import type { RootStackParams } from "../navigation";
+import { File } from "expo-file-system";
+import { attachmentForEntity, materializeAttachment } from "../media/attachments";
+import { extractMedia } from "../media/extract";
+import { mediaConnections } from "../media/preferences";
 import { AttachmentView } from "../media/AttachmentView";
 import { useTheme } from "../theme";
 
@@ -31,11 +36,15 @@ export function MemoryNoteScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParams>>();
   const route = useRoute<RouteProp<RootStackParams, "MemoryNote">>();
   const profile = useProfile();
+  const extraction = useRef<AbortController | null>(null);
+  useEffect(() => { const off = onLocalMemorySessionChange(unlocked => { if (!unlocked) extraction.current?.abort(); }); return () => { off(); extraction.current?.abort(); }; }, []);
   const repository = useRef<SqliteMemoryRepository | null>(null); const alive = useRef(true); const pending = useRef(false);
   const [selected, setSelected] = useState<EntityRecord | null>(null);
   const [collections, setCollections] = useState<CollectionRecord[]>([]);
   const [collectionId, setCollectionId] = useState(route.params?.collectionId);
   const [title, setTitle] = useState(""); const [body, setBody] = useState("");
+  const [extractedText, setExtractedText] = useState("");
+  const [allowAgent, setAllowAgent] = useState(false);
   const [kind, setKind] = useState<MemoryKind>("note"); const [names, setNames] = useState("");
   const [terms, setTerms] = useState(""); const [modelTerms, setModelTerms] = useState<string[]>([]);
   const [loading, setLoading] = useState(true); const [busy, setBusy] = useState(false); const [error, setError] = useState("");
@@ -46,7 +55,7 @@ export function MemoryNoteScreen() {
   const [eventText, setEventText] = useState(""); const [linkOpen, setLinkOpen] = useState(false); const [linkSearch, setLinkSearch] = useState("");
   const baseline = useRef({ title: "", body: "", collectionId: route.params?.collectionId, kind: "note" as MemoryKind, names: "", terms: "" });
   const kindTouched = useRef(false);
-  const dirty = title !== baseline.current.title || body !== baseline.current.body || collectionId !== baseline.current.collectionId ||
+  const dirty = allowAgent || extractedText !== String(selected?.payload.extracted_text || "") || title !== baseline.current.title || body !== baseline.current.body || collectionId !== baseline.current.collectionId ||
     kind !== baseline.current.kind || splitNames(names).join(",") !== splitNames(baseline.current.names).join(",") ||
     terms.trim() !== baseline.current.terms.trim();
   usePreventRemove(!leaving && (busy || dirty), ({ data }) => {
@@ -66,7 +75,7 @@ export function MemoryNoteScreen() {
       const note = route.params?.entityId ? await db.entity(route.params.entityId) : null;
       if (route.params?.entityId && !note) throw new Error("Запись не найдена.");
       if (!alive.current) return;
-      repository.current = db; setCollections(sections); setSelected(note);
+      repository.current = db; setCollections(sections); setSelected(note); setExtractedText(String(note?.payload.extracted_text || "")); setAllowAgent(false);
       const initialTitle = note?.title || ""; const initialBody = String(note?.payload.body || "");
       const initialCollection = note?.collection_id || route.params?.collectionId;
       const initialKind = note?.kind || defaultKind(sections.find(c => c.id === initialCollection)?.slug);
@@ -97,13 +106,18 @@ export function MemoryNoteScreen() {
       if (!notes) notes = await db.createCollection({ name: "Заметки", slug: "notes", sensitivity: "standard" });
       collection = notes.id;
     }
+    if (allowAgent) {
+      const notes = (await ensureSections(db)).find(c => c.slug === "notes" && c.sensitivity === "standard");
+      if (!notes) throw new Error("Для доступа агенту нужен обычный раздел «Заметки».");
+      collection = notes.id;
+    }
     const finalTitle = title.trim() || body.trim().split("\n")[0].slice(0, 80);
-    const payload = { ...selected?.payload, type: "note", title: finalTitle, body: body.trim() };
+    const payload = { ...selected?.payload, type: "note", title: finalTitle, body: body.trim(), extracted_text: extractedText.trim() };
     const base = baseline.current;
     let saved: EntityRecord;
     if (selected) {
-      const textChanged = title !== base.title || body !== base.body || collectionId !== base.collectionId;
-      saved = textChanged ? await db.reviseEntity(selected.id, selected.record_version, payload, "Редактирование записи", collection) : selected;
+      const textChanged = allowAgent || extractedText !== String(selected.payload.extracted_text || "") || title !== base.title || body !== base.body || collectionId !== base.collectionId;
+      saved = textChanged ? await db.reviseEntity(selected.id, selected.record_version, payload, allowAgent ? "Разрешён доступ агенту" : "Редактирование записи", collection, allowAgent) : selected;
       if (kind !== saved.kind) saved = await db.setEntityKind(saved.id, saved.record_version, kind);
     } else saved = await db.createEntity({ collection_id: collection, domain: "notes", title: finalTitle, payload, kind,
       sensitivity: "inherit", source_kind: "user", source_ref: "device" });
@@ -141,6 +155,30 @@ export function MemoryNoteScreen() {
         </View>
         <TextInput accessibilityLabel="Заголовок заметки" value={title} onChangeText={setTitle} editable={!busy} maxLength={160} placeholder="Заголовок" placeholderTextColor={t.muted} style={field} />
         <TextInput accessibilityLabel="Текст заметки" multiline value={body} onChangeText={setBody} editable={!busy} placeholder="Что нужно запомнить?" placeholderTextColor={t.muted} style={{ ...field, minHeight: 200, textAlignVertical: "top", lineHeight: 23 }} />
+        {selected && (selected.payload.source_file || selected.payload.extracted_text) ? <>
+          <Text style={{ color: t.muted }}>Распознанное содержимое файла — индексируется вместе с заметкой</Text>
+          <TextInput accessibilityLabel="Распознанное содержимое файла" multiline editable={!busy} value={extractedText} onChangeText={setExtractedText} maxLength={60_000} style={field} />
+          <Pressable disabled={busy} accessibilityRole="button" style={button} onPress={() => Alert.alert("Распознать оригинал?", "Будут использованы подключения из раздела «Обработка медиа» в настройках. Фото и кадры видео отправляются этому сервису; аудио — локальному Whisper, если он установлен, иначе сервису. Проверьте результат перед сохранением.", [
+            { text: "Отмена", style: "cancel" },
+            { text: "Распознать", onPress: () => void run(async () => {
+              if (!profile) return;
+              const attachment = await attachmentForEntity(profile, selected.id);
+              if (!attachment) throw new Error("Оригинал не найден.");
+              const aborter = new AbortController(); extraction.current = aborter;
+              let uri = "";
+              try {
+                uri = await materializeAttachment(profile, attachment, aborter.signal);
+                const settings = await mediaConnections(profile);
+                const text = await extractMedia({ uri, name: attachment.name, mimeType: attachment.mime }, settings.vision, true, aborter.signal, undefined, settings.speech);
+                if (alive.current && !aborter.signal.aborted) setExtractedText(text);
+              } finally { extraction.current = null; if (uri) { const file = new File(uri); if (file.exists) file.delete(); } }
+            }) },
+          ])}><Text style={{ color: t.accent }}>Распознать сохранённый файл</Text></Pressable>
+        </> : null}
+        {selected && (selected.sensitivity === "sensitive" || collections.find(c => c.id === selected.collection_id)?.sensitivity !== "standard") ? <>
+          <Text style={{ color: t.muted }}>Запись закрыта для агента. Локальная векторизация доступна, но текст не передаётся модели.</Text>
+          <Pressable disabled={busy} accessibilityRole="button" style={button} onPress={() => Alert.alert("Разрешить доступ агенту?", "После сохранения запись перейдёт в обычные «Заметки». Текст и распознанное содержимое смогут передаваться модели при поиске. Оригинал автоматически не отправляется.", [{ text: "Отмена", style: "cancel" }, { text: "Разрешить", onPress: () => setAllowAgent(true) }])}><Text style={{ color: t.accent }}>{allowAgent ? "Доступ будет разрешён после сохранения" : "Разрешить агенту находить запись"}</Text></Pressable>
+        </> : null}
         <TextInput accessibilityLabel="Другие имена и прозвища" value={names} onChangeText={setNames} editable={!busy} maxLength={600}
           placeholder={kind === "person" ? "Другие имена через запятую: Маша, Мария Петровна" : "Другие названия через запятую (по желанию)"} placeholderTextColor={t.muted} style={field} />
         <Text style={{ color: t.muted, fontSize: 12 }}>По этим именам запись тоже находится в поиске.</Text>
@@ -149,8 +187,11 @@ export function MemoryNoteScreen() {
         {modelTerms.length ? <Text accessibilityLabel="Слова, подобранные моделью" style={{ color: t.muted, fontSize: 12, lineHeight: 18 }}>Подобрала модель: {modelTerms.join(", ")}. Обновятся после правки текста.</Text> : null}
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}><VoiceInput value={body} onChange={setBody} disabled={busy} onError={setError} /><Text style={{ color: t.muted }}>Надиктовать запись</Text></View>
         <Pressable accessibilityRole="button" accessibilityLabel="Сохранить запись" disabled={busy || (!title.trim() && !body.trim())} onPress={() => void save()} style={{ ...button, backgroundColor: t.accent, alignItems: "center" }}><Text style={{ color: "#fff", fontWeight: "700" }}>{busy ? "Сохранение…" : "Сохранить запись"}</Text></Pressable>
+        {typeof selected?.payload.source_url === "string" ? <Pressable accessibilityRole="link" style={button} onPress={() => { const url = String(selected.payload.source_url); if (/^https:\/\//.test(url)) void Linking.openURL(url).catch(() => setError("Не удалось открыть ссылку.")); }}><Text style={{ color: t.accent }}>Источник: {selected.payload.source_url}</Text></Pressable> : null}
+        {Array.isArray(selected?.payload.merged_sources) ? <View><Text style={{ color: t.muted }}>Исходные записи, их даты и связи сохранены:</Text>{(selected.payload.merged_sources as { id: string; title: string }[]).filter(n => n.id !== selected.id).map(n => <Pressable key={n.id} style={button} onPress={() => navigation.push("MemoryNote", { entityId: n.id })}><Text style={{ color: t.accent }}>{n.title || "Исходная запись"}</Text></Pressable>)}</View> : null}
         {selected && profile ? <AttachmentView profile={profile} entityId={selected.id} /> : null}
         {selected ? <>
+          {selected.record_status === "trashed" ? <Text style={{ color: t.muted }}>Запись в корзине. Восстановите её на странице памяти, чтобы агент снова мог её находить.</Text> : null}
           <Pressable accessibilityRole="button" accessibilityLabel="История, события и связи" accessibilityState={{ expanded: details }} onPress={() => details ? setDetails(false) : void loadDetails()} style={{ ...button, backgroundColor: t.soft }}><Text style={{ color: t.text }}>История, события и связи {details ? "⌃" : "⌄"}</Text></Pressable>
           {details ? <View style={{ gap: 12, padding: 16, borderWidth: 1, borderColor: t.line, borderRadius: 20 }}>
             <Text style={{ color: t.text, fontWeight: "700" }}>История изменений · версия {selected.record_version}</Text>
@@ -167,7 +208,7 @@ export function MemoryNoteScreen() {
               return <Text key={r.id} style={{ color: t.muted }}>{(other?.title || "Другая запись") + (other?.kind ? " · " + KIND_NAMES[other.kind] : "") + (r.kind === "about" ? (r.source_entity_id === selected.id ? " — о ком запись" : " — запись об этом человеке") : "")}</Text>; })}
             <Pressable accessibilityRole="button" accessibilityLabel="Связать с другой записью" style={button} onPress={() => setLinkOpen(true)}><Text style={{ color: t.accent }}>+ Связать с другой записью</Text></Pressable>
           </View> : null}
-          <Pressable accessibilityRole="button" accessibilityLabel={selected.record_status === "archived" ? "Вернуть запись из архива" : "Архивировать запись"} disabled={busy || dirty} style={button} onPress={() => void run(async db => {
+          <Pressable accessibilityRole="button" accessibilityLabel={selected.record_status === "archived" ? "Вернуть запись из архива" : "Архивировать запись"} disabled={busy || dirty || !["active", "archived"].includes(selected.record_status)} style={button} onPress={() => void run(async db => {
             await db.setEntityStatus(selected.id, selected.record_version, selected.record_status === "archived" ? "active" : "archived");
             if (alive.current) setLeaving(true);
           })}><Text style={{ color: t.muted }}>{selected.record_status === "archived" ? "Вернуть из архива" : "Перенести в архив"}</Text></Pressable>

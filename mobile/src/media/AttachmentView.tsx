@@ -6,7 +6,7 @@ import { File } from 'expo-file-system';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useApplicationVisible } from '../security/visibility';
 import { useTheme } from '../theme';
-import { attachmentForEntity, materializeAttachment } from './attachments';
+import { attachmentsForEntity, materializeAttachment } from './attachments';
 import type { Attachment } from './attachments';
 
 function Player({ uri, onError }: { uri: string; onError: (message: string) => void }) {
@@ -15,10 +15,15 @@ function Player({ uri, onError }: { uri: string; onError: (message: string) => v
   return <VideoView player={player} nativeControls style={{ width: '100%', height: 220 }} allowsPictureInPicture={false} />;
 }
 export function AttachmentView({ profile, entityId }: { profile: string; entityId: string }) {
+  const [loadError, setLoadError] = useState("");
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  useEffect(() => { let alive = true; void attachmentsForEntity(profile, entityId).then(items => { if (alive) setAttachments(items); }).catch(e => { if (alive) setLoadError(memoryErrorMessage(e)); }); return () => { alive = false; }; }, [profile, entityId]);
+  return <View>{loadError ? <Text accessibilityRole="alert">{loadError}</Text> : null}{attachments.map(attachment => <OneAttachment key={attachment.id} profile={profile} attachment={attachment} />)}</View>;
+}
+function OneAttachment({ profile, attachment }: { profile: string; attachment: Attachment }) {
   const t = useTheme(); const appVisible = useApplicationVisible(); const focused = useIsFocused(); const visible = appVisible && focused;
-  const [attachment, setAttachment] = useState<Attachment | null>(null);
   const [uri, setUri] = useState(''); const [error, setError] = useState(''); const [busy, setBusy] = useState(false);
-  useEffect(() => { let alive = true; if (visible) void attachmentForEntity(profile, entityId).then(a => { if (alive) setAttachment(a); }).catch(e => { if (alive) setError(memoryErrorMessage(e)); }); return () => { alive = false; }; }, [profile, entityId, visible]);
+
   useEffect(() => {
     let alive = true; let temporary = ''; const controller = new AbortController();
     if (busy && visible && attachment) void materializeAttachment(profile, attachment, controller.signal).then(value => {

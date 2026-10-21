@@ -98,7 +98,7 @@ test.each([false, true])("upgrading an installed v1 database (chats=%s) opens a 
   expect(await repo.revisions("entity", "note")).toHaveLength(1);
   expect(await repo.listCollections()).toMatchObject([{ id: "recipes", name: "Рецепты" }]);
   expect(mockVault.get(identity.keyName)).toBe("6".repeat(64));
-  expect(mockConnections[0].sqlite.prepare("PRAGMA user_version").get()).toMatchObject({ user_version: 4 });
+  expect(mockConnections[0].sqlite.prepare("PRAGMA user_version").get()).toMatchObject({ user_version: 5 });
   await closeLocalMemory();
   const reopened = conversationRepository("guest");
   expect((await reopened.load()).find(c => c.question === "Можно ввести сообщение")).toBeTruthy();
@@ -148,7 +148,7 @@ test("upgrading v2 to v3 types the records, splits long text into chunks and sea
   await installationV2();
   const repo = await localMemoryRepository("guest");
   const db = mockConnections[0].sqlite;
-  expect(db.prepare("PRAGMA user_version").get()).toMatchObject({ user_version: 4 });
+  expect(db.prepare("PRAGMA user_version").get()).toMatchObject({ user_version: 5 });
   expect(await repo.entity("masha")).toMatchObject({ kind: "person", title: "Маша", record_version: 1 });
   expect(await repo.entity("dacha")).toMatchObject({ kind: "note" });
   expect(db.prepare("SELECT count(*) AS n FROM memory_chunks WHERE entity_id='dacha'").get().n).toBeGreaterThan(1);
@@ -175,4 +175,27 @@ test("a failure while building the v3 index rolls back to an intact v2 database,
   const repo = await localMemoryRepository("guest");
   expect((await repo.searchNotes("малину"))[0].id).toBe("dacha");
   expect(mockVault.get(identity.keyName)).toBe("7".repeat(64));
+});
+
+test("v4 attachments upgrade keeps every byte and allows merging two originals", async () => {
+  const { SCHEMA_SQL } = require("../storage");
+  const identity = await localMemoryIdentity("guest");
+  const legacy = new DatabaseSync(path.join(mockDirectory, identity.databaseName));
+  legacy.exec(SCHEMA_SQL.replace("created_at TEXT NOT NULL\n);\nCREATE TABLE IF NOT EXISTS memory_attachment_parts", "created_at TEXT NOT NULL, UNIQUE(entity_id)\n);\nCREATE TABLE IF NOT EXISTS memory_attachment_parts"));
+  legacy.exec("PRAGMA user_version=4");
+  legacy.prepare("INSERT INTO memory_collections(id,name,slug,sensitivity,created_at) VALUES (?,?,?,?,?)").run("c", "Notes", "notes", "standard", "now");
+  legacy.prepare("INSERT INTO memory_entities(id,collection_id,domain,payload_json,created_at,updated_at) VALUES (?,?,?,?,?,?)").run("n", "c", "notes", JSON.stringify({ body: "Подпись", extracted_text: "Распознанная гарантия" }), "now", "now");
+  legacy.prepare("INSERT INTO memory_attachments VALUES (?,?,?,?,?,?)").run("a", "n", "a.png", "image/png", 3, "now");
+  legacy.prepare("INSERT INTO memory_attachment_parts VALUES (?,?,?,?)").run("a", 0, new Uint8Array([1,2,3]), "hash");
+  legacy.close(); mockVault.set(identity.keyName, "6".repeat(64)); mockVault.set(identity.keyName + ".initialized", "yes");
+  await openLocalMemory("guest");
+  const db = mockConnections[0].sqlite;
+  expect(Array.from(db.prepare("SELECT bytes FROM memory_attachment_parts").get().bytes)).toEqual([1,2,3]);
+  db.prepare("INSERT INTO memory_attachments VALUES (?,?,?,?,?,?)").run("b", "n", "b.png", "image/png", 3, "now");
+  expect(db.prepare("SELECT count(*) AS n FROM memory_attachments").get().n).toBe(2);
+  expect(db.prepare("PRAGMA user_version").get().user_version).toBe(5);
+  expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+  const repo = await localMemoryRepository("guest");
+  expect((await repo.searchMemory("гарантия"))[0].entity.id).toBe("n");
+  expect((await repo.pendingVectorChunks("test"))[0].text).toContain("Распознанная гарантия");
 });

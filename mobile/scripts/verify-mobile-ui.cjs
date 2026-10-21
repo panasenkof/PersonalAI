@@ -313,7 +313,7 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByText('note.txt', { exact: true }).waitFor();
       assert.equal(await page.evaluate(() => window.__qa.auth), authenticationCount, 'A short file-picker switch must not ask for biometrics');
       await page.getByLabel('Извлечь сведения из файла', { exact: true }).click();
-      await page.waitForFunction(() => document.querySelector('[aria-label="Сведения из файла"]').value.includes('индейка'));
+      await page.waitForFunction(() => document.querySelector('[aria-label="Распознанное содержимое файла"]').value.includes('индейка'));
       await page.getByLabel('Сохранить сведения в память', { exact: true }).click();
       await page.getByLabel('Открыть заметку note.txt', { exact: true }).waitFor();
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, `Overflow at ${width}px`);

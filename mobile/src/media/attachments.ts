@@ -46,7 +46,7 @@ export async function writeOriginal(db: Pick<SQLiteDatabase, 'runAsync'>, entity
   } finally { handle.close(); }
 }
 /** Note + original + receipt commit together. Cancellation never leaves a partial note. */
-export async function saveMediaNote(profile: string, input: { file?: ImportFile; title: string; body: string; sensitivity: 'sensitive' | 'standard'; receipt?: string }, signal?: AbortSignal): Promise<string> {
+export async function saveMediaNote(profile: string, input: { file?: ImportFile; title: string; body: string; extractedText?: string; sensitivity: 'sensitive' | 'standard'; receipt?: string; collectionId?: string; sourceUrl?: string }, signal?: AbortSignal): Promise<string> {
   return withLocalMemoryDatabase(profile, async db => {
     check(signal);
     // Native hash avoids loading the complete original into JavaScript.
@@ -55,18 +55,19 @@ export async function saveMediaNote(profile: string, input: { file?: ImportFile;
     if (source && (!source.size || source.size > MAX_ORIGINAL_BYTES)) throw new Error('Выберите непустой файл размером до 80 МБ.');
     const contentHash = source?.md5 || null;
     if (input.file && !contentHash) throw new Error('Не удалось прочитать оригинал. Выберите файл повторно.');
-    const receipt = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, JSON.stringify([input.receipt || 'device-import', contentHash, input.title, input.body, input.sensitivity]));
+    const receipt = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, JSON.stringify([input.receipt || 'device-import', contentHash, input.title, input.body, input.extractedText || "", input.sensitivity, input.collectionId || "", input.sourceUrl || ""]));
     {
       const old = await db.getFirstAsync<{ entity_id: string }>('SELECT entity_id FROM memory_received_shares WHERE fingerprint=?', [receipt]);
       if (old) return old.entity_id;
     }
     const repo = new SqliteMemoryRepository(db);
     const slug = input.receipt ? 'inbox' : 'notes';
-    let col = (await repo.listCollections()).find(c => c.slug === slug);
+    let col = (await repo.listCollections()).find(c => input.collectionId ? c.id === input.collectionId : c.slug === slug);
+    if (input.collectionId && !col) throw new Error("Раздел не найден.");
     if (!col) col = await repo.createCollection({ name: input.receipt ? 'Входящие' : 'Заметки', slug, sensitivity: input.receipt ? 'sensitive' : 'standard' });
     const title = input.title.trim().slice(0, 160) || input.file?.name || 'Входящая запись';
     const entity = await repo.createEntity({ collection_id: col.id, domain: 'notes', title,
-      payload: { type: 'note', title, body: input.body.trim(), ...(input.file ? { source_file: input.file.name, source_media: mediaKind(input.file) } : {}) },
+      payload: { type: 'note', title, ...(input.sourceUrl ? { source_url: input.sourceUrl } : {}), body: input.body.trim(), ...(input.extractedText ? { extracted_text: input.extractedText.trim() } : {}), ...(input.file ? { source_file: input.file.name, source_media: mediaKind(input.file) } : {}) },
       sensitivity: input.sensitivity, source_kind: 'user', source_ref: input.receipt ? 'android-share' : 'device-import',
     }, async (tx, entityId) => {
       if (input.file) await writeOriginal(tx, entityId, input.file, signal);
@@ -104,4 +105,8 @@ export async function materializeAttachment(profile: string, attachment: Attachm
     } catch (e) { handle.close(); if (file.exists) file.delete(); throw e; }
     finally { try { handle.close(); } catch {} }
   });
+}
+
+export async function attachmentsForEntity(profile: string, entityId: string): Promise<Attachment[]> {
+  return withLocalMemoryDatabase(profile, db => db.getAllAsync<Attachment>('SELECT * FROM memory_attachments WHERE entity_id=? ORDER BY created_at,id', [entityId]));
 }

@@ -5,7 +5,7 @@ export type { MemoryKind } from "./search-index";
  * No network/account/session dependency and no automatic sync or export. */
 export type MemorySensitivity = "unclassified" | "standard" | "sensitive" | "secret";
 export type RecordSensitivity = "inherit" | "standard" | "sensitive" | "secret";
-export type RecordStatus = "active" | "archived" | "superseded";
+export type RecordStatus = "active" | "archived" | "superseded" | "trashed";
 
 export type CollectionRecord = {
   id: string; name: string; slug: string; description: string | null;

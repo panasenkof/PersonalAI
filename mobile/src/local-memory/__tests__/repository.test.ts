@@ -271,3 +271,72 @@ test("vectors: pending chunks, saved vectors, staleness on edit, and search by m
   // Without a vector the word search is unchanged.
   expect(await repo.searchMemory("Чем угостить гостью?")).toEqual([]);
 });
+
+
+test("file text and annotation are both searchable and vectorized; edits invalidate only changed chunks", async () => {
+  const repo = new SqliteMemoryRepository(new FakeSqlite() as never);
+  const col = await repo.createCollection({ name: "Заметки", slug: "notes", sensitivity: "standard" });
+  const note = await repo.createEntity({ collection_id: col.id, domain: "notes", title: "scan.png", payload: { body: "Куплено для поездки", extracted_text: "Гарантия на холодильник до 2030 года" }, sensitivity: "standard" });
+  expect((await repo.searchMemory("холодильник"))[0].entity.id).toBe(note.id);
+  expect((await repo.searchMemory("поездки"))[0].entity.id).toBe(note.id);
+  const chunks = await repo.pendingVectorChunks("test");
+  expect(chunks.map(c => c.text).join(" ")).toContain("Гарантия");
+  expect(chunks.map(c => c.text).join(" ")).toContain("Куплено");
+  await repo.saveVectors("test", chunks.map(c => ({ chunkId: c.chunkId, hash: c.hash, vector: new Float32Array([1, 0]) })));
+  await repo.reviseEntity(note.id, 1, { body: "Куплено для поездки", extracted_text: "Новая квитанция" }, "Исправление");
+  expect(await repo.searchMemory("холодильник")).toEqual([]);
+  expect((await repo.pendingVectorChunks("test")).length).toBeGreaterThan(0);
+});
+test("explicit approval makes an old private imported note visible; ordinary move does not", async () => {
+  const repo = new SqliteMemoryRepository(new FakeSqlite() as never);
+  const inbox = await repo.createCollection({ name: "Входящие", slug: "inbox", sensitivity: "sensitive" });
+  const notes = await repo.createCollection({ name: "Заметки", slug: "notes", sensitivity: "standard" });
+  const note = await repo.createEntity({ collection_id: inbox.id, domain: "notes", payload: { body: "Рецепт супа" }, sensitivity: "sensitive" });
+  const moved = await repo.reviseEntity(note.id, 1, note.payload, "Перенос", notes.id);
+  expect(moved.sensitivity).toBe("sensitive");
+  const approved = await repo.reviseEntity(note.id, 2, note.payload, "Разрешён доступ", notes.id, true);
+  expect(approved.sensitivity).toBe("standard");
+  await expect(repo.reviseEntity(note.id, 2, note.payload, "Устаревшее разрешение", notes.id, true)).rejects.toThrow();
+});
+
+test('bulk move and trash are atomic, private notes stay private, undo survives repository recreation', async () => {
+  const sql = new FakeSqlite(); const repo = new SqliteMemoryRepository(sql as never);
+  const a = await repo.createCollection({ name: 'Личное', slug: 'private', sensitivity: 'sensitive' });
+  const b = await repo.createCollection({ name: 'Заметки', slug: 'notes', sensitivity: 'standard' });
+  const first = await repo.createEntity({ collection_id: a.id, domain: 'notes', payload: { body: 'Гарантия' } });
+  const second = await repo.createEntity({ collection_id: a.id, domain: 'notes', payload: { body: 'Квитанция' } });
+  await expect(repo.changeNotes('move', [first, { ...second, record_version: 99 }], b.id)).rejects.toThrow();
+  expect((await repo.entity(first.id))?.collection_id).toBe(a.id);
+  const token = await repo.changeNotes('move', [first, second], b.id);
+  expect((await repo.entity(first.id))?.sensitivity).toBe('sensitive');
+  await new SqliteMemoryRepository(sql as never).undoNotes(token);
+  expect((await repo.entity(first.id))?.collection_id).toBe(a.id);
+  const updated = [await repo.entity(first.id), await repo.entity(second.id)] as any;
+  const deleted = await repo.changeNotes('trash', updated);
+  expect(await repo.searchMemory('Гарантия')).toEqual([]);
+  expect((await repo.searchNotes('', 50, 0, { status: 'trashed' })).length).toBe(2);
+  await repo.undoNotes(deleted);
+  expect((await repo.searchMemory('Гарантия')).length).toBe(1);
+});
+test('merge preserves originals, sources and contradictory text; undo restores ownership and refuses later edits', async () => {
+  const sql = new FakeSqlite(); const repo = new SqliteMemoryRepository(sql as never);
+  const col = await repo.createCollection({ name: 'Заметки', slug: 'notes', sensitivity: 'standard' });
+  const a = await repo.createEntity({ collection_id: col.id, domain: 'notes', title: 'Первый', payload: { body: 'Цена 100', extracted_text: 'Чек 2026' } });
+  const b = await repo.createEntity({ collection_id: col.id, domain: 'notes', title: 'Второй', payload: { body: 'Цена 200', source_url: 'https://example.org' }, sensitivity: 'sensitive' });
+  await sql.runAsync('INSERT INTO memory_attachments(id,entity_id,name,mime,size,created_at) VALUES (?,?,?,?,?,?)', ['photo-a', a.id, 'a.png', 'image/png', 10, 'now']);
+  await sql.runAsync('INSERT INTO memory_attachments(id,entity_id,name,mime,size,created_at) VALUES (?,?,?,?,?,?)', ['photo', b.id, 'photo.png', 'image/png', 10, 'now']);
+  const token = await repo.changeNotes('merge', [a, b]);
+  const merged = (await repo.entity(a.id))!;
+  expect(merged.payload.body).toContain('Цена 100'); expect(merged.payload.body).toContain('Цена 200'); expect(merged.payload.body).toContain('Чек 2026');
+  expect(merged.sensitivity).toBe('sensitive');
+  expect((await sql.getFirstAsync<any>('SELECT entity_id FROM memory_attachments WHERE id=?', ['photo'])).entity_id).toBe(a.id);
+  expect((await repo.entity(b.id))?.record_status).toBe('superseded');
+  await repo.undoNotes(token);
+  expect((await sql.getFirstAsync<any>('SELECT entity_id FROM memory_attachments WHERE id=?', ['photo'])).entity_id).toBe(b.id);
+  expect((await repo.entity(b.id))?.record_status).toBe('active');
+  const again = await repo.changeNotes('merge', [(await repo.entity(a.id))!, (await repo.entity(b.id))!]);
+  const latest = (await repo.entity(a.id))!;
+  await repo.reviseEntity(latest.id, latest.record_version, { body: 'Новая правка' }, 'После объединения');
+  await expect(repo.undoNotes(again)).rejects.toThrow();
+  expect((await repo.entity(a.id))?.payload.body).toBe('Новая правка');
+});

@@ -146,6 +146,7 @@ export function HomeScreen() {
       <PromptInput value={question} onChange={value => store.setQuestion(value)} onClear={() => { normalization.reset(); setVoiceReset(n => n + 1); }} editable={ready} />
       <View style={{ zIndex: 1, flexDirection: "row", alignItems: "center", gap: 6 }}>
         <IconAction icon="plus" label="Файл" accessibilityLabel="Добавить сведения из файла" hint="Добавить в память сведения из текста, фото, аудио или видео." hintAbove hintAlign="start" onPress={() => navigation.navigate("MemoryImport")} />
+        <IconAction icon="camera" label="Камера" accessibilityLabel="Сфотографировать и распознать" hint="Снять фото и сохранить распознанный текст." hintAbove onPress={() => navigation.navigate("MemoryImport", { camera: true })} />
         <VoiceInput key={`${active?.id}:${voiceReset}`} value={question} onChange={value => { if (store.getSnapshot().activeId === active?.id) store.setQuestion(value); }} disabled={!ready} onError={setNotice} showLabel onBegin={normalization.reset} onActiveChange={setDictating} />
         <IconAction icon={normalization.busy ? "x" : normalization.normalized ? "rotate-ccw" : "edit-3"}
           label={normalization.busy ? "Отмена" : normalization.normalized ? "Исходный" : "Улучшить"}
