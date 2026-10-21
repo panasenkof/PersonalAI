@@ -48,7 +48,7 @@ export async function importLink(raw: string, signal?: AbortSignal): Promise<{ f
       throw new Error('Сайт перенаправляет запрос на другой адрес. Автоматические перенаправления для импорта отключены.');
     if (!response.ok) throw new Error('Сайт отказал в загрузке: HTTP ' + response.status + '. Проверьте доступ к файлу в браузере.');
     const mime = (response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
-    const looksLikeMediaFile = /\\.(mp3|m4a|wav|ogg|flac|aac|mp4|mov|webm|mkv)$/i.test(new URL(source).pathname);
+    const looksLikeMediaFile = /\.(mp3|m4a|wav|ogg|flac|aac|mp4|mov|webm|mkv)$/i.test(new URL(source).pathname);
     if (looksLikeMediaFile && (mime === 'text/html' || mime === 'application/xhtml+xml' || mime === 'text/plain'))
       throw new Error('Вместо медиафайла сайт вернул страницу или текст. Возможна проверка VPN, авторизация или недействительная прямая ссылка.');
     const text = mime === 'text/html' || mime.startsWith('text/') || mime === 'application/json';
