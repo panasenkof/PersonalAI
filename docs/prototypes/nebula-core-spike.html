@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PersAI Nebula · motion R&D / NOT production</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,-apple-system,Segoe UI,Arial,sans-serif}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 12% 4%,#182658,#070d20 58%,#050916);color:#f6f8ff}
+main{max-width:1100px;margin:0 auto;padding:24px 18px 64px}header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px}
+h1{font-size:clamp(22px,3vw,33px);letter-spacing:.01em;margin:0}p{line-height:1.55;color:#b5c7e5}
+.status{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:#9cb5fa;background:#1d2850;border:1px solid #5269aa;padding:9px 12px;border-radius:999px}
+.layout{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(260px,.75fr);gap:18px;margin-top:20px}
+.canvas-wrap{position:relative;aspect-ratio:1;background:linear-gradient(140deg,#0a0c27,#07152c 60%,#06101f);border:1px solid #3e538b;border-radius:29px;overflow:hidden;box-shadow:0 12px 60px #0007}
+canvas{width:100%;height:100%;display:block}aside{background:#141f3a;border:1px solid #344872;padding:20px;border-radius:25px}
+.group{margin:18px 0}.group b{display:block;margin-bottom:11px;font-size:14px}
+.buttons{display:flex;flex-wrap:wrap;gap:7px}button{border:1px solid #465b84;background:#1d2c4c;color:#f7f9ff;border-radius:12px;min-height:44px;padding:10px 13px;font-size:13px;cursor:pointer}
+button[aria-pressed=true]{background:linear-gradient(125deg,#5846d2,#336cba);border-color:#a396ff}button:focus-visible{outline:3px solid #89dfff;outline-offset:2px}
+small{color:#b0c3e3;line-height:1.5}.hint{background:#202d4a;border-left:3px solid #887eff;padding:12px;margin:20px 0;border-radius:10px}
+.note{margin-top:15px;font-size:12px;color:#adbad5}#phase{font-weight:700;color:#8ee9ff}
+@media(max-width:720px){.layout{grid-template-columns:1fr}main{padding:12px}.canvas-wrap{max-height:80vh}.status{font-size:10px}}
+</style></head><body><main>
+<header><div><h1>PersAI / Nebula Core</h1><p>Исследование формы и световых мембран — не готовая анимация Android.</p></div><span class="status">ISOLATED VISUAL STUDY • Canvas2D</span></header>
+<div class="layout"><div class="canvas-wrap"><canvas id="space" role="img" aria-label="Анимируемая органическая фиолетово-синяя сфера на космическом фоне; состояние указано справа"></canvas></div>
+<aside><h2 style="margin-top:0">Состояния</h2><div class="buttons" id="states"></div>
+<div class="group"><b>Качество / доступность</b><div class="buttons" id="qualities"></div></div>
+<div class="hint"><span id="phase" role="status">Спокойный режим</span><p id="description">Мягкое изменение формы, внутренние переливы и глубина.</p></div>
+<button id="flight" type="button">Короткий пролёт через звёзды</button>
+<p class="note">Учитываются Reduce Motion и сворачивание вкладки. Полёт доступен только в idle при полном качестве. Референс — REF-ORB-B, не упрощённая круговая иконка.</p>
+<p class="note"><strong>Проверять отдельно:</strong> Android Skia/кадровый рендер, 60 FPS, нагрев, RAM, поведение микрофона и клавиатуры. Canvas2D не является производственным компонентом React Native.</p>
+</aside></div></main>
+<script>
+(()=>{"use strict";
+const canvas=document.getElementById("space"),ctx=canvas.getContext("2d",{alpha:false});
+const states=[["idle","Покой","Медленная пластика мембран и внутренние цветовые переливы."],["listening","Слушает","Всплески оболочки — лишь демонстрация; реальный режим включает только микрофон."],["transcribing","Распознаёт","Плавная внутренняя циркуляция без ложного статуса записи."],["thinking","Думает","Потоки внутри сферы становятся активнее."],["responding","Отвечает","Выразительный свет, не закрывающий текст."],["offline","Нет сети","Спокойное приглушённое состояние."],["error","Ошибка","Состояние обозначено текстом, а не только цветом."]];
+const reduced=window.matchMedia("(prefers-reduced-motion: reduce)");let state="idle",quality=reduced.matches?"static":"full",visible=true,flightStart=-1,w=640,h=640,dpr=1,clock=0,frame=0;
+function choose(target,container,value){for(const b of container.querySelectorAll("button"))b.setAttribute("aria-pressed",String(b.dataset.value===value));}
+for(const [id,label,desc] of states){const b=document.createElement("button");b.textContent=label;b.dataset.value=id;b.setAttribute("aria-pressed",String(id===state));b.onclick=()=>{state=id;choose(b,document.getElementById("states"),id);document.getElementById("phase").textContent=label;document.getElementById("description").textContent=desc};document.getElementById("states").append(b)}
+for(const [q,title] of [["full","Полный"],["reduced","Экономный"],["static","Без анимации"]]){const b=document.createElement("button");b.textContent=title;b.dataset.value=q;b.setAttribute("aria-pressed",String(q===quality));b.onclick=()=>{quality=q;choose(b,document.getElementById("qualities"),q);draw()};document.getElementById("qualities").append(b)}
+const stars=Array.from({length:100},(_,i)=>{const s=(Math.sin(i*127.13+13)*43758.5453)%1;return {x:((i*73.13)%100)/100,y:((i*41.17+11)%100)/100,z:0.2+Math.abs(s)*.9,a:.15+Math.abs(s)*.6}});
+function resize(){const r=canvas.getBoundingClientRect();dpr=Math.min(2,window.devicePixelRatio||1);w=Math.max(240,Math.round(r.width*dpr));h=Math.max(240,Math.round(r.height*dpr));canvas.width=w;canvas.height=h;draw()}
+const blend=(a,b,v)=>a+(b-a)*v;
+function ellipseGlow(x,y,rx,ry,color,opacity,blur){ctx.save();ctx.globalAlpha=opacity;ctx.filter="blur("+blur+"px)";ctx.fillStyle=color;ctx.beginPath();ctx.ellipse(x,y,rx,ry,0,0,Math.PI*2);ctx.fill();ctx.restore()}
+function path(cx,cy,r,phase,amount=1){ctx.beginPath();for(let i=0;i<=220;i++){let a=i/220*Math.PI*2;let off=amount*(Math.sin(a*3+phase)*.027+Math.sin(a*5-phase*.7)*.013+Math.sin(a*8+phase*.43)*.006);let rad=r*(1+off);let x=cx+Math.cos(a)*rad,y=cy+Math.sin(a)*rad;i?ctx.lineTo(x,y):ctx.moveTo(x,y)}ctx.closePath()}
+function draw(){
+ const t=quality==="static"||!visible?0:clock;const cx=w*.5,cy=h*.515,R=Math.min(w,h)*.305,energy=state==="thinking"?1.6:state==="listening"?1.28:state==="offline"?.2:state==="error"?.15:1;
+ ctx.clearRect(0,0,w,h);let base=ctx.createLinearGradient(0,0,w,h);base.addColorStop(0,"#090d2b");base.addColorStop(.55,"#071631");base.addColorStop(1,"#06091b");ctx.fillStyle=base;ctx.fillRect(0,0,w,h);
+ ellipseGlow(w*.2,h*.24,w*.33,h*.24,"#3845cf",.2,w*.05);ellipseGlow(w*.86,h*.76,w*.29,h*.22,"#0265b8",.12,w*.04);
+ let timeFlight=flightStart<0||quality!=="full"||state!=="idle"?-1:(performance.now()-flightStart)/1800;if(timeFlight>=1){timeFlight=-1;flightStart=-1}
+ for(const s of stars){let scale=timeFlight>=0?1+timeFlight*s.z*4:1;let x=cx+(s.x-.5)*w*scale,y=cy+(s.y-.5)*h*scale;ctx.fillStyle="#95cfff";ctx.globalAlpha=s.a*(state==="offline"?.3:1);ctx.beginPath();ctx.arc(x,y,Math.max(1,dpr*s.z*.85),0,Math.PI*2);ctx.fill()}ctx.globalAlpha=1;
+ ellipseGlow(cx,cy,R*1.13,R*1.13,"#5c54ff",.35,w*.05);ellipseGlow(cx-R*.47,cy-R*.35,R*.48,R*.42,"#b654ff",.32,w*.025);
+ ctx.save();ctx.shadowColor="#647dff";ctx.shadowBlur=R*.20;path(cx,cy,R,t*.26,quality==="static"?0:energy);let shell=ctx.createRadialGradient(cx-R*.3,cy-R*.42,R*.06,cx,cy,R*1.08);shell.addColorStop(0,"#94d9ff");shell.addColorStop(.15,"#705df2");shell.addColorStop(.46,"#282baf");shell.addColorStop(.78,"#293aeb");shell.addColorStop(1,"#58d7ff");ctx.fillStyle=shell;ctx.fill();ctx.restore();
+ ctx.save();path(cx,cy,R*.95,t*.26,quality==="static"?0:energy);ctx.clip();
+ // Multilayer translucent, independently moving membrane surfaces.
+ for(let j=0;j<5;j++){
+  let phase=t*(.27+j*.11)+j*1.7,shift=Math.sin(phase)*R*.34;
+  let yy=cy-R*.32+j*R*.19+shift;
+  let grd=ctx.createLinearGradient(cx-R*.88,yy-R*.34,cx+R*.87,yy+R*.58);
+  grd.addColorStop(0,j%2?"#2acbef18":"#cb70ff20");
+  grd.addColorStop(.32,j%2?"#49d7ff8c":"#de8eff88");
+  grd.addColorStop(.62,"#7151f49c");grd.addColorStop(1,j%2?"#42c8ff10":"#e489ff13");
+  ctx.fillStyle=grd;ctx.beginPath();
+  for(let i=0;i<=110;i++){let u=i/110*2-1,x=cx+u*R*1.22;
+    let y=yy+Math.sin(u*3.4+phase)*R*(.18+j*.012)+Math.cos(u*5.2-phase*.7)*R*.067;
+    if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y)}
+  for(let i=110;i>=0;i--){let u=i/110*2-1,x=cx+u*R*1.22;
+    let y=yy+Math.sin(u*3.4+phase)*R*(.18+j*.012)+Math.cos(u*5.2-phase*.7)*R*.067+R*(.13+j*.014);
+    ctx.lineTo(x,y)}
+  ctx.closePath();ctx.fill();
+ }
+ const coreX=cx+Math.sin(t*.29)*R*.17,coreY=cy+Math.cos(t*.23)*R*.13;
+ const core=ctx.createRadialGradient(coreX,coreY,0,coreX,coreY,R*.60);
+ core.addColorStop(0,"#e1fdff");core.addColorStop(.07,"#9bf6ff");core.addColorStop(.19,"#39c4ffb5");core.addColorStop(.48,"#3578ff56");core.addColorStop(1,"#493eff00");
+ ctx.globalAlpha=state==="offline"?.28:state==="error"?.4:.94;ctx.fillStyle=core;ctx.fillRect(cx-R,cy-R,R*2,R*2);ctx.globalAlpha=1;
+ // Specular, lens-depth arcs.
+ ctx.strokeStyle="#cff7ffb8";ctx.lineWidth=Math.max(1,R*.038);
+ ctx.shadowColor="#e5baff";ctx.shadowBlur=R*.08;ctx.beginPath();ctx.ellipse(cx+R*.32,cy-R*.57,R*.43,R*.12,-.25,Math.PI*.95,Math.PI*1.92);ctx.stroke();
+ ctx.shadowBlur=0;ctx.restore();
+ ctx.save();path(cx,cy,R*1.006,t*.26,quality==="static"?0:energy);ctx.lineWidth=Math.max(2,R*.018);ctx.strokeStyle=state==="error"?"#ff8fa9":state==="offline"?"#7b7eac":"#8c8cff";ctx.shadowColor="#4de9ff";ctx.shadowBlur=R*.13;ctx.stroke();ctx.restore();
+ if(state==="listening"&&quality!=="static"){ctx.save();ctx.strokeStyle="#62d9fc65";ctx.lineWidth=Math.max(1,2*dpr);for(let k=0;k<2;k++){ctx.beginPath();ctx.arc(cx,cy,R*(1.09+.03*k+.025*Math.sin(t*7-k)),0,Math.PI*2);ctx.stroke()}ctx.restore()}
+}
+let prev=performance.now();function tick(now){let dt=Math.min(.045,(now-prev)/1000);prev=now;if(visible&&quality!=="static"){clock+=dt*(quality==="reduced"?.33:1);draw()}frame=requestAnimationFrame(tick)}
+document.getElementById("flight").onclick=()=>{if(quality==="full"&&state==="idle"){flightStart=performance.now();draw()}};
+function onVisibility(){visible=!document.hidden;if(visible)draw()}document.addEventListener("visibilitychange",onVisibility);
+reduced.addEventListener?.("change",e=>{if(e.matches){quality="static";choose(null,document.getElementById("qualities"),quality);draw()}});
+window.addEventListener("resize",resize);resize();frame=requestAnimationFrame(tick);
+})();
+</script></body></html>
