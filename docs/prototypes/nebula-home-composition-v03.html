@@ -38,7 +38,6 @@ textarea{border:0;outline:0;resize:none;min-height:42px;max-height:126px;overflo
 .tabs{flex-shrink:0;height:62px;background:#091026e8;border-top:1px solid #8ba4de2f;display:flex;align-items:center;justify-content:space-around}
 .tabs>div{text-align:center;font-size:10px;color:#9baac5;min-width:30%}.tabs b{display:block;font-size:19px;font-weight:400;line-height:24px}.tabs .active{color:#8ddaff}
 .androidnav{height:18px;display:grid;place-items:center;flex-shrink:0;background:#080d1e}.androidnav:after{content:"";width:107px;height:4px;background:#afbbd6;border-radius:20px;opacity:.65}
-.kbd{height:218px;background:#263249;padding:8px 6px;display:none;flex-direction:column;gap:6px;flex-shrink:0}.kbd.open{display:flex}.keyline{display:flex;flex:1;gap:4px}.keyline span{display:grid;place-items:center;flex:1;background:#465575;border-radius:6px;color:#e9edfa}
 .shade{position:absolute;inset:0;display:none;z-index:8;background:#0009;align-items:flex-end}.shade.open{display:flex}.sheet{width:100%;background:#1b2a49;border-radius:24px 24px 0 0;padding:18px 18px 24px;border:1px solid #6c7db5}.sheet h2{font-size:17px;margin:0 0 12px}.sheet button{display:block;width:100%;padding:12px;text-align:left;background:transparent;border:0;border-top:1px solid #50618e;font-size:14px;min-height:46px}
 aside{padding:19px;border:1px solid #52648c70;background:#14213d9e;border-radius:20px;position:sticky;top:15px}aside h2{font-size:17px;margin:0}aside p,aside li{font-size:13px;color:var(--muted);line-height:1.6}aside ul{padding-left:18px}aside .tag{font-size:11px;color:#9bdeff;border:1px solid #4e83b2;border-radius:999px;padding:5px 10px;display:inline-block;margin-bottom:13px}
 @media(max-width:770px){main{display:flex;flex-direction:column;align-items:center;gap:15px;padding:8px}aside{position:static;max-width:450px;width:100%}header{justify-content:center}header>div{text-align:center;width:100%}.phone{height:min(790px,calc(100dvh - 147px));min-height:480px}}
@@ -50,7 +49,7 @@ aside{padding:19px;border:1px solid #52648c70;background:#14213d9e;border-radius
 <button data-scenario="empty" aria-pressed="true">Новый чат</button>
 <button data-scenario="chat" aria-pressed="false">Диалог</button>
 <button data-scenario="thinking" aria-pressed="false">ИИ думает</button>
-<button id="kbdToggle" aria-pressed="false">Клавиатура</button>
+<button id="focusComposer">Открыть ввод (системная клавиатура)</button>
 <select id="device" aria-label="Ширина Android"><option value="390">390 dp</option><option value="320">320 dp</option><option value="360">360 dp</option><option value="430">430 dp</option></select>
 </div></header>
 <main>
@@ -70,7 +69,7 @@ aside{padding:19px;border:1px solid #52648c70;background:#14213d9e;border-radius
 <button class="icon" id="mic" aria-label="Голосовой ввод">♪</button>
 <button class="send" id="send" aria-label="Отправить демонстрационное сообщение" disabled>➤</button></div>
 <div class="hint"><button id="clean">✦ Улучшить / исходный</button><span id="state">Прототип · данные не отправляются</span></div></div>
-<div class="kbd" id="keyboard"><div class="keyline" id="row1"></div><div class="keyline" id="row2"></div><div class="keyline" id="row3"></div></div>
+
 <div class="tabs"><div class="active"><b>⌂</b>Главная</div><div><b>▤</b>Память</div><div><b>⚙</b>Настройки</div></div>
 <div class="androidnav"></div>
 <div class="shade" id="shade"><div class="sheet" role="dialog" aria-modal="true" aria-label="Демо выбора вложений"><h2>Прикрепить к сообщению</h2>
@@ -84,25 +83,25 @@ aside{padding:19px;border:1px solid #52648c70;background:#14213d9e;border-radius
 <p>Теперь проверяем только устройство Home: компактная шапка, просторный чат, закреплённый composer, доступность вложений и голоса.</p>
 <ul><li><b>Новый чат:</b> утверждённая сфера REF-ORB-B без баннеров «Чем помочь сегодня?»</li>
 <li><b>Диалог:</b> сфера становится небольшим статусным символом, не занимает место сообщений.</li>
-<li><b>Ввод:</b> проверка 320/360/390/430 dp и макета клавиатуры.</li>
+<li><b>Ввод:</b> на телефоне фокус открывает <strong>системную клавиатуру Android</strong>; макет НЕ рисует клавиши. Проверяем 320/360/390/430 dp.</li>
 <li><b>Вложения:</b> выбор типа файла и съёмный чип; это только UX-проба, не обработка файла.</li>
 <li><b>Будущие функции:</b> media, automations и инструменты входят в контекстные действия, не размножают вкладки.</li></ul>
-<p>После утверждения компоновки — нативный UX-аудит, затем дизайн-система и React Native Home. В настоящий Android переносится уже утверждённая Skia B+C (сфера ×5, контурная нить ×1).</p></aside>
+<p>Проверка с клавиатурой в браузере условная: на Android клавиатуру создаёт сама система (Gboard, SwiftKey и др.), а приложению доступны только изменение видимой области и системные WindowInsets. Полноценную проверку выполнить на реальном APK.</p><p>После утверждения компоновки — нативный UX-аудит, затем дизайн-система и React Native Home. В настоящий Android переносится уже утверждённая Skia B+C (сфера ×5, контурная нить ×1).</p></aside>
 </main>
 <script>
 (()=>{"use strict";const $=id=>document.getElementById(id);
 const art='../../mobile/src/design/nebula/assets/nebula-orb-ref-b.png';
+const approvedEmpty=document.getElementById("empty");
 let scenario="empty",chosen=[],original="",clean=false;
 function draw(){const box=$("historyList");box.innerHTML="";
-if(scenario==="empty"){box.append($("empty"))}else{
+if(scenario==="empty"){box.append(approvedEmpty)}else{
 const title=document.createElement("div");title.className="phase";const img=document.createElement("img");img.className="littlesphere";img.src=art;img.alt="Nebula";const t=document.createElement("span");t.textContent=scenario==="thinking"?"Обрабатываю запрос":"Ассистент";title.append(img,t);box.append(title);
 const rows=[["mine","Найди мои заметки про любимые рецепты."],["ai","Поищу в локальной памяти. Чтобы обратиться к интернету, сначала проверю разрешения."],["mine","Хочу прикрепить к сообщению фотографию."],["ai",scenario==="thinking"?"Обрабатываю запрос… (это демонстрация)":"Кнопка «+» позволяет выбрать файл прямо из строки ввода. Анализ вложений — отдельная функция."]];
 for(const [who,msg]of rows){const n=document.createElement("div");n.className="msg "+who;n.textContent=msg;box.append(n)}}
 document.querySelectorAll("[data-scenario]").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.scenario===scenario)));$("state").textContent=scenario==="thinking"?"ИИ думает · демонстрация":"Прототип · данные не отправляются";box.scrollTop=box.scrollHeight}
 document.querySelectorAll("[data-scenario]").forEach(b=>b.onclick=()=>{scenario=b.dataset.scenario;draw()});
 $("new").onclick=()=>{scenario="empty";draw()};$("device").onchange=e=>document.documentElement.style.setProperty("--width",e.target.value+"px");
-$("kbdToggle").onclick=()=>{let open=$("keyboard").classList.toggle("open");$("kbdToggle").setAttribute("aria-pressed",String(open))};
-for(const [id,letters]of [["row1","йцукенгшщзх"],["row2","фывапролджэ"],["row3","ячсмитьбю"]])for(const ch of letters){const k=document.createElement("span");k.textContent=ch;$(id).append(k)}
+$("focusComposer").onclick=()=>$("prompt").focus();
 $("model").onclick=()=>alert("Демо макета: переход к реальным подключениям будет в Android.");$("history").onclick=()=>alert("Демо макета: история чатов будет в Android.");
 $("mic").onclick=()=>alert("Демо: макет не записывает звук.");
 $("plus").onclick=()=>$("shade").classList.add("open");$("cancel").onclick=()=>$("shade").classList.remove("open");
