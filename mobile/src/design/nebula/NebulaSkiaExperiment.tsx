@@ -19,6 +19,7 @@ import { runOnJS, useAnimatedReaction, useDerivedValue } from "react-native-rean
 import { resolveNebulaScene, type NebulaPhase } from "./motion";
 import { nebulaColors } from "./tokens";
 import { NEBULA_ENERGY, NEBULA_HYBRID_SKSL } from "./hybridShader";
+import { getFilamentUniforms, type NebulaLabSpeed } from "./phaseFilament";
 import { isNebulaLabForeground, nebulaRendererLabels, nebulaRendererReason } from "./rendererDiagnostics";
 
 /**
@@ -53,7 +54,7 @@ export interface NebulaSkiaExperimentProps {
   /** Enables the laboratory status and actual Skia-clock activity indicator. */
   showDiagnostics?: boolean;
   /** Laboratory-only acceleration for checking whether subtle membranes move. */
-  previewSpeed?: 1 | 2.5;
+  previewSpeed?: NebulaLabSpeed;
 }
 
 function AnimatedSkiaOrb({ size, phase, speed, onImageReady, onClockTick }: {
@@ -65,7 +66,9 @@ function AnimatedSkiaOrb({ size, phase, speed, onImageReady, onClockTick }: {
 }) {
   const image = useImage(poster);
   const clock = useClock();
-  const energy = NEBULA_ENERGY[phase] * speed;
+  // Speed multiplies elapsed TIME only, never deformation/energy/intensity.
+  const energy = NEBULA_ENERGY[phase];
+  const filament = useMemo(() => getFilamentUniforms(phase, true), [phase]);
   useEffect(() => { onImageReady(Boolean(image)); }, [image, onImageReady]);
   // Clock observations originate on the UI thread. A static fallback no longer
   // looks like a successful running shader; this proves whether time advances.
@@ -77,11 +80,18 @@ function AnimatedSkiaOrb({ size, phase, speed, onImageReady, onClockTick }: {
     [onClockTick],
   );
   const uniforms = useDerivedValue(() => ({
-    uTime: clock.value * 0.001,
+    uTime: clock.value * 0.001 * speed,
     uSize: size,
     uEnergy: energy,
     uOffline: 0,
-  }), [size, energy]);
+    uLineR: filament.uLineR,
+    uLineG: filament.uLineG,
+    uLineB: filament.uLineB,
+    uLineIntensity: filament.uLineIntensity,
+    uLinePulseHz: filament.uLinePulseHz,
+    uLineWave: filament.uLineWave,
+    uLineAnimate: filament.uLineAnimate,
+  }), [size, energy, speed, filament]);
 
   // Correct-art fallback when SkSL is not supported by the device.
   if (!nebulaEffect || !image) {
@@ -99,6 +109,39 @@ function AnimatedSkiaOrb({ size, phase, speed, onImageReady, onClockTick }: {
       </Fill>
     </Canvas>
   );
+}
+
+/**
+ * Statically shader-rendered B+C artwork WITH the current status filament.
+ * No useClock / no loop; offline, error, reduced-motion, background and
+ * low-power states therefore remain accessible and truly motionless.
+ */
+function StaticSkiaOrb({ size, phase, onImageReady }: {
+  size: number;
+  phase: NebulaPhase;
+  onImageReady: (ready: boolean) => void;
+}) {
+  const image = useImage(poster);
+  useEffect(() => { onImageReady(Boolean(image)); }, [image, onImageReady]);
+  const uniforms = useMemo(() => ({
+    uTime: 0,
+    uSize: size,
+    uEnergy: NEBULA_ENERGY[phase],
+    uOffline: phase === "offline" ? 1 : 0,
+    ...getFilamentUniforms(phase, false),
+  }), [size, phase]);
+  if (!nebulaEffect || !image) {
+    return <Image testID="nebula-skia-static-fallback" source={poster}
+      accessibilityIgnoresInvertColors style={{ width: size, height: size }} />;
+  }
+  return <Canvas testID="nebula-skia-static-canvas" style={{ width: size, height: size }}>
+    <Fill>
+      <Shader source={nebulaEffect} uniforms={uniforms}>
+        <ImageShader image={image} fit="cover"
+          rect={{ x: 0, y: 0, width: size, height: size }} />
+      </Shader>
+    </Fill>
+  </Canvas>;
 }
 
 export function NebulaSkiaExperiment({
@@ -171,9 +214,11 @@ export function NebulaSkiaExperiment({
         {animated
           ? <AnimatedSkiaOrb size={size} phase={phase}
               speed={previewSpeed} onImageReady={onImageReady} onClockTick={onClockTick} />
-          : <Image testID="nebula-skia-poster" source={poster}
-              resizeMode="cover" accessibilityIgnoresInvertColors
-              style={{ width: size, height: size }} />}
+          : enableNativeShader && Boolean(nebulaEffect)
+            ? <StaticSkiaOrb size={size} phase={phase} onImageReady={onImageReady} />
+            : <Image testID="nebula-skia-poster" source={poster}
+                resizeMode="cover" accessibilityIgnoresInvertColors
+                style={{ width: size, height: size }} />}
       </View>
       {showDiagnostics ? <View style={{ alignItems: "center", gap: 3, paddingHorizontal: 8 }}>
         <Text testID="nebula-renderer-reason" accessibilityRole="text"
