@@ -1,4 +1,5 @@
 import { useColorScheme } from "react-native";
+import React, { createContext, useContext } from "react";
 
 /** PersAI tokens: calm Aurora surfaces and the turquoise / indigo / orchid mark. */
 const light = {
@@ -14,6 +15,16 @@ const dark: typeof light = {
   userBubble: "#4B428E", userText: "#FFFFFF", ok: "#4FCFB1", err: "#FF8EAD", warn: "#463D29",
 };
 export type Theme = typeof light;
+
+/** Home-only theme boundary; Memory and Settings keep their own OS theme. */
+const ThemeOverride = createContext<Theme | null>(null);
+export function NebulaHomeThemeProvider({ children }: { children: React.ReactNode }) {
+  return React.createElement(ThemeOverride.Provider, { value: dark }, children);
+}
+export const nebulaHomeColors = dark;
+
 export function useTheme(): Theme {
-  return useColorScheme() === "dark" ? dark : light;
+  const override = useContext(ThemeOverride);
+  const scheme = useColorScheme();
+  return override ?? (scheme === "dark" ? dark : light);
 }
