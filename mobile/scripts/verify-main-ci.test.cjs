@@ -54,10 +54,10 @@ test("RG-04: YAML uses verified event/API helper instead of jq env filter, prese
   assert.match(workflow, /node mobile\/scripts\/verify-main-ci\.cjs/);
   // Valid GitHub Actions env references must stay: checkout and artifact metadata
   // use the verified TARGET_SHA. Only the old gh --jq field comparison was unsafe.
-  assert.match(workflow, /ref:\\s*\\$\\{\\{ env\\.TARGET_SHA \\}\\}/);
-  assert.match(workflow, /PIA_ANDROID_BUILD_SHA:\\s*\\$\\{\\{ env\\.TARGET_SHA \\}\\}/);
-  assert.doesNotMatch(workflow, /\\.head_sha\\s*==\\s*env\\.TARGET_SHA/);
-  assert.doesNotMatch(workflow, /actions\\/workflows\\/ci\\.yml\\/runs\\?branch=main/);
+  assert.match(workflow, /ref:\s*\$\{\{ env\.TARGET_SHA \}\}/);
+  assert.match(workflow, /PIA_ANDROID_BUILD_SHA:\s*\$\{\{ env\.TARGET_SHA \}\}/);
+  assert.doesNotMatch(workflow, /\.head_sha\s*==\s*env\.TARGET_SHA/);
+  assert.doesNotMatch(workflow, /actions\/workflows\/ci\.yml\/runs\?branch=main/);
   assert.match(workflow, /git rev-parse HEAD/);
   assert.match(workflow, /git\/ref\/heads\/main/);
   assert.match(workflow, /Check cumulative Android changes since last published APK/);
