@@ -3,8 +3,10 @@ import React, { useLayoutEffect, useRef } from "react";
 import { Pressable, TextInput, View } from "react-native";
 import { useTheme } from "../theme";
 
-export function PromptInput({ value, onChange, onClear, editable }: {
+export function PromptInput({ value, onChange, onClear, editable, onFocusChange }: {
   value: string; onChange: (value: string) => void; onClear: () => void; editable: boolean;
+  /** Optional UI-only signal; used to keep decorative artwork above the keyboard. */
+  onFocusChange?: (focused: boolean) => void;
 }) {
   const t = useTheme();
   const input = useRef<TextInput>(null);
@@ -15,6 +17,7 @@ export function PromptInput({ value, onChange, onClear, editable }: {
   }, [value]);
   return <View style={{ flexDirection: "row", alignItems: "flex-start", borderWidth: 1, borderColor: t.line, borderRadius: 18, backgroundColor: t.soft }}>
     <TextInput ref={input} accessibilityLabel="Сообщение ассистенту" multiline value={value} onChangeText={onChange}
+      onFocus={() => onFocusChange?.(true)} onBlur={() => onFocusChange?.(false)}
       placeholder="Спросить у ИИ…" placeholderTextColor={t.muted} editable={editable}
       style={{ flex: 1, minWidth: 0, minHeight: 46, maxHeight: 112, padding: 12, color: t.text, fontSize: 16 }} />
     {value.length ? <Pressable accessibilityRole="button" accessibilityLabel="Очистить сообщение" accessibilityHint="Удалить весь текст черновика"
