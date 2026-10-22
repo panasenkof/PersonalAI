@@ -13,8 +13,9 @@ export function NebulaHomeArtwork({ size = 288, phase = "idle" }: {
   size?: number; phase?: NebulaPhase;
 }) {
   const isFocused = useIsFocused();
+  // The Skia canvas hides itself from TalkBack, while its textual status
+  // remains readable: do not hide the entire subtree.
   return <View testID="nebula-home-approved-art" pointerEvents="none"
-    accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
     style={{ width: size, minHeight: size, justifyContent: "center", alignItems: "center" }}>
     {isFocused
       ? <NebulaSkiaExperiment phase={phase} size={size}
