@@ -1,4 +1,6 @@
-# Единый план PersAI — ред. 47
+# Единый план PersAI — ред. 48
+
+**22.10.2026 · начата настоящая Android-интеграция Nebula Home (этап 86/89):** вместо круглого статичного PNG — native Skia B+C, реальная речь (listening/transcribing), реальные стадии запроса (thinking/responding), тёмный Home без чёрного диска и unmount GPU при переходе на другую вкладку. [Спецификация](docs/design/NEBULA_HOME_NATIVE_INTEGRATION.md), [OpenSpec](openspec/changes/nebula-home-native-integration/). Это отдельный PR; не путать зелёный CI с реальной художественной/энергетической приёмкой APK.
 
 **22.10.2026 · подготовлен интерактивный макет Home (этап 86):** [HTML-композиция v0.3](docs/prototypes/nebula-home-composition-v03.html) и [чек-лист согласования](docs/design/NEBULA_HOME_COMPOSITION_REVIEW.md), с responsive 320–430dp, mock клавиатуры, диалога и вложений. Figma Starter пока не даёт новых вызовов; **редактируемый Figma и Android-реализация Home ещё не готовы**. Полный [performance/battery gate](docs/design/NEBULA_PERFORMANCE_GATE.md) ставим **после интеграции основных графически нагружающих компонентов Home (native orb + фон + потоковый чат + голос)**, но короткие профилирующие проверки — в каждом GPU PR. Не ждать завершения Memory/Settings.
 
@@ -317,10 +319,11 @@ iOS «Отправить в» (61б) — отдельная будущая ра�
 Markdown GitHub поддерживает сворачиваемые секции. Исторические сведения ниже сохраняются для справки; **приоритет всегда у разделов 1–2**.
 
 <details>
-<summary><strong>Краткая история редакций 1–42 (таблица)</strong></summary>
+<summary><strong>Краткая история редакций 1–48 (таблица)</strong></summary>
 
 | Ред. | Дата | Суть изменений |
 | --- | --- | --- |
+| **48** | **22.10** | **Первый нативный Skia B+C на Home, тёмная сцена без круглого фона, фазы из реальной диктовки и LLM, безопасные тема/навигация/тесты, Android device QA открыта.** |
 | **47** | **22.10** | **Интерактивная композиция Home v0.3 и критерии приёмки; полный performance/battery gate — после интеграции основных нагружающих компонентов Home, короткие guards в каждом PR.** |
 | **46** | **22.10** | **Художественная сфера B+C утверждена; следующий этап — компоновка рабочего чата и дальнейшая UX/UI-миграция по фиксированному образцу, а не новый эксперимент orb.** |
 | **45** | **22.10** | **APK release: сравнение с последним опубликованным APK вместо HEAD^; регрессия docs-only HEAD и безопасные ограничения публикации.** |
@@ -369,7 +372,12 @@ Markdown GitHub поддерживает сворачиваемые секции
 </details>
 
 <details>
-<summary><strong>Подробный журнал редакций 1–47</strong></summary>
+<summary><strong>Подробный журнал редакций 1–48</strong></summary>
+### Ред. 48 (22.10.2026)
+
+- [Нативный B+C на Home](docs/design/NEBULA_HOME_NATIVE_INTEGRATION.md): scope-only dark styling + source-driven voice/LLM phases + Android GPU unmount; браузерная версия использует исходный арт как fallback.
+- Обязательны native release, TS/Jest, CanvasKit shader, browser QA и последующая пользовательская проверка на телефоне; Memory/Settings и security не мигрируются этим PR.
+
 ### Ред. 47 (22.10.2026)
 
 - Подготовлен [макет Home v0.3](docs/prototypes/nebula-home-composition-v03.html), композиционный [review](docs/design/NEBULA_HOME_COMPOSITION_REVIEW.md), поэтапная [performance-проверка](docs/design/NEBULA_PERFORMANCE_GATE.md). Макет показывает только UX, не LLM/Skia API; Figma недоступна по Starter limit.
