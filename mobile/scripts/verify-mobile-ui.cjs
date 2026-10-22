@@ -112,6 +112,13 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await prompt.fill('Длинный черновик\nВторая строка');
       await page.getByLabel('Очистить сообщение', { exact: true }).click();
       assert.equal(await prompt.inputValue(), '');
+      // Native/web focus restoration occurs after React removes the clear
+      // control and may settle in the next frame when the artwork reflows.
+      // Still fail if focus isn't restored: never mask lost IME focus.
+      await page.waitForFunction(() => {
+        const input = document.querySelector('[aria-label="Сообщение ассистенту"]');
+        return input && document.activeElement === input;
+      }, null, { timeout: 2500 });
       assert.equal(await prompt.evaluate(el => document.activeElement === el), true, 'Clear keeps keyboard focus in the composer');
       assert.equal(await page.getByLabel('Очистить сообщение', { exact: true }).count(), 0);
       assert.equal(await page.getByLabel('Улучшить текст', { exact: true }).isDisabled(), true);
