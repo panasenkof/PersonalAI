@@ -4,9 +4,9 @@
 
 ## Что относится к готовой дизайн-системе
 
-- **Сделано в этом PR:** typed semantic palettes, spacing/radii/type/layout/touch tokens, базовые `NebulaSurface`, `NebulaAction`, `NebulaSection`, `NebulaSettingRow` и pure `resolveNebulaScene`, тесты их инвариантов.
-- **Не сделано:** финальный morphing `NebulaCore`, фон со star-flight в React Native, adaptive icon, мультимодальный transport, экраны Home/Memory/Settings на новой системе, Android performance run, завершение редактируемых Figma экранов. Нельзя помечать пункт 88 целиком готовым на основании первого PR.
-- Production `src/theme.ts` пока **не тронут**, новая палитра не подключена к старым экранам, чтобы не ломать внешность приложения частичным редизайном.
+- **Сделано к 22.10.2026:** typed tokens, базовые компоненты, политика состояний, Skia B+C и Home-only theme, живой Home, A/B и стабилизация в #96. `src/theme.ts` уже изменён для Home.
+- **Открыто:** миграция памяти/импорта/настроек и общего theme adapter на единые токены, adaptive icon, мультимодальный transport, окончательная Figma и Android QA. Home использует собственную тёмную границу темы, остальные экраны ещё следуют теме ОС.
+- Текущий порядок и критерии выхода: [PLAN](../PLAN.md), [U0–U5](../Plans/UI_DELIVERY.md). Не повторять завершённую лабораторию как блокер всей миграции.
 
 ## Дизайн-токены
 

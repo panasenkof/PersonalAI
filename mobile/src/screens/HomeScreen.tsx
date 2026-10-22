@@ -1,7 +1,7 @@
 import Feather from "@expo/vector-icons/Feather";
 import { useFocusEffect, useIsFocused, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { StatusBar } from "expo-status-bar";
 import { ActivityIndicator, Alert, FlatList, Keyboard, KeyboardAvoidingView, Linking, Platform, Pressable, Text, TextInput, useWindowDimensions, View } from "react-native";
 import { useProfile } from "../profile/ProfileContext";
@@ -9,13 +9,13 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useDirectChat } from "../direct-agent/ChatContext";
 import { PROVIDER_PRESETS, anonymousLocalAllowed, loadDirectConnections } from "../direct-agent/settings";
 import type { DirectAgentSettings } from "../direct-agent/settings";
-import type { ChatRow } from "../direct-agent/conversations";
 import type { RootStackParams } from "../navigation";
 import { BottomSheet } from "../components/BottomSheet";
 import { NebulaHomeHeader } from "../design/nebula/NebulaHomeHeader";
 import { NebulaHomeArtwork } from "../design/nebula/NebulaHomeArtwork";
 import { isNebulaChatNearBottom, nebulaEmptyOrbSize, nebulaConversationOrbSize, shouldScrollNebulaChatToEnd } from "../design/nebula/homeArtLayout";
 import { resolveNebulaHomePhase, type NebulaVoicePhase } from "../design/nebula/homePhase";
+import { useChatBottomFollow } from "../design/nebula/useChatBottomFollow";
 import { VoiceInput } from "../components/VoiceInput";
 import { IconAction } from "../components/IconAction";
 import { PromptInput } from "../components/PromptInput";
@@ -47,27 +47,16 @@ function NebulaHomeContent() {
   const [composerFocused, setComposerFocused] = useState(false);
   const [keyboardOpen, setKeyboardOpen] = useState(false);
   const [listViewportHeight, setListViewportHeight] = useState(0);
-  const list = useRef<FlatList<ChatRow>>(null);
-  const nearChatBottom = useRef(true); // no rerenders for individual scroll events
-  const pendingSendFollow = useRef(false);
-  const scrollFrame = useRef<number | null>(null);
-  // Coalesce transient height changes, streamed tokens, and IME resizes into
-  // ONE non-animated scroll per frame, rather than competing scroll animations.
-  const scheduleBottomFollow = useCallback(() => {
-    if (scrollFrame.current !== null) return;
-    scrollFrame.current = requestAnimationFrame(() => {
-      scrollFrame.current = null;
-      if (pendingSendFollow.current || nearChatBottom.current) {
-        list.current?.scrollToEnd({ animated: false });
-      }
-    });
-  }, []);
-  useEffect(() => () => {
-    if (scrollFrame.current !== null) cancelAnimationFrame(scrollFrame.current);
-  }, []);
+  const { list, nearChatBottom, pendingSendFollow, scheduleBottomFollow } =
+    useChatBottomFollow(active?.id, isFocused);
   useEffect(() => {
     // Browser QA / React Native Web may omit the native Keyboard module.
     // Native Android still reports keyboardDidShow/Hide; focus is the fallback.
+    if (!isFocused) {
+      setKeyboardOpen(false);
+      setComposerFocused(false);
+      return;
+    }
     if (!Keyboard?.addListener) return;
     const shown = Keyboard.addListener("keyboardDidShow", () => setKeyboardOpen(true));
     const hidden = Keyboard.addListener("keyboardDidHide", () => {
@@ -82,7 +71,7 @@ function NebulaHomeContent() {
       }
     });
     return () => { shown.remove(); hidden.remove(); };
-  }, [scheduleBottomFollow]);
+  }, [isFocused, scheduleBottomFollow]);
   const normalization = useDraftNormalization(store, profile, setNotice);
   useFocusEffect(useCallback(() => {
     let alive = true;
@@ -129,7 +118,7 @@ function NebulaHomeContent() {
       newChatEnabled={ready} onNewChat={() => store.create()} />
     {!ready ? <View style={{ padding: 20, gap: 12 }}>{!error ? <ActivityIndicator accessibilityLabel="Загрузка диалогов" /> : null}
       {error ? <Pressable accessibilityRole="button" onPress={() => void store.initialize()} style={action}><Text style={{ color: t.accent }}>Повторить загрузку</Text></Pressable> : null}</View> : null}
-    <FlatList ref={list} data={active?.rows || []} keyExtractor={item => item.id}
+    <FlatList key={active?.id || "empty"} ref={list} data={active?.rows || []} keyExtractor={item => item.id}
       onLayout={event => {
         const nextHeight = Math.round(event.nativeEvent.layout.height);
         setListViewportHeight(previous => previous === nextHeight ? previous : nextHeight);

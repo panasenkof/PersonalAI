@@ -4,10 +4,12 @@
 
 ## Подтверждённая точка синхронизации
 
-- `main`: `d123d06d6075183c773bd7654c2af0e1e7d53966`; PR [#93](https://github.com/panasenkof/PersonalAI/pull/93), [#94](https://github.com/panasenkof/PersonalAI/pull/94), [#95](https://github.com/panasenkof/PersonalAI/pull/95) **слиты**.
+- `main` после #96: `f8e10c70796cb55b51771f80bab4ba0866dacb8f`; прежняя подтверждённая точка выпуска `d123d06d6075183c773bd7654c2af0e1e7d53966`; PR [#93](https://github.com/panasenkof/PersonalAI/pull/93), [#94](https://github.com/panasenkof/PersonalAI/pull/94), [#95](https://github.com/panasenkof/PersonalAI/pull/95) **слиты**.
 - `CI main` [успешен](https://github.com/panasenkof/PersonalAI/actions/runs/39826676307), [публикация APK успешна](https://github.com/panasenkof/PersonalAI/actions/runs/39827040826), [release b264-a1](https://github.com/panasenkof/PersonalAI/releases/tag/android-test-b264-a1) на том же SHA. **Это не означает успешной Android-приёмки плавности.**
-- [PR #96](https://github.com/panasenkof/PersonalAI/pull/96) **открыт, не слит**: улучшает отправку при Gboard и автопрокрутку thinking. Проверки PR и новая ручная приёмка — отдельно. APK b264-a1 **не содержит #96**.
+- [PR #96](https://github.com/panasenkof/PersonalAI/pull/96) **слит**: улучшает отправку при Gboard и автопрокрутку thinking. CI/native PR на 695da30 успешны; main CI, выпуск после merge и новая ручная приёмка — отдельно. APK b264-a1 **не содержит #96**.
 - Статусы привязаны к указанным PR/плану, а не к предположению, что тесты на устройстве автоматически прошли.
+
+**Ревизия ред.56:** [рабочие пакеты U0–U5](UI_DELIVERY.md) детализируют №67–70/86–90. На `695da30` оба workflow PR #96 зелёные; дополнительные правки ревизии требуют повторных проверок. Не закрывать Android QA по этому факту.
 
 ## Как читать статус
 

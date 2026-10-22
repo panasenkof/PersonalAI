@@ -10,3 +10,7 @@ For **mobile UI, UX, navigation, motion, launcher icons, voice controls, preview
 6. Do not modify unrelated application architecture, SQLCipher, LLM transport, microphone permissions or releases in a purely UI-spec PR.
 
 These rules complement, rather than replace, applicable repository instructions. Consult the rest of the repo for build, security and test guidance.
+
+## Delivery checkpoint (22 October 2026)
+
+Read [Plans/UI_DELIVERY.md](Plans/UI_DELIVERY.md) for U0–U5 acceptance and current delivery rules. Preserve roadmap IDs 1–91. A green run applies only to its exact SHA; implementation, published APK and Android acceptance are separate states. Add behavioral regression tests for lifecycle/race fixes, not only source-string checks. Finish one user scenario per PR and update the active status before appending history. Independent Memory/Import/Settings work does not wait for orb battery measurements or Figma quota; native acceptance remains required. Keep approved B+C and avoid unrelated data or security changes.
