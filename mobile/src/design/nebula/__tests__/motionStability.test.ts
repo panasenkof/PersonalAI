@@ -4,7 +4,7 @@ import { isNebulaChatNearBottom, shouldScrollNebulaChatToEnd, nebulaConversation
 
 describe("Nebula motion stability regression", () => {
   const root = join(__dirname, "..", "..", "..");
-  const home = readFileSync(join(root, "screens", "HomeScreen.tsx"), "utf8");
+  const home = readFileSync(join(root, "screens", "HomeScreen.tsx"), "utf8") + readFileSync(join(__dirname, "..", "useChatBottomFollow.ts"), "utf8");
   const skia = readFileSync(join(__dirname, "..", "NebulaSkiaExperiment.tsx"), "utf8");
   const nativeArtwork = readFileSync(join(__dirname, "..", "NebulaHomeArtwork.native.tsx"), "utf8");
   const shader = readFileSync(join(__dirname, "..", "hybridShader.ts"), "utf8");

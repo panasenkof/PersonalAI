@@ -34,11 +34,13 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   let browser;
+  let currentPage;
   try {
   browser = await chromium.launch({ headless: true, ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}), args: ['--no-sandbox'] });
     if (process.env.SCREENSHOT_DIR) fs.mkdirSync(process.env.SCREENSHOT_DIR, { recursive: true });
     for (const width of [320, 390, 768]) {
       const page = await browser.newPage({ viewport: { width, height: 900 }, colorScheme: width === 390 ? "dark" : "light" });
+      currentPage = page;
       const errors = []; page.on('pageerror', error => { errors.push(error.message); console.error('UI runtime:', error.message); if (process.env.GITHUB_ACTIONS) console.log('::warning title=UI runtime::' + String(error.message).slice(0, 500).replace(/\n/g, '%0A')); });
       let replyNumber = 0;
       let releaseReply;
@@ -382,6 +384,12 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
 
       await page.close();
     }
+  } catch (error) {
+    // Synthetic QA data only; capture the actual failing production screen.
+    if (process.env.SCREENSHOT_DIR && currentPage && !currentPage.isClosed()) {
+      await currentPage.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, 'failure.png') }).catch(() => {});
+    }
+    throw error;
   } finally { await browser?.close(); await new Promise(resolve => server.close(resolve)); }
 })().catch(error => {
   console.error(error);

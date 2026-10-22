@@ -47,10 +47,21 @@ jobs:
       - name: Bundle Android (current release target)
         run: npx expo export --platform android --output-dir /tmp/native-export
       - name: Browser acceptance of production screens
+        env:
+          SCREENSHOT_DIR: ${{ runner.temp }}/persai-ui
         run: |
           npx playwright install --with-deps chromium
           node scripts/verify-mobile-ui.cjs
           node scripts/verify-nebula-home-prototype.cjs
+
+      - name: Upload browser UI evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-ui-${{ github.sha }}
+          path: ${{ runner.temp }}/persai-ui
+          if-no-files-found: ignore
+          retention-days: 7
 
   required:
     # Keep this job name: it may be a required status check for main.

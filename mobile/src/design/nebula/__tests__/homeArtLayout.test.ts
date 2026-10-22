@@ -43,7 +43,7 @@ describe("Nebula Home keyboard and visual viewport", () => {
   });
   it("closes Gboard only on Send, settles LLM thinking below the chat and respects intentional upward scrolling", () => {
     const root = join(__dirname, "..", "..", "..");
-    const home = readFileSync(join(root, "screens", "HomeScreen.tsx"), "utf8");
+    const home = readFileSync(join(root, "screens", "HomeScreen.tsx"), "utf8") + readFileSync(join(__dirname, "..", "useChatBottomFollow.ts"), "utf8");
     const sendBlock = home.slice(
       home.indexOf("const sendOrStop = () => {"),
       home.indexOf("const openConnections =", home.indexOf("const sendOrStop = () => {")),
@@ -69,7 +69,7 @@ describe("Nebula Home keyboard and visual viewport", () => {
   });
   it("passes keyboard/focus and viewport signals without replacing any chat actions", () => {
     const root = join(__dirname, "..", "..", "..");
-    const home = readFileSync(join(root, "screens", "HomeScreen.tsx"), "utf8");
+    const home = readFileSync(join(root, "screens", "HomeScreen.tsx"), "utf8") + readFileSync(join(__dirname, "..", "useChatBottomFollow.ts"), "utf8");
     const composer = readFileSync(join(root, "components", "PromptInput.tsx"), "utf8");
     expect(home).toContain('Keyboard.addListener("keyboardDidShow"');
     expect(home).toContain('Keyboard.addListener("keyboardDidHide"');

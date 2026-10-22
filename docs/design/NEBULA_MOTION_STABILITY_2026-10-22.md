@@ -56,3 +56,12 @@
 - **MS-10**: при старте `busy` и изменении списка после Send установить pending-bottom-follow, плавно/без animation competition вывести последнюю user-реплику и индикатор работы LLM **над composer**. После `keyboardDidHide` повторно привязать нижнюю границу, уже с корректным viewport.
 - **MS-11**: не запускать несколько `scrollToEnd({animated:true})` при каждом токене. Коалесцировать scrollToEnd до **одного вызова на frame**; user drag снимает forced-follow до следующего Send.
 - **MS-12**: если в момент генерации пользователь сам скроллит вверх, никакого авто-переноса вниз. При новом Send, наоборот, явно вернуться к последней реплике.
+
+## Revision checkpoint: conversation and tab lifetime
+
+- MS-13: while reading older messages in A, switch to Memory and return: retain reading position and do not force-follow new content. The LLM request continues.
+- MS-14: switch from that A to B: B has independent list metrics and opens at its latest messages. A's near-bottom flag must not suppress B's initial alignment.
+- MS-15: queue a Send/stream frame, then leave Home or unmount before it fires: cancel that frame, clear pending Send, and ignore later hidden-screen scroll scheduling. Returning to a following conversation may resume bottom-follow.
+- MS-16: clear keyboard visibility/focus decoration flags on Home blur; a keyboard dismissed on another screen cannot keep the returned Home artwork hidden.
+
+Behavioral hook tests cover coalescing, gesture priority, blur, conversation change and unmount. Android Gboard behavior still needs the final APK; the browser fixture does not measure GPU frame time. Delivery sequence: [U0–U5](../../Plans/UI_DELIVERY.md).
