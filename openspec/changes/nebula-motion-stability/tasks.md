@@ -5,6 +5,8 @@
 - [x] Embed compact status orb in progress row; respect IME.
 - [x] Mount Skia JS clock diagnostics only inside lab.
 - [x] Add regression tests of layout, scrolling and artistic invariants.
+- [x] On user Send dismiss Gboard, show latest user message plus LLM thinking at bottom after IME resize.
+- [x] Batch native bottom-follow to one nonanimated update per frame; cancel forced-follow on finger gesture.
 - [ ] Confirm TypeScript/Jest, CanvasKit SkSL, browser UI checks green for latest PR SHA.
 - [ ] Confirm native Android SQLCipher build green for latest PR SHA.
 - [ ] Manual Android compare same scenarios as video, FPS/jank/battery recorded separately.
