@@ -55,12 +55,10 @@ jobs:
             echo "Main has advanced. Skip publishing a stale APK."
             exit 1
           fi
-          good_ci="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=main&head_sha=$TARGET_SHA&per_page=30" \
-            --jq '[.workflow_runs[] | select(.head_sha == env.TARGET_SHA and .event == "push" and .status == "completed" and .conclusion == "success")] | length')"
-          if [ "$good_ci" -lt 1 ]; then
-            echo "::error::No successful main CI for $TARGET_SHA. APK will not be published."
-            exit 1
-          fi
+          # For workflow_run, verify the trusted triggering CI event directly:
+          # avoid the old redundant gh --jq lookup that caused a false-negative.
+          # Manual dispatch independently checks the GitHub Actions runs API.
+          node mobile/scripts/verify-main-ci.cjs
 
       - uses: actions/setup-node@v4
         with:

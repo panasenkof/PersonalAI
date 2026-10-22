@@ -1,4 +1,6 @@
-# Единый план PersAI — ред. 51
+# Единый план PersAI — ред. 52
+
+**22.10.2026 · исправляется ложный отказ выпуска Android APK после слитого PR #93 (ред. 52):** CI push на точном SHA `6d31db5…` прошёл, но релизный gate запуск #258 ошибочно сообщил, что успешного CI нет. Добавлены проверка доверенного `workflow_run` события и строгий поиск точного CI для ручного запуска, тесты отказов для PR/чужого репозитория/другого SHA, без ослабления подписи и main-guard. [Спецификация и факты](docs/design/ANDROID_RELEASE_CI_GATE_2026_10_22.md), [OpenSpec](openspec/changes/android-release-ci-gate/). После слияния проверить новый APK из HEAD с PR #93; Android device QA **NOT RUN**.
 
 **22.10.2026 · исправляется заметная «дёрганость» Nebula Home по 54-секундной записи пользователя:** [разбор и acceptance](docs/design/NEBULA_MOTION_STABILITY_2026-10-22.md), [OpenSpec](openspec/changes/nebula-motion-stability/). Убрана конкурирующая анимированная прокрутка `FlatList` на каждом изменении потока; 116dp status orb заменена на ≤56dp внутри прогресса, а clock diagnostic UI→JS работает только в лаборатории. ×5/×1, стеклянная B+C, нить, космический фон и безопасность не изменяются. **Реальное GPU FPS/jank и artistic acceptance ещё NOT RUN.**
 
