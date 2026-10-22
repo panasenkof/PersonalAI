@@ -60,7 +60,7 @@ export interface NebulaSkiaExperimentProps {
 function AnimatedSkiaOrb({ size, phase, speed, onImageReady, onClockTick }: {
   size: number;
   phase: NebulaPhase;
-  speed: number;
+  speed: NebulaOrbSpeed;
   onImageReady: (ready: boolean) => void;
   onClockTick: (beat: number) => void;
 }) {
@@ -69,7 +69,7 @@ function AnimatedSkiaOrb({ size, phase, speed, onImageReady, onClockTick }: {
   // Speed multiplies elapsed TIME only, never deformation/energy/intensity.
   const energy = NEBULA_ENERGY[phase];
   const filament = useMemo(() => getFilamentUniforms(phase, true), [phase]);
-  const motion = useMemo(() => getNebulaMotionParameters(phase, speed as NebulaOrbSpeed), [phase, speed]);
+  const motion = useMemo(() => getNebulaMotionParameters(phase, speed), [phase, speed]);
   const orbSpeed = motion.orbSpeed, lineSpeed = motion.lineSpeed, thinking = motion.thinking;
   useEffect(() => { onImageReady(Boolean(image)); }, [image, onImageReady]);
   // Clock observations originate on the UI thread. A static fallback no longer
