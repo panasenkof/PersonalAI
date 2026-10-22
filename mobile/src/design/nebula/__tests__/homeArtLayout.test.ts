@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   nebulaConversationOrbSize,
+  isNebulaChatNearBottom,
   nebulaEmptyOrbSize,
   shouldScrollNebulaChatToEnd,
 } from "../homeArtLayout";
@@ -20,16 +21,23 @@ describe("Nebula Home keyboard and visual viewport", () => {
     expect(nebulaEmptyOrbSize({ ...base, composerOccluded: true, listHeight: 130 })).toBe(82);
     expect(nebulaEmptyOrbSize({ ...base, composerOccluded: false })).toBe(320);
   });
-  it("keeps a small status orb only if conversation viewport allows it", () => {
-    expect(nebulaConversationOrbSize(base)).toBe(116);
-    expect(nebulaConversationOrbSize({ ...base, composerOccluded: true, listHeight: 250 })).toBe(80);
+  it("keeps a small inline status orb without growing a separate 116dp footer", () => {
+    expect(nebulaConversationOrbSize(base)).toBe(56);
+    expect(nebulaConversationOrbSize({ ...base, composerOccluded: true, listHeight: 250 })).toBe(0);
     expect(nebulaConversationOrbSize({ ...base, composerOccluded: true, listHeight: 160 })).toBe(0);
     expect(nebulaConversationOrbSize({ ...base, composerOccluded: false, listHeight: 110 })).toBe(0);
+    expect(nebulaConversationOrbSize({ ...base, windowWidth: 60 })).toBe(12);
   });
   it("never scrolls an empty screen to a clipped artwork during IME changes", () => {
     expect(shouldScrollNebulaChatToEnd(0, "")).toBe(false);
     expect(shouldScrollNebulaChatToEnd(0, "   ")).toBe(false);
     expect(shouldScrollNebulaChatToEnd(1)).toBe(true);
+    expect(shouldScrollNebulaChatToEnd(1, "streaming", false)).toBe(false);
+    expect(shouldScrollNebulaChatToEnd(1, "streaming", true)).toBe(true);
+    expect(isNebulaChatNearBottom(1200, 450, 700)).toBe(true);
+    expect(isNebulaChatNearBottom(1200, 0, 700)).toBe(false);
+    expect(isNebulaChatNearBottom(1200, 0, 0)).toBe(true);
+    expect(isNebulaChatNearBottom(Number.NaN, 100, 300)).toBe(false);
     expect(shouldScrollNebulaChatToEnd(0, "partial streamed reply")).toBe(true);
   });
   it("passes keyboard/focus and viewport signals without replacing any chat actions", () => {
