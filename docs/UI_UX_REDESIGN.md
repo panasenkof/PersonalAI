@@ -106,3 +106,10 @@
 - [Storybook for React Native](https://storybook.js.org/docs/get-started/frameworks/react-native-vite) — изучить актуальную совместимость до выбора инструмента.
 
 **Решение об инструментах:** не менять React Native / Expo и не внедрять новую UI-библиотеку без прототипа и проверки совместимости. Figma — источник утверждённого визуального направления; проектные токены и компоненты — источник правил выполнения в коде.
+
+
+### 22.10.2026 — макет Home и порядок performance-проверки
+
+В репозитории подготовлен [интерактивный Home v0.3](prototypes/nebula-home-composition-v03.html) с утверждённой сферой, компактной шапкой, диалогом и закреплённым composer. [Критерии принятия](design/NEBULA_HOME_COMPOSITION_REVIEW.md). Это **макет UX**, не нативный интерфейс, не рабочие LLM-вложения. Финальная редакция Figma остаётся открытой из-за лимита Starter.
+
+Полный FPS/CPU/GPU/battery/thermal gate — [после переноса основных компонентов Home](design/NEBULA_PERFORMANCE_GATE.md), не после всех экранов PersAI. Короткие guard-профили в каждом PR с GPU/анимацией.
