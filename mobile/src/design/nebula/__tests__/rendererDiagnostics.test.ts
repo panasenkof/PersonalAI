@@ -25,6 +25,7 @@ describe("Nebula shader/static fallback diagnostic", () => {
     expect(nebulaRendererReason({ ...active, compiled: false })).toBe("shader-compilation-failed");
     expect(nebulaRendererReason({ ...active, imageReady: false })).toBe("source-image-loading");
     expect(nebulaRendererReason({ ...active, enableNativeShader: false })).toBe("shader-disabled");
+    expect(nebulaRendererReason({ ...active, pauseAnimation: true })).toBe("manual-static");
   });
   it("prefers system accessibility and power-safe freeze reasons over shader", () => {
     expect(nebulaRendererReason({ ...active, reduceMotion: true })).toBe("reduce-motion");
@@ -38,6 +39,7 @@ describe("Nebula shader/static fallback diagnostic", () => {
       "animated", "shader-compilation-failed", "source-image-loading",
       "shader-disabled", "app-background", "reduce-motion", "low-power",
       "nonanimated-phase",
+      "manual-static",
     ] as const) expect(nebulaRendererLabels[reason].length).toBeGreaterThan(15);
   });
 });
