@@ -84,7 +84,6 @@ function NebulaHomeContent() {
     windowWidth: width, composerOccluded };
   const artworkSize = nebulaEmptyOrbSize(artLayout);
   const statusArtworkSize = nebulaConversationOrbSize(artLayout);
-  const hasChatRows = Boolean(active?.rows?.length);
   const action = { minHeight: 44, minWidth: 44, justifyContent: "center" as const, alignItems: "center" as const };
   const openConnections = (presetId?: string) => navigation.navigate("ModelConnections", presetId ? { presetId } : undefined);
   // First run: the active connection has neither a key nor a keyless local address.
