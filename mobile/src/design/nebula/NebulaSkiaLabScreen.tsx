@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { Pressable, SafeAreaView, ScrollView, Text, View } from "react-native";
 import { NebulaSkiaExperiment } from "./NebulaSkiaExperiment";
 import type { NebulaPhase } from "./motion";
+import { NEBULA_FILAMENT, NEBULA_LAB_SPEED } from "./phaseFilament";
 import { nebulaColors, nebulaSpacing } from "./tokens";
 
 /**
@@ -46,7 +47,7 @@ export function NebulaSkiaLabScreen() {
         <NebulaSkiaExperiment phase={phase} size={size}
           reduceMotion={reduced} powerConstrained={lowPower}
           enableNativeShader={shader} showDiagnostics
-          previewSpeed={demoSpeed ? 2.5 : 1} />
+          previewSpeed={demoSpeed ? NEBULA_LAB_SPEED.accelerated : NEBULA_LAB_SPEED.default} />
       </View>
       <Text accessibilityRole="header" style={{ color: theme.text, fontSize: 17, fontWeight: "600" }}>
         Состояние
@@ -54,6 +55,15 @@ export function NebulaSkiaLabScreen() {
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 9 }}>
         {phases.map(x => labToggle(x, phase === x, () => setPhase(x)))}
       </View>
+      <Text testID="nebula-state-color" style={{
+        color: NEBULA_FILAMENT[phase].colorHex ?? theme.textSecondary,
+        fontSize: 12,
+        fontWeight: "600",
+      }}>
+        {phase === "idle"
+          ? "Покой: неоновой нити нет"
+          : `Статусная нить: ${NEBULA_FILAMENT[phase].colorHex} · интенсивность ${NEBULA_FILAMENT[phase].intensity}`}
+      </Text>
       <Text accessibilityRole="header" style={{ color: theme.text, fontSize: 17, fontWeight: "600" }}>
         Режим и размеры
       </Text>
@@ -63,7 +73,7 @@ export function NebulaSkiaLabScreen() {
         {labToggle("Reduce Motion", reduced, () => setReduced(v => !v))}
         {labToggle("Экономия", lowPower, () => setLowPower(v => !v))}
         {labToggle("Skia / оригинал", shader, () => setShader(v => !v))}
-        {labToggle("Проверка движения ×2,5", demoSpeed, () => setDemoSpeed(v => !v))}
+        {labToggle("Проверка движения ×5", demoSpeed, () => setDemoSpeed(v => !v))}
       </View>
       <Text style={{ color: theme.textSecondary, fontSize: 12, lineHeight: 18 }}>
         Вверху отображается причина статичной сферы и реальный счётчик таймера
