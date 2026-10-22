@@ -16,6 +16,7 @@ uniform float uThinking; // thinking-only extra contour and pulse depth
 uniform float uSize;
 uniform float uEnergy;
 uniform float uOffline;
+uniform float uHomeCanvas;
 // Semantic-state filament inputs come from phaseFilament.ts. The filament
 // follows the same organic deformation as the sphere, NOT a circular border.
 uniform float uLineR;
@@ -101,6 +102,13 @@ half4 main(float2 xy) {
                (1.0 - mask) * .13;
   float3 bg = mix(float3(.021, .026, .074), float3(.030, .079, .157),
                   clamp(xy.y / uSize, 0.0, 1.0));
+  // Home can opt into edge-matched Nebula dark canvas (#0E1024).
+  // Its gentle central glow vanishes into the surrounding Home background;
+  // lab retains the reference's original background.
+  float homeGlow = exp(-12.0 * radial * radial);
+  float3 homeBg = float3(.05490, .06275, .14118) +
+                   homeGlow * float3(.017, .010, .028);
+  bg = mix(bg, homeBg, clamp(uHomeCanvas, 0.0, 1.0));
   bg += halo * float3(.33, .23, .78);
   float2 cell = floor(xy / (uSize * .082));
   float seed = fract(sin(dot(cell, float2(127.1, 311.7))) * 43758.5453);
