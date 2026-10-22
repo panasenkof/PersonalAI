@@ -10,18 +10,18 @@ export interface NebulaHomeArtLayout {
 }
 
 export function nebulaEmptyOrbSize(layout: NebulaHomeArtLayout): number {
+  // Opening Gboard changes the viewport over several Android frames. A 96dp
+  // orb used to pop in/out as that height crossed a threshold mid-animation.
+  // Keep the composer completely unobstructed throughout focus and IME.
+  if (layout.composerOccluded) return 0;
   const widthBudget = Math.max(0, layout.windowWidth - 48);
   // Before onLayout, be conservative; after it, trust the real FlatList
   // viewport (not a static ratio of a device's full screen).
   const heightBudget = Math.max(
-    0,
-    (layout.listHeight > 0 ? layout.listHeight : layout.windowHeight * 0.5) -
-      (layout.composerOccluded ? 48 : 64),
+    0, (layout.listHeight > 0 ? layout.listHeight : layout.windowHeight * 0.5) - 64,
   );
-  const maxArt = layout.composerOccluded ? 96 : 320;
-  const size = Math.floor(Math.min(maxArt, widthBudget, heightBudget));
-  // A cramped viewport is better left for the user's prompt than for an orb.
-  return size >= (layout.composerOccluded ? 64 : 96) ? size : 0;
+  const size = Math.floor(Math.min(320, widthBudget, heightBudget));
+  return size >= 96 ? size : 0;
 }
 
 export function nebulaConversationOrbSize(layout: NebulaHomeArtLayout): number {
