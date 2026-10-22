@@ -1,9 +1,11 @@
-import { useFocusEffect } from "@react-navigation/native";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import React, { useCallback, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, Switch, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useProfile } from "../profile/ProfileContext";
 import { useTheme } from "../theme";
+import type { RootStackParams } from "../navigation";
 import { withNativeInteraction } from "../security/native-interaction";
 import { DEFAULT_DIAGNOSTICS, deleteDiagnosticFiles, getDiagnosticSettings, listDiagnosticFiles, setDiagnosticSettings, shareDiagnosticFile } from "../direct-agent/diagnostics";
 import type { DiagnosticFile, DiagnosticSettings } from "../direct-agent/diagnostics";
@@ -11,6 +13,7 @@ import type { DiagnosticFile, DiagnosticSettings } from "../direct-agent/diagnos
 /** Temporary QA-only screen. Files are private; nothing is uploaded automatically. */
 export function DiagnosticLogsScreen() {
   const profile = useProfile();
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParams>>();
   const t = useTheme();
   const insets = useSafeAreaInsets();
   const [prefs, setPrefs] = useState<DiagnosticSettings>(DEFAULT_DIAGNOSTICS);
@@ -61,6 +64,19 @@ export function DiagnosticLogsScreen() {
   return <ScrollView style={{ flex: 1, backgroundColor: t.bg }} contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 30, gap: 14 }}>
     <Text style={{ color: t.text, fontSize: 24, fontWeight: "800" }}>Диагностика диалогов</Text>
     <Text style={{ color: t.muted, lineHeight: 21 }}>Временная функция для тестирования PersAI. Журналы JSONL сохраняются только во внутреннем хранилище приложения. Они не отправляются разработчикам автоматически.</Text>
+    <View style={{ gap: 8 }}>
+      <Text accessibilityRole="header" style={{ color: t.text, fontSize: 18, fontWeight: "700" }}>Для разработчика</Text>
+      <Pressable testID="open-nebula-lab" accessibilityRole="button"
+        accessibilityLabel="Открыть лабораторию Nebula"
+        accessibilityHint="Экспериментальный экран Skia, не влияет на переписку и память"
+        onPress={() => navigation.navigate("NebulaLab")}
+        style={{ ...card, gap: 6, minHeight: 48 }}>
+        <Text style={{ color: t.accent, fontSize: 16, fontWeight: "700" }}>Лаборатория Nebula →</Text>
+        <Text style={{ color: t.muted, lineHeight: 20 }}>
+          Сфера B+C: состояния, размеры 44/168 dp, отключение движения. Экспериментальная графика Skia, не подключена к чату.
+        </Text>
+      </Pressable>
+    </View>
     {control("Записывать диагностические события",
       "Этапы обработки вопроса, решения о поиске, вызовы LLM, инструменты, время и ошибки. По умолчанию отключено.",
       prefs.enabled, false, enabled => update({ enabled, includeContent: enabled && prefs.includeContent }))}
