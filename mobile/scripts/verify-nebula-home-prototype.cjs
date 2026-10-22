@@ -25,7 +25,7 @@ const html=path.resolve(__dirname,"../../docs/prototypes/nebula-home-composition
       assert(rect.x>=phone.x-1&&rect.x+rect.width<=phone.x+phone.width+1,label+" exceeds "+width+"dp");
     }
   }
-  await page.getByRole("button",{name:"Диалог"}).click();
+  await page.getByRole("button",{name:"Диалог",exact:true}).click();
   assert(await page.locator(".msg").count()>=4,"Mock conversation must render");
   await page.getByRole("button",{name:"ИИ думает"}).click();
   assert(await page.getByText("Обрабатываю запрос",{exact:true}).count()>=1,"Real state should have visual target");
