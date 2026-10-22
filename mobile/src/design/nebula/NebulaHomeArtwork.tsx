@@ -4,7 +4,7 @@ import type { NebulaPhase } from "./motion";
 
 /**
  * Web/browser-QA fallback. Metro loads .native.tsx on Android/iOS instead.
- * Retain the approved unmodified artwork; this fallback does NOT claim Skia
+ * Retain the approved unmodified REF-ORB-B artwork; this fallback does NOT claim Skia
  * or real motion outside the native environment.
  */
 const orb = require("./assets/nebula-orb-ref-b.png");
