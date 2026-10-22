@@ -1,8 +1,9 @@
 import Feather from "@expo/vector-icons/Feather";
-import { useFocusEffect, useNavigation } from "@react-navigation/native";
+import { useFocusEffect, useIsFocused, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Linking, Platform, Pressable, Text, TextInput, View } from "react-native";
+import { StatusBar } from "expo-status-bar";
+import { ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Linking, Platform, Pressable, Text, TextInput, useWindowDimensions, View } from "react-native";
 import { useProfile } from "../profile/ProfileContext";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useDirectChat } from "../direct-agent/ChatContext";
@@ -13,16 +14,23 @@ import type { RootStackParams } from "../navigation";
 import { BottomSheet } from "../components/BottomSheet";
 import { NebulaHomeHeader } from "../design/nebula/NebulaHomeHeader";
 import { NebulaHomeArtwork } from "../design/nebula/NebulaHomeArtwork";
+import { resolveNebulaHomePhase, type NebulaVoicePhase } from "../design/nebula/homePhase";
 import { VoiceInput } from "../components/VoiceInput";
 import { IconAction } from "../components/IconAction";
 import { PromptInput } from "../components/PromptInput";
-import { useTheme } from "../theme";
+import { NebulaHomeThemeProvider, useTheme } from "../theme";
 import { MarkdownText } from "../components/Markdown";
 import { KIND_NAMES } from "../direct-agent/fact-tool";
 import { useDraftNormalization } from "../direct-agent/use-draft-normalization";
 
 export function HomeScreen() {
+  return <NebulaHomeThemeProvider><NebulaHomeContent /></NebulaHomeThemeProvider>;
+}
+
+function NebulaHomeContent() {
   const t = useTheme();
+  const isFocused = useIsFocused();
+  const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParams>>();
   const profile = useProfile();
@@ -34,6 +42,7 @@ export function HomeScreen() {
   const [historySearch, setHistorySearch] = useState("");
   const [voiceReset, setVoiceReset] = useState(0);
   const [dictating, setDictating] = useState(false);
+  const [voicePhase, setVoicePhase] = useState<NebulaVoicePhase>("idle");
   const normalization = useDraftNormalization(store, profile, setNotice);
   const list = useRef<FlatList<ChatRow>>(null);
   useFocusEffect(useCallback(() => {
@@ -52,11 +61,15 @@ export function HomeScreen() {
   const canSend = Boolean(ready && !active?.deleting && settings && (settings.apiKey || anonymousLocalAllowed(settings)));
   const question = active?.question || "";
   const busy = active?.busy || false;
+  const orbPhase = resolveNebulaHomePhase({ voicePhase, busy, streamText: active?.streamText, error, ready });
+  const artworkSize = Math.min(320, Math.max(200, width - 48));
+  const hasChatRows = Boolean(active?.rows?.length);
   const action = { minHeight: 44, minWidth: 44, justifyContent: "center" as const, alignItems: "center" as const };
   const openConnections = (presetId?: string) => navigation.navigate("ModelConnections", presetId ? { presetId } : undefined);
   // First run: the active connection has neither a key nor a keyless local address.
   const needsSetup = Boolean(settings && !settings.apiKey && !anonymousLocalAllowed(settings));
   return <KeyboardAvoidingView style={{ flex: 1, paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right, backgroundColor: t.bg }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
+    <StatusBar style={isFocused ? "light" : "auto"} />
     <NebulaHomeHeader connectionName={connectionName} model={settings?.model}
       onConnections={() => openConnections()} onHistory={() => setHistoryOpen(true)}
       newChatEnabled={ready} onNewChat={() => store.create()} />
@@ -67,7 +80,7 @@ export function HomeScreen() {
       onContentSizeChange={() => list.current?.scrollToEnd({ animated: true })}
       contentContainerStyle={{ padding: 16, gap: 12, flexGrow: 1 }}
       ListEmptyComponent={ready && needsSetup ? <View style={{ flex: 1, justifyContent: "center", gap: 14, paddingVertical: 12 }}>
-        <View style={{ alignItems: "center", gap: 10 }}><NebulaHomeArtwork size={104} />
+        <View style={{ alignItems: "center", gap: 10 }}><NebulaHomeArtwork size={136} phase={orbPhase} />
           <Text style={{ color: t.text, fontSize: 26, fontWeight: "800", textAlign: "center" }}>Подключите модель</Text>
           <Text style={{ color: t.muted, lineHeight: 21, textAlign: "center", maxWidth: 340 }}>PersAI работает с моделью, которую выбираете вы. Память и диалоги остаются на телефоне.</Text></View>
         <View style={{ backgroundColor: t.panel, borderWidth: 1, borderColor: t.line, borderRadius: 18, padding: 16, gap: 6 }}>
@@ -81,9 +94,9 @@ export function HomeScreen() {
         </View>
         <Pressable accessibilityRole="button" onPress={() => openConnections()} style={{ minHeight: 44, justifyContent: "center", alignItems: "center" }}>
           <Text style={{ color: t.accent }}>Другие варианты, включая OpenAI и Anthropic →</Text></Pressable>
-      </View> : ready ? <View testID="nebula-home-empty-state"
+      </View> : ready && !busy ? <View testID="nebula-home-empty-state"
         style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 12 }}>
-        <NebulaHomeArtwork size={176} />
+        <NebulaHomeArtwork size={artworkSize} phase={orbPhase} />
       </View> : null}
       renderItem={({ item }) => <View style={{ alignSelf: item.role === "user" ? "flex-end" : "stretch", backgroundColor: item.role === "user" ? t.userBubble : item.role === "info" ? t.soft : t.panel,
         borderWidth: item.role === "assistant" ? 1 : 0, borderColor: t.line, borderRadius: 20, padding: 15, gap: 10 }}>
@@ -99,6 +112,10 @@ export function HomeScreen() {
         </Pressable>)}</View> : null}
       </View>}
       ListFooterComponent={<View style={{ gap: 10 }}>
+        {(busy || (hasChatRows && orbPhase !== "idle")) ? <View testID="nebula-home-live-status"
+          style={{ alignItems: "center", paddingVertical: 2 }}>
+          <NebulaHomeArtwork size={116} phase={orbPhase} />
+        </View> : null}
         {active?.drafts.map(d => <View key={d.id} style={{ backgroundColor: t.panel, borderWidth: 1, borderColor: t.accent, borderRadius: 20, padding: 16, gap: 8 }}>
           <Text style={{ color: t.accent, fontWeight: "700" }}>Запомнить?</Text><Text selectable style={{ color: t.text, fontWeight: "700" }}>{d.title}</Text><Text selectable style={{ color: t.text }}>{d.body}</Text>
           {d.kind || d.person || d.date ? <Text style={{ color: t.muted, fontSize: 13 }}>{[d.kind ? KIND_NAMES[d.kind] : "", d.person ? (d.kind === "person" ? "имя: " : "о ком: ") + d.person : "", d.date ? "дата: " + new Date(d.date + "T00:00:00").toLocaleDateString() : ""].filter(Boolean).join(" · ")}</Text> : null}
@@ -128,7 +145,7 @@ export function HomeScreen() {
       <View testID="composer-actions" style={{ zIndex: 1, flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
         <IconAction icon="plus" label="Файл" accessibilityLabel="Добавить сведения из файла" hint="Добавить в память сведения из текста, фото, аудио или видео." hintAbove hintAlign="start" onPress={() => navigation.navigate("MemoryImport")} />
         <IconAction icon="camera" label="Камера" accessibilityLabel="Сфотографировать и распознать" hint="Снять фото и сохранить распознанный текст." hintAbove onPress={() => navigation.navigate("MemoryImport", { camera: true })} />
-        <VoiceInput key={`${active?.id}:${voiceReset}`} value={question} onChange={value => { if (store.getSnapshot().activeId === active?.id) store.setQuestion(value); }} disabled={!ready} onError={setNotice} showLabel onBegin={normalization.reset} onActiveChange={setDictating} />
+        <VoiceInput key={`${active?.id}:${voiceReset}`} value={question} onChange={value => { if (store.getSnapshot().activeId === active?.id) store.setQuestion(value); }} disabled={!ready} onError={setNotice} showLabel onBegin={normalization.reset} onActiveChange={setDictating} onPhaseChange={setVoicePhase} />
         <IconAction icon={normalization.busy ? "x" : normalization.normalized ? "rotate-ccw" : "edit-3"}
           label={normalization.busy ? "Отмена" : normalization.normalized ? "Исходный" : "Улучшить"}
           accessibilityLabel={normalization.busy ? "Отменить улучшение текста" : normalization.normalized ? "Вернуть исходный текст" : "Улучшить текст"}
