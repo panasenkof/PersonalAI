@@ -56,7 +56,7 @@ jobs:
             exit 1
           fi
           # For workflow_run, verify the trusted triggering CI event directly:
-          # a second gh --jq query can return false negatives for env.TARGET_SHA.
+          # avoid the old redundant gh --jq lookup that caused a false-negative.
           # Manual dispatch independently checks the GitHub Actions runs API.
           node mobile/scripts/verify-main-ci.cjs
 
