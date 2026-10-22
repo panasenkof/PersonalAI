@@ -93,6 +93,8 @@ describe("Nebula neon contour and split motion clocks (22.10.2026)", () => {
   });
   it("boosts thinking deformation and pulse without making the filament faster", () => {
     expect(NEBULA_THINKING_TUNING.contourAmplitudeMultiplier).toBeCloseTo(1.2);
+    expect(NEBULA_THINKING_TUNING.radialBreathAmplitude).toBeCloseTo(0.012);
+    expect(NEBULA_HYBRID_SKSL).toContain("float thinkingBreath = .012 * uThinking * sin(t * .55)");
     expect(NEBULA_THINKING_TUNING.filamentPulseDepth).toBeGreaterThan(NEBULA_THINKING_TUNING.usualPulseDepth);
     expect(NEBULA_HYBRID_SKSL).toContain("float thinkingWarp = 1.0 + .20 * uThinking");
     expect(NEBULA_HYBRID_SKSL).toContain("float pulseDepth = .14 + .10 * uThinking");
