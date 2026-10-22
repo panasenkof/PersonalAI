@@ -14,6 +14,15 @@ uniform float uTime;
 uniform float uSize;
 uniform float uEnergy;
 uniform float uOffline;
+// Semantic-state filament inputs come from phaseFilament.ts. The filament
+// follows the same organic deformation as the sphere, NOT a circular border.
+uniform float uLineR;
+uniform float uLineG;
+uniform float uLineB;
+uniform float uLineIntensity;
+uniform float uLinePulseHz;
+uniform float uLineWave;
+uniform float uLineAnimate;
 
 // One fully editable native shader: image-backed optics + three independent
 // plasma caustic membranes + glass rim + a gently morphed sphere silhouette.
@@ -96,6 +105,32 @@ half4 main(float2 xy) {
 
   float3 outputColor = mix(bg, plasma, mask);
   outputColor = mix(outputColor, outputColor * .43, uOffline);
+
+  // A fine electric filament hugging the EXACT organic silhouette d≈1.
+  // Core and two increasingly diffuse halos never replace the B texture.
+  // Widths are resolution-aware so a 44dp lab preview stays identifiable.
+  // Unlike a circular RN view border, all filaments follow deformation(angle).
+  if (uLineIntensity > .001) {
+    float linePhase = uTime * 6.2831853 * uLinePulseHz * uLineAnimate;
+    float contourWave = .0038 * uLineAnimate *
+      sin(angle * uLineWave + linePhase) +
+      .0017 * uLineAnimate * sin(angle * 8.0 - .61 * linePhase);
+    float contourDistance = abs(d - (1.004 + contourWave));
+    float coreWidth = max(.009, 1.0 / max(uSize * .335, 1.0));
+    float core = exp(-2.0 * pow(contourDistance / coreWidth, 2.0));
+    float haloNear = exp(-1.3 * pow(contourDistance / (coreWidth * 2.5), 2.0));
+    float haloFar = exp(-1.2 * pow(contourDistance / (coreWidth * 4.6), 2.0));
+    float pulse = mix(1.0, .86 + .14 *
+      sin(linePhase + angle * (1.5 + uLineWave * .5)), uLineAnimate);
+    // Unequal angular shimmer means it reads as a fine energy STRING,
+    // not one featureless LED ring; no strobing/flash is generated.
+    float localShimmer = mix(1.0, .9 + .1 *
+      sin(angle * 5.0 - linePhase * .43), uLineAnimate);
+    float brightness = uLineIntensity * pulse * localShimmer;
+    float3 filamentColor = float3(uLineR, uLineG, uLineB);
+    float filament = core * .87 + haloNear * .35 + haloFar * .115;
+    outputColor += filamentColor * brightness * filament;
+  }
   return half4(half3(clamp(outputColor, 0.0, 1.0)), 1.0);
 }
 `;
