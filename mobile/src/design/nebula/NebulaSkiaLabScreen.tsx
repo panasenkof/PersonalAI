@@ -19,6 +19,7 @@ export function NebulaSkiaLabScreen() {
   const [reduced, setReduced] = useState(false);
   const [lowPower, setLowPower] = useState(false);
   const [shader, setShader] = useState(true);
+  const [demoSpeed, setDemoSpeed] = useState(false);
   const theme = nebulaColors("dark");
   function labToggle(text: string, active: boolean, onPress: () => void) {
     return <Pressable accessibilityRole="button"
@@ -44,7 +45,8 @@ export function NebulaSkiaLabScreen() {
       <View style={{ alignItems: "center", minHeight: 220, justifyContent: "center" }}>
         <NebulaSkiaExperiment phase={phase} size={size}
           reduceMotion={reduced} powerConstrained={lowPower}
-          enableNativeShader={shader} />
+          enableNativeShader={shader} showDiagnostics
+          previewSpeed={demoSpeed ? 2.5 : 1} />
       </View>
       <Text accessibilityRole="header" style={{ color: theme.text, fontSize: 17, fontWeight: "600" }}>
         Состояние
@@ -61,7 +63,16 @@ export function NebulaSkiaLabScreen() {
         {labToggle("Reduce Motion", reduced, () => setReduced(v => !v))}
         {labToggle("Экономия", lowPower, () => setLowPower(v => !v))}
         {labToggle("Skia / оригинал", shader, () => setShader(v => !v))}
+        {labToggle("Проверка движения ×2,5", demoSpeed, () => setDemoSpeed(v => !v))}
       </View>
+      <Text style={{ color: theme.textSecondary, fontSize: 12, lineHeight: 18 }}>
+        Вверху отображается причина статичной сферы и реальный счётчик таймера
+        Skia. Если таймер растёт, но перемены не видны, переключите «Проверка
+        движения ×2,5». Если показано «SkSL не скомпилировался», сделайте снимок
+        экрана и отправьте логи приложения для диагностики. Offline и error
+        намеренно статичны; Android Reduce Motion имеет приоритет над тестовым
+        переключателем.
+      </Text>
       <Text style={{ color: theme.textSecondary, fontSize: 12, lineHeight: 18 }}>
         Процедурный шейдер использует исходный REF-ORB-B; сравнение с видео B,
         FPS p50/p95 и расход батареи необходимо выполнить отдельно в реальном APK.

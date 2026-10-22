@@ -31,6 +31,8 @@ jobs:
       - name: Verify approved Nebula source artwork
         # Prevent AI agents or image optimizers from replacing the agreed originals.
         run: node scripts/check-nebula-references.cjs
+      - name: Compile original-backed Nebula SkSL (CanvasKit WASM)
+        run: node scripts/check-nebula-sksl.cjs
       - name: Typecheck
         run: npx tsc --noEmit
       - name: Unit tests
