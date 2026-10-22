@@ -6,8 +6,8 @@ import { nebulaColors, nebulaSpacing } from "./tokens";
 
 /**
  * Manual research harness only. Exported for an INTERNAL Android test build.
- * Intentionally NOT part of production Home, tab bar or Settings routes.
- * A follow-up test APK must mount this component explicitly.
+ * Accessible only through Settings -> Diagnostics -> Lab in a test APK.
+ * NOT a production Home widget or a fourth bottom tab.
  */
 const phases: NebulaPhase[] = [
   "idle", "listening", "transcribing", "thinking", "responding", "offline", "error",
