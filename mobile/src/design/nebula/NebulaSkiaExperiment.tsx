@@ -55,6 +55,8 @@ export interface NebulaSkiaExperimentProps {
   showDiagnostics?: boolean;
   /** Defaults to approved working orb speed ×5; ×1 only for lab comparison. */
   previewSpeed?: NebulaOrbSpeed;
+  /** Home: full rectangular cosmic canvas, never a clipped black disk. */
+  clipToCircle?: boolean;
 }
 
 function AnimatedSkiaOrb({ size, phase, speed, onImageReady, onClockTick }: {
@@ -158,6 +160,7 @@ export function NebulaSkiaExperiment({
   enableNativeShader = true,
   showDiagnostics = false,
   previewSpeed = NEBULA_ORB_SPEED.working,
+  clipToCircle = true,
 }: NebulaSkiaExperimentProps) {
   const [appActive, setAppActive] = useState(isNebulaLabForeground(AppState.currentState));
   const [imageReady, setImageReady] = useState(false);
@@ -216,7 +219,7 @@ export function NebulaSkiaExperiment({
       <View pointerEvents="none"
         accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
         style={{ width: size, height: size, overflow: "hidden",
-          backgroundColor: colors.canvas, borderRadius: size / 2 }}>
+          backgroundColor: colors.canvas, borderRadius: clipToCircle ? size / 2 : 0 }}>
         {animated
           ? <AnimatedSkiaOrb size={size} phase={phase}
               speed={previewSpeed} onImageReady={onImageReady} onClockTick={onClockTick} />
