@@ -31,6 +31,8 @@ export type RootStackParams = {
   MemoryBackup: undefined;
   MemoryImport: { incoming?: SharePayload[]; camera?: boolean } | undefined;
   DiagnosticLogs: undefined;
+  /** Research-only native graphics screen (not a bottom tab). */
+  NebulaLab: undefined;
 };
 const navigationRef = createNavigationContainerRef<RootStackParams>();
 const Stack = createNativeStackNavigator<RootStackParams>();
@@ -80,6 +82,11 @@ export function RootNavigator() {
         <Stack.Screen name="MemoryBackup" component={MemoryBackupScreen} options={{ title: "Резервные копии" }} />
         <Stack.Screen name="ModelConnections" component={DirectAgentSettingsScreen} options={{ title: "Модели и подключения" }} />
         <Stack.Screen name="DiagnosticLogs" component={DiagnosticLogsScreen} options={{ title: "Диагностика" }} />
+        {/* Lazily require the experimental native shader only when the lab is opened.
+            Do not create a fourth bottom tab or initialize Skia on app launch. */}
+        <Stack.Screen name="NebulaLab"
+          getComponent={() => require("./design/nebula/NebulaSkiaLabScreen").NebulaSkiaLabScreen}
+          options={{ title: "Лаборатория Nebula" }} />
       </Stack.Navigator>
     </NavigationContainer>
   );
