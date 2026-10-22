@@ -36,7 +36,10 @@ half4 main(float2 xy) {
   float t = uTime;
   // 20% more organic deformation only when thinking; other phases untouched.
   float thinkingWarp = 1.0 + .20 * uThinking;
-  float deformation = 1.0 +
+  // Soft additional 1.2% radial "breathing" ONLY while thinking;
+  // orb time already runs ×5, so the visible breath cycle stays gentle.
+  float thinkingBreath = .012 * uThinking * sin(t * .55);
+  float deformation = 1.0 + thinkingBreath +
     (.023 * thinkingWarp) * sin(3.0 * angle + t * .37 * uEnergy) +
     (.014 * thinkingWarp) * sin(5.0 * angle - t * .28 * uEnergy) +
     (.007 * thinkingWarp) * sin(8.0 * angle + t * .22 * uEnergy);
