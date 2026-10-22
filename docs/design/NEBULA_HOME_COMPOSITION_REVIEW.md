@@ -28,7 +28,7 @@
 
 Это макет композиции, а не React Native код. Нельзя переносить в производство действия `alert()` или демонстрационные ответы как реальные функции. В текущем приложении уже существуют истории диалога, профили моделей, голос/нормализация, зашифрованная память, share, импорт и адаптеры. UI-миграция должна **сохранить их** и привязывать status только к настоящим фазам операции.
 
-Не заменять REF-ORB-B на flat SVG или generic circle; использовать [approved orb](design/NEBULA_DUAL_SPEED_THINKING.md) через безопасный production adapter с режимами reduced-motion, background и feature flag.
+Не заменять REF-ORB-B на flat SVG или generic circle; использовать [approved orb](NEBULA_DUAL_SPEED_THINKING.md) через безопасный production adapter с режимами reduced-motion, background и feature flag.
 
 ## Порядок после согласования композиции
 
@@ -37,4 +37,4 @@
 3. **Пункт 89:** внедрение Home с feature flag, сначала навигация и composer, затем native SkiaCore со статусами, потом фоновая графика, затем memory/settings/import.
 4. **Пункт 90:** UI-регрессионные проверки каждого PR. **Полный тест батареи и графической производительности — сразу после интеграции главных нагружающих компонентов**, а не когда весь проект будет полностью готов.
 
-Подробнее: [NEBULA_PRODUCTION_ROLLOUT.md](design/NEBULA_PRODUCTION_ROLLOUT.md), [NEBULA_PERFORMANCE_GATE.md](design/NEBULA_PERFORMANCE_GATE.md).
+Подробнее: [NEBULA_PRODUCTION_ROLLOUT.md](NEBULA_PRODUCTION_ROLLOUT.md), [NEBULA_PERFORMANCE_GATE.md](NEBULA_PERFORMANCE_GATE.md).
