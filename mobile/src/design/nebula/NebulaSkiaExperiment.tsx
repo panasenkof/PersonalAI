@@ -19,7 +19,7 @@ import { runOnJS, useAnimatedReaction, useDerivedValue } from "react-native-rean
 import { resolveNebulaScene, type NebulaPhase } from "./motion";
 import { nebulaColors } from "./tokens";
 import { NEBULA_ENERGY, NEBULA_HYBRID_SKSL } from "./hybridShader";
-import { getFilamentUniforms, type NebulaLabSpeed } from "./phaseFilament";
+import { getFilamentUniforms, getNebulaMotionParameters, NEBULA_ORB_SPEED, type NebulaOrbSpeed } from "./phaseFilament";
 import { isNebulaLabForeground, nebulaRendererLabels, nebulaRendererReason } from "./rendererDiagnostics";
 
 /**
@@ -53,14 +53,14 @@ export interface NebulaSkiaExperimentProps {
   enableNativeShader?: boolean;
   /** Enables the laboratory status and actual Skia-clock activity indicator. */
   showDiagnostics?: boolean;
-  /** Laboratory-only acceleration for checking whether subtle membranes move. */
-  previewSpeed?: NebulaLabSpeed;
+  /** Defaults to approved working orb speed ×5; ×1 only for lab comparison. */
+  previewSpeed?: NebulaOrbSpeed;
 }
 
 function AnimatedSkiaOrb({ size, phase, speed, onImageReady, onClockTick }: {
   size: number;
   phase: NebulaPhase;
-  speed: number;
+  speed: NebulaOrbSpeed;
   onImageReady: (ready: boolean) => void;
   onClockTick: (beat: number) => void;
 }) {
@@ -69,6 +69,8 @@ function AnimatedSkiaOrb({ size, phase, speed, onImageReady, onClockTick }: {
   // Speed multiplies elapsed TIME only, never deformation/energy/intensity.
   const energy = NEBULA_ENERGY[phase];
   const filament = useMemo(() => getFilamentUniforms(phase, true), [phase]);
+  const motion = useMemo(() => getNebulaMotionParameters(phase, speed), [phase, speed]);
+  const orbSpeed = motion.orbSpeed, lineSpeed = motion.lineSpeed, thinking = motion.thinking;
   useEffect(() => { onImageReady(Boolean(image)); }, [image, onImageReady]);
   // Clock observations originate on the UI thread. A static fallback no longer
   // looks like a successful running shader; this proves whether time advances.
@@ -80,7 +82,9 @@ function AnimatedSkiaOrb({ size, phase, speed, onImageReady, onClockTick }: {
     [onClockTick],
   );
   const uniforms = useDerivedValue(() => ({
-    uTime: clock.value * 0.001 * speed,
+    uTime: clock.value * 0.001 * orbSpeed,
+    uLineTime: clock.value * 0.001 * lineSpeed,
+    uThinking: thinking,
     uSize: size,
     uEnergy: energy,
     uOffline: 0,
@@ -91,7 +95,7 @@ function AnimatedSkiaOrb({ size, phase, speed, onImageReady, onClockTick }: {
     uLinePulseHz: filament.uLinePulseHz,
     uLineWave: filament.uLineWave,
     uLineAnimate: filament.uLineAnimate,
-  }), [size, energy, speed, filament]);
+  }), [size, energy, orbSpeed, lineSpeed, thinking, filament]);
 
   // Correct-art fallback when SkSL is not supported by the device.
   if (!nebulaEffect || !image) {
@@ -125,6 +129,8 @@ function StaticSkiaOrb({ size, phase, onImageReady }: {
   useEffect(() => { onImageReady(Boolean(image)); }, [image, onImageReady]);
   const uniforms = useMemo(() => ({
     uTime: 0,
+    uLineTime: 0,
+    uThinking: phase === "thinking" ? 1 : 0,
     uSize: size,
     uEnergy: NEBULA_ENERGY[phase],
     uOffline: phase === "offline" ? 1 : 0,
@@ -151,7 +157,7 @@ export function NebulaSkiaExperiment({
   powerConstrained = false,
   enableNativeShader = true,
   showDiagnostics = false,
-  previewSpeed = 1,
+  previewSpeed = NEBULA_ORB_SPEED.working,
 }: NebulaSkiaExperimentProps) {
   const [appActive, setAppActive] = useState(isNebulaLabForeground(AppState.currentState));
   const [imageReady, setImageReady] = useState(false);

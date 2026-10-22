@@ -10,7 +10,9 @@
  */
 export const NEBULA_HYBRID_SKSL = `
 uniform shader source;
-uniform float uTime;
+uniform float uTime;     // ×5 B+C core and silhouette clock
+uniform float uLineTime; // independent ×1 filament pulse and waves
+uniform float uThinking; // thinking-only extra contour and pulse depth
 uniform float uSize;
 uniform float uEnergy;
 uniform float uOffline;
@@ -32,10 +34,15 @@ half4 main(float2 xy) {
   float2 q = (xy - center) / radiusScale;
   float angle = atan(q.y, q.x);
   float t = uTime;
-  float deformation = 1.0 +
-    .023 * sin(3.0 * angle + t * .37 * uEnergy) +
-    .014 * sin(5.0 * angle - t * .28 * uEnergy) +
-    .007 * sin(8.0 * angle + t * .22 * uEnergy);
+  // 20% more organic deformation only when thinking; other phases untouched.
+  float thinkingWarp = 1.0 + .20 * uThinking;
+  // Soft additional 1.2% radial "breathing" ONLY while thinking;
+  // orb time already runs ×5, so the visible breath cycle stays gentle.
+  float thinkingBreath = .012 * uThinking * sin(t * .55);
+  float deformation = 1.0 + thinkingBreath +
+    (.023 * thinkingWarp) * sin(3.0 * angle + t * .37 * uEnergy) +
+    (.014 * thinkingWarp) * sin(5.0 * angle - t * .28 * uEnergy) +
+    (.007 * thinkingWarp) * sin(8.0 * angle + t * .22 * uEnergy);
   float d = length(q) / deformation;
   float mask = 1.0 - smoothstep(.967, 1.012, d);
 
@@ -111,7 +118,9 @@ half4 main(float2 xy) {
   // Widths are resolution-aware so a 44dp lab preview stays identifiable.
   // Unlike a circular RN view border, all filaments follow deformation(angle).
   if (uLineIntensity > .001) {
-    float linePhase = uTime * 6.2831853 * uLinePulseHz * uLineAnimate;
+    // The filament tracks the rapidly changing contour d (uTime / ×5),
+    // but its own light modulation and local waves use slow uLineTime / ×1.
+    float linePhase = uLineTime * 6.2831853 * uLinePulseHz * uLineAnimate;
     float contourWave = .0038 * uLineAnimate *
       sin(angle * uLineWave + linePhase) +
       .0017 * uLineAnimate * sin(angle * 8.0 - .61 * linePhase);
@@ -120,7 +129,9 @@ half4 main(float2 xy) {
     float core = exp(-2.0 * pow(contourDistance / coreWidth, 2.0));
     float haloNear = exp(-1.3 * pow(contourDistance / (coreWidth * 2.5), 2.0));
     float haloFar = exp(-1.2 * pow(contourDistance / (coreWidth * 4.6), 2.0));
-    float pulse = mix(1.0, .86 + .14 *
+    // Thinking: pulse depth 14% -> 24%, SAME pulse cycle and line speed.
+    float pulseDepth = .14 + .10 * uThinking;
+    float pulse = mix(1.0, 1.0 - pulseDepth + pulseDepth *
       sin(linePhase + angle * (1.5 + uLineWave * .5)), uLineAnimate);
     // Unequal angular shimmer means it reads as a fine energy STRING,
     // not one featureless LED ring; no strobing/flash is generated.
@@ -128,8 +139,15 @@ half4 main(float2 xy) {
       sin(angle * 5.0 - linePhase * .43), uLineAnimate);
     float brightness = uLineIntensity * pulse * localShimmer;
     float3 filamentColor = float3(uLineR, uLineG, uLineB);
-    float filament = core * .87 + haloNear * .35 + haloFar * .115;
-    outputColor += filamentColor * brightness * filament;
+    // Dark narrow backing helps colored thread stand out against the bright
+    // plasma rim WITHOUT turning it into a thick or flashing LED border.
+    float edgeBacking = exp(-1.8 * pow(contourDistance / (coreWidth * 1.55), 2.0));
+    outputColor *= 1.0 - .19 * edgeBacking * uLineIntensity;
+    // Bright tinted core and softly colored two-part neon halo.
+    float3 tintedCore = mix(filamentColor, float3(1.0), .24);
+    float3 lineLight = tintedCore * core * 1.05 +
+      filamentColor * (haloNear * .38 + haloFar * .125);
+    outputColor += lineLight * brightness;
   }
   return half4(half3(clamp(outputColor, 0.0, 1.0)), 1.0);
 }
