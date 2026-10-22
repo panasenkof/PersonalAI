@@ -13,7 +13,8 @@ export type NebulaRendererReason =
   | "app-background"
   | "reduce-motion"
   | "low-power"
-  | "nonanimated-phase";
+  | "nonanimated-phase"
+  | "manual-static";
 
 export interface NebulaRendererSignals {
   phase: NebulaPhase;
@@ -24,6 +25,8 @@ export interface NebulaRendererSignals {
   enableNativeShader: boolean;
   compiled: boolean;
   imageReady: boolean;
+  /** Home A/B profiling switch: false when unset. */
+  pauseAnimation?: boolean;
 }
 
 /** An initial unknown AppState is NOT evidence that the lab is backgrounded. */
@@ -39,11 +42,13 @@ export function nebulaRendererReason(signals: NebulaRendererSignals): NebulaRend
   if (!signals.enableNativeShader) return "shader-disabled";
   if (!signals.compiled) return "shader-compilation-failed";
   if (!signals.imageReady) return "source-image-loading";
+  if (signals.pauseAnimation) return "manual-static";
   return "animated";
 }
 
 export const nebulaRendererLabels: Record<NebulaRendererReason, string> = {
   animated: "Skia включена: шейдер скомпилирован и текстура загружена",
+  "manual-static": "Ручной A/B: статичная Nebula, анимационный таймер выключен",
   "shader-compilation-failed": "SkSL не скомпилировался: показан исходный REF-ORB-B",
   "source-image-loading": "Загружается исходная текстура REF-ORB-B",
   "shader-disabled": "Режим «Оригинал»: Skia отключена вручную",
