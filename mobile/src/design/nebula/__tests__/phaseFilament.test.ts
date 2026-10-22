@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { getFilamentUniforms, NEBULA_FILAMENT, NEBULA_LAB_SPEED } from "../phaseFilament";
+import { getFilamentUniforms, NEBULA_FILAMENT, NEBULA_ORB_SPEED, NEBULA_FILAMENT_SPEED, getNebulaMotionParameters, NEBULA_THINKING_TUNING } from "../phaseFilament";
 import { NEBULA_HYBRID_SKSL } from "../hybridShader";
 import type { NebulaPhase } from "../motion";
 
@@ -8,10 +8,16 @@ const phases: NebulaPhase[] = [
   "idle", "listening", "transcribing", "thinking", "responding", "offline", "error",
 ];
 
-describe("Nebula approved neon contour contract (22.10.2026)", () => {
-  it("uses 1× by default and 5× only for laboratory acceleration", () => {
-    expect(NEBULA_LAB_SPEED.default).toBe(1);
-    expect(NEBULA_LAB_SPEED.accelerated).toBe(5);
+describe("Nebula neon contour and split motion clocks (22.10.2026)", () => {
+  it("runs orb at approved 5× and filament independently at 1×", () => {
+    expect(NEBULA_ORB_SPEED.working).toBe(5);
+    expect(NEBULA_ORB_SPEED.compare).toBe(1);
+    expect(NEBULA_FILAMENT_SPEED).toBe(1);
+    for (const phase of phases) {
+      expect(getNebulaMotionParameters(phase, 5).lineSpeed).toBe(1);
+      expect(getNebulaMotionParameters(phase, 1).lineSpeed).toBe(1);
+      expect(getNebulaMotionParameters(phase, 5).thinking).toBe(phase === "thinking" ? 1 : 0);
+    }
   });
   it("does not draw a filament in the idle phase", () => {
     expect(NEBULA_FILAMENT.idle.colorHex).toBeNull();
@@ -56,7 +62,7 @@ describe("Nebula approved neon contour contract (22.10.2026)", () => {
   it("paints a narrow neon core and two halos on the SAME deformed boundary", () => {
     for (const name of [
       "uLineR", "uLineG", "uLineB", "uLineIntensity",
-      "uLinePulseHz", "uLineWave", "uLineAnimate",
+      "uLinePulseHz", "uLineWave", "uLineAnimate", "uLineTime", "uThinking",
     ]) expect(NEBULA_HYBRID_SKSL).toContain(`uniform float ${name};`);
     expect(NEBULA_HYBRID_SKSL).toContain("contourDistance = abs(d -");
     expect(NEBULA_HYBRID_SKSL).toContain("float core =");
@@ -69,16 +75,33 @@ describe("Nebula approved neon contour contract (22.10.2026)", () => {
     for (const name of ["membraneA", "membraneB", "membraneC", "membraneD", "membraneE"])
       expect(NEBULA_HYBRID_SKSL).toContain(name);
   });
-  it("accelerates elapsed TIME, not core energy or brightness", () => {
+  it("separates B+C clock and filament clock, preserving energy/brightness", () => {
     const component = readFileSync(join(__dirname, "..", "NebulaSkiaExperiment.tsx"), "utf8");
     const lab = readFileSync(join(__dirname, "..", "NebulaSkiaLabScreen.tsx"), "utf8");
-    expect(component).toContain("clock.value * 0.001 * speed");
+    expect(component).toContain("clock.value * 0.001 * orbSpeed");
+    expect(component).toContain("clock.value * 0.001 * lineSpeed");
+    expect(component).toContain("uThinking: thinking");
     expect(component).toContain("const energy = NEBULA_ENERGY[phase];");
-    expect(component).toContain('previewSpeed?: NebulaLabSpeed;');
+    expect(component).toContain('previewSpeed?: NebulaOrbSpeed;');
     expect(component).toContain('function StaticSkiaOrb(');
     expect(component).toContain('...getFilamentUniforms(phase, false)');
-    expect(lab).toContain("NEBULA_LAB_SPEED.accelerated");
-    expect(lab).toContain("Проверка движения ×5");
-    expect(lab).not.toContain("×2,5");
+    expect(lab).toContain("NEBULA_ORB_SPEED.working");
+    expect(lab).toContain("NEBULA_ORB_SPEED.compare");
+    expect(lab).toContain("Сфера ×1 — сравнить");
+    expect(lab).toContain("Нить ×");
+    expect(lab).not.toContain("Проверка движения ×5");
   });
+  it("boosts thinking deformation and pulse without making the filament faster", () => {
+    expect(NEBULA_THINKING_TUNING.contourAmplitudeMultiplier).toBeCloseTo(1.2);
+    expect(NEBULA_THINKING_TUNING.filamentPulseDepth).toBeGreaterThan(NEBULA_THINKING_TUNING.usualPulseDepth);
+    expect(NEBULA_HYBRID_SKSL).toContain("float thinkingWarp = 1.0 + .20 * uThinking");
+    expect(NEBULA_HYBRID_SKSL).toContain("float pulseDepth = .14 + .10 * uThinking");
+    expect(NEBULA_HYBRID_SKSL).toContain("linePhase = uLineTime");
+    expect(NEBULA_HYBRID_SKSL).toContain("float d = length(q) / deformation;");
+    expect(NEBULA_HYBRID_SKSL).toContain("edgeBacking");
+    expect(NEBULA_HYBRID_SKSL).toContain("tintedCore");
+    expect(getFilamentUniforms("thinking", true).uLinePulseHz)
+      .toBeCloseTo(1 / 2.25);
+  });
+
 });
