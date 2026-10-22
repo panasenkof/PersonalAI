@@ -20,7 +20,7 @@ import { MemoryNoteScreen } from "./screens/MemoryNoteScreen";
 import { MemoryBackupScreen } from "./screens/MemoryBackupScreen";
 import { DeviceSettingsScreen } from "./screens/DeviceSettingsScreen";
 import { DiagnosticLogsScreen } from "./screens/DiagnosticLogsScreen";
-import { useTheme } from "./theme";
+import { nebulaHomeColors, useTheme } from "./theme";
 
 export type TabParams = { Home: undefined; LocalMemory: undefined; Settings: undefined };
 export type RootStackParams = {
@@ -45,17 +45,22 @@ function Tabs() {
     <Feather name={symbol} color={color} size={22} />
   );
   return (
-    <Tab.Navigator screenOptions={{
-      tabBarActiveTintColor: t.accent,
-      tabBarInactiveTintColor: t.muted,
-      tabBarLabelStyle: { fontSize: 11, fontWeight: "600" },
-      // Navigation measures height, not minHeight: reserve the control row
-      // PLUS the system bar so both the buttons and the scene clear it.
-      tabBarStyle: { height: 64 + insets.bottom, paddingTop: 7, paddingBottom: insets.bottom + 7,
-        backgroundColor: t.panel, borderTopColor: t.line, elevation: 0 },
-      headerStyle: { backgroundColor: t.panel },
-      headerTintColor: t.text,
-      tabBarHideOnKeyboard: true,
+    <Tab.Navigator screenOptions={({ route }) => {
+      // Home is an intentionally dark cosmic scene even when the device is
+      // light; keep Memory/Settings exactly on the selected OS theme.
+      const colors = route.name === "Home" ? nebulaHomeColors : t;
+      return {
+        tabBarActiveTintColor: colors.accent,
+        tabBarInactiveTintColor: colors.muted,
+        tabBarLabelStyle: { fontSize: 11, fontWeight: "600" },
+        // Respect Android gesture / three-button navigation in all themes.
+        tabBarStyle: { height: 64 + insets.bottom, paddingTop: 7,
+          paddingBottom: insets.bottom + 7, backgroundColor: colors.panel,
+          borderTopColor: colors.line, elevation: 0 },
+        headerStyle: { backgroundColor: colors.panel },
+        headerTintColor: colors.text,
+        tabBarHideOnKeyboard: true,
+      };
     }}>
       <Tab.Screen name="Home" component={HomeScreen}
           options={{ title: "Главная", headerShown: false, tabBarAccessibilityLabel: "Вкладка Главная", tabBarIcon: tabIcon("home") }} />
