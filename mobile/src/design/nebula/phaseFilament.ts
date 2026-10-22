@@ -38,9 +38,28 @@ export function getFilamentUniforms(phase: NebulaPhase, allowAnimation: boolean)
   };
 }
 
-export const NEBULA_LAB_SPEED = {
-  default: 1,
-  accelerated: 5,
+/**
+ * Owner-approved working rates: orb materials and silhouette move at ×5,
+ * filament has an independent ×1 pulse/wave even while following that silhouette.
+ * A 1× ORB comparison is available only in the lab; not a production default.
+ */
+export const NEBULA_ORB_SPEED = {
+  working: 5,
+  compare: 1,
+} as const;
+export const NEBULA_FILAMENT_SPEED = 1 as const;
+export type NebulaOrbSpeed = typeof NEBULA_ORB_SPEED[keyof typeof NEBULA_ORB_SPEED];
+
+export const NEBULA_THINKING_TUNING = {
+  contourAmplitudeMultiplier: 1.2,
+  filamentPulseDepth: 0.24,
+  usualPulseDepth: 0.14,
 } as const;
 
-export type NebulaLabSpeed = typeof NEBULA_LAB_SPEED[keyof typeof NEBULA_LAB_SPEED];
+export function getNebulaMotionParameters(phase: NebulaPhase, orbSpeed: NebulaOrbSpeed) {
+  return {
+    orbSpeed,
+    lineSpeed: NEBULA_FILAMENT_SPEED,
+    thinking: phase === "thinking" ? 1 : 0,
+  };
+}
