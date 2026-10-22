@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PersAI · Nebula Home v0.3 · Интерактивный макет</title>
+<style>
+:root{color-scheme:dark;--width:390px;--ink:#f6f8ff;--muted:#a7b9da;--violet:#9476f7;--cyan:#64d8fc;--edge:#364e80;--pane:#172744;font:15px/1.5 system-ui,Segoe UI,Arial,sans-serif}*{box-sizing:border-box}
+body{margin:0;color:var(--ink);background:radial-gradient(ellipse at 18% 15%,#202960,#060c1e 65%,#05091a)}
+button,input,textarea,select{font:inherit}button{cursor:pointer;color:inherit}button:focus-visible,textarea:focus-visible,select:focus-visible{outline:2px solid #64d8fc;outline-offset:2px}
+header{max-width:1080px;margin:auto;padding:18px;display:flex;align-items:center;justify-content:space-between;gap:15px;flex-wrap:wrap}
+h1{font-size:23px;margin:0;line-height:1.25}header p{font-size:12px;margin:4px 0;color:var(--muted)}.kicker{letter-spacing:.18em;font-size:10px;color:#81e4ff;font-weight:700}
+.switches{display:flex;gap:7px;align-items:center;flex-wrap:wrap}.switches button,.switches select{min-height:40px;border:1px solid var(--edge);border-radius:11px;background:#24385a;padding:8px 12px;color:var(--ink);font-size:12px}
+.switches [aria-pressed=true]{background:#7152d4;border-color:#b59cff}
+main{max-width:1080px;margin:auto;padding:8px 20px 38px;display:grid;grid-template-columns:minmax(0,1fr) 270px;gap:24px;align-items:start}
+.mock{display:flex;justify-content:center;min-width:0}
+.phone{position:relative;isolation:isolate;width:min(100%,var(--width));height:790px;border:1px solid rgba(142,162,219,.25);border-radius:32px;box-shadow:0 20px 70px #0008;overflow:hidden;display:flex;flex-direction:column;background:#070d20}
+.sky{z-index:-1;position:absolute;inset:0;background:radial-gradient(ellipse at 50% 25%,#41348042,transparent 45%),radial-gradient(ellipse at 90% 65%,#007bc42e,transparent 48%),linear-gradient(#071127,#080c1a)}
+.sky:after{content:"";position:absolute;inset:0;background-image:radial-gradient(1px 1px at 21px 45px,#8cd9fa 80%,transparent),radial-gradient(1px 1px at 187px 152px,#9e8ef5 80%,transparent),radial-gradient(1px 1px at 89px 270px,#d1e4ff 80%,transparent);background-size:300px 310px;opacity:.5}
+.status{height:36px;flex-shrink:0;padding:8px 17px;display:flex;justify-content:space-between;font-size:11px;color:#c6d1ee}
+.appbar{display:flex;align-items:center;gap:7px;padding:8px 11px 10px;min-height:58px;background:#0c142cbb;border-bottom:1px solid #52648c28;flex-shrink:0}
+.brand{font-size:17px;font-weight:800;letter-spacing:-.06em;white-space:nowrap}.brand em{font-style:normal;color:#b39cff}
+.model{background:#38427964;border:1px solid #6572b34d;min-height:38px;padding:7px 9px;border-radius:100px;color:#d9d8fc;font-size:12px;flex:1;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;text-align:left}
+.icon{background:transparent;border:0;border-radius:12px;min-width:42px;height:42px;font-size:20px;display:inline-grid;place-items:center}.icon:hover{background:#7885b52e}
+.history{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:12px;padding:10px 14px;scrollbar-width:thin}
+.empty{min-height:280px;flex:1;display:flex;align-items:center;justify-content:center}
+.orb{width:208px;height:208px;object-fit:contain;mix-blend-mode:screen;filter:drop-shadow(0 0 27px #715fe85c)}
+.littlesphere{width:40px;height:40px;border-radius:50%;object-fit:contain;mix-blend-mode:screen}
+.phase{display:flex;align-items:center;gap:8px;align-self:flex-start;color:#a8c4e8;font-size:12px}
+.phase span{background:#26406466;border:1px solid #5c7aa447;border-radius:100px;padding:5px 9px}
+.msg{font-size:14px;line-height:1.52;padding:11px 13px;max-width:92%;border:1px solid #738abb33;overflow-wrap:anywhere}
+.msg.mine{align-self:flex-end;background:linear-gradient(120deg,#544299be,#233b74c7);border-radius:18px 18px 5px 18px}
+.msg.ai{align-self:flex-start;background:#182b48c7;border-radius:5px 18px 18px 18px}
+.msg small{font-size:11px;color:#bbc7e3}
+.input-area{flex-shrink:0;border-top:1px solid #8791ce33;background:linear-gradient(#111d36d9,#081123f7);padding:7px 10px 0}
+.files{display:flex;flex-wrap:wrap;gap:5px}.file{display:inline-flex;align-items:center;gap:5px;font-size:11px;background:#283f61;border:1px solid #6087b94b;padding:4px 7px;border-radius:10px;margin-bottom:6px}.file button{border:0;background:transparent}
+.composer{display:flex;gap:2px;align-items:flex-end;background:#25385bde;border:1px solid #8298cc70;padding:4px;border-radius:23px}
+textarea{border:0;outline:0;resize:none;min-height:42px;max-height:126px;overflow-y:auto;flex:1;min-width:0;background:transparent;color:#fff;padding:9px 3px;font-size:14px;line-height:22px}textarea::placeholder{color:#b7c0d5}
+.send{border:0;min-width:42px;height:42px;border-radius:17px;background:linear-gradient(125deg,#8061e7,#4262cd);font-size:18px}.send:disabled{opacity:.45}
+.hint{display:flex;justify-content:space-between;padding:5px 7px 7px;font-size:11px;color:#9aafd4}.hint button{border:0;background:transparent;color:#b8d2ff;font-size:11px}
+.tabs{flex-shrink:0;height:62px;background:#091026e8;border-top:1px solid #8ba4de2f;display:flex;align-items:center;justify-content:space-around}
+.tabs>div{text-align:center;font-size:10px;color:#9baac5;min-width:30%}.tabs b{display:block;font-size:19px;font-weight:400;line-height:24px}.tabs .active{color:#8ddaff}
+.androidnav{height:18px;display:grid;place-items:center;flex-shrink:0;background:#080d1e}.androidnav:after{content:"";width:107px;height:4px;background:#afbbd6;border-radius:20px;opacity:.65}
+.kbd{height:218px;background:#263249;padding:8px 6px;display:none;flex-direction:column;gap:6px;flex-shrink:0}.kbd.open{display:flex}.keyline{display:flex;flex:1;gap:4px}.keyline span{display:grid;place-items:center;flex:1;background:#465575;border-radius:6px;color:#e9edfa}
+.shade{position:absolute;inset:0;display:none;z-index:8;background:#0009;align-items:flex-end}.shade.open{display:flex}.sheet{width:100%;background:#1b2a49;border-radius:24px 24px 0 0;padding:18px 18px 24px;border:1px solid #6c7db5}.sheet h2{font-size:17px;margin:0 0 12px}.sheet button{display:block;width:100%;padding:12px;text-align:left;background:transparent;border:0;border-top:1px solid #50618e;font-size:14px;min-height:46px}
+aside{padding:19px;border:1px solid #52648c70;background:#14213d9e;border-radius:20px;position:sticky;top:15px}aside h2{font-size:17px;margin:0}aside p,aside li{font-size:13px;color:var(--muted);line-height:1.6}aside ul{padding-left:18px}aside .tag{font-size:11px;color:#9bdeff;border:1px solid #4e83b2;border-radius:999px;padding:5px 10px;display:inline-block;margin-bottom:13px}
+@media(max-width:770px){main{display:flex;flex-direction:column;align-items:center;gap:15px;padding:8px}aside{position:static;max-width:450px;width:100%}header{justify-content:center}header>div{text-align:center;width:100%}.phone{height:min(790px,calc(100dvh - 147px));min-height:480px}}
+@media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}}
+</style></head>
+<body>
+<header><div><div class="kicker">NEBULA / HOME COMPOSITION</div><h1>PersAI · Главный экран v0.3</h1><p>Интерактивный макет. Реальных запросов LLM, диктовки и загрузки файлов нет.</p></div>
+<div class="switches" aria-label="Сценарии макета">
+<button data-scenario="empty" aria-pressed="true">Новый чат</button>
+<button data-scenario="chat" aria-pressed="false">Диалог</button>
+<button data-scenario="thinking" aria-pressed="false">ИИ думает</button>
+<button id="kbdToggle" aria-pressed="false">Клавиатура</button>
+<select id="device" aria-label="Ширина Android"><option value="390">390 dp</option><option value="320">320 dp</option><option value="360">360 dp</option><option value="430">430 dp</option></select>
+</div></header>
+<main>
+<div class="mock"><section class="phone" role="region" aria-label="Макет главной страницы Android">
+<div class="sky"></div><div class="status"><span>10:24</span><span>▴ 5G ▰ 86%</span></div>
+<div class="appbar">
+<div class="brand">Pers<em>AI</em></div>
+<button class="model" id="model" aria-label="Выбрать модель">◆ Модель ▾</button>
+<button class="icon" id="history" aria-label="История диалогов">◷</button>
+<button class="icon" id="new" aria-label="Новый чат">✎</button>
+</div>
+<div class="history" id="historyList" aria-live="polite">
+<div class="empty" id="empty"><img class="orb" src="../../mobile/src/design/nebula/assets/nebula-orb-ref-b.png" alt="Одобренная сложная плазменная сфера Nebula" onerror="this.style.display='none';this.parentElement.textContent='Для отображения REF-ORB-B откройте макет из клона репозитория.'"></div></div>
+<div class="input-area"><div class="files" id="files"></div>
+<div class="composer"><button class="icon" id="plus" aria-label="Прикрепить файл">＋</button>
+<textarea id="prompt" rows="1" placeholder="Сообщение PersAI…" aria-label="Сообщение"></textarea>
+<button class="icon" id="mic" aria-label="Голосовой ввод">♪</button>
+<button class="send" id="send" aria-label="Отправить демонстрационное сообщение" disabled>➤</button></div>
+<div class="hint"><button id="clean">✦ Улучшить / исходный</button><span id="state">Прототип · данные не отправляются</span></div></div>
+<div class="kbd" id="keyboard"><div class="keyline" id="row1"></div><div class="keyline" id="row2"></div><div class="keyline" id="row3"></div></div>
+<div class="tabs"><div class="active"><b>⌂</b>Главная</div><div><b>▤</b>Память</div><div><b>⚙</b>Настройки</div></div>
+<div class="androidnav"></div>
+<div class="shade" id="shade"><div class="sheet" role="dialog" aria-modal="true" aria-label="Демо выбора вложений"><h2>Прикрепить к сообщению</h2>
+<button data-attachment="🖼 Изображение">🖼 Изображение</button>
+<button data-attachment="▣ PDF">▣ PDF / документ</button>
+<button data-attachment="♫ Аудио">♫ Аудиофайл</button>
+<button data-attachment="◉ Камера">◉ Камера</button>
+<button id="cancel">Отмена</button></div></div>
+</section></div>
+<aside><div class="tag">Пункт 86 · композиция</div><h2>Что предстоит согласовать</h2>
+<p>Теперь проверяем только устройство Home: компактная шапка, просторный чат, закреплённый composer, доступность вложений и голоса.</p>
+<ul><li><b>Новый чат:</b> утверждённая сфера REF-ORB-B без баннеров «Чем помочь сегодня?»</li>
+<li><b>Диалог:</b> сфера становится небольшим статусным символом, не занимает место сообщений.</li>
+<li><b>Ввод:</b> проверка 320/360/390/430 dp и макета клавиатуры.</li>
+<li><b>Вложения:</b> выбор типа файла и съёмный чип; это только UX-проба, не обработка файла.</li>
+<li><b>Будущие функции:</b> media, automations и инструменты входят в контекстные действия, не размножают вкладки.</li></ul>
+<p>После утверждения компоновки — нативный UX-аудит, затем дизайн-система и React Native Home. В настоящий Android переносится уже утверждённая Skia B+C (сфера ×5, контурная нить ×1).</p></aside>
+</main>
+<script>
+(()=>{"use strict";const $=id=>document.getElementById(id);
+const art='../../mobile/src/design/nebula/assets/nebula-orb-ref-b.png';
+let scenario="empty",chosen=[],original="",clean=false;
+function draw(){const box=$("historyList");box.innerHTML="";
+if(scenario==="empty"){box.append($("empty"))}else{
+const title=document.createElement("div");title.className="phase";const img=document.createElement("img");img.className="littlesphere";img.src=art;img.alt="Nebula";const t=document.createElement("span");t.textContent=scenario==="thinking"?"Обрабатываю запрос":"Ассистент";title.append(img,t);box.append(title);
+const rows=[["mine","Найди мои заметки про любимые рецепты."],["ai","Поищу в локальной памяти. Чтобы обратиться к интернету, сначала проверю разрешения."],["mine","Хочу прикрепить к сообщению фотографию."],["ai",scenario==="thinking"?"Обрабатываю запрос… (это демонстрация)":"Кнопка «+» позволяет выбрать файл прямо из строки ввода. Анализ вложений — отдельная функция."]];
+for(const [who,msg]of rows){const n=document.createElement("div");n.className="msg "+who;n.textContent=msg;box.append(n)}}
+document.querySelectorAll("[data-scenario]").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.scenario===scenario)));$("state").textContent=scenario==="thinking"?"ИИ думает · демонстрация":"Прототип · данные не отправляются";box.scrollTop=box.scrollHeight}
+document.querySelectorAll("[data-scenario]").forEach(b=>b.onclick=()=>{scenario=b.dataset.scenario;draw()});
+$("new").onclick=()=>{scenario="empty";draw()};$("device").onchange=e=>document.documentElement.style.setProperty("--width",e.target.value+"px");
+$("kbdToggle").onclick=()=>{let open=$("keyboard").classList.toggle("open");$("kbdToggle").setAttribute("aria-pressed",String(open))};
+for(const [id,letters]of [["row1","йцукенгшщзх"],["row2","фывапролджэ"],["row3","ячсмитьбю"]])for(const ch of letters){const k=document.createElement("span");k.textContent=ch;$(id).append(k)}
+$("model").onclick=()=>alert("Демо макета: переход к реальным подключениям будет в Android.");$("history").onclick=()=>alert("Демо макета: история чатов будет в Android.");
+$("mic").onclick=()=>alert("Демо: макет не записывает звук.");
+$("plus").onclick=()=>$("shade").classList.add("open");$("cancel").onclick=()=>$("shade").classList.remove("open");
+$("shade").onclick=e=>{if(e.target===$("shade"))$("shade").classList.remove("open")};
+document.querySelectorAll("[data-attachment]").forEach(b=>b.onclick=()=>{chosen.push(b.dataset.attachment);$("shade").classList.remove("open");renderFiles()});
+function renderFiles(){const f=$("files");f.replaceChildren();chosen.forEach((label,i)=>{const c=document.createElement("span");c.className="file";c.append(document.createTextNode(label+" · демо"));const b=document.createElement("button");b.textContent="×";b.setAttribute("aria-label","Удалить "+label);b.onclick=()=>{chosen.splice(i,1);renderFiles()};c.append(b);f.append(c)})}
+$("prompt").oninput=()=>{const t=$("prompt");t.style.height="42px";t.style.height=Math.min(t.scrollHeight,126)+"px";$("send").disabled=!t.value.trim()&&!chosen.length};
+$("clean").onclick=()=>{const p=$("prompt");if(!clean){if(!p.value.trim())return;original=p.value;p.value=p.value.replace(/\s+/g," ").trim();clean=true;}else{p.value=original;clean=false}p.dispatchEvent(new Event("input"))};
+$("send").onclick=()=>{scenario="chat";draw();const box=$("historyList"),b=document.createElement("div");b.className="msg mine";b.textContent=$("prompt").value||"(вложения)";const foot=document.createElement("small");foot.textContent=" · Демонстрация, не отправлено";b.append(foot);box.append(b);box.scrollTop=box.scrollHeight;$("prompt").value="";chosen=[];renderFiles();$("prompt").dispatchEvent(new Event("input"))};
+draw();
+})();
+</script>
+</body></html>
