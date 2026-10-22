@@ -48,6 +48,7 @@ jobs:
         run: |
           npx playwright install --with-deps chromium
           node scripts/verify-mobile-ui.cjs
+          node scripts/verify-nebula-home-prototype.cjs
 
   required:
     # Keep this job name: it may be a required status check for main.
