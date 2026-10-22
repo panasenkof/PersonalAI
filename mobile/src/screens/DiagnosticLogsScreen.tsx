@@ -9,6 +9,8 @@ import type { RootStackParams } from "../navigation";
 import { withNativeInteraction } from "../security/native-interaction";
 import { DEFAULT_DIAGNOSTICS, deleteDiagnosticFiles, getDiagnosticSettings, listDiagnosticFiles, setDiagnosticSettings, shareDiagnosticFile } from "../direct-agent/diagnostics";
 import type { DiagnosticFile, DiagnosticSettings } from "../direct-agent/diagnostics";
+import { getNebulaVisualMode, setNebulaVisualMode } from "../design/nebula/visualPreference";
+import type { NebulaVisualMode } from "../design/nebula/visualMode";
 
 /** Temporary QA-only screen. Files are private; nothing is uploaded automatically. */
 export function DiagnosticLogsScreen() {
@@ -21,18 +23,23 @@ export function DiagnosticLogsScreen() {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [ready, setReady] = useState(false);
+  const [nebulaMode, setNebulaMode] = useState<NebulaVisualMode>("live");
   const card = { backgroundColor: t.panel, borderWidth: 1, borderColor: t.line, borderRadius: 18, padding: 16 };
   const refresh = useCallback(async () => {
     if (!profile) return;
-    const [settings, files] = await Promise.all([getDiagnosticSettings(profile), listDiagnosticFiles(profile)]);
-    setPrefs(settings); setLogs(files); setReady(true);
+    const [settings, files, mode] = await Promise.all([
+      getDiagnosticSettings(profile), listDiagnosticFiles(profile), getNebulaVisualMode(),
+    ]);
+    setPrefs(settings); setLogs(files); setNebulaMode(mode); setReady(true);
   }, [profile]);
   useFocusEffect(useCallback(() => {
     let current = true;
     if (profile) {
-      void Promise.all([getDiagnosticSettings(profile), listDiagnosticFiles(profile)]).then(([settings, files]) => {
-        if (current) { setPrefs(settings); setLogs(files); setReady(true); }
-      }).catch(() => { if (current) setNotice("Не удалось прочитать журналы"); });
+      void Promise.all([
+        getDiagnosticSettings(profile), listDiagnosticFiles(profile), getNebulaVisualMode(),
+      ]).then(([settings, files, mode]) => {
+        if (current) { setPrefs(settings); setLogs(files); setNebulaMode(mode); setReady(true); }
+      }).catch(() => { if (current) { setNotice("Не удалось прочитать диагностику или режим Nebula"); setReady(true); } });
     }
     return () => { current = false; };
   }, [profile]));
@@ -73,9 +80,19 @@ export function DiagnosticLogsScreen() {
         style={{ ...card, gap: 6, minHeight: 48 }}>
         <Text style={{ color: t.accent, fontSize: 16, fontWeight: "700" }}>Лаборатория Nebula →</Text>
         <Text style={{ color: t.muted, lineHeight: 20 }}>
-          Сфера B+C: состояния, размеры 44/168 dp, отключение движения. Экспериментальная графика Skia, не подключена к чату.
+          Сфера B+C: состояния, размеры 44/168 dp, отключение движения. Экспериментальная графика Skia для сравнения с главной.
         </Text>
       </Pressable>
+      {control("Анимация Nebula на главной",
+        "A/B тест производительности: включено — живая B+C; выключено — та же статичная Skia-сфера с цветом состояния, без анимационного таймера. Изменение применяется после возвращения на главную, данные и диалоги не затрагиваются.",
+        nebulaMode === "live", false, enabled => {
+          void run(() => setNebulaVisualMode(enabled ? "live" : "static"),
+            enabled ? "Живая Nebula включена. Вернитесь на главную." : "Статичная Nebula включена. Вернитесь на главную.");
+        })}
+      <Text style={{ color: t.muted, lineHeight: 20 }}>
+        Для сравнения расхода батареи переключайте режимы на одном телефоне при одинаковой яркости,
+        сети и длительности сценария. Системное «Уменьшение движения» имеет приоритет.
+      </Text>
     </View>
     {control("Записывать диагностические события",
       "Этапы обработки вопроса, решения о поиске, вызовы LLM, инструменты, время и ошибки. По умолчанию отключено.",
