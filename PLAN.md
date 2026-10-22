@@ -1,4 +1,6 @@
-# Единый план PersAI — ред. 48
+# Единый план PersAI — ред. 49
+
+**22.10.2026 · исправляется обрезание Nebula при Android Gboard:** [NEBULA_HOME_KEYBOARD_LAYOUT.md](docs/design/NEBULA_HOME_KEYBOARD_LAYOUT.md), [OpenSpec](openspec/changes/nebula-home-keyboard-layout/). По фактическому скриншоту большой orb обрезается composer при наборе. Переключение на ≤96dp при клавиатуре/фокусе (или скрытие при нехватке места), размер по реальному viewport, защита от прокрутки пустого чата. Экран «Защищено» исключён из объёма. Android pixel check после APK.
 
 **22.10.2026 · начата настоящая Android-интеграция Nebula Home (этап 86/89):** вместо круглого статичного PNG — native Skia B+C, реальная речь (listening/transcribing), реальные стадии запроса (thinking/responding), тёмный Home без чёрного диска и unmount GPU при переходе на другую вкладку. [Спецификация](docs/design/NEBULA_HOME_NATIVE_INTEGRATION.md), [OpenSpec](openspec/changes/nebula-home-native-integration/). Это отдельный PR; не путать зелёный CI с реальной художественной/энергетической приёмкой APK.
 
@@ -319,10 +321,11 @@ iOS «Отправить в» (61б) — отдельная будущая ра�
 Markdown GitHub поддерживает сворачиваемые секции. Исторические сведения ниже сохраняются для справки; **приоритет всегда у разделов 1–2**.
 
 <details>
-<summary><strong>Краткая история редакций 1–48 (таблица)</strong></summary>
+<summary><strong>Краткая история редакций 1–49 (таблица)</strong></summary>
 
 | Ред. | Дата | Суть изменений |
 | --- | --- | --- |
+| **49** | **22.10** | **Исправлена геометрия Nebula Home при Gboard: компактный orb ≤96dp, размеры по FlatList viewport, без empty auto-scroll; ручной Android QA после APK.** |
 | **48** | **22.10** | **Первый нативный Skia B+C на Home, тёмная сцена без круглого фона, фазы из реальной диктовки и LLM, безопасные тема/навигация/тесты, Android device QA открыта.** |
 | **47** | **22.10** | **Интерактивная композиция Home v0.3 и критерии приёмки; полный performance/battery gate — после интеграции основных нагружающих компонентов Home, короткие guards в каждом PR.** |
 | **46** | **22.10** | **Художественная сфера B+C утверждена; следующий этап — компоновка рабочего чата и дальнейшая UX/UI-миграция по фиксированному образцу, а не новый эксперимент orb.** |
@@ -372,7 +375,12 @@ Markdown GitHub поддерживает сворачиваемые секции
 </details>
 
 <details>
-<summary><strong>Подробный журнал редакций 1–48</strong></summary>
+<summary><strong>Подробный журнал редакций 1–49</strong></summary>
+### Ред. 49 (22.10.2026)
+
+- По пользовательскому Android скриншоту подготовлены [спецификация исправления клавиатуры](docs/design/NEBULA_HOME_KEYBOARD_LAYOUT.md) и [OpenSpec](openspec/changes/nebula-home-keyboard-layout/).
+- Сфера адаптируется к реальному viewport и фокусу composer; пустой чат не скроллится автоматически. Защищённый экран, агент и локальные записи не меняются; real-device тест остаётся открытым.
+
 ### Ред. 48 (22.10.2026)
 
 - [Нативный B+C на Home](docs/design/NEBULA_HOME_NATIVE_INTEGRATION.md): scope-only dark styling + source-driven voice/LLM phases + Android GPU unmount; браузерная версия использует исходный арт как fallback.
