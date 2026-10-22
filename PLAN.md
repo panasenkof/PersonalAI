@@ -1,4 +1,6 @@
-# Единый план PersAI — ред. 52
+# Единый план PersAI — ред. 53
+
+**22.10.2026 · продолжение выпуска APK после PR #94 (ред. 53):** [main CI](https://github.com/panasenkof/PersonalAI/actions/runs/39822139651) красный из-за ложного unit test RG-04: он запрещал **все** упоминания `env.TARGET_SHA`, включая корректные `checkout.ref` и `PIA_ANDROID_BUILD_SHA`. [Спецификация регрессии](docs/design/ANDROID_RELEASE_CI_GATE_REGRESSION_2026_10_22.md). Тест теперь отличает корректные GitHub expressions от старого неверного `--jq` сравнения. После нового зелёного main CI проверить выпуск APK и Android Nebula smoothness (NOT RUN).
 
 **22.10.2026 · исправляется ложный отказ выпуска Android APK после слитого PR #93 (ред. 52):** CI push на точном SHA `6d31db5…` прошёл, но релизный gate запуск #258 ошибочно сообщил, что успешного CI нет. Добавлены проверка доверенного `workflow_run` события и строгий поиск точного CI для ручного запуска, тесты отказов для PR/чужого репозитория/другого SHA, без ослабления подписи и main-guard. [Спецификация и факты](docs/design/ANDROID_RELEASE_CI_GATE_2026_10_22.md), [OpenSpec](openspec/changes/android-release-ci-gate/). После слияния проверить новый APK из HEAD с PR #93; Android device QA **NOT RUN**.
 
