@@ -52,6 +52,7 @@ export type NebulaOrbSpeed = typeof NEBULA_ORB_SPEED[keyof typeof NEBULA_ORB_SPE
 
 export const NEBULA_THINKING_TUNING = {
   contourAmplitudeMultiplier: 1.2,
+  radialBreathAmplitude: 0.012,
   filamentPulseDepth: 0.24,
   usualPulseDepth: 0.14,
 } as const;
