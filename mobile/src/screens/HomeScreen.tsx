@@ -14,7 +14,7 @@ import type { RootStackParams } from "../navigation";
 import { BottomSheet } from "../components/BottomSheet";
 import { NebulaHomeHeader } from "../design/nebula/NebulaHomeHeader";
 import { NebulaHomeArtwork } from "../design/nebula/NebulaHomeArtwork";
-import { nebulaEmptyOrbSize, nebulaConversationOrbSize, shouldScrollNebulaChatToEnd } from "../design/nebula/homeArtLayout";
+import { isNebulaChatNearBottom, nebulaEmptyOrbSize, nebulaConversationOrbSize, shouldScrollNebulaChatToEnd } from "../design/nebula/homeArtLayout";
 import { resolveNebulaHomePhase, type NebulaVoicePhase } from "../design/nebula/homePhase";
 import { VoiceInput } from "../components/VoiceInput";
 import { IconAction } from "../components/IconAction";
@@ -61,6 +61,7 @@ function NebulaHomeContent() {
   }, []);
   const normalization = useDraftNormalization(store, profile, setNotice);
   const list = useRef<FlatList<ChatRow>>(null);
+  const nearChatBottom = useRef(true); // no rerenders from native scroll events
   useFocusEffect(useCallback(() => {
     let alive = true;
     setSettings(null); setConnectionName("");
@@ -83,7 +84,6 @@ function NebulaHomeContent() {
     windowWidth: width, composerOccluded };
   const artworkSize = nebulaEmptyOrbSize(artLayout);
   const statusArtworkSize = nebulaConversationOrbSize(artLayout);
-  const hasChatRows = Boolean(active?.rows?.length);
   const action = { minHeight: 44, minWidth: 44, justifyContent: "center" as const, alignItems: "center" as const };
   const openConnections = (presetId?: string) => navigation.navigate("ModelConnections", presetId ? { presetId } : undefined);
   // First run: the active connection has neither a key nor a keyless local address.
@@ -101,9 +101,21 @@ function NebulaHomeContent() {
         setListViewportHeight(previous => previous === nextHeight ? previous : nextHeight);
       }}
       keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag"
+      scrollEventThrottle={64}
+      onScroll={event => {
+        const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+        nearChatBottom.current = isNebulaChatNearBottom(
+          contentSize.height, contentOffset.y, layoutMeasurement.height,
+        );
+      }}
       onContentSizeChange={() => {
-        if (shouldScrollNebulaChatToEnd(active?.rows?.length || 0, active?.streamText)) {
-          list.current?.scrollToEnd({ animated: true });
+        // Native changes can arrive on every streamed token AND during IME
+        // resize. Repeated animated scrollToEnd fights layout and looks jerky.
+        // Instantly follow ONLY when the user is already near the bottom.
+        if (shouldScrollNebulaChatToEnd(
+          active?.rows?.length || 0, active?.streamText, nearChatBottom.current,
+        )) {
+          list.current?.scrollToEnd({ animated: false });
         }
       }}
       contentContainerStyle={{ padding: 16, gap: 12, flexGrow: 1 }}
@@ -140,10 +152,6 @@ function NebulaHomeContent() {
         </Pressable>)}</View> : null}
       </View>}
       ListFooterComponent={<View style={{ gap: 10 }}>
-        {statusArtworkSize > 0 && (busy || (hasChatRows && orbPhase !== "idle")) ? <View testID="nebula-home-live-status"
-          style={{ alignItems: "center", paddingVertical: 2 }}>
-          <NebulaHomeArtwork size={statusArtworkSize} phase={orbPhase} />
-        </View> : null}
         {active?.drafts.map(d => <View key={d.id} style={{ backgroundColor: t.panel, borderWidth: 1, borderColor: t.accent, borderRadius: 20, padding: 16, gap: 8 }}>
           <Text style={{ color: t.accent, fontWeight: "700" }}>Запомнить?</Text><Text selectable style={{ color: t.text, fontWeight: "700" }}>{d.title}</Text><Text selectable style={{ color: t.text }}>{d.body}</Text>
           {d.kind || d.person || d.date ? <Text style={{ color: t.muted, fontSize: 13 }}>{[d.kind ? KIND_NAMES[d.kind] : "", d.person ? (d.kind === "person" ? "имя: " : "о ком: ") + d.person : "", d.date ? "дата: " + new Date(d.date + "T00:00:00").toLocaleDateString() : ""].filter(Boolean).join(" · ")}</Text> : null}
@@ -162,7 +170,12 @@ function NebulaHomeContent() {
         {busy && active?.streamText ? <View accessibilityLiveRegion="polite" style={{ backgroundColor: t.panel, borderWidth: 1, borderColor: t.line, borderRadius: 20, padding: 15 }}>
           <MarkdownText text={active.streamText} style={{ color: t.text, lineHeight: 23 }} />
         </View> : null}
-        {busy ? <View style={{ flexDirection: "row", alignItems: "center", gap: 10, padding: 8 }}><ActivityIndicator /><Text style={{ flex: 1, color: t.muted }}>{active?.progress || "Готовлю ответ…"}<Elapsed since={active?.progressSince} /></Text></View> : null}
+        {busy ? <View testID="nebula-home-live-status"
+          style={{ flexDirection: "row", alignItems: "center", gap: 10, padding: 8 }}>
+          {statusArtworkSize > 0 ? <NebulaHomeArtwork size={statusArtworkSize} phase={orbPhase} /> : null}
+          <ActivityIndicator />
+          <Text style={{ flex: 1, color: t.muted }}>{active?.progress || "Готовлю ответ…"}<Elapsed since={active?.progressSince} /></Text>
+        </View> : null}
       </View>}
     />
     {error || notice || historyNotice ? <View style={{ paddingHorizontal: 16, paddingVertical: 6 }}><Text accessibilityRole="alert" style={{ color: error || notice ? t.err : t.muted }}>{error || notice || historyNotice}</Text>

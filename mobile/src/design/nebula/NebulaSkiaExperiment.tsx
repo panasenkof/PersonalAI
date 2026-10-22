@@ -61,15 +61,36 @@ export interface NebulaSkiaExperimentProps {
   homeCanvas?: boolean;
   /** A/B profiler: same Skia artwork, but fully static (no useClock subtree). */
   pauseAnimation?: boolean;
+  /** Hide phase caption when this is an inline 56dp progress indicator. */
+  showStatusText?: boolean;
 }
 
-function AnimatedSkiaOrb({ size, phase, speed, homeCanvas, onImageReady, onClockTick }: {
+/**
+ * Diagnostic observer lives in its OWN subtree. The production Home renderer
+ * must not wake the JS thread / React tree every 750ms for an invisible counter.
+ */
+function SkiaClockMeter({ clock, onClockTick }: {
+  clock: ReturnType<typeof useClock>;
+  onClockTick: (beat: number) => void;
+}) {
+  useAnimatedReaction(
+    () => Math.floor(clock.value / 750),
+    (beat, previous) => {
+      if (beat !== previous) runOnJS(onClockTick)(beat);
+    },
+    [onClockTick],
+  );
+  return null;
+}
+
+function AnimatedSkiaOrb({ size, phase, speed, homeCanvas, onImageReady, onClockTick, showClockDiagnostics }: {
   size: number;
   phase: NebulaPhase;
   speed: NebulaOrbSpeed;
   homeCanvas: boolean;
   onImageReady: (ready: boolean) => void;
   onClockTick: (beat: number) => void;
+  showClockDiagnostics: boolean;
 }) {
   const image = useImage(poster);
   const clock = useClock();
@@ -79,15 +100,7 @@ function AnimatedSkiaOrb({ size, phase, speed, homeCanvas, onImageReady, onClock
   const motion = useMemo(() => getNebulaMotionParameters(phase, speed), [phase, speed]);
   const orbSpeed = motion.orbSpeed, lineSpeed = motion.lineSpeed, thinking = motion.thinking;
   useEffect(() => { onImageReady(Boolean(image)); }, [image, onImageReady]);
-  // Clock observations originate on the UI thread. A static fallback no longer
-  // looks like a successful running shader; this proves whether time advances.
-  useAnimatedReaction(
-    () => Math.floor(clock.value / 750),
-    (beat, previous) => {
-      if (beat !== previous) runOnJS(onClockTick)(beat);
-    },
-    [onClockTick],
-  );
+  // Shader clock stays entirely on UI/GPU; bridge diagnostics only in the lab.
   const uniforms = useDerivedValue(() => ({
     uTime: clock.value * 0.001 * orbSpeed,
     uLineTime: clock.value * 0.001 * lineSpeed,
@@ -112,14 +125,17 @@ function AnimatedSkiaOrb({ size, phase, speed, homeCanvas, onImageReady, onClock
   }
 
   return (
-    <Canvas testID="nebula-skia-canvas" style={{ width: size, height: size }}>
-      <Fill>
-        <Shader source={nebulaEffect} uniforms={uniforms}>
-          <ImageShader image={image} fit="cover"
-            rect={{ x: 0, y: 0, width: size, height: size }} />
-        </Shader>
-      </Fill>
-    </Canvas>
+    <>
+      {showClockDiagnostics ? <SkiaClockMeter clock={clock} onClockTick={onClockTick} /> : null}
+      <Canvas testID="nebula-skia-canvas" style={{ width: size, height: size }}>
+        <Fill>
+          <Shader source={nebulaEffect} uniforms={uniforms}>
+            <ImageShader image={image} fit="cover"
+              rect={{ x: 0, y: 0, width: size, height: size }} />
+          </Shader>
+        </Fill>
+      </Canvas>
+    </>
   );
 }
 
@@ -171,6 +187,7 @@ export function NebulaSkiaExperiment({
   clipToCircle = true,
   homeCanvas = false,
   pauseAnimation = false,
+  showStatusText = true,
 }: NebulaSkiaExperimentProps) {
   const [appActive, setAppActive] = useState(isNebulaLabForeground(AppState.currentState));
   const [imageReady, setImageReady] = useState(false);
@@ -233,7 +250,9 @@ export function NebulaSkiaExperiment({
           backgroundColor: colors.canvas, borderRadius: clipToCircle ? size / 2 : 0 }}>
         {animated
           ? <AnimatedSkiaOrb size={size} phase={phase}
-              speed={previewSpeed} homeCanvas={homeCanvas} onImageReady={onImageReady} onClockTick={onClockTick} />
+              speed={previewSpeed} homeCanvas={homeCanvas}
+              onImageReady={onImageReady} onClockTick={onClockTick}
+              showClockDiagnostics={showDiagnostics} />
           : enableNativeShader && Boolean(nebulaEffect)
             ? <StaticSkiaOrb size={size} phase={phase} homeCanvas={homeCanvas} onImageReady={onImageReady} />
             : <Image testID="nebula-skia-poster" source={poster}
@@ -253,7 +272,7 @@ export function NebulaSkiaExperiment({
             : "Таймер остановлен (статичный оригинал)"}
         </Text>
       </View> : null}
-      {scene.status ? <Text accessibilityLiveRegion="polite"
+      {showStatusText && scene.status ? <Text accessibilityLiveRegion="polite"
         style={{ color: colors.textSecondary, textAlign: "center", fontSize: 13 }}>
         {scene.status}
       </Text> : null}

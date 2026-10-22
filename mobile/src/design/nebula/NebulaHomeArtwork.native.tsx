@@ -31,7 +31,8 @@ export function NebulaHomeArtwork({ size = 288, phase = "idle" }: {
     style={{ width: size, minHeight: size, justifyContent: "center", alignItems: "center" }}>
     {isFocused
       ? <NebulaSkiaExperiment phase={phase} size={size}
-          clipToCircle={false} homeCanvas pauseAnimation={mode === "static"} />
+          clipToCircle={false} homeCanvas pauseAnimation={mode === "static"}
+          showStatusText={size > 100} />
       : null}
   </View>;
 }
