@@ -1,3 +1,16 @@
+// Jest resolves *.native for react-native tests: simulate the SQLite key-value
+// boundary rather than opening a real native SQLite database outside Android.
+jest.mock("expo-sqlite/kv-store", () => {
+  const values = new Map<string, string>();
+  return {
+    __esModule: true,
+    default: {
+      getItem: async (key: string) => values.get(key) ?? null,
+      setItem: async (key: string, value: string) => { values.set(key, value); },
+    },
+  };
+});
+
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DEFAULT_NEBULA_VISUAL_MODE, NEBULA_VISUAL_MODE_KEY, nebulaVisualModeDescription, parseNebulaVisualMode } from "../visualMode";
@@ -16,7 +29,7 @@ describe("Nebula Home A/B performance switch", () => {
     expect(nebulaVisualModeDescription.live).toContain("×5");
     expect(nebulaVisualModeDescription.static).toContain("без таймера");
   });
-  it("can switch reversible web QA preference without changing chat data", async () => {
+  it("can persist and reverse native preference with a mocked SQLite boundary", async () => {
     await setNebulaVisualMode("static");
     expect(await getNebulaVisualMode()).toBe("static");
     await setNebulaVisualMode("live");
