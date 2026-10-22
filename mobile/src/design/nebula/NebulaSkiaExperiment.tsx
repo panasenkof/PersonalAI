@@ -57,12 +57,15 @@ export interface NebulaSkiaExperimentProps {
   previewSpeed?: NebulaOrbSpeed;
   /** Home: full rectangular cosmic canvas, never a clipped black disk. */
   clipToCircle?: boolean;
+  /** Match the surrounding dark Home background without a square seam. */
+  homeCanvas?: boolean;
 }
 
-function AnimatedSkiaOrb({ size, phase, speed, onImageReady, onClockTick }: {
+function AnimatedSkiaOrb({ size, phase, speed, homeCanvas, onImageReady, onClockTick }: {
   size: number;
   phase: NebulaPhase;
   speed: NebulaOrbSpeed;
+  homeCanvas: boolean;
   onImageReady: (ready: boolean) => void;
   onClockTick: (beat: number) => void;
 }) {
@@ -90,6 +93,7 @@ function AnimatedSkiaOrb({ size, phase, speed, onImageReady, onClockTick }: {
     uSize: size,
     uEnergy: energy,
     uOffline: 0,
+    uHomeCanvas: homeCanvas ? 1 : 0,
     uLineR: filament.uLineR,
     uLineG: filament.uLineG,
     uLineB: filament.uLineB,
@@ -97,7 +101,7 @@ function AnimatedSkiaOrb({ size, phase, speed, onImageReady, onClockTick }: {
     uLinePulseHz: filament.uLinePulseHz,
     uLineWave: filament.uLineWave,
     uLineAnimate: filament.uLineAnimate,
-  }), [size, energy, orbSpeed, lineSpeed, thinking, filament]);
+  }), [size, energy, orbSpeed, lineSpeed, thinking, filament, homeCanvas]);
 
   // Correct-art fallback when SkSL is not supported by the device.
   if (!nebulaEffect || !image) {
@@ -122,9 +126,10 @@ function AnimatedSkiaOrb({ size, phase, speed, onImageReady, onClockTick }: {
  * No useClock / no loop; offline, error, reduced-motion, background and
  * low-power states therefore remain accessible and truly motionless.
  */
-function StaticSkiaOrb({ size, phase, onImageReady }: {
+function StaticSkiaOrb({ size, phase, homeCanvas, onImageReady }: {
   size: number;
   phase: NebulaPhase;
+  homeCanvas: boolean;
   onImageReady: (ready: boolean) => void;
 }) {
   const image = useImage(poster);
@@ -136,8 +141,9 @@ function StaticSkiaOrb({ size, phase, onImageReady }: {
     uSize: size,
     uEnergy: NEBULA_ENERGY[phase],
     uOffline: phase === "offline" ? 1 : 0,
+    uHomeCanvas: homeCanvas ? 1 : 0,
     ...getFilamentUniforms(phase, false),
-  }), [size, phase]);
+  }), [size, phase, homeCanvas]);
   if (!nebulaEffect || !image) {
     return <Image testID="nebula-skia-static-fallback" source={poster}
       accessibilityIgnoresInvertColors style={{ width: size, height: size }} />;
@@ -161,6 +167,7 @@ export function NebulaSkiaExperiment({
   showDiagnostics = false,
   previewSpeed = NEBULA_ORB_SPEED.working,
   clipToCircle = true,
+  homeCanvas = false,
 }: NebulaSkiaExperimentProps) {
   const [appActive, setAppActive] = useState(isNebulaLabForeground(AppState.currentState));
   const [imageReady, setImageReady] = useState(false);
@@ -222,9 +229,9 @@ export function NebulaSkiaExperiment({
           backgroundColor: colors.canvas, borderRadius: clipToCircle ? size / 2 : 0 }}>
         {animated
           ? <AnimatedSkiaOrb size={size} phase={phase}
-              speed={previewSpeed} onImageReady={onImageReady} onClockTick={onClockTick} />
+              speed={previewSpeed} homeCanvas={homeCanvas} onImageReady={onImageReady} onClockTick={onClockTick} />
           : enableNativeShader && Boolean(nebulaEffect)
-            ? <StaticSkiaOrb size={size} phase={phase} onImageReady={onImageReady} />
+            ? <StaticSkiaOrb size={size} phase={phase} homeCanvas={homeCanvas} onImageReady={onImageReady} />
             : <Image testID="nebula-skia-poster" source={poster}
                 resizeMode="cover" accessibilityIgnoresInvertColors
                 style={{ width: size, height: size }} />}
