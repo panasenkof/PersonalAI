@@ -48,6 +48,9 @@ function NebulaHomeContent() {
   const [keyboardOpen, setKeyboardOpen] = useState(false);
   const [listViewportHeight, setListViewportHeight] = useState(0);
   useEffect(() => {
+    // Browser QA / React Native Web may omit the native Keyboard module.
+    // Native Android still reports keyboardDidShow/Hide; focus is the fallback.
+    if (!Keyboard?.addListener) return;
     const shown = Keyboard.addListener("keyboardDidShow", () => setKeyboardOpen(true));
     const hidden = Keyboard.addListener("keyboardDidHide", () => {
       setKeyboardOpen(false);
