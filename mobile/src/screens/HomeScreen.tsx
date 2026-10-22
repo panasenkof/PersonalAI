@@ -102,6 +102,8 @@ function NebulaHomeContent() {
       }}
       keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag"
       scrollEventThrottle={64}
+      // Respect a finger gesture immediately, before its first onScroll event.
+      onScrollBeginDrag={() => { nearChatBottom.current = false; }}
       onScroll={event => {
         const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
         nearChatBottom.current = isNebulaChatNearBottom(
