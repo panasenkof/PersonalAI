@@ -1,4 +1,6 @@
-# Единый план PersAI — ред. 50
+# Единый план PersAI — ред. 51
+
+**22.10.2026 · исправляется заметная «дёрганость» Nebula Home по 54-секундной записи пользователя:** [разбор и acceptance](docs/design/NEBULA_MOTION_STABILITY_2026-10-22.md), [OpenSpec](openspec/changes/nebula-motion-stability/). Убрана конкурирующая анимированная прокрутка `FlatList` на каждом изменении потока; 116dp status orb заменена на ≤56dp внутри прогресса, а clock diagnostic UI→JS работает только в лаборатории. ×5/×1, стеклянная B+C, нить, космический фон и безопасность не изменяются. **Реальное GPU FPS/jank и artistic acceptance ещё NOT RUN.**
 
 **22.10.2026 · добавлен A/B переключатель производительности Nebula (этап 90):** [спецификация](docs/design/NEBULA_HOME_AB_PERFORMANCE.md), [OpenSpec](openspec/changes/nebula-home-ab-performance/). В «Настройки → Диагностика диалогов → Для разработчика» появляется переключатель **«Анимация Nebula на главной»**, сохраняющийся локально. OFF отображает ту же высокодетальную B+C через статичный Skia shader **без useClock**, ON возвращает живой renderer при входе в Home. Это позволяет проводить реальный baseline vs GPU performance test с замерами на устройстве. **Замеры FPS/battery/thermal ещё NOT RUN.** Биометрия/«Защищено», память и чат не меняются.
 
@@ -327,6 +329,7 @@ Markdown GitHub поддерживает сворачиваемые секции
 
 | Ред. | Дата | Суть изменений |
 | --- | --- | --- |
+| **51** | **22.10** | **Стабилизация Nebula по 54s Android видео: без пересекающихся animated-scroll, статусная сфера внутри строки прогресса, meter UI→JS только в Lab. Отдельный native QA.** |
 | **50** | **22.10** | **Обратимый live/static A/B для сложного Nebula Home через диагностику, сохранение только графической настройки, отдельный Android performance gate.** |
 | **49** | **22.10** | **Исправлена геометрия Nebula Home при Gboard: компактный orb ≤96dp, размеры по FlatList viewport, без empty auto-scroll; ручной Android QA после APK.** |
 | **48** | **22.10** | **Первый нативный Skia B+C на Home, тёмная сцена без круглого фона, фазы из реальной диктовки и LLM, безопасные тема/навигация/тесты, Android device QA открыта.** |
@@ -378,7 +381,12 @@ Markdown GitHub поддерживает сворачиваемые секции
 </details>
 
 <details>
-<summary><strong>Подробный журнал редакций 1–50</strong></summary>
+<summary><strong>Подробный журнал редакций 1–51</strong></summary>
+### Ред. 51 (22.10.2026)
+
+- [Стабилизация раскладки и рендера Home](docs/design/NEBULA_MOTION_STABILITY_2026-10-22.md) по фактическому Android видео; в OpenSpec разделены layout-ryvki и непроверенный GPU-jank.
+- Параметры шейдера B+C/движение не меняются до записи на стабильном layout, device FPS/battery NOT RUN.
+
 ### Ред. 50 (22.10.2026)
 
 - Добавлен [A/B profiler gate](docs/design/NEBULA_HOME_AB_PERFORMANCE.md) с обратимым live/static режимом B+C и локальным графическим флагом.
