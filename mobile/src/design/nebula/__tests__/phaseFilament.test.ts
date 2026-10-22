@@ -69,7 +69,7 @@ describe("Nebula neon contour and split motion clocks (22.10.2026)", () => {
     expect(NEBULA_HYBRID_SKSL).toContain("float haloNear =");
     expect(NEBULA_HYBRID_SKSL).toContain("float haloFar =");
     expect(NEBULA_HYBRID_SKSL.indexOf("float3 outputColor = mix(bg, plasma, mask);"))
-      .toBeLessThan(NEBULA_HYBRID_SKSL.indexOf("outputColor += filamentColor"));
+      .toBeLessThan(NEBULA_HYBRID_SKSL.indexOf("outputColor += lineLight * brightness;"));
     // Keep the original image-backed B details and multi-layer C dynamics.
     expect(NEBULA_HYBRID_SKSL).toContain("source.eval(uv)");
     for (const name of ["membraneA", "membraneB", "membraneC", "membraneD", "membraneE"])
