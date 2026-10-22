@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Pressable, SafeAreaView, ScrollView, Text, View } from "react-native";
 import { NebulaSkiaExperiment } from "./NebulaSkiaExperiment";
 import type { NebulaPhase } from "./motion";
-import { NEBULA_FILAMENT, NEBULA_LAB_SPEED } from "./phaseFilament";
+import { NEBULA_FILAMENT, NEBULA_ORB_SPEED, NEBULA_FILAMENT_SPEED } from "./phaseFilament";
 import { nebulaColors, nebulaSpacing } from "./tokens";
 
 /**
@@ -20,7 +20,7 @@ export function NebulaSkiaLabScreen() {
   const [reduced, setReduced] = useState(false);
   const [lowPower, setLowPower] = useState(false);
   const [shader, setShader] = useState(true);
-  const [demoSpeed, setDemoSpeed] = useState(false);
+  const [compareSlow, setCompareSlow] = useState(false);
   const theme = nebulaColors("dark");
   function labToggle(text: string, active: boolean, onPress: () => void) {
     return <Pressable accessibilityRole="button"
@@ -47,7 +47,7 @@ export function NebulaSkiaLabScreen() {
         <NebulaSkiaExperiment phase={phase} size={size}
           reduceMotion={reduced} powerConstrained={lowPower}
           enableNativeShader={shader} showDiagnostics
-          previewSpeed={demoSpeed ? NEBULA_LAB_SPEED.accelerated : NEBULA_LAB_SPEED.default} />
+          previewSpeed={compareSlow ? NEBULA_ORB_SPEED.compare : NEBULA_ORB_SPEED.working} />
       </View>
       <Text accessibilityRole="header" style={{ color: theme.text, fontSize: 17, fontWeight: "600" }}>
         Состояние
@@ -55,6 +55,12 @@ export function NebulaSkiaLabScreen() {
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 9 }}>
         {phases.map(x => labToggle(x, phase === x, () => setPhase(x)))}
       </View>
+      <Text testID="nebula-motion-speeds" style={{
+        color: theme.textSecondary, fontSize: 13, fontWeight: "600",
+      }}>
+        {"Сфера ×" + (compareSlow ? NEBULA_ORB_SPEED.compare : NEBULA_ORB_SPEED.working)
+          + " · Нить ×" + NEBULA_FILAMENT_SPEED}
+      </Text>
       <Text testID="nebula-state-color" style={{
         color: NEBULA_FILAMENT[phase].colorHex ?? theme.textSecondary,
         fontSize: 12,
@@ -73,12 +79,12 @@ export function NebulaSkiaLabScreen() {
         {labToggle("Reduce Motion", reduced, () => setReduced(v => !v))}
         {labToggle("Экономия", lowPower, () => setLowPower(v => !v))}
         {labToggle("Skia / оригинал", shader, () => setShader(v => !v))}
-        {labToggle("Проверка движения ×5", demoSpeed, () => setDemoSpeed(v => !v))}
+        {labToggle("Сфера ×1 — сравнить", compareSlow, () => setCompareSlow(v => !v))}
       </View>
       <Text style={{ color: theme.textSecondary, fontSize: 12, lineHeight: 18 }}>
         Вверху отображается причина статичной сферы и реальный счётчик таймера
-        Skia. Если таймер растёт, но перемены не видны, переключите «Проверка
-        движения ×5». Если показано «SkSL не скомпилировался», сделайте снимок
+        Skia. Сфера работает на ×5, неоновая нить — ×1. Для сравнения
+        формы можно временно включить «Сфера ×1 — сравнить». Если показано «SkSL не скомпилировался», сделайте снимок
         экрана и отправьте логи приложения для диагностики. Offline и error
         намеренно статичны; Android Reduce Motion имеет приоритет над тестовым
         переключателем.
