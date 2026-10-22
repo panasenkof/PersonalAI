@@ -59,6 +59,8 @@ export interface NebulaSkiaExperimentProps {
   clipToCircle?: boolean;
   /** Match the surrounding dark Home background without a square seam. */
   homeCanvas?: boolean;
+  /** A/B profiler: same Skia artwork, but fully static (no useClock subtree). */
+  pauseAnimation?: boolean;
 }
 
 function AnimatedSkiaOrb({ size, phase, speed, homeCanvas, onImageReady, onClockTick }: {
@@ -168,6 +170,7 @@ export function NebulaSkiaExperiment({
   previewSpeed = NEBULA_ORB_SPEED.working,
   clipToCircle = true,
   homeCanvas = false,
+  pauseAnimation = false,
 }: NebulaSkiaExperimentProps) {
   const [appActive, setAppActive] = useState(isNebulaLabForeground(AppState.currentState));
   const [imageReady, setImageReady] = useState(false);
@@ -205,7 +208,7 @@ export function NebulaSkiaExperiment({
     preferredQuality: "full",
   }), [phase, reduceMotion, osReduceMotion, appActive, powerConstrained]);
 
-  const animated = enableNativeShader && scene.animateCore && scene.quality === "full"
+  const animated = enableNativeShader && !pauseAnimation && scene.animateCore && scene.quality === "full"
     && Boolean(nebulaEffect);
   const reason = nebulaRendererReason({
     phase,
@@ -216,6 +219,7 @@ export function NebulaSkiaExperiment({
     enableNativeShader,
     compiled: Boolean(nebulaEffect),
     imageReady,
+    pauseAnimation,
   });
   const colors = nebulaColors("dark");
   // The Skia subtree is UNMOUNTED when inactive/reduced/offline rather than
