@@ -1,4 +1,6 @@
-# Единый план PersAI — ред. 49
+# Единый план PersAI — ред. 50
+
+**22.10.2026 · добавлен A/B переключатель производительности Nebula (этап 90):** [спецификация](docs/design/NEBULA_HOME_AB_PERFORMANCE.md), [OpenSpec](openspec/changes/nebula-home-ab-performance/). В «Настройки → Диагностика диалогов → Для разработчика» появляется переключатель **«Анимация Nebula на главной»**, сохраняющийся локально. OFF отображает ту же высокодетальную B+C через статичный Skia shader **без useClock**, ON возвращает живой renderer при входе в Home. Это позволяет проводить реальный baseline vs GPU performance test с замерами на устройстве. **Замеры FPS/battery/thermal ещё NOT RUN.** Биометрия/«Защищено», память и чат не меняются.
 
 **22.10.2026 · исправляется обрезание Nebula при Android Gboard:** [NEBULA_HOME_KEYBOARD_LAYOUT.md](docs/design/NEBULA_HOME_KEYBOARD_LAYOUT.md), [OpenSpec](openspec/changes/nebula-home-keyboard-layout/). По фактическому скриншоту большой orb обрезается composer при наборе. Переключение на ≤96dp при клавиатуре/фокусе (или скрытие при нехватке места), размер по реальному viewport, защита от прокрутки пустого чата. Экран «Защищено» исключён из объёма. Android pixel check после APK.
 
@@ -325,6 +327,7 @@ Markdown GitHub поддерживает сворачиваемые секции
 
 | Ред. | Дата | Суть изменений |
 | --- | --- | --- |
+| **50** | **22.10** | **Обратимый live/static A/B для сложного Nebula Home через диагностику, сохранение только графической настройки, отдельный Android performance gate.** |
 | **49** | **22.10** | **Исправлена геометрия Nebula Home при Gboard: компактный orb ≤96dp, размеры по FlatList viewport, без empty auto-scroll; ручной Android QA после APK.** |
 | **48** | **22.10** | **Первый нативный Skia B+C на Home, тёмная сцена без круглого фона, фазы из реальной диктовки и LLM, безопасные тема/навигация/тесты, Android device QA открыта.** |
 | **47** | **22.10** | **Интерактивная композиция Home v0.3 и критерии приёмки; полный performance/battery gate — после интеграции основных нагружающих компонентов Home, короткие guards в каждом PR.** |
@@ -375,7 +378,12 @@ Markdown GitHub поддерживает сворачиваемые секции
 </details>
 
 <details>
-<summary><strong>Подробный журнал редакций 1–49</strong></summary>
+<summary><strong>Подробный журнал редакций 1–50</strong></summary>
+### Ред. 50 (22.10.2026)
+
+- Добавлен [A/B profiler gate](docs/design/NEBULA_HOME_AB_PERFORMANCE.md) с обратимым live/static режимом B+C и локальным графическим флагом.
+- FPS, батарея, FPS p95, jank, температура — до реального сравнения на одном Android помечены NOT RUN, а не PASS.
+
 ### Ред. 49 (22.10.2026)
 
 - По пользовательскому Android скриншоту подготовлены [спецификация исправления клавиатуры](docs/design/NEBULA_HOME_KEYBOARD_LAYOUT.md) и [OpenSpec](openspec/changes/nebula-home-keyboard-layout/).
