@@ -91,9 +91,10 @@ test("published SHA, absent baseline and manual dispatch have distinct behavior"
 test("released commit not on main ancestry is never used for a silent false negative", () => {
   repoWithCommits(({ dir, git, commit }) => {
     const old = commit("mobile/app.js", "base");
+    const mainBranch = git("branch", "--show-current");
     git("checkout", "-qb", "alternate");
     const unrelated = commit("mobile/app.js", "unrelated");
-    git("checkout", "-q", "master");
+    git("checkout", "-q", mainBranch);
     const target = commit("PLAN.md", "tip");
     assert.notEqual(unrelated, old);
     assert.throws(() => decideAndroidBuild({
