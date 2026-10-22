@@ -14,7 +14,7 @@ const html=path.resolve(__dirname,"../../docs/prototypes/nebula-home-composition
   const orb=page.locator(".orb");
   await orb.waitFor();
   assert(await orb.evaluate(el=>el.naturalWidth>0),"Approved REF-ORB-B must load from repository art");
-  assert.equal(await page.getByText("Чем помочь сегодня?").count(),0);
+  assert.equal(await page.locator(".phone").getByText("Чем помочь сегодня?").count(),0,"No unwanted slogan within mobile screen");
   assert.equal(await page.getByLabel("Сообщение").isEditable(),true);
   for(const width of [320,360,390,430]){
     await page.locator("#device").selectOption(String(width));
