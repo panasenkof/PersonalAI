@@ -15,7 +15,7 @@ const html=path.resolve(__dirname,"../../docs/prototypes/nebula-home-composition
   await orb.waitFor();
   assert(await orb.evaluate(el=>el.naturalWidth>0),"Approved REF-ORB-B must load from repository art");
   assert.equal(await page.locator(".phone").getByText("Чем помочь сегодня?").count(),0,"No unwanted slogan within mobile screen");
-  assert.equal(await page.getByLabel("Сообщение").isEditable(),true);
+  assert.equal(await page.getByRole("textbox",{name:"Сообщение",exact:true}).isEditable(),true);
   for(const width of [320,360,390,430]){
     await page.locator("#device").selectOption(String(width));
     const phone=await page.locator(".phone").boundingBox();
@@ -30,7 +30,7 @@ const html=path.resolve(__dirname,"../../docs/prototypes/nebula-home-composition
   await page.getByRole("button",{name:"ИИ думает"}).click();
   assert(await page.getByText("Обрабатываю запрос",{exact:true}).count()>=1,"Real state should have visual target");
   await page.getByRole("button",{name:"Открыть ввод (системная клавиатура)"}).click();
-  assert(await page.getByLabel("Сообщение").evaluate(el=>el===document.activeElement),"Focus should request platform IME through textarea");
+  assert(await page.getByRole("textbox",{name:"Сообщение",exact:true}).evaluate(el=>el===document.activeElement),"Focus should request platform IME through textarea");
   assert.equal(await page.locator(".kbd").count(),0,"Prototype must not paint any fake keyboard");
   const c=await page.locator(".composer").boundingBox(),n=await page.locator(".tabs").boundingBox();
   assert(c.y+c.height<=n.y+1,"Keyboard must not overlap bottom navigation/composer");
@@ -39,7 +39,7 @@ const html=path.resolve(__dirname,"../../docs/prototypes/nebula-home-composition
   assert(await page.locator(".file").count()===1,"Attachment chip shown");
   await page.locator(".file button").click();
   assert(await page.locator(".file").count()===0,"Attachment chip can be removed");
-  await page.getByLabel("Сообщение").fill("Проверочный текст");
+  await page.getByRole("textbox",{name:"Сообщение",exact:true}).fill("Проверочный текст");
   await page.getByLabel("Отправить демонстрационное сообщение").click();
   assert(await page.getByText(/Демонстрация, не отправлено/).count()===1,"No mock response masquerades as production");
   assert.deepEqual(errors,[],"No JS runtime errors");
