@@ -11,9 +11,29 @@ export function PromptInput({ value, onChange, onClear, editable, onFocusChange 
   const t = useTheme();
   const input = useRef<TextInput>(null);
   const focusAfterClear = useRef(false);
+  const restoreFocusFrame = useRef<number | null>(null);
   useLayoutEffect(() => {
-    // Restore focus after the pressed clear button has left the native tree.
-    if (!value && focusAfterClear.current) { focusAfterClear.current = false; input.current?.focus(); }
+    if (value !== "" || !focusAfterClear.current) return;
+    // Pressable takes focus before onPress, while clearing remounts VoiceInput
+    // and can resize the empty-state artwork. A single synchronous focus()
+    // briefly succeeds and then loses focus as the press/layout settles.
+    input.current?.focus();
+    restoreFocusFrame.current = requestAnimationFrame(() => {
+      if (!focusAfterClear.current) return;
+      input.current?.focus();
+      restoreFocusFrame.current = requestAnimationFrame(() => {
+        restoreFocusFrame.current = null;
+        if (focusAfterClear.current) input.current?.focus();
+        focusAfterClear.current = false;
+      });
+    });
+    // Cancel deferred refocus when the draft changes, the user navigates
+    // away, or this input unmounts. Never reopen Gboard on another screen.
+    return () => {
+      if (restoreFocusFrame.current !== null) cancelAnimationFrame(restoreFocusFrame.current);
+      restoreFocusFrame.current = null;
+      focusAfterClear.current = false;
+    };
   }, [value]);
   return <View style={{ flexDirection: "row", alignItems: "flex-start", borderWidth: 1, borderColor: t.line, borderRadius: 18, backgroundColor: t.soft }}>
     <TextInput ref={input} accessibilityLabel="Сообщение ассистенту" multiline value={value} onChangeText={onChange}
@@ -25,10 +45,8 @@ export function PromptInput({ value, onChange, onClear, editable, onFocusChange 
         focusAfterClear.current = true;
         onClear();
         onChange("");
-        // Re-focus after the pressed X disappears from the native tree.
-        // The explicit next-frame fallback also covers Android/web blur
-        // events during the Home artwork's keyboard-responsive re-layout.
-        requestAnimationFrame(() => input.current?.focus());
+        // Focus is restored after React commits the empty draft and settles
+        // the clear-button removal; see the layout effect above.
       }}
       style={{ minHeight: 46, minWidth: 44, alignItems: "center", justifyContent: "center", opacity: editable ? 1 : 0.5 }}>
       <Feather name="x" size={20} color={t.muted} />

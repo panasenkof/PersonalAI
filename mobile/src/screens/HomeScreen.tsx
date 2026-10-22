@@ -47,6 +47,24 @@ function NebulaHomeContent() {
   const [composerFocused, setComposerFocused] = useState(false);
   const [keyboardOpen, setKeyboardOpen] = useState(false);
   const [listViewportHeight, setListViewportHeight] = useState(0);
+  const list = useRef<FlatList<ChatRow>>(null);
+  const nearChatBottom = useRef(true); // no rerenders for individual scroll events
+  const pendingSendFollow = useRef(false);
+  const scrollFrame = useRef<number | null>(null);
+  // Coalesce transient height changes, streamed tokens, and IME resizes into
+  // ONE non-animated scroll per frame, rather than competing scroll animations.
+  const scheduleBottomFollow = useCallback(() => {
+    if (scrollFrame.current !== null) return;
+    scrollFrame.current = requestAnimationFrame(() => {
+      scrollFrame.current = null;
+      if (pendingSendFollow.current || nearChatBottom.current) {
+        list.current?.scrollToEnd({ animated: false });
+      }
+    });
+  }, []);
+  useEffect(() => () => {
+    if (scrollFrame.current !== null) cancelAnimationFrame(scrollFrame.current);
+  }, []);
   useEffect(() => {
     // Browser QA / React Native Web may omit the native Keyboard module.
     // Native Android still reports keyboardDidShow/Hide; focus is the fallback.
@@ -56,12 +74,16 @@ function NebulaHomeContent() {
       setKeyboardOpen(false);
       // Android can keep the TextInput focused after Back dismisses Gboard.
       setComposerFocused(false);
+      if (pendingSendFollow.current) {
+        // Height has settled after IME resize: settle LLM thinking at bottom.
+        nearChatBottom.current = true;
+        scheduleBottomFollow();
+        pendingSendFollow.current = false;
+      }
     });
     return () => { shown.remove(); hidden.remove(); };
-  }, []);
+  }, [scheduleBottomFollow]);
   const normalization = useDraftNormalization(store, profile, setNotice);
-  const list = useRef<FlatList<ChatRow>>(null);
-  const nearChatBottom = useRef(true); // no rerenders from native scroll events
   useFocusEffect(useCallback(() => {
     let alive = true;
     setSettings(null); setConnectionName("");
@@ -85,6 +107,18 @@ function NebulaHomeContent() {
   const artworkSize = nebulaEmptyOrbSize(artLayout);
   const statusArtworkSize = nebulaConversationOrbSize(artLayout);
   const action = { minHeight: 44, minWidth: 44, justifyContent: "center" as const, alignItems: "center" as const };
+  const sendOrStop = () => {
+    if (busy) { store.stop(); return; }
+    if (!settings) return;
+    // Only a deliberate Send closes Gboard (not a pause in typing).
+    pendingSendFollow.current = true;
+    nearChatBottom.current = true;
+    Keyboard?.dismiss?.();
+    setComposerFocused(false);
+    setVoiceReset(n => n + 1);
+    void store.send(settings);
+    scheduleBottomFollow();
+  };
   const openConnections = (presetId?: string) => navigation.navigate("ModelConnections", presetId ? { presetId } : undefined);
   // First run: the active connection has neither a key nor a keyless local address.
   const needsSetup = Boolean(settings && !settings.apiKey && !anonymousLocalAllowed(settings));
@@ -99,23 +133,30 @@ function NebulaHomeContent() {
       onLayout={event => {
         const nextHeight = Math.round(event.nativeEvent.layout.height);
         setListViewportHeight(previous => previous === nextHeight ? previous : nextHeight);
+        if (pendingSendFollow.current) scheduleBottomFollow();
       }}
       keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag"
       scrollEventThrottle={64}
+      // Respect a finger gesture immediately, before its first onScroll event.
+      onScrollBeginDrag={() => {
+        // Finger scrolling always wins; stop forced following immediately.
+        pendingSendFollow.current = false;
+        nearChatBottom.current = false;
+      }}
       onScroll={event => {
+        if (pendingSendFollow.current) return; // ignore keyboard-resize offsets
         const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
         nearChatBottom.current = isNebulaChatNearBottom(
           contentSize.height, contentOffset.y, layoutMeasurement.height,
         );
       }}
       onContentSizeChange={() => {
-        // Native changes can arrive on every streamed token AND during IME
-        // resize. Repeated animated scrollToEnd fights layout and looks jerky.
-        // Instantly follow ONLY when the user is already near the bottom.
-        if (shouldScrollNebulaChatToEnd(
+        if (pendingSendFollow.current || shouldScrollNebulaChatToEnd(
           active?.rows?.length || 0, active?.streamText, nearChatBottom.current,
         )) {
-          list.current?.scrollToEnd({ animated: false });
+          scheduleBottomFollow();
+          // No Gboard animation to wait for: normal LLM auto-follow takes over.
+          if (!keyboardOpen && !composerFocused) pendingSendFollow.current = false;
         }
       }}
       contentContainerStyle={{ padding: 16, gap: 12, flexGrow: 1 }}
@@ -197,7 +238,7 @@ function NebulaHomeContent() {
         <Text style={{ flex: 1, minWidth: 0, color: t.muted, fontSize: 11 }} numberOfLines={2} accessibilityLiveRegion="polite">{normalization.busy ? "Улучшаю текст…" : busy ? "Можно перейти в другую вкладку" : ""}</Text>
         <IconAction icon={busy ? "square" : "arrow-up"} label={busy ? "Стоп" : "Отправить"} accessibilityLabel={busy ? "Остановить запрос" : "Отправить запрос"}
           hint={busy ? "Остановить ответ ИИ в этом диалоге." : "Отправить написанное сообщение выбранной модели."} hintAbove emphasized={!busy}
-          disabled={!busy && (!canSend || !question.trim())} onPress={() => { if (busy) store.stop(); else if (settings) { setVoiceReset(n => n + 1); void store.send(settings); } }} />
+          disabled={!busy && (!canSend || !question.trim())} onPress={sendOrStop} />
       </View>
     </View>
     <BottomSheet visible={historyOpen} title="Мои диалоги" onClose={() => setHistoryOpen(false)}>

@@ -119,7 +119,10 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
         const input = document.querySelector('[aria-label="Сообщение ассистенту"]');
         return input && document.activeElement === input;
       }, null, { timeout: 2500 });
-      assert.equal(await prompt.evaluate(el => document.activeElement === el), true, 'Clear keeps keyboard focus in the composer');
+      // A transient focus() is not enough: clear remounts VoiceInput and
+      // resizes Nebula's empty state. Focus must survive the next UI frames.
+      await page.clock.runFor(120);
+      assert.equal(await prompt.evaluate(el => document.activeElement === el), true, 'Clear keeps keyboard focus in the composer after layout settles');
       assert.equal(await page.getByLabel('Очистить сообщение', { exact: true }).count(), 0);
       assert.equal(await page.getByLabel('Улучшить текст', { exact: true }).isDisabled(), true);
       const originalDraft = 'нужно купить молоко и хлеб';

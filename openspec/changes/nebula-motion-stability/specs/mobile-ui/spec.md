@@ -17,3 +17,11 @@ WHEN updating stability, THEN B+C image-backed shader, five membranes, neon fila
 
 ## MS-05: Android signoff
 WHEN CI and Android native build are complete, THEN supply a new APK and collect real-device recordings; FPS/energy measurements must not be claimed from source tests alone.
+
+## MS-09/10: Send ends input and anchors thinking under chat
+
+WHEN a user sends text from focused Gboard, THEN dismiss the keyboard, keep the submitted message, position latest message and LLM thinking status near the bottom above the composer, even if the chat has many old messages. Do not wait for the next user interaction to scroll. When keyboardDidHide completes layout adjustment, settle the viewport again using its new height. Do not reset the saved conversation or delete the unsent draft before Send commits.
+
+## MS-11/12: No conflicting scroll loops
+
+WHEN streaming text resizes the list, THEN at most one nonanimated scroll is scheduled per animation frame while the user stays near bottom. WHEN the user starts dragging up, THEN cancel forced follow immediately and leave the history where the user placed it, until the next explicit Send. Do not hide the keyboard on a typing pause or when Stop is pressed.
