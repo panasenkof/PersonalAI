@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-const root = join(__dirname, "..", "..");
+const root = join(__dirname, "..", "..", "..");
 const home = readFileSync(join(root, "screens", "HomeScreen.tsx"), "utf8");
 const header = readFileSync(join(__dirname, "..", "NebulaHomeHeader.tsx"), "utf8");
 const orb = readFileSync(join(__dirname, "..", "NebulaHomeArtwork.tsx"), "utf8");
