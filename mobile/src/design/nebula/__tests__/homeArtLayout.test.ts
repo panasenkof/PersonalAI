@@ -15,10 +15,11 @@ describe("Nebula Home keyboard and visual viewport", () => {
     expect(nebulaEmptyOrbSize({ ...base, listHeight: 260 })).toBe(196);
     expect(nebulaEmptyOrbSize({ ...base, listHeight: 80 })).toBe(0);
   });
-  it("reduces the orb to 96dp or less as soon as the composer is focused", () => {
-    expect(nebulaEmptyOrbSize({ ...base, composerOccluded: true, listHeight: 220 })).toBe(96);
+  it("hides the big orb through the full Gboard resize and restores it afterward", () => {
+    expect(nebulaEmptyOrbSize({ ...base, composerOccluded: true, listHeight: 520 })).toBe(0);
+    expect(nebulaEmptyOrbSize({ ...base, composerOccluded: true, listHeight: 220 })).toBe(0);
     expect(nebulaEmptyOrbSize({ ...base, composerOccluded: true, listHeight: 105 })).toBe(0);
-    expect(nebulaEmptyOrbSize({ ...base, composerOccluded: true, listHeight: 130 })).toBe(82);
+    expect(nebulaEmptyOrbSize({ ...base, composerOccluded: true, listHeight: 130 })).toBe(0);
     expect(nebulaEmptyOrbSize({ ...base, composerOccluded: false })).toBe(320);
   });
   it("keeps a small inline status orb without growing a separate 116dp footer", () => {
