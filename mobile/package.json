@@ -9,7 +9,8 @@
     "ios": "expo start --ios",
     "typecheck": "tsc --noEmit",
     "test": "jest",
-    "test:ui": "node scripts/verify-mobile-ui.cjs"
+    "test:ui": "node scripts/verify-mobile-ui.cjs",
+    "test:nebula-skia": "jest --runInBand src/design/nebula/__tests__/skia-hybrid-contract.test.ts"
   },
   "dependencies": {
     "@expo/metro-runtime": "~57.0.17",
@@ -46,7 +47,9 @@
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "~4.26.0",
     "react-native-web": "^0.21.0",
-    "react-native-worklets": "0.10.1"
+    "react-native-worklets": "0.10.1",
+    "@shopify/react-native-skia": "2.6.2",
+    "react-native-reanimated": "4.5.1"
   },
   "devDependencies": {
     "@babel/core": "^7.24.0",
