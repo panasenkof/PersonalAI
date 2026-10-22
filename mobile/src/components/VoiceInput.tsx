@@ -23,9 +23,11 @@ function recognitionService(): ServiceChoice | undefined {
 
 /** Each mounted input owns one draft. Unmounting (including clearing the draft
  * or changing conversations) invalidates permission requests and late results. */
-export function VoiceInput({ value, onChange, disabled = false, onError, showLabel = false, onBegin, onActiveChange }: {
+export function VoiceInput({ value, onChange, disabled = false, onError, showLabel = false, onBegin, onActiveChange, onPhaseChange }: {
   value: string; onChange: (text: string) => void; disabled?: boolean; onError: (message: string) => void; showLabel?: boolean;
   onBegin?: () => void; onActiveChange?: (active: boolean) => void;
+  /** Real native recognizer stage for the decorative Home orb. */
+  onPhaseChange?: (phase: "idle" | "starting" | "listening" | "finishing") => void;
 }) {
   const t = useTheme();
   const whisper = useWhisperStatus();
@@ -44,8 +46,8 @@ export function VoiceInput({ value, onChange, disabled = false, onError, showLab
   const service = useRef<ServiceChoice | undefined>(undefined);
   const [offerNetwork, setOfferNetwork] = useState(false);
   const [phase, setPhase] = useState<"idle" | "starting" | "listening" | "finishing">("idle");
-  useEffect(() => { onActiveChange?.(phase !== "idle"); }, [phase, onActiveChange]);
-  useEffect(() => () => onActiveChange?.(false), [onActiveChange]);
+  useEffect(() => { onActiveChange?.(phase !== "idle"); onPhaseChange?.(phase); }, [phase, onActiveChange, onPhaseChange]);
+  useEffect(() => () => { onActiveChange?.(false); onPhaseChange?.("idle"); }, [onActiveChange, onPhaseChange]);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const watchdog = useRef<ReturnType<typeof setTimeout> | null>(null);
   const finalTimer = useRef<ReturnType<typeof setTimeout> | null>(null);

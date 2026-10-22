@@ -5,8 +5,9 @@ const root = join(__dirname, "..", "..", "..");
 const home = readFileSync(join(root, "screens", "HomeScreen.tsx"), "utf8");
 const header = readFileSync(join(__dirname, "..", "NebulaHomeHeader.tsx"), "utf8");
 const orb = readFileSync(join(__dirname, "..", "NebulaHomeArtwork.tsx"), "utf8");
+const liveOrb = readFileSync(join(__dirname, "..", "NebulaHomeArtwork.native.tsx"), "utf8");
 
-describe("Nebula Home phase-A screen contracts", () => {
+describe("Nebula Home native B+C screen contracts", () => {
   it("uses one compact header with working native navigation paths", () => {
     expect(home).toContain("<NebulaHomeHeader");
     expect(home).toContain("onHistory={() => setHistoryOpen(true)}");
@@ -19,7 +20,10 @@ describe("Nebula Home phase-A screen contracts", () => {
   });
   it("retains selected B+C original in idle, never a generic flat orb or a welcome billboard", () => {
     expect(home).toContain('testID="nebula-home-empty-state"');
-    expect(home).toContain('<NebulaHomeArtwork size={176} />');
+    expect(home).toContain("<NebulaHomeArtwork size={artworkSize} phase={orbPhase} />");
+    expect(liveOrb).toContain("<NebulaSkiaExperiment");
+    expect(liveOrb).toContain("clipToCircle={false}");
+    expect(home).toContain("<NebulaHomeThemeProvider>");
     expect(orb).toContain('require("./assets/nebula-orb-ref-b.png")');
     expect(home).not.toContain("Чем помочь сегодня?");
     expect(home).not.toContain("Составить план");
