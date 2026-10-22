@@ -24,7 +24,10 @@ describe("Nebula Home composition prototype acceptance", () => {
   });
   it("shows layout test widths and simulated Android keyboard without a real mic/LLM connection", () => {
     for (const width of ["320", "360", "390", "430"]) expect(document).toContain('value="' + width + '"');
-    expect(document).toContain("id=\"keyboard\"");
+    expect(document).toContain('id="focusComposer"');
+    expect(document).not.toContain('class="kbd"');
+    expect(document).not.toContain('id="keyboard"');
+    expect(document).toContain("системную клавиатуру Android");
     expect(document).toContain("Демо: макет не записывает звук");
     expect(document).toContain('aria-label="Сообщение"');
     expect(document).toContain('aria-label="Прикрепить файл"');
