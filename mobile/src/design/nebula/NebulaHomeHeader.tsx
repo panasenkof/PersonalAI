@@ -3,6 +3,7 @@ import React from "react";
 import { Pressable, Text, View } from "react-native";
 import { useTheme } from "../../theme";
 import { nebulaRadii, nebulaSpacing, nebulaTouch } from "./tokens";
+import { IconAction } from "../../components/IconAction";
 
 /**
  * Phase A of the approved Home v0.3 migration: compact functional header.
@@ -25,9 +26,6 @@ export function NebulaHomeHeader({
   newChatEnabled: boolean;
 }) {
   const t = useTheme();
-  const iconButton = { minHeight: nebulaTouch.minimum, minWidth: nebulaTouch.minimum,
-    alignItems: "center" as const, justifyContent: "center" as const,
-    borderRadius: nebulaRadii.field };
   return <View testID="nebula-home-header" style={{
     minHeight: 60, flexDirection: "row", alignItems: "center",
     gap: nebulaSpacing.xs, backgroundColor: t.panel,
@@ -48,17 +46,13 @@ export function NebulaHomeHeader({
         {connectionName || "Выбрать модель"} · {model || "Нет подключения"} ▾
       </Text>
     </Pressable>
-    <Pressable accessibilityRole="button" accessibilityLabel="История диалогов"
-      accessibilityHint="Открыть сохранённые диалоги"
-      onPress={onHistory} style={iconButton}>
-      <Feather name="clock" size={21} color={t.accent} />
-    </Pressable>
-    <Pressable accessibilityRole="button" accessibilityLabel="Новый диалог"
-      accessibilityHint="Начать новый диалог, сохранив предыдущий в истории"
-      accessibilityState={{ disabled: !newChatEnabled }}
-      disabled={!newChatEnabled} onPress={onNewChat}
-      style={[iconButton, { opacity: newChatEnabled ? 1 : 0.5 }]}>
-      <Feather name="edit" size={21} color={t.accent} />
-    </Pressable>
+    {/* Keep IconAction's existing in-place hint contract: browser and
+        accessibility tests expect the explanatory text on first activation. */}
+    <IconAction icon="clock" label="" accessibilityLabel="История диалогов"
+      hint="Открыть сохранённые диалоги и найти прошлые сообщения."
+      onPress={onHistory} />
+    <IconAction icon="edit" label="" accessibilityLabel="Новый диалог"
+      hint="Начать пустой диалог. Предыдущие диалоги останутся в истории."
+      disabled={!newChatEnabled} onPress={onNewChat} />
   </View>;
 }
