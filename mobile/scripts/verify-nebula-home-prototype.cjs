@@ -29,8 +29,9 @@ const html=path.resolve(__dirname,"../../docs/prototypes/nebula-home-composition
   assert(await page.locator(".msg").count()>=4,"Mock conversation must render");
   await page.getByRole("button",{name:"ИИ думает"}).click();
   assert(await page.getByText("Обрабатываю запрос",{exact:true}).count()>=1,"Real state should have visual target");
-  await page.getByRole("button",{name:"Клавиатура"}).click();
-  assert(await page.locator(".kbd.open").isVisible(),"Keyboard state must be selectable");
+  await page.getByRole("button",{name:"Открыть ввод (системная клавиатура)"}).click();
+  assert(await page.getByLabel("Сообщение").evaluate(el=>el===document.activeElement),"Focus should request platform IME through textarea");
+  assert.equal(await page.locator(".kbd").count(),0,"Prototype must not paint any fake keyboard");
   const c=await page.locator(".composer").boundingBox(),n=await page.locator(".tabs").boundingBox();
   assert(c.y+c.height<=n.y+1,"Keyboard must not overlap bottom navigation/composer");
   await page.getByLabel("Прикрепить файл").click();
