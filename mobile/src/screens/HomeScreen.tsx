@@ -11,7 +11,8 @@ import type { DirectAgentSettings } from "../direct-agent/settings";
 import type { ChatRow } from "../direct-agent/conversations";
 import type { RootStackParams } from "../navigation";
 import { BottomSheet } from "../components/BottomSheet";
-import { FloatingBrand } from "../components/FloatingBrand";
+import { NebulaHomeHeader } from "../design/nebula/NebulaHomeHeader";
+import { NebulaHomeArtwork } from "../design/nebula/NebulaHomeArtwork";
 import { VoiceInput } from "../components/VoiceInput";
 import { IconAction } from "../components/IconAction";
 import { PromptInput } from "../components/PromptInput";
@@ -56,17 +57,9 @@ export function HomeScreen() {
   // First run: the active connection has neither a key nor a keyless local address.
   const needsSetup = Boolean(settings && !settings.apiKey && !anonymousLocalAllowed(settings));
   return <KeyboardAvoidingView style={{ flex: 1, paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right, backgroundColor: t.bg }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
-    <View style={{ zIndex: 2, backgroundColor: t.panel, borderBottomWidth: 1, borderColor: t.line, paddingHorizontal: 16, paddingTop: 6, paddingBottom: 10, gap: 2 }}>
-      <View style={{ zIndex: 1, flexDirection: "row", gap: 8, alignItems: "center" }}>
-        <Text style={{ flex: 1, color: t.text, fontSize: 25, fontWeight: "800" }}>Pers<Text style={{ color: t.accent }}>AI</Text></Text>
-        <IconAction icon="clock" label="История" accessibilityLabel="История диалогов" hint="Открыть сохранённые диалоги и найти прошлые сообщения." onPress={() => setHistoryOpen(true)} />
-        <IconAction icon="edit" label="Новый чат" accessibilityLabel="Новый диалог" hint="Начать пустой диалог. Предыдущие диалоги останутся в истории." disabled={!ready} onPress={() => store.create()} />
-      </View>
-      <Pressable accessibilityRole="button" accessibilityLabel="Выбрать модель и подключение" onPress={() => openConnections()} style={{ minHeight: 44, justifyContent: "center", gap: 4 }}>
-        <Text numberOfLines={1} style={{ color: t.muted, fontSize: 13 }}>{connectionName || "Выбрать модель"} · {settings?.model || "Подключение не настроено"} ▾</Text>
-        <Text style={{ color: t.muted, fontSize: 11 }}>Интернет {settings?.allowWeb ? "включён" : "выключен"} · Диалоги сохраняются на телефоне</Text>
-      </Pressable>
-    </View>
+    <NebulaHomeHeader connectionName={connectionName} model={settings?.model}
+      onConnections={() => openConnections()} onHistory={() => setHistoryOpen(true)}
+      newChatEnabled={ready} onNewChat={() => store.create()} />
     {!ready ? <View style={{ padding: 20, gap: 12 }}>{!error ? <ActivityIndicator accessibilityLabel="Загрузка диалогов" /> : null}
       {error ? <Pressable accessibilityRole="button" onPress={() => void store.initialize()} style={action}><Text style={{ color: t.accent }}>Повторить загрузку</Text></Pressable> : null}</View> : null}
     <FlatList ref={list} data={active?.rows || []} keyExtractor={item => item.id}
@@ -74,7 +67,7 @@ export function HomeScreen() {
       onContentSizeChange={() => list.current?.scrollToEnd({ animated: true })}
       contentContainerStyle={{ padding: 16, gap: 12, flexGrow: 1 }}
       ListEmptyComponent={ready && needsSetup ? <View style={{ flex: 1, justifyContent: "center", gap: 14, paddingVertical: 12 }}>
-        <View style={{ alignItems: "center", gap: 10 }}><FloatingBrand size={104} />
+        <View style={{ alignItems: "center", gap: 10 }}><NebulaHomeArtwork size={104} />
           <Text style={{ color: t.text, fontSize: 26, fontWeight: "800", textAlign: "center" }}>Подключите модель</Text>
           <Text style={{ color: t.muted, lineHeight: 21, textAlign: "center", maxWidth: 340 }}>PersAI работает с моделью, которую выбираете вы. Память и диалоги остаются на телефоне.</Text></View>
         <View style={{ backgroundColor: t.panel, borderWidth: 1, borderColor: t.line, borderRadius: 18, padding: 16, gap: 6 }}>
@@ -88,21 +81,9 @@ export function HomeScreen() {
         </View>
         <Pressable accessibilityRole="button" onPress={() => openConnections()} style={{ minHeight: 44, justifyContent: "center", alignItems: "center" }}>
           <Text style={{ color: t.accent }}>Другие варианты, включая OpenAI и Anthropic →</Text></Pressable>
-      </View> : ready ? <View style={{ flex: 1, justifyContent: "center", alignItems: "center", gap: 12, paddingVertical: 12 }}>
-        <FloatingBrand size={124} />
-        <Text style={{ color: t.text, fontSize: 28, fontWeight: "800", textAlign: "center" }}>Чем помочь сегодня?</Text>
-        <Text style={{ color: t.muted, lineHeight: 21, textAlign: "center", maxWidth: 340 }}>Обсуждайте идеи, возвращайтесь к своим знаниям и сохраняйте важное.</Text>
-        <View style={{ flexDirection: "row", flexWrap: "wrap", width: "100%", gap: 10, marginTop: 6 }}>
-          {[
-            { label: "Составить план", icon: "calendar" as const, prompt: "Помоги составить план на неделю" },
-            { label: "Написать текст", icon: "edit-3" as const, prompt: "Помоги написать текст" },
-            { label: "Объяснить идею", icon: "sun" as const, prompt: "Объясни сложную идею простыми словами" },
-            { label: "Вспомнить важное", icon: "bookmark" as const, prompt: "Что ты помнишь обо мне?" },
-          ].map(item => <Pressable key={item.label} accessibilityRole="button" accessibilityLabel={item.label}
-            style={{ flexBasis: "45%", flexGrow: 1, minHeight: 78, backgroundColor: t.panel, borderWidth: 1, borderColor: t.line, borderRadius: 18, padding: 14, gap: 8 }} onPress={() => store.setQuestion(item.prompt)}>
-            <Feather name={item.icon} size={20} color={t.accent} /><Text style={{ color: t.text, fontWeight: "600" }}>{item.label}</Text>
-          </Pressable>)}
-        </View>
+      </View> : ready ? <View testID="nebula-home-empty-state"
+        style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 12 }}>
+        <NebulaHomeArtwork size={176} />
       </View> : null}
       renderItem={({ item }) => <View style={{ alignSelf: item.role === "user" ? "flex-end" : "stretch", backgroundColor: item.role === "user" ? t.userBubble : item.role === "info" ? t.soft : t.panel,
         borderWidth: item.role === "assistant" ? 1 : 0, borderColor: t.line, borderRadius: 20, padding: 15, gap: 10 }}>
