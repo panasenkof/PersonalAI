@@ -4,7 +4,7 @@
 **WHEN** пользователь переключает диагностику 1× → 5×, **THEN** `uTime` увеличивается пятикратно, `uEnergy` и интенсивность нити остаются прежними. Сохранения глобальной настройки нет.
 
 ### NEO-02 — индивидуальный контур
-**WHEN** выбраны listening/transcribing/thinking/responding/offline/error, **THEN** неоновая нить следует динамической границе B+C, имеет уникальный цвет и стиль согласно [контракту](../../../../docs/design/NEBULA_STATE_FILAMENT_SPEC.md). **WHEN** idle, **THEN** нить полностью отсутствует.
+**WHEN** выбраны listening/transcribing/thinking/responding/offline/error, **THEN** неоновая нить следует динамической границе B+C, имеет уникальный цвет и стиль согласно [контракту](../../../../../docs/design/NEBULA_STATE_FILAMENT_SPEC.md). **WHEN** idle, **THEN** нить полностью отсутствует.
 
 ### NEO-03 — безопасный статичный рендер
 **WHEN** offline/error/Reduce Motion/background/power constrained, **THEN** бесконечные часы/движение остановлены, но качественное статичное изображение со статусным контуром выводится через работающий shader. При отсутствии shader — оригинал REF-ORB-B плюс доступная диагностика.
