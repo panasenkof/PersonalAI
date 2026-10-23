@@ -217,7 +217,7 @@ export function MemoryNoteScreen() {
       {!loading && !repository.current ? <Pressable accessibilityRole="button" style={button} onPress={() => setRetry(n => n + 1)}><Text style={{ color: t.accent }}>Повторить загрузку</Text></Pressable> : null}
     </ScrollView>
     {!loading && repository.current ? <View style={{ paddingHorizontal: 18, paddingTop: 8, paddingBottom: insets.bottom + 8, backgroundColor: t.bg }}>
-      <Pressable accessibilityRole="button" accessibilityLabel="Сохранить запись" disabled={busy || (!title.trim() && !body.trim())}
+      <Pressable testID="note-save-button" accessibilityRole="button" accessibilityLabel="Сохранить запись" disabled={busy || (!title.trim() && !body.trim())}
         onPress={() => { Keyboard.dismiss(); void save(); }}
         style={{ ...button, backgroundColor: t.accent, alignItems: "center" }}>
         <Text style={{ color: "#fff", fontWeight: "700" }}>{busy ? "Сохранение…" : "Сохранить запись"}</Text>
