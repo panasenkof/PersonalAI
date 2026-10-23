@@ -29,7 +29,7 @@ export function nebulaConversationOrbSize(layout: NebulaHomeArtLayout): number {
   // separate 116dp footer that pushes the scrolling conversation around.
   // The Gboard/composer always gets priority over decorative content.
   if (layout.composerOccluded || (layout.listHeight > 0 && layout.listHeight < 155)) return 0;
-  return Math.min(56, Math.max(0, layout.windowWidth - 48));
+  return Math.min(96, Math.max(0, layout.windowWidth - 48));
 }
 
 export function shouldScrollNebulaChatToEnd(
