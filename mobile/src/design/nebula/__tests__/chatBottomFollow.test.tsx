@@ -21,6 +21,13 @@ describe("single-owner chat viewport", () => {
     flush(); scrollToOffset.mockClear();
     return { ...hook, scrollToOffset };
   }
+  it("never scrolls empty artwork when focus, clear or IME changes its size", () => {
+    const { result } = renderHook(() => useChatBottomFollow("empty", true, undefined, false));
+    const scrollToOffset = jest.fn(); result.current.list.current = { scrollToOffset } as any;
+    act(() => { result.current.onViewport(300); result.current.onContent(390, 800); }); flush();
+    act(() => { result.current.onViewport(600); result.current.onContent(390, 900); }); flush();
+    expect(scrollToOffset).not.toHaveBeenCalled();
+  });
   it("coalesces content changes and cancels a queued command on a finger gesture", () => {
     const { result, scrollToOffset } = setup();
     act(() => { result.current.onContent(390, 1700); result.current.onContent(390, 1800); }); flush();

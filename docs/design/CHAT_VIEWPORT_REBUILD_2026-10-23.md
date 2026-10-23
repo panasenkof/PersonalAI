@@ -79,3 +79,12 @@ completion, IME или возвращением на вкладку. Тольк�
 - Android APK/IME/визуальная приёмка: NOT RUN локально; CI и устройство отдельно.
 - REF-ICON-A/B/C: SHA-256 PASS; ZIP и shader не изменены.
 - Owner acceptance: pending.
+
+## CI #432: Clear/focus
+
+Browser обнаружил потерю фокуса после Clear. В установленном RN Web 0.21.0
+`ScrollView._handleScroll` при keyboardDismissMode=on-drag вызывает dismissKeyboard
+даже для программного scroll. Контроллер также не исключал artwork пустого чата.
+Исправлено: пустой список не прокручивается; keyboardDismissMode=none, явное
+закрытие IME только в настоящем onScrollBeginDrag и Send. Регрессия empty/IME
+добавлена, browser assert сохранён без ослабления. Новый SHA требует повторного CI.

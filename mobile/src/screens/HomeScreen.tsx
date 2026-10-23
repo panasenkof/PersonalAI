@@ -52,7 +52,7 @@ function NebulaHomeContent() {
   const rows = useMemo(() => presentChatRows(active?.rows || [], Boolean(active?.busy), active?.streamText),
     [active?.rows, active?.busy, active?.streamText]);
   const turnId = [...(active?.rows || [])].reverse().find(row => row.role === "user")?.id;
-  const viewport = useChatBottomFollow(active?.id, isFocused, turnId);
+  const viewport = useChatBottomFollow(active?.id, isFocused, turnId, rows.length > 0);
   const { onCell } = viewport;
   // Measure the cell in list coordinates, not the inner bubble's local y=0.
   // Stable component identity is essential: recreating this on tokens remounts cells.
@@ -134,9 +134,9 @@ function NebulaHomeContent() {
         setListViewportHeight(previous => previous === nextHeight ? previous : nextHeight);
         viewport.onViewport(nextHeight);
       }}
-      keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag"
+      keyboardShouldPersistTaps="handled" keyboardDismissMode="none"
       scrollEventThrottle={64}
-      onScrollBeginDrag={viewport.beginDrag}
+      onScrollBeginDrag={() => { viewport.beginDrag(); Keyboard?.dismiss?.(); }}
       onScroll={event => viewport.onScroll(event.nativeEvent)}
       onScrollEndDrag={event => viewport.endDrag(event.nativeEvent)}
       onMomentumScrollBegin={viewport.beginDrag}

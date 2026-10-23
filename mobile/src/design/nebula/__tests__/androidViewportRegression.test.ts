@@ -9,7 +9,7 @@ describe("Android viewport regressions from real device recordings", () => {
   const minimal = readFileSync(join(root, "..", ".maestro", "flows", "minimal.yaml"), "utf8");
 
   it("keeps the composer available and prevents native stream offsets disabling follow", () => {
-    expect(home).toContain("onScrollBeginDrag={viewport.beginDrag}");
+    expect(home).toContain("viewport.beginDrag(); Keyboard?.dismiss?.();");
     expect(home).toContain("viewport.onViewport(nextHeight)");
     expect(home).toContain("removeClippedSubviews={false}");
     // CI #424: Android 35 edge-to-edge put the composer beneath Gboard when

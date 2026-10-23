@@ -71,7 +71,7 @@ describe("Nebula Home keyboard and visual viewport", () => {
     expect(home).toContain("removeClippedSubviews={false}");
     expect(home).toContain('testID="chat-jump-to-latest"');
     expect(home).toContain("onMomentumScrollEnd={event =>");
-    expect(home).toContain("onScrollBeginDrag={viewport.beginDrag}");
+    expect(home).toContain("viewport.beginDrag(); Keyboard?.dismiss?.();");
     expect(home).toContain('behavior={Platform.OS === "ios" ? "padding" : "height"}');
     expect(home).toContain("onContentSizeChange={viewport.onContent}");
     expect(home).toContain("artworkSize > 0 ? <NebulaHomeArtwork");

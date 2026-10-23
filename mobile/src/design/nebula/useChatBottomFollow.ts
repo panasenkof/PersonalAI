@@ -8,10 +8,12 @@ type Metrics = { contentOffset: { y: number }; contentSize: { height: number }; 
 /** One owner for every scroll command. IME events never switch the reading mode.
  * Turn mode follows up to the submitted question, then holds that reading anchor.
  */
-export function useChatBottomFollow(conversationId: string | undefined, focused: boolean, turnId?: string) {
+export function useChatBottomFollow(conversationId: string | undefined, focused: boolean, turnId?: string, hasRows = true) {
   const list = useRef<FlatList<PresentedChatRow>>(null);
   const state = useRef({ mode: "latest" as Mode, content: 0, viewport: 0, offset: 0,
     gesture: false, enabled: focused, turnId, locateOffset: null as number | null, anchor: null as null | { y: number; height: number } });
+  const contentPresent = useRef(hasRows);
+  contentPresent.current = hasRows;
   const frame = useRef<number | null>(null);
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const cancel = useCallback(() => {
@@ -23,7 +25,7 @@ export function useChatBottomFollow(conversationId: string | undefined, focused:
     frame.current = requestAnimationFrame(() => {
       frame.current = null;
       const s = state.current;
-      if (!s.enabled || s.gesture || s.viewport <= 0) return;
+      if (!s.enabled || s.gesture || s.viewport <= 0 || !contentPresent.current) return;
       const bottom = Math.max(0, s.content - s.viewport);
       if (s.mode !== "reading") {
         // A long question may exceed the viewport: retain its last 30% above
