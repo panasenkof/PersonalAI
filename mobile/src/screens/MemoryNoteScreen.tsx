@@ -3,6 +3,7 @@ import type { RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useHeaderHeight } from "@react-navigation/elements";
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import Feather from "@expo/vector-icons/Feather";
 import { ActivityIndicator, Alert, Keyboard, KeyboardAvoidingView, Linking, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useProfile } from "../profile/ProfileContext";
@@ -30,6 +31,8 @@ import { extractMedia } from "../media/extract";
 import { mediaConnections } from "../media/preferences";
 import { AttachmentView } from "../media/AttachmentView";
 import { useTheme } from "../theme";
+import { nebulaRadii, nebulaSpacing, nebulaTouch, nebulaTypography } from "../design/nebula/tokens";
+import { NoteEditorSection } from "../design/nebula/NoteEditorSection";
 
 export function MemoryNoteScreen() {
   const t = useTheme(); const insets = useSafeAreaInsets(); const headerHeight = useHeaderHeight();
@@ -50,11 +53,18 @@ export function MemoryNoteScreen() {
   const [loading, setLoading] = useState(true); const [busy, setBusy] = useState(false); const [error, setError] = useState("");
   const [retry, setRetry] = useState(0); const [leaving, setLeaving] = useState(false);
   const [sectionOpen, setSectionOpen] = useState(false); const [details, setDetails] = useState(false);
+  const [metadataOpen, setMetadataOpen] = useState(false); const [fileContentOpen, setFileContentOpen] = useState(false);
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
   const [history, setHistory] = useState<RevisionRecord[]>([]); const [events, setEvents] = useState<ObservationRecord[]>([]);
   const [relations, setRelations] = useState<RelationRecord[]>([]); const [related, setRelated] = useState<EntityRecord[]>([]);
   const [eventText, setEventText] = useState(""); const [linkOpen, setLinkOpen] = useState(false); const [linkSearch, setLinkSearch] = useState("");
   const baseline = useRef({ title: "", body: "", collectionId: route.params?.collectionId, kind: "note" as MemoryKind, names: "", terms: "" });
   const kindTouched = useRef(false);
+  useEffect(() => {
+    const show = Keyboard.addListener("keyboardDidShow", () => setKeyboardOpen(true));
+    const hide = Keyboard.addListener("keyboardDidHide", () => setKeyboardOpen(false));
+    return () => { show.remove(); hide.remove(); };
+  }, []);
   const dirty = allowAgent || extractedText !== String(selected?.payload.extracted_text || "") || title !== baseline.current.title || body !== baseline.current.body || collectionId !== baseline.current.collectionId ||
     kind !== baseline.current.kind || splitNames(names).join(",") !== splitNames(baseline.current.names).join(",") ||
     terms.trim() !== baseline.current.terms.trim();
@@ -62,12 +72,12 @@ export function MemoryNoteScreen() {
     if (busy) { setError("Дождитесь завершения сохранения."); return; }
     Alert.alert("Изменения не сохранены", "Закрыть запись без сохранения?", [
       { text: "Продолжить редактирование", style: "cancel" },
-      { text: "Закрыть", style: "destructive", onPress: () => navigation.dispatch(data.action) },
+      { text: "Закрыть", style: "destructive", onPress: () => setLeaving(true) },
     ]);
   });
   useEffect(() => { if (leaving) navigation.goBack(); }, [leaving, navigation]);
   useEffect(() => {
-    alive.current = true; setLoading(true); setError("");
+    alive.current = true; setLoading(true); setError(""); setMetadataOpen(false); setFileContentOpen(false);
     void (async () => {
       if (!profile) throw new Error("profile_missing");
       const db = await localMemoryRepository(profile);
@@ -138,25 +148,47 @@ export function MemoryNoteScreen() {
     const timer = setTimeout(() => { void repository.current?.searchNotes(linkSearch, 30).then(items => { if (!cancelled) setRelated(items); }).catch(e => { if (!cancelled) setError(memoryErrorMessage(e)); }); }, 200);
     return () => { cancelled = true; clearTimeout(timer); };
   }, [linkOpen, linkSearch]);
-  const field = { borderWidth: 1, borderColor: t.line, borderRadius: 16, backgroundColor: t.panel, minHeight: 50, padding: 14, color: t.text, fontSize: 16 };
-  const button = { minHeight: 50, borderRadius: 16, justifyContent: "center" as const, padding: 14 };
-  return <KeyboardAvoidingView style={{ flex: 1, backgroundColor: t.bg }} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={headerHeight}>
-    <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 24, gap: 14 }}>
-      <Text style={{ color: t.text, fontSize: 26, fontWeight: "800" }}>{selected ? "Редактирование записи" : "Новая запись"}</Text>
+  const field = { borderWidth: 1, borderColor: t.line, borderRadius: nebulaRadii.field, backgroundColor: t.panel, minHeight: nebulaTouch.minimum, padding: nebulaSpacing.md, color: t.text, ...nebulaTypography.body };
+  const button = { minHeight: nebulaTouch.minimum, borderRadius: nebulaRadii.field, justifyContent: "center" as const, padding: nebulaSpacing.md };
+  return <KeyboardAvoidingView style={{ flex: 1, backgroundColor: t.bg }} behavior={Platform.OS === "ios" ? "padding" : "height"} keyboardVerticalOffset={Platform.OS === "ios" ? headerHeight : 0}>
+    <ScrollView testID="note-editor-scroll" keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentContainerStyle={{ padding: nebulaSpacing.md, paddingBottom: nebulaSpacing.xl, gap: nebulaSpacing.sm }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: nebulaSpacing.sm }}>
+        <Text accessibilityRole="header" style={{ flex: 1, color: t.text, ...nebulaTypography.heading, fontWeight: "800" }}>{selected ? "Запись" : "Новая запись"}</Text>
+        {!loading && dirty ? <Text accessibilityLabel="Несохранённые изменения" style={{ color: t.muted, ...nebulaTypography.label }}>Не сохранено</Text> : null}
+      </View>
       {loading ? <ActivityIndicator accessibilityLabel="Загрузка записи" /> : null}
       {!loading && repository.current ? <>
-        <Pressable accessibilityRole="button" accessibilityLabel="Выбрать раздел записи" onPress={() => setSectionOpen(true)} style={{ ...button, backgroundColor: t.soft }}><Text style={{ color: t.secondary }}>Раздел: {collections.find(c => c.id === collectionId)?.name || "Заметки"} ▾</Text></Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel="Выбрать раздел записи" onPress={() => setSectionOpen(true)}
+          style={{ ...button, backgroundColor: t.soft, flexDirection: "row", alignItems: "center", gap: nebulaSpacing.xs }}>
+          <Feather name="folder" size={18} color={t.secondary} />
+          <Text numberOfLines={2} style={{ flex: 1, color: t.secondary, ...nebulaTypography.body }}>Раздел: {collections.find(c => c.id === collectionId)?.name || "Заметки"}</Text>
+          <Feather name="chevron-down" size={20} color={t.secondary} />
+        </Pressable>
+        <TextInput testID="note-title-input" accessibilityLabel="Заголовок заметки" value={title} onChangeText={setTitle} editable={!busy} maxLength={160} placeholder="Заголовок" placeholderTextColor={t.muted} style={field} />
+        <TextInput testID="note-body-input" accessibilityLabel="Текст заметки" multiline value={body} onChangeText={setBody} editable={!busy} placeholder="Что нужно запомнить?" placeholderTextColor={t.muted} style={{ ...field, minHeight: 200, textAlignVertical: "top", lineHeight: 23 }} />
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}><VoiceInput value={body} onChange={setBody} disabled={busy} onError={setError} /><Text style={{ color: t.muted }}>Надиктовать запись</Text></View>
+
+        <NoteEditorSection testID="note-metadata-toggle" title="Параметры записи" summary={"Тип: " + KIND_NAMES[kind] + " · другие названия и слова поиска"}
+          expanded={metadataOpen} onToggle={() => { Keyboard.dismiss(); setMetadataOpen(open => !open); }}>
         <Text style={{ color: t.muted, fontSize: 12 }}>Тип записи</Text>
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
           {MEMORY_KINDS.map(k => { const chosen = k === kind; return <Pressable key={k} accessibilityRole="button" accessibilityLabel={"Тип записи: " + KIND_NAMES[k]}
             accessibilityState={{ selected: chosen }} aria-selected={chosen} disabled={busy} onPress={() => { kindTouched.current = true; setKind(k); }}
-            style={{ minHeight: 36, paddingHorizontal: 10, justifyContent: "center", borderRadius: 12, borderWidth: 1, borderColor: chosen ? t.accent : t.line, backgroundColor: chosen ? t.soft : t.panel }}>
+            style={{ minHeight: nebulaTouch.minimum, paddingHorizontal: nebulaSpacing.sm, justifyContent: "center", borderRadius: nebulaRadii.chip, borderWidth: 1, borderColor: chosen ? t.accent : t.line, backgroundColor: chosen ? t.soft : t.panel }}>
             <Text style={{ color: chosen ? t.secondary : t.text, fontSize: 13 }}>{KIND_NAMES[k]}</Text></Pressable>; })}
         </View>
-        <TextInput testID="note-title-input" accessibilityLabel="Заголовок заметки" value={title} onChangeText={setTitle} editable={!busy} maxLength={160} placeholder="Заголовок" placeholderTextColor={t.muted} style={field} />
-        <TextInput testID="note-body-input" accessibilityLabel="Текст заметки" multiline value={body} onChangeText={setBody} editable={!busy} placeholder="Что нужно запомнить?" placeholderTextColor={t.muted} style={{ ...field, minHeight: 200, textAlignVertical: "top", lineHeight: 23 }} />
-        {selected && (selected.payload.source_file || selected.payload.extracted_text) ? <>
-          <Text style={{ color: t.muted }}>Распознанное содержимое файла — индексируется вместе с заметкой</Text>
+        <TextInput accessibilityLabel="Другие имена и прозвища" value={names} onChangeText={setNames} editable={!busy} maxLength={600}
+          placeholder={kind === "person" ? "Другие имена через запятую: Маша, Мария Петровна" : "Другие названия через запятую (по желанию)"} placeholderTextColor={t.muted} style={field} />
+        <Text style={{ color: t.muted, fontSize: 12 }}>По этим именам запись тоже находится в поиске.</Text>
+        <TextInput accessibilityLabel="Слова для поиска" value={terms} onChangeText={setTerms} editable={!busy} maxLength={600}
+          placeholder="Слова для поиска через запятую: автомобиль, шкода" placeholderTextColor={t.muted} style={field} />
+        {modelTerms.length ? <Text accessibilityLabel="Слова, подобранные моделью" style={{ color: t.muted, fontSize: 12, lineHeight: 18 }}>Подобрала модель: {modelTerms.join(", ")}. Обновятся после правки текста.</Text> : null}
+        </NoteEditorSection>
+        {selected && (selected.payload.source_file || selected.payload.extracted_text) ? <NoteEditorSection
+          testID="note-extracted-toggle" title="Текст из файла"
+          summary="Распознанное содержимое участвует в поиске по памяти"
+          expanded={fileContentOpen} onToggle={() => { Keyboard.dismiss(); setFileContentOpen(open => !open); }}>
+          <Text style={{ color: t.muted, ...nebulaTypography.label }}>Проверьте распознанный текст. Он индексируется вместе с записью.</Text>
           <TextInput accessibilityLabel="Распознанное содержимое файла" multiline editable={!busy} value={extractedText} onChangeText={setExtractedText} maxLength={60_000} style={field} />
           <Pressable disabled={busy} accessibilityRole="button" style={button} onPress={() => Alert.alert("Распознать оригинал?", "Будут использованы подключения из раздела «Обработка медиа» в настройках. Фото и кадры видео отправляются этому сервису; аудио — локальному Whisper, если он установлен, иначе сервису. Проверьте результат перед сохранением.", [
             { text: "Отмена", style: "cancel" },
@@ -174,18 +206,11 @@ export function MemoryNoteScreen() {
               } finally { extraction.current = null; if (uri) { const file = new File(uri); if (file.exists) file.delete(); } }
             }) },
           ])}><Text style={{ color: t.secondary }}>Распознать сохранённый файл</Text></Pressable>
-        </> : null}
+        </NoteEditorSection> : null}
         {selected && (selected.sensitivity === "sensitive" || collections.find(c => c.id === selected.collection_id)?.sensitivity !== "standard") ? <>
           <Text style={{ color: t.muted }}>Запись закрыта для агента. Локальная векторизация доступна, но текст не передаётся модели.</Text>
           <Pressable disabled={busy} accessibilityRole="button" style={button} onPress={() => Alert.alert("Разрешить доступ агенту?", "После сохранения запись перейдёт в обычные «Заметки». Текст и распознанное содержимое смогут передаваться модели при поиске. Оригинал автоматически не отправляется.", [{ text: "Отмена", style: "cancel" }, { text: "Разрешить", onPress: () => setAllowAgent(true) }])}><Text style={{ color: t.secondary }}>{allowAgent ? "Доступ будет разрешён после сохранения" : "Разрешить агенту находить запись"}</Text></Pressable>
         </> : null}
-        <TextInput accessibilityLabel="Другие имена и прозвища" value={names} onChangeText={setNames} editable={!busy} maxLength={600}
-          placeholder={kind === "person" ? "Другие имена через запятую: Маша, Мария Петровна" : "Другие названия через запятую (по желанию)"} placeholderTextColor={t.muted} style={field} />
-        <Text style={{ color: t.muted, fontSize: 12 }}>По этим именам запись тоже находится в поиске.</Text>
-        <TextInput accessibilityLabel="Слова для поиска" value={terms} onChangeText={setTerms} editable={!busy} maxLength={600}
-          placeholder="Слова для поиска через запятую: автомобиль, шкода" placeholderTextColor={t.muted} style={field} />
-        {modelTerms.length ? <Text accessibilityLabel="Слова, подобранные моделью" style={{ color: t.muted, fontSize: 12, lineHeight: 18 }}>Подобрала модель: {modelTerms.join(", ")}. Обновятся после правки текста.</Text> : null}
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}><VoiceInput value={body} onChange={setBody} disabled={busy} onError={setError} /><Text style={{ color: t.muted }}>Надиктовать запись</Text></View>
         {typeof selected?.payload.source_url === "string" ? <Pressable accessibilityRole="link" style={button} onPress={() => { const url = String(selected.payload.source_url); if (/^https:\/\//.test(url)) void Linking.openURL(url).catch(() => setError("Не удалось открыть ссылку.")); }}><Text style={{ color: t.secondary }}>Источник: {selected.payload.source_url}</Text></Pressable> : null}
         {Array.isArray(selected?.payload.merged_sources) ? <View><Text style={{ color: t.muted }}>Исходные записи, их даты и связи сохранены:</Text>{(selected.payload.merged_sources as { id: string; title: string }[]).filter(n => n.id !== selected.id).map(n => <Pressable key={n.id} style={button} onPress={() => navigation.push("MemoryNote", { entityId: n.id })}><Text style={{ color: t.secondary }}>{n.title || "Исходная запись"}</Text></Pressable>)}</View> : null}
         {selected && profile ? <AttachmentView profile={profile} entityId={selected.id} /> : null}
@@ -216,7 +241,7 @@ export function MemoryNoteScreen() {
       {error ? <Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text> : null}
       {!loading && !repository.current ? <Pressable accessibilityRole="button" style={button} onPress={() => setRetry(n => n + 1)}><Text style={{ color: t.secondary }}>Повторить загрузку</Text></Pressable> : null}
     </ScrollView>
-    {!loading && repository.current ? <View style={{ paddingHorizontal: 18, paddingTop: 8, paddingBottom: insets.bottom + 8, backgroundColor: t.bg }}>
+    {!loading && repository.current ? <View style={{ paddingHorizontal: nebulaSpacing.md, paddingTop: nebulaSpacing.xs, paddingBottom: keyboardOpen ? nebulaSpacing.xs : insets.bottom + nebulaSpacing.xs, borderTopWidth: 1, borderTopColor: t.line, backgroundColor: t.bg }}>
       <Pressable testID="note-save-button" accessibilityRole="button" accessibilityLabel="Сохранить запись" disabled={busy || (!title.trim() && !body.trim())}
         onPress={() => { Keyboard.dismiss(); void save(); }}
         style={{ ...button, backgroundColor: t.accent, alignItems: "center" }}>
