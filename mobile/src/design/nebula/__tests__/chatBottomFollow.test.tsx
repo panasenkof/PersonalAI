@@ -29,6 +29,20 @@ describe("chat viewport lifetime", () => {
     result.current.nearChatBottom.current = false;
     flush(); expect(scrollToEnd).toHaveBeenCalledTimes(1);
   });
+  it("does not yank a dragging or flinging user to the bottom even with follow still enabled", () => {
+    const { result, scrollToEnd } = setup();
+    result.current.userScrollActive.current = true;
+    result.current.nearChatBottom.current = true;
+    result.current.scheduleBottomFollow(); flush();
+    expect(scrollToEnd).not.toHaveBeenCalled();
+    result.current.userScrollActive.current = false;
+    result.current.scheduleBottomFollow(); flush();
+    expect(scrollToEnd).toHaveBeenCalledTimes(1);
+    result.current.scheduleBottomFollow();
+    result.current.userScrollActive.current = true;
+    flush();
+    expect(scrollToEnd).toHaveBeenCalledTimes(1);
+  });
   it("cancels a queued Send on leaving Home and ignores later background stream updates", () => {
     const { result, rerender, scrollToEnd } = setup();
     result.current.pendingSendFollow.current = true;
