@@ -176,16 +176,19 @@ export function LocalMemoryScreen() {
       {undo ? <Pressable disabled={busy} style={button} onPress={() => { if (!repository.current) return; setBusy(true); void repository.current.undoNotes(undo).then(() => { setUndo(""); setRetry(n => n + 1); if (profile) scheduleVectors(profile); }).catch(e => setError(memoryErrorMessage(e))).finally(() => setBusy(false)); }}><Text style={{ color: t.accent }}>Отменить последнюю операцию</Text></Pressable> : null}
     {error ? <View style={{ paddingHorizontal: 18, gap: 8 }}><Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text><Pressable accessibilityRole="button" onPress={() => setRetry(n => n + 1)} style={button}><Text style={{ color: t.accent }}>Повторить загрузку</Text></Pressable></View> : null}
     {loading ? <ActivityIndicator accessibilityLabel="Загрузка записей" /> : null}
-</>} data={loading ? [] : notes} keyExtractor={item => item.id} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag"
-      contentContainerStyle={{ paddingHorizontal: 18, paddingBottom: 24, gap: 10, flexGrow: 1 }}
+</View>} data={loading ? [] : notes} keyExtractor={item => item.id} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag"
+      contentContainerStyle={{ paddingHorizontal: nebulaSpacing.md, paddingBottom: nebulaSpacing.xl, gap: nebulaSpacing.sm, flexGrow: 1 }}
       ListEmptyComponent={!loading && !error ? <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24, gap: 12 }}><Feather name={term ? "search" : "book-open"} size={40} color={t.accent} />
-        <Text style={{ color: t.text, fontSize: 20, fontWeight: "700", textAlign: "center" }}>{term ? "Ничего не найдено" : status === "archived" ? "Архив пуст" : "Начните с важного"}</Text>
-        <Text style={{ color: t.muted, textAlign: "center", lineHeight: 21 }}>{term ? "Попробуйте другое слово или раздел «Все записи»." : "Создайте запись или добавьте сведения из файла."}</Text></View> : null}
-      renderItem={({ item }) => <Pressable accessibilityRole="button" accessibilityLabel={"Открыть заметку " + (item.title || "Без названия")} onLongPress={() => setSelectedIds(ids => ids.includes(item.id) ? ids.filter(id => id !== item.id) : [...ids, item.id])} onPress={() => selectedIds.length ? setSelectedIds(ids => ids.includes(item.id) ? ids.filter(id => id !== item.id) : [...ids, item.id]) : navigation.navigate("MemoryNote", { entityId: item.id })}
-        style={{ borderWidth: 1, borderColor: t.line, borderRadius: 20, backgroundColor: t.panel, padding: 17, gap: 8 }}>
-        <Text numberOfLines={1} style={{ color: t.text, fontWeight: "700", fontSize: 17 }}>{selectedIds.includes(item.id) ? "☑ " : ""}{item.title || "Без названия"}</Text><Text numberOfLines={2} style={{ color: t.muted, lineHeight: 21 }}>{String(item.payload.body || "")}</Text>
-        <Text style={{ color: t.muted, fontSize: 11 }}>{collections.find(c => c.id === item.collection_id)?.name || "Запись"} · {new Date(item.updated_at).toLocaleDateString()}</Text>
-      </Pressable>}
+        <Text style={{ color: t.text, fontSize: 20, fontWeight: "700", textAlign: "center" }}>{term ? "Ничего не найдено" : status === "archived" ? "Архив пуст" : status === "trashed" ? "Корзина пуста" : "Начните с важного"}</Text>
+        <Text style={{ color: t.muted, textAlign: "center", lineHeight: 21 }}>{term ? "Попробуйте другое слово или раздел «Все записи»." : status === "trashed" ? "Здесь будут удалённые заметки, пока вы их не восстановите." : "Создайте запись или добавьте сведения из файла."}</Text></View> : null}
+      renderItem={({ item }) => <MemoryNoteCard note={item}
+        sectionName={collections.find(c => c.id === item.collection_id)?.name || "Запись"}
+        selected={selectedIds.includes(item.id)}
+        onToggleSelection={() => setSelectedIds(ids => ids.includes(item.id) ? ids.filter(id => id !== item.id) : [...ids, item.id])}
+        onOpen={() => selectedIds.length
+          ? setSelectedIds(ids => ids.includes(item.id) ? ids.filter(id => id !== item.id) : [...ids, item.id])
+          : navigation.navigate("MemoryNote", { entityId: item.id })}
+      />}
       ListFooterComponent={more && !loading ? <Pressable accessibilityRole="button" accessibilityLabel="Показать ещё заметки" disabled={busy} onPress={() => void loadMore()} style={button}><Text style={{ color: t.accent }}>{busy ? "Загружаю…" : "Показать ещё"}</Text></Pressable> : null} />
     <BottomSheet visible={moveOpen} title="Перенести выбранные записи" onClose={() => setMoveOpen(false)}>
       <Text style={{ color: t.muted }}>{selectedNotes.map(n => n.title).join(", ")}</Text>
