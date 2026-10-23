@@ -318,19 +318,35 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByLabel('Новая заметка', { exact: true }).click();
       await page.getByLabel('Заголовок заметки', { exact: true }).fill('Индейка');
       await page.getByLabel('Текст заметки', { exact: true }).fill('Чеснок и паприка');
+      // On a short keyboard-sized viewport the Save action stays outside the scrolling form.
+      await page.setViewportSize({ width, height: 470 }); await page.evaluate(() => window.__insets(48));
+      await page.waitForFunction(() => document.querySelector('[aria-label="Сохранить запись"]').getBoundingClientRect().bottom <= innerHeight - 48);
+      const saveBox = await page.getByTestId('note-save-button').boundingBox();
+      assert(saveBox && saveBox.y + saveBox.height <= 470 - 48, 'Note Save clears the 48px system bar on the short viewport');
+      await page.setViewportSize({ width, height: 900 }); await page.evaluate(() => window.__insets(24));
       await page.getByLabel('Сохранить запись', { exact: true }).click();
       await page.getByLabel('Открыть заметку Индейка', { exact: true }).waitFor();
       await page.getByLabel('Открыть заметку Индейка', { exact: true }).click();
       await page.getByLabel('Текст заметки', { exact: true }).fill('Чеснок, паприка и перец');
-      // Schema v3: the record type and other names are edited with the text.
+      // Schema v3: advanced fields are accessible without crowding the text editor.
+      assert.equal(await page.getByLabel('Тип записи: Факт', { exact: true }).count(), 0, 'Metadata starts collapsed');
+      await page.getByLabel('Параметры записи', { exact: true }).click();
+      assert.equal(await page.getByLabel('Параметры записи', { exact: true }).getAttribute('aria-expanded'), 'true');
       await page.getByLabel('Тип записи: Факт', { exact: true }).click();
       await page.getByLabel('Другие имена и прозвища', { exact: true }).fill('Индюшка, индюк');
       await page.getByLabel('Сохранить запись', { exact: true }).click();
       await page.getByLabel('Открыть заметку Индейка', { exact: true }).click();
+      await page.getByLabel('Параметры записи', { exact: true }).click();
       assert.equal(await page.getByLabel('Другие имена и прозвища', { exact: true }).inputValue(), 'Индюшка, индюк');
       assert.equal(await page.getByLabel('Тип записи: Факт', { exact: true }).getAttribute('aria-selected'), 'true', 'The chosen record type is kept');
       await page.getByLabel('История, события и связи', { exact: true }).click();
       await page.getByText('История изменений · версия 3', { exact: true }).waitFor();
+      // Rejecting an unsaved edit must return to the list without overwriting the saved record.
+      await page.getByLabel('Текст заметки', { exact: true }).fill('Черновик — НЕ СОХРАНЯТЬ');
+      await page.getByLabel(/back/i).click();
+      await page.getByLabel('Открыть заметку Индейка', { exact: true }).waitFor();
+      await page.getByLabel('Открыть заметку Индейка', { exact: true }).click();
+      assert.equal(await page.getByLabel('Текст заметки', { exact: true }).inputValue(), 'Чеснок, паприка и перец');
       await page.getByLabel('Архивировать запись', { exact: true }).click();
       assert.equal(await page.getByLabel('Открыть заметку Индейка', { exact: true }).count(), 0);
       await page.getByLabel('Открыть архив', { exact: true }).click();
