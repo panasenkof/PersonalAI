@@ -69,3 +69,19 @@ test('does not retry a script failure after smoke started without system ANR', (
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   assert.equal(classifyEmulatorFailure(dir).retry, false);
 });
+
+
+test('native PIN flow matches Android 35 credential hierarchy captured in CI #384', () => {
+  const unlock = fs.readFileSync(path.join(__dirname, '..', '.maestro', 'unlock.yaml'), 'utf8');
+  // Exact resource-id observed in a real Android 35 default-system-image UI dump.
+  const androidSystemCredential = 'com.android.systemui:id/lockPassword';
+  const selectors = [...unlock.matchAll(/^\s*id:\s*"([^"]+)"/gm)].map(match => match[1]);
+  assert.equal(selectors.length, 2, 'both wait and tap must target the Android credential input');
+  for (const selector of selectors) {
+    assert.match(androidSystemCredential, new RegExp(selector));
+  }
+  assert.match(unlock, /inputText:\s*"2468"/);
+  assert.match(unlock, /pressKey:\s*Enter/);
+  assert.match(unlock, /visible:\s*"Сообщение ассистенту"/);
+  assert.doesNotMatch(unlock, /skipAuth|bypass|mockAuthentication/i);
+});
