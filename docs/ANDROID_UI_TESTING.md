@@ -6,8 +6,9 @@
 
 - Быстрый JS job: TypeScript, Jest, release guards, Expo compatibility, SkSL и браузерные
   сценарии реальных экранов на 320/390/768px. Нативные API в браузере подменены адаптерами.
-- Native job: standalone release APK x86_64 с SQLCipher/ExecuTorch → Android 35 Pixel 2
-  эмулятор → Maestro CLI 2.0.10. APK содержит JS bundle, Metro и облачный Maestro не нужны.
+- Native job: standalone release APK x86_64 с SQLCipher/ExecuTorch → Android 35
+  AOSP **default** без Google Pixel Launcher (профиль Pixel 2, RAM 2048M) →
+  Maestro CLI 2.0.10. APK содержит JS bundle, Metro и облачный Maestro не нужны.
 
 Нативный smoke: настоящий вход Android PIN → ввод/очистка с IME → переходы с сохранением
 черновика → открытие/закрытие истории → создание/редактирование заметки → изменение лимита LLM →
@@ -25,9 +26,17 @@
 `android-ui-evidence-<SHA>` (JUnit, скриншоты, logcat, UI hierarchy),
 `android-ui-apk-<SHA>` (эмуляторный APK с временной подписью, не для установки поверх APK телефона),
 `browser-ui-<SHA>` (браузерные снимки). Retention: evidence 7 дней, APK 3 дня.
-При ошибке открывать первый упавший шаг; ошибки сборки/запуска не маскируются повторными попытками тестов.
+При ошибке открывать первый упавший шаг и каталог `attempt-1/`. Если экран и UI hierarchy
+показывают ANR системного Launcher/System UI либо тест не смог сформировать JUnit до старта,
+CI создаёт **новый AVD** и делает ровно один повтор (каталог `attempt-2/`). Оба прогона
+сохраняют независимые screenshots, hierarchy, logcat и JUnit; успешным считается только
+полностью прошедший настоящий smoke. Если Maestro записал JUnit-ошибку приложения или
+ассерта без доказанного системного ANR, **повтора нет**, PR остаётся красным.
+Тест классификации `classify-emulator-failure.test.cjs` входит в обязательный быстрый CI.
+Нельзя «лечить» ANR выключением проверки PIN/AppLock.
 
-Локально нужны JDK 17, Android SDK/KVM, чистый Android 35 x86_64 AVD и Maestro 2.0.10.
+Локально нужны JDK 17, Android SDK/KVM, чистый Android 35 x86_64 AOSP (target `default`)
+AVD и Maestro 2.0.10.
 Сборка повторяет `.github/workflows/mobile-native-sqlcipher.yml`, включая переменные ABI,
 `PIA_ANDROID_PACKAGE=com.paigent.app`, prebuild и временную подпись. После сборки из корня:
 
@@ -44,6 +53,8 @@ bash mobile/scripts/android-ui-smoke.sh
 - Известные документационные изменения: только roadmap/source-artwork integrity и тест классификации.
 - Любые изменения mobile, workflow, бинарных референсов и неизвестных путей: полный набор.
 - При отсутствии baseline выполняется полный набор; отмена/ошибка обязательного job не считается успехом.
+  Единичный retry применяется **только к Android infrastructure failure**, не к упавшим
+  тестам функций приложения; повторная сборка APK не выполняется.
 - Общий executorch.jar поставляется upstream только в ARM64-архиве: installer скачивает его,
   затем x86_64 runtime; компилируется только x86_64. Архивы кешируются, upstream проверяет SHA-256.
 - npm и Gradle cache; PR читает Gradle cache, main может обновить. Один ABI, один эмулятор,
