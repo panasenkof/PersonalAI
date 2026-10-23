@@ -360,15 +360,18 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByLabel('Сохранить запись', { exact: true }).click();
       await page.getByLabel('Открыть заметку Индейка', { exact: true }).click();
       await page.getByLabel('Параметры записи', { exact: true }).click();
-      // Loading aliases is asynchronous after an editor route opens. Wait for
-      // the actual React Native Web TextInput (textarea OR input) to hydrate;
-      // the old "input[aria-label=...]" selector missed textarea elements.
-      // Keep the hard persistence assertion; do not accept an empty alias.
-      await page.waitForFunction(() => {
-        const el = document.querySelector('[aria-label="Другие имена и прозвища"]');
-        return el && 'value' in el && el.value === 'Индюшка, индюк';
-      }, undefined, { timeout: 10000 });
-      assert.equal(await page.getByLabel('Другие имена и прозвища', { exact: true }).inputValue(), 'Индюшка, индюк', 'Aliases persist after save and reopen');
+      // Aliases arrive asynchronously after opening a note. Poll through the
+      // accessible Playwright locator, which works for RN Web input AND
+      // textarea; the old raw CSS selector was browser-implementation-specific.
+      // This still fails if the persisted alias is actually missing.
+      const aliasInput = page.getByLabel('Другие имена и прозвища', { exact: true });
+      let persistedAliases = '';
+      for (let attempt = 0; attempt < 50; attempt++) {
+        persistedAliases = await aliasInput.inputValue();
+        if (persistedAliases === 'Индюшка, индюк') break;
+        await page.waitForTimeout(100);
+      }
+      assert.equal(persistedAliases, 'Индюшка, индюк', 'Aliases persist after save and reopen');
       assert.equal(await page.getByLabel('Тип записи: Факт', { exact: true }).getAttribute('aria-selected'), 'true', 'The chosen record type is kept');
       await page.getByLabel('История, события и связи', { exact: true }).click();
       await page.getByText('История изменений · версия 3', { exact: true }).waitFor();
