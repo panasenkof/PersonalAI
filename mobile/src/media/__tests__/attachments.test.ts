@@ -8,6 +8,7 @@ let mockDb: any;
 const mockFiles = new Map<string, Uint8Array>();
 let mockFailure = false;
 let mockFailUri = '';
+const mockSizes = new Map<string, number>();
 let mockMaxRead = 0;
 jest.mock('expo-crypto', () => ({
   CryptoDigestAlgorithm: { SHA256: 'sha256' },
@@ -26,7 +27,7 @@ jest.mock('expo-file-system', () => ({
   File: class {
     uri: string;
     constructor(...parts: any[]) { this.uri = parts.map(p => p.uri || p).join('/'); }
-    get size() { return mockFiles.get(this.uri)?.length || 0; }
+    get size() { return mockSizes.get(this.uri) ?? mockFiles.get(this.uri)?.length ?? 0; }
     get md5() { return mockFiles.has(this.uri) ? require('node:crypto').createHash('md5').update(mockFiles.get(this.uri)).digest('hex') : null; }
     get exists() { return mockFiles.has(this.uri); }
     create() { mockFiles.set(this.uri, new Uint8Array()); }
@@ -50,7 +51,7 @@ beforeEach(() => {
     getFirstAsync: async (s: string, p: any[] = []) => sqlite.prepare(s).get(...p) || null,
     getAllAsync: async (s: string, p: any[] = []) => sqlite.prepare(s).all(...p),
   };
-  mockUnlocked = true; mockFailure = false; mockFailUri = ''; mockMaxRead = 0; mockFiles.clear();
+  mockUnlocked = true; mockFailure = false; mockFailUri = ''; mockMaxRead = 0; mockFiles.clear(); mockSizes.clear();
   mockFiles.set('file:///photo.png', new Uint8Array(600_000).fill(83));
 });
 afterEach(() => sqlite.close());
@@ -133,8 +134,9 @@ test("a failed second file rolls back the entire transaction (note and all chunk
 test("multiple originals cannot exceed limits and cannot mix two file input formats", async () => {
   await expect(saveMediaNote("guest", { files: Array(MAX_ORIGINALS_PER_NOTE + 1).fill(multi[0]), title: "Too many", body: "", sensitivity: "standard" })).rejects.toThrow("10 вложений");
   await expect(saveMediaNote("guest", { file: multi[0], files: multi, title: "Both", body: "", sensitivity: "standard" })).rejects.toThrow("одним способом");
-  const saved = mockFiles.get(multi[0].uri)!;
-  mockFiles.set(multi[0].uri, new Uint8Array(81 * 1024 * 1024));
+  mockSizes.set(multi[0].uri, 81 * 1024 * 1024);
   await expect(saveMediaNote("guest", { files: [multi[0]], title: "Too big", body: "", sensitivity: "standard" })).rejects.toThrow("80 МБ");
-  mockFiles.set(multi[0].uri, saved);
+  mockSizes.set(multi[0].uri, 50 * 1024 * 1024);
+  mockSizes.set(multi[1].uri, 40 * 1024 * 1024);
+  await expect(saveMediaNote("guest", { files: multi.slice(0, 2), title: "Together too big", body: "", sensitivity: "standard" })).rejects.toThrow("суммарный");
 });
