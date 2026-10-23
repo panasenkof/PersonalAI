@@ -47,6 +47,15 @@ describe("chat viewport lifetime", () => {
     expect(scrollToEnd).toHaveBeenCalledWith({ animated: false });
     expect(result.current.nearChatBottom.current).toBe(true);
   });
+  it("never retains a user gesture after navigating to another chat or tab", () => {
+    const { result, rerender } = setup();
+    result.current.userScrollActive.current = true;
+    rerender({ id: "b", focused: true });
+    expect(result.current.userScrollActive.current).toBe(false);
+    result.current.userScrollActive.current = true;
+    rerender({ id: "b", focused: false });
+    expect(result.current.userScrollActive.current).toBe(false);
+  });
   it("cancels a queued frame when unmounted", () => {
     const { result, unmount, scrollToEnd } = setup();
     result.current.scheduleBottomFollow(); unmount(); flush();
