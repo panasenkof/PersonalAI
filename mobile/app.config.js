@@ -4,6 +4,10 @@
 // models (Ollama, LM Studio) on the home network. The app itself only allows
 // http:// for private-network addresses (validateBaseUrl), so permitting
 // cleartext at the OS level does not open public http:// connections.
+// Android application identity is permanent: changing it detaches the user's
+// encrypted on-device database from future upgrades.
+const PERSAI_ANDROID_PACKAGE = 'com.persai.app';
+
 const withLocalModelCleartext = (expoConfig) => require('expo/config-plugins').withAndroidManifest(expoConfig, mod => {
   const application = mod.modResults.manifest.application?.[0];
   if (application) application.$['android:usesCleartextTraffic'] = 'true';
@@ -15,10 +19,13 @@ module.exports = ({ config }) => {
   if (typeof require === 'function') require('./scripts/generate-brand.cjs').buildApprovedBrand();
   const androidCiRelease = process.env.PIA_ANDROID_RELEASE === 'true';
   const release = androidCiRelease || ['preview', 'production'].includes(process.env.EAS_BUILD_PROFILE);
-  if (release && (!process.env.PIA_ANDROID_PACKAGE || (!androidCiRelease && !process.env.PIA_IOS_BUNDLE_ID))) {
-    throw new Error(androidCiRelease
-      ? 'Set PIA_ANDROID_PACKAGE to your owned Android package ID.'
-      : 'Set PIA_IOS_BUNDLE_ID and PIA_ANDROID_PACKAGE to your owned application identifiers.');
+  // The former Actions variable is only a compatibility input. Never let it
+  // silently replace the published package, even in a local preview build.
+  if (process.env.PIA_ANDROID_PACKAGE && process.env.PIA_ANDROID_PACKAGE !== PERSAI_ANDROID_PACKAGE) {
+    throw new Error('PIA_ANDROID_PACKAGE must be ' + PERSAI_ANDROID_PACKAGE + '; changing it would create a different Android app.');
+  }
+  if (release && !androidCiRelease && !process.env.PIA_IOS_BUNDLE_ID) {
+    throw new Error('Set PIA_IOS_BUNDLE_ID for an owned iOS application identifier.');
   }
   const versionCodeRaw = process.env.PIA_ANDROID_VERSION_CODE;
   const versionCode = versionCodeRaw ? Number(versionCodeRaw) : undefined;
@@ -30,7 +37,7 @@ module.exports = ({ config }) => {
     plugins: [...(config.plugins || []), withLocalModelCleartext],
     ...(androidCiRelease && versionCode ? { version: `${config.version}-test.${versionCode}` } : {}),
     ios: { ...config.ios, ...(process.env.PIA_IOS_BUNDLE_ID ? { bundleIdentifier: process.env.PIA_IOS_BUNDLE_ID } : {}) },
-    android: { ...config.android, softwareKeyboardLayoutMode: 'resize', ...(process.env.PIA_ANDROID_PACKAGE ? { package: process.env.PIA_ANDROID_PACKAGE } : {}), ...(versionCode ? { versionCode } : {}) },
+    android: { ...config.android, package: PERSAI_ANDROID_PACKAGE, softwareKeyboardLayoutMode: 'resize', ...(versionCode ? { versionCode } : {}) },
     extra: { ...config.extra, ...(process.env.PIA_ANDROID_BUILD_SHA ? { buildSha: process.env.PIA_ANDROID_BUILD_SHA } : {}) },
   };
 };

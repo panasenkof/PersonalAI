@@ -1,4 +1,4 @@
-appId: com.paigent.app
+appId: com.persai.app
 name: PersAI mandatory minimal native smoke
 ---
 # Security is never mocked or bypassed.
