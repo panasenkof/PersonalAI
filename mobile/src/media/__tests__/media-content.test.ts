@@ -52,3 +52,16 @@ describe('URL import diagnostics (user-reported MP3 from a protected site)', () 
     expect(linkImportErrorMessage(new TypeError('Network request failed'))).not.toContain('память');
   });
 });
+
+
+test('HTML article import strips navigation/ads and decodes numeric entities without remote AI', () => {
+  const html = '<header>Меню</header><nav>Поиск</nav><main><article><h1>Пирог &#x2014; рецепт</h1><p>Мука&nbsp;и&nbsp;вода</p><div class="advert-banner">Реклама</div><p>Выпекать 30 минут.</p></article></main><footer>Подписка</footer>';
+  const text = pageText(html);
+  expect(text).toContain('Пирог — рецепт');
+  expect(text).toContain('Мука и вода');
+  expect(text).toContain('Выпекать 30 минут.');
+  expect(text).not.toMatch(/Меню|Поиск|Реклама|Подписка/);
+});
+test('HTML import still falls back for short pages without article or main', () => {
+  expect(pageText('<p>Хлеб</p><p>Соль &amp; вода</p>')).toBe('Хлеб\nСоль & вода');
+});
