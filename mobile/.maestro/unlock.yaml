@@ -1,4 +1,4 @@
-appId: com.paigent.app
+appId: com.persai.app
 ---
 - extendedWaitUntil:
     visible:

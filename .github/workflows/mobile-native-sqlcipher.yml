@@ -20,7 +20,7 @@ jobs:
       # One emulator ABI; signed phone release still builds ARM64.
       ORG_GRADLE_PROJECT_reactNativeArchitectures: x86_64
       RNET_TARGET: android-x86_64
-      PIA_ANDROID_PACKAGE: com.paigent.app
+      PIA_ANDROID_PACKAGE: com.persai.app
       MAESTRO_VERSION: 2.0.10
     defaults:
       run:

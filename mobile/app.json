@@ -97,6 +97,7 @@
       "supportsTablet": true
     },
     "android": {
+      "package": "com.persai.app",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#070D20",
