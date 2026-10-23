@@ -18,7 +18,9 @@ describe("Android viewport regressions from real device recordings", () => {
     const saveButton = note.indexOf('accessibilityLabel="Сохранить запись"');
     expect(saveButton).toBeGreaterThan(endScroll);
     expect(note).toContain("Keyboard.dismiss(); void save();");
-    expect(smoke).toContain('element: "Сохранить запись"');
+    expect(note).toContain('testID="note-save-button"');
+    expect(smoke).toContain('id: "note-save-button"');
+    expect(smoke).not.toContain('element: "Сохранить запись"');
   });
   it("uses stable accessibility labels for both note edit steps", () => {
     expect(note).toContain('accessibilityLabel="Текст заметки"');
