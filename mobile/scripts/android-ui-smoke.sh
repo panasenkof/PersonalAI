@@ -29,4 +29,4 @@ adb shell locksettings set-pin 2468
 adb shell input keyevent 82
 maestro test --format junit --output "$RESULTS_DIR/junit.xml" \
   --test-output-dir "$RESULTS_DIR" --debug-output "$RESULTS_DIR/debug" \
-  .maestro/flows/smoke.yaml
+  .maestro/flows/minimal.yaml
