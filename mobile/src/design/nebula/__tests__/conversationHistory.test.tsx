@@ -1,6 +1,5 @@
 import React from "react";
 import { fireEvent, render } from "@testing-library/react-native";
-import { Text, View } from "react-native";
 import type { LiveConversation } from "../../../direct-agent/chat-store";
 import { indexConversationHistory, searchConversationHistory } from "../conversationHistory";
 import { ConversationHistorySheet } from "../ConversationHistorySheet";
@@ -13,8 +12,11 @@ jest.mock("../../../theme", () => ({
   }),
 }));
 jest.mock("../../../components/BottomSheet", () => ({
-  BottomSheet: ({ visible, title, children }: { visible: boolean; title: string; children: React.ReactNode }) =>
-    visible ? <View><Text>{title}</Text>{children}</View> : null,
+  BottomSheet: ({ visible, title, children }: { visible: boolean; title: string; children: React.ReactNode }) => {
+    const React = require("react");
+    const { View, Text } = require("react-native");
+    return visible ? React.createElement(View, null, React.createElement(Text, null, title), children) : null;
+  },
 }));
 
 function chat(id: string, title = "Диалог", updatedAt = "2026-10-22T10:00:00Z",
