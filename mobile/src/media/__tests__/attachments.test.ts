@@ -138,5 +138,5 @@ test("multiple originals cannot exceed limits and cannot mix two file input form
   await expect(saveMediaNote("guest", { files: [multi[0]], title: "Too big", body: "", sensitivity: "standard" })).rejects.toThrow("80 МБ");
   mockSizes.set(multi[0].uri, 50 * 1024 * 1024);
   mockSizes.set(multi[1].uri, 40 * 1024 * 1024);
-  await expect(saveMediaNote("guest", { files: multi.slice(0, 2), title: "Together too big", body: "", sensitivity: "standard" })).rejects.toThrow("суммарный");
+  await expect(saveMediaNote("guest", { files: multi.slice(0, 2), title: "Together too big", body: "", sensitivity: "standard" })).rejects.toThrow("Размер вложений вместе не должен превышать 80 МБ.");
 });
