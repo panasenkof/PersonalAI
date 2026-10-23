@@ -30,4 +30,33 @@ describe("Android viewport regressions from real device recordings", () => {
     expect(smoke).toContain('timeout: 15000');
   });
 
+  it("audits native smoke selectors against the actual rendered screens", () => {
+    const files = [
+      "screens/HomeScreen.tsx",
+      "screens/LocalMemoryScreen.tsx",
+      "screens/MemoryNoteScreen.tsx",
+      "components/AgentLimitsCard.tsx",
+      "components/Collapsible.tsx",
+      "navigation.tsx",
+      "components/BottomSheet.tsx",
+      "components/PromptInput.tsx",
+    ].map(path => readFileSync(join(root, path), "utf8")).join("\n");
+    const selectors = [
+      "Сообщение ассистенту", "Очистить сообщение", "Отправить запрос",
+      "Вкладка Главная", "Вкладка Память", "Вкладка Настройки",
+      "Новая заметка", "История диалогов", "Поиск диалогов",
+      "Заголовок заметки", "Текст заметки", "Сохранить запись",
+      "Лимит обращений к LLM на сообщение", "Сохранить лимит обращений к LLM",
+    ];
+    for (const label of selectors) {
+      expect(smoke).toContain(label);
+      expect(files).toContain(label);
+    }
+    // These are dynamic or composed labels; assert their source fragments.
+    expect(files).toContain('"Открыть заметку " +');
+    expect(files).toContain('title="Мои диалоги"');
+    expect(files).toContain('"Закрыть панель " +');
+    expect(files).toContain('title="Работа ИИ"');
+  });
+
 });
