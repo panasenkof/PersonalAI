@@ -50,6 +50,9 @@ export function MemoryNoteScreen() {
   const [extractedText, setExtractedText] = useState("");
   const [allowAgent, setAllowAgent] = useState(false);
   const [kind, setKind] = useState<MemoryKind>("note"); const [names, setNames] = useState("");
+  // Capture TextInput changes synchronously: Save may run before React commits
+  // the final keystroke to the component state on a fast press.
+  const namesForSave = useRef("");
   const [terms, setTerms] = useState(""); const [modelTerms, setModelTerms] = useState<string[]>([]);
   const [loading, setLoading] = useState(true); const [busy, setBusy] = useState(false); const [error, setError] = useState("");
   const [retry, setRetry] = useState(0); const [leaving, setLeaving] = useState(false);
@@ -97,7 +100,7 @@ export function MemoryNoteScreen() {
       baseline.current = { title: initialTitle, body: initialBody, collectionId: initialCollection, kind: initialKind, names: initialNames, terms: initialTerms };
       setTerms(initialTerms); setModelTerms(indexTerms.filter(x => x.source.startsWith("model:")).flatMap(x => x.terms));
       kindTouched.current = false;
-      setTitle(initialTitle); setBody(initialBody); setCollectionId(initialCollection); setKind(initialKind); setNames(initialNames);
+      setTitle(initialTitle); setBody(initialBody); setCollectionId(initialCollection); setKind(initialKind); namesForSave.current = initialNames; setNames(initialNames);
     })().catch(e => { if (alive.current) setError(memoryErrorMessage(e)); }).finally(() => { if (alive.current) setLoading(false); });
     return () => { alive.current = false; repository.current = null; };
   }, [profile, route.params?.entityId, route.params?.collectionId, retry]);
@@ -132,7 +135,8 @@ export function MemoryNoteScreen() {
       if (kind !== saved.kind) saved = await db.setEntityKind(saved.id, saved.record_version, kind);
     } else saved = await db.createEntity({ collection_id: collection, domain: "notes", title: finalTitle, payload, kind,
       sensitivity: "inherit", source_kind: "user", source_ref: "device" });
-    if (splitNames(names).join(",") !== splitNames(base.names).join(",")) await db.setAliases(saved.id, splitNames(names));
+    const nextAliases = splitNames(namesForSave.current);
+    if (nextAliases.join(",") !== splitNames(base.names).join(",")) await db.setAliases(saved.id, nextAliases);
     if (terms.trim() !== base.terms.trim()) await db.setIndexTerms(saved.id, splitNames(terms), "user");
     if (profile) { scheduleIndexTerms(profile); scheduleVectors(profile); }
     if (alive.current) setLeaving(true);
@@ -178,7 +182,7 @@ export function MemoryNoteScreen() {
             style={{ minHeight: nebulaTouch.minimum, paddingHorizontal: nebulaSpacing.sm, justifyContent: "center", borderRadius: nebulaRadii.chip, borderWidth: 1, borderColor: chosen ? t.accent : t.line, backgroundColor: chosen ? t.soft : t.panel }}>
             <Text style={{ color: chosen ? t.secondary : t.text, fontSize: 13 }}>{KIND_NAMES[k]}</Text></Pressable>; })}
         </View>
-        <TextInput accessibilityLabel="Другие имена и прозвища" value={names} onChangeText={setNames} editable={!busy} maxLength={600}
+        <TextInput accessibilityLabel="Другие имена и прозвища" value={names} onChangeText={next => { namesForSave.current = next; setNames(next); }} editable={!busy} maxLength={600}
           placeholder={kind === "person" ? "Другие имена через запятую: Маша, Мария Петровна" : "Другие названия через запятую (по желанию)"} placeholderTextColor={t.muted} style={field} />
         <Text style={{ color: t.muted, fontSize: 12 }}>По этим именам запись тоже находится в поиске.</Text>
         <TextInput accessibilityLabel="Слова для поиска" value={terms} onChangeText={setTerms} editable={!busy} maxLength={600}
