@@ -105,3 +105,16 @@ test('native note smoke navigates past the keyboard before targeting the body', 
   assert.match(note, /tapOn: "Текст заметки"/,
     "use the stable accessibility label when editing a note");
 });
+
+
+test('note edit waits for editor, not matching preview in the list (CI #410)', () => {
+  const flow = fs.readFileSync(path.join(__dirname, '..', '.maestro', 'flows', 'smoke.yaml'), 'utf8');
+  const open = flow.indexOf('- tapOn: "Открыть заметку Native smoke note"');
+  const wait = flow.indexOf('visible: "Сохранить запись"', open);
+  const body = flow.indexOf('- assertVisible: "Persisted offline content"', open);
+  const edit = flow.indexOf('element: "Текст заметки"', body);
+  assert.ok(open >= 0 && wait > open && body > wait && edit > body,
+    'editor save control must be visible before checking body or editing');
+  assert.match(flow.slice(open, body), /timeout: 15000/,
+    'wait for asynchronous navigation rather than checking list preview immediately');
+});
