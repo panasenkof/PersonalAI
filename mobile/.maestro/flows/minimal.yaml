@@ -1,0 +1,20 @@
+appId: com.paigent.app
+name: PersAI mandatory minimal native smoke
+---
+# Security is never mocked or bypassed.
+- launchApp:
+    clearState: true
+- runFlow: ../unlock.yaml
+# A working native composer and retained draft across tabs.
+- tapOn: "Сообщение ассистенту"
+- inputText: "Smoke draft"
+- assertVisible: "Очистить сообщение"
+- hideKeyboard
+- tapOn: "Вкладка Память"
+- extendedWaitUntil:
+    visible: "Новая заметка"
+    timeout: 15000
+- tapOn: "Вкладка Настройки"
+- tapOn: "Вкладка Главная"
+- assertVisible: "Smoke draft"
+- takeScreenshot: minimal-home

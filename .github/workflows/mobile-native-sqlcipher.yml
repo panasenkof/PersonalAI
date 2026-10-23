@@ -1,11 +1,8 @@
-name: Native Android SQLCipher build
+name: Native Android UI smoke
 
 on:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - "mobile/**"
-      - ".github/workflows/mobile-native-sqlcipher.yml"
+  workflow_call:
 
 concurrency:
   group: native-sqlcipher-${{ github.ref }}
@@ -20,9 +17,11 @@ jobs:
     # The Whisper runtime (react-native-executorch) compiles a large C++ library.
     timeout-minutes: 90
     env:
-      # Phones are arm64; skipping emulator ABIs halves native compile time.
-      ORG_GRADLE_PROJECT_reactNativeArchitectures: arm64-v8a
-      RNET_TARGET: android-arm64-v8a
+      # One emulator ABI; signed phone release still builds ARM64.
+      ORG_GRADLE_PROJECT_reactNativeArchitectures: x86_64
+      RNET_TARGET: android-x86_64
+      PIA_ANDROID_PACKAGE: com.paigent.app
+      MAESTRO_VERSION: 2.0.10
     defaults:
       run:
         working-directory: mobile
@@ -40,14 +39,27 @@ jobs:
       - name: Reuse trusted Gradle cache (PR cannot write)
         uses: gradle/actions/setup-gradle@v4
         with:
-          cache-read-only: true
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
       - uses: android-actions/setup-android@v3
         with:
           # The Android SDK removed the obsolete "tools" package, which this
           # action still requests by default. Only install supported packages.
           packages: platform-tools
-      - name: Install locked JS and native dependencies
+      - name: Cache verified ExecuTorch release downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/react-native-executorch
+          key: ${{ runner.os }}-executorch-${{ hashFiles('mobile/package-lock.json') }}
+      - name: Install locked JS and shared Android Java dependencies
+        # Upstream only puts the architecture-independent executorch.jar in ARM64 core.
+        # Download it using the upstream checksum-validating installer, but compile x86_64 only.
+        env:
+          RNET_TARGET: android-arm64-v8a
         run: npm ci --no-audit --no-fund
+      - name: Prepare emulator native libraries and verify Java bridge
+        run: |
+          node node_modules/react-native-executorch/scripts/download-libs.js
+          test -s node_modules/react-native-executorch/third-party/android/libs/executorch.jar
       - name: Generate native Android project including Expo SQLCipher
         run: npx expo prebuild --platform android --no-install --clean
       - name: Local models over http:// are allowed by the manifest
@@ -80,6 +92,84 @@ jobs:
           unzip -t "$APK" >/dev/null
           # On-device Whisper: the ExecuTorch runtime and its CPU backend are packaged.
           for lib in libRnExecutorch.so libexecutorch.so libxnnpack_executorch_backend.so; do
-            unzip -Z1 "$APK" | grep -Fx "lib/arm64-v8a/$lib"
+            unzip -Z1 "$APK" | grep -Fx "lib/x86_64/$lib"
           done
           echo "APK generated and archive verified: $APK"
+
+      - name: Save standalone emulator APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-ui-apk-${{ github.sha }}
+          path: mobile/android/app/build/outputs/apk/release/app-release.apk
+          retention-days: 3
+      - name: Install pinned Maestro CLI
+        run: |
+          curl --fail --location --retry 3 -o "$RUNNER_TEMP/maestro.zip" "https://github.com/mobile-dev-inc/maestro/releases/download/cli-${MAESTRO_VERSION}/maestro.zip"
+          unzip -q "$RUNNER_TEMP/maestro.zip" -d "$RUNNER_TEMP/maestro-cli"
+          echo "$RUNNER_TEMP/maestro-cli/maestro/bin" >> "$GITHUB_PATH"
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      # AOSP (no Google Pixel Launcher) is sufficient for the offline flow.
+      # Each attempt creates its own AVD. The second is only for a proven
+      # system/emulator failure, never for a failed product assertion.
+      - name: Run real Android UI smoke
+        id: android_ui_first
+        continue-on-error: true
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          SMOKE_ATTEMPT: '1'
+          MAESTRO_CLI_NO_ANALYTICS: '1'
+        with:
+          api-level: 35
+          arch: x86_64
+          target: default
+          profile: pixel_2
+          ram-size: 2048M
+          heap-size: 384M
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
+          script: bash mobile/scripts/android-ui-smoke.sh
+      - name: Classify first Android smoke failure
+        id: android_ui_classify
+        if: ${{ steps.android_ui_first.outcome == 'failure' }}
+        run: node scripts/classify-emulator-failure.cjs qa/android-results/attempt-1
+      - name: Retry only an emulator infrastructure failure
+        id: android_ui_retry
+        if: ${{ steps.android_ui_first.outcome == 'failure' && steps.android_ui_classify.outputs.retry == 'true' }}
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          SMOKE_ATTEMPT: '2'
+          MAESTRO_CLI_NO_ANALYTICS: '1'
+        with:
+          api-level: 35
+          arch: x86_64
+          target: default
+          profile: pixel_2
+          ram-size: 2048M
+          heap-size: 384M
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
+          script: bash mobile/scripts/android-ui-smoke.sh
+      - name: Preserve Android evidence even after failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-ui-evidence-${{ github.sha }}
+          path: mobile/qa/android-results/
+          retention-days: 7
+          if-no-files-found: warn
+      - name: Require successful Android smoke, without suppressing app failures
+        if: ${{ always() }}
+        env:
+          FIRST: ${{ steps.android_ui_first.outcome }}
+          SECOND: ${{ steps.android_ui_retry.outcome }}
+        run: |
+          if [ "$FIRST" = success ] || [ "$SECOND" = success ]; then
+            echo "Android UI smoke PASSED"
+          else
+            echo "::error::Android UI smoke failed (first=$FIRST, retry=$SECOND). See saved evidence."
+            exit 1
+          fi

@@ -6,3 +6,6 @@ dist/
 # Expo prebuild output (native projects are regenerated in CI)
 mobile/android/
 mobile/ios/
+
+# Local native UI evidence
+mobile/qa/android-results/
