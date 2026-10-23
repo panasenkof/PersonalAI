@@ -6,6 +6,7 @@ jest.mock("@react-navigation/native", () => ({
   useNavigation: () => ({ goBack: mockBack }),
   useRoute: () => ({ params: mockParams.current }),
   useFocusEffect: (cb: () => void | (() => void)) => require("react").useEffect(cb, [cb]),
+  usePreventRemove: () => {},
 }));
 jest.mock("../profile/ProfileContext", () => ({ useProfile: () => "guest" }));
 jest.mock("@react-navigation/elements", () => ({ useHeaderHeight: () => 64 }));

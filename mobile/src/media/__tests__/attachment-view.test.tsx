@@ -98,3 +98,17 @@ test("failed decryption shows retry instead of losing the encrypted original", a
   await waitFor(() => expect(screen.getByLabelText("Просмотр изображения снимок.jpg")).toBeTruthy());
   expect(materializeAttachment).toHaveBeenCalledTimes(2);
 });
+
+
+test("native media preview error hides the broken image and offers a retry", async () => {
+  const screen = render(<AttachmentView profile="guest" entityId="note" />);
+  await waitFor(() => expect(screen.getByText("Вложения · 3")).toBeTruthy());
+  fireEvent.press(screen.getByLabelText("Открыть фото снимок.jpg"));
+  await waitFor(() => expect(screen.getByLabelText("Просмотр изображения снимок.jpg")).toBeTruthy());
+  fireEvent(screen.getByLabelText("Просмотр изображения снимок.jpg"), "onError");
+  await waitFor(() => expect(screen.queryByLabelText("Просмотр изображения снимок.jpg")).toBeNull());
+  expect(screen.getByText(/Для повторной попытки/)).toBeTruthy();
+  fireEvent.press(screen.getByLabelText("Открыть фото снимок.jpg"));
+  await waitFor(() => expect(screen.getByLabelText("Просмотр изображения снимок.jpg")).toBeTruthy());
+  expect(materializeAttachment).toHaveBeenCalledTimes(2);
+});

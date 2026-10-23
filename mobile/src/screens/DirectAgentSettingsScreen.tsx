@@ -1,4 +1,4 @@
-import { useFocusEffect, useNavigation, useRoute } from "@react-navigation/native";
+import { useFocusEffect, useNavigation, usePreventRemove, useRoute } from "@react-navigation/native";
 import type { RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useHeaderHeight } from "@react-navigation/elements";
@@ -15,6 +15,7 @@ import { fetchTavilyUsage, formatTavilyUsage } from "../direct-agent/web-search"
 import type { RootStackParams } from "../navigation";
 import { useTheme } from "../theme";
 import { MediaSettings } from "../media/MediaSettings";
+import { connectionDraftFingerprint } from "./connectionDraft";
 import { Collapsible } from "../components/Collapsible";
 
 const API_TYPES: Array<{ id: ApiType; name: string; hint: string }> = [
@@ -39,6 +40,8 @@ export function DirectAgentSettingsScreen() {
   const [value, setValue] = useState<DirectConnections | null>(null);
   const [selectedId, setSelectedId] = useState("");
   const pending = useRef(false);
+  const baselineFingerprint = useRef("");
+  const [leaving, setLeaving] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [retry, setRetry] = useState(0);
@@ -53,9 +56,10 @@ export function DirectAgentSettingsScreen() {
 
   useFocusEffect(useCallback(() => {
     let alive = true;
-    setValue(null); setNotice("");
+    setValue(null); setNotice(""); baselineFingerprint.current = "";
     if (profile) void loadDirectConnections(profile).then(saved => {
       if (!alive) return;
+      baselineFingerprint.current = connectionDraftFingerprint(saved, saved.activeId);
       const preset = presetId ? PROVIDER_PRESETS.find(p => p.id === presetId) : undefined;
       if (preset && appliedPreset.current !== presetId && saved.connections.length < 20) {
         // First-run setup: reuse an unconfigured connection of the same kind, or add one.
@@ -68,6 +72,16 @@ export function DirectAgentSettingsScreen() {
     return () => { alive = false; setValue(null); checkAbort.current?.abort(); setChecking(false); setCheck(null);
       searchAbort.current?.abort(); setSearching(false); setSearchCheck(null); };
   }, [profile, retry]));
+
+  const dirty = Boolean(value && baselineFingerprint.current && connectionDraftFingerprint(value, selectedId) !== baselineFingerprint.current);
+  usePreventRemove(!leaving && (busy || dirty), () => {
+    if (busy) { Alert.alert("Сохранение", "Дождитесь завершения сохранения настроек."); return; }
+    Alert.alert("Изменения не сохранены", "Закрыть настройки без сохранения?", [
+      { text: "Продолжить редактирование", style: "cancel" },
+      { text: "Закрыть без сохранения", style: "destructive", onPress: () => setLeaving(true) },
+    ]);
+  });
+  useEffect(() => { if (leaving) navigation.goBack(); }, [leaving, navigation]);
 
   const selected = value?.connections.find(c => c.id === selectedId);
   const type = selected ? apiTypeOf(selected.provider) : "openai";
@@ -138,7 +152,7 @@ export function DirectAgentSettingsScreen() {
     try {
       await saveDirectConnections(profile, { ...value, activeId: selectedId,
         connections: value.connections.map(c => c.searchProvider === "builtin" && c.provider !== "openai" ? { ...c, searchProvider: "tavily" as const } : c) });
-      navigation.goBack();
+      setLeaving(true);
     } catch (e) { setNotice((e as Error).message); }
     finally { pending.current = false; setBusy(false); }
   }
@@ -154,6 +168,7 @@ export function DirectAgentSettingsScreen() {
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: t.bg }} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={headerHeight}>
     <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 24, gap: 12 }}>
       <Text style={{ color: t.text, fontSize: 28, fontWeight: "800" }}>Ваши модели</Text>
+      {dirty ? <Text accessibilityLiveRegion="polite" accessibilityLabel="Несохранённые настройки подключения" style={{ color: t.secondary, fontSize: 13 }}>Изменения не сохранены. Нажмите «Сохранить настройки», чтобы применить их.</Text> : null}
       {!value && !notice ? <ActivityIndicator accessibilityLabel="Загрузка подключений" /> : null}
       {value && selected ? <>
         <View style={{ gap: 8 }}>

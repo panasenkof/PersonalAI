@@ -338,10 +338,15 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       assert.equal(await page.getByLabel('Параметры записи', { exact: true }).getAttribute('aria-expanded'), 'true');
       await page.getByLabel('Тип записи: Факт', { exact: true }).click();
       await page.getByLabel('Другие имена и прозвища', { exact: true }).fill('Индюшка, индюк');
+      // Assert the field using its accessible locator. The real persistence
+      // contract is checked after reopening; polling the transient DOM input
+      // here caused intermittent 30-second timeouts on wider viewports.
+      assert.equal(await page.getByLabel('Другие имена и прозвища', { exact: true }).inputValue(), 'Индюшка, индюк');
       await page.getByLabel('Сохранить запись', { exact: true }).click();
       await page.getByLabel('Открыть заметку Индейка', { exact: true }).click();
       await page.getByLabel('Параметры записи', { exact: true }).click();
-      assert.equal(await page.getByLabel('Другие имена и прозвища', { exact: true }).inputValue(), 'Индюшка, индюк');
+      // Verify persisted aliases, not a browser-specific input/textarea selector.
+      assert.equal(await page.getByLabel('Другие имена и прозвища', { exact: true }).inputValue(), 'Индюшка, индюк', 'Aliases persist after save and reopen');
       assert.equal(await page.getByLabel('Тип записи: Факт', { exact: true }).getAttribute('aria-selected'), 'true', 'The chosen record type is kept');
       await page.getByLabel('История, события и связи', { exact: true }).click();
       await page.getByText('История изменений · версия 3', { exact: true }).waitFor();

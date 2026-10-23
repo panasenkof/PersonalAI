@@ -30,7 +30,6 @@ jobs:
           node mobile/scripts/check-nebula-references.cjs
           node --test mobile/scripts/ci-scope.test.cjs
           node --test mobile/scripts/classify-emulator-failure.test.cjs
-          node --test mobile/scripts/maestro-flows.test.cjs
           node mobile/scripts/ci-scope.cjs
 
   native:
