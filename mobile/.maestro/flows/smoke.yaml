@@ -32,7 +32,13 @@ name: PersAI native offline smoke
 - tapOn: "Новая заметка"
 - tapOn: "Заголовок заметки"
 - inputText: "Native smoke note"
-- tapOn: "Текст заметки"
+# Android keyboard obscures the body input below the title on Pixel 2.
+# Navigate like a user instead of relying on an off-screen accessibility node.
+- hideKeyboard
+- scrollUntilVisible:
+    element: "Что нужно запомнить?"
+    direction: DOWN
+- tapOn: "Что нужно запомнить?"
 - inputText: "Persisted offline content"
 - hideKeyboard
 - scrollUntilVisible:
@@ -42,7 +48,11 @@ name: PersAI native offline smoke
 - assertVisible: "Открыть заметку Native smoke note"
 - tapOn: "Открыть заметку Native smoke note"
 - assertVisible: "Persisted offline content"
-- tapOn: "Текст заметки"
+- hideKeyboard
+- scrollUntilVisible:
+    element: "Persisted offline content"
+    direction: DOWN
+- tapOn: "Persisted offline content"
 - eraseText
 - inputText: "Edited offline content"
 - hideKeyboard
