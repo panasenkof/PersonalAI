@@ -1,0 +1,27 @@
+appId: com.paigent.app
+name: PersAI native import source and URL validation
+---
+- launchApp:
+    clearState: true
+- runFlow: ../unlock.yaml
+- tapOn: "Вкладка Память"
+- tapOn: "Добавить сведения из файла"
+- extendedWaitUntil:
+    visible: "1 · Источник"
+    timeout: 15000
+- assertVisible: "Выбрать файл для памяти"
+- assertVisible: "Сфотографировать и распознать"
+- tapOn: "Ссылка для импорта"
+- inputText: "http://example.org/test.txt"
+- hideKeyboard
+- tapOn: "Загрузить по ссылке"
+# The error is below the source picker on compact devices.
+- scrollUntilVisible:
+    element: "Нужна публичная HTTPS-ссылка без логина и пароля."
+    direction: DOWN
+- assertNotVisible: "3 · Проверить и сохранить"
+- takeScreenshot: native-invalid-url
+- back
+- extendedWaitUntil:
+    visible: "Добавить сведения из файла"
+    timeout: 15000
