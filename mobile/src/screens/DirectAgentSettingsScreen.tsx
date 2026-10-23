@@ -14,7 +14,6 @@ import { yandexFolder } from "../direct-agent/compatible";
 import { fetchTavilyUsage, formatTavilyUsage } from "../direct-agent/web-search";
 import type { RootStackParams } from "../navigation";
 import { useTheme } from "../theme";
-import { MediaSettings } from "../media/MediaSettings";
 import { connectionDraftFingerprint } from "./connectionDraft";
 import { Collapsible } from "../components/Collapsible";
 
@@ -282,7 +281,6 @@ export function DirectAgentSettingsScreen() {
       </> : null}
       {notice && !value ? <><Text accessibilityRole="alert" style={{ color: t.err }}>{notice}</Text>
         <Pressable accessibilityRole="button" onPress={() => setRetry(x => x + 1)} style={{ minHeight: 44 }}><Text style={{ color: t.secondary }}>Повторить загрузку</Text></Pressable></> : null}
-    {profile && value ? <MediaSettings profile={profile} connections={value.connections} /> : null}
       </ScrollView>
     </KeyboardAvoidingView>
   );
