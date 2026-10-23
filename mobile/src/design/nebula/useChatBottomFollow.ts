@@ -8,6 +8,8 @@ export function useChatBottomFollow(conversationId: string | undefined, focused:
   const nearChatBottom = useRef(true);
   // Programmatic scroll/IME resize is not a user gesture: it must not disable follow.
   const userScrollActive = useRef(false);
+  const streamReadAnchored = useRef(false);
+  const streamFollowOverride = useRef(false);
   const pendingSendFollow = useRef(false);
   const scrollFrame = useRef<number | null>(null);
   const enabled = useRef(false);
@@ -27,6 +29,8 @@ export function useChatBottomFollow(conversationId: string | undefined, focused:
       previousConversation.current = conversationId;
       nearChatBottom.current = true;
       userScrollActive.current = false;
+      streamReadAnchored.current = false;
+      streamFollowOverride.current = false;
     }
     // The same conversation keeps its reading position across tabs; a newly
     // selected one opens at its latest messages with independent list metrics.
@@ -39,5 +43,6 @@ export function useChatBottomFollow(conversationId: string | undefined, focused:
       scrollFrame.current = null;
     };
   }, [conversationId, focused, scheduleBottomFollow]);
-  return { list, nearChatBottom, pendingSendFollow, userScrollActive, scheduleBottomFollow };
+  return { list, nearChatBottom, pendingSendFollow, userScrollActive,
+    streamReadAnchored, streamFollowOverride, scheduleBottomFollow };
 }
