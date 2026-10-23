@@ -47,6 +47,11 @@ name: PersAI native offline smoke
     visible: "Открыть заметку Native smoke note"
     timeout: 15000
 - tapOn: "Открыть заметку Native smoke note"
+# The note preview in the list also contains the saved body. Wait for the
+# editor's own save action before touching its input, not for preview text.
+- extendedWaitUntil:
+    visible: "Сохранить запись"
+    timeout: 15000
 - assertVisible: "Persisted offline content"
 - hideKeyboard
 - scrollUntilVisible:
