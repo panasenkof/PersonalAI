@@ -81,3 +81,55 @@ test('URL download network error is not shown as a local-memory failure', async 
   await waitFor(() => expect(screen.getByText(/этап: соединение/)).toBeTruthy());
   expect(screen.queryByText(/Не удалось выполнить операцию с памятью/)).toBeNull();
 });
+
+
+test('U3 presents one source step and preserves the file when a replacement URL is only drafted', async () => {
+  const screen = render(<MemoryImportScreen />);
+  expect(screen.getByTestId('import-source-choices')).toBeTruthy();
+  fireEvent.press(screen.getByLabelText('Выбрать файл для памяти'));
+  await waitFor(() => expect(screen.getByText('photo.png')).toBeTruthy());
+  expect(screen.queryByLabelText('Ссылка для импорта')).toBeNull();
+  fireEvent.press(screen.getByLabelText('Изменить источник'));
+  fireEvent.changeText(screen.getByLabelText('Ссылка для импорта'), 'https://files.example.org/other.mp3');
+  // An unconfirmed replacement cannot poison the stored file provenance.
+  fireEvent.press(screen.getByLabelText('Сохранить сведения в память'));
+  await waitFor(() => expect(saveMediaNote).toHaveBeenCalled());
+  expect(saveMediaNote).toHaveBeenCalledWith('guest', expect.objectContaining({
+    file: expect.objectContaining({ name: 'photo.png' }), sourceUrl: undefined,
+  }), expect.anything());
+});
+
+test('U3 hides provider choices by default but keeps recognition accessible', async () => {
+  const screen = render(<MemoryImportScreen />);
+  fireEvent.press(screen.getByLabelText('Выбрать файл для памяти'));
+  await waitFor(() => expect(screen.getByText('photo.png')).toBeTruthy());
+  expect(screen.getByLabelText('Параметры распознавания').props.accessibilityState.expanded).toBe(false);
+  expect(screen.queryByLabelText('Разобрать через Vision')).toBeNull();
+  fireEvent.press(screen.getByLabelText('Параметры распознавания'));
+  expect(screen.getByLabelText('Разобрать через Vision')).toBeTruthy();
+  fireEvent.press(screen.getByLabelText('Извлечь сведения из файла'));
+  await waitFor(() => expect(extractMedia).toHaveBeenCalledTimes(1));
+});
+
+test('U3 does not show source replacement buttons for Android Share text', async () => {
+  mockParams = { incoming: [{ shareType: 'text', value: 'Семейный рецепт' }] };
+  const screen = render(<MemoryImportScreen />);
+  await waitFor(() => expect(screen.getByLabelText('Сведения из файла').props.value).toBe('Семейный рецепт'));
+  expect(screen.queryByLabelText('Ссылка для импорта')).toBeNull();
+  expect(screen.queryByLabelText('Сфотографировать и распознать')).toBeNull();
+  fireEvent.press(screen.getByLabelText('Сохранить сведения в память'));
+  await waitFor(() => expect(saveMediaNote).toHaveBeenCalledWith('guest', expect.objectContaining({ body: 'Семейный рецепт' }), expect.anything()));
+});
+
+test('U3 uses the confirmed URL returned by a successful text download', async () => {
+  (importLink as jest.Mock).mockResolvedValueOnce({ source: 'https://example.org/recipe', text: 'Хлеб: мука и вода' });
+  const screen = render(<MemoryImportScreen />);
+  fireEvent.changeText(screen.getByLabelText('Ссылка для импорта'), 'https://example.org/recipe');
+  fireEvent.press(screen.getByText('Загрузить по ссылке'));
+  await waitFor(() => expect(screen.getByLabelText('Распознанное содержимое файла').props.value).toBe('Хлеб: мука и вода'));
+  expect(screen.queryByLabelText('Ссылка для импорта')).toBeNull();
+  fireEvent.press(screen.getByLabelText('Сохранить сведения в память'));
+  await waitFor(() => expect(saveMediaNote).toHaveBeenCalledWith('guest', expect.objectContaining({
+    sourceUrl: 'https://example.org/recipe', extractedText: 'Хлеб: мука и вода', file: undefined,
+  }), expect.anything()));
+});
