@@ -49,3 +49,9 @@ export function isNebulaChatNearBottom(
   if (viewportHeight <= 0) return true; // Before the first measured layout.
   return contentHeight - (Math.max(0, offsetY) + viewportHeight) <= tolerance;
 }
+
+/** Keep the start of a long streamed reply readable instead of chasing its end. */
+export function shouldAnchorNebulaStreamingReply(replyHeight: number, viewportHeight: number): boolean {
+  return Number.isFinite(replyHeight) && Number.isFinite(viewportHeight) &&
+    viewportHeight > 0 && replyHeight >= viewportHeight * 0.7;
+}
