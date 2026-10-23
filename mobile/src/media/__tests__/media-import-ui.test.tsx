@@ -4,6 +4,8 @@ import { MemoryImportScreen } from '../../screens/MemoryImportScreen';
 import { saveMediaNote } from '../attachments';
 import { extractMedia } from '../extract';
 import { importLink } from '../link-import';
+import { analyzeFilesTogether } from '../joint-recognition';
+import * as DocumentPicker from 'expo-document-picker';
 const mockBack = jest.fn();
 let mockParams: any = undefined;
 jest.mock("../preferences", () => ({ loadMediaPreferences: async () => ({ visionId: "", speechId: "" }) }));
@@ -22,7 +24,8 @@ jest.mock('../vector-runner', () => ({ scheduleVectors: jest.fn() }));
 jest.mock('../whisper', () => ({ useWhisperStatus: () => ({ state: 'absent' }) }));
 jest.mock('../attachments', () => ({ saveMediaNote: jest.fn(async () => 'note') }));
 jest.mock('../extract', () => ({ ...jest.requireActual('../kinds'), extractMedia: jest.fn() }));
-jest.mock('expo-document-picker', () => ({ getDocumentAsync: async () => ({ canceled: false, assets: [{ uri: 'file:///cache/photo.png', name: 'photo.png', mimeType: 'image/png' }] }) }));
+jest.mock('../joint-recognition', () => ({ analyzeFilesTogether: jest.fn() }));
+jest.mock('expo-document-picker', () => ({ getDocumentAsync: jest.fn(async () => ({ canceled: false, assets: [{ uri: 'file:///cache/photo.png', name: 'photo.png', mimeType: 'image/png' }] })) }));
 jest.mock('expo-file-system/legacy', () => ({ cacheDirectory: 'file:///cache/', deleteAsync: jest.fn(async () => {}) }));
 beforeEach(() => { jest.clearAllMocks(); mockParams = undefined; });
 test('picker lets user save original without transcript, provider or network; user text stays separate', async () => {
@@ -132,4 +135,75 @@ test('U3 uses the confirmed URL returned by a successful text download', async (
   await waitFor(() => expect(saveMediaNote).toHaveBeenCalledWith('guest', expect.objectContaining({
     sourceUrl: 'https://example.org/recipe', extractedText: 'Хлеб: мука и вода', file: undefined,
   }), expect.anything()));
+});
+
+
+const multiple = [
+  { uri: "file:///cache/a.png", name: "a.png", mimeType: "image/png", size: 1200 },
+  { uri: "file:///cache/b.txt", name: "b.txt", mimeType: "text/plain", size: 2400 },
+];
+
+test("two selected files share one note and support ordered recognition without joint LLM request", async () => {
+  (DocumentPicker.getDocumentAsync as jest.Mock).mockResolvedValueOnce({ canceled: false, assets: multiple });
+  (extractMedia as jest.Mock).mockResolvedValueOnce("Фото").mockResolvedValueOnce("Документ");
+  const screen = render(<MemoryImportScreen />);
+  fireEvent.press(screen.getByLabelText("Выбрать файл для памяти"));
+  await waitFor(() => expect(screen.getByText("Вложения · 2")).toBeTruthy());
+  expect(screen.getByLabelText("Распознавать по очереди").props.accessibilityState.selected).toBe(true);
+  fireEvent.press(screen.getByLabelText("Извлечь сведения из файла"));
+  await waitFor(() => expect(screen.getByLabelText("Распознанное содержимое файла").props.value).toContain("Файл 2: b.txt"));
+  expect(extractMedia).toHaveBeenCalledTimes(2);
+  expect((extractMedia as jest.Mock).mock.calls.map(x => x[0].name)).toEqual(["a.png", "b.txt"]);
+  expect(analyzeFilesTogether).not.toHaveBeenCalled();
+  fireEvent.press(screen.getByLabelText("Сохранить сведения в память"));
+  await waitFor(() => expect(saveMediaNote).toHaveBeenCalledWith("guest", expect.objectContaining({
+    files: multiple, title: "a.png", extractedText: expect.stringContaining("Файл 2: b.txt"),
+  }), expect.anything()));
+});
+
+test("joint mode uses one additional synthesis request and stores the shared result in the same note", async () => {
+  (DocumentPicker.getDocumentAsync as jest.Mock).mockResolvedValueOnce({ canceled: false, assets: multiple });
+  (extractMedia as jest.Mock).mockResolvedValueOnce("Фото").mockResolvedValueOnce("Документ");
+  (analyzeFilesTogether as jest.Mock).mockResolvedValueOnce("Оба файла описывают один рецепт.");
+  const screen = render(<MemoryImportScreen />);
+  fireEvent.press(screen.getByLabelText("Выбрать файл для памяти"));
+  await waitFor(() => expect(screen.getByText("Вложения · 2")).toBeTruthy());
+  fireEvent.press(screen.getByLabelText("Распознавать вместе"));
+  fireEvent.press(screen.getByLabelText("Извлечь сведения из файла"));
+  await waitFor(() => expect(screen.getByLabelText("Распознанное содержимое файла").props.value).toContain("Оба файла описывают один рецепт."));
+  expect(analyzeFilesTogether).toHaveBeenCalledTimes(1);
+  expect(analyzeFilesTogether).toHaveBeenCalledWith(expect.arrayContaining([
+    expect.objectContaining({ name: "a.png", text: "Фото" }),
+    expect.objectContaining({ name: "b.txt", text: "Документ" }),
+  ]), expect.anything(), true, expect.anything());
+  fireEvent.press(screen.getByLabelText("Сохранить сведения в память"));
+  await waitFor(() => expect(saveMediaNote).toHaveBeenCalledWith("guest", expect.objectContaining({
+    files: multiple, extractedText: expect.stringContaining("Совместный анализ материалов"),
+  }), expect.anything()));
+});
+
+test("joint analysis failure preserves independently recognized files for one note", async () => {
+  (DocumentPicker.getDocumentAsync as jest.Mock).mockResolvedValueOnce({ canceled: false, assets: multiple });
+  (extractMedia as jest.Mock).mockResolvedValueOnce("Фото").mockRejectedValueOnce(new Error("Кодек недоступен"));
+  (analyzeFilesTogether as jest.Mock).mockRejectedValueOnce(new Error("Провайдер недоступен"));
+  const screen = render(<MemoryImportScreen />);
+  fireEvent.press(screen.getByLabelText("Выбрать файл для памяти"));
+  await waitFor(() => expect(screen.getByText("Вложения · 2")).toBeTruthy());
+  fireEvent.press(screen.getByLabelText("Распознавать вместе"));
+  fireEvent.press(screen.getByLabelText("Извлечь сведения из файла"));
+  await waitFor(() => expect(screen.getByText(/совместный анализ не получился/i)).toBeTruthy());
+  expect(screen.getByLabelText("Распознанное содержимое файла").props.value).toContain("Файл 1: a.png");
+  expect(screen.getByLabelText("Распознанное содержимое файла").props.value).not.toContain("Кодек недоступен");
+  expect(screen.getByText(/Не распознано — Кодек недоступен/)).toBeTruthy();
+});
+
+test("joint recognition is unavailable for sensitive notes and restores sequential mode", async () => {
+  (DocumentPicker.getDocumentAsync as jest.Mock).mockResolvedValueOnce({ canceled: false, assets: multiple });
+  const screen = render(<MemoryImportScreen />);
+  fireEvent.press(screen.getByLabelText("Выбрать файл для памяти"));
+  await waitFor(() => expect(screen.getByText("Вложения · 2")).toBeTruthy());
+  fireEvent.press(screen.getByLabelText("Распознавать вместе"));
+  fireEvent.press(screen.getByLabelText("Личные — только на телефоне"));
+  expect(screen.getByLabelText("Распознавать вместе").props.accessibilityState.disabled).toBe(true);
+  expect(screen.getByLabelText("Распознавать по очереди").props.accessibilityState.selected).toBe(true);
 });
