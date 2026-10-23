@@ -34,7 +34,7 @@ export function NebulaHomeHeader({
 }) {
   const t = useTheme();
   return <View testID="nebula-home-header" style={{
-    minHeight: 60, flexDirection: "row", alignItems: "center",
+    height: 72, flexDirection: "row", alignItems: "center",
     gap: nebulaSpacing.xs, backgroundColor: t.panel,
     borderBottomWidth: 1, borderColor: t.line,
     paddingHorizontal: nebulaSpacing.sm, paddingVertical: nebulaSpacing.xs,
@@ -42,7 +42,9 @@ export function NebulaHomeHeader({
     <Text accessibilityRole="header" style={{ color: t.text, fontWeight: "800", fontSize: 18, letterSpacing: -0.5 }}>
       Pers<Text style={{ color: t.accent }}>AI</Text>
     </Text>
-    {showOrb ? <NebulaHomeArtwork size={40} phase={orbPhase} /> : null}
+    <View style={{ width: 48, height: 48, justifyContent: "center", alignItems: "center" }}>
+      {showOrb ? <NebulaHomeArtwork size={48} phase={orbPhase} /> : null}
+    </View>
     <Pressable accessibilityRole="button" accessibilityLabel="Выбрать модель и подключение"
       accessibilityHint="Открыть выбранное подключение и его настройки"
       onPress={onConnections} style={{
@@ -53,9 +55,10 @@ export function NebulaHomeHeader({
       <Text numberOfLines={1} style={{ width: "100%", color: t.text, fontSize: 12, fontWeight: "600" }}>
         {connectionName || "Выбрать модель"} · {model || "Нет подключения"} ▾
       </Text>
-      {progressText ? <Text numberOfLines={1} accessibilityLiveRegion="polite" style={{ width: "100%", color: t.muted, fontSize: 10 }}>
-        {progressText}
-      </Text> : null}
+      <Text numberOfLines={1} accessibilityLiveRegion={progressText ? "polite" : "none"}
+        style={{ width: "100%", height: 13, color: t.muted, fontSize: 10 }}>
+        {progressText || " "}
+      </Text>
     </Pressable>
     {/* Keep IconAction's existing in-place hint contract: browser and
         accessibility tests expect the explanatory text on first activation. */}
