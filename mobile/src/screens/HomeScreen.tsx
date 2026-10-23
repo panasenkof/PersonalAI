@@ -197,7 +197,7 @@ function NebulaHomeContent() {
         style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 12 }}>
         {artworkSize > 0 ? <NebulaHomeArtwork size={artworkSize} phase={orbPhase} /> : null}
       </View> : null}
-      renderItem={({ item }) => <View style={{ alignSelf: item.role === "user" ? "flex-end" : "stretch", backgroundColor: item.role === "user" ? t.userBubble : item.role === "info" ? t.soft : t.panel,
+      renderItem={({ item }) => <View testID={"chat-message-" + item.role} style={{ alignSelf: item.role === "user" ? "flex-end" : "stretch", backgroundColor: item.role === "user" ? t.userBubble : item.role === "info" ? t.soft : t.panel,
         borderWidth: item.role === "assistant" ? 1 : 0, borderColor: t.line, borderRadius: 20, padding: 15, gap: 10 }}>
         {item.role === "assistant" ? <MarkdownText text={item.text} style={{ color: t.text, lineHeight: 23 }} /> :
           <Text selectable style={{ color: item.role === "user" ? t.userText : item.role === "info" ? t.muted : t.text, lineHeight: 23 }}>{item.text}</Text>}
@@ -250,6 +250,7 @@ function NebulaHomeContent() {
         streamFollowOverride.current = true;
         streamReadAnchored.current = false;
         nearChatBottom.current = true;
+        userScrollActive.current = false;
         setShowJumpToLatest(false);
         scheduleBottomFollow();
       }} style={{ position: "absolute", right: 16, bottom: 182, zIndex: 4,
