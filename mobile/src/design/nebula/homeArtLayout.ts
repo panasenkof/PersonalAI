@@ -53,5 +53,5 @@ export function isNebulaChatNearBottom(
 /** Keep the start of a long streamed reply readable instead of chasing its end. */
 export function shouldAnchorNebulaStreamingReply(replyHeight: number, viewportHeight: number): boolean {
   return Number.isFinite(replyHeight) && Number.isFinite(viewportHeight) &&
-    viewportHeight > 0 && replyHeight >= viewportHeight * 0.7;
+    viewportHeight > 0 && replyHeight >= Math.max(140, viewportHeight * 0.38);
 }
