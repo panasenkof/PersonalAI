@@ -146,11 +146,11 @@ function OneAttachment({ profile, attachment, expanded, visible, onToggle }: {
       <Text style={{ color: t.secondary, fontWeight: "700" }}>{expanded ? error ? "Повторить просмотр" : "Закрыть просмотр" : action}</Text>
     </Pressable> : <Text style={{ color: t.muted }}>Оригинал сохранён в зашифрованной памяти. Встроенный просмотр этого формата пока не поддерживается.</Text>}
     {active && loading ? <Text style={{ color: t.muted }}>Подготавливаю защищённый просмотр…</Text> : null}
-    {active && uri && !loading ? kind === "image" ? <Image accessibilityLabel={"Просмотр изображения " + attachment.name}
+    {active && uri && !loading && !error ? kind === "image" ? <Image accessibilityLabel={"Просмотр изображения " + attachment.name}
       source={{ uri }} resizeMode="contain" onError={() => setError("Не удалось показать изображение. Оригинал сохранён.")}
       style={{ width: "100%", height: 280, borderRadius: nebulaRadii.field }} />
       : kind === "audio" ? <AudioPreview uri={uri} onError={setError} />
       : kind === "video" ? <VideoPreview uri={uri} onError={setError} /> : null : null}
-    {active && error ? <Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text> : null}
+    {active && error ? <Text accessibilityRole="alert" style={{ color: t.err }}>{error} Для повторной попытки нажмите «Повторить просмотр».</Text> : null}
   </View>;
 }
