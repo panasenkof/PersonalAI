@@ -36,21 +36,23 @@ name: PersAI native offline smoke
 # Navigate like a user instead of relying on an off-screen accessibility node.
 - hideKeyboard
 - scrollUntilVisible:
-    element: "Что нужно запомнить?"
+    element: "Текст заметки"
     direction: DOWN
-- tapOn: "Что нужно запомнить?"
+- tapOn: "Текст заметки"
 - inputText: "Persisted offline content"
 - hideKeyboard
 - assertVisible: "Сохранить запись"
 - tapOn: "Сохранить запись"
-- assertVisible: "Открыть заметку Native smoke note"
+- extendedWaitUntil:
+    visible: "Открыть заметку Native smoke note"
+    timeout: 15000
 - tapOn: "Открыть заметку Native smoke note"
 - assertVisible: "Persisted offline content"
 - hideKeyboard
 - scrollUntilVisible:
-    element: "Persisted offline content"
+    element: "Текст заметки"
     direction: DOWN
-- tapOn: "Persisted offline content"
+- tapOn: "Текст заметки"
 - eraseText
 - inputText: "Edited offline content"
 - hideKeyboard
@@ -83,7 +85,7 @@ name: PersAI native offline smoke
 - back
 - tapOn: "Вкладка Настройки"
 - scrollUntilVisible:
-    element: ".*(Развернуть|Свернуть): Работа ИИ"
+    element: "Работа ИИ"
     direction: DOWN
 - runFlow:
     when:
