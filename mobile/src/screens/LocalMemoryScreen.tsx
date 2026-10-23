@@ -128,17 +128,17 @@ export function LocalMemoryScreen() {
         <View style={{ flexDirection: "row", alignItems: "center", gap: nebulaSpacing.xs }}>
           <Pressable accessibilityRole="button" accessibilityLabel="Открыть текущие записи"
             accessibilityState={{ selected: status === "active" }} onPress={() => setStatus("active")}
-            style={{ ...button, paddingHorizontal: nebulaSpacing.sm, minHeight: 40, backgroundColor: status === "active" ? t.soft : "transparent" }}>
+            style={{ ...button, paddingHorizontal: nebulaSpacing.sm, minHeight: nebulaTouch.minimum, backgroundColor: status === "active" ? t.soft : "transparent" }}>
             <Text style={{ color: status === "active" ? t.accent : t.muted, fontWeight: "600", fontSize: 13 }}>Записи</Text>
           </Pressable>
           <Pressable accessibilityRole="button" accessibilityLabel="Открыть архив"
             accessibilityState={{ selected: status === "archived" }} onPress={() => setStatus("archived")}
-            style={{ ...button, paddingHorizontal: nebulaSpacing.sm, minHeight: 40, backgroundColor: status === "archived" ? t.soft : "transparent" }}>
+            style={{ ...button, paddingHorizontal: nebulaSpacing.sm, minHeight: nebulaTouch.minimum, backgroundColor: status === "archived" ? t.soft : "transparent" }}>
             <Text style={{ color: status === "archived" ? t.accent : t.muted, fontWeight: "600", fontSize: 13 }}>Архив</Text>
           </Pressable>
           <Pressable accessibilityRole="button" accessibilityLabel="Открыть корзину"
             accessibilityState={{ selected: status === "trashed" }} onPress={() => setStatus("trashed")}
-            style={{ ...button, paddingHorizontal: nebulaSpacing.sm, minHeight: 40, backgroundColor: status === "trashed" ? t.soft : "transparent" }}>
+            style={{ ...button, paddingHorizontal: nebulaSpacing.sm, minHeight: nebulaTouch.minimum, backgroundColor: status === "trashed" ? t.soft : "transparent" }}>
             <Text style={{ color: status === "trashed" ? t.accent : t.muted, fontWeight: "600", fontSize: 13 }}>Корзина</Text>
           </Pressable>
           <View style={{ flex: 1 }} />
@@ -149,13 +149,13 @@ export function LocalMemoryScreen() {
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: nebulaSpacing.md }}>
           <Pressable accessibilityRole="button" accessibilityLabel="Резервные копии"
             onPress={() => navigation.navigate("MemoryBackup")}
-            style={{ minHeight: 40, flexDirection: "row", alignItems: "center", gap: 6 }}>
+            style={{ minHeight: nebulaTouch.minimum, flexDirection: "row", alignItems: "center", gap: 6 }}>
             <Feather name="download-cloud" size={16} color={t.accent} />
             <Text style={{ color: t.accent, fontSize: 13 }}>Копии</Text>
           </Pressable>
           <Pressable accessibilityRole="button" accessibilityLabel={selectedIds.length ? "Снять выбор записей" : "Выбрать показанные записи"}
             onPress={() => setSelectedIds(selectedIds.length ? [] : notes.slice(0, 100).map(n => n.id))}
-            style={{ minHeight: 40, flexDirection: "row", alignItems: "center", gap: 6 }}>
+            style={{ minHeight: nebulaTouch.minimum, flexDirection: "row", alignItems: "center", gap: 6 }}>
             <Feather name={selectedIds.length ? "x-circle" : "check-square"} size={16} color={t.accent} />
             <Text style={{ color: t.accent, fontSize: 13 }}>{selectedIds.length ? `Выбрано: ${selectedIds.length}` : "Выбрать"}</Text>
           </Pressable>
