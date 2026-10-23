@@ -3,6 +3,8 @@ import { Pressable, Text, View } from "react-native";
 import { useTheme } from "../../theme";
 import { nebulaRadii, nebulaSpacing, nebulaTouch } from "./tokens";
 import { IconAction } from "../../components/IconAction";
+import { NebulaHomeArtwork } from "./NebulaHomeArtwork";
+import type { NebulaPhase } from "./motion";
 
 /**
  * Phase A of the approved Home v0.3 migration: compact functional header.
@@ -16,6 +18,9 @@ export function NebulaHomeHeader({
   onHistory,
   onNewChat,
   newChatEnabled,
+  showOrb = false,
+  orbPhase = "idle",
+  progressText,
 }: {
   connectionName: string;
   model: string | undefined;
@@ -23,6 +28,9 @@ export function NebulaHomeHeader({
   onHistory: () => void;
   onNewChat: () => void;
   newChatEnabled: boolean;
+  showOrb?: boolean;
+  orbPhase?: NebulaPhase;
+  progressText?: string;
 }) {
   const t = useTheme();
   return <View testID="nebula-home-header" style={{
@@ -34,6 +42,7 @@ export function NebulaHomeHeader({
     <Text accessibilityRole="header" style={{ color: t.text, fontWeight: "800", fontSize: 18, letterSpacing: -0.5 }}>
       Pers<Text style={{ color: t.accent }}>AI</Text>
     </Text>
+    {showOrb ? <NebulaHomeArtwork size={40} phase={orbPhase} /> : null}
     <Pressable accessibilityRole="button" accessibilityLabel="Выбрать модель и подключение"
       accessibilityHint="Открыть выбранное подключение и его настройки"
       onPress={onConnections} style={{
@@ -44,6 +53,9 @@ export function NebulaHomeHeader({
       <Text numberOfLines={1} style={{ width: "100%", color: t.text, fontSize: 12, fontWeight: "600" }}>
         {connectionName || "Выбрать модель"} · {model || "Нет подключения"} ▾
       </Text>
+      {progressText ? <Text numberOfLines={1} accessibilityLiveRegion="polite" style={{ width: "100%", color: t.muted, fontSize: 10 }}>
+        {progressText}
+      </Text> : null}
     </Pressable>
     {/* Keep IconAction's existing in-place hint contract: browser and
         accessibility tests expect the explanatory text on first activation. */}
