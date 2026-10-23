@@ -52,6 +52,7 @@ describe("Android viewport regressions from real device recordings", () => {
       "components/AgentLimitsCard.tsx",
       "components/Collapsible.tsx",
       "navigation.tsx",
+      "design/nebula/ConversationHistorySheet.tsx",
       "components/BottomSheet.tsx",
       "components/PromptInput.tsx",
     ].map(path => readFileSync(join(root, path), "utf8")).join("\n");

@@ -1,17 +1,16 @@
-import Feather from "@expo/vector-icons/Feather";
 import { useFocusEffect, useIsFocused, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { StatusBar } from "expo-status-bar";
-import { ActivityIndicator, Alert, FlatList, Keyboard, KeyboardAvoidingView, Linking, Platform, Pressable, Text, TextInput, useWindowDimensions, View } from "react-native";
+import { ActivityIndicator, Alert, FlatList, Keyboard, KeyboardAvoidingView, Linking, Platform, Pressable, Text, useWindowDimensions, View } from "react-native";
 import { useProfile } from "../profile/ProfileContext";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useDirectChat } from "../direct-agent/ChatContext";
 import { PROVIDER_PRESETS, anonymousLocalAllowed, loadDirectConnections } from "../direct-agent/settings";
 import type { DirectAgentSettings } from "../direct-agent/settings";
 import type { RootStackParams } from "../navigation";
-import { BottomSheet } from "../components/BottomSheet";
 import { NebulaHomeHeader } from "../design/nebula/NebulaHomeHeader";
+import { ConversationHistorySheet } from "../design/nebula/ConversationHistorySheet";
 import { NebulaHomeArtwork } from "../design/nebula/NebulaHomeArtwork";
 import { nebulaEmptyOrbSize } from "../design/nebula/homeArtLayout";
 import { resolveNebulaHomePhase, resolveNebulaStatus, type NebulaVoicePhase } from "../design/nebula/homePhase";
@@ -42,7 +41,6 @@ function NebulaHomeContent() {
   const [settings, setSettings] = useState<DirectAgentSettings | null>(null);
   const [notice, setNotice] = useState("");
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [historySearch, setHistorySearch] = useState("");
   const [voiceReset, setVoiceReset] = useState(0);
   const [dictating, setDictating] = useState(false);
   const [voicePhase, setVoicePhase] = useState<NebulaVoicePhase>("idle");
@@ -224,17 +222,15 @@ function NebulaHomeContent() {
           disabled={!busy && (!canSend || !question.trim())} onPress={sendOrStop} />
       </View>
     </View>
-    <BottomSheet visible={historyOpen} title="Мои диалоги" onClose={() => setHistoryOpen(false)}>
-      <Text style={{ color: t.muted }}>Здесь сохранены ваши диалоги. Нажмите на название, чтобы продолжить разговор.</Text>
-      <TextInput accessibilityLabel="Поиск диалогов" value={historySearch} onChangeText={setHistorySearch} placeholder="Найти диалог" placeholderTextColor={t.muted} style={{ borderWidth: 1, borderColor: t.line, borderRadius: 16, minHeight: 48, padding: 12, color: t.text }} />
-      {conversations.filter(c => (c.title + c.rows.map(r => r.text).join(" ")).toLowerCase().includes(historySearch.toLowerCase())).map(c => <View key={c.id} style={{ flexDirection: "row", gap: 6, alignItems: "center" }}>
-        <Pressable accessibilityRole="button" accessibilityLabel={"Открыть диалог " + c.title} accessibilityState={{ selected: c.id === active?.id }} onPress={() => { store.select(c.id); setHistoryOpen(false); }} style={{ flex: 1, minHeight: 64, borderWidth: 1, borderColor: c.id === active?.id ? t.accent : t.line, borderRadius: 16, padding: 14, gap: 5 }}>
-          <Text numberOfLines={1} style={{ color: t.text, fontWeight: "700" }}>{c.title}</Text><Text style={{ color: t.muted, fontSize: 12 }}>{c.busy ? "Готовлю ответ…" : new Date(c.updatedAt).toLocaleDateString()}</Text>
-        </Pressable>
-        <Pressable accessibilityRole="button" accessibilityLabel={"Удалить диалог " + c.title} disabled={c.busy || Boolean(c.savingDraft) || c.deleting} style={action} onPress={() => Alert.alert("Удалить диалог?", c.title, [{ text: "Отмена", style: "cancel" }, { text: "Удалить", style: "destructive", onPress: () => void store.remove(c.id) }])}><Feather name="trash-2" size={19} color={c.busy ? t.muted : t.err} /></Pressable>
-      </View>)}
-      <Pressable accessibilityRole="button" style={action} onPress={() => { store.create(); setHistoryOpen(false); }}><Text style={{ color: t.accent, fontWeight: "700" }}>+ Новый диалог</Text></Pressable>
-    </BottomSheet>
+    <ConversationHistorySheet visible={historyOpen} conversations={conversations} activeId={active?.id}
+      onClose={() => setHistoryOpen(false)}
+      onSelect={c => { store.select(c.id); setHistoryOpen(false); }}
+      onDelete={c => Alert.alert("Удалить диалог?", c.title, [
+        { text: "Отмена", style: "cancel" },
+        { text: "Удалить", style: "destructive", onPress: () => void store.remove(c.id) },
+      ])}
+      onNewChat={() => { store.create(); setHistoryOpen(false); }}
+    />
   </KeyboardAvoidingView>;
 }
 
