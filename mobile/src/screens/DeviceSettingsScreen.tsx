@@ -5,7 +5,9 @@ import React, { useCallback, useState } from "react";
 import { KeyboardAvoidingView, Platform, ScrollView, Text } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useProfile } from "../profile/ProfileContext";
-import { loadDirectConnections } from "../direct-agent/settings";
+import { loadDirectConnections, type DirectConnection } from "../direct-agent/settings";
+import { MediaSettings } from "../media/MediaSettings";
+import { Collapsible } from "../components/Collapsible";
 import type { RootStackParams } from "../navigation";
 import { NebulaSettingRow, NebulaSection } from "../design/nebula/components";
 import { nebulaSpacing, nebulaTypography } from "../design/nebula/tokens";
@@ -19,12 +21,13 @@ export function DeviceSettingsScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParams>>();
   const t = useTheme(); const insets = useSafeAreaInsets();
   const [model, setModel] = useState("Выберите сервис и модель");
+  const [connections, setConnections] = useState<DirectConnection[]>([]);
   useFocusEffect(useCallback(() => {
     let alive = true;
     if (profile) void loadDirectConnections(profile).then(value => {
-      const active = value.connections.find(c => c.id === value.activeId)!;
-      if (alive) setModel(active.name + " · " + active.model);
-    }).catch(() => { if (alive) setModel("Открыть подключения"); });
+      const active = value.connections.find(c => c.id === value.activeId);
+      if (alive) { setModel(active ? active.name + " · " + active.model : "Выберите подключение"); setConnections(value.connections); }
+    }).catch(() => { if (alive) { setModel("Открыть подключения"); setConnections([]); } });
     return () => { alive = false; };
   }, [profile]));
   return <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
@@ -34,6 +37,16 @@ export function DeviceSettingsScreen() {
         <VoiceModelCard />
         <SmartSearchCard />
         <AgentLimitsCard key={profile} />
+      </NebulaSection>
+      <NebulaSection title="Мультимедиа">
+        <Collapsible id="settings.media-routing" icon="image" title="Распознавание файлов"
+          summary="Фото, видео и аудио · выбор подключений">
+          {profile && connections.length
+            ? <MediaSettings profile={profile} connections={connections} />
+            : <Text style={{ color: t.muted, ...nebulaTypography.label }}>
+                Сначала настройте хотя бы одно подключение в разделе «Модели и подключения».
+              </Text>}
+        </Collapsible>
       </NebulaSection>
       <NebulaSection title="Данные">
         <NebulaSettingRow icon="archive" title="Резервные копии" summary="Записи и диалоги · перенос на другой телефон" onPress={() => navigation.navigate("MemoryBackup")} />
