@@ -1,0 +1,40 @@
+appId: com.paigent.app
+name: PersAI native photo import and encrypted preview
+---
+# Synthetic local image staged by the runner, no network or camera permission.
+- launchApp:
+    clearState: true
+- runFlow: ../unlock.yaml
+- tapOn: "Вкладка Память"
+- tapOn: "Добавить сведения из файла"
+- tapOn: "Выбрать файл для памяти"
+- extendedWaitUntil:
+    visible: "persai-qa-photo.png"
+    timeout: 20000
+- tapOn: "persai-qa-photo.png"
+- extendedWaitUntil:
+    visible: "2 · Предпросмотр и распознавание"
+    timeout: 20000
+- assertVisible: "Изменить источник"
+- scrollUntilVisible:
+    element: "Сохранить сведения в память"
+    direction: DOWN
+- tapOn: "Сохранить сведения в память"
+- extendedWaitUntil:
+    visible: "Открыть заметку persai-qa-photo.png"
+    timeout: 20000
+- tapOn: "Открыть заметку persai-qa-photo.png"
+- extendedWaitUntil:
+    visible: "Вложения · 1"
+    timeout: 20000
+- scrollUntilVisible:
+    element: "Открыть фото persai-qa-photo.png"
+    direction: DOWN
+- tapOn: "Открыть фото persai-qa-photo.png"
+- extendedWaitUntil:
+    visible: "Просмотр изображения persai-qa-photo.png"
+    timeout: 20000
+- takeScreenshot: native-photo-opened
+- tapOn: "Открыть фото persai-qa-photo.png"
+- assertNotVisible: "Просмотр изображения persai-qa-photo.png"
+- takeScreenshot: native-photo-closed
