@@ -7,6 +7,8 @@ import type { ImportFile } from './kinds';
 import { mediaKind } from './kinds';
 
 export const MAX_ORIGINAL_BYTES = 80 * 1024 * 1024;
+export const MAX_ORIGINALS_PER_NOTE = 10;
+export const MAX_TOTAL_ORIGINAL_BYTES = 80 * 1024 * 1024;
 const PART_BYTES = 256 * 1024;
 export type Attachment = { id: string; entity_id: string; name: string; mime: string; size: number };
 const previewDirectory = () => new Directory(Paths.cache, 'persai-previews');
@@ -46,15 +48,30 @@ export async function writeOriginal(db: Pick<SQLiteDatabase, 'runAsync'>, entity
   } finally { handle.close(); }
 }
 /** Note + original + receipt commit together. Cancellation never leaves a partial note. */
-export async function saveMediaNote(profile: string, input: { file?: ImportFile; title: string; body: string; extractedText?: string; sensitivity: 'sensitive' | 'standard'; receipt?: string; collectionId?: string; sourceUrl?: string }, signal?: AbortSignal): Promise<string> {
+export async function saveMediaNote(profile: string, input: { file?: ImportFile; files?: ImportFile[]; title: string; body: string; extractedText?: string; sensitivity: 'sensitive' | 'standard'; receipt?: string; collectionId?: string; sourceUrl?: string }, signal?: AbortSignal): Promise<string> {
   return withLocalMemoryDatabase(profile, async db => {
     check(signal);
-    // Native hash avoids loading the complete original into JavaScript.
-    const source = input.file ? new File(input.file.uri) : null;
-    if (input.file && !/^(file|content):\/\//.test(input.file.uri)) throw new Error('Для оригинала нужен локальный файл.');
-    if (source && (!source.size || source.size > MAX_ORIGINAL_BYTES)) throw new Error('Выберите непустой файл размером до 80 МБ.');
-    const contentHash = source?.md5 || null;
-    if (input.file && !contentHash) throw new Error('Не удалось прочитать оригинал. Выберите файл повторно.');
+    // One canonical list for old single-file clients and future multi-picker UI.
+    // Keep the single-file fingerprint identical to older app versions.
+    if (input.file && input.files !== undefined) throw new Error('Передайте оригиналы одним способом.');
+    const originals = input.files || (input.file ? [input.file] : []);
+    if (originals.length > MAX_ORIGINALS_PER_NOTE) throw new Error('Не более 10 вложений в одной заметке.');
+    const originalHashes: string[] = [];
+    let combinedSize = 0;
+    // Native MD5 is only a deduplication fingerprint; per-part SHA-256 verifies
+    // decrypted originals. File bytes are never loaded into JS all at once.
+    for (const original of originals) {
+      if (!/^(file|content):\/\//.test(original.uri)) throw new Error('Для оригинала нужен локальный файл.');
+      mediaKind(original);
+      const source = new File(original.uri);
+      if (!source.size || source.size > MAX_ORIGINAL_BYTES) throw new Error('Выберите непустой файл размером до 80 МБ.');
+      combinedSize += source.size;
+      if (combinedSize > MAX_TOTAL_ORIGINAL_BYTES) throw new Error('Размер вложений вместе не должен превышать 80 МБ.');
+      const fingerprint = source.md5;
+      if (!fingerprint) throw new Error('Не удалось прочитать оригинал. Выберите файл повторно.');
+      originalHashes.push(fingerprint);
+    }
+    const contentHash: string | string[] | null = originals.length > 1 ? originalHashes : originalHashes[0] || null;
     const receipt = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, JSON.stringify([input.receipt || 'device-import', contentHash, input.title, input.body, input.extractedText || "", input.sensitivity, input.collectionId || "", input.sourceUrl || ""]));
     {
       const old = await db.getFirstAsync<{ entity_id: string }>('SELECT entity_id FROM memory_received_shares WHERE fingerprint=?', [receipt]);
@@ -65,12 +82,13 @@ export async function saveMediaNote(profile: string, input: { file?: ImportFile;
     let col = (await repo.listCollections()).find(c => input.collectionId ? c.id === input.collectionId : c.slug === slug);
     if (input.collectionId && !col) throw new Error("Раздел не найден.");
     if (!col) col = await repo.createCollection({ name: input.receipt ? 'Входящие' : 'Заметки', slug, sensitivity: input.receipt ? 'sensitive' : 'standard' });
-    const title = input.title.trim().slice(0, 160) || input.file?.name || 'Входящая запись';
+    const title = input.title.trim().slice(0, 160) || originals[0]?.name || 'Входящая запись';
     const entity = await repo.createEntity({ collection_id: col.id, domain: 'notes', title,
-      payload: { type: 'note', title, ...(input.sourceUrl ? { source_url: input.sourceUrl } : {}), body: input.body.trim(), ...(input.extractedText ? { extracted_text: input.extractedText.trim() } : {}), ...(input.file ? { source_file: input.file.name, source_media: mediaKind(input.file) } : {}) },
+      payload: { type: 'note', title, ...(input.sourceUrl ? { source_url: input.sourceUrl } : {}), body: input.body.trim(), ...(input.extractedText ? { extracted_text: input.extractedText.trim() } : {}), ...(originals.length ? { source_file: originals[0].name, source_media: mediaKind(originals[0]),
+        ...(originals.length > 1 ? { source_files: originals.map(f => f.name), source_media_types: originals.map(mediaKind) } : {}) } : {}) },
       sensitivity: input.sensitivity, source_kind: 'user', source_ref: input.receipt ? 'android-share' : 'device-import',
     }, async (tx, entityId) => {
-      if (input.file) await writeOriginal(tx, entityId, input.file, signal);
+      for (const original of originals) await writeOriginal(tx, entityId, original, signal);
       check(signal);
       await tx.runAsync('INSERT INTO memory_received_shares(fingerprint,entity_id) VALUES (?,?)', [receipt, entityId]);
     });
