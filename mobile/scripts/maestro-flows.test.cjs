@@ -42,7 +42,7 @@ test("reopening an editor must not send Android Back via hideKeyboard before edi
   assert.ok(point >= 0, "native persistence assertion must remain");
   const nextInput = flow.indexOf('- tapOn:\n    id: "note-body-input"', point);
   assert.ok(nextInput > point, "tap existing editor after the persistence assertion");
-  assert.doesNotMatch(flow.slice(point, nextInput), /hideKeyboard|scrollUntilVisible/, "no navigation-triggering actions between saved text and editor tap");
+  assert.doesNotMatch(flow.slice(point, nextInput).split("\n").filter(line => !line.trim().startsWith("#")).join("\n"), /hideKeyboard|scrollUntilVisible/, "no navigation-triggering actions between saved text and editor tap");
 });
 test("generated fixture is an offline PNG", () => {
   const { png } = require("./prepare-maestro-fixtures.cjs");
