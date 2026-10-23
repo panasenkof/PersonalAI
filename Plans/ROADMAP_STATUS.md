@@ -4,9 +4,9 @@
 
 ## Обновление после #101–103 (23.10.2026)
 
-- \`main\` на момент проверки: \`0d5535c02f110f3d605a45fd8db530b4450d0a4d\`. [#101](https://github.com/panasenkof/PersonalAI/pull/101) / [#102](https://github.com/panasenkof/PersonalAI/pull/102) / [#103](https://github.com/panasenkof/PersonalAI/pull/103) **слиты**; их финальные PR CI **успешны**.
+- `main` на момент проверки: `0d5535c02f110f3d605a45fd8db530b4450d0a4d`. [#101](https://github.com/panasenkof/PersonalAI/pull/101) / [#102](https://github.com/panasenkof/PersonalAI/pull/102) / [#103](https://github.com/panasenkof/PersonalAI/pull/103) **слиты**; их финальные PR CI **успешны**.
 - №86/88/89: Home и первая U1-панель реализованы **частично**. №87/90: обязательные автоматические проверки существуют, **ручная Android-приёмка новых изменений не выполнена**; завершение этапов не подтверждено.
-- Последний найденный подписанный выпуск [b339-a1](https://github.com/panasenkof/PersonalAI/releases/tag/android-test-b339-a1) соответствует #101, **не** #102/#103. Требуется подписанный release после main \`0d5535c\`, успешного CI и [совмещённой приёмки](ANDROID_ACCEPTANCE_PR101_103.md). Не заменять release временным emulator APK.
+- Последний найденный подписанный выпуск [b339-a1](https://github.com/panasenkof/PersonalAI/releases/tag/android-test-b339-a1) соответствует #101, **не** #102/#103. Требуется подписанный release после main `0d5535c`, успешного CI и [совмещённой приёмки](ANDROID_ACCEPTANCE_PR101_103.md). Не заменять release временным emulator APK.
 - №27/30 (микрофон) на телефоне с новым APK всё ещё открыты; №63а (восстановление в отдельной памяти) специально отложен; №83–85, бюджет №54, автоматизации и умный дом №91 не меняют статус из-за этих UI PR.
 
 ## Историческая инвентаризация на 22.10.2026
