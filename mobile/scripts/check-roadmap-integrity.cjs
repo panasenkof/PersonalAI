@@ -46,6 +46,8 @@ const required = [
   "Plans/ASSISTANT_FEATURES.md",
   "Plans/LOCAL_MULTIMODAL_AI.md",
   "Plans/SMART_HOME.md",
+  "Plans/ANDROID_PERFORMANCE.md",
+  "docs/ANDROID_UI_TESTING.md",
   "docs/design/NEBULA_PRODUCTION_ROLLOUT.md",
   "docs/design/NEBULA_PERFORMANCE_GATE.md",
   "docs/DEVICE_QA.md",

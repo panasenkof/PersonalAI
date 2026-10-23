@@ -1,0 +1,125 @@
+appId: com.paigent.app
+name: PersAI native offline smoke
+---
+- launchApp:
+    clearState: true
+- runFlow: ../unlock.yaml
+# 1. Real IME, editable composer and reachable actions after clear.
+- tapOn: "Сообщение ассистенту"
+- inputText: "Native draft"
+- assertVisible: "Очистить сообщение"
+- assertVisible: "Отправить запрос"
+- tapOn: "Очистить сообщение"
+- assertNotVisible: "Native draft"
+- inputText: "After clear"
+- assertVisible: "After clear"
+- hideKeyboard
+- takeScreenshot: 01-composer
+# 2. Navigation preserves drafts and the authenticated session.
+- tapOn: "Вкладка Память"
+- assertVisible: "Новая заметка"
+- tapOn: "Вкладка Настройки"
+- tapOn: "Вкладка Главная"
+- assertVisible: "After clear"
+# 3. Android modal opens/closes without privacy-cover oscillation.
+- tapOn: "История диалогов"
+- assertVisible: "Поиск диалогов"
+- takeScreenshot: 03-history
+- tapOn: "Закрыть панель Мои диалоги"
+- assertNotVisible: "Поиск диалогов"
+# 4. Create/edit a real SQLCipher note, without network/model credentials.
+- tapOn: "Вкладка Память"
+- tapOn: "Новая заметка"
+- tapOn:
+    id: "note-title-input"
+- inputText: "Native smoke note"
+# Android keyboard obscures the body input below the title on Pixel 2.
+# Navigate like a user instead of relying on an off-screen accessibility node.
+- hideKeyboard
+- scrollUntilVisible:
+    element:
+      id: "note-body-input"
+    direction: DOWN
+- tapOn:
+    id: "note-body-input"
+- inputText: "Persisted offline content"
+- hideKeyboard
+- extendedWaitUntil:
+    visible:
+      id: "note-save-button"
+    timeout: 15000
+- tapOn:
+    id: "note-save-button"
+- extendedWaitUntil:
+    visible: "Открыть заметку Native smoke note"
+    timeout: 15000
+- tapOn: "Открыть заметку Native smoke note"
+# The note preview in the list also contains the saved body. Wait for the
+# editor's own save action before touching its input, not for preview text.
+- extendedWaitUntil:
+    visible:
+      id: "note-save-button"
+    timeout: 15000
+- assertVisible: "Persisted offline content"
+- hideKeyboard
+- scrollUntilVisible:
+    element:
+      id: "note-body-input"
+    direction: DOWN
+- tapOn:
+    id: "note-body-input"
+- eraseText
+- inputText: "Edited offline content"
+- hideKeyboard
+- extendedWaitUntil:
+    visible:
+      id: "note-save-button"
+    timeout: 15000
+- tapOn:
+    id: "note-save-button"
+- takeScreenshot: 04-memory
+# 5. Settings and notes survive a full process restart.
+- tapOn: "Вкладка Настройки"
+- scrollUntilVisible:
+    element: "Развернуть: Работа ИИ"
+    direction: DOWN
+- tapOn: "Развернуть: Работа ИИ"
+- scrollUntilVisible:
+    element: "Лимит обращений к LLM на сообщение"
+    direction: DOWN
+- tapOn: "Лимит обращений к LLM на сообщение"
+- eraseText
+- inputText: "6"
+- hideKeyboard
+- scrollUntilVisible:
+    element: "Сохранить лимит обращений к LLM"
+    direction: DOWN
+- tapOn: "Сохранить лимит обращений к LLM"
+- assertVisible: "Лимит сохранён. Он действует для следующих сообщений."
+- launchApp
+- runFlow: ../unlock.yaml
+- tapOn: "Вкладка Память"
+- tapOn: "Открыть заметку Native smoke note"
+- assertVisible: "Edited offline content"
+- back
+- tapOn: "Вкладка Настройки"
+- scrollUntilVisible:
+    element: "Работа ИИ"
+    direction: DOWN
+- runFlow:
+    when:
+      visible: "Развернуть: Работа ИИ"
+    commands:
+      - tapOn: "Развернуть: Работа ИИ"
+- scrollUntilVisible:
+    element: "Лимит обращений к LLM на сообщение"
+    direction: DOWN
+- assertVisible: "6"
+- takeScreenshot: 05-persistence
+# 6. Short background round trip reuses the application session.
+- tapOn: "Вкладка Главная"
+- pressKey: Home
+- launchApp:
+    stopApp: false
+- assertVisible: "Сообщение ассистенту"
+- assertNotVisible: "Разблокировать приложение"

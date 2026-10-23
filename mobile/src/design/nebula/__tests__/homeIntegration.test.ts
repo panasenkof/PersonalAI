@@ -32,6 +32,7 @@ describe("Nebula Home real chat and dictation status routing", () => {
 describe("Native Home integration remains isolated and accessible", () => {
   const base = join(__dirname, "..");
   const home = readFileSync(join(base, "..", "..", "screens", "HomeScreen.tsx"), "utf8");
+  const header = readFileSync(join(base, "NebulaHomeHeader.tsx"), "utf8");
   const native = readFileSync(join(base, "NebulaHomeArtwork.native.tsx"), "utf8");
   const web = readFileSync(join(base, "NebulaHomeArtwork.tsx"), "utf8");
   const skia = readFileSync(join(base, "NebulaSkiaExperiment.tsx"), "utf8");
@@ -63,6 +64,9 @@ describe("Native Home integration remains isolated and accessible", () => {
     expect(home).toContain("<NebulaHomeThemeProvider>");
     expect(tabs).toContain('route.name === "Home" ? nebulaHomeColors : t');
     expect(home).toContain('testID="nebula-home-empty-state"');
-    expect(home).toContain('testID="nebula-home-live-status"');
+    expect(home).toContain("showOrb={Boolean(active?.rows.length)}");
+    expect(header).toContain('testID="nebula-home-header"');
+    expect(header).toContain("<NebulaHomeArtwork size={48} phase={orbPhase} />");
+    expect(header).toContain('{progressText || " "}');
   });
 });

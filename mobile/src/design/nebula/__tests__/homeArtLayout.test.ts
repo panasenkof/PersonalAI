@@ -23,8 +23,8 @@ describe("Nebula Home keyboard and visual viewport", () => {
     expect(nebulaEmptyOrbSize({ ...base, composerOccluded: true, listHeight: 130 })).toBe(0);
     expect(nebulaEmptyOrbSize({ ...base, composerOccluded: false })).toBe(320);
   });
-  it("keeps a small inline status orb without growing a separate 116dp footer", () => {
-    expect(nebulaConversationOrbSize(base)).toBe(56);
+  it("preserves the legacy orb size limit while the live orb resides in the header", () => {
+    expect(nebulaConversationOrbSize(base)).toBe(96);
     expect(nebulaConversationOrbSize({ ...base, composerOccluded: true, listHeight: 250 })).toBe(0);
     expect(nebulaConversationOrbSize({ ...base, composerOccluded: true, listHeight: 160 })).toBe(0);
     expect(nebulaConversationOrbSize({ ...base, composerOccluded: false, listHeight: 110 })).toBe(0);
