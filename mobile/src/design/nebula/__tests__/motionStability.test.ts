@@ -27,13 +27,14 @@ describe("Nebula motion stability regression", () => {
     expect(footer).toBeGreaterThan(0);
     expect(row).toBeGreaterThan(footer);
     expect(home.substring(footer, row)).not.toContain("<NebulaHomeArtwork");
-    expect(home).toContain("statusArtworkSize > 0 ? <NebulaHomeArtwork");
+    expect(home).toContain("statusArtworkSize > 0 && !active?.rows?.length ? <NebulaHomeArtwork");
+    expect(home).toContain('testID="nebula-conversation-orb"');
     expect(nebulaConversationOrbSize({
       windowWidth: 390, windowHeight: 820, listHeight: 420, composerOccluded: true,
     })).toBe(0);
     expect(nebulaConversationOrbSize({
       windowWidth: 390, windowHeight: 820, listHeight: 420, composerOccluded: false,
-    })).toBe(56);
+    })).toBe(96);
     expect(nativeArtwork).toContain("showStatusText={size > 100}");
   });
 
