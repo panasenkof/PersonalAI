@@ -38,7 +38,7 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
   try {
   browser = await chromium.launch({ headless: true, ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}), args: ['--no-sandbox'] });
     if (process.env.SCREENSHOT_DIR) fs.mkdirSync(process.env.SCREENSHOT_DIR, { recursive: true });
-    for (const width of [320, 390, 768]) {
+    for (const width of [320, 360, 390, 430, 768]) {
       const page = await browser.newPage({ viewport: { width, height: 900 }, colorScheme: width === 390 ? "dark" : "light" });
       currentPage = page;
       const errors = []; page.on('pageerror', error => { errors.push(error.message); console.error('UI runtime:', error.message); if (process.env.GITHUB_ACTIONS) console.log('::warning title=UI runtime::' + String(error.message).slice(0, 500).replace(/\n/g, '%0A')); });
@@ -229,6 +229,10 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByLabel('Вкладка Память', { exact: true }).click();
       await page.getByLabel('Вкладка Настройки', { exact: true }).click();
       assert.equal(await page.getByText('Безопасность', { exact: true }).count(), 0);
+      if (process.env.SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, `settings-overview-${width}.png`) });
+      const settingsCanvas = await page.getByTestId('settings-overview').evaluate(el => getComputedStyle(el).backgroundColor);
+      assert.equal(settingsCanvas, 'rgb(7, 13, 32)', 'Working screens use the approved dark theme regardless of OS appearance');
+      assert(await page.getByLabel('Модели и подключения', { exact: true }).count());
       await page.getByLabel('Развернуть: Работа ИИ', { exact: true }).click();
       const limitInput = page.getByLabel('Лимит обращений к LLM на сообщение', { exact: true });
       assert.equal(await limitInput.inputValue(), '4');

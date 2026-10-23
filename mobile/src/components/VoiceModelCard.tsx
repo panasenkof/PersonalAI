@@ -26,7 +26,7 @@ export function VoiceModelCard({ defaultOpen = false }: { defaultOpen?: boolean 
 
   const summary = (selected === "whisper" ? "Whisper на телефоне" : "Системное распознавание") +
     (status.state === "ready" ? " · модель " + (WHISPER_CHOICES.find(c => c.id === status.id)?.name || "") + " скачана" : status.state === "downloading" ? ` · скачивается ${status.progress}%` : "");
-  return <Collapsible id="settings.voice" title="Голосовой ввод" summary={summary} defaultOpen={defaultOpen}>
+  return <Collapsible icon="mic" id="settings.voice" title="Голосовой ввод" summary={summary} defaultOpen={defaultOpen}>
     <Text style={{ color: t.muted, lineHeight: 20 }}>Выберите способ диктовки для чата и заметок. Выбор сохраняется; скачанную модель Whisper можно использовать снова в любой момент.</Text>
     <View accessibilityRole="radiogroup" accessibilityLabel="Способ распознавания речи" style={{ gap: 8 }}>
       {([
@@ -39,7 +39,7 @@ export function VoiceModelCard({ defaultOpen = false }: { defaultOpen?: boolean 
         return <Pressable key={option.id} accessibilityRole="radio" accessibilityLabel={option.name} aria-checked={checked} accessibilityState={{ disabled }} disabled={disabled}
           onPress={() => { void setVoiceEngine(option.id).catch(() => {}); }}
           style={{ minHeight: 56, padding: 12, gap: 4, borderRadius: 14, borderWidth: 1, borderColor: checked ? t.accent : t.line, backgroundColor: checked ? t.soft : t.panel, opacity: unavailable ? 0.5 : 1 }}>
-          <Text style={{ color: checked ? t.accent : t.text, fontWeight: "600" }}>{checked ? "● " : "○ "}{option.name}</Text>
+          <Text style={{ color: checked ? t.secondary : t.text, fontWeight: "600" }}>{checked ? "● " : "○ "}{option.name}</Text>
           <Text style={{ color: t.muted, fontSize: 12, lineHeight: 17 }}>{option.detail}</Text>
         </Pressable>;
       })}
@@ -47,7 +47,7 @@ export function VoiceModelCard({ defaultOpen = false }: { defaultOpen?: boolean 
     {!voice.loaded ? <Text style={{ color: t.muted }}>Загружаю настройки голоса…</Text> : null}
     {voice.error ? <Text accessibilityRole="alert" style={{ color: t.err }}>{voice.error}</Text> : null}
     {voice.loaded && !voice.error && selected === "whisper" && status.state !== "ready" && status.state !== "unsupported" ?
-      <Text style={{ color: t.accent }}>Для диктовки Whisper скачайте модель ниже или дождитесь завершения скачивания.</Text> : null}
+      <Text style={{ color: t.secondary }}>Для диктовки Whisper скачайте модель ниже или дождитесь завершения скачивания.</Text> : null}
     {selected === "system" && status.state === "downloading" ? <Text style={{ color: t.muted }}>Модель Whisper скачивается в фоне: {status.progress}%.</Text> : null}
     {voice.loaded && selected === "whisper" ? <>
     <Text style={{ color: t.text, fontSize: 16, fontWeight: "700", marginTop: 6 }}>Голос без интернета</Text>
@@ -59,12 +59,12 @@ export function VoiceModelCard({ defaultOpen = false }: { defaultOpen?: boolean 
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}><ActivityIndicator />
           <Text style={{ color: t.text }}>Скачивается {WHISPER_CHOICES.find(c => c.id === status.id)?.name}: {status.progress}%</Text></View>
         <View style={{ height: 6, borderRadius: 3, backgroundColor: t.soft, overflow: "hidden" }}><View style={{ width: `${status.progress}%`, height: 6, backgroundColor: t.accent }} /></View>
-        <Pressable accessibilityRole="button" accessibilityLabel="Отменить скачивание модели" onPress={cancelWhisperDownload} style={button(false)}><Text style={{ color: t.accent }}>Отменить</Text></Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel="Отменить скачивание модели" onPress={cancelWhisperDownload} style={button(false)}><Text style={{ color: t.secondary }}>Отменить</Text></Pressable>
       </View> : <>
         <View style={{ gap: 6 }}>
           {WHISPER_CHOICES.map(c => <Pressable key={c.id} accessibilityRole="button" accessibilityLabel={"Модель " + c.name} accessibilityState={{ selected: choice === c.id }}
             onPress={() => setChoice(c.id)} style={{ minHeight: 44, justifyContent: "center" }}>
-            <Text style={{ color: choice === c.id ? t.accent : t.text }}>{choice === c.id ? "● " : "○ "}{c.name} · около {c.approxMb} МБ{current === c.id ? " · скачана" : ""}</Text>
+            <Text style={{ color: choice === c.id ? t.secondary : t.text }}>{choice === c.id ? "● " : "○ "}{c.name} · около {c.approxMb} МБ{current === c.id ? " · скачана" : ""}</Text>
             <Text style={{ color: t.muted, fontSize: 12, marginLeft: 18 }}>{c.hint}</Text>
           </Pressable>)}
         </View>

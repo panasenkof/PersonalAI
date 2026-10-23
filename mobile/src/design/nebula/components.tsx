@@ -1,6 +1,6 @@
 import React from "react";
 import Feather from "@expo/vector-icons/Feather";
-import { Pressable, Text, View, useColorScheme, type StyleProp, type ViewStyle } from "react-native";
+import { Pressable, Text, View, type StyleProp, type ViewStyle } from "react-native";
 import { nebulaColors, nebulaRadii, nebulaSpacing, nebulaTouch, nebulaTypography, type NebulaColors } from "./tokens";
 
 /**
@@ -9,7 +9,7 @@ import { nebulaColors, nebulaRadii, nebulaSpacing, nebulaTouch, nebulaTypography
  * The approved REF-ICON-A and REF-ORB-B are mandatory for visual identity.
  */
 export function useNebulaColors(): NebulaColors {
-  return nebulaColors(useColorScheme() === "dark" ? "dark" : "light");
+  return nebulaColors("dark");
 }
 
 export function NebulaSurface({ children, elevated = false, padding = "md", style, accessibilityLabel }: {
@@ -90,7 +90,7 @@ export function NebulaSettingRow({ title, summary, icon, onPress, disabled = fal
       borderWidth: 1, borderColor: c.border,
       backgroundColor: pressed ? c.surfaceMuted : c.surface, opacity: disabled ? .5 : 1,
     })}>
-    <Feather name={icon} size={22} color={c.accent} />
+    <Feather name={icon} size={22} color={c.cyan} />
     <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
       <Text style={{ color: c.text, ...nebulaTypography.body, fontWeight: "600" }}>{title}</Text>
       {summary ? <Text style={{ color: c.textSecondary, ...nebulaTypography.label }}>{summary}</Text> : null}

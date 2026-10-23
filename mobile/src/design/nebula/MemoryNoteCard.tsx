@@ -4,7 +4,7 @@ import Feather from "@expo/vector-icons/Feather";
 import type { EntityRecord } from "../../local-memory/types";
 import { useTheme } from "../../theme";
 import { nebulaRadii, nebulaSpacing } from "./tokens";
-import { memoryNoteDate, memoryNotePreview } from "./memoryNotePresentation";
+import { memoryNoteDate, memoryNotePreview, memoryNoteType } from "./memoryNotePresentation";
 
 /** The library card is display-only: selection, long-press and navigation
  * remain under the owning Memory screen. No persistence or LLM calls here. */
@@ -16,6 +16,8 @@ export function MemoryNoteCard({ note, sectionName, selected, onOpen, onToggleSe
   onToggleSelection: () => void;
 }) {
   const t = useTheme();
+  const type = memoryNoteType(note);
+  const sourceName = typeof note.payload.source_file === "string" ? note.payload.source_file : "";
   const preview = memoryNotePreview(note);
   const date = memoryNoteDate(note.updated_at);
   return <Pressable testID={"memory-note-" + note.id}
@@ -28,13 +30,16 @@ export function MemoryNoteCard({ note, sectionName, selected, onOpen, onToggleSe
       padding: nebulaSpacing.md, gap: nebulaSpacing.xs, minHeight: 88,
     })}>
     <View style={{ flexDirection: "row", alignItems: "flex-start", gap: nebulaSpacing.xs }}>
-      {selected ? <Feather name="check-square" size={20} color={t.accent} style={{ marginTop: 3 }} /> : null}
+      <View accessible={false} style={{ padding: nebulaSpacing.xs, borderRadius: nebulaRadii.chip, backgroundColor: t.soft }}><Feather name={type.icon} size={20} color={t.secondary} /></View>
+      {selected ? <Feather name="check-square" size={20} color={t.secondary} style={{ marginTop: 3 }} /> : null}
       <Text numberOfLines={2} style={{ flex: 1, minWidth: 0, color: t.text, fontWeight: "700", fontSize: 16, lineHeight: 23 }}>
         {note.title || "Без названия"}
       </Text>
       <Feather name="chevron-right" size={18} color={t.muted} />
     </View>
+    <Text style={{ color: t.secondary, fontSize: 13, lineHeight: 20 }}>{type.label}</Text>
     {preview ? <Text numberOfLines={3} style={{ color: t.muted, fontSize: 14, lineHeight: 20 }}>{preview}</Text> : null}
+    {sourceName && sourceName !== note.title ? <Text numberOfLines={2} style={{ color: t.muted, fontSize: 13, lineHeight: 20 }}>{sourceName}</Text> : null}
     <Text numberOfLines={1} style={{ color: t.muted, fontSize: 12, lineHeight: 18 }}>
       {sectionName}{date ? " · " + date : ""}
     </Text>

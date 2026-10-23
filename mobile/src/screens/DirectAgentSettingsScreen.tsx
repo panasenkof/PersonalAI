@@ -164,14 +164,14 @@ export function DirectAgentSettingsScreen() {
               style={{ padding: 14, borderRadius: 18, borderWidth: 1, borderColor: on ? t.accent : t.line, backgroundColor: on ? t.soft : t.panel }}>
               <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
                 <Text style={{ color: t.text, fontWeight: "700", flex: 1 }}>{c.name}</Text>
-                {c.id === value.activeId ? <Text style={{ color: t.accent, fontSize: 12 }}>активна</Text> : null}
+                {c.id === value.activeId ? <Text style={{ color: t.secondary, fontSize: 12 }}>активна</Text> : null}
               </View>
               <Text style={{ ...small, marginTop: 4 }} numberOfLines={1}>{c.model || "модель не указана"} · {host(c.baseUrl)}</Text>
             </Pressable>;
           })}
           <Pressable disabled={busy || value.connections.length >= 20} accessibilityRole="button" accessibilityLabel="Добавить подключение"
             style={{ ...chip(false), alignItems: "center" }} onPress={() => add({ ...newDirectConnection("openai-compatible"), name: "Новое подключение", baseUrl: "", model: "" })}>
-            <Text style={{ color: t.accent, fontWeight: "700" }}>+ Новое подключение</Text>
+            <Text style={{ color: t.secondary, fontWeight: "700" }}>+ Новое подключение</Text>
           </Pressable>
         </View>
 
@@ -181,7 +181,7 @@ export function DirectAgentSettingsScreen() {
           <View style={{ flexDirection: "row", gap: 8 }}>
             {API_TYPES.map(a => <Pressable key={a.id} disabled={busy} accessibilityRole="button" accessibilityLabel={"Тип API " + a.name}
               accessibilityState={{ selected: type === a.id }} style={{ ...chip(type === a.id), flex: 1, alignItems: "center" }} onPress={() => setType(a.id)}>
-              <Text style={{ color: type === a.id ? t.accent : t.text, fontWeight: type === a.id ? "700" : "400" }}>{type === a.id ? "● " : "○ "}{a.name}</Text>
+              <Text style={{ color: type === a.id ? t.secondary : t.text, fontWeight: type === a.id ? "700" : "400" }}>{type === a.id ? "● " : "○ "}{a.name}</Text>
             </Pressable>)}
           </View>
           <Text style={small}>{API_TYPES.find(a => a.id === type)!.hint}</Text>
@@ -190,7 +190,7 @@ export function DirectAgentSettingsScreen() {
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
             {PROVIDER_PRESETS.filter(p => apiTypeOf(p.provider) === type).map(p => <Pressable key={p.id} disabled={busy} accessibilityRole="button"
               accessibilityLabel={"Шаблон " + p.name} style={chip(preset?.id === p.id)} onPress={() => applyPreset(p)}>
-              <Text style={{ color: t.accent }}>{p.name}</Text>
+              <Text style={{ color: t.secondary }}>{p.name}</Text>
             </Pressable>)}
           </View>
           <Text style={small}>Шаблон подставит адрес и модель; ключ вставьте свой.{preset ? " " + preset.hint : ""}</Text>
@@ -210,7 +210,7 @@ export function DirectAgentSettingsScreen() {
             onChangeText={model => update({ model })} placeholder="Например, deepseek-flash" placeholderTextColor={t.muted} style={field} />
           <Pressable accessibilityRole="button" accessibilityLabel="Проверить связь" disabled={busy || checking} onPress={() => void runCheck()}
             style={{ minHeight: 46, justifyContent: "center", alignItems: "center", borderRadius: 16, borderWidth: 1, borderColor: t.accent }}>
-            {checking ? <ActivityIndicator accessibilityLabel="Проверка связи" /> : <Text style={{ color: t.accent, fontWeight: "700" }}>Проверить связь</Text>}
+            {checking ? <ActivityIndicator accessibilityLabel="Проверка связи" /> : <Text style={{ color: t.secondary, fontWeight: "700" }}>Проверить связь</Text>}
           </Pressable>
           {check ? <Text selectable accessibilityRole="alert" style={{ color: check.ok ? t.ok : t.err }}>{check.ok ? "Связь есть. Модель ответила: «" + check.reply + "»" : check.message}</Text> : null}
         </View>
@@ -226,7 +226,7 @@ export function DirectAgentSettingsScreen() {
             <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
               {SEARCH_OPTIONS.filter(o => o.id !== "builtin" || selected.provider === "openai").map(o => <Pressable key={o.id} disabled={busy} accessibilityRole="button"
                 accessibilityLabel={"Поиск " + o.name} accessibilityState={{ selected: search === o.id }} style={chip(search === o.id)} onPress={() => chooseSearch(o.id)}>
-                <Text style={{ color: search === o.id ? t.accent : t.text, fontWeight: search === o.id ? "700" : "400" }}>{search === o.id ? "● " : "○ "}{o.name}</Text>
+                <Text style={{ color: search === o.id ? t.secondary : t.text, fontWeight: search === o.id ? "700" : "400" }}>{search === o.id ? "● " : "○ "}{o.name}</Text>
               </Pressable>)}
             </View>
             <Text style={small}>{SEARCH_OPTIONS.find(o => o.id === search)!.hint} У каждого способа поиска свой ключ; при переключении ключи сохраняются.</Text>
@@ -244,7 +244,7 @@ export function DirectAgentSettingsScreen() {
             </> : null}
             {search !== "builtin" ? <Pressable accessibilityRole="button" accessibilityLabel="Проверить поиск" disabled={busy || searching} onPress={() => void runSearchCheck()}
               style={{ minHeight: 46, justifyContent: "center", alignItems: "center", borderRadius: 16, borderWidth: 1, borderColor: t.accent }}>
-              {searching ? <ActivityIndicator accessibilityLabel="Проверка поиска" /> : <Text style={{ color: t.accent, fontWeight: "700" }}>Проверить поиск</Text>}
+              {searching ? <ActivityIndicator accessibilityLabel="Проверка поиска" /> : <Text style={{ color: t.secondary, fontWeight: "700" }}>Проверить поиск</Text>}
             </Pressable> : null}
             {searchCheck ? <Text selectable accessibilityRole="alert" style={{ color: searchCheck.ok ? t.ok : t.err }}>{searchCheck.ok ? "Поиск работает: найдено ссылок — " + searchCheck.count + (searchCheck.first ? ", первая: " + searchCheck.first : "") + "." : searchCheck.message}</Text> : null}
           </> : <Text style={small}>Помощник всегда сначала ищет в памяти телефона. С поиском он сообщит, что в памяти пусто, и поищет в интернете.</Text>}
@@ -266,7 +266,7 @@ export function DirectAgentSettingsScreen() {
           ])}><Text style={{ color: t.err }}>Удалить это подключение</Text></Pressable> : null}
       </> : null}
       {notice && !value ? <><Text accessibilityRole="alert" style={{ color: t.err }}>{notice}</Text>
-        <Pressable accessibilityRole="button" onPress={() => setRetry(x => x + 1)} style={{ minHeight: 44 }}><Text style={{ color: t.accent }}>Повторить загрузку</Text></Pressable></> : null}
+        <Pressable accessibilityRole="button" onPress={() => setRetry(x => x + 1)} style={{ minHeight: 44 }}><Text style={{ color: t.secondary }}>Повторить загрузку</Text></Pressable></> : null}
     {profile && value ? <MediaSettings profile={profile} connections={value.connections} /> : null}
       </ScrollView>
     </KeyboardAvoidingView>

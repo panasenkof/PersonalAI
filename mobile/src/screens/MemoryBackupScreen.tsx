@@ -27,7 +27,7 @@ export function MemoryBackupScreen() {
     <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 24, gap: 16 }}>
       <Text style={{ color: t.text, fontSize: 25, fontWeight: "800" }}>Резервные копии</Text>
       <Text style={{ color: t.muted, lineHeight: 22 }}>Записи и диалоги сохраняются в зашифрованном файле. Код восстановления храните отдельно: без него файл нельзя прочитать.</Text>
-      <Pressable accessibilityRole="button" accessibilityLabel="Создать новый код восстановления" disabled={busy} onPress={() => { setCode(createRecoveryCode()); setConfirmed(false); }} style={button}><Text style={{ color: t.accent, fontWeight: "700" }}>Создать код восстановления</Text></Pressable>
+      <Pressable accessibilityRole="button" accessibilityLabel="Создать новый код восстановления" disabled={busy} onPress={() => { setCode(createRecoveryCode()); setConfirmed(false); }} style={button}><Text style={{ color: t.secondary, fontWeight: "700" }}>Создать код восстановления</Text></Pressable>
       {code ? <>
         <Text selectable accessibilityLabel="Код восстановления резервной копии" style={{ color: t.text, fontFamily: "monospace" }}>{code}</Text>
         <Pressable accessibilityRole="checkbox" accessibilityLabel="Код сохранён отдельно" accessibilityState={{ checked: confirmed }} onPress={() => setConfirmed(c => !c)} style={button}><Text style={{ color: t.text }}>{confirmed ? "☑" : "☐"} Я сохранил код отдельно от файла</Text></Pressable>
