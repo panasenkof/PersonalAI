@@ -5,6 +5,8 @@ cd "$(dirname "$0")/.."
 case "${SMOKE_ATTEMPT:-1}" in 1|2) ;; *) echo "Invalid smoke attempt" >&2; exit 2;; esac
 RESULTS_DIR="qa/android-results/attempt-${SMOKE_ATTEMPT:-1}"
 mkdir -p "$RESULTS_DIR"
+# Marker distinguishes emulator boot/setup failures from problems after smoke started.
+touch "$RESULTS_DIR/smoke-started"
 # Disposable emulator only: this script installs an ephemeral APK and sets a PIN.
 [[ "$(adb shell getprop ro.kernel.qemu | tr -d '\r')" == 1 ]]
 collect() {
