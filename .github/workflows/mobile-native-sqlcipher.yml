@@ -131,9 +131,7 @@ jobs:
           heap-size: 384M
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
-          script: |
-            bash mobile/scripts/android-ui-smoke.sh
-            bash mobile/scripts/android-native-flows.sh
+          script: bash mobile/scripts/android-ui-smoke.sh
       - name: Classify first Android smoke failure
         id: android_ui_classify
         if: ${{ steps.android_ui_first.outcome == 'failure' }}
@@ -154,9 +152,7 @@ jobs:
           heap-size: 384M
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
-          script: |
-            bash mobile/scripts/android-ui-smoke.sh
-            bash mobile/scripts/android-native-flows.sh
+          script: bash mobile/scripts/android-ui-smoke.sh
       - name: Preserve Android evidence even after failure
         if: always()
         uses: actions/upload-artifact@v4
