@@ -85,3 +85,23 @@ test('native PIN flow matches Android 35 credential hierarchy captured in CI #38
   assert.match(unlock, /visible:\s*"Сообщение ассистенту"/);
   assert.doesNotMatch(unlock, /skipAuth|bypass|mockAuthentication/i);
 });
+
+
+test('native note smoke navigates past the keyboard before targeting the body', () => {
+  const flow = fs.readFileSync(path.join(__dirname, '..', '.maestro', 'flows', 'smoke.yaml'), 'utf8');
+  const noteStart = flow.indexOf('# 4. Create/edit a real SQLCipher note');
+  const noteEnd = flow.indexOf('# 5. Settings', noteStart);
+  assert.ok(noteStart >= 0 && noteEnd > noteStart, 'note flow exists');
+  const note = flow.slice(noteStart, noteEnd);
+  const title = note.indexOf('inputText: "Native smoke note"');
+  const dismiss = note.indexOf('- hideKeyboard', title);
+  const scroll = note.indexOf('element: "Что нужно запомнить?"', dismiss);
+  const tap = note.indexOf('- tapOn: "Что нужно запомнить?"', scroll);
+  const input = note.indexOf('inputText: "Persisted offline content"', tap);
+  assert.ok(title >= 0 && dismiss > title && scroll > dismiss && tap > scroll && input > tap,
+    'after entering title, dismiss IME, scroll to placeholder, focus body and type');
+  assert.ok(note.includes('element: "Persisted offline content"'),
+    'editing previously stored text scrolls to the body before editing');
+  assert.doesNotMatch(note, /tapOn: "Текст заметки"/,
+    'Maestro text selectors should not use off-screen accessibility descriptions');
+});
