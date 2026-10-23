@@ -367,7 +367,7 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.waitForFunction(() => {
         const el = document.querySelector('[aria-label="Другие имена и прозвища"]');
         return el && 'value' in el && el.value === 'Индюшка, индюк';
-      }, { timeout: 10000 });
+      }, undefined, { timeout: 10000 });
       assert.equal(await page.getByLabel('Другие имена и прозвища', { exact: true }).inputValue(), 'Индюшка, индюк', 'Aliases persist after save and reopen');
       assert.equal(await page.getByLabel('Тип записи: Факт', { exact: true }).getAttribute('aria-selected'), 'true', 'The chosen record type is kept');
       await page.getByLabel('История, события и связи', { exact: true }).click();
