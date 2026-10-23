@@ -247,7 +247,7 @@ export function NebulaSkiaExperiment({
       <View pointerEvents="none"
         accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
         style={{ width: size, height: size, overflow: "hidden",
-          backgroundColor: colors.canvas, borderRadius: clipToCircle ? size / 2 : 0 }}>
+          backgroundColor: homeCanvas ? "transparent" : colors.canvas, borderRadius: clipToCircle ? size / 2 : 0 }}>
         {animated
           ? <AnimatedSkiaOrb size={size} phase={phase}
               speed={previewSpeed} homeCanvas={homeCanvas}

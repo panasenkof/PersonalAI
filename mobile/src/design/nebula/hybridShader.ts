@@ -157,7 +157,13 @@ half4 main(float2 xy) {
       filamentColor * (haloNear * .38 + haloFar * .125);
     outputColor += lineLight * brightness;
   }
-  return half4(half3(clamp(outputColor, 0.0, 1.0)), 1.0);
+  // Home composites over the actual app theme instead of drawing an opaque
+  // square. Alpha is premultiplied, including the faint organic outer glow.
+  // Non-Home lab mode remains fully opaque for reference comparisons.
+  float outerGlow = exp(-40.0 * pow(max(0.0, d - 1.0), 2.0)) * .22;
+  float orbAlpha = clamp(mask + (1.0 - mask) * outerGlow, 0.0, 1.0);
+  float resultAlpha = mix(1.0, orbAlpha, clamp(uHomeCanvas, 0.0, 1.0));
+  return half4(half3(clamp(outputColor, 0.0, 1.0)) * resultAlpha, resultAlpha);
 }
 `;
 

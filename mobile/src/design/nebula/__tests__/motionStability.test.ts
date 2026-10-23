@@ -26,12 +26,11 @@ describe("Nebula motion stability regression", () => {
   it("keeps the active orb in a fixed header and never adds a moving progress footer", () => {
     const header = readFileSync(join(__dirname, "..", "NebulaHomeHeader.tsx"), "utf8");
     const footer = home.slice(home.indexOf("ListFooterComponent="), home.indexOf("    />", home.indexOf("ListFooterComponent=")));
-    expect(home).toContain("showOrb={Boolean(active?.rows.length)}");
-    expect(home).toContain("progressText={busy ?");
-    expect(header).toContain("<NebulaHomeArtwork size={48} phase={orbPhase} />");
+    expect(home).toContain("showOrb={ready}");
+    expect(home).toContain("statusText={statusText}");
+    expect(header).toContain("<NebulaHomeArtwork size={44} phase={orbPhase} />");
     expect(header).toContain("height: 72");
-    expect(header).toContain("height: 13");
-    expect(header).toContain('{progressText || " "}');
+    expect(header).toContain("{statusText}");
     expect(footer).not.toContain("NebulaHomeArtwork");
     expect(footer).not.toContain("nebula-home-live-status");
     expect(nativeArtwork).toContain("showStatusText={size > 100}");

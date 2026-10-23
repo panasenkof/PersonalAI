@@ -64,9 +64,11 @@ describe("Native Home integration remains isolated and accessible", () => {
     expect(home).toContain("<NebulaHomeThemeProvider>");
     expect(tabs).toContain('route.name === "Home" ? nebulaHomeColors : t');
     expect(home).toContain('testID="nebula-home-empty-state"');
-    expect(home).toContain("showOrb={Boolean(active?.rows.length)}");
+    expect(home).toContain("showOrb={ready}");
     expect(header).toContain('testID="nebula-home-header"');
-    expect(header).toContain("<NebulaHomeArtwork size={48} phase={orbPhase} />");
-    expect(header).toContain('{progressText || " "}');
+    expect(header).toContain("<NebulaHomeArtwork size={44} phase={orbPhase} />");
+    expect(header).toContain("{statusText}");
+    expect(header).not.toContain("connectionName");
+    expect(header).not.toContain("model: string");
   });
 });

@@ -12,11 +12,11 @@ describe("Nebula Home native B+C screen contracts", () => {
     expect(home).toContain("<NebulaHomeHeader");
     expect(home).toContain("onHistory={() => setHistoryOpen(true)}");
     expect(home).toContain("onNewChat={() => store.create()}");
-    expect(home).toContain("onConnections={() => openConnections()}");
+    expect(home).toContain("statusText={statusText}");
     expect(header).toContain('accessibilityLabel="История диалогов"');
     expect(header).toContain('accessibilityLabel="Новый диалог"');
-    expect(header).toContain('accessibilityLabel="Выбрать модель и подключение"');
-    expect(header).toContain("nebulaTouch.minimum");
+    expect(header).toContain('testID="nebula-home-status"');
+    expect(header).not.toContain("Выбрать модель и подключение");
   });
   it("retains selected B+C original in idle, never a generic flat orb or a welcome billboard", () => {
     expect(home).toContain('testID="nebula-home-empty-state"');
