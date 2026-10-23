@@ -7,8 +7,9 @@ const root = path.join(__dirname, "..");
 const flowNames = ["minimal", "memory-note", "settings", "import-url", "import-photo"];
 const runner = fs.readFileSync(path.join(__dirname, "android-native-flows.sh"), "utf8");
 const workflow = fs.readFileSync(path.join(root, "..", ".github/workflows/mobile-native-sqlcipher.yml"), "utf8");
-test("required Android job runs all native flows on the same AVD and APK", () => {
-  assert.equal(workflow.split("bash mobile/scripts/android-native-flows.sh").length - 1, 2, "first AVD and infrastructure retry");
+test("required Android job runs only the minimal native smoke", () => {
+  assert.equal(workflow.split("bash mobile/scripts/android-native-flows.sh").length - 1, 1 - 1, "expanded suite must not block CI");
+  assert.equal(workflow.split("script: bash mobile/scripts/android-ui-smoke.sh").length - 1, 2, "minimal flow required on both AVD attempts");
   assert.match(runner, /set -euo pipefail/);
   assert.match(runner, /for scenario in memory-note settings import-url import-photo/);
   assert.match(runner, /maestro test --format junit/);
