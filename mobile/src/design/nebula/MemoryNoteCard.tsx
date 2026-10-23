@@ -3,7 +3,7 @@ import { Pressable, Text, View } from "react-native";
 import Feather from "@expo/vector-icons/Feather";
 import type { EntityRecord } from "../../local-memory/types";
 import { useTheme } from "../../theme";
-import { nebulaRadii, nebulaSpacing, nebulaTouch } from "./tokens";
+import { nebulaRadii, nebulaSpacing } from "./tokens";
 import { memoryNoteDate, memoryNotePreview } from "./memoryNotePresentation";
 
 /** The library card is display-only: selection, long-press and navigation
