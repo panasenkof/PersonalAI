@@ -112,7 +112,7 @@ test('note edit waits for editor, not matching preview in the list (CI #410)', (
   const open = flow.indexOf('- tapOn: "Открыть заметку Native smoke note"');
   const wait = flow.indexOf('visible: "Сохранить запись"', open);
   const body = flow.indexOf('- assertVisible: "Persisted offline content"', open);
-  const edit = flow.indexOf('element: "Текст заметки"', body);
+  const edit = flow.indexOf('element: "Persisted offline content"', body);
   assert.ok(open >= 0 && wait > open && body > wait && edit > body,
     'editor save control must be visible before checking body or editing');
   assert.match(flow.slice(open, body), /timeout: 15000/,
