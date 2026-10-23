@@ -9,11 +9,9 @@ describe("Android viewport regressions from real device recordings", () => {
   const minimal = readFileSync(join(root, "..", ".maestro", "flows", "minimal.yaml"), "utf8");
 
   it("keeps the composer available and prevents native stream offsets disabling follow", () => {
-    expect(home).toContain("onScrollBeginDrag={() => {");
-    expect(home).toContain("userScrollActive.current && !pendingSendFollow.current");
-    expect(home).toContain("pendingSendFollow.current = composerOccluded;");
-    expect(home).toContain("!streamReadAnchored.current");
-    expect(home).toContain("scheduleBottomFollow()");
+    expect(home).toContain("viewport.beginDrag(); Keyboard?.dismiss?.();");
+    expect(home).toContain("viewport.onViewport(nextHeight)");
+    expect(home).toContain("removeClippedSubviews={false}");
     // CI #424: Android 35 edge-to-edge put the composer beneath Gboard when
     // KeyboardAvoidingView had no Android behavior. Test keeps the real IME open.
     expect(home).toContain('behavior={Platform.OS === "ios" ? "padding" : "height"}');
