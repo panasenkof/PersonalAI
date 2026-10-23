@@ -233,6 +233,17 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       const settingsCanvas = await page.getByTestId('settings-overview').evaluate(el => getComputedStyle(el).backgroundColor);
       assert.equal(settingsCanvas, 'rgb(7, 13, 32)', 'Working screens use the approved dark theme regardless of OS appearance');
       assert(await page.getByLabel('Модели и подключения', { exact: true }).count());
+      // U5: recognition routes have exactly one owner in Settings, not a
+      // competing Save inside the nested connection editor.
+      const openMedia = page.getByLabel('Развернуть: Распознавание файлов', { exact: true });
+      if (await openMedia.count()) await openMedia.click();
+      const photoProvider = page.getByLabel('Изображения и кадры видео: Anthropic', { exact: true });
+      await photoProvider.waitFor();
+      await photoProvider.click();
+      await page.getByText('Выбор для медиа сохранён.', { exact: true }).waitFor();
+      assert.equal(await photoProvider.getAttribute('aria-checked'), 'true', 'Chosen media provider is saved in one action');
+      assert.equal(await page.getByText('Сохранить выбор для медиа', { exact: true }).count(), 0, 'There is no duplicate media Save');
+      if (process.env.SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, `settings-media-${width}.png`) });
       await page.getByLabel('Развернуть: Работа ИИ', { exact: true }).click();
       const limitInput = page.getByLabel('Лимит обращений к LLM на сообщение', { exact: true });
       assert.equal(await limitInput.inputValue(), '4');
@@ -273,6 +284,10 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.reload();
       await page.getByText('Ответ 1', { exact: true }).waitFor();
       await page.getByLabel('Вкладка Настройки', { exact: true }).click();
+      const mediaCollapsed = page.getByLabel('Развернуть: Распознавание файлов', { exact: true });
+      if (await mediaCollapsed.count()) await mediaCollapsed.click();
+      await page.getByLabel('Изображения и кадры видео: Anthropic', { exact: true }).waitFor();
+      assert.equal(await page.getByLabel('Изображения и кадры видео: Anthropic', { exact: true }).getAttribute('aria-checked'), 'true', 'Media selection persists after full reload');
       await page.getByLabel('Развернуть: Работа ИИ', { exact: true }).click();
       assert.equal(await page.getByLabel('Лимит обращений к LLM на сообщение', { exact: true }).inputValue(), '6', 'The chosen limit survives a full app reload');
       await page.getByLabel('Увеличить лимит обращений к LLM', { exact: true }).click();
