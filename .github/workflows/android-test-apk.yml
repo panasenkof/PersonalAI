@@ -5,6 +5,8 @@ on:
   workflow_run:
     workflows: [CI]
     types: [completed]
+    # Ignore CI runs from PR branches; only main push CI can publish an APK.
+    branches: [main]
   workflow_dispatch:
 
 permissions:
