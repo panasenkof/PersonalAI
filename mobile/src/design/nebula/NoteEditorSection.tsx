@@ -4,8 +4,8 @@ import { Pressable, Text, View } from "react-native";
 import { useTheme } from "../../theme";
 import { nebulaRadii, nebulaSpacing, nebulaTouch, nebulaTypography } from "./tokens";
 
-/** A local, controlled disclosure: never persists the note's sensitive content
- * or disclosure state to SecureStore. The editor owns the form values. */
+/** Controlled disclosure. Note data stays in the editor's in-memory state;
+ * this presentational component has no persistence or external side effects. */
 export function NoteEditorSection({ title, summary, expanded, onToggle, children, testID }: {
   title: string;
   summary?: string;
