@@ -204,6 +204,15 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.evaluate(() => { window.__qa.holdSpeech = false; window.__speechEvent('result', { results: [{ transcript: 'Запоздалый текст после отправки' }], isFinal: true }); });
       assert.equal(await prompt.inputValue(), '', 'A late transcript cannot refill an already sent draft');
 
+      // Real production rows (not a mocked chat layout) must keep the submitted
+      // bubble visible above the composer while the LLM request is pending.
+      const userBubble = page.getByTestId('chat-message-user').last();
+      await userBubble.waitFor();
+      const userBox = await userBubble.boundingBox();
+      const promptBox = await prompt.boundingBox();
+      assert(userBox && promptBox && userBox.y >= 0 &&
+        userBox.y + userBox.height <= promptBox.y, 'Sent question remains visible above the composer');
+
       const sendHint = page.getByText('Отправить написанное сообщение выбранной модели.', { exact: true });
       await sendHint.waitFor();
       const hintBox = await sendHint.boundingBox();
@@ -212,7 +221,7 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       assert(hintBox.y + hintBox.height < buttonBox.y && buttonBox.y - hintBox.y - hintBox.height < 30, 'Composer hint appears right above its button');
       if (process.env.SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, `composer-hint-${width}.png`) });
 
-      await page.waitForFunction(() => /Подключаюсь|Думаю|Пишу ответ/.test(document.querySelector('[data-testid="nebula-home-status"]')?.textContent || ''));
+      await page.waitForFunction(() => /Подключаюсь|Думаю|Обрабатываю|Пишу ответ/.test(document.querySelector('[data-testid="nebula-home-status"]')?.textContent || ''));
       await page.getByLabel('Вкладка Память', { exact: true }).click();
       await page.getByLabel('Вкладка Настройки', { exact: true }).click();
       assert.equal(await page.getByText('Безопасность', { exact: true }).count(), 0);
@@ -249,6 +258,10 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.waitForFunction(() => document.querySelector('[data-testid="nebula-home-status"]')?.textContent?.includes('(1/4)'));
       releaseReply();
       await page.getByText('Ответ 1', { exact: true }).waitFor();
+      const answerBubble = await page.getByTestId('chat-message-assistant').last().boundingBox();
+      const sentBubble = await page.getByTestId('chat-message-user').last().boundingBox();
+      assert(answerBubble && sentBubble && answerBubble.y >= sentBubble.y + sentBubble.height,
+        'Assistant reply starts directly after the user turn');
       await page.reload();
       await page.getByText('Ответ 1', { exact: true }).waitFor();
       await page.getByLabel('Вкладка Настройки', { exact: true }).click();
@@ -266,7 +279,7 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByLabel('Сообщение ассистенту', { exact: true }).fill('Второй вопрос');
       await page.getByLabel('Отправить запрос', { exact: true }).click();
       await page.waitForFunction(() => document.querySelector('[data-testid="nebula-home-status"]')?.textContent?.includes('(1/7)'));
-      await page.waitForFunction(() => /Подключаюсь|Думаю|Пишу ответ/.test(document.querySelector('[data-testid="nebula-home-status"]')?.textContent || ''));
+      await page.waitForFunction(() => /Подключаюсь|Думаю|Обрабатываю|Пишу ответ/.test(document.querySelector('[data-testid="nebula-home-status"]')?.textContent || ''));
       const beforeHistory = await page.evaluate(() => window.__qa.modalShows || 0);
       await page.getByLabel('История диалогов', { exact: true }).click();
       await page.getByLabel('Поиск диалогов', { exact: true }).waitFor();
