@@ -43,7 +43,8 @@ describe("Nebula Home keyboard and visual viewport", () => {
     expect(shouldScrollNebulaChatToEnd(0, "partial streamed reply")).toBe(true);
   });
   it("holds the beginning of a long streamed answer still, but follows short replies", () => {
-    expect(shouldAnchorNebulaStreamingReply(240, 500)).toBe(false);
+    expect(shouldAnchorNebulaStreamingReply(160, 500)).toBe(false);
+    expect(shouldAnchorNebulaStreamingReply(240, 500)).toBe(true);
     expect(shouldAnchorNebulaStreamingReply(350, 500)).toBe(true);
     expect(shouldAnchorNebulaStreamingReply(499, 500)).toBe(true);
     expect(shouldAnchorNebulaStreamingReply(100, 0)).toBe(false);
@@ -88,7 +89,9 @@ describe("Nebula Home keyboard and visual viewport", () => {
     expect(home).toContain("onFocusChange={setComposerFocused}");
     expect(home).toContain("onLayout={event =>");
     expect(home).toContain("nebulaEmptyOrbSize(artLayout)");
-    expect(home).toContain("showOrb={Boolean(active?.rows.length)}");
+    expect(home).toContain("showOrb={ready}");
+    expect(home).toContain('justifyContent: "flex-end"');
+    expect(home).toContain('testID="chat-jump-to-latest"');
     expect(home).toContain("onMomentumScrollEnd={event =>");
     expect(home).toContain("userScrollActive.current && !pendingSendFollow.current");
     expect(home).toContain('behavior={Platform.OS === "ios" ? "padding" : "height"}');
