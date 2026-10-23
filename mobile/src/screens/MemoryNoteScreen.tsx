@@ -28,6 +28,7 @@ import type { RootStackParams } from "../navigation";
 import { File } from "expo-file-system";
 import { attachmentForEntity, materializeAttachment } from "../media/attachments";
 import { extractMedia } from "../media/extract";
+import { maySendOriginalToProvider } from "../media/recognitionPolicy";
 import { mediaConnections } from "../media/preferences";
 import { AttachmentView } from "../media/AttachmentView";
 import { useTheme } from "../theme";
@@ -190,7 +191,9 @@ export function MemoryNoteScreen() {
           expanded={fileContentOpen} onToggle={() => { Keyboard.dismiss(); setFileContentOpen(open => !open); }}>
           <Text style={{ color: t.muted, ...nebulaTypography.label }}>Проверьте распознанный текст. Он индексируется вместе с записью.</Text>
           <TextInput accessibilityLabel="Распознанное содержимое файла" multiline editable={!busy} value={extractedText} onChangeText={setExtractedText} maxLength={60_000} style={field} />
-          <Pressable disabled={busy} accessibilityRole="button" style={button} onPress={() => Alert.alert("Распознать оригинал?", "Будут использованы подключения из раздела «Обработка медиа» в настройках. Фото и кадры видео отправляются этому сервису; аудио — локальному Whisper, если он установлен, иначе сервису. Проверьте результат перед сохранением.", [
+          <Pressable disabled={busy} accessibilityRole="button" style={button} onPress={() => Alert.alert("Распознать оригинал?", maySendOriginalToProvider(selected.sensitivity, collections.find(c => c.id === selected.collection_id)?.sensitivity)
+            ? "Будут использованы подключения из раздела «Обработка медиа». Фото и кадры видео отправляются сервису; аудио обрабатывается локально установленным Whisper либо внешним сервисом. Проверьте результат до сохранения."
+            : "Это закрытая запись. Допускается только локальное чтение текстового файла или распознавание аудио установленным Whisper. Фото, видео и аудио без локального Whisper нельзя передавать внешнему провайдеру. Оригинал останется зашифрованным.", [
             { text: "Отмена", style: "cancel" },
             { text: "Распознать", onPress: () => void run(async () => {
               if (!profile) return;
@@ -201,7 +204,8 @@ export function MemoryNoteScreen() {
               try {
                 uri = await materializeAttachment(profile, attachment, aborter.signal);
                 const settings = await mediaConnections(profile);
-                const text = await extractMedia({ uri, name: attachment.name, mimeType: attachment.mime }, settings.vision, true, aborter.signal, undefined, settings.speech);
+                const allowRemote = maySendOriginalToProvider(selected.sensitivity, collections.find(c => c.id === selected.collection_id)?.sensitivity);
+                const text = await extractMedia({ uri, name: attachment.name, mimeType: attachment.mime }, settings.vision, allowRemote, aborter.signal, undefined, settings.speech);
                 if (alive.current && !aborter.signal.aborted) setExtractedText(text);
               } finally { extraction.current = null; if (uri) { const file = new File(uri); if (file.exists) file.delete(); } }
             }) },
