@@ -34,11 +34,8 @@ name: PersAI native note persistence
       id: "note-body-input"
     timeout: 15000
 - assertVisible: "Saved offline"
-- hideKeyboard
-- scrollUntilVisible:
-    element:
-      id: "note-body-input"
-    direction: DOWN
+# The editor field was just confirmed visible. On Android, hideKeyboard with no
+# keyboard open can act as Back and pop the editor; never invoke it here.
 - tapOn:
     id: "note-body-input"
 - eraseText
