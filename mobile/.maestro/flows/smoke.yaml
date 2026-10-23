@@ -41,9 +41,7 @@ name: PersAI native offline smoke
 - tapOn: "Что нужно запомнить?"
 - inputText: "Persisted offline content"
 - hideKeyboard
-- scrollUntilVisible:
-    element: "Сохранить запись"
-    direction: DOWN
+- assertVisible: "Сохранить запись"
 - tapOn: "Сохранить запись"
 - assertVisible: "Открыть заметку Native smoke note"
 - tapOn: "Открыть заметку Native smoke note"
@@ -56,9 +54,7 @@ name: PersAI native offline smoke
 - eraseText
 - inputText: "Edited offline content"
 - hideKeyboard
-- scrollUntilVisible:
-    element: "Сохранить запись"
-    direction: DOWN
+- assertVisible: "Сохранить запись"
 - tapOn: "Сохранить запись"
 - takeScreenshot: 04-memory
 # 5. Settings and notes survive a full process restart.
