@@ -49,6 +49,15 @@ test("RG-03: manual release only accepts an exact completed push CI for same mai
   assert.equal(isVerifiedRun(null, SHA, REPO), false);
 });
 
+test("RG-05: automatic APK publisher only receives completed CI runs from main", () => {
+  const workflow = fs.readFileSync(path.join(__dirname, "..", "..", ".github", "workflows", "android-test-apk.yml"), "utf8");
+  assert.match(workflow, /on:\s*\n\s*workflow_run:\s*\n\s*workflows:\s*\[CI\]\s*\n\s*types:\s*\[completed\][\s\S]*?\n\s*branches:\s*\[main\]\s*\n\s*workflow_dispatch:/);
+  assert.match(workflow, /github\.event\.workflow_run\.conclusion == 'success'/);
+  assert.match(workflow, /github\.event\.workflow_run\.event == 'push'/);
+  assert.match(workflow, /github\.event\.workflow_run\.head_branch == 'main'/);
+  assert.match(workflow, /github\.event\.workflow_run\.head_repository\.full_name == github\.repository/);
+});
+
 test("RG-04: YAML uses verified event/API helper instead of jq env filter, preserves main checks", () => {
   const workflow = fs.readFileSync(path.join(__dirname, "..", "..", ".github", "workflows", "android-test-apk.yml"), "utf8");
   assert.match(workflow, /node mobile\/scripts\/verify-main-ci\.cjs/);
