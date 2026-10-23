@@ -20,7 +20,7 @@ function classifyEmulatorFailure(resultsDir) {
 
   // Only the Android *system* launcher ANR, never the tested app's ANR.
   // The hierarchy captures the blocking dialog at the instant of failure.
-  const launcherDialog = /(?:Pixel Launcher|Launcher3|Quickstep|System UI)[^<"]{0,90}(?:isn.t responding|is not responding)/i.test(hierarchy);
+  const launcherDialog = /(?:Pixel Launcher|Launcher3|Quickstep|System UI)[^<"]{0,90}(?:isn(?:['’]|&#39;|&apos;)t responding|is not responding)/i.test(hierarchy);
   const launcherAnr = /ANR in (?:com\.google\.android\.apps\.nexuslauncher|com\.android\.launcher3|com\.android\.systemui)\b/i.test(logcat);
   const retry = launcherDialog || (!junitExists && launcherAnr) || !junitExists;
   const reason = launcherDialog
