@@ -33,6 +33,7 @@ describe("Android viewport regressions from real device recordings", () => {
   it("audits native smoke selectors against the actual rendered screens", () => {
     const files = [
       "screens/HomeScreen.tsx",
+      "design/nebula/NebulaHomeHeader.tsx",
       "screens/LocalMemoryScreen.tsx",
       "screens/MemoryNoteScreen.tsx",
       "components/AgentLimitsCard.tsx",
