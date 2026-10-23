@@ -21,6 +21,7 @@ import { loadDirectConnections, anonymousLocalAllowed, defaultDirectPreferences 
 import type { DirectConnection } from "../direct-agent/settings";
 import { MAX_ORIGINALS_PER_NOTE, MAX_TOTAL_ORIGINAL_BYTES, saveMediaNote } from "../media/attachments";
 import { combinedRecognitionText, recognizeFilesSequentially, type FileRecognition } from "../media/batch-recognition";
+import { analyzeFilesTogether } from "../media/joint-recognition";
 import { extractMedia, mediaKind } from "../media/extract";
 import type { ImportFile } from "../media/extract";
 import type { RootStackParams } from "../navigation";
@@ -56,6 +57,8 @@ export function MemoryImportScreen() {
   const file = files[0] || null;
   const [recognitionResults, setRecognitionResults] = useState<FileRecognition[]>([]);
   const [recognizingIndex, setRecognizingIndex] = useState(-1);
+  const [recognitionMode, setRecognitionMode] = useState<"sequential" | "joint">("sequential");
+  const [jointAnalyzing, setJointAnalyzing] = useState(false);
   const [connections, setConnections] = useState<DirectConnection[]>([]);
   const [connectionId, setConnectionId] = useState("");
   const [speechConnectionId, setSpeechConnectionId] = useState("");
@@ -192,14 +195,39 @@ export function MemoryImportScreen() {
         const results = await recognizeFilesSequentially(files,
           async item => extractMedia(item, vision, classification === "standard", aborter.signal, undefined, speech),
           aborter.signal, (done, current) => {
-            if (alive.current) { setRecognitionResults(done); setRecognizingIndex(current < files.length ? current : -1); }
+            if (alive.current) {
+              setRecognitionResults(done);
+              setRecognizingIndex(current < files.length ? current : -1);
+              try { setExtractedText(combinedRecognitionText(done, files.length)); } catch { /* final length check reports failure */ }
+            }
           });
         if (alive.current && !aborter.signal.aborted) {
           const text = combinedRecognitionText(results, files.length);
+          // Keep the original per-file text, even when the additional joint
+          // request fails; that failure must never erase recognized sources.
           setExtractedText(text);
           const errors = results.filter(r => r.status === "error").length;
-          setNotice(errors ? `Готово: ${results.length - errors} из ${files.length}. Не распознано: ${errors}. Результаты сохраните после проверки.` :
-            "Все файлы распознаны по очереди. Проверьте общий текст и сохраните заметку.");
+          if (recognitionMode === "joint" && results.some(r => r.status === "success")) {
+            if (classification !== "standard") throw new Error("Для совместного анализа разрешите обработку обычных записей выбранным подключением.");
+            setJointAnalyzing(true);
+            try {
+              const analysis = await analyzeFilesTogether(results.filter(r => r.status === "success" && r.text).map(r => ({ index: r.index, name: r.name, text: r.text! })),
+                vision, true, aborter.signal);
+              if (alive.current && !aborter.signal.aborted) {
+                const merged = text + "\n\nСовместный анализ материалов:\n" + analysis;
+                if (merged.length > 60_000) throw new Error("Результат совместного анализа превышает 60 000 символов.");
+                setExtractedText(merged);
+                setNotice(errors ? `Общий анализ готов по ${results.length - errors} из ${files.length} файлов, ${errors} не распознано. Проверьте текст.` :
+                  "Все материалы сопоставлены одной моделью. Проверьте итог и сохраните заметку.");
+              }
+            } catch (e) {
+              if (alive.current && !aborter.signal.aborted) setNotice("Исходные результаты сохранены, но совместный анализ не получился: " + (e as Error).message);
+              else throw e;
+            } finally { if (alive.current) setJointAnalyzing(false); }
+          } else {
+            setNotice(errors ? `Готово: ${results.length - errors} из ${files.length}. Не распознано: ${errors}. Результаты сохраните после проверки.` :
+              "Все файлы распознаны по очереди. Проверьте общий текст и сохраните заметку.");
+          }
         }
       }
     } catch (e) { if (alive.current) setNotice(aborter.signal.aborted ? "Разбор остановлен." : (e as Error).message); }
@@ -250,9 +278,25 @@ export function MemoryImportScreen() {
         </Text>) : null}
         {kind === "image" ? <Image source={{ uri: file.uri }} resizeMode="contain" style={{ width: "100%", height: 180, borderRadius: 14 }} /> : null}
         <Text style={{ color: t.muted, fontSize: 12 }}>{kind === "video" ? "Речь и пять выборочных кадров обрабатываются отдельно. Максимум 10 минут; частичные результаты явно отмечены." : kind === "audio" ? (localAudio ? "Речь распознаётся на телефоне моделью Whisper; файл никуда не отправляется." : "Речь преобразуется в текст сервисом подключения. Чтобы распознавать на телефоне, скачайте модель: Настройки → Голосовой ввод → Голос без интернета.") : kind === "text" ? "Текстовый файл читается на телефоне, без отправки в интернет." : "Выбранная модель должна поддерживать изображения."}</Text>
+        {files.length > 1 ? <View style={{ gap: 6 }}>
+          <Text style={{ color: t.text, fontWeight: "700" }}>Режим распознавания</Text>
+          <Pressable disabled={busy} accessibilityRole="button" accessibilityLabel="Распознавать по очереди"
+            accessibilityState={{ selected: recognitionMode === "sequential" }} onPress={() => setRecognitionMode("sequential")}
+            style={{ minHeight: 44, justifyContent: "center" }}>
+            <Text style={{ color: recognitionMode === "sequential" ? t.secondary : t.text }}>{recognitionMode === "sequential" ? "● " : "○ "}По очереди — результат каждого файла отдельно</Text>
+          </Pressable>
+          <Pressable disabled={busy || classification !== "standard"} accessibilityRole="button" accessibilityLabel="Распознавать вместе"
+            accessibilityState={{ selected: recognitionMode === "joint", disabled: classification !== "standard" }} onPress={() => setRecognitionMode("joint")}
+            style={{ minHeight: 44, justifyContent: "center", opacity: classification === "standard" ? 1 : .5 }}>
+            <Text style={{ color: recognitionMode === "joint" ? t.secondary : t.text }}>{recognitionMode === "joint" ? "● " : "○ "}Вместе — дополнительно сопоставить все материалы</Text>
+          </Pressable>
+          <Text style={{ color: t.muted, fontSize: 12 }}>
+            В режиме «Вместе» сначала распознаём каждый файл, затем отправляем полученный текст выбранной LLM для общего анализа. Это дополнительный запрос, время и возможные расходы. Для личных записей этот режим недоступен.
+          </Text>
+        </View> : null}
         <Text style={{ color: t.text, fontWeight: "600" }}>Обработка файла</Text>
         {([ ["sensitive", "Личные — только на телефоне"], ["standard", "Обычные — доступны агенту и разбору у провайдера"] ] as const).map(([id, label]) =>
-          <Pressable disabled={busy} key={id} accessibilityRole="button" accessibilityLabel={label} onPress={() => setClassification(id)} style={{ minHeight: 46, justifyContent: "center" }}>
+          <Pressable disabled={busy} key={id} accessibilityRole="button" accessibilityLabel={label} onPress={() => { setClassification(id); if (id === "sensitive") setRecognitionMode("sequential"); }} style={{ minHeight: 46, justifyContent: "center" }}>
             <Text style={{ color: classification === id ? t.secondary : t.text }}>{classification === id ? "● " : "○ "}{label}</Text>
           </Pressable>)}
         {(files.length > 1 || (kind !== "text" && !localAudio)) ? <NoteEditorSection testID="import-processing-options" title="Параметры распознавания" summary="Модель и подключение" expanded={processingOptionsOpen} onToggle={() => setProcessingOptionsOpen(v => !v)}>
@@ -265,8 +309,9 @@ export function MemoryImportScreen() {
         </NoteEditorSection> : null}
         {files.some(item => ["audio", "video"].includes(mediaKind(item))) ? <View><Text style={{ color: t.text }}>Подключение для речи (локальный Whisper имеет приоритет)</Text>{connections.map(c => <Pressable key={c.id} disabled={busy} onPress={() => setSpeechConnectionId(c.id)} style={{ minHeight: 44 }}><Text style={{ color: c.id === speechConnectionId ? t.secondary : t.text }}>{c.id === speechConnectionId ? "● " : "○ "}{c.name} · {c.transcriptionModel || "whisper-1"}</Text></Pressable>)}</View> : null}
         <Pressable disabled={busy || !canExtract} accessibilityRole="button" accessibilityLabel="Извлечь сведения из файла" style={[button, { opacity: canExtract ? 1 : .5 }]} onPress={() => void extract()}>
-          <Text style={{ color: "#fff", fontWeight: "700" }}>{files.length > 1 ? "Распознать все по очереди" : kind === "text" ? "Прочитать текст на телефоне" : localAudio ? "Распознать речь на телефоне" : "Передать файл провайдеру и разобрать"}</Text>
+          <Text style={{ color: "#fff", fontWeight: "700" }}>{files.length > 1 ? recognitionMode === "joint" ? "Распознать и сопоставить" : "Распознать все по очереди" : kind === "text" ? "Прочитать текст на телефоне" : localAudio ? "Распознать речь на телефоне" : "Передать файл провайдеру и разобрать"}</Text>
         </Pressable>
+        {jointAnalyzing ? <Text accessibilityLiveRegion="polite" style={{ color: t.secondary }}>Сопоставляю результаты всех файлов…</Text> : null}
         {recognizingIndex >= 0 ? <Text accessibilityLiveRegion="polite" style={{ color: t.secondary }}>
           Распознаю файл {recognizingIndex + 1} из {files.length}: {files[recognizingIndex]?.name}
         </Text> : null}
