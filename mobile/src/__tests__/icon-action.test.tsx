@@ -63,3 +63,18 @@ test("a tap explains an action only the first time; holding explains it again", 
   fireEvent(v.getByLabelText("Отправить запрос"), "longPress");
   expect(v.getByText("Отправить сообщение")).toBeTruthy();
 });
+
+
+test("compact composer action is icon-only, keyboard-accessible, and retains its hint/action", () => {
+  const onPress = jest.fn();
+  const view = render(<IconAction icon="camera" label="Камера" accessibilityLabel="Сфотографировать и распознать"
+    hint="Снять фото и распознать текст" compact onPress={onPress} />);
+  const action = view.getByLabelText("Сфотографировать и распознать");
+  expect(view.queryByText("Камера")).toBeNull();
+  const style = typeof action.props.style === "function" ? action.props.style({ pressed: false }) : action.props.style;
+  expect(style.minWidth).toBe(48);
+  expect(style.minHeight).toBe(48);
+  fireEvent.press(action);
+  expect(onPress).toHaveBeenCalledTimes(1);
+  expect(view.getByText("Снять фото и распознать текст")).toBeTruthy();
+});
