@@ -123,7 +123,10 @@ function NebulaHomeContent() {
   const openConnections = (presetId?: string) => navigation.navigate("ModelConnections", presetId ? { presetId } : undefined);
   // First run: the active connection has neither a key nor a keyless local address.
   const needsSetup = Boolean(settings && !settings.apiKey && !anonymousLocalAllowed(settings));
-  return <KeyboardAvoidingView style={{ flex: 1, paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right, backgroundColor: t.bg }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+  // Android 35 edge-to-edge does not reliably resize this screen above the IME on its own.
+  // Keep the composer on screen with height avoidance; FlatList follows only finger gestures,
+  // so the keyboard relayout must not be interpreted as a user scroll.
+  return <KeyboardAvoidingView style={{ flex: 1, paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right, backgroundColor: t.bg }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
     <StatusBar style={isFocused ? "light" : "auto"} />
     <NebulaHomeHeader connectionName={connectionName} model={settings?.model}
       onConnections={() => openConnections()} onHistory={() => setHistoryOpen(true)}

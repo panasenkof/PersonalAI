@@ -91,7 +91,7 @@ describe("Nebula Home keyboard and visual viewport", () => {
     expect(home).toContain("showOrb={Boolean(active?.rows.length)}");
     expect(home).toContain("onMomentumScrollEnd={event =>");
     expect(home).toContain("userScrollActive.current && !pendingSendFollow.current");
-    expect(home).toContain('behavior={Platform.OS === "ios" ? "padding" : undefined}');
+    expect(home).toContain('behavior={Platform.OS === "ios" ? "padding" : "height"}');
     expect(home).toContain("shouldScrollNebulaChatToEnd(");
     expect(home).toContain("artworkSize > 0 ? <NebulaHomeArtwork");
     expect(home).toContain("store.send(settings)");
