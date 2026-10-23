@@ -78,3 +78,10 @@
 - Локальный browser run NOT RUN: загрузка Chromium в среде вернула повреждённый архив. Проверка остаётся обязательной в GitHub Actions; не заменять её синтаксической проверкой скрипта.
 - Native build и browser CI нового SHA: проверяются в PR. Android Gboard, TalkBack, FPS/battery и визуальная приёмка NOT RUN.
 - CI теперь сохраняет снимки production browser fixtures и экран при сбое как artifact `browser-ui-<sha>` на 7 дней. Данные fixtures синтетические.
+
+## Автоматическая регрессия (23.10.2026)
+
+[Android UI smoke и быстрый CI](../docs/ANDROID_UI_TESTING.md) входят в проверку изменений
+интерфейса. Для каждого SHA отдельно фиксировать результат native и browser. Скриншоты без
+сравнения с эталоном не считать автоматической визуальной приёмкой. Расширять smoke при
+добавлении новых сценариев U0–U5. [Performance](ANDROID_PERFORMANCE.md) — поздняя P3.

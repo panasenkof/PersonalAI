@@ -1,0 +1,13 @@
+appId: com.paigent.app
+---
+- extendedWaitUntil:
+    visible:
+      id: ".*:id/(pinEntry|passwordEntry|pin_entry|password_entry)"
+    timeout: 30000
+- tapOn:
+    id: ".*:id/(pinEntry|passwordEntry|pin_entry|password_entry)"
+- inputText: "2468"
+- pressKey: Enter
+- extendedWaitUntil:
+    visible: "Сообщение ассистенту"
+    timeout: 30000

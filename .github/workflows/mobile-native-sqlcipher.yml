@@ -1,11 +1,8 @@
-name: Native Android SQLCipher build
+name: Native Android UI smoke
 
 on:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - "mobile/**"
-      - ".github/workflows/mobile-native-sqlcipher.yml"
+  workflow_call:
 
 concurrency:
   group: native-sqlcipher-${{ github.ref }}
@@ -20,9 +17,11 @@ jobs:
     # The Whisper runtime (react-native-executorch) compiles a large C++ library.
     timeout-minutes: 90
     env:
-      # Phones are arm64; skipping emulator ABIs halves native compile time.
-      ORG_GRADLE_PROJECT_reactNativeArchitectures: arm64-v8a
-      RNET_TARGET: android-arm64-v8a
+      # One emulator ABI; signed phone release still builds ARM64.
+      ORG_GRADLE_PROJECT_reactNativeArchitectures: x86_64
+      RNET_TARGET: android-x86_64
+      PIA_ANDROID_PACKAGE: com.paigent.app
+      MAESTRO_VERSION: 2.0.10
     defaults:
       run:
         working-directory: mobile
@@ -40,7 +39,7 @@ jobs:
       - name: Reuse trusted Gradle cache (PR cannot write)
         uses: gradle/actions/setup-gradle@v4
         with:
-          cache-read-only: true
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
       - uses: android-actions/setup-android@v3
         with:
           # The Android SDK removed the obsolete "tools" package, which this
@@ -80,6 +79,41 @@ jobs:
           unzip -t "$APK" >/dev/null
           # On-device Whisper: the ExecuTorch runtime and its CPU backend are packaged.
           for lib in libRnExecutorch.so libexecutorch.so libxnnpack_executorch_backend.so; do
-            unzip -Z1 "$APK" | grep -Fx "lib/arm64-v8a/$lib"
+            unzip -Z1 "$APK" | grep -Fx "lib/x86_64/$lib"
           done
           echo "APK generated and archive verified: $APK"
+
+      - name: Save standalone emulator APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-ui-apk-${{ github.sha }}
+          path: mobile/android/app/build/outputs/apk/release/app-release.apk
+          retention-days: 3
+      - name: Install pinned Maestro CLI
+        run: |
+          curl --fail --location --retry 3 -o "$RUNNER_TEMP/maestro.zip" "https://github.com/mobile-dev-inc/maestro/releases/download/cli-${MAESTRO_VERSION}/maestro.zip"
+          unzip -q "$RUNNER_TEMP/maestro.zip" -d "$RUNNER_TEMP/maestro-cli"
+          echo "$RUNNER_TEMP/maestro-cli/maestro/bin" >> "$GITHUB_PATH"
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Run real Android UI smoke
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          profile: pixel_2
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
+          script: bash mobile/scripts/android-ui-smoke.sh
+      - name: Preserve Android evidence even after failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-ui-evidence-${{ github.sha }}
+          path: mobile/qa/android-results/
+          retention-days: 7
+          if-no-files-found: warn
