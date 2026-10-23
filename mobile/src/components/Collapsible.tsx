@@ -2,6 +2,7 @@ import * as SecureStore from "expo-secure-store";
 import Feather from "@expo/vector-icons/Feather";
 import React, { useEffect, useState } from "react";
 import { Pressable, Text, View } from "react-native";
+import { nebulaRadii, nebulaSpacing, nebulaTouch, nebulaTypography } from "../design/nebula/tokens";
 import { useTheme } from "../theme";
 
 /** Which groups the user opened, remembered across launches (no secrets inside). */
@@ -17,22 +18,23 @@ function remember(id: string, open: boolean) {
 }
 
 /** A settings group that folds to its title and a one-line summary. */
-export function Collapsible({ id, title, summary, defaultOpen = false, children, card = true }: {
-  id: string; title: string; summary?: string; defaultOpen?: boolean; children: React.ReactNode; card?: boolean;
+export function Collapsible({ id, title, summary, defaultOpen = false, children, card = true, icon }: {
+  id: string; title: string; summary?: string; defaultOpen?: boolean; children: React.ReactNode; card?: boolean; icon?: React.ComponentProps<typeof Feather>["name"];
 }) {
   const t = useTheme();
   const [open, setOpen] = useState(remembered?.[id] ?? defaultOpen);
   useEffect(() => { let alive = true; void load().then(r => { if (alive && r[id] !== undefined) setOpen(r[id]); }); return () => { alive = false; }; }, [id]);
   const toggle = () => { setOpen(v => { remember(id, !v); return !v; }); };
-  const box = card ? { backgroundColor: t.panel, padding: 20, gap: 10, borderRadius: 22, borderWidth: 1, borderColor: t.line } : { gap: 10 };
+  const box = card ? { backgroundColor: t.panel, padding: nebulaSpacing.md, gap: nebulaSpacing.sm, borderRadius: nebulaRadii.card, borderWidth: 1, borderColor: t.line } : { gap: 10 };
   return <View style={box}>
     <Pressable accessibilityRole="button" accessibilityLabel={(open ? "Свернуть: " : "Развернуть: ") + title} accessibilityState={{ expanded: open }}
-      aria-expanded={open} onPress={toggle} style={{ flexDirection: "row", alignItems: "center", gap: 10, minHeight: 44 }}>
-      <View style={{ flex: 1, gap: 2 }}>
-        <Text style={{ color: t.text, fontSize: card ? 19 : 17, fontWeight: "700" }}>{title}</Text>
-        {!open && summary ? <Text numberOfLines={2} style={{ color: t.muted, fontSize: 13 }}>{summary}</Text> : null}
+      aria-expanded={open} onPress={toggle} style={{ flexDirection: "row", alignItems: "center", gap: nebulaSpacing.sm, minHeight: nebulaTouch.minimum }}>
+      {icon ? <View style={{ padding: nebulaSpacing.xs, borderRadius: nebulaRadii.chip, backgroundColor: t.soft }}><Feather name={icon} size={22} color={t.secondary} /></View> : null}
+      <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+        <Text style={{ color: t.text, ...nebulaTypography.body, fontWeight: "600" }}>{title}</Text>
+        {!open && summary ? <Text style={{ color: t.muted, ...nebulaTypography.label }}>{summary}</Text> : null}
       </View>
-      <Feather name={open ? "chevron-up" : "chevron-down"} size={22} color={t.accent} />
+      <Feather name={open ? "chevron-up" : "chevron-down"} size={22} color={t.secondary} />
     </Pressable>
     {open ? children : null}
   </View>;

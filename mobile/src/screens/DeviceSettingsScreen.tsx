@@ -2,11 +2,13 @@ import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import Constants from "expo-constants";
 import React, { useCallback, useState } from "react";
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text } from "react-native";
+import { KeyboardAvoidingView, Platform, ScrollView, Text } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useProfile } from "../profile/ProfileContext";
 import { loadDirectConnections } from "../direct-agent/settings";
 import type { RootStackParams } from "../navigation";
+import { NebulaSettingRow, NebulaSection } from "../design/nebula/components";
+import { nebulaSpacing, nebulaTypography } from "../design/nebula/tokens";
 import { useTheme } from "../theme";
 import { VoiceModelCard } from "../components/VoiceModelCard";
 import { SmartSearchCard } from "../components/SmartSearchCard";
@@ -25,26 +27,20 @@ export function DeviceSettingsScreen() {
     }).catch(() => { if (alive) setModel("Открыть подключения"); });
     return () => { alive = false; };
   }, [profile]));
-  const card = { backgroundColor: t.panel, padding: 20, gap: 10, borderRadius: 22, borderWidth: 1, borderColor: t.line };
   return <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
-    <ScrollView style={{ flex: 1, backgroundColor: t.bg }} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentContainerStyle={{ padding: 18, gap: 16, paddingBottom: insets.bottom + 24 }}>
-    <Text style={{ color: t.muted, lineHeight: 22 }}>Всё для работы вашего помощника.</Text>
-    <Pressable accessibilityRole="button" accessibilityLabel="Модели и подключения" style={card} onPress={() => navigation.navigate("ModelConnections")}>
-      <Text style={{ color: t.text, fontSize: 19, fontWeight: "700" }}>Модели и подключения →</Text>
-      <Text numberOfLines={2} style={{ color: t.accent }}>{model}</Text>
-      <Text style={{ color: t.muted, lineHeight: 20 }}>Сохранённые сервисы, адреса, ключи и интернет-поиск.</Text>
-    </Pressable>
-    <Pressable accessibilityRole="button" accessibilityLabel="Диагностика диалогов" style={card} onPress={() => navigation.navigate("DiagnosticLogs")}>
-      <Text style={{ color: t.text, fontSize: 19, fontWeight: "700" }}>Диагностика диалогов →</Text>
-      <Text style={{ color: t.muted, lineHeight: 20 }}>Временные журналы работы LLM: включить запись, посмотреть файлы, передать для анализа и удалить.</Text>
-    </Pressable>
-    <AgentLimitsCard key={profile} />
-    <SmartSearchCard />
-    <VoiceModelCard />
-    <Pressable accessibilityRole="button" accessibilityLabel="Резервные копии" style={card} onPress={() => navigation.navigate("MemoryBackup")}>
-      <Text style={{ color: t.text, fontSize: 19, fontWeight: "700" }}>Резервные копии →</Text>
-      <Text style={{ color: t.muted, lineHeight: 20 }}>Сохранить записи и диалоги или перенести их на другой телефон.</Text>
-    </Pressable>
-    <Text style={{ color: t.muted, fontSize: 12 }}>PersAI {Constants.expoConfig?.version || "—"} · {String(Constants.expoConfig?.extra?.buildSha || "—").slice(0, 7)}</Text>
-  </ScrollView></KeyboardAvoidingView>;
+    <ScrollView testID="settings-overview" style={{ flex: 1, backgroundColor: t.bg }} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentContainerStyle={{ padding: nebulaSpacing.md, gap: nebulaSpacing.xl, paddingBottom: insets.bottom + nebulaSpacing.xl }}>
+      <NebulaSection title="Помощник">
+        <NebulaSettingRow icon="cpu" title="Модели и подключения" summary={model} onPress={() => navigation.navigate("ModelConnections")} />
+        <VoiceModelCard />
+        <SmartSearchCard />
+        <AgentLimitsCard key={profile} />
+      </NebulaSection>
+      <NebulaSection title="Данные">
+        <NebulaSettingRow icon="archive" title="Резервные копии" summary="Записи и диалоги · перенос на другой телефон" onPress={() => navigation.navigate("MemoryBackup")} />
+      </NebulaSection>
+      <NebulaSection title="Обслуживание">
+        <NebulaSettingRow icon="activity" title="Диагностика диалогов" summary="Журналы работы и разбор ошибок" onPress={() => navigation.navigate("DiagnosticLogs")} />
+        <Text selectable style={{ color: t.muted, ...nebulaTypography.label }}>PersAI {Constants.expoConfig?.version || "—"} · {String(Constants.expoConfig?.extra?.buildSha || "—").slice(0, 7)}</Text>
+      </NebulaSection>
+    </ScrollView></KeyboardAvoidingView>;
 }

@@ -78,7 +78,7 @@ export function DiagnosticLogsScreen() {
         accessibilityHint="Экспериментальный экран Skia, не влияет на переписку и память"
         onPress={() => navigation.navigate("NebulaLab")}
         style={{ ...card, gap: 6, minHeight: 48 }}>
-        <Text style={{ color: t.accent, fontSize: 16, fontWeight: "700" }}>Лаборатория Nebula →</Text>
+        <Text style={{ color: t.secondary, fontSize: 16, fontWeight: "700" }}>Лаборатория Nebula →</Text>
         <Text style={{ color: t.muted, lineHeight: 20 }}>
           Сфера B+C: состояния, размеры 44/168 dp, отключение движения. Экспериментальная графика Skia для сравнения с главной.
         </Text>
@@ -103,18 +103,18 @@ export function DiagnosticLogsScreen() {
     <Text style={{ color: t.muted, lineHeight: 21 }}>Хранение: до 7 дней, не более 12 файлов примерно по 2 МБ. После отключения уже собранные журналы сохраняются до удаления или истечения срока хранения.</Text>
     <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 8 }}>
       <Text style={{ color: t.text, fontSize: 20, fontWeight: "700" }}>Журналы ({logs.length})</Text>
-      {busy ? <ActivityIndicator color={t.accent} /> : null}
+      {busy ? <ActivityIndicator color={t.secondary} /> : null}
     </View>
     {!logs.length ? <Text style={{ color: t.muted }}>Файлов пока нет. Включите диагностику и отправьте сообщение помощнику.</Text> : logs.map(file =>
       <Pressable key={file.name} accessibilityRole="button" accessibilityLabel={"Поделиться журналом " + file.name}
         disabled={busy} onPress={() => void run(() => withNativeInteraction(() => shareDiagnosticFile(profile!, file.name)))}
         style={{ ...card, gap: 6 }}>
-        <Text style={{ color: t.accent, fontWeight: "700" }}>{file.name} ↗</Text>
+        <Text style={{ color: t.secondary, fontWeight: "700" }}>{file.name} ↗</Text>
         <Text style={{ color: t.muted }}>{Math.max(1, Math.ceil(file.size / 1024))} КБ · нажмите, чтобы передать файл</Text>
       </Pressable>)}
     <Pressable accessibilityRole="button" accessibilityLabel="Обновить список журналов" disabled={busy}
       onPress={() => void run(async () => {})} style={{ ...card, alignItems: "center" }}>
-      <Text style={{ color: t.accent, fontWeight: "700" }}>Обновить список</Text>
+      <Text style={{ color: t.secondary, fontWeight: "700" }}>Обновить список</Text>
     </Pressable>
     {logs.length ? <Pressable accessibilityRole="button" accessibilityLabel="Удалить все журналы" disabled={busy}
       onPress={confirmClear} style={{ ...card, alignItems: "center" }}>

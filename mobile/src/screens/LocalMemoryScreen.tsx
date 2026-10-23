@@ -80,13 +80,12 @@ export function LocalMemoryScreen() {
   return <View style={{ flex: 1, backgroundColor: t.bg }}>
     <FlatList
       testID="memory-note-list"
-      ListHeaderComponent={<View style={{ paddingHorizontal: nebulaSpacing.md, paddingTop: nebulaSpacing.sm, paddingBottom: nebulaSpacing.sm, gap: nebulaSpacing.sm }}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: nebulaSpacing.xs }}>
-          <Text accessibilityRole="header" style={{ flex: 1, minWidth: 0, color: t.text, fontSize: 22, fontWeight: "800" }}>Память</Text>
+      ListHeaderComponent={<View style={{ paddingTop: nebulaSpacing.sm, paddingBottom: nebulaSpacing.sm, gap: nebulaSpacing.sm }}>
+        <View style={{ flexDirection: "row", justifyContent: "flex-end", alignItems: "center", gap: nebulaSpacing.xs }}>
           <Pressable accessibilityRole="button" accessibilityLabel="Добавить сведения из файла"
             onPress={() => navigation.navigate("MemoryImport")}
             style={{ minWidth: nebulaTouch.minimum, minHeight: nebulaTouch.minimum, alignItems: "center", justifyContent: "center", borderRadius: nebulaRadii.field, borderWidth: 1, borderColor: t.line, backgroundColor: t.panel }}>
-            <Feather name="paperclip" size={20} color={t.accent} />
+            <Feather name="paperclip" size={20} color={t.secondary} />
           </Pressable>
           <Pressable accessibilityRole="button" accessibilityLabel="Новая заметка"
             onPress={() => navigation.navigate("MemoryNote", { collectionId })}
@@ -115,31 +114,31 @@ export function LocalMemoryScreen() {
               onPress={() => setCollectionId(c.id)}
               style={{ minHeight: nebulaTouch.minimum, paddingHorizontal: nebulaSpacing.md, alignItems: "center", justifyContent: "center",
                 borderRadius: nebulaRadii.pill, borderWidth: 1, borderColor: chosen ? t.accent : t.line, backgroundColor: chosen ? t.soft : t.panel }}>
-              <Text numberOfLines={1} style={{ color: chosen ? t.accent : t.text, fontSize: 14, fontWeight: chosen ? "700" : "500" }}>{c.name}</Text>
+              <Text numberOfLines={1} style={{ color: chosen ? t.secondary : t.text, fontSize: 14, fontWeight: chosen ? "700" : "500" }}>{c.name}</Text>
             </Pressable>;
           })}
           <Pressable accessibilityRole="button" accessibilityLabel="Новый раздел памяти"
             onPress={() => setSectionOpen(true)}
             style={{ minHeight: nebulaTouch.minimum, flexDirection: "row", alignItems: "center", paddingHorizontal: nebulaSpacing.md,
               borderRadius: nebulaRadii.pill, borderWidth: 1, borderColor: t.line, gap: 6 }}>
-            <Feather name="folder-plus" size={18} color={t.accent} /><Text style={{ color: t.accent }}>Раздел</Text>
+            <Feather name="folder-plus" size={18} color={t.secondary} /><Text style={{ color: t.secondary }}>Раздел</Text>
           </Pressable>
         </ScrollView>
         <View style={{ flexDirection: "row", alignItems: "center", gap: nebulaSpacing.xs }}>
           <Pressable accessibilityRole="button" accessibilityLabel="Открыть текущие записи"
             accessibilityState={{ selected: status === "active" }} onPress={() => setStatus("active")}
             style={{ ...button, paddingHorizontal: nebulaSpacing.sm, minHeight: nebulaTouch.minimum, backgroundColor: status === "active" ? t.soft : "transparent" }}>
-            <Text style={{ color: status === "active" ? t.accent : t.muted, fontWeight: "600", fontSize: 13 }}>Записи</Text>
+            <Text style={{ color: status === "active" ? t.secondary : t.muted, fontWeight: "600", fontSize: 13 }}>Записи</Text>
           </Pressable>
           <Pressable accessibilityRole="button" accessibilityLabel="Открыть архив"
             accessibilityState={{ selected: status === "archived" }} onPress={() => setStatus("archived")}
             style={{ ...button, paddingHorizontal: nebulaSpacing.sm, minHeight: nebulaTouch.minimum, backgroundColor: status === "archived" ? t.soft : "transparent" }}>
-            <Text style={{ color: status === "archived" ? t.accent : t.muted, fontWeight: "600", fontSize: 13 }}>Архив</Text>
+            <Text style={{ color: status === "archived" ? t.secondary : t.muted, fontWeight: "600", fontSize: 13 }}>Архив</Text>
           </Pressable>
           <Pressable accessibilityRole="button" accessibilityLabel="Открыть корзину"
             accessibilityState={{ selected: status === "trashed" }} onPress={() => setStatus("trashed")}
             style={{ ...button, paddingHorizontal: nebulaSpacing.sm, minHeight: nebulaTouch.minimum, backgroundColor: status === "trashed" ? t.soft : "transparent" }}>
-            <Text style={{ color: status === "trashed" ? t.accent : t.muted, fontWeight: "600", fontSize: 13 }}>Корзина</Text>
+            <Text style={{ color: status === "trashed" ? t.secondary : t.muted, fontWeight: "600", fontSize: 13 }}>Корзина</Text>
           </Pressable>
           <View style={{ flex: 1 }} />
           <Text accessibilityLiveRegion="polite" style={{ color: t.muted, fontSize: 12 }}>
@@ -150,14 +149,14 @@ export function LocalMemoryScreen() {
           <Pressable accessibilityRole="button" accessibilityLabel="Резервные копии"
             onPress={() => navigation.navigate("MemoryBackup")}
             style={{ minHeight: nebulaTouch.minimum, flexDirection: "row", alignItems: "center", gap: 6 }}>
-            <Feather name="download-cloud" size={16} color={t.accent} />
-            <Text style={{ color: t.accent, fontSize: 13 }}>Копии</Text>
+            <Feather name="download-cloud" size={16} color={t.secondary} />
+            <Text style={{ color: t.secondary, fontSize: 13 }}>Копии</Text>
           </Pressable>
           <Pressable accessibilityRole="button" accessibilityLabel={selectedIds.length ? "Снять выбор записей" : "Выбрать показанные записи"}
             onPress={() => setSelectedIds(selectedIds.length ? [] : notes.slice(0, 100).map(n => n.id))}
             style={{ minHeight: nebulaTouch.minimum, flexDirection: "row", alignItems: "center", gap: 6 }}>
-            <Feather name={selectedIds.length ? "x-circle" : "check-square"} size={16} color={t.accent} />
-            <Text style={{ color: t.accent, fontSize: 13 }}>{selectedIds.length ? `Выбрано: ${selectedIds.length}` : "Выбрать"}</Text>
+            <Feather name={selectedIds.length ? "x-circle" : "check-square"} size={16} color={t.secondary} />
+            <Text style={{ color: t.secondary, fontSize: 13 }}>{selectedIds.length ? `Выбрано: ${selectedIds.length}` : "Выбрать"}</Text>
           </Pressable>
         </View>
         {status === "trashed" ? <Text style={{ color: t.muted, fontSize: 13, lineHeight: 19 }}>
@@ -165,20 +164,20 @@ export function LocalMemoryScreen() {
         </Text> : null}
       {selectedIds.length ? <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
         {status === "trashed" ? <>
-          <Pressable disabled={busy} style={button} onPress={() => void act("restore")}><Text style={{ color: t.accent }}>Восстановить</Text></Pressable>
+          <Pressable disabled={busy} style={button} onPress={() => void act("restore")}><Text style={{ color: t.secondary }}>Восстановить</Text></Pressable>
           <Pressable disabled={busy} style={button} onPress={() => Alert.alert("Удалить навсегда?", "Исчезнут выбранные записи, их оригиналы и история. Отменить это действие нельзя.\n" + selectedNotes.map(n => n.title).join("\n"), [{ text: "Отмена", style: "cancel" }, { text: "Удалить навсегда", style: "destructive", onPress: () => { if (!repository.current) return; setBusy(true); void repository.current.purgeNotes(selectedNotes).then(() => { setSelectedIds([]); setUndo(""); setRetry(n => n + 1); }).catch(e => setError(memoryErrorMessage(e))).finally(() => setBusy(false)); } }])}><Text style={{ color: t.err }}>Удалить навсегда</Text></Pressable>
         </> : <>
-          <Pressable disabled={busy} style={button} onPress={() => setMoveOpen(true)}><Text style={{ color: t.accent }}>Перенести</Text></Pressable>
-          <Pressable disabled={busy || selectedIds.length < 2 || status !== "active"} style={button} onPress={() => setMergeOpen(true)}><Text style={{ color: t.accent }}>Объединить</Text></Pressable>
+          <Pressable disabled={busy} style={button} onPress={() => setMoveOpen(true)}><Text style={{ color: t.secondary }}>Перенести</Text></Pressable>
+          <Pressable disabled={busy || selectedIds.length < 2 || status !== "active"} style={button} onPress={() => setMergeOpen(true)}><Text style={{ color: t.secondary }}>Объединить</Text></Pressable>
           <Pressable disabled={busy} style={button} onPress={() => Alert.alert("В корзину?", selectedNotes.map(n => n.title || "Без названия").join("\n"), [{ text: "Отмена", style: "cancel" }, { text: "В корзину", onPress: () => void act("trash") }])}><Text style={{ color: t.err }}>Удалить</Text></Pressable>
         </>}
       </View> : null}
-      {undo ? <Pressable disabled={busy} style={button} onPress={() => { if (!repository.current) return; setBusy(true); void repository.current.undoNotes(undo).then(() => { setUndo(""); setRetry(n => n + 1); if (profile) scheduleVectors(profile); }).catch(e => setError(memoryErrorMessage(e))).finally(() => setBusy(false)); }}><Text style={{ color: t.accent }}>Отменить последнюю операцию</Text></Pressable> : null}
-    {error ? <View style={{ paddingHorizontal: 18, gap: 8 }}><Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text><Pressable accessibilityRole="button" onPress={() => setRetry(n => n + 1)} style={button}><Text style={{ color: t.accent }}>Повторить загрузку</Text></Pressable></View> : null}
+      {undo ? <Pressable disabled={busy} style={button} onPress={() => { if (!repository.current) return; setBusy(true); void repository.current.undoNotes(undo).then(() => { setUndo(""); setRetry(n => n + 1); if (profile) scheduleVectors(profile); }).catch(e => setError(memoryErrorMessage(e))).finally(() => setBusy(false)); }}><Text style={{ color: t.secondary }}>Отменить последнюю операцию</Text></Pressable> : null}
+    {error ? <View style={{ paddingHorizontal: 18, gap: 8 }}><Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text><Pressable accessibilityRole="button" onPress={() => setRetry(n => n + 1)} style={button}><Text style={{ color: t.secondary }}>Повторить загрузку</Text></Pressable></View> : null}
     {loading ? <ActivityIndicator accessibilityLabel="Загрузка записей" /> : null}
 </View>} data={loading ? [] : notes} keyExtractor={item => item.id} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag"
       contentContainerStyle={{ paddingHorizontal: nebulaSpacing.md, paddingBottom: nebulaSpacing.xl, gap: nebulaSpacing.sm, flexGrow: 1 }}
-      ListEmptyComponent={!loading && !error ? <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24, gap: 12 }}><Feather name={term ? "search" : "book-open"} size={40} color={t.accent} />
+      ListEmptyComponent={!loading && !error ? <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24, gap: 12 }}><Feather name={term ? "search" : "book-open"} size={40} color={t.secondary} />
         <Text style={{ color: t.text, fontSize: 20, fontWeight: "700", textAlign: "center" }}>{term ? "Ничего не найдено" : status === "archived" ? "Архив пуст" : status === "trashed" ? "Корзина пуста" : "Начните с важного"}</Text>
         <Text style={{ color: t.muted, textAlign: "center", lineHeight: 21 }}>{term ? "Попробуйте другое слово или раздел «Все записи»." : status === "trashed" ? "Здесь будут удалённые заметки, пока вы их не восстановите." : "Создайте запись или добавьте сведения из файла."}</Text></View> : null}
       renderItem={({ item }) => <MemoryNoteCard note={item}
@@ -189,15 +188,15 @@ export function LocalMemoryScreen() {
           ? setSelectedIds(ids => ids.includes(item.id) ? ids.filter(id => id !== item.id) : [...ids, item.id])
           : navigation.navigate("MemoryNote", { entityId: item.id })}
       />}
-      ListFooterComponent={more && !loading ? <Pressable accessibilityRole="button" accessibilityLabel="Показать ещё заметки" disabled={busy} onPress={() => void loadMore()} style={button}><Text style={{ color: t.accent }}>{busy ? "Загружаю…" : "Показать ещё"}</Text></Pressable> : null} />
+      ListFooterComponent={more && !loading ? <Pressable accessibilityRole="button" accessibilityLabel="Показать ещё заметки" disabled={busy} onPress={() => void loadMore()} style={button}><Text style={{ color: t.secondary }}>{busy ? "Загружаю…" : "Показать ещё"}</Text></Pressable> : null} />
     <BottomSheet visible={moveOpen} title="Перенести выбранные записи" onClose={() => setMoveOpen(false)}>
       <Text style={{ color: t.muted }}>{selectedNotes.map(n => n.title).join(", ")}</Text>
-      {collections.map(c => <Pressable key={c.id} disabled={busy} style={button} onPress={() => void act("move", c.id)}><Text style={{ color: t.accent }}>{c.name}</Text></Pressable>)}
+      {collections.map(c => <Pressable key={c.id} disabled={busy} style={button} onPress={() => void act("move", c.id)}><Text style={{ color: t.secondary }}>{c.name}</Text></Pressable>)}
     </BottomSheet>
     <BottomSheet visible={mergeOpen} title="Предпросмотр объединения" onClose={() => setMergeOpen(false)}>
       <Text style={{ color: t.muted }}>Название первой выбранной записи сохраняется. Тексты остаются отдельными блоками; вложения и источники сохраняются. Противоречия не исправляются автоматически.</Text>
       <ScrollView style={{ maxHeight: 300 }}><Text style={{ color: t.text }}>{mergeText(selectedNotes)}</Text></ScrollView>
-      <Pressable disabled={busy} style={button} onPress={() => void act("merge")}><Text style={{ color: t.accent }}>Подтвердить объединение</Text></Pressable>
+      <Pressable disabled={busy} style={button} onPress={() => void act("merge")}><Text style={{ color: t.secondary }}>Подтвердить объединение</Text></Pressable>
     </BottomSheet>
     <BottomSheet visible={sectionOpen} title="Новый раздел" onClose={() => setSectionOpen(false)}>
       <Text style={{ color: t.muted }}>Например: «Рецепты», «Идеи» или «Планы».</Text>

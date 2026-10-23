@@ -1,30 +1,30 @@
 import { useColorScheme } from "react-native";
 import React, { createContext, useContext } from "react";
+import { nebulaColors, nebulaHomeColors, legacyLightColors, type NebulaThemeName } from "./design/nebula/tokens";
+export { nebulaHomeColors } from "./design/nebula/tokens";
 
-/** PersAI tokens: calm Aurora surfaces and the turquoise / indigo / orchid mark. */
-const light = {
-  bg: "#F8FAFF", panel: "#FFFFFF", line: "#E8EAF7", text: "#111C3D", muted: "#6D779D",
-  accent: "#5966F8", secondary: "#10CFE4", violet: "#BD59F2",
-  soft: "#F1F3FF", glow: "#C8CBFF", orbA: "#89E7FC", orbB: "#EAB3FF",
-  userBubble: "#655DEA", userText: "#FFFFFF", ok: "#159D80", err: "#D5456B", warn: "#FFF2DA",
-};
-const dark: typeof light = {
-  bg: "#0E1024", panel: "#191C39", line: "#32365A", text: "#F3F3FF", muted: "#ADB3D3",
-  accent: "#A49BFF", secondary: "#52DFEF", violet: "#E09DFF",
-  soft: "#252A4F", glow: "#584A9F", orbA: "#267AAE", orbB: "#81539F",
-  userBubble: "#4B428E", userText: "#FFFFFF", ok: "#4FCFB1", err: "#FF8EAD", warn: "#463D29",
-};
-export type Theme = typeof light;
-
-/** Home-only theme boundary; Memory and Settings keep their own OS theme. */
+/** Compatibility adapter: existing forms share the semantic Nebula palette. */
+export function themeFor(scheme: NebulaThemeName) {
+  const c = nebulaColors(scheme);
+  return {
+    bg: c.canvas, panel: c.surface, line: c.border, text: c.text, muted: c.textSecondary,
+    accent: c.accent, secondary: c.cyan, violet: c.electric, soft: c.surfaceElevated,
+    glow: c.surfaceMuted, orbA: c.cyan, orbB: c.electric,
+    userBubble: c.accent, userText: c.textOnAccent, ok: c.success, err: c.danger, warn: c.surfaceMuted,
+  };
+}
+export type Theme = ReturnType<typeof themeFor>;
 const ThemeOverride = createContext<Theme | null>(null);
 export function NebulaHomeThemeProvider({ children }: { children: React.ReactNode }) {
-  return React.createElement(ThemeOverride.Provider, { value: dark }, children);
+  return React.createElement(ThemeOverride.Provider, { value: nebulaHomeColors }, children);
 }
-export const nebulaHomeColors = dark;
-
+/** Approved dark brand default; Home retains its exact pre-migration scene colors. */
+const appTheme = themeFor("dark");
+export function NebulaAppThemeProvider({ children }: { children: React.ReactNode }) {
+  return React.createElement(ThemeOverride.Provider, { value: appTheme }, children);
+}
 export function useTheme(): Theme {
   const override = useContext(ThemeOverride);
   const scheme = useColorScheme();
-  return override ?? (scheme === "dark" ? dark : light);
+  return override ?? (scheme === "dark" ? nebulaHomeColors : legacyLightColors);
 }

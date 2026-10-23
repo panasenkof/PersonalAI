@@ -30,7 +30,7 @@ export function SmartSearchCard() {
   const summary = [enrich.enabled ? `слова для поиска: ${enrich.done}${enrich.pending ? ", ждут " + enrich.pending : ""}` : "слова для поиска выключены",
     model.state === "ready" ? `по смыслу: ${vectors.done} из ${vectors.total}` : model.state === "downloading" ? `модель скачивается ${model.progress}%` :
     model.state === "unsupported" ? "" : "по смыслу: модель не скачана"].filter(Boolean).join(" · ");
-  return <Collapsible id="settings.smart-search" title="Умный поиск по памяти" summary={(enrich.error || vectors.error ? "⚠ " : "") + summary}>
+  return <Collapsible icon="search" id="settings.smart-search" title="Умный поиск по памяти" summary={(enrich.error || vectors.error ? "⚠ " : "") + summary}>
     <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
       <View style={{ flex: 1, gap: 4 }}>
         <Text style={{ color: t.text, fontWeight: "600" }}>Слова для поиска</Text>
@@ -45,7 +45,7 @@ export function SmartSearchCard() {
       {enrich.error ? <Text selectable accessibilityRole="alert" style={{ color: t.err }}>{enrich.error}</Text> : null}
       {!enrich.running && enrich.pending ? <Pressable accessibilityRole="button" accessibilityLabel="Подобрать слова сейчас" onPress={() => { if (profile) scheduleIndexTerms(profile, 0); }}
         style={{ minHeight: 46, justifyContent: "center", alignItems: "center", borderRadius: 16, borderWidth: 1, borderColor: t.accent }}>
-        <Text style={{ color: t.accent }}>Подобрать сейчас</Text></Pressable> : null}
+        <Text style={{ color: t.secondary }}>Подобрать сейчас</Text></Pressable> : null}
     </> : null}
     <Text style={{ color: t.text, fontWeight: "600", marginTop: 6 }}>Поиск по смыслу</Text>
     {model.state === "unsupported" ? <Text style={{ color: t.muted, fontSize: 12, lineHeight: 17 }}>Требует Android 13 или новее (iOS 17). На этом телефоне поиск работает по словам и словам для поиска.</Text> : <>
@@ -56,13 +56,13 @@ export function SmartSearchCard() {
         {vectors.error ? <Text selectable accessibilityRole="alert" style={{ color: t.err }}>{vectors.error}</Text> : null}
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
           {!vectors.running && vectors.done < vectors.total ? <Pressable accessibilityRole="button" accessibilityLabel="Посчитать векторы сейчас" onPress={() => { if (profile) scheduleVectors(profile, 0); }} style={button(false)}>
-            <Text style={{ color: t.accent }}>Посчитать сейчас</Text></Pressable> : null}
+            <Text style={{ color: t.secondary }}>Посчитать сейчас</Text></Pressable> : null}
           <Pressable accessibilityRole="button" accessibilityLabel="Удалить модель поиска по смыслу" onPress={confirmDelete} style={button(false)}><Text style={{ color: t.err }}>Удалить модель</Text></Pressable>
         </View>
       </> : model.state === "downloading" ? <View style={{ gap: 8 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}><ActivityIndicator /><Text style={{ color: t.text }}>Скачивается: {model.progress}%</Text></View>
         <View style={{ height: 6, borderRadius: 3, backgroundColor: t.soft, overflow: "hidden" }}><View style={{ width: `${model.progress}%`, height: 6, backgroundColor: t.accent }} /></View>
-        <Pressable accessibilityRole="button" accessibilityLabel="Отменить скачивание модели поиска" onPress={cancelEmbedderDownload} style={button(false)}><Text style={{ color: t.accent }}>Отменить</Text></Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel="Отменить скачивание модели поиска" onPress={cancelEmbedderDownload} style={button(false)}><Text style={{ color: t.secondary }}>Отменить</Text></Pressable>
       </View> : <>
         {model.state === "error" ? <Text selectable accessibilityRole="alert" style={{ color: t.err }}>{model.message}</Text> : null}
         <Pressable accessibilityRole="button" accessibilityLabel="Скачать модель поиска по смыслу" onPress={confirmDownload} style={button(true)}>

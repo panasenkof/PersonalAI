@@ -9,7 +9,7 @@ import React, { useEffect } from "react";
 import { createNavigationContainerRef } from "@react-navigation/native";
 import { IncomingShares } from "./media/IncomingShares";
 import { clearAttachmentPreviews } from "./media/attachments";
-import { useColorScheme } from "react-native";
+
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { HomeScreen } from "./screens/HomeScreen";
@@ -20,7 +20,7 @@ import { MemoryNoteScreen } from "./screens/MemoryNoteScreen";
 import { MemoryBackupScreen } from "./screens/MemoryBackupScreen";
 import { DeviceSettingsScreen } from "./screens/DeviceSettingsScreen";
 import { DiagnosticLogsScreen } from "./screens/DiagnosticLogsScreen";
-import { nebulaHomeColors, useTheme } from "./theme";
+import { NebulaAppThemeProvider, nebulaHomeColors, useTheme } from "./theme";
 
 export type TabParams = { Home: undefined; LocalMemory: undefined; Settings: undefined };
 export type RootStackParams = {
@@ -46,11 +46,10 @@ function Tabs() {
   );
   return (
     <Tab.Navigator screenOptions={({ route }) => {
-      // Home is an intentionally dark cosmic scene even when the device is
-      // light; keep Memory/Settings exactly on the selected OS theme.
+      // Preserve the Home scene; other routes share the migrated Nebula theme.
       const colors = route.name === "Home" ? nebulaHomeColors : t;
       return {
-        tabBarActiveTintColor: colors.accent,
+        tabBarActiveTintColor: route.name === "Home" ? colors.accent : colors.secondary,
         tabBarInactiveTintColor: colors.muted,
         tabBarLabelStyle: { fontSize: 11, fontWeight: "600" },
         // Respect Android gesture / three-button navigation in all themes.
@@ -72,8 +71,11 @@ function Tabs() {
   );
 }
 export function RootNavigator() {
+  return <NebulaAppThemeProvider><ThemedRootNavigator /></NebulaAppThemeProvider>;
+}
+function ThemedRootNavigator() {
   useEffect(() => { clearAttachmentPreviews(); }, []);
-  const dark = useColorScheme() === "dark";
+  const dark = true;
   const t = useTheme();
   return (
     <NavigationContainer ref={navigationRef} theme={dark ? DarkTheme : DefaultTheme}>

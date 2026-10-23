@@ -195,32 +195,32 @@ export function MemoryImportScreen() {
         <Text style={{ color: t.text, fontWeight: "600" }}>Обработка файла</Text>
         {([ ["sensitive", "Личные — только на телефоне"], ["standard", "Обычные — доступны агенту и разбору у провайдера"] ] as const).map(([id, label]) =>
           <Pressable disabled={busy} key={id} accessibilityRole="button" accessibilityLabel={label} onPress={() => setClassification(id)} style={{ minHeight: 46, justifyContent: "center" }}>
-            <Text style={{ color: classification === id ? t.accent : t.text }}>{classification === id ? "● " : "○ "}{label}</Text>
+            <Text style={{ color: classification === id ? t.secondary : t.text }}>{classification === id ? "● " : "○ "}{label}</Text>
           </Pressable>)}
         {kind !== "text" && !localAudio ? <>
           <Text style={{ color: t.muted, fontSize: 12 }}>При разборе файл или кадры отправляются выбранному сервису.</Text>
           <Text style={{ color: t.text, fontWeight: "600" }}>Подключение для разбора</Text>
           {connections.map(c => <Pressable disabled={busy} key={c.id} accessibilityRole="button" accessibilityLabel={"Разобрать через " + c.name} style={{ minHeight: 44, justifyContent: "center" }} onPress={() => setConnectionId(c.id)}>
-            <Text style={{ color: connectionId === c.id ? t.accent : t.text }}>{connectionId === c.id ? "● " : "○ "}{c.name} · {c.model}</Text>
+            <Text style={{ color: connectionId === c.id ? t.secondary : t.text }}>{connectionId === c.id ? "● " : "○ "}{c.name} · {c.model}</Text>
           </Pressable>)}
           {kind === "audio" && selected?.provider === "anthropic" ? <Text style={{ color: t.err }}>Для аудио выберите OpenAI-совместимое подключение с распознаванием речи.</Text> : null}
         </> : null}
-        {kind === "audio" || kind === "video" ? <View><Text style={{ color: t.text }}>Подключение для речи (локальный Whisper имеет приоритет)</Text>{connections.map(c => <Pressable key={c.id} disabled={busy} onPress={() => setSpeechConnectionId(c.id)} style={{ minHeight: 44 }}><Text style={{ color: c.id === speechConnectionId ? t.accent : t.text }}>{c.id === speechConnectionId ? "● " : "○ "}{c.name} · {c.transcriptionModel || "whisper-1"}</Text></Pressable>)}</View> : null}
+        {kind === "audio" || kind === "video" ? <View><Text style={{ color: t.text }}>Подключение для речи (локальный Whisper имеет приоритет)</Text>{connections.map(c => <Pressable key={c.id} disabled={busy} onPress={() => setSpeechConnectionId(c.id)} style={{ minHeight: 44 }}><Text style={{ color: c.id === speechConnectionId ? t.secondary : t.text }}>{c.id === speechConnectionId ? "● " : "○ "}{c.name} · {c.transcriptionModel || "whisper-1"}</Text></Pressable>)}</View> : null}
         <Pressable disabled={busy || !canExtract} accessibilityRole="button" accessibilityLabel="Извлечь сведения из файла" style={[button, { opacity: canExtract ? 1 : .5 }]} onPress={() => void extract()}>
           <Text style={{ color: "#fff", fontWeight: "700" }}>{kind === "text" ? "Прочитать текст на телефоне" : localAudio ? "Распознать речь на телефоне" : "Передать файл провайдеру и разобрать"}</Text>
         </Pressable>
       </View> : null}
       {busy ? <><ActivityIndicator /><Pressable accessibilityRole="button" onPress={() => controller.current?.abort()} style={{ minHeight: 44 }}><Text style={{ color: t.err }}>Остановить</Text></Pressable></> : null}
       {incoming && !preparing ? <View style={{ flexDirection: "row", gap: 16 }}>
-        <Pressable disabled={busy} style={{ minHeight: 44 }} onPress={() => setPrepareAttempt(n => n + 1)}><Text style={{ color: t.accent }}>Повторить подготовку</Text></Pressable>
-        {position + 1 < incoming.length ? <Pressable disabled={busy} style={{ minHeight: 44 }} onPress={() => Alert.alert("Пропустить материал?", "Этот материал не будет сохранён.", [{ text: "Отмена", style: "cancel" }, { text: "Пропустить", onPress: () => setPosition(p => p + 1) }])}><Text style={{ color: t.accent }}>Пропустить</Text></Pressable> : null}
+        <Pressable disabled={busy} style={{ minHeight: 44 }} onPress={() => setPrepareAttempt(n => n + 1)}><Text style={{ color: t.secondary }}>Повторить подготовку</Text></Pressable>
+        {position + 1 < incoming.length ? <Pressable disabled={busy} style={{ minHeight: 44 }} onPress={() => Alert.alert("Пропустить материал?", "Этот материал не будет сохранён.", [{ text: "Отмена", style: "cancel" }, { text: "Пропустить", onPress: () => setPosition(p => p + 1) }])}><Text style={{ color: t.secondary }}>Пропустить</Text></Pressable> : null}
       </View> : null}
       {notice ? <Text accessibilityRole="alert" style={{ color: t.muted }}>{notice}</Text> : null}
       {file || extractedText || (incoming && !preparing) ? <>
-        {file ? <Pressable disabled={busy} accessibilityRole="checkbox" accessibilityState={{ checked: !keepOriginal }} onPress={() => setKeepOriginal(v => !v)} style={{ minHeight: 44 }}><Text style={{ color: t.accent }}>{keepOriginal ? "□" : "☑"} Не сохранять оригинал — оставить только текст</Text></Pressable> : null}
+        {file ? <Pressable disabled={busy} accessibilityRole="checkbox" accessibilityState={{ checked: !keepOriginal }} onPress={() => setKeepOriginal(v => !v)} style={{ minHeight: 44 }}><Text style={{ color: t.secondary }}>{keepOriginal ? "□" : "☑"} Не сохранять оригинал — оставить только текст</Text></Pressable> : null}
         <Text style={{ color: t.text }}>Раздел</Text>
         {collections.find(c => c.id === collectionId)?.sensitivity !== "standard" ? <Text style={{ color: t.muted }}>Выбранный раздел закрыт для агента независимо от настройки записи.</Text> : null}
-        {collections.map(c => <Pressable key={c.id} disabled={busy} accessibilityRole="button" accessibilityLabel={"Раздел: " + c.name} onPress={() => setCollectionId(c.id)} style={{ minHeight: 44 }}><Text style={{ color: c.id === collectionId ? t.accent : t.text }}>{c.id === collectionId ? "● " : "○ "}{c.name}</Text></Pressable>)}
+        {collections.map(c => <Pressable key={c.id} disabled={busy} accessibilityRole="button" accessibilityLabel={"Раздел: " + c.name} onPress={() => setCollectionId(c.id)} style={{ minHeight: 44 }}><Text style={{ color: c.id === collectionId ? t.secondary : t.text }}>{c.id === collectionId ? "● " : "○ "}{c.name}</Text></Pressable>)}
         {!file ? <Pressable disabled={busy} accessibilityRole="button" style={button} onPress={() => setClassification(classification === "standard" ? "sensitive" : "standard")}><Text style={{ color: "#fff" }}>{classification === "standard" ? "Доступно агенту" : "Только на телефоне — нажмите, чтобы разрешить агенту"}</Text></Pressable> : null}
         <Text style={{ color: t.text, fontWeight: "600" }}>Название заметки</Text>
         <TextInput accessibilityLabel="Название импортируемой заметки" editable={!busy} value={title} onChangeText={setTitle} style={field} />
