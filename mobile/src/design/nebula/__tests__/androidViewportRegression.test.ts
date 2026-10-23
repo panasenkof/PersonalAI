@@ -21,4 +21,13 @@ describe("Android viewport regressions from real device recordings", () => {
     expect(smoke).toContain('- assertVisible: "Сохранить запись"');
     expect(smoke).not.toContain('element: "Сохранить запись"');
   });
+  it("uses stable accessibility labels for both note edit steps", () => {
+    expect(note).toContain('accessibilityLabel="Текст заметки"');
+    expect(smoke.match(/element: "Текст заметки"/g)).toHaveLength(2);
+    expect(smoke.match(/- tapOn: "Текст заметки"/g)).toHaveLength(2);
+    expect(smoke).not.toContain('element: "Persisted offline content"');
+    expect(smoke).not.toContain('element: "Что нужно запомнить?"');
+    expect(smoke).toContain('timeout: 15000');
+  });
+
 });
