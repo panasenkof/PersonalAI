@@ -36,7 +36,7 @@ export function ConversationHistorySheet({
   const changeQuery = (value: string) => { setQuery(value); setLimit(PAGE_SIZE); };
 
   return <BottomSheet visible={visible} title="Мои диалоги" onClose={onClose}>
-    <Text style={{ color: t.muted, lineHeight: 20 }}>Выберите разговор или найдите нужное сообщение. История хранится на устройстве.</Text>
+    {!searching ? <Text style={{ color: t.muted, lineHeight: 20 }}>Выберите разговор или найдите нужное сообщение. История хранится на устройстве.</Text> : null}
     <View style={{ flexDirection: "row", alignItems: "center", borderColor: t.line, borderWidth: 1, borderRadius: 16, backgroundColor: t.soft }}>
       <TextInput testID="chat-history-search" accessibilityLabel="Поиск диалогов"
         value={query} onChangeText={changeQuery} autoCorrect={false} returnKeyType="search"
