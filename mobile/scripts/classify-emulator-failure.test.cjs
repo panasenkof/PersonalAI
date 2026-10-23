@@ -95,15 +95,15 @@ test('native note smoke navigates past the keyboard before targeting the body', 
   const note = flow.slice(noteStart, noteEnd);
   const title = note.indexOf('inputText: "Native smoke note"');
   const dismiss = note.indexOf('- hideKeyboard', title);
-  const scroll = note.indexOf('element: "Текст заметки"', dismiss);
-  const tap = note.indexOf('- tapOn: "Текст заметки"', scroll);
+  const scroll = note.indexOf('element: "Что нужно запомнить?"', dismiss);
+  const tap = note.indexOf('- tapOn: "Что нужно запомнить?"', scroll);
   const input = note.indexOf('inputText: "Persisted offline content"', tap);
   assert.ok(title >= 0 && dismiss > title && scroll > dismiss && tap > scroll && input > tap,
-    'after entering title, dismiss IME, scroll to accessible body input, focus and type');
-  assert.ok(note.includes('element: "Текст заметки"'),
+    'after entering title, dismiss IME, scroll to the visible body placeholder, focus and type');
+  assert.ok(note.includes('element: "Persisted offline content"'),
     'editing previously stored text scrolls to the body before editing');
-  assert.match(note, /tapOn: "Текст заметки"/,
-    "use the stable accessibility label when editing a note");
+  assert.match(note, /tapOn: "Persisted offline content"/,
+    "use visible text when editing an existing note");
 });
 
 
