@@ -23,12 +23,36 @@ export function linkImportErrorMessage(error: unknown): string {
   return 'Не удалось загрузить ссылку: сетевая ошибка или ограничения сайта. Проверьте соединение, доступность адреса в браузере и попробуйте другой публичный файл.';
 }
 
+/** Offline best-effort HTML extraction. Do not invoke an LLM for cleaning, and
+ * never discard a shorter non-article page solely for lacking semantic tags. */
 export function pageText(html: string): string {
-  return html.replace(/<(script|style|noscript)\b[^>]*>[\s\S]*?<\/\1>/gi, '')
-    .replace(/<\/(p|div|h[1-6]|li|section)>/gi, '\n').replace(/<br\s*\/?\s*>/gi, '\n')
-    .replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').trim();
+  const safe = html
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<(script|style|noscript|template|svg|iframe|nav|header|footer|aside|form)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '')
+    .replace(/<(div|section)\b(?=[^>]*(?:id|class)\s*=\s*["'][^"']*(?:cookie|advert|banner|sidebar|breadcrumbs|newsletter|popup)[^"']*["'])[^>]*>[\s\S]*?<\/\1\s*>/gi, '');
+  // Prefer article/main text when meaningful; retain the rest as fallback.
+  const blocks = [...safe.matchAll(/<(article|main)\b[^>]*>([\s\S]*?)<\/\1\s*>/gi)].map(m => m[2]);
+  function clean(markup: string): string {
+    const entities: Record<string, string> = { nbsp: ' ', amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", laquo: '«', raquo: '»', mdash: '—', ndash: '–', hellip: '…' };
+    return markup.replace(/<\/(p|div|h[1-6]|li|section|article|main|blockquote|tr)>/gi, '\n')
+      .replace(/<br\s*\/?\s*>/gi, '\n')
+      .replace(/<[^>]*>/g, '')
+      .replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (entity, value: string) => {
+        if (value.startsWith('#')) {
+          const n = value[1].toLowerCase() === 'x' ? parseInt(value.slice(2), 16) : parseInt(value.slice(1), 10);
+          return n > 0 && n <= 0x10ffff && !(n >= 0xd800 && n <= 0xdfff) ? String.fromCodePoint(n) : '';
+        }
+        return entities[value.toLowerCase()] ?? entity;
+      })
+      .replace(/\r/g, '')
+      .replace(/[ \t]+/g, ' ')
+      .replace(/\n[ \t]*/g, '\n')
+      .replace(/\n{3,}/g, '\n\n').trim();
+  }
+  const candidates = blocks.map(clean).filter(text => text.length >= 24).sort((a, b) => b.length - a.length);
+  return candidates[0] || clean(safe);
 }
+
 /** Explicit user action only; no cookies/keys; streaming bound before allocation. */
 export async function importLink(raw: string, signal?: AbortSignal): Promise<{ file?: ImportFile; text?: string; source: string }> {
   const source = publicImportUrl(raw);
