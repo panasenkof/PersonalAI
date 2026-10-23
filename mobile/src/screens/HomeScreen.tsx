@@ -13,7 +13,7 @@ import type { RootStackParams } from "../navigation";
 import { BottomSheet } from "../components/BottomSheet";
 import { NebulaHomeHeader } from "../design/nebula/NebulaHomeHeader";
 import { NebulaHomeArtwork } from "../design/nebula/NebulaHomeArtwork";
-import { isNebulaChatNearBottom, nebulaEmptyOrbSize, nebulaConversationOrbSize, shouldScrollNebulaChatToEnd } from "../design/nebula/homeArtLayout";
+import { isNebulaChatNearBottom, nebulaEmptyOrbSize, shouldScrollNebulaChatToEnd, shouldAnchorNebulaStreamingReply } from "../design/nebula/homeArtLayout";
 import { resolveNebulaHomePhase, type NebulaVoicePhase } from "../design/nebula/homePhase";
 import { useChatBottomFollow } from "../design/nebula/useChatBottomFollow";
 import { VoiceInput } from "../components/VoiceInput";
@@ -23,8 +23,6 @@ import { NebulaHomeThemeProvider, useTheme } from "../theme";
 import { MarkdownText } from "../components/Markdown";
 import { KIND_NAMES } from "../direct-agent/fact-tool";
 import { useDraftNormalization } from "../direct-agent/use-draft-normalization";
-
-const StableNebulaArtwork = React.memo(NebulaHomeArtwork);
 
 export function HomeScreen() {
   return <NebulaHomeThemeProvider><NebulaHomeContent /></NebulaHomeThemeProvider>;
@@ -49,7 +47,7 @@ function NebulaHomeContent() {
   const [composerFocused, setComposerFocused] = useState(false);
   const [keyboardOpen, setKeyboardOpen] = useState(false);
   const [listViewportHeight, setListViewportHeight] = useState(0);
-  const { list, nearChatBottom, pendingSendFollow, scheduleBottomFollow } =
+  const { list, nearChatBottom, pendingSendFollow, userScrollActive, streamReadAnchored, streamFollowOverride, scheduleBottomFollow } =
     useChatBottomFollow(active?.id, isFocused);
   useEffect(() => {
     // Browser QA / React Native Web may omit the native Keyboard module.
@@ -96,29 +94,44 @@ function NebulaHomeContent() {
   const artLayout = { listHeight: listViewportHeight, windowHeight: height,
     windowWidth: width, composerOccluded };
   const artworkSize = nebulaEmptyOrbSize(artLayout);
-  const statusArtworkSize = nebulaConversationOrbSize(artLayout);
   const action = { minHeight: 44, minWidth: 44, justifyContent: "center" as const, alignItems: "center" as const };
   const sendOrStop = () => {
     if (busy) { store.stop(); return; }
     if (!settings) return;
     // Only a deliberate Send closes Gboard (not a pause in typing).
-    pendingSendFollow.current = true;
+    // Keep the send-follow latch only while the IME actually needs to close.
+    pendingSendFollow.current = composerOccluded;
     nearChatBottom.current = true;
+    userScrollActive.current = false;
+    streamReadAnchored.current = false;
+    streamFollowOverride.current = false;
     Keyboard?.dismiss?.();
     setComposerFocused(false);
     setVoiceReset(n => n + 1);
     void store.send(settings);
     scheduleBottomFollow();
   };
+  const updateUserScrollPosition = (metrics: { contentOffset: { y: number }; contentSize: { height: number }; layoutMeasurement: { height: number } }) => {
+    nearChatBottom.current = isNebulaChatNearBottom(
+      metrics.contentSize.height, metrics.contentOffset.y, metrics.layoutMeasurement.height,
+    );
+    // A reader who explicitly returns to the end opts back into following
+    // the current response. Another upward swipe cancels this override.
+    streamFollowOverride.current = nearChatBottom.current;
+    if (nearChatBottom.current) streamReadAnchored.current = false;
+  };
   const openConnections = (presetId?: string) => navigation.navigate("ModelConnections", presetId ? { presetId } : undefined);
   // First run: the active connection has neither a key nor a keyless local address.
   const needsSetup = Boolean(settings && !settings.apiKey && !anonymousLocalAllowed(settings));
+  // Android 35 edge-to-edge does not reliably resize this screen above the IME on its own.
+  // Keep the composer on screen with height avoidance; FlatList follows only finger gestures,
+  // so the keyboard relayout must not be interpreted as a user scroll.
   return <KeyboardAvoidingView style={{ flex: 1, paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right, backgroundColor: t.bg }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
     <StatusBar style={isFocused ? "light" : "auto"} />
     <NebulaHomeHeader connectionName={connectionName} model={settings?.model}
       onConnections={() => openConnections()} onHistory={() => setHistoryOpen(true)}
+      showOrb={Boolean(active?.rows.length)} orbPhase={orbPhase} progressText={busy ? (active?.progress || "Готовлю ответ…") : undefined}
       newChatEnabled={ready} onNewChat={() => store.create()} />
-    {ready && Boolean(active?.rows?.length) ? <View testID="nebula-conversation-orb" style={{ height: 112, justifyContent: "center", alignItems: "center" }}><StableNebulaArtwork size={104} phase={orbPhase} /></View> : null}
     {!ready ? <View style={{ padding: 20, gap: 12 }}>{!error ? <ActivityIndicator accessibilityLabel="Загрузка диалогов" /> : null}
       {error ? <Pressable accessibilityRole="button" onPress={() => void store.initialize()} style={action}><Text style={{ color: t.accent }}>Повторить загрузку</Text></Pressable> : null}</View> : null}
     <FlatList key={active?.id || "empty"} ref={list} data={active?.rows || []} keyExtractor={item => item.id}
@@ -131,27 +144,31 @@ function NebulaHomeContent() {
       scrollEventThrottle={64}
       // Respect a finger gesture immediately, before its first onScroll event.
       onScrollBeginDrag={() => {
-        // Finger scrolling always wins; stop forced following immediately.
+        // Only direct finger gestures can change follow mode. Layout reflow,
+        // streaming tokens and Gboard resize must not be mistaken for a swipe.
+        userScrollActive.current = true;
         pendingSendFollow.current = false;
         nearChatBottom.current = false;
       }}
       onScroll={event => {
-        if (pendingSendFollow.current) return; // ignore keyboard-resize offsets
-        const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
-        // Native scroll offsets lag behind streaming layout; only a real drag
-        // (onScrollBeginDrag) may interrupt auto-follow during generation.
-        if (busy && nearChatBottom.current) return;
-        nearChatBottom.current = isNebulaChatNearBottom(
-          contentSize.height, contentOffset.y, layoutMeasurement.height,
-        );
+        if (userScrollActive.current && !pendingSendFollow.current) {
+          updateUserScrollPosition(event.nativeEvent);
+        }
+      }}
+      onScrollEndDrag={event => {
+        updateUserScrollPosition(event.nativeEvent);
+        userScrollActive.current = false;
+      }}
+      onMomentumScrollBegin={() => { userScrollActive.current = true; }}
+      onMomentumScrollEnd={event => {
+        updateUserScrollPosition(event.nativeEvent);
+        userScrollActive.current = false;
       }}
       onContentSizeChange={() => {
-        if (pendingSendFollow.current || shouldScrollNebulaChatToEnd(
+        if (!streamReadAnchored.current && (pendingSendFollow.current || shouldScrollNebulaChatToEnd(
           active?.rows?.length || 0, active?.streamText, nearChatBottom.current,
-        )) {
+        ))) {
           scheduleBottomFollow();
-          // No Gboard animation to wait for: normal LLM auto-follow takes over.
-          if (!keyboardOpen && !composerFocused && (active?.rows?.length || active?.streamText)) pendingSendFollow.current = false;
         }
       }}
       contentContainerStyle={{ padding: 16, gap: 12, flexGrow: 1 }}
@@ -203,15 +220,22 @@ function NebulaHomeContent() {
           <View style={{ flexDirection: "row", gap: 20 }}><Pressable accessibilityRole="button" disabled={Boolean(active.savingDraft)} onPress={() => void store.approve(d)} style={action}><Text style={{ color: t.accent }}>{active.savingDraft === d.id ? "Сохранение…" : "Сохранить"}</Text></Pressable>
             <Pressable accessibilityRole="button" disabled={Boolean(active.savingDraft)} onPress={() => store.dismiss(d)} style={action}><Text style={{ color: t.muted }}>Отклонить</Text></Pressable></View>
         </View>)}
-        {busy && active?.streamText ? <View accessibilityLiveRegion="polite" style={{ backgroundColor: t.panel, borderWidth: 1, borderColor: t.line, borderRadius: 20, padding: 15 }}>
+        {busy && active?.streamText ? <View accessibilityLiveRegion="polite"
+          onLayout={event => {
+            // NN/g (2026): do not scroll users away from the beginning of a
+            // long streamed answer. Freeze following before it fills the viewport.
+            // A later user scroll to the bottom explicitly resumes following.
+            if (!composerOccluded && !streamFollowOverride.current &&
+                shouldAnchorNebulaStreamingReply(event.nativeEvent.layout.height, listViewportHeight)) {
+              streamReadAnchored.current = true;
+              nearChatBottom.current = false;
+              pendingSendFollow.current = false;
+            }
+          }}
+          style={{ backgroundColor: t.panel, borderWidth: 1, borderColor: t.line, borderRadius: 20, padding: 15 }}>
           <MarkdownText text={active.streamText} style={{ color: t.text, lineHeight: 23 }} />
         </View> : null}
-        {busy ? <View testID="nebula-home-live-status"
-          style={{ flexDirection: "row", alignItems: "center", gap: 10, padding: 8 }}>
-          {statusArtworkSize > 0 && !active?.rows?.length ? <NebulaHomeArtwork size={statusArtworkSize} phase={orbPhase} /> : null}
-          <ActivityIndicator />
-          <Text style={{ flex: 1, color: t.muted }}>{active?.progress || "Готовлю ответ…"}<Elapsed since={active?.progressSince} /></Text>
-        </View> : null}
+
       </View>}
     />
     {error || notice || historyNotice ? <View style={{ paddingHorizontal: 16, paddingVertical: 6 }}><Text accessibilityRole="alert" style={{ color: error || notice ? t.err : t.muted }}>{error || notice || historyNotice}</Text>
@@ -250,17 +274,3 @@ function NebulaHomeContent() {
   </KeyboardAvoidingView>;
 }
 
-/** " · 0:42" after the first five seconds of a stage, ticking once a second. */
-function Elapsed({ since }: { since?: number }) {
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    if (!since) return;
-    setNow(Date.now());
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [since]);
-  if (!since) return null;
-  const seconds = Math.floor((now - since) / 1000);
-  if (seconds < 5) return null;
-  return <Text>{" · " + Math.floor(seconds / 60) + ":" + String(seconds % 60).padStart(2, "0")}</Text>;
-}

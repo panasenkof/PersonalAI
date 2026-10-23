@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { isNebulaChatNearBottom, shouldScrollNebulaChatToEnd, nebulaConversationOrbSize } from "../homeArtLayout";
+import { isNebulaChatNearBottom, shouldScrollNebulaChatToEnd } from "../homeArtLayout";
 
 describe("Nebula motion stability regression", () => {
   const root = join(__dirname, "..", "..", "..");
@@ -11,6 +11,9 @@ describe("Nebula motion stability regression", () => {
 
   it("never starts a competing animated chat scroll for each streamed token", () => {
     expect(home).toContain("nearChatBottom.current");
+    expect(home).toContain("userScrollActive.current && !pendingSendFollow.current");
+    expect(home).toContain("onScrollBeginDrag={() => {");
+    expect(home).toContain("onMomentumScrollEnd={event =>");
     expect(home).toContain("isNebulaChatNearBottom(");
     expect(home).toContain("scrollToEnd({ animated: false })");
     expect(home).not.toContain("scrollToEnd({ animated: true })");
@@ -20,21 +23,17 @@ describe("Nebula motion stability regression", () => {
     expect(isNebulaChatNearBottom(1500, 650, 800)).toBe(true);
   });
 
-  it("draws no large jumpy orb in the chat footer and moves status inside progress", () => {
-    expect(home).toContain('testID="nebula-home-live-status"');
-    const footer = home.indexOf("ListFooterComponent=");
-    const row = home.indexOf("{busy ? <View testID=\"nebula-home-live-status\"");
-    expect(footer).toBeGreaterThan(0);
-    expect(row).toBeGreaterThan(footer);
-    expect(home.substring(footer, row)).not.toContain("<NebulaHomeArtwork");
-    expect(home).toContain("statusArtworkSize > 0 && !active?.rows?.length ? <NebulaHomeArtwork");
-    expect(home).toContain('testID="nebula-conversation-orb"');
-    expect(nebulaConversationOrbSize({
-      windowWidth: 390, windowHeight: 820, listHeight: 420, composerOccluded: true,
-    })).toBe(0);
-    expect(nebulaConversationOrbSize({
-      windowWidth: 390, windowHeight: 820, listHeight: 420, composerOccluded: false,
-    })).toBe(96);
+  it("keeps the active orb in a fixed header and never adds a moving progress footer", () => {
+    const header = readFileSync(join(__dirname, "..", "NebulaHomeHeader.tsx"), "utf8");
+    const footer = home.slice(home.indexOf("ListFooterComponent="), home.indexOf("    />", home.indexOf("ListFooterComponent=")));
+    expect(home).toContain("showOrb={Boolean(active?.rows.length)}");
+    expect(home).toContain("progressText={busy ?");
+    expect(header).toContain("<NebulaHomeArtwork size={48} phase={orbPhase} />");
+    expect(header).toContain("height: 72");
+    expect(header).toContain("height: 13");
+    expect(header).toContain('{progressText || " "}');
+    expect(footer).not.toContain("NebulaHomeArtwork");
+    expect(footer).not.toContain("nebula-home-live-status");
     expect(nativeArtwork).toContain("showStatusText={size > 100}");
   });
 

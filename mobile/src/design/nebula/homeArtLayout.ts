@@ -25,9 +25,9 @@ export function nebulaEmptyOrbSize(layout: NebulaHomeArtLayout): number {
 }
 
 export function nebulaConversationOrbSize(layout: NebulaHomeArtLayout): number {
-  // A small phase indicator is INSIDE the existing busy-progress row, not a
-  // separate 116dp footer that pushes the scrolling conversation around.
-  // The Gboard/composer always gets priority over decorative content.
+  // Legacy sizing helper retained for compatibility with existing callers/tests.
+  // Active conversation orb is now a fixed 48dp header element (PR #99).
+  // Preserve PR #98 sizing policy for other consumers.
   if (layout.composerOccluded || (layout.listHeight > 0 && layout.listHeight < 155)) return 0;
   return Math.min(96, Math.max(0, layout.windowWidth - 48));
 }
@@ -48,4 +48,10 @@ export function isNebulaChatNearBottom(
   if (![contentHeight, offsetY, viewportHeight].every(Number.isFinite)) return false;
   if (viewportHeight <= 0) return true; // Before the first measured layout.
   return contentHeight - (Math.max(0, offsetY) + viewportHeight) <= tolerance;
+}
+
+/** Keep the start of a long streamed reply readable instead of chasing its end. */
+export function shouldAnchorNebulaStreamingReply(replyHeight: number, viewportHeight: number): boolean {
+  return Number.isFinite(replyHeight) && Number.isFinite(viewportHeight) &&
+    viewportHeight > 0 && replyHeight >= viewportHeight * 0.7;
 }

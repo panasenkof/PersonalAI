@@ -6,12 +6,23 @@ describe("Android viewport regressions from real device recordings", () => {
   const home = readFileSync(join(root, "screens", "HomeScreen.tsx"), "utf8");
   const note = readFileSync(join(root, "screens", "MemoryNoteScreen.tsx"), "utf8");
   const smoke = readFileSync(join(root, "..", ".maestro", "flows", "smoke.yaml"), "utf8");
+  const minimal = readFileSync(join(root, "..", ".maestro", "flows", "minimal.yaml"), "utf8");
 
   it("keeps the composer available and prevents native stream offsets disabling follow", () => {
     expect(home).toContain("onScrollBeginDrag={() => {");
-    expect(home).toContain("if (busy && nearChatBottom.current) return;");
-    expect(home).toContain("pendingSendFollow.current = true;");
+    expect(home).toContain("userScrollActive.current && !pendingSendFollow.current");
+    expect(home).toContain("pendingSendFollow.current = composerOccluded;");
+    expect(home).toContain("!streamReadAnchored.current");
     expect(home).toContain("scheduleBottomFollow()");
+    // CI #424: Android 35 edge-to-edge put the composer beneath Gboard when
+    // KeyboardAvoidingView had no Android behavior. Test keeps the real IME open.
+    expect(home).toContain('behavior={Platform.OS === "ios" ? "padding" : "height"}');
+    const typed = minimal.indexOf('- inputText: "Smoke draft"');
+    const visible = minimal.indexOf('- assertVisible: "Очистить сообщение"');
+    const hidden = minimal.indexOf("- hideKeyboard");
+    expect(typed).toBeGreaterThan(0);
+    expect(visible).toBeGreaterThan(typed);
+    expect(hidden).toBeGreaterThan(visible);
   });
   it("pins Save outside the scrolling note form even with the Android IME", () => {
     const endScroll = note.indexOf("</ScrollView>");

@@ -5,6 +5,7 @@ import {
   isNebulaChatNearBottom,
   nebulaEmptyOrbSize,
   shouldScrollNebulaChatToEnd,
+  shouldAnchorNebulaStreamingReply,
 } from "../homeArtLayout";
 
 const base = { listHeight: 520, windowHeight: 820, windowWidth: 390, composerOccluded: false };
@@ -22,7 +23,7 @@ describe("Nebula Home keyboard and visual viewport", () => {
     expect(nebulaEmptyOrbSize({ ...base, composerOccluded: true, listHeight: 130 })).toBe(0);
     expect(nebulaEmptyOrbSize({ ...base, composerOccluded: false })).toBe(320);
   });
-  it("keeps a visible inline status orb without growing a separate 116dp footer", () => {
+  it("preserves the legacy orb size limit while the live orb resides in the header", () => {
     expect(nebulaConversationOrbSize(base)).toBe(96);
     expect(nebulaConversationOrbSize({ ...base, composerOccluded: true, listHeight: 250 })).toBe(0);
     expect(nebulaConversationOrbSize({ ...base, composerOccluded: true, listHeight: 160 })).toBe(0);
@@ -41,6 +42,17 @@ describe("Nebula Home keyboard and visual viewport", () => {
     expect(isNebulaChatNearBottom(Number.NaN, 100, 300)).toBe(false);
     expect(shouldScrollNebulaChatToEnd(0, "partial streamed reply")).toBe(true);
   });
+  it("holds the beginning of a long streamed answer still, but follows short replies", () => {
+    expect(shouldAnchorNebulaStreamingReply(240, 500)).toBe(false);
+    expect(shouldAnchorNebulaStreamingReply(350, 500)).toBe(true);
+    expect(shouldAnchorNebulaStreamingReply(499, 500)).toBe(true);
+    expect(shouldAnchorNebulaStreamingReply(100, 0)).toBe(false);
+    expect(shouldAnchorNebulaStreamingReply(Number.NaN, 500)).toBe(false);
+    const home = readFileSync(join(__dirname, "..", "..", "..", "screens", "HomeScreen.tsx"), "utf8");
+    expect(home).toContain("shouldAnchorNebulaStreamingReply(event.nativeEvent.layout.height, listViewportHeight)");
+    expect(home).toContain("!streamReadAnchored.current");
+    expect(home).toContain("streamFollowOverride.current = nearChatBottom.current");
+  });
   it("closes Gboard only on Send, settles LLM thinking below the chat and respects intentional upward scrolling", () => {
     const root = join(__dirname, "..", "..", "..");
     const home = readFileSync(join(root, "screens", "HomeScreen.tsx"), "utf8") + readFileSync(join(__dirname, "..", "useChatBottomFollow.ts"), "utf8");
@@ -49,7 +61,7 @@ describe("Nebula Home keyboard and visual viewport", () => {
       home.indexOf("const openConnections =", home.indexOf("const sendOrStop = () => {")),
     );
     expect(sendBlock).toContain("if (busy) { store.stop(); return; }");
-    expect(sendBlock).toContain("pendingSendFollow.current = true;");
+    expect(sendBlock).toContain("pendingSendFollow.current = composerOccluded;");
     expect(sendBlock).toContain("Keyboard?.dismiss?.()");
     expect(sendBlock).toContain("setComposerFocused(false)");
     expect(sendBlock).toContain("store.send(settings)");
@@ -76,7 +88,10 @@ describe("Nebula Home keyboard and visual viewport", () => {
     expect(home).toContain("onFocusChange={setComposerFocused}");
     expect(home).toContain("onLayout={event =>");
     expect(home).toContain("nebulaEmptyOrbSize(artLayout)");
-    expect(home).toContain("nebulaConversationOrbSize(artLayout)");
+    expect(home).toContain("showOrb={Boolean(active?.rows.length)}");
+    expect(home).toContain("onMomentumScrollEnd={event =>");
+    expect(home).toContain("userScrollActive.current && !pendingSendFollow.current");
+    expect(home).toContain('behavior={Platform.OS === "ios" ? "padding" : "height"}');
     expect(home).toContain("shouldScrollNebulaChatToEnd(");
     expect(home).toContain("artworkSize > 0 ? <NebulaHomeArtwork");
     expect(home).toContain("store.send(settings)");
