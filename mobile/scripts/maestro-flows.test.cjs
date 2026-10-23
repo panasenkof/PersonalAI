@@ -35,6 +35,14 @@ test("native test selectors reflect current production components", () => {
   for (const tag of ["Открыть фото", "Просмотр изображения"]) assert.ok(viewer.includes(tag), tag);
   assert.ok(settings.includes("Лимит обращений к LLM на сообщение"));
 });
+test("reopening an editor must not send Android Back via hideKeyboard before editing", () => {
+  const flow = fs.readFileSync(path.join(root, ".maestro/flows/memory-note.yaml"), "utf8");
+  const point = flow.indexOf('- assertVisible: "Saved offline"');
+  assert.ok(point >= 0, "native persistence assertion must remain");
+  const nextInput = flow.indexOf('- tapOn:\n    id: "note-body-input"', point);
+  assert.ok(nextInput > point, "tap existing editor after the persistence assertion");
+  assert.doesNotMatch(flow.slice(point, nextInput), /hideKeyboard|scrollUntilVisible/, "no navigation-triggering actions between saved text and editor tap");
+});
 test("generated fixture is an offline PNG", () => {
   const { png } = require("./prepare-maestro-fixtures.cjs");
   const data = png();
