@@ -49,36 +49,14 @@ describe("Nebula Home keyboard and visual viewport", () => {
     expect(shouldAnchorNebulaStreamingReply(499, 500)).toBe(true);
     expect(shouldAnchorNebulaStreamingReply(100, 0)).toBe(false);
     expect(shouldAnchorNebulaStreamingReply(Number.NaN, 500)).toBe(false);
-    const home = readFileSync(join(__dirname, "..", "..", "..", "screens", "HomeScreen.tsx"), "utf8");
-    expect(home).toContain("shouldAnchorNebulaStreamingReply(event.nativeEvent.layout.height, listViewportHeight)");
-    expect(home).toContain("!streamReadAnchored.current");
-    expect(home).toContain("streamFollowOverride.current = nearChatBottom.current");
+
   });
-  it("closes Gboard only on Send, settles LLM thinking below the chat and respects intentional upward scrolling", () => {
-    const root = join(__dirname, "..", "..", "..");
-    const home = readFileSync(join(root, "screens", "HomeScreen.tsx"), "utf8") + readFileSync(join(__dirname, "..", "useChatBottomFollow.ts"), "utf8");
-    const sendBlock = home.slice(
-      home.indexOf("const sendOrStop = () => {"),
-      home.indexOf("const openConnections =", home.indexOf("const sendOrStop = () => {")),
-    );
-    expect(sendBlock).toContain("if (busy) { store.stop(); return; }");
-    expect(sendBlock).toContain("pendingSendFollow.current = composerOccluded;");
-    expect(sendBlock).toContain("Keyboard?.dismiss?.()");
-    expect(sendBlock).toContain("setComposerFocused(false)");
-    expect(sendBlock).toContain("store.send(settings)");
-    expect(sendBlock).toContain("scheduleBottomFollow()");
-    expect(home).toContain("onPress={sendOrStop}");
-    expect(home).toContain("Keyboard.addListener(\"keyboardDidHide\"");
-    expect(home).toContain("if (pendingSendFollow.current)");
-    expect(home).toContain("onScrollBeginDrag={() => {");
-    expect(home).toContain("pendingSendFollow.current = false;");
-    expect(home).toContain("nearChatBottom.current = false;");
-    expect(home).toContain("scrollFrame.current = requestAnimationFrame(");
-    expect(home).toContain("cancelAnimationFrame(scrollFrame.current)");
-    expect(home).toContain("list.current?.scrollToEnd({ animated: false })");
-    expect(home).not.toContain("scrollToEnd({ animated: true })");
-    expect(shouldScrollNebulaChatToEnd(12, "incoming answer", false)).toBe(false);
-    expect(shouldScrollNebulaChatToEnd(12, "incoming answer", true)).toBe(true);
+  it("closes Gboard on Send while viewport policy owns all scrolling", () => {
+    const home = readFileSync(join(__dirname, "..", "..", "..", "screens", "HomeScreen.tsx"), "utf8");
+    expect(home).toContain("Keyboard?.dismiss?.()");
+    expect(home).toContain("store.send(settings)");
+    expect(home).not.toContain("scrollToEnd(");
+    expect(home).not.toContain("streamReadAnchored");
   });
   it("passes keyboard/focus and viewport signals without replacing any chat actions", () => {
     const root = join(__dirname, "..", "..", "..");
@@ -90,12 +68,12 @@ describe("Nebula Home keyboard and visual viewport", () => {
     expect(home).toContain("onLayout={event =>");
     expect(home).toContain("nebulaEmptyOrbSize(artLayout)");
     expect(home).toContain("showOrb={ready}");
-    expect(home).toContain('justifyContent: "flex-end"');
+    expect(home).toContain("removeClippedSubviews={false}");
     expect(home).toContain('testID="chat-jump-to-latest"');
     expect(home).toContain("onMomentumScrollEnd={event =>");
-    expect(home).toContain("userScrollActive.current && !pendingSendFollow.current");
+    expect(home).toContain("onScrollBeginDrag={viewport.beginDrag}");
     expect(home).toContain('behavior={Platform.OS === "ios" ? "padding" : "height"}');
-    expect(home).toContain("shouldScrollNebulaChatToEnd(");
+    expect(home).toContain("onContentSizeChange={viewport.onContent}");
     expect(home).toContain("artworkSize > 0 ? <NebulaHomeArtwork");
     expect(home).toContain("store.send(settings)");
     expect(home).toContain("store.stop()");

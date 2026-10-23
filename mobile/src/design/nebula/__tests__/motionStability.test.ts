@@ -10,13 +10,10 @@ describe("Nebula motion stability regression", () => {
   const shader = readFileSync(join(__dirname, "..", "hybridShader.ts"), "utf8");
 
   it("never starts a competing animated chat scroll for each streamed token", () => {
-    expect(home).toContain("nearChatBottom.current");
-    expect(home).toContain("userScrollActive.current && !pendingSendFollow.current");
-    expect(home).toContain("onScrollBeginDrag={() => {");
+    expect(home).toContain("onScrollBeginDrag={viewport.beginDrag}");
     expect(home).toContain("onMomentumScrollEnd={event =>");
-    expect(home).toContain("isNebulaChatNearBottom(");
-    expect(home).toContain("scrollToEnd({ animated: false })");
-    expect(home).not.toContain("scrollToEnd({ animated: true })");
+    expect(home).toContain("scrollToOffset({ offset, animated: false })");
+    expect(home).not.toContain("scrollToEnd(");
     expect(shouldScrollNebulaChatToEnd(5, "stream", true)).toBe(true);
     expect(shouldScrollNebulaChatToEnd(5, "stream", false)).toBe(false);
     expect(isNebulaChatNearBottom(1500, 400, 800)).toBe(false);
