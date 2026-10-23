@@ -25,9 +25,11 @@ export async function analyzeFilesTogether(
   const body = anthropic ? { model, max_tokens: MAX_DIRECT_REPLY_TOKENS, messages: [{ role: "user", content: [{ type: "text", text: instructions }] }] }
     : openai ? { model, store: false, max_output_tokens: isReasoningModel(model) ? MAX_REASONING_REPLY_TOKENS : MAX_DIRECT_REPLY_TOKENS, input: [{ role: "user", content: [{ type: "input_text", text: instructions }] }] }
     : { model, max_tokens: MAX_DIRECT_REPLY_TOKENS, messages: [{ role: "user", content: instructions }] };
-  const headers = anthropic
-    ? { "Content-Type": "application/json", "x-api-key": settings.apiKey, "anthropic-version": "2023-06-01" }
-    : { "Content-Type": "application/json", ...(settings.apiKey ? { Authorization: "Bearer " + settings.apiKey } : {}) };
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (anthropic) {
+    headers["x-api-key"] = settings.apiKey;
+    headers["anthropic-version"] = "2023-06-01";
+  } else if (settings.apiKey) headers.Authorization = "Bearer " + settings.apiKey;
   const response = await fetchWithTimeout(transport, base + (anthropic ? "/messages" : openai ? "/responses" : "/chat/completions"), {
     method: "POST", body: JSON.stringify(body), headers, signal,
   }, { connectMs: 30_000, idleMs: 180_000, totalMs: 180_000 }, [settings.apiKey]);
