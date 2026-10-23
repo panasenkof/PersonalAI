@@ -14,7 +14,7 @@ import { BottomSheet } from "../components/BottomSheet";
 import { NebulaHomeHeader } from "../design/nebula/NebulaHomeHeader";
 import { NebulaHomeArtwork } from "../design/nebula/NebulaHomeArtwork";
 import { isNebulaChatNearBottom, nebulaEmptyOrbSize, shouldScrollNebulaChatToEnd, shouldAnchorNebulaStreamingReply } from "../design/nebula/homeArtLayout";
-import { resolveNebulaHomePhase, type NebulaVoicePhase } from "../design/nebula/homePhase";
+import { resolveNebulaHomePhase, resolveNebulaStatus, type NebulaVoicePhase } from "../design/nebula/homePhase";
 import { useChatBottomFollow } from "../design/nebula/useChatBottomFollow";
 import { VoiceInput } from "../components/VoiceInput";
 import { IconAction } from "../components/IconAction";
@@ -37,7 +37,6 @@ function NebulaHomeContent() {
   const profile = useProfile();
   const { store, ready, error, notice: historyNotice, conversations, active, sections } = useDirectChat();
   const [settings, setSettings] = useState<DirectAgentSettings | null>(null);
-  const [connectionName, setConnectionName] = useState("");
   const [notice, setNotice] = useState("");
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historySearch, setHistorySearch] = useState("");
@@ -47,8 +46,10 @@ function NebulaHomeContent() {
   const [composerFocused, setComposerFocused] = useState(false);
   const [keyboardOpen, setKeyboardOpen] = useState(false);
   const [listViewportHeight, setListViewportHeight] = useState(0);
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const { list, nearChatBottom, pendingSendFollow, userScrollActive, streamReadAnchored, streamFollowOverride, scheduleBottomFollow } =
     useChatBottomFollow(active?.id, isFocused);
+  useEffect(() => { setShowJumpToLatest(false); }, [active?.id]);
   useEffect(() => {
     // Browser QA / React Native Web may omit the native Keyboard module.
     // Native Android still reports keyboardDidShow/Hide; focus is the fallback.
@@ -75,11 +76,11 @@ function NebulaHomeContent() {
   const normalization = useDraftNormalization(store, profile, setNotice);
   useFocusEffect(useCallback(() => {
     let alive = true;
-    setSettings(null); setConnectionName("");
+    setSettings(null);
     if (profile) void loadDirectConnections(profile).then(value => {
       if (!alive) return;
       const connection = value.connections.find(c => c.id === value.activeId)!;
-      setSettings(connection); setConnectionName(connection.name); setNotice("");
+      setSettings(connection); setNotice("");
     }).catch(() => { if (alive) { setSettings(null); setNotice("Не удалось прочитать подключения. Откройте настройки."); } });
     // A section created in the memory screen shows up in proposals right away.
     void store.refreshSections();
@@ -89,7 +90,9 @@ function NebulaHomeContent() {
   const canSend = Boolean(ready && !active?.deleting && settings && (settings.apiKey || anonymousLocalAllowed(settings)));
   const question = active?.question || "";
   const busy = active?.busy || false;
-  const orbPhase = resolveNebulaHomePhase({ voicePhase, busy, streamText: active?.streamText, error, ready });
+  const statusSignals = { voicePhase, busy, streamText: active?.streamText, progress: active?.progress, error, ready };
+  const orbPhase = resolveNebulaHomePhase(statusSignals);
+  const statusText = resolveNebulaStatus(statusSignals);
   const composerOccluded = keyboardOpen || composerFocused;
   const artLayout = { listHeight: listViewportHeight, windowHeight: height,
     windowWidth: width, composerOccluded };
@@ -105,6 +108,7 @@ function NebulaHomeContent() {
     userScrollActive.current = false;
     streamReadAnchored.current = false;
     streamFollowOverride.current = false;
+    setShowJumpToLatest(false);
     Keyboard?.dismiss?.();
     setComposerFocused(false);
     setVoiceReset(n => n + 1);
@@ -118,6 +122,7 @@ function NebulaHomeContent() {
     // A reader who explicitly returns to the end opts back into following
     // the current response. Another upward swipe cancels this override.
     streamFollowOverride.current = nearChatBottom.current;
+    setShowJumpToLatest(!nearChatBottom.current);
     if (nearChatBottom.current) streamReadAnchored.current = false;
   };
   const openConnections = (presetId?: string) => navigation.navigate("ModelConnections", presetId ? { presetId } : undefined);
@@ -128,9 +133,8 @@ function NebulaHomeContent() {
   // so the keyboard relayout must not be interpreted as a user scroll.
   return <KeyboardAvoidingView style={{ flex: 1, paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right, backgroundColor: t.bg }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
     <StatusBar style={isFocused ? "light" : "auto"} />
-    <NebulaHomeHeader connectionName={connectionName} model={settings?.model}
-      onConnections={() => openConnections()} onHistory={() => setHistoryOpen(true)}
-      showOrb={Boolean(active?.rows.length)} orbPhase={orbPhase} progressText={busy ? (active?.progress || "Готовлю ответ…") : undefined}
+    <NebulaHomeHeader statusText={statusText} onHistory={() => setHistoryOpen(true)}
+      showOrb={ready} orbPhase={orbPhase}
       newChatEnabled={ready} onNewChat={() => store.create()} />
     {!ready ? <View style={{ padding: 20, gap: 12 }}>{!error ? <ActivityIndicator accessibilityLabel="Загрузка диалогов" /> : null}
       {error ? <Pressable accessibilityRole="button" onPress={() => void store.initialize()} style={action}><Text style={{ color: t.accent }}>Повторить загрузку</Text></Pressable> : null}</View> : null}
@@ -171,7 +175,9 @@ function NebulaHomeContent() {
           scheduleBottomFollow();
         }
       }}
-      contentContainerStyle={{ padding: 16, gap: 12, flexGrow: 1 }}
+      // Small conversations grow from the composer, so the newest user bubble
+      // stays visible and the reply starts directly beneath it.
+      contentContainerStyle={{ padding: 16, gap: 12, flexGrow: 1, justifyContent: "flex-end" }}
       ListEmptyComponent={ready && needsSetup ? <View style={{ flex: 1, justifyContent: "center", gap: 14, paddingVertical: 12 }}>
         <View style={{ alignItems: "center", gap: 10 }}><NebulaHomeArtwork size={136} phase={orbPhase} />
           <Text style={{ color: t.text, fontSize: 26, fontWeight: "800", textAlign: "center" }}>Подключите модель</Text>
@@ -225,11 +231,12 @@ function NebulaHomeContent() {
             // NN/g (2026): do not scroll users away from the beginning of a
             // long streamed answer. Freeze following before it fills the viewport.
             // A later user scroll to the bottom explicitly resumes following.
-            if (!composerOccluded && !streamFollowOverride.current &&
+            if (!streamReadAnchored.current && !composerOccluded && !streamFollowOverride.current &&
                 shouldAnchorNebulaStreamingReply(event.nativeEvent.layout.height, listViewportHeight)) {
               streamReadAnchored.current = true;
               nearChatBottom.current = false;
               pendingSendFollow.current = false;
+              setShowJumpToLatest(true);
             }
           }}
           style={{ backgroundColor: t.panel, borderWidth: 1, borderColor: t.line, borderRadius: 20, padding: 15 }}>
@@ -238,6 +245,18 @@ function NebulaHomeContent() {
 
       </View>}
     />
+    {showJumpToLatest ? <Pressable testID="chat-jump-to-latest" accessibilityRole="button"
+      accessibilityLabel="К последнему сообщению" onPress={() => {
+        streamFollowOverride.current = true;
+        streamReadAnchored.current = false;
+        nearChatBottom.current = true;
+        setShowJumpToLatest(false);
+        scheduleBottomFollow();
+      }} style={{ position: "absolute", right: 16, bottom: 182, zIndex: 4,
+        paddingHorizontal: 14, minHeight: 40, justifyContent: "center",
+        borderRadius: 20, borderWidth: 1, borderColor: t.line, backgroundColor: t.panel }}>
+      <Text style={{ color: t.accent, fontSize: 12 }}>↓ К последнему</Text>
+    </Pressable> : null}
     {error || notice || historyNotice ? <View style={{ paddingHorizontal: 16, paddingVertical: 6 }}><Text accessibilityRole="alert" style={{ color: error || notice ? t.err : t.muted }}>{error || notice || historyNotice}</Text>
       {error && ready ? <Pressable accessibilityRole="button" onPress={() => void store.checkpoint().catch(() => {})} style={{ minHeight: 44, justifyContent: "center" }}><Text style={{ color: t.accent }}>Повторить сохранение истории</Text></Pressable> : null}</View> : null}
     {!canSend && ready && !(needsSetup && !active?.rows.length) ? <Pressable accessibilityRole="button" onPress={() => openConnections()} style={{ paddingHorizontal: 16, minHeight: 44, justifyContent: "center" }}><Text style={{ color: t.accent }}>Добавьте модель в настройках подключений →</Text></Pressable> : null}
