@@ -97,7 +97,7 @@ function NebulaHomeContent() {
   const busy = active?.busy || false;
   const statusSignals = { voicePhase, busy, streamText: active?.streamText, progress: active?.progress, error, ready };
   const orbPhase = resolveNebulaHomePhase(statusSignals);
-  const statusText = resolveNebulaStatus(statusSignals);
+  const statusText = normalization.busy && !busy ? "Улучшаю текст" : resolveNebulaStatus(statusSignals);
   const composerOccluded = keyboardOpen || composerFocused;
   const artLayout = { listHeight: listViewportHeight, windowHeight: height,
     windowWidth: width, composerOccluded };
@@ -207,19 +207,18 @@ function NebulaHomeContent() {
     {!canSend && ready && !(needsSetup && !active?.rows.length) ? <Pressable accessibilityRole="button" onPress={() => openConnections()} style={{ paddingHorizontal: 16, minHeight: 44, justifyContent: "center" }}><Text style={{ color: t.accent }}>Добавьте модель в настройках подключений →</Text></Pressable> : null}
     <View style={{ zIndex: 3, padding: 10, gap: 5, backgroundColor: t.panel, borderTopWidth: 1, borderColor: t.line }}>
       <PromptInput value={question} onChange={value => store.setQuestion(value)} onClear={() => { normalization.reset(); setVoiceReset(n => n + 1); }} editable={ready} onFocusChange={setComposerFocused} />
-      <View testID="composer-actions" style={{ zIndex: 1, flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
-        <IconAction icon="plus" label="Файл" accessibilityLabel="Добавить сведения из файла" hint="Добавить в память сведения из текста, фото, аудио или видео." hintAbove hintAlign="start" onPress={() => navigation.navigate("MemoryImport")} />
-        <IconAction icon="camera" label="Камера" accessibilityLabel="Сфотографировать и распознать" hint="Снять фото и сохранить распознанный текст." hintAbove onPress={() => navigation.navigate("MemoryImport", { camera: true })} />
-        <VoiceInput key={`${active?.id}:${voiceReset}`} value={question} onChange={value => { if (store.getSnapshot().activeId === active?.id) store.setQuestion(value); }} disabled={!ready} onError={setNotice} showLabel onBegin={normalization.reset} onActiveChange={setDictating} onPhaseChange={setVoicePhase} />
-        <IconAction icon={normalization.busy ? "x" : normalization.normalized ? "rotate-ccw" : "edit-3"}
+      <View testID="composer-actions" style={{ zIndex: 1, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 2 }}>
+        <IconAction compact icon="plus" label="Файл" accessibilityLabel="Добавить сведения из файла" hint="Добавить в память сведения из текста, фото, аудио или видео." hintAbove hintAlign="start" onPress={() => navigation.navigate("MemoryImport")} />
+        <IconAction compact icon="camera" label="Камера" accessibilityLabel="Сфотографировать и распознать" hint="Снять фото и сохранить распознанный текст." hintAbove onPress={() => navigation.navigate("MemoryImport", { camera: true })} />
+        <VoiceInput key={`${active?.id}:${voiceReset}`} value={question} onChange={value => { if (store.getSnapshot().activeId === active?.id) store.setQuestion(value); }} disabled={!ready} onError={setNotice} showLabel={false} onBegin={normalization.reset} onActiveChange={setDictating} onPhaseChange={setVoicePhase} />
+        <IconAction compact icon={normalization.busy ? "x" : normalization.normalized ? "rotate-ccw" : "edit-3"}
           label={normalization.busy ? "Отмена" : normalization.normalized ? "Исходный" : "Улучшить"}
           accessibilityLabel={normalization.busy ? "Отменить улучшение текста" : normalization.normalized ? "Вернуть исходный текст" : "Улучшить текст"}
           hint={normalization.busy ? "Отменить улучшение: исходный текст останется." : normalization.normalized ? "Вернуть текст до улучшения. Повторное нажатие снова покажет исправленный вариант без запроса к LLM." : normalization.alternate ? "Показать исправленный вариант без нового запроса к LLM." : "Исправить ошибки и пунктуацию всего черновика через выбранное подключение LLM. Один дополнительный запрос; сообщение не отправляется."}
           hintAbove hintAlign="center" emphasized={normalization.normalized}
           disabled={!ready || dictating || (!normalization.busy && (!question.trim() || (!normalization.alternate && !canSend)))}
           onPress={() => void normalization.toggle(settings)} />
-        <Text style={{ flex: 1, minWidth: 0, color: t.muted, fontSize: 11 }} numberOfLines={2} accessibilityLiveRegion="polite">{normalization.busy ? "Улучшаю текст…" : busy ? "Можно перейти в другую вкладку" : ""}</Text>
-        <IconAction icon={busy ? "square" : "arrow-up"} label={busy ? "Стоп" : "Отправить"} accessibilityLabel={busy ? "Остановить запрос" : "Отправить запрос"}
+        <IconAction compact icon={busy ? "square" : "arrow-up"} label={busy ? "Стоп" : "Отправить"} accessibilityLabel={busy ? "Остановить запрос" : "Отправить запрос"}
           hint={busy ? "Остановить ответ ИИ в этом диалоге." : "Отправить написанное сообщение выбранной модели."} hintAbove emphasized={!busy}
           disabled={!busy && (!canSend || !question.trim())} onPress={sendOrStop} />
       </View>
