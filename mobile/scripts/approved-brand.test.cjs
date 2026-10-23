@@ -1,0 +1,23 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const { PNG } = require('pngjs');
+const { buildApprovedBrand, ORIGINAL_SHA } = require('./generate-brand.cjs');
+const asset = name => fs.readFileSync(path.join(__dirname, '../assets', name));
+test('launcher, splash, adaptive, and Android themed icons derive from owner-approved REF-ICON-A', () => {
+  const out = buildApprovedBrand();
+  assert.equal(out.sourceSha256, ORIGINAL_SHA);
+  assert.equal(out.files.length, 4);
+  const a = PNG.sync.read(asset('icon.png'));
+  const s = PNG.sync.read(asset('splash.png'));
+  const f = PNG.sync.read(asset('adaptive-icon.png'));
+  const m = PNG.sync.read(asset('monochrome-icon.png'));
+  for (const image of [a, s, f, m]) assert.deepEqual([image.width, image.height], [1024, 1024]);
+  assert.ok(asset('icon.png').equals(asset('splash.png')));
+  assert.deepEqual([...f.data.subarray(0, 4)], [0, 0, 0, 0], 'safe-zone must be transparent');
+  assert.equal(m.data[3], 0, 'themed icon must not show a dark square');
+  assert.ok(f.data[(512 * 1024 + 512) * 4 + 3] > 0, 'adapted foreground must contain center artwork');
+  const again = buildApprovedBrand();
+  assert.deepEqual(again, out, 'deterministic outputs on repeated generation');
+});

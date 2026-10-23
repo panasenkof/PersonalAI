@@ -65,8 +65,12 @@
         {
           "image": "./assets/splash.png",
           "resizeMode": "contain",
-          "backgroundColor": "#F8FAFF",
-          "imageWidth": 200
+          "backgroundColor": "#070D20",
+          "imageWidth": 200,
+          "dark": {
+            "backgroundColor": "#070D20",
+            "image": "./assets/splash.png"
+          }
         }
       ],
       [
@@ -95,7 +99,8 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#F8FAFF"
+        "backgroundColor": "#070D20",
+        "monochromeImage": "./assets/monochrome-icon.png"
       },
       "permissions": [
         "android.permission.RECORD_AUDIO"
