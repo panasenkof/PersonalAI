@@ -13,10 +13,10 @@ export function useChatBottomFollow(conversationId: string | undefined, focused:
   const enabled = useRef(false);
   const previousConversation = useRef(conversationId);
   const scheduleBottomFollow = useCallback(() => {
-    if (!enabled.current || scrollFrame.current !== null) return;
+    if (!enabled.current || userScrollActive.current || scrollFrame.current !== null) return;
     scrollFrame.current = requestAnimationFrame(() => {
       scrollFrame.current = null;
-      if (enabled.current && (pendingSendFollow.current || nearChatBottom.current)) {
+      if (enabled.current && !userScrollActive.current && (pendingSendFollow.current || nearChatBottom.current)) {
         list.current?.scrollToEnd({ animated: false });
       }
     });
