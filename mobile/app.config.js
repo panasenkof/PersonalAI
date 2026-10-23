@@ -11,6 +11,8 @@ const withLocalModelCleartext = (expoConfig) => require('expo/config-plugins').w
 });
 
 module.exports = ({ config }) => {
+  // Generate native and JS artwork from the exact approved REF-ICON-A on every Expo build.
+  if (typeof require === 'function') require('./scripts/generate-brand.cjs').buildApprovedBrand();
   const androidCiRelease = process.env.PIA_ANDROID_RELEASE === 'true';
   const release = androidCiRelease || ['preview', 'production'].includes(process.env.EAS_BUILD_PROFILE);
   if (release && (!process.env.PIA_ANDROID_PACKAGE || (!androidCiRelease && !process.env.PIA_IOS_BUNDLE_ID))) {

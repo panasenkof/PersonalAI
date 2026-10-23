@@ -58,6 +58,8 @@ jobs:
           # JS tests and bundle do not execute the native runtime. Native CI downloads it separately.
           RNET_SKIP_DOWNLOAD: '1'
         run: npm ci --no-audit --no-fund
+      - name: Verify approved icon, splash and adaptive assets
+        run: node --test scripts/approved-brand.test.cjs
       - name: Compile original-backed Nebula SkSL (CanvasKit WASM)
         run: node scripts/check-nebula-sksl.cjs
       - name: Typecheck
