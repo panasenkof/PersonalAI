@@ -18,6 +18,7 @@ function fixture(files) {
 test('retries a blocking system Launcher ANR, even with failed JUnit', (t) => {
   const dir = fixture({
     'window.xml': '<node text="Pixel Launcher isn&#39;t responding" />',
+    'smoke-started': '',
     'junit.xml': '<failure>PIN not visible</failure>',
     'logcat.txt': 'ANR in com.google.android.apps.nexuslauncher',
   });
@@ -28,6 +29,7 @@ test('retries a blocking system Launcher ANR, even with failed JUnit', (t) => {
 test('retries the actual CI hierarchy, preserving diagnostics', (t) => {
   const dir = fixture({
     'window.xml': '<node text="Pixel Launcher isn\'t responding" resource-id="android:id/alertTitle"/>',
+    'smoke-started': '',
     'junit.xml': '<failure>PIN selector not visible</failure>',
   });
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -37,6 +39,7 @@ test('retries the actual CI hierarchy, preserving diagnostics', (t) => {
 test('does not retry normal Maestro assertion failures or app crashes', (t) => {
   const dir = fixture({
     'window.xml': '<node text="Сообщение ассистенту" />',
+    'smoke-started': '',
     'junit.xml': '<failure>Expected note is visible</failure>',
     'logcat.txt': 'ANR in com.paigent.app',
   });
@@ -47,6 +50,7 @@ test('does not retry normal Maestro assertion failures or app crashes', (t) => {
 test('does not mistake earlier Launcher ANR for a product test failure', (t) => {
   const dir = fixture({
     'window.xml': '<node text="PersAI home" />',
+    'smoke-started': '',
     'junit.xml': '<failure>Notes are missing</failure>',
     'logcat.txt': 'ANR in com.android.launcher3',
   });
@@ -54,8 +58,14 @@ test('does not mistake earlier Launcher ANR for a product test failure', (t) => 
   assert.equal(classifyEmulatorFailure(dir).retry, false);
 });
 
-test('one retry allowed when the emulator never produced a JUnit report', (t) => {
+test('one retry allowed when the emulator runner never invoked smoke', (t) => {
   const dir = fixture({});
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   assert.equal(classifyEmulatorFailure(dir).retry, true);
+});
+
+test('does not retry a script failure after smoke started without system ANR', (t) => {
+  const dir = fixture({ 'smoke-started': '', 'logcat.txt': 'FATAL EXCEPTION in com.paigent.app' });
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  assert.equal(classifyEmulatorFailure(dir).retry, false);
 });
