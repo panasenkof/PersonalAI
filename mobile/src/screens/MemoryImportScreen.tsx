@@ -19,7 +19,8 @@ import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Platform, Pressa
 import { useProfile } from "../profile/ProfileContext";
 import { loadDirectConnections, anonymousLocalAllowed, defaultDirectPreferences } from "../direct-agent/settings";
 import type { DirectConnection } from "../direct-agent/settings";
-import { saveMediaNote } from "../media/attachments";
+import { MAX_ORIGINALS_PER_NOTE, MAX_TOTAL_ORIGINAL_BYTES, saveMediaNote } from "../media/attachments";
+import { combinedRecognitionText, recognizeFilesSequentially, type FileRecognition } from "../media/batch-recognition";
 import { extractMedia, mediaKind } from "../media/extract";
 import type { ImportFile } from "../media/extract";
 import type { RootStackParams } from "../navigation";
@@ -51,7 +52,10 @@ export function MemoryImportScreen() {
   const header = useHeaderHeight(); const insets = useSafeAreaInsets();
   const profile = useProfile();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParams>>();
-  const [file, setFile] = useState<ImportFile | null>(null);
+  const [files, setFiles] = useState<ImportFile[]>([]);
+  const file = files[0] || null;
+  const [recognitionResults, setRecognitionResults] = useState<FileRecognition[]>([]);
+  const [recognizingIndex, setRecognizingIndex] = useState(-1);
   const [connections, setConnections] = useState<DirectConnection[]>([]);
   const [connectionId, setConnectionId] = useState("");
   const [speechConnectionId, setSpeechConnectionId] = useState("");
@@ -80,7 +84,7 @@ export function MemoryImportScreen() {
   useEffect(() => {
     const payload = incoming?.[position]; if (!payload) return;
     let cancelled = false;
-    setPreparing(true); setTitle(""); setFile(null); setBody(""); setExtractedText(""); setNotice(""); setSourceUrl(""); setLinkDraft(""); setSourcePickerOpen(false); setProcessingOptionsOpen(false); setKeepOriginal(true);
+    setPreparing(true); setTitle(""); setFiles([]); setRecognitionResults([]); setRecognizingIndex(-1); setBody(""); setExtractedText(""); setNotice(""); setSourceUrl(""); setLinkDraft(""); setSourcePickerOpen(false); setProcessingOptionsOpen(false); setKeepOriginal(true);
     void (async () => {
       if (incoming!.length > 30) throw new Error("Отправляйте не более 30 файлов за один раз.");
       const text = payload.shareType === "text" || payload.shareType === "url";
@@ -93,7 +97,7 @@ export function MemoryImportScreen() {
       if (cancelled) { if (target.exists) target.delete(); return; }
       ownedFiles.current.push(target.uri);
       const asset = { uri: target.uri, name: source.name || "Входящий файл", mimeType: payload.mimeType };
-      mediaKind(asset); setFile(asset); setTitle(asset.name.slice(0, 160));
+      mediaKind(asset); setFiles([asset]); setRecognitionResults([]); setTitle(asset.name.slice(0, 160));
     })().catch(e => { if (!cancelled) setNotice(memoryErrorMessage(e)); }).finally(() => { if (!cancelled) setPreparing(false); });
     return () => { cancelled = true; };
   }, [incoming, position, prepareAttempt]);
@@ -108,8 +112,15 @@ export function MemoryImportScreen() {
   const localAudio = kind === "audio" && whisper.state === "ready";
   const speechSelected = connections.find(c => c.id === speechConnectionId);
   const processor = kind === "audio" ? speechSelected : selected;
-  const canExtract = kind === "text" || localAudio || (kind === "video" && whisper.state === "ready") || Boolean(processor && classification === "standard" &&
-    (processor.apiKey || anonymousLocalAllowed(processor)) && !(kind === "audio" && processor.provider === "anthropic"));
+  const canExtract = files.some(item => {
+    const currentKind = mediaKind(item);
+    const currentProcessor = currentKind === "audio" ? speechSelected : selected;
+    return currentKind === "text" ||
+      (currentKind === "audio" && whisper.state === "ready") ||
+      (currentKind === "video" && whisper.state === "ready") ||
+      Boolean(currentProcessor && classification === "standard" && (currentProcessor.apiKey || anonymousLocalAllowed(currentProcessor)) &&
+        !(currentKind === "audio" && currentProcessor.provider === "anthropic"));
+  });
   const field = { color: t.text, backgroundColor: t.panel, borderWidth: 1, borderColor: t.line, borderRadius: 16, padding: 14, minHeight: 50 };
   const button = { backgroundColor: t.accent, padding: 14, borderRadius: 17, minHeight: 50, justifyContent: "center" as const, alignItems: "center" as const };
 
@@ -126,7 +137,7 @@ export function MemoryImportScreen() {
       finally { await FileSystem.deleteAsync(asset.uri, { idempotent: true }); }
       if (!alive.current) { if (target.exists) target.delete(); return; }
       ownedFiles.current.push(target.uri);
-      setFile({ uri: target.uri, name: asset.fileName || "camera.jpg", mimeType: asset.mimeType || "image/jpeg" });
+      setFiles([{ uri: target.uri, name: asset.fileName || "camera.jpg", mimeType: asset.mimeType || "image/jpeg" }]); setRecognitionResults([]);
       setTitle("Снимок"); setSourceUrl(""); setLinkDraft(""); setSourcePickerOpen(false); setProcessingOptionsOpen(false); setKeepOriginal(false); setExtractedText(""); setBody("");
     } catch (e) { if (alive.current) setNotice(memoryErrorMessage(e)); }
   }
@@ -137,8 +148,9 @@ export function MemoryImportScreen() {
     try {
       const result = await importLink(linkDraft, aborter.signal);
       if (!alive.current || aborter.signal.aborted) { if (result.file) await FileSystem.deleteAsync(result.file.uri, { idempotent: true }); return; }
-      if (result.file) { ownedFiles.current.push(result.file.uri); setFile(result.file); setExtractedText(""); setKeepOriginal(true); setTitle(result.file.name); }
-      else { setFile(null); setExtractedText(result.text || ""); setKeepOriginal(false); setTitle("Материал по ссылке"); }
+      if (result.file) { ownedFiles.current.push(result.file.uri); setFiles([result.file]); setExtractedText(""); setKeepOriginal(true); setTitle(result.file.name); }
+      else { setFiles([]); setExtractedText(result.text || ""); setKeepOriginal(false); setTitle("Материал по ссылке"); }
+      setRecognitionResults([]);
       setSourceUrl(result.source); setLinkDraft(result.source); setSourcePickerOpen(false); setProcessingOptionsOpen(false); setBody("");
     } catch (e) { if (alive.current) setNotice(linkImportErrorMessage(e)); }
     finally { if (alive.current) setBusy(false); }
@@ -147,23 +159,51 @@ export function MemoryImportScreen() {
     setNotice("");
     try {
       const result = await withNativeInteraction(() => DocumentPicker.getDocumentAsync({
-        type: ["image/*", "audio/*", "video/*", "text/*", "application/json"], copyToCacheDirectory: true, multiple: false,
+        type: ["image/*", "audio/*", "video/*", "text/*", "application/json"], copyToCacheDirectory: true, multiple: true,
       }));
       if (!alive.current || result.canceled || !result.assets.length) return;
-      const asset = result.assets[0];
-      if (FileSystem.cacheDirectory && asset.uri.startsWith(FileSystem.cacheDirectory)) ownedFiles.current.push(asset.uri);
-      mediaKind(asset);
-      setFile(asset); setSourceUrl(""); setLinkDraft(""); setSourcePickerOpen(false); setProcessingOptionsOpen(false); setKeepOriginal(true); setTitle(asset.name.slice(0, 160)); setBody(""); setExtractedText(""); setClassification("standard");
+      const chosen = result.assets.map(asset => ({ uri: asset.uri, name: asset.name, mimeType: asset.mimeType, size: asset.size }));
+      if (chosen.length > MAX_ORIGINALS_PER_NOTE) throw new Error("Не более 10 вложений в одной заметке.");
+      chosen.forEach(mediaKind);
+      const knownBytes = chosen.reduce((sum, item) => sum + (item.size || 0), 0);
+      if (knownBytes > MAX_TOTAL_ORIGINAL_BYTES) throw new Error("Суммарный размер вложений — не более 80 МБ.");
+      for (const asset of chosen) {
+        if (FileSystem.cacheDirectory && asset.uri.startsWith(FileSystem.cacheDirectory)) ownedFiles.current.push(asset.uri);
+      }
+      setFiles(chosen); setRecognitionResults([]); setRecognizingIndex(-1);
+      setSourceUrl(""); setLinkDraft(""); setSourcePickerOpen(false); setProcessingOptionsOpen(false);
+      setKeepOriginal(true); setTitle(chosen[0].name.slice(0, 160)); setBody(""); setExtractedText(""); setClassification("standard");
     } catch (e) { if (alive.current) setNotice((e as Error).message); }
   }
   async function extract() {
     if (!file || !canExtract || busy) return;
     const aborter = new AbortController(); controller.current = aborter; setBusy(true); setNotice("");
     try {
-      const text = await extractMedia(file, selected || { ...defaultDirectPreferences, apiKey: "", webSearchKey: "" }, classification === "standard", aborter.signal, undefined, connections.find(c => c.id === speechConnectionId) || selected);
-      if (alive.current && !aborter.signal.aborted) { setExtractedText(text); setNotice("Проверьте и отредактируйте текст. В памяти он появится после сохранения."); }
+      const vision = selected || { ...defaultDirectPreferences, apiKey: "", webSearchKey: "" };
+      const speech = connections.find(c => c.id === speechConnectionId) || selected;
+      if (files.length === 1) {
+        const text = await extractMedia(file, vision, classification === "standard", aborter.signal, undefined, speech);
+        if (alive.current && !aborter.signal.aborted) {
+          setRecognitionResults([{ index: 0, name: file.name, status: "success", text }]);
+          setExtractedText(text);
+          setNotice("Проверьте и отредактируйте текст. В памяти он появится после сохранения.");
+        }
+      } else {
+        const results = await recognizeFilesSequentially(files,
+          async item => extractMedia(item, vision, classification === "standard", aborter.signal, undefined, speech),
+          aborter.signal, (done, current) => {
+            if (alive.current) { setRecognitionResults(done); setRecognizingIndex(current < files.length ? current : -1); }
+          });
+        if (alive.current && !aborter.signal.aborted) {
+          const text = combinedRecognitionText(results, files.length);
+          setExtractedText(text);
+          const errors = results.filter(r => r.status === "error").length;
+          setNotice(errors ? `Готово: ${results.length - errors} из ${files.length}. Не распознано: ${errors}. Результаты сохраните после проверки.` :
+            "Все файлы распознаны по очереди. Проверьте общий текст и сохраните заметку.");
+        }
+      }
     } catch (e) { if (alive.current) setNotice(aborter.signal.aborted ? "Разбор остановлен." : (e as Error).message); }
-    finally { if (alive.current) setBusy(false); if (controller.current === aborter) controller.current = null; }
+    finally { if (alive.current) { setBusy(false); setRecognizingIndex(-1); } if (controller.current === aborter) controller.current = null; }
   }
   async function save() {
     if (!keepOriginal && !body.trim() && !extractedText.trim()) { setNotice("Добавьте текст или распознайте материал перед сохранением без оригинала."); return; }
@@ -171,12 +211,12 @@ export function MemoryImportScreen() {
     setBusy(true); setNotice("");
     try {
       const aborter = new AbortController(); controller.current = aborter;
-      const content = !extractedText.trim() && file && mediaKind(file) === "text"
+      const content = !extractedText.trim() && files.length === 1 && file && mediaKind(file) === "text"
         ? await extractMedia(file, selected || { ...defaultDirectPreferences, apiKey: "", webSearchKey: "" }, false, aborter.signal)
         : extractedText;
-      await saveMediaNote(profile, { file: keepOriginal ? file || undefined : undefined, title, body, extractedText: content, sourceUrl: sourceUrl || undefined, sensitivity: classification, collectionId: collectionId || undefined, ...(incoming ? { receipt: JSON.stringify(incoming[position]) } : {}) }, aborter.signal);
+      await saveMediaNote(profile, { ...(keepOriginal && files.length > 1 ? { files } : { file: keepOriginal ? file || undefined : undefined }), title, body, extractedText: content, sourceUrl: sourceUrl || undefined, sensitivity: classification, collectionId: collectionId || undefined, ...(incoming ? { receipt: JSON.stringify(incoming[position]) } : {}) }, aborter.signal);
       scheduleIndexTerms(profile); scheduleVectors(profile);
-      if (!keepOriginal && file) { await FileSystem.deleteAsync(file.uri, { idempotent: true }).catch(() => {}); }
+      if (!keepOriginal) for (const item of files) { await FileSystem.deleteAsync(item.uri, { idempotent: true }).catch(() => {}); }
       if (alive.current) { if (incoming && position + 1 < incoming.length) setPosition(p => p + 1); else setLeaving(true); }
     } catch (e) { if (alive.current) setNotice("Не удалось сохранить: " + memoryErrorMessage(e)); }
     finally { if (alive.current) setBusy(false); }
@@ -200,11 +240,14 @@ export function MemoryImportScreen() {
         <Pressable disabled={busy || !linkDraft.trim()} accessibilityRole="button" style={[button, { opacity: busy || !linkDraft.trim() ? .5 : 1 }]} onPress={() => void readLink()}><Text style={{ color: "#fff" }}>Загрузить по ссылке</Text></Pressable>
         <Text style={{ color: t.muted, fontSize: 12 }}>Без cookies и ключей. Закрытые сайты и перенаправления не поддерживаются.</Text>
       </View> : null}
-      {file || extractedText ? <Text style={{ color: t.muted, fontSize: 12 }}>Выбранный источник: {file ? file.name : "Текст по ссылке"}</Text> : null}
+      {file || extractedText ? <Text style={{ color: t.muted, fontSize: 12 }}>Выбранный источник: {files.length > 1 ? files.length + " файлов · одна заметка" : file ? file.name : "Текст по ссылке"}</Text> : null}
       {preparing ? <ActivityIndicator accessibilityLabel="Подготовка входящего файла" /> : null}
       {file || extractedText ? <Text accessibilityRole="header" style={{ color: t.text, fontSize: 18, fontWeight: "700" }}>2 · Предпросмотр и распознавание</Text> : null}
       {file ? <View style={{ backgroundColor: t.panel, padding: 16, borderRadius: 20, borderWidth: 1, borderColor: t.line, gap: 10 }}>
-        <Text style={{ color: t.text, fontWeight: "700" }}>{file.name}</Text>
+        <Text style={{ color: t.text, fontWeight: "700" }}>{files.length > 1 ? "Вложения · " + files.length : file.name}</Text>
+        {files.length > 1 ? files.map((item, index) => <Text key={index} style={{ color: t.muted }}>
+          {index + 1}. {item.name} · {mediaKind(item)}
+        </Text>) : null}
         {kind === "image" ? <Image source={{ uri: file.uri }} resizeMode="contain" style={{ width: "100%", height: 180, borderRadius: 14 }} /> : null}
         <Text style={{ color: t.muted, fontSize: 12 }}>{kind === "video" ? "Речь и пять выборочных кадров обрабатываются отдельно. Максимум 10 минут; частичные результаты явно отмечены." : kind === "audio" ? (localAudio ? "Речь распознаётся на телефоне моделью Whisper; файл никуда не отправляется." : "Речь преобразуется в текст сервисом подключения. Чтобы распознавать на телефоне, скачайте модель: Настройки → Голосовой ввод → Голос без интернета.") : kind === "text" ? "Текстовый файл читается на телефоне, без отправки в интернет." : "Выбранная модель должна поддерживать изображения."}</Text>
         <Text style={{ color: t.text, fontWeight: "600" }}>Обработка файла</Text>
@@ -212,7 +255,7 @@ export function MemoryImportScreen() {
           <Pressable disabled={busy} key={id} accessibilityRole="button" accessibilityLabel={label} onPress={() => setClassification(id)} style={{ minHeight: 46, justifyContent: "center" }}>
             <Text style={{ color: classification === id ? t.secondary : t.text }}>{classification === id ? "● " : "○ "}{label}</Text>
           </Pressable>)}
-        {kind !== "text" && !localAudio ? <NoteEditorSection testID="import-processing-options" title="Параметры распознавания" summary="Модель и подключение" expanded={processingOptionsOpen} onToggle={() => setProcessingOptionsOpen(v => !v)}>
+        {(files.length > 1 || (kind !== "text" && !localAudio)) ? <NoteEditorSection testID="import-processing-options" title="Параметры распознавания" summary="Модель и подключение" expanded={processingOptionsOpen} onToggle={() => setProcessingOptionsOpen(v => !v)}>
           <Text style={{ color: t.muted, fontSize: 12 }}>При разборе файл или кадры отправляются выбранному сервису.</Text>
           <Text style={{ color: t.text, fontWeight: "600" }}>Подключение для разбора</Text>
           {connections.map(c => <Pressable disabled={busy} key={c.id} accessibilityRole="button" accessibilityLabel={"Разобрать через " + c.name} style={{ minHeight: 44, justifyContent: "center" }} onPress={() => setConnectionId(c.id)}>
@@ -220,10 +263,17 @@ export function MemoryImportScreen() {
           </Pressable>)}
           {kind === "audio" && selected?.provider === "anthropic" ? <Text style={{ color: t.err }}>Для аудио выберите OpenAI-совместимое подключение с распознаванием речи.</Text> : null}
         </NoteEditorSection> : null}
-        {kind === "audio" || kind === "video" ? <View><Text style={{ color: t.text }}>Подключение для речи (локальный Whisper имеет приоритет)</Text>{connections.map(c => <Pressable key={c.id} disabled={busy} onPress={() => setSpeechConnectionId(c.id)} style={{ minHeight: 44 }}><Text style={{ color: c.id === speechConnectionId ? t.secondary : t.text }}>{c.id === speechConnectionId ? "● " : "○ "}{c.name} · {c.transcriptionModel || "whisper-1"}</Text></Pressable>)}</View> : null}
+        {files.some(item => ["audio", "video"].includes(mediaKind(item))) ? <View><Text style={{ color: t.text }}>Подключение для речи (локальный Whisper имеет приоритет)</Text>{connections.map(c => <Pressable key={c.id} disabled={busy} onPress={() => setSpeechConnectionId(c.id)} style={{ minHeight: 44 }}><Text style={{ color: c.id === speechConnectionId ? t.secondary : t.text }}>{c.id === speechConnectionId ? "● " : "○ "}{c.name} · {c.transcriptionModel || "whisper-1"}</Text></Pressable>)}</View> : null}
         <Pressable disabled={busy || !canExtract} accessibilityRole="button" accessibilityLabel="Извлечь сведения из файла" style={[button, { opacity: canExtract ? 1 : .5 }]} onPress={() => void extract()}>
-          <Text style={{ color: "#fff", fontWeight: "700" }}>{kind === "text" ? "Прочитать текст на телефоне" : localAudio ? "Распознать речь на телефоне" : "Передать файл провайдеру и разобрать"}</Text>
+          <Text style={{ color: "#fff", fontWeight: "700" }}>{files.length > 1 ? "Распознать все по очереди" : kind === "text" ? "Прочитать текст на телефоне" : localAudio ? "Распознать речь на телефоне" : "Передать файл провайдеру и разобрать"}</Text>
         </Pressable>
+        {recognizingIndex >= 0 ? <Text accessibilityLiveRegion="polite" style={{ color: t.secondary }}>
+          Распознаю файл {recognizingIndex + 1} из {files.length}: {files[recognizingIndex]?.name}
+        </Text> : null}
+        {recognitionResults.length > 0 && files.length > 1 ? recognitionResults.map(item =>
+          <Text key={item.index} style={{ color: item.status === "error" ? t.err : t.muted }}>
+            {item.index + 1}. {item.name}: {item.status === "success" ? "Распознано" : "Не распознано — " + item.error}
+          </Text>) : null}
       </View> : null}
       {busy ? <><ActivityIndicator /><Pressable accessibilityRole="button" onPress={() => controller.current?.abort()} style={{ minHeight: 44 }}><Text style={{ color: t.err }}>Остановить</Text></Pressable></> : null}
       {incoming && !preparing ? <View style={{ flexDirection: "row", gap: 16 }}>
@@ -248,7 +298,7 @@ export function MemoryImportScreen() {
         <Pressable disabled={busy} accessibilityRole="button" accessibilityLabel="Сохранить сведения в память" style={[button, { opacity: busy ? .5 : 1 }]} onPress={() => void save()}>
           <Text style={{ color: "#fff", fontWeight: "700" }}>Сохранить сведения в память</Text>
         </Pressable>
-        <Text style={{ color: t.muted, fontSize: 12 }}>При сохранении оригинала он остаётся в зашифрованной памяти и входит в резервную копию. Текст можно добавить сейчас или позже. Максимум — 80 МБ на файл.</Text>
+        <Text style={{ color: t.muted, fontSize: 12 }}>При сохранении оригиналы останутся в зашифрованной памяти и войдут в резервную копию. Не более 10 файлов и 80 МБ суммарно. Распознавание выполняется по очереди, результаты попадают в одну заметку.</Text>
       </> : null}
     </ScrollView>
   </KeyboardAvoidingView>;
