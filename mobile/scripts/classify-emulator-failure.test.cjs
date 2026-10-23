@@ -95,13 +95,13 @@ test('native note smoke navigates past the keyboard before targeting the body', 
   const note = flow.slice(noteStart, noteEnd);
   const title = note.indexOf('inputText: "Native smoke note"');
   const dismiss = note.indexOf('- hideKeyboard', title);
-  const scroll = note.indexOf('element: "Что нужно запомнить?"', dismiss);
-  const tap = note.indexOf('- tapOn: "Что нужно запомнить?"', scroll);
+  const scroll = note.indexOf('element: "Текст заметки"', dismiss);
+  const tap = note.indexOf('- tapOn: "Текст заметки"', scroll);
   const input = note.indexOf('inputText: "Persisted offline content"', tap);
   assert.ok(title >= 0 && dismiss > title && scroll > dismiss && tap > scroll && input > tap,
-    'after entering title, dismiss IME, scroll to placeholder, focus body and type');
-  assert.ok(note.includes('element: "Persisted offline content"'),
+    'after entering title, dismiss IME, scroll to accessible body input, focus and type');
+  assert.ok(note.includes('element: "Текст заметки"'),
     'editing previously stored text scrolls to the body before editing');
-  assert.doesNotMatch(note, /tapOn: "Текст заметки"/,
-    'Maestro text selectors should not use off-screen accessibility descriptions');
+  assert.match(note, /tapOn: "Текст заметки"/,
+    "use the stable accessibility label when editing a note");
 });
