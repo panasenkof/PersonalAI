@@ -24,6 +24,8 @@ import { MarkdownText } from "../components/Markdown";
 import { KIND_NAMES } from "../direct-agent/fact-tool";
 import { useDraftNormalization } from "../direct-agent/use-draft-normalization";
 
+const StableNebulaArtwork = React.memo(NebulaHomeArtwork);
+
 export function HomeScreen() {
   return <NebulaHomeThemeProvider><NebulaHomeContent /></NebulaHomeThemeProvider>;
 }
@@ -116,6 +118,7 @@ function NebulaHomeContent() {
     <NebulaHomeHeader connectionName={connectionName} model={settings?.model}
       onConnections={() => openConnections()} onHistory={() => setHistoryOpen(true)}
       newChatEnabled={ready} onNewChat={() => store.create()} />
+    {ready && Boolean(active?.rows?.length) ? <View testID="nebula-conversation-orb" style={{ height: 112, justifyContent: "center", alignItems: "center" }}><StableNebulaArtwork size={104} phase={orbPhase} /></View> : null}
     {!ready ? <View style={{ padding: 20, gap: 12 }}>{!error ? <ActivityIndicator accessibilityLabel="Загрузка диалогов" /> : null}
       {error ? <Pressable accessibilityRole="button" onPress={() => void store.initialize()} style={action}><Text style={{ color: t.accent }}>Повторить загрузку</Text></Pressable> : null}</View> : null}
     <FlatList key={active?.id || "empty"} ref={list} data={active?.rows || []} keyExtractor={item => item.id}
@@ -205,7 +208,7 @@ function NebulaHomeContent() {
         </View> : null}
         {busy ? <View testID="nebula-home-live-status"
           style={{ flexDirection: "row", alignItems: "center", gap: 10, padding: 8 }}>
-          {statusArtworkSize > 0 ? <NebulaHomeArtwork size={statusArtworkSize} phase={orbPhase} /> : null}
+          {statusArtworkSize > 0 && !active?.rows?.length ? <NebulaHomeArtwork size={statusArtworkSize} phase={orbPhase} /> : null}
           <ActivityIndicator />
           <Text style={{ flex: 1, color: t.muted }}>{active?.progress || "Готовлю ответ…"}<Elapsed since={active?.progressSince} /></Text>
         </View> : null}
