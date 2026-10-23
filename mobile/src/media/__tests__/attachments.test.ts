@@ -1,5 +1,5 @@
 import { SqliteMemoryRepository } from '../../local-memory/repository';
-import { writeOriginal, materializeAttachment, saveMediaNote, MAX_ORIGINAL_BYTES } from '../attachments';
+import { writeOriginal, materializeAttachment, saveMediaNote, MAX_ORIGINAL_BYTES, MAX_ORIGINALS_PER_NOTE } from '../attachments';
 import { SCHEMA_SQL } from '../../local-memory/storage';
 const { DatabaseSync } = require('node:sqlite');
 const crypto = require('node:crypto');
@@ -7,6 +7,7 @@ let mockUnlocked = true;
 let mockDb: any;
 const mockFiles = new Map<string, Uint8Array>();
 let mockFailure = false;
+let mockFailUri = '';
 let mockMaxRead = 0;
 jest.mock('expo-crypto', () => ({
   CryptoDigestAlgorithm: { SHA256: 'sha256' },
@@ -34,7 +35,7 @@ jest.mock('expo-file-system', () => ({
       const uri = this.uri; let offset = 0;
       return { size: mockFiles.get(uri)?.length, close() {}, readBytes(n: number) {
         mockMaxRead = Math.max(mockMaxRead, n);
-        if (mockFailure && offset > 0) throw new Error('disk read failed');
+        if ((mockFailure || mockFailUri === uri) && offset > 0) throw new Error('disk read failed');
         const bytes = mockFiles.get(uri)!.slice(offset, offset + n); offset += bytes.length; return bytes;
       }, writeBytes(bytes: Uint8Array) { mockFiles.set(uri, new Uint8Array([...mockFiles.get(uri)!, ...bytes])); } };
     }
@@ -49,7 +50,7 @@ beforeEach(() => {
     getFirstAsync: async (s: string, p: any[] = []) => sqlite.prepare(s).get(...p) || null,
     getAllAsync: async (s: string, p: any[] = []) => sqlite.prepare(s).all(...p),
   };
-  mockUnlocked = true; mockFailure = false; mockMaxRead = 0; mockFiles.clear();
+  mockUnlocked = true; mockFailure = false; mockFailUri = ''; mockMaxRead = 0; mockFiles.clear();
   mockFiles.set('file:///photo.png', new Uint8Array(600_000).fill(83));
 });
 afterEach(() => sqlite.close());
@@ -91,4 +92,49 @@ test('refuses remote originals and empty originals', async () => {
   await expect(writeOriginal(mockDb, 'id', { ...input.file, uri: 'https://example.org/a.png' })).rejects.toThrow('локальный');
   mockFiles.set(input.file.uri, new Uint8Array());
   await expect(saveMediaNote('guest', input)).rejects.toThrow('непустой');
+});
+
+
+const multi = [
+  { uri: "file:///photo.png", name: "photo.png", mimeType: "image/png" },
+  { uri: "file:///voice.mp3", name: "voice.mp3", mimeType: "audio/mpeg" },
+  { uri: "file:///recipe.txt", name: "recipe.txt", mimeType: "text/plain" },
+];
+
+test("three originals share one encrypted note, preserve names, chunks, and receipt deduplication", async () => {
+  mockFiles.set(multi[1].uri, new Uint8Array(400_000).fill(14));
+  mockFiles.set(multi[2].uri, new Uint8Array(1200).fill(22));
+  const request = { files: multi, title: "Семейная подборка", body: "Моя подпись", extractedText: "Файл 1: photo.png\nЧек\n\nФайл 2: voice.mp3\nРазговор", sensitivity: "standard" as const };
+  const id = await saveMediaNote("guest", request);
+  expect(await saveMediaNote("guest", request)).toBe(id);
+  expect(sqlite.prepare("SELECT count(*) n FROM memory_entities").get().n).toBe(1);
+  const originals = sqlite.prepare("SELECT * FROM memory_attachments").all();
+  expect(originals).toHaveLength(3);
+  expect(originals.map((x: any) => x.name).sort()).toEqual(multi.map(x => x.name).sort());
+  for (const row of originals) {
+    const uri = await materializeAttachment("guest", row);
+    const original = multi.find(m => m.name === row.name)!;
+    expect(Buffer.from(mockFiles.get(uri)!)).toEqual(Buffer.from(mockFiles.get(original.uri)!));
+  }
+  const payload = JSON.parse(sqlite.prepare("SELECT payload_json FROM memory_entities").get().payload_json);
+  expect(payload.source_files).toEqual(multi.map(f => f.name));
+  expect(payload.extracted_text).toContain("voice.mp3");
+  expect(mockMaxRead).toBeLessThanOrEqual(256 * 1024);
+});
+
+test("a failed second file rolls back the entire transaction (note and all chunks)", async () => {
+  mockFiles.set(multi[1].uri, new Uint8Array(600_000).fill(31));
+  mockFailUri = multi[1].uri;
+  await expect(saveMediaNote("guest", { files: multi.slice(0, 2), title: "Two", body: "", sensitivity: "standard" })).rejects.toThrow("disk read failed");
+  for (const table of ["memory_entities", "memory_attachments", "memory_attachment_parts", "memory_received_shares"])
+    expect(sqlite.prepare("SELECT count(*) n FROM " + table).get().n).toBe(0);
+});
+
+test("multiple originals cannot exceed limits and cannot mix two file input formats", async () => {
+  await expect(saveMediaNote("guest", { files: Array(MAX_ORIGINALS_PER_NOTE + 1).fill(multi[0]), title: "Too many", body: "", sensitivity: "standard" })).rejects.toThrow("10 вложений");
+  await expect(saveMediaNote("guest", { file: multi[0], files: multi, title: "Both", body: "", sensitivity: "standard" })).rejects.toThrow("одним способом");
+  const saved = mockFiles.get(multi[0].uri)!;
+  mockFiles.set(multi[0].uri, new Uint8Array(81 * 1024 * 1024));
+  await expect(saveMediaNote("guest", { files: [multi[0]], title: "Too big", body: "", sensitivity: "standard" })).rejects.toThrow("80 МБ");
+  mockFiles.set(multi[0].uri, saved);
 });
