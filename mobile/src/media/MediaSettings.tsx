@@ -72,7 +72,7 @@ export function MediaSettings({ profile, connections }: { profile: string; conne
           const checked = prefs[field] === c.id;
           return <Pressable key={c.id} accessibilityRole="radio"
             accessibilityLabel={label + ": " + c.name}
-            accessibilityState={{ checked, disabled: !loaded || saving }}
+            aria-checked={checked} accessibilityState={{ checked, disabled: !loaded || saving }}
             disabled={!loaded || saving}
             onPress={() => void choose(field, c.id)}
             style={{ minHeight: nebulaTouch.minimum, borderWidth: 1, borderColor: checked ? t.secondary : t.line,
