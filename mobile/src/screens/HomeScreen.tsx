@@ -13,7 +13,7 @@ import type { RootStackParams } from "../navigation";
 import { BottomSheet } from "../components/BottomSheet";
 import { NebulaHomeHeader } from "../design/nebula/NebulaHomeHeader";
 import { NebulaHomeArtwork } from "../design/nebula/NebulaHomeArtwork";
-import { isNebulaChatNearBottom, nebulaEmptyOrbSize, shouldScrollNebulaChatToEnd } from "../design/nebula/homeArtLayout";
+import { isNebulaChatNearBottom, nebulaEmptyOrbSize, shouldScrollNebulaChatToEnd, shouldAnchorNebulaStreamingReply } from "../design/nebula/homeArtLayout";
 import { resolveNebulaHomePhase, type NebulaVoicePhase } from "../design/nebula/homePhase";
 import { useChatBottomFollow } from "../design/nebula/useChatBottomFollow";
 import { VoiceInput } from "../components/VoiceInput";
@@ -47,7 +47,7 @@ function NebulaHomeContent() {
   const [composerFocused, setComposerFocused] = useState(false);
   const [keyboardOpen, setKeyboardOpen] = useState(false);
   const [listViewportHeight, setListViewportHeight] = useState(0);
-  const { list, nearChatBottom, pendingSendFollow, userScrollActive, scheduleBottomFollow } =
+  const { list, nearChatBottom, pendingSendFollow, userScrollActive, streamReadAnchored, streamFollowOverride, scheduleBottomFollow } =
     useChatBottomFollow(active?.id, isFocused);
   useEffect(() => {
     // Browser QA / React Native Web may omit the native Keyboard module.
@@ -103,6 +103,8 @@ function NebulaHomeContent() {
     pendingSendFollow.current = composerOccluded;
     nearChatBottom.current = true;
     userScrollActive.current = false;
+    streamReadAnchored.current = false;
+    streamFollowOverride.current = false;
     Keyboard?.dismiss?.();
     setComposerFocused(false);
     setVoiceReset(n => n + 1);
@@ -113,6 +115,10 @@ function NebulaHomeContent() {
     nearChatBottom.current = isNebulaChatNearBottom(
       metrics.contentSize.height, metrics.contentOffset.y, metrics.layoutMeasurement.height,
     );
+    // A reader who explicitly returns to the end opts back into following
+    // the current response. Another upward swipe cancels this override.
+    streamFollowOverride.current = nearChatBottom.current;
+    if (nearChatBottom.current) streamReadAnchored.current = false;
   };
   const openConnections = (presetId?: string) => navigation.navigate("ModelConnections", presetId ? { presetId } : undefined);
   // First run: the active connection has neither a key nor a keyless local address.
@@ -156,9 +162,9 @@ function NebulaHomeContent() {
         userScrollActive.current = false;
       }}
       onContentSizeChange={() => {
-        if (pendingSendFollow.current || shouldScrollNebulaChatToEnd(
+        if (!streamReadAnchored.current && (pendingSendFollow.current || shouldScrollNebulaChatToEnd(
           active?.rows?.length || 0, active?.streamText, nearChatBottom.current,
-        )) {
+        ))) {
           scheduleBottomFollow();
         }
       }}
@@ -211,7 +217,19 @@ function NebulaHomeContent() {
           <View style={{ flexDirection: "row", gap: 20 }}><Pressable accessibilityRole="button" disabled={Boolean(active.savingDraft)} onPress={() => void store.approve(d)} style={action}><Text style={{ color: t.accent }}>{active.savingDraft === d.id ? "Сохранение…" : "Сохранить"}</Text></Pressable>
             <Pressable accessibilityRole="button" disabled={Boolean(active.savingDraft)} onPress={() => store.dismiss(d)} style={action}><Text style={{ color: t.muted }}>Отклонить</Text></Pressable></View>
         </View>)}
-        {busy && active?.streamText ? <View accessibilityLiveRegion="polite" style={{ backgroundColor: t.panel, borderWidth: 1, borderColor: t.line, borderRadius: 20, padding: 15 }}>
+        {busy && active?.streamText ? <View accessibilityLiveRegion="polite"
+          onLayout={event => {
+            // NN/g (2026): do not scroll users away from the beginning of a
+            // long streamed answer. Freeze following before it fills the viewport.
+            // A later user scroll to the bottom explicitly resumes following.
+            if (!composerOccluded && !streamFollowOverride.current &&
+                shouldAnchorNebulaStreamingReply(event.nativeEvent.layout.height, listViewportHeight)) {
+              streamReadAnchored.current = true;
+              nearChatBottom.current = false;
+              pendingSendFollow.current = false;
+            }
+          }}
+          style={{ backgroundColor: t.panel, borderWidth: 1, borderColor: t.line, borderRadius: 20, padding: 15 }}>
           <MarkdownText text={active.streamText} style={{ color: t.text, lineHeight: 23 }} />
         </View> : null}
 
