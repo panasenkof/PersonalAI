@@ -49,7 +49,7 @@ describe("Nebula Home keyboard and visual viewport", () => {
       home.indexOf("const openConnections =", home.indexOf("const sendOrStop = () => {")),
     );
     expect(sendBlock).toContain("if (busy) { store.stop(); return; }");
-    expect(sendBlock).toContain("pendingSendFollow.current = true;");
+    expect(sendBlock).toContain("pendingSendFollow.current = composerOccluded;");
     expect(sendBlock).toContain("Keyboard?.dismiss?.()");
     expect(sendBlock).toContain("setComposerFocused(false)");
     expect(sendBlock).toContain("store.send(settings)");
@@ -76,7 +76,10 @@ describe("Nebula Home keyboard and visual viewport", () => {
     expect(home).toContain("onFocusChange={setComposerFocused}");
     expect(home).toContain("onLayout={event =>");
     expect(home).toContain("nebulaEmptyOrbSize(artLayout)");
-    expect(home).toContain("nebulaConversationOrbSize(artLayout)");
+    expect(home).toContain("showOrb={Boolean(active?.rows.length)}");
+    expect(home).toContain("onMomentumScrollEnd={event =>");
+    expect(home).toContain("userScrollActive.current && !pendingSendFollow.current");
+    expect(home).toContain('behavior={Platform.OS === "ios" ? "padding" : undefined}');
     expect(home).toContain("shouldScrollNebulaChatToEnd(");
     expect(home).toContain("artworkSize > 0 ? <NebulaHomeArtwork");
     expect(home).toContain("store.send(settings)");
