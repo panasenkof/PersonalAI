@@ -5,6 +5,7 @@ import {
   isNebulaChatNearBottom,
   nebulaEmptyOrbSize,
   shouldScrollNebulaChatToEnd,
+  shouldAnchorNebulaStreamingReply,
 } from "../homeArtLayout";
 
 const base = { listHeight: 520, windowHeight: 820, windowWidth: 390, composerOccluded: false };
@@ -40,6 +41,17 @@ describe("Nebula Home keyboard and visual viewport", () => {
     expect(isNebulaChatNearBottom(1200, 0, 0)).toBe(true);
     expect(isNebulaChatNearBottom(Number.NaN, 100, 300)).toBe(false);
     expect(shouldScrollNebulaChatToEnd(0, "partial streamed reply")).toBe(true);
+  });
+  it("holds the beginning of a long streamed answer still, but follows short replies", () => {
+    expect(shouldAnchorNebulaStreamingReply(240, 500)).toBe(false);
+    expect(shouldAnchorNebulaStreamingReply(350, 500)).toBe(true);
+    expect(shouldAnchorNebulaStreamingReply(499, 500)).toBe(true);
+    expect(shouldAnchorNebulaStreamingReply(100, 0)).toBe(false);
+    expect(shouldAnchorNebulaStreamingReply(Number.NaN, 500)).toBe(false);
+    const home = readFileSync(join(__dirname, "..", "..", "..", "screens", "HomeScreen.tsx"), "utf8");
+    expect(home).toContain("shouldAnchorNebulaStreamingReply(event.nativeEvent.layout.height, listViewportHeight)");
+    expect(home).toContain("!streamReadAnchored.current");
+    expect(home).toContain("streamFollowOverride.current = nearChatBottom.current");
   });
   it("closes Gboard only on Send, settles LLM thinking below the chat and respects intentional upward scrolling", () => {
     const root = join(__dirname, "..", "..", "..");
