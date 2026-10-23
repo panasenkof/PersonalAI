@@ -38,7 +38,7 @@ describe("U2 Memory library note presentation", () => {
     fireEvent(button, "longPress");
     expect(onOpen).toHaveBeenCalledTimes(1);
     expect(onToggleSelection).toHaveBeenCalledTimes(1);
-    expect(view.getByText(note().title).props.numberOfLines).toBe(2);
+    expect(view.getByText(note().title || "Без названия").props.numberOfLines).toBe(2);
     expect(view.getByText("Мой длинный текст заметки").props.numberOfLines).toBe(3);
   });
   it("toggles selected cards without opening their editor", () => {
