@@ -28,8 +28,10 @@ describe("Nebula motion stability regression", () => {
     const footer = home.slice(home.indexOf("ListFooterComponent="), home.indexOf("    />", home.indexOf("ListFooterComponent=")));
     expect(home).toContain("showOrb={Boolean(active?.rows.length)}");
     expect(home).toContain("progressText={busy ?");
-    expect(header).toContain("<NebulaHomeArtwork size={40} phase={orbPhase} />");
-    expect(header).toContain("{progressText}");
+    expect(header).toContain("<NebulaHomeArtwork size={48} phase={orbPhase} />");
+    expect(header).toContain("height: 72");
+    expect(header).toContain("height: 13");
+    expect(header).toContain('{progressText || " "}');
     expect(footer).not.toContain("NebulaHomeArtwork");
     expect(footer).not.toContain("nebula-home-live-status");
     expect(nativeArtwork).toContain("showStatusText={size > 100}");
