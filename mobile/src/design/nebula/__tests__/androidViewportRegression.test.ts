@@ -24,10 +24,11 @@ describe("Android viewport regressions from real device recordings", () => {
   });
   it("uses stable accessibility labels for both note edit steps", () => {
     expect(note).toContain('accessibilityLabel="Текст заметки"');
-    expect(smoke).toContain('element: "Что нужно запомнить?"');
-    expect(smoke).toContain('element: "Persisted offline content"');
-    expect(smoke).toContain('- tapOn: "Что нужно запомнить?"');
-    expect(smoke).toContain('- tapOn: "Persisted offline content"');
+    expect(note).toContain('testID="note-title-input"');
+    expect(note).toContain('testID="note-body-input"');
+    expect(smoke).toContain('id: "note-body-input"');
+    expect(smoke).toContain('id: "note-title-input"');
+    expect(smoke).not.toContain('tapOn: "Persisted offline content"');
     expect(smoke).not.toContain('element: "Текст заметки"');
     
     expect(smoke).toContain('timeout: 15000');

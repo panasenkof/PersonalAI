@@ -30,15 +30,18 @@ name: PersAI native offline smoke
 # 4. Create/edit a real SQLCipher note, without network/model credentials.
 - tapOn: "Вкладка Память"
 - tapOn: "Новая заметка"
-- tapOn: "Заголовок заметки"
+- tapOn:
+    id: "note-title-input"
 - inputText: "Native smoke note"
 # Android keyboard obscures the body input below the title on Pixel 2.
 # Navigate like a user instead of relying on an off-screen accessibility node.
 - hideKeyboard
 - scrollUntilVisible:
-    element: "Что нужно запомнить?"
+    element:
+      id: "note-body-input"
     direction: DOWN
-- tapOn: "Что нужно запомнить?"
+- tapOn:
+    id: "note-body-input"
 - inputText: "Persisted offline content"
 - hideKeyboard
 - extendedWaitUntil:
@@ -54,14 +57,17 @@ name: PersAI native offline smoke
 # The note preview in the list also contains the saved body. Wait for the
 # editor's own save action before touching its input, not for preview text.
 - extendedWaitUntil:
-    visible: "Сохранить запись"
+    visible:
+      id: "note-save-button"
     timeout: 15000
 - assertVisible: "Persisted offline content"
 - hideKeyboard
 - scrollUntilVisible:
-    element: "Persisted offline content"
+    element:
+      id: "note-body-input"
     direction: DOWN
-- tapOn: "Persisted offline content"
+- tapOn:
+    id: "note-body-input"
 - eraseText
 - inputText: "Edited offline content"
 - hideKeyboard

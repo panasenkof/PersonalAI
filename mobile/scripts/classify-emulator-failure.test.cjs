@@ -95,14 +95,14 @@ test('native note smoke navigates past the keyboard before targeting the body', 
   const note = flow.slice(noteStart, noteEnd);
   const title = note.indexOf('inputText: "Native smoke note"');
   const dismiss = note.indexOf('- hideKeyboard', title);
-  const scroll = note.indexOf('element: "Что нужно запомнить?"', dismiss);
-  const tap = note.indexOf('- tapOn: "Что нужно запомнить?"', scroll);
+  const scroll = note.indexOf('id: "note-body-input"', dismiss);
+  const tap = note.indexOf('- tapOn:\n    id: "note-body-input"', scroll);
   const input = note.indexOf('inputText: "Persisted offline content"', tap);
   assert.ok(title >= 0 && dismiss > title && scroll > dismiss && tap > scroll && input > tap,
     'after entering title, dismiss IME, scroll to the visible body placeholder, focus and type');
-  assert.ok(note.includes('element: "Persisted offline content"'),
+  assert.ok(note.includes('id: "note-body-input"'),
     'editing previously stored text scrolls to the body before editing');
-  assert.match(note, /tapOn: "Persisted offline content"/,
+  assert.match(note, /id: "note-body-input"/,
     "use visible text when editing an existing note");
 });
 
@@ -110,9 +110,9 @@ test('native note smoke navigates past the keyboard before targeting the body', 
 test('note edit waits for editor, not matching preview in the list (CI #410)', () => {
   const flow = fs.readFileSync(path.join(__dirname, '..', '.maestro', 'flows', 'smoke.yaml'), 'utf8');
   const open = flow.indexOf('- tapOn: "Открыть заметку Native smoke note"');
-  const wait = flow.indexOf('visible: "Сохранить запись"', open);
+  const wait = flow.indexOf('id: "note-save-button"', open);
   const body = flow.indexOf('- assertVisible: "Persisted offline content"', open);
-  const edit = flow.indexOf('element: "Persisted offline content"', body);
+  const edit = flow.indexOf('id: "note-body-input"', body);
   assert.ok(open >= 0 && wait > open && body > wait && edit > body,
     'editor save control must be visible before checking body or editing');
   assert.match(flow.slice(open, body), /timeout: 15000/,
