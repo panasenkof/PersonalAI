@@ -48,6 +48,7 @@ describe("Android viewport regressions from real device recordings", () => {
       "screens/HomeScreen.tsx",
       "design/nebula/NebulaHomeHeader.tsx",
       "screens/LocalMemoryScreen.tsx",
+      "design/nebula/MemoryNoteCard.tsx",
       "screens/MemoryNoteScreen.tsx",
       "components/AgentLimitsCard.tsx",
       "components/Collapsible.tsx",
