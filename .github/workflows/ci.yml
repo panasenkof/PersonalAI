@@ -65,14 +65,14 @@ jobs:
         # github-actions: failing assertions appear as annotations on the PR.
         run: npx jest --ci --maxWorkers=2 --reporters=default --reporters=github-actions
       - name: Android release configuration tests
-        run: node --test scripts/prepare-android-release.test.cjs scripts/apk-signing-certificate.test.cjs scripts/android-release-policy.test.cjs scripts/verify-main-ci.test.cjs
+        run: node --test scripts/prepare-android-release.test.cjs scripts/apk-signing-certificate.test.cjs scripts/android-release-policy.test.cjs scripts/verify-main-ci.test.cjs scripts/prepare-browser-ci.test.cjs
       - name: Expo dependency compatibility
         run: npx expo install --check
       - name: Browser acceptance of production screens
         env:
           SCREENSHOT_DIR: ${{ runner.temp }}/persai-ui
         run: |
-          npx playwright install --with-deps chromium
+          bash scripts/prepare-browser-ci.sh
           node scripts/verify-mobile-ui.cjs
           node scripts/verify-nebula-home-prototype.cjs
 
