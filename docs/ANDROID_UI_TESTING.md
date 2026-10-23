@@ -44,6 +44,8 @@ bash mobile/scripts/android-ui-smoke.sh
 - Известные документационные изменения: только roadmap/source-artwork integrity и тест классификации.
 - Любые изменения mobile, workflow, бинарных референсов и неизвестных путей: полный набор.
 - При отсутствии baseline выполняется полный набор; отмена/ошибка обязательного job не считается успехом.
+- Общий executorch.jar поставляется upstream только в ARM64-архиве: installer скачивает его,
+  затем x86_64 runtime; компилируется только x86_64. Архивы кешируются, upstream проверяет SHA-256.
 - npm и Gradle cache; PR читает Gradle cache, main может обновить. Один ABI, один эмулятор,
   один native build вместо прежнего отдельного PR workflow. ARM64 проверяется подписанной сборкой выпуска.
 - JS и native идут параллельно; отдельного дублирующего Expo Android export нет.

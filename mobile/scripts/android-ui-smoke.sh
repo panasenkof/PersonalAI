@@ -17,4 +17,5 @@ adb install -r android/app/build/outputs/apk/release/app-release.apk
 adb shell locksettings set-pin 2468
 adb shell input keyevent 82
 maestro test --format junit --output qa/android-results/junit.xml \
-  --test-output-dir qa/android-results .maestro/flows/smoke.yaml
+  --test-output-dir qa/android-results --debug-output qa/android-results/debug \
+  .maestro/flows/smoke.yaml

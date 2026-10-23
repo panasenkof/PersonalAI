@@ -57,11 +57,6 @@ jobs:
           # JS tests and bundle do not execute the native runtime. Native CI downloads it separately.
           RNET_SKIP_DOWNLOAD: '1'
         run: npm ci --no-audit --no-fund
-      - name: Verify roadmap integrity (all task IDs and subplans)
-        run: node scripts/check-roadmap-integrity.cjs
-      - name: Verify approved Nebula source artwork
-        # Prevent AI agents or image optimizers from replacing the agreed originals.
-        run: node scripts/check-nebula-references.cjs
       - name: Compile original-backed Nebula SkSL (CanvasKit WASM)
         run: node scripts/check-nebula-sksl.cjs
       - name: Typecheck

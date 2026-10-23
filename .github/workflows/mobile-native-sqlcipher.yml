@@ -45,8 +45,21 @@ jobs:
           # The Android SDK removed the obsolete "tools" package, which this
           # action still requests by default. Only install supported packages.
           packages: platform-tools
-      - name: Install locked JS and native dependencies
+      - name: Cache verified ExecuTorch release downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/react-native-executorch
+          key: ${{ runner.os }}-executorch-${{ hashFiles('mobile/package-lock.json') }}
+      - name: Install locked JS and shared Android Java dependencies
+        # Upstream only puts the architecture-independent executorch.jar in ARM64 core.
+        # Download it using the upstream checksum-validating installer, but compile x86_64 only.
+        env:
+          RNET_TARGET: android-arm64-v8a
         run: npm ci --no-audit --no-fund
+      - name: Prepare emulator native libraries and verify Java bridge
+        run: |
+          node node_modules/react-native-executorch/scripts/download-libs.js
+          test -s node_modules/react-native-executorch/third-party/android/libs/executorch.jar
       - name: Generate native Android project including Expo SQLCipher
         run: npx expo prebuild --platform android --no-install --clean
       - name: Local models over http:// are allowed by the manifest

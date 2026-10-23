@@ -14,7 +14,7 @@ name: PersAI native offline smoke
 - inputText: "After clear"
 - assertVisible: "After clear"
 - hideKeyboard
-- takeScreenshot: qa/android-results/01-composer
+- takeScreenshot: 01-composer
 # 2. Navigation preserves drafts and the authenticated session.
 - tapOn: "Вкладка Память"
 - assertVisible: "Новая заметка"
@@ -24,7 +24,7 @@ name: PersAI native offline smoke
 # 3. Android modal opens/closes without privacy-cover oscillation.
 - tapOn: "История диалогов"
 - assertVisible: "Поиск диалогов"
-- takeScreenshot: qa/android-results/03-history
+- takeScreenshot: 03-history
 - tapOn: "Закрыть панель Мои диалоги"
 - assertNotVisible: "Поиск диалогов"
 # 4. Create/edit a real SQLCipher note, without network/model credentials.
@@ -50,7 +50,7 @@ name: PersAI native offline smoke
     element: "Сохранить запись"
     direction: DOWN
 - tapOn: "Сохранить запись"
-- takeScreenshot: qa/android-results/04-memory
+- takeScreenshot: 04-memory
 # 5. Settings and notes survive a full process restart.
 - tapOn: "Вкладка Настройки"
 - scrollUntilVisible:
@@ -88,7 +88,7 @@ name: PersAI native offline smoke
     element: "Лимит обращений к LLM на сообщение"
     direction: DOWN
 - assertVisible: "6"
-- takeScreenshot: qa/android-results/05-persistence
+- takeScreenshot: 05-persistence
 # 6. Short background round trip reuses the application session.
 - tapOn: "Вкладка Главная"
 - pressKey: Home
