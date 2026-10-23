@@ -151,6 +151,6 @@ function OneAttachment({ profile, attachment, expanded, visible, onToggle }: {
       style={{ width: "100%", height: 280, borderRadius: nebulaRadii.field }} />
       : kind === "audio" ? <AudioPreview uri={uri} onError={setError} />
       : kind === "video" ? <VideoPreview uri={uri} onError={setError} /> : null : null}
-    {active && error ? <Text accessibilityRole="alert" style={{ color: t.err }}>{error} Для повторной попытки нажмите «Повторить просмотр».</Text> : null}
+    {active && error ? <><Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text><Text style={{ color: t.muted }}>Для повторной попытки нажмите «Повторить просмотр».</Text></> : null}
   </View>;
 }
