@@ -17,7 +17,7 @@ export function NoteEditorSection({ title, summary, expanded, onToggle, children
   const t = useTheme();
   return <View style={{ borderRadius: nebulaRadii.card, borderWidth: 1, borderColor: t.line, backgroundColor: t.panel, overflow: "hidden" }}>
     <Pressable testID={testID} accessibilityRole="button" accessibilityLabel={title}
-      accessibilityState={{ expanded }} onPress={onToggle}
+      accessibilityState={{ expanded }} aria-expanded={expanded} onPress={onToggle}
       style={{ minHeight: nebulaTouch.minimum, flexDirection: "row", alignItems: "center",
         paddingHorizontal: nebulaSpacing.md, paddingVertical: nebulaSpacing.sm, gap: nebulaSpacing.sm }}>
       <View style={{ flex: 1, minWidth: 0, gap: nebulaSpacing.xxs }}>
