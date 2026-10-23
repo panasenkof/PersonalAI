@@ -135,6 +135,9 @@ function NebulaHomeContent() {
       onScroll={event => {
         if (pendingSendFollow.current) return; // ignore keyboard-resize offsets
         const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+        // Native scroll offsets lag behind streaming layout; only a real drag
+        // (onScrollBeginDrag) may interrupt auto-follow during generation.
+        if (busy && nearChatBottom.current) return;
         nearChatBottom.current = isNebulaChatNearBottom(
           contentSize.height, contentOffset.y, layoutMeasurement.height,
         );
@@ -145,7 +148,7 @@ function NebulaHomeContent() {
         )) {
           scheduleBottomFollow();
           // No Gboard animation to wait for: normal LLM auto-follow takes over.
-          if (!keyboardOpen && !composerFocused) pendingSendFollow.current = false;
+          if (!keyboardOpen && !composerFocused && (active?.rows?.length || active?.streamText)) pendingSendFollow.current = false;
         }
       }}
       contentContainerStyle={{ padding: 16, gap: 12, flexGrow: 1 }}
