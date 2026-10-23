@@ -15,9 +15,10 @@ name: PersAI native import source and URL validation
 - inputText: "http://example.org/test.txt"
 - hideKeyboard
 - tapOn: "Загрузить по ссылке"
-- extendedWaitUntil:
-    visible: "Нужна публичная HTTPS-ссылка без логина и пароля."
-    timeout: 15000
+# The error is below the source picker on compact devices.
+- scrollUntilVisible:
+    element: "Нужна публичная HTTPS-ссылка без логина и пароля."
+    direction: DOWN
 - assertNotVisible: "3 · Проверить и сохранить"
 - takeScreenshot: native-invalid-url
 - back
