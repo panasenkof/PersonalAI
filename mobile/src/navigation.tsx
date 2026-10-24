@@ -64,7 +64,7 @@ function Tabs() {
       <Tab.Screen name="Home" component={HomeScreen}
           options={{ title: "Главная", headerShown: false, tabBarAccessibilityLabel: "Вкладка Главная", tabBarIcon: tabIcon("home") }} />
       <Tab.Screen name="LocalMemory" component={LocalMemoryScreen}
-        options={{ title: "Память", tabBarAccessibilityLabel: "Вкладка Память", tabBarIcon: tabIcon("database") }} />
+        options={{ title: "Память", headerShown: false, tabBarAccessibilityLabel: "Вкладка Память", tabBarIcon: tabIcon("database") }} />
       <Tab.Screen name="Settings" component={DeviceSettingsScreen}
           options={{ title: "Настройки", tabBarAccessibilityLabel: "Вкладка Настройки", tabBarIcon: tabIcon("settings") }} />
     </Tab.Navigator>

@@ -17,6 +17,7 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
     // a browser-backed save implementation; native attachment code remains real.
     build.onResolve({ filter: /^\.\.\/media\/attachments$/ }, args =>
       args.importer.includes('/screens/MemoryImportScreen.') ? ({ path: path.join(qa, 'media-attachments.ts') }) : undefined);
+    build.onResolve({ filter: /^\.\/attachments$/ }, args => /media\/(MemoryCover|AttachmentView)\./.test(args.importer) ? ({ path: path.join(qa, 'memory-previews.ts') }) : undefined);
     build.onResolve({ filter: /^\.\/storage$/ }, args => args.importer.includes('/local-memory/') ? ({ path: path.join(qa, 'adapters.tsx') }) : undefined);
     build.onResolve({ filter: /local-memory\/storage$/ }, () => ({ path: path.join(qa, 'adapters.tsx') }));
     build.onResolve({ filter: /local-memory\/repository$/ }, () => ({ path: path.join(qa, 'repository.ts') }));
@@ -38,7 +39,7 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
   try {
   browser = await chromium.launch({ headless: true, ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}), args: ['--no-sandbox'] });
     if (process.env.SCREENSHOT_DIR) fs.mkdirSync(process.env.SCREENSHOT_DIR, { recursive: true });
-    for (const width of [320, 360, 390, 430, 768]) {
+    for (const width of process.env.UI_WIDTHS ? process.env.UI_WIDTHS.split(",").map(Number) : [320, 360, 390, 430, 768]) {
       const page = await browser.newPage({ viewport: { width, height: 900 }, colorScheme: width === 390 ? "dark" : "light" });
       currentPage = page;
       const errors = []; page.on('pageerror', error => { errors.push(error.message); console.error('UI runtime:', error.message); if (process.env.GITHUB_ACTIONS) console.log('::warning title=UI runtime::' + String(error.message).slice(0, 500).replace(/\n/g, '%0A')); });
@@ -49,6 +50,12 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       let releaseNormalization;
       await page.route('**/v1/chat/completions', async route => {
         const body = route.request().postDataJSON();
+        if (body.messages?.[0]?.content?.includes('Ты редактор одной личной заметки')) {
+          const input = JSON.parse(body.messages[1].content);
+          assert.equal(body.tools, undefined);
+          assert.deepEqual(Object.keys(input).sort(), ['instruction', 'note']);
+          await route.fulfill({ json: { choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({ title: input.note.title, body: 'Чеснок, паприка и перец' }) } }] } }); return;
+        }
         if (!body.messages?.[0]?.content?.includes('normalized_text')) {
           await route.fulfill({ json: { choices: [{ message: { content: '{"queries":[],"terms":[],"people":[]}' } }] } }); return;
         }
@@ -318,6 +325,7 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByLabel('Поиск диалогов', { exact: true }).waitFor({ state: 'hidden' });
       await page.getByTestId('chat-message-list').getByText('Ответ 2', { exact: true }).waitFor();
       await page.getByLabel('Вкладка Память', { exact: true }).click();
+      await page.getByLabel('Все коллекции', { exact: true }).click();
       const beforeSection = await page.evaluate(() => window.__qa.modalShows || 0);
       await page.getByLabel('Новый раздел памяти', { exact: true }).click();
       await page.getByLabel('Название раздела памяти', { exact: true }).fill('Рецепты');
@@ -332,7 +340,7 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
         await page.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, `section-${width}.png`) });
       }
       await page.getByLabel('Создать раздел', { exact: true }).click();
-      await page.getByLabel('Раздел Рецепты', { exact: true }).waitFor();
+      await page.getByText('Рецепты', { exact: true }).waitFor();
       await page.setViewportSize({ width, height: 900 }); await page.evaluate(() => window.__insets(24));
       await page.getByLabel('Новая заметка', { exact: true }).click();
       await page.getByLabel('Заголовок заметки', { exact: true }).fill('Индейка');
@@ -346,6 +354,21 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByLabel('Сохранить запись', { exact: true }).click();
       await page.getByLabel('Открыть заметку Индейка', { exact: true }).waitFor();
       await page.getByLabel('Открыть заметку Индейка', { exact: true }).click();
+      assert.equal(await page.getByLabel('Текст заметки', { exact: true }).count(), 0, 'Opening a saved note shows reading, not a form');
+      if (process.env.SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, `note-reading-${width}.png`) });
+      await page.getByLabel('Изменить заметку с ИИ', { exact: true }).click();
+      await page.getByLabel('Команда для редактирования заметки', { exact: true }).click();
+      await page.getByLabel('Команда для редактирования заметки', { exact: true }).fill('Добавь перец');
+      await page.getByLabel('Запросить правку ИИ', { exact: true }).click();
+      await page.getByTestId('note-ai-preview').waitFor();
+      if (process.env.SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, `note-ai-${width}.png`) });
+      assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('qa.notes')).find(n => n.title === 'Индейка').payload.body), 'Чеснок и паприка', 'LLM preview never persists itself');
+      await page.getByText('Сравнить с исходным', { exact: true }).click();
+      assert.equal(await page.getByTestId('note-ai-preview').innerText(), 'Чеснок и паприка');
+      await page.getByLabel('Применить правку ИИ', { exact: true }).click();
+      assert.equal(await page.getByLabel('Текст заметки', { exact: true }).inputValue(), 'Чеснок, паприка и перец');
+      await page.getByLabel('Вернуть текст до правки ИИ', { exact: true }).click();
+      assert.equal(await page.getByLabel('Текст заметки', { exact: true }).inputValue(), 'Чеснок и паприка');
       await page.getByLabel('Текст заметки', { exact: true }).fill('Чеснок, паприка и перец');
       // Schema v3: advanced fields are accessible without crowding the text editor.
       assert.equal(await page.getByLabel('Тип записи: Факт', { exact: true }).count(), 0, 'Metadata starts collapsed');
@@ -359,6 +382,7 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       assert.equal(await page.getByLabel('Другие имена и прозвища', { exact: true }).inputValue(), 'Индюшка, индюк');
       await page.getByLabel('Сохранить запись', { exact: true }).click();
       await page.getByLabel('Открыть заметку Индейка', { exact: true }).click();
+      await page.getByLabel('Редактировать запись', { exact: true }).click();
       await page.getByLabel('Параметры записи', { exact: true }).click();
       // Aliases arrive asynchronously after opening a note. Poll through the
       // accessible Playwright locator, which works for RN Web input AND
@@ -380,22 +404,30 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByLabel(/back/i).click();
       await page.getByLabel('Открыть заметку Индейка', { exact: true }).waitFor();
       await page.getByLabel('Открыть заметку Индейка', { exact: true }).click();
+      await page.getByLabel('Редактировать запись', { exact: true }).click();
       assert.equal(await page.getByLabel('Текст заметки', { exact: true }).inputValue(), 'Чеснок, паприка и перец');
       await page.getByLabel('Архивировать запись', { exact: true }).click();
       assert.equal(await page.getByLabel('Открыть заметку Индейка', { exact: true }).count(), 0);
+      await page.getByLabel('Меню памяти', { exact: true }).click();
       await page.getByLabel('Открыть архив', { exact: true }).click();
       await page.getByLabel('Открыть заметку Индейка', { exact: true }).click();
+      await page.getByLabel('Редактировать запись', { exact: true }).click();
       await page.getByLabel('Вернуть запись из архива', { exact: true }).click();
-      if (await page.getByLabel('Открыть текущие записи', { exact: true }).count()) await page.getByLabel('Открыть текущие записи', { exact: true }).click();
+      await page.getByLabel('Меню памяти', { exact: true }).click();
+      await page.getByLabel('Открыть текущие записи', { exact: true }).click();
       await page.getByLabel('Открыть заметку Индейка', { exact: true }).waitFor();
       await page.getByLabel('Поиск по заметкам', { exact: true }).fill('НичегоПодобного');
       await page.clock.runFor(300);
       await page.getByText('Ничего не найдено', { exact: true }).waitFor();
-      await page.getByLabel('Поиск по заметкам', { exact: true }).fill(''); await page.clock.runFor(300);
+      await page.getByLabel('Очистить поиск по памяти', { exact: true }).click();
+      await page.clock.runFor(500);
+      await page.getByLabel('Открыть заметку Индейка', { exact: true }).waitFor();
+      await page.getByLabel('Меню памяти', { exact: true }).click();
       await page.getByRole('button', { name: 'Резервные копии', exact: true }).click();
       await page.getByLabel('Создать новый код восстановления', { exact: true }).waitFor();
       await page.getByLabel(/back/i).click();
       await page.getByLabel('Раздел Все записи', { exact: true }).click();
+      await page.getByLabel('Меню памяти', { exact: true }).click();
       await page.getByRole('button', { name: 'Добавить сведения из файла', exact: true }).click();
       const authenticationCount = await page.evaluate(() => window.__qa.auth);
       await page.getByLabel('Выбрать файл для памяти', { exact: true }).click();

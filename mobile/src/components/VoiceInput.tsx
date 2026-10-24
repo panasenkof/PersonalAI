@@ -5,7 +5,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, AppState, Platform, Pressable, Text, View } from "react-native";
 import { nativeInteractionActive, withNativeInteraction } from "../security/native-interaction";
 import type { ServiceChoice } from "../media/voice";
-import { NO_SERVICE_MESSAGE, START_TIMEOUT_MS, pickRecognitionService, startTimeoutMessage, voiceErrorMessage } from "../media/voice";
+import { appendDictation, NO_SERVICE_MESSAGE, START_TIMEOUT_MS, pickRecognitionService, startTimeoutMessage, voiceErrorMessage } from "../media/voice";
 import { startWhisperDictation, useWhisperStatus } from "../media/whisper";
 import type { DictationSession } from "../media/whisper";
 import { resolveVoiceEngine, useVoiceEngine } from "../media/voice-engine";
@@ -23,7 +23,8 @@ function recognitionService(): ServiceChoice | undefined {
 
 /** Each mounted input owns one draft. Unmounting (including clearing the draft
  * or changing conversations) invalidates permission requests and late results. */
-export function VoiceInput({ value, onChange, disabled = false, onError, showLabel = false, onBegin, onActiveChange, onPhaseChange }: {
+export function VoiceInput({ value, onChange, disabled = false, onError, showLabel = false, onBegin, onActiveChange, onPhaseChange, maxLength = 4000 }: {
+  maxLength?: number;
   value: string; onChange: (text: string) => void; disabled?: boolean; onError: (message: string) => void; showLabel?: boolean;
   onBegin?: () => void; onActiveChange?: (active: boolean) => void;
   /** Real native recognizer stage for the decorative Home orb. */
@@ -99,7 +100,7 @@ export function VoiceInput({ value, onChange, disabled = false, onError, showLab
   useSpeechRecognitionEvent("result", event => {
     if (!owns.current || viaWhisper.current || AppState.currentState !== "active") return;
     const transcript = event.results[0]?.transcript || "";
-    if (transcript) onChange((base.current + (base.current ? " " : "") + transcript).slice(0, 4000));
+    if (transcript) onChange(appendDictation(base.current, transcript, maxLength));
     if (event.isFinal) markFinishing();
   });
   useSpeechRecognitionEvent("end", () => {
@@ -123,10 +124,10 @@ export function VoiceInput({ value, onChange, disabled = false, onError, showLab
 
   async function startWhisper(token: number) {
     const aborter = new AbortController(); controller.current = aborter;
-    base.current = value.trim(); owns.current = viaWhisper.current = true;
+    base.current = value; owns.current = viaWhisper.current = true;
     try {
       const running = await withNativeInteraction(() => startWhisperDictation(
-        text => { if (generation.current === token && viaWhisper.current && AppState.currentState === "active" && text) onChange((base.current + (base.current ? " " : "") + text).slice(0, 4000)); },
+        text => { if (generation.current === token && viaWhisper.current && AppState.currentState === "active" && text) onChange(appendDictation(base.current, text, maxLength)); },
         message => { if (generation.current === token && owns.current) onError(message); },
         () => {
           if (generation.current !== token || !viaWhisper.current) return;
@@ -142,6 +143,7 @@ export function VoiceInput({ value, onChange, disabled = false, onError, showLab
   }
   async function start(network = false) {
     if (disabled || !voice.loaded || voice.saving || owns.current || starting.current) return;
+    if (value.length >= maxLength) { onError("Текст слишком длинный для диктовки. Существующий текст сохранён; добавьте отдельную запись."); return; }
     if (voice.error) { onError(voice.error); return; }
     if (selectedEngine === "whisper" && !network && whisper.state !== "ready") {
       onError(whisper.state === "unsupported" ? "Whisper недоступен на этом телефоне. Выберите системное распознавание: Настройки → Голосовой ввод." :
@@ -167,7 +169,7 @@ export function VoiceInput({ value, onChange, disabled = false, onError, showLab
       if (generation.current !== token) return;
       if (!permission.granted) throw new Error("Голосовой ввод: нет разрешения на микрофон. Разрешите микрофон для PersAI в настройках телефона.");
       service.current = recognitionService();
-      base.current = value.trim(); offline.current = !useNetwork; setOfferNetwork(false);
+      base.current = value; offline.current = !useNetwork; setOfferNetwork(false);
       owns.current = true; started.current = finishing.current = false;
       // Native endpointing remains authoritative. Android documents that
       // custom silence extras may be ignored or cause unexpected results.

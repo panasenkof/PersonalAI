@@ -8,6 +8,9 @@ import { ActivityIndicator, Alert, Keyboard, KeyboardAvoidingView, Linking, Plat
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useProfile } from "../profile/ProfileContext";
 import { BottomSheet } from "../components/BottomSheet";
+import { NoteAiEditor } from "../components/NoteAiEditor";
+import { mayEditNoteText, type NoteDraft } from "../direct-agent/edit-note";
+import { MemoryCover } from "../media/MemoryCover";
 import { VoiceInput } from "../components/VoiceInput";
 import { localMemoryRepository } from "../local-memory/repository";
 import type { SqliteMemoryRepository } from "../local-memory/repository";
@@ -33,6 +36,7 @@ import { mediaConnections } from "../media/preferences";
 import { AttachmentView } from "../media/AttachmentView";
 import { useTheme } from "../theme";
 import { nebulaRadii, nebulaSpacing, nebulaTouch, nebulaTypography } from "../design/nebula/tokens";
+import { memoryNoteHasPhoto } from "../design/nebula/memoryNotePresentation";
 import { NoteEditorSection } from "../design/nebula/NoteEditorSection";
 
 export function MemoryNoteScreen() {
@@ -43,6 +47,12 @@ export function MemoryNoteScreen() {
   const extraction = useRef<AbortController | null>(null);
   useEffect(() => { const off = onLocalMemorySessionChange(unlocked => { if (!unlocked) extraction.current?.abort(); }); return () => { off(); extraction.current?.abort(); }; }, []);
   const repository = useRef<SqliteMemoryRepository | null>(null); const alive = useRef(true); const pending = useRef(false);
+  const [editing, setEditing] = useState(!route.params?.entityId);
+  const [aiOpen, setAiOpen] = useState(false);
+  const [noteMenu, setNoteMenu] = useState(false);
+  const [voiceActive, setVoiceActive] = useState(false);
+  const [beforeAi, setBeforeAi] = useState<NoteDraft | null>(null);
+  const closeAi = useCallback(() => setAiOpen(false), []);
   const [selected, setSelected] = useState<EntityRecord | null>(null);
   const [collections, setCollections] = useState<CollectionRecord[]>([]);
   const [collectionId, setCollectionId] = useState(route.params?.collectionId);
@@ -72,8 +82,8 @@ export function MemoryNoteScreen() {
   const dirty = allowAgent || extractedText !== String(selected?.payload.extracted_text || "") || title !== baseline.current.title || body !== baseline.current.body || collectionId !== baseline.current.collectionId ||
     kind !== baseline.current.kind || splitNames(names).join(",") !== splitNames(baseline.current.names).join(",") ||
     terms.trim() !== baseline.current.terms.trim();
-  usePreventRemove(!leaving && (busy || dirty), ({ data }) => {
-    if (busy) { setError("Дождитесь завершения сохранения."); return; }
+  usePreventRemove(!leaving && (busy || dirty || voiceActive), ({ data }) => {
+    if (busy || voiceActive) { setError("Дождитесь завершения сохранения или диктовки."); return; }
     Alert.alert("Изменения не сохранены", "Закрыть запись без сохранения?", [
       { text: "Продолжить редактирование", style: "cancel" },
       { text: "Закрыть", style: "destructive", onPress: () => setLeaving(true) },
@@ -112,6 +122,7 @@ export function MemoryNoteScreen() {
     finally { pending.current = false; if (alive.current) setBusy(false); }
   }, []);
   const save = () => run(async db => {
+    if (voiceActive) throw new Error("Завершите диктовку перед сохранением.");
     if (!title.trim() && !body.trim()) throw new Error("Введите заголовок или текст записи.");
     let collection = collectionId;
     if (!collection) {
@@ -131,7 +142,7 @@ export function MemoryNoteScreen() {
     let saved: EntityRecord;
     if (selected) {
       const textChanged = allowAgent || extractedText !== String(selected.payload.extracted_text || "") || title !== base.title || body !== base.body || collectionId !== base.collectionId;
-      saved = textChanged ? await db.reviseEntity(selected.id, selected.record_version, payload, allowAgent ? "Разрешён доступ агенту" : "Редактирование записи", collection, allowAgent) : selected;
+      saved = textChanged ? await db.reviseEntity(selected.id, selected.record_version, payload, allowAgent ? "Разрешён доступ агенту" : beforeAi ? "Подтверждённая правка ИИ" : "Редактирование записи", collection, allowAgent) : selected;
       if (kind !== saved.kind) saved = await db.setEntityKind(saved.id, saved.record_version, kind);
     } else saved = await db.createEntity({ collection_id: collection, domain: "notes", title: finalTitle, payload, kind,
       sensitivity: "inherit", source_kind: "user", source_ref: "device" });
@@ -158,22 +169,33 @@ export function MemoryNoteScreen() {
   return <KeyboardAvoidingView style={{ flex: 1, backgroundColor: t.bg }} behavior={Platform.OS === "ios" ? "padding" : "height"} keyboardVerticalOffset={Platform.OS === "ios" ? headerHeight : 0}>
     <ScrollView testID="note-editor-scroll" keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentContainerStyle={{ padding: nebulaSpacing.md, paddingBottom: nebulaSpacing.xl, gap: nebulaSpacing.sm }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: nebulaSpacing.sm }}>
-        <Text accessibilityRole="header" style={{ flex: 1, color: t.text, ...nebulaTypography.heading, fontWeight: "800" }}>{selected ? "Запись" : "Новая запись"}</Text>
+        <Text accessibilityRole="header" style={{ flex: 1, color: t.text, ...nebulaTypography.heading, fontWeight: "800" }}>{editing ? selected ? "Редактирование" : "Новая запись" : collections.find(c => c.id === collectionId)?.name || "Заметка"}</Text>
+        {selected && !editing ? <Pressable accessibilityRole="button" accessibilityLabel="Меню записи" style={button} onPress={() => setNoteMenu(true)}><Feather name="more-vertical" size={22} color={t.text} /></Pressable> : null}
         {!loading && dirty ? <Text accessibilityLabel="Несохранённые изменения" style={{ color: t.muted, ...nebulaTypography.label }}>Не сохранено</Text> : null}
       </View>
       {loading ? <ActivityIndicator accessibilityLabel="Загрузка записи" /> : null}
       {!loading && repository.current ? <>
+        {!editing ? <>
+          {profile && selected && memoryNoteHasPhoto(selected) ? <View style={{ borderRadius: nebulaRadii.card, overflow: "hidden" }}><MemoryCover profile={profile} entityId={selected.id} height={210} label={title} /></View> : null}
+          <Text accessibilityRole="header" selectable style={{ color: t.text, fontSize: 28, lineHeight: 36, fontWeight: "800" }}>{title || "Без названия"}</Text>
+          {body ? <Text testID="note-read-body" selectable style={{ color: t.text, ...nebulaTypography.body }}>{body}</Text> : null}
+          {selected && profile ? <AttachmentView profile={profile} entityId={selected.id} /> : null}
+          {!body && extractedText ? <Text selectable style={{ color: t.text, ...nebulaTypography.body }}>{extractedText}</Text> : null}
+          {typeof selected?.payload.source_url === "string" && /^https:\/\//.test(selected.payload.source_url) ? <Pressable accessibilityRole="link" style={button} onPress={() => void Linking.openURL(String(selected.payload.source_url)).catch(() => setError("Не удалось открыть источник."))}><Text style={{ color: t.secondary }}>Открыть источник</Text></Pressable> : null}
+        </> : <>
         <Pressable accessibilityRole="button" accessibilityLabel="Выбрать раздел записи" onPress={() => setSectionOpen(true)}
           style={{ ...button, backgroundColor: t.soft, flexDirection: "row", alignItems: "center", gap: nebulaSpacing.xs }}>
           <Feather name="folder" size={18} color={t.secondary} />
           <Text numberOfLines={2} style={{ flex: 1, color: t.secondary, ...nebulaTypography.body }}>Раздел: {collections.find(c => c.id === collectionId)?.name || "Заметки"}</Text>
           <Feather name="chevron-down" size={20} color={t.secondary} />
         </Pressable>
-        <TextInput testID="note-title-input" accessibilityLabel="Заголовок заметки" value={title} onChangeText={setTitle} editable={!busy} maxLength={160} placeholder="Заголовок" placeholderTextColor={t.muted} style={field} />
-        <TextInput testID="note-body-input" accessibilityLabel="Текст заметки" multiline value={body} onChangeText={setBody} editable={!busy} placeholder="Что нужно запомнить?" placeholderTextColor={t.muted} style={{ ...field, minHeight: 200, textAlignVertical: "top", lineHeight: 23 }} />
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}><VoiceInput value={body} onChange={setBody} disabled={busy} onError={setError} /><Text style={{ color: t.muted }}>Надиктовать запись</Text></View>
+        <TextInput testID="note-title-input" accessibilityLabel="Заголовок заметки" value={title} onChangeText={value => { setBeforeAi(null); setTitle(value); }} editable={!busy} maxLength={160} placeholder="Заголовок — необязательно" placeholderTextColor={t.muted} style={field} />
+        <TextInput testID="note-body-input" accessibilityLabel="Текст заметки" multiline value={body} onChangeText={value => { setBeforeAi(null); setBody(value); }} editable={!busy && !voiceActive} placeholder="Что нужно запомнить?" placeholderTextColor={t.muted} style={{ ...field, minHeight: 200, textAlignVertical: "top", lineHeight: 23 }} />
+        {!body && extractedText ? <Pressable accessibilityRole="button" style={button} onPress={() => setBody(extractedText)}><Text style={{ color: t.secondary }}>Вставить распознанный текст</Text></Pressable> : null}
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}><VoiceInput value={body} onChange={value => { setBeforeAi(null); setBody(value); }} maxLength={60000} disabled={busy || aiOpen} onActiveChange={setVoiceActive} onError={setError} /><Text style={{ color: t.muted }}>Надиктовать запись</Text></View>
 
-        <NoteEditorSection testID="note-metadata-toggle" title="Параметры записи" summary={"Тип: " + KIND_NAMES[kind] + " · другие названия и слова поиска"}
+        {beforeAi ? <Pressable accessibilityRole="button" accessibilityLabel="Вернуть текст до правки ИИ" style={button} onPress={() => { setTitle(beforeAi.title); setBody(beforeAi.body); setBeforeAi(null); }}><Text style={{ color: t.secondary }}>Отменить правку ИИ</Text></Pressable> : null}
+        <NoteEditorSection testID="note-metadata-toggle" title="Параметры записи" summary={"Тип: " + KIND_NAMES[kind] + " · заполнять необязательно"}
           expanded={metadataOpen} onToggle={() => { Keyboard.dismiss(); setMetadataOpen(open => !open); }}>
         <Text style={{ color: t.muted, fontSize: 12 }}>Тип записи</Text>
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
@@ -245,17 +267,27 @@ export function MemoryNoteScreen() {
             if (alive.current) setLeaving(true);
           })}><Text style={{ color: t.muted }}>{selected.record_status === "archived" ? "Вернуть из архива" : "Перенести в архив"}</Text></Pressable>
         </> : null}
+        </>}
       </> : null}
       {error ? <Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text> : null}
       {!loading && !repository.current ? <Pressable accessibilityRole="button" style={button} onPress={() => setRetry(n => n + 1)}><Text style={{ color: t.secondary }}>Повторить загрузку</Text></Pressable> : null}
     </ScrollView>
     {!loading && repository.current ? <View style={{ paddingHorizontal: nebulaSpacing.md, paddingTop: nebulaSpacing.xs, paddingBottom: keyboardOpen ? nebulaSpacing.xs : insets.bottom + nebulaSpacing.xs, borderTopWidth: 1, borderTopColor: t.line, backgroundColor: t.bg }}>
-      <Pressable testID="note-save-button" accessibilityRole="button" accessibilityLabel="Сохранить запись" disabled={busy || (!title.trim() && !body.trim())}
-        onPress={() => { Keyboard.dismiss(); void save(); }}
+      <Pressable testID="note-save-button" accessibilityRole="button" accessibilityLabel={editing ? "Сохранить запись" : "Редактировать запись"} disabled={busy || voiceActive || (editing && !title.trim() && !body.trim())}
+        onPress={() => { Keyboard.dismiss(); if (editing) void save(); else setEditing(true); }}
         style={{ ...button, backgroundColor: t.accent, alignItems: "center" }}>
-        <Text style={{ color: "#fff", fontWeight: "700" }}>{busy ? "Сохранение…" : "Сохранить запись"}</Text>
+        <Text style={{ color: "#fff", fontWeight: "700" }}>{busy ? "Сохранение…" : editing ? "Сохранить запись" : "Редактировать"}</Text>
       </Pressable>
+      <Pressable accessibilityRole="button" accessibilityLabel="Изменить заметку с ИИ" disabled={busy || voiceActive} onPress={() => { Keyboard.dismiss(); setAiOpen(true); }} style={{ ...button, alignItems: "center" }}><Text style={{ color: t.secondary, fontWeight: "700" }}>Изменить с ИИ</Text></Pressable>
     </View> : null}
+    {aiOpen && profile ? <NoteAiEditor profile={profile} draft={{ title, body: body.trim() ? body : extractedText }}
+      allowed={mayEditNoteText(selected?.sensitivity || "inherit", collections.find(c => c.id === collectionId)?.sensitivity || (!selected && !collectionId ? "standard" : undefined), selected ? collections.find(c => c.id === selected.collection_id)?.sensitivity || "unclassified" : undefined)}
+      onClose={closeAi} onApply={draft => { setBeforeAi({ title, body }); setTitle(draft.title); setBody(draft.body); setEditing(true); }} /> : null}
+    <BottomSheet visible={noteMenu} title="Запись" onClose={() => setNoteMenu(false)}>
+      <Pressable accessibilityRole="button" style={button} onPress={() => { setNoteMenu(false); setEditing(true); setMetadataOpen(true); }}><Text style={{ color: t.text }}>Свойства и доступ</Text></Pressable>
+      <Pressable accessibilityRole="button" style={button} onPress={() => { setNoteMenu(false); setEditing(true); void loadDetails(); }}><Text style={{ color: t.text }}>История, события и связи</Text></Pressable>
+      <Pressable accessibilityRole="button" style={button} onPress={() => { setNoteMenu(false); setEditing(true); setFileContentOpen(true); }}><Text style={{ color: t.text }}>Распознанный текст и оригиналы</Text></Pressable>
+    </BottomSheet>
     <BottomSheet visible={sectionOpen} title="Раздел записи" onClose={() => setSectionOpen(false)}>
       {collections.length ? collections.map(c => <Pressable key={c.id} accessibilityRole="button" accessibilityLabel={"Поместить в раздел " + c.name} accessibilityState={{ selected: c.id === collectionId }} style={button} onPress={() => { setCollectionId(c.id); setSectionOpen(false); if (!selected && !kindTouched.current) setKind(defaultKind(c.slug)); }}><Text style={{ color: c.id === collectionId ? t.secondary : t.text }}>{c.name}</Text></Pressable>) : <Text style={{ color: t.muted }}>Первая запись будет в разделе «Заметки». Другие разделы можно создать на странице памяти.</Text>}
     </BottomSheet>

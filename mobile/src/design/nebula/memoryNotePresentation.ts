@@ -34,3 +34,8 @@ export function memoryNoteType(note: Pick<EntityRecord, "payload" | "kind">): { 
     default: return { label: "Заметка", icon: "edit-3" };
   }
 }
+
+export function memoryNoteHasPhoto(note: Pick<EntityRecord, "payload">): boolean {
+  return note.payload.source_media === "image" ||
+    (Array.isArray(note.payload.source_media_types) && note.payload.source_media_types.includes("image"));
+}
