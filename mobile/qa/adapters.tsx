@@ -86,3 +86,5 @@ export const getResolvedSharedPayloadsAsync = async () => [];
 export const useVideoPlayer = () => null;
 export const VideoView = () => null;
 export const shareAsync = async () => { throw new Error('Native sharing requires an actual phone.'); };
+
+export const manipulateAsync = async (uri: string) => ({ uri });

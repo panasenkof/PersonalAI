@@ -61,6 +61,7 @@ name: PersAI native offline smoke
       id: "note-save-button"
     timeout: 15000
 - assertVisible: "Persisted offline content"
+- tapOn: "Редактировать запись"
 - hideKeyboard
 - scrollUntilVisible:
     element:

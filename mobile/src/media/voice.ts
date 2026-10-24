@@ -50,3 +50,9 @@ export const startTimeoutMessage = (choice?: ServiceChoice) => {
   return `Голосовой ввод: ${serviceName(choice?.pkg || choice?.defaultPackage || undefined)} не начала запись за ${START_TIMEOUT_MS / 1000} с.` +
     (diagnosis || " Проверьте, что приложение Google включено и обновлено, и повторите.");
 };
+
+/** Dictation may bound the new phrase, never discard an existing note or its formatting. */
+export function appendDictation(base: string, transcript: string, maxLength: number): string {
+  const combined = base + (base && !/\s$/.test(base) ? " " : "") + transcript;
+  return combined.slice(0, Math.max(maxLength, base.length));
+}

@@ -24,9 +24,9 @@ describe("Android viewport regressions from real device recordings", () => {
   });
   it("pins Save outside the scrolling note form even with the Android IME", () => {
     const endScroll = note.indexOf("</ScrollView>");
-    const saveButton = note.indexOf('accessibilityLabel="Сохранить запись"');
+    const saveButton = note.indexOf('testID="note-save-button"');
     expect(saveButton).toBeGreaterThan(endScroll);
-    expect(note).toContain("Keyboard.dismiss(); void save();");
+    expect(note).toContain("Keyboard.dismiss(); if (editing) void save(); else setEditing(true);");
     expect(note).toContain('testID="note-save-button"');
     expect(smoke).toContain('id: "note-save-button"');
     expect(smoke).not.toContain('element: "Сохранить запись"');

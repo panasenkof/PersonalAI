@@ -27,3 +27,12 @@ test("a service that never starts and a phone without one are explained", () => 
   expect(startTimeoutMessage()).toContain("не начала запись за 6 с");
   expect(NO_SERVICE_MESSAGE).toContain("приложение Google");
 });
+
+
+test("dictation preserves long notes and existing paragraph whitespace", () => {
+  const { appendDictation } = require("../voice");
+  const original = "Длинная заметка\n" + "а".repeat(5000) + "\n";
+  expect(appendDictation(original, "Новый абзац", 60000)).toBe(original + "Новый абзац");
+  expect(appendDictation(original, "Новый абзац", 4000)).toBe(original);
+  expect(appendDictation("Текст", "ещё", 60000)).toBe("Текст ещё");
+});

@@ -1,9 +1,10 @@
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Feather from "@expo/vector-icons/Feather";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import * as Crypto from "expo-crypto";
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Alert, FlatList, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, FlatList, Pressable, ScrollView, Text, TextInput, View, useWindowDimensions } from "react-native";
 import { useProfile } from "../profile/ProfileContext";
 import { BottomSheet } from "../components/BottomSheet";
 import { localMemoryRepository } from "../local-memory/repository";
@@ -14,6 +15,8 @@ import { ensureSections, orderCollections } from "../local-memory/sections";
 import type { RootStackParams } from "../navigation";
 import { useTheme } from "../theme";
 import { nebulaSpacing, nebulaRadii, nebulaTouch } from "../design/nebula/tokens";
+import { MemoryCover } from "../media/MemoryCover";
+import { memoryNoteHasPhoto } from "../design/nebula/memoryNotePresentation";
 import { MemoryNoteCard } from "../design/nebula/MemoryNoteCard";
 
 import { mergeText, type NoteAction } from "../local-memory/note-actions";
@@ -21,7 +24,17 @@ import { scheduleVectors } from "../media/vector-runner";
 
 export function LocalMemoryScreen() {
   const t = useTheme(); const navigation = useNavigation<NativeStackNavigationProp<RootStackParams>>();
-  const profile = useProfile();
+  const profile = useProfile(); const insets = useSafeAreaInsets();
+  const { width, fontScale } = useWindowDimensions();
+  const [grid, setGrid] = useState(true);
+  const columns = grid && width >= 350 && fontScale < 1.4 ? 2 : 1;
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [collectionMenu, setCollectionMenu] = useState(false);
+  const [collectionCards, setCollectionCards] = useState<CollectionRecord[]>([]);
+  const [covers, setCovers] = useState<Record<string, EntityRecord>>({});
+  const [visibleIds, setVisibleIds] = useState<Set<string>>(new Set());
+  const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: { item: EntityRecord }[] }) => setVisibleIds(new Set(viewableItems.map(x => x.item.id)))).current;
+  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 10 }).current;
   const [collections, setCollections] = useState<CollectionRecord[]>([]);
   const [collectionId, setCollectionId] = useState<string | undefined>();
   const [status, setStatus] = useState<"active" | "archived" | "trashed">("active");
@@ -37,13 +50,24 @@ export function LocalMemoryScreen() {
   const [sectionOpen, setSectionOpen] = useState(false); const [sectionName, setSectionName] = useState("");
   const repository = useRef<SqliteMemoryRepository | null>(null); const generation = useRef(0);
   useEffect(() => { const timer = setTimeout(() => setTerm(search.trim()), 250); return () => clearTimeout(timer); }, [search]);
-  useEffect(() => { setCollectionId(undefined); setSearch(""); setStatus("active"); setCollections([]); setNotes([]); }, [profile]);
+  useEffect(() => { setCollectionId(undefined); setSearch(""); setStatus("active"); setCollections([]); setNotes([]); setCollectionCards([]); setCovers({}); setSelectedIds([]); setVisibleIds(new Set()); }, [profile]);
   useFocusEffect(useCallback(() => {
     const request = ++generation.current; setLoading(true); setError("");
     if (profile) void localMemoryRepository(profile).then(async db => {
       const [sections, page] = await Promise.all([ensureSections(db), db.searchNotes(term, 50, 0, { collectionId, status })]);
       if (request !== generation.current) return;
       repository.current = db; void db.lastNoteOperation().then(value => { if (request === generation.current) setUndo(value); }).catch(() => {}); setCollections(sections); setNotes(page); setMore(page.length === 50);
+      const recentIds = [...new Set(page.map(n => n.collection_id))];
+      const shownSections = [...sections].sort((a, b) => {
+        const rank = (id: string) => recentIds.includes(id) ? recentIds.indexOf(id) : recentIds.length;
+        return rank(a.id) - rank(b.id);
+      }).slice(0, 6);
+      if (!term && !collectionId && status === "active") setCollectionCards(shownSections);
+      const entries = await Promise.all(shownSections.map(async section => {
+        const recent = await db.searchNotes("", 12, 0, { collectionId: section.id, status: "active" });
+        return [section.id, recent.find(memoryNoteHasPhoto)] as const;
+      }));
+      if (request === generation.current) setCovers(Object.fromEntries(entries.filter((entry): entry is readonly [string, EntityRecord] => Boolean(entry[1]))));
     }).catch(e => { if (request === generation.current) { repository.current = null; setError(memoryErrorMessage(e)); } })
       .finally(() => { if (request === generation.current) setLoading(false); });
     return () => { generation.current++; repository.current = null; };
@@ -77,22 +101,17 @@ export function LocalMemoryScreen() {
     finally { setBusy(false); }
   }
   const button = { minHeight: 48, justifyContent: "center" as const, alignItems: "center" as const, borderRadius: 16, paddingHorizontal: 16 };
-  return <View style={{ flex: 1, backgroundColor: t.bg }}>
+  return <View style={{ flex: 1, backgroundColor: t.bg, paddingTop: insets.top }}>
     <FlatList
-      testID="memory-note-list"
+      testID="memory-note-list" key={columns} numColumns={columns}
+      onViewableItemsChanged={onViewableItemsChanged} viewabilityConfig={viewabilityConfig}
+      initialNumToRender={8} windowSize={5} columnWrapperStyle={columns > 1 ? { gap: nebulaSpacing.sm } : undefined}
       ListHeaderComponent={<View style={{ paddingTop: nebulaSpacing.sm, paddingBottom: nebulaSpacing.sm, gap: nebulaSpacing.sm }}>
-        <View style={{ flexDirection: "row", justifyContent: "flex-end", alignItems: "center", gap: nebulaSpacing.xs }}>
-          <Pressable accessibilityRole="button" accessibilityLabel="Добавить сведения из файла"
-            onPress={() => navigation.navigate("MemoryImport")}
-            style={{ minWidth: nebulaTouch.minimum, minHeight: nebulaTouch.minimum, alignItems: "center", justifyContent: "center", borderRadius: nebulaRadii.field, borderWidth: 1, borderColor: t.line, backgroundColor: t.panel }}>
-            <Feather name="paperclip" size={20} color={t.secondary} />
-          </Pressable>
-          <Pressable accessibilityRole="button" accessibilityLabel="Новая заметка"
-            onPress={() => navigation.navigate("MemoryNote", { collectionId })}
-            style={{ ...button, flexDirection: "row", gap: 6, minHeight: nebulaTouch.minimum, backgroundColor: t.accent }}>
-            <Feather name="plus" size={18} color="#fff" />
-            <Text style={{ color: "#fff", fontWeight: "700", fontSize: 15 }}>Запись</Text>
-          </Pressable>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: nebulaSpacing.xs }}>
+          <Text accessibilityRole="header" style={{ flex: 1, color: t.text, fontSize: 28, fontWeight: "800" }}>Память</Text>
+          <Pressable accessibilityRole="button" accessibilityLabel="Новая заметка" onPress={() => navigation.navigate("MemoryNote", { collectionId })}
+            style={{ ...button, paddingHorizontal: 12, backgroundColor: t.accent }}><Feather name="plus" size={24} color={t.userText} /></Pressable>
+          <Pressable accessibilityRole="button" accessibilityLabel="Меню памяти" onPress={() => setMenuOpen(true)} style={{ ...button, paddingHorizontal: 12 }}><Feather name="more-vertical" size={24} color={t.text} /></Pressable>
         </View>
         <View style={{ flexDirection: "row", alignItems: "center", borderWidth: 1, borderColor: t.line, borderRadius: nebulaRadii.field, backgroundColor: t.panel }}>
           <Feather name="search" size={19} color={t.muted} style={{ marginLeft: nebulaSpacing.sm }} />
@@ -105,60 +124,28 @@ export function LocalMemoryScreen() {
             <Feather name="x" size={20} color={t.muted} />
           </Pressable> : null}
         </View>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled"
-          contentContainerStyle={{ gap: nebulaSpacing.xs, alignItems: "center" }}>
-          {[{ id: undefined, name: "Все записи" }, ...collections].map(c => {
-            const chosen = c.id === collectionId;
-            return <Pressable key={c.id || "all"} accessibilityRole="button"
-              accessibilityLabel={"Раздел " + c.name} accessibilityState={{ selected: chosen }}
-              onPress={() => setCollectionId(c.id)}
-              style={{ minHeight: nebulaTouch.minimum, paddingHorizontal: nebulaSpacing.md, alignItems: "center", justifyContent: "center",
-                borderRadius: nebulaRadii.pill, borderWidth: 1, borderColor: chosen ? t.accent : t.line, backgroundColor: chosen ? t.soft : t.panel }}>
-              <Text numberOfLines={1} style={{ color: chosen ? t.secondary : t.text, fontSize: 14, fontWeight: chosen ? "700" : "500" }}>{c.name}</Text>
-            </Pressable>;
-          })}
-          <Pressable accessibilityRole="button" accessibilityLabel="Новый раздел памяти"
-            onPress={() => setSectionOpen(true)}
-            style={{ minHeight: nebulaTouch.minimum, flexDirection: "row", alignItems: "center", paddingHorizontal: nebulaSpacing.md,
-              borderRadius: nebulaRadii.pill, borderWidth: 1, borderColor: t.line, gap: 6 }}>
-            <Feather name="folder-plus" size={18} color={t.secondary} /><Text style={{ color: t.secondary }}>Раздел</Text>
-          </Pressable>
-        </ScrollView>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: nebulaSpacing.xs }}>
-          <Pressable accessibilityRole="button" accessibilityLabel="Открыть текущие записи"
-            accessibilityState={{ selected: status === "active" }} onPress={() => setStatus("active")}
-            style={{ ...button, paddingHorizontal: nebulaSpacing.sm, minHeight: nebulaTouch.minimum, backgroundColor: status === "active" ? t.soft : "transparent" }}>
-            <Text style={{ color: status === "active" ? t.secondary : t.muted, fontWeight: "600", fontSize: 13 }}>Записи</Text>
-          </Pressable>
-          <Pressable accessibilityRole="button" accessibilityLabel="Открыть архив"
-            accessibilityState={{ selected: status === "archived" }} onPress={() => setStatus("archived")}
-            style={{ ...button, paddingHorizontal: nebulaSpacing.sm, minHeight: nebulaTouch.minimum, backgroundColor: status === "archived" ? t.soft : "transparent" }}>
-            <Text style={{ color: status === "archived" ? t.secondary : t.muted, fontWeight: "600", fontSize: 13 }}>Архив</Text>
-          </Pressable>
-          <Pressable accessibilityRole="button" accessibilityLabel="Открыть корзину"
-            accessibilityState={{ selected: status === "trashed" }} onPress={() => setStatus("trashed")}
-            style={{ ...button, paddingHorizontal: nebulaSpacing.sm, minHeight: nebulaTouch.minimum, backgroundColor: status === "trashed" ? t.soft : "transparent" }}>
-            <Text style={{ color: status === "trashed" ? t.secondary : t.muted, fontWeight: "600", fontSize: 13 }}>Корзина</Text>
-          </Pressable>
-          <View style={{ flex: 1 }} />
-          <Text accessibilityLiveRegion="polite" style={{ color: t.muted, fontSize: 12 }}>
-            {loading ? "Загрузка…" : `${notes.length}${more ? "+" : ""}`}
-          </Text>
-        </View>
-        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: nebulaSpacing.md }}>
-          <Pressable accessibilityRole="button" accessibilityLabel="Резервные копии"
-            onPress={() => navigation.navigate("MemoryBackup")}
-            style={{ minHeight: nebulaTouch.minimum, flexDirection: "row", alignItems: "center", gap: 6 }}>
-            <Feather name="download-cloud" size={16} color={t.secondary} />
-            <Text style={{ color: t.secondary, fontSize: 13 }}>Копии</Text>
-          </Pressable>
-          <Pressable accessibilityRole="button" accessibilityLabel={selectedIds.length ? "Снять выбор записей" : "Выбрать показанные записи"}
-            onPress={() => setSelectedIds(selectedIds.length ? [] : notes.slice(0, 100).map(n => n.id))}
-            style={{ minHeight: nebulaTouch.minimum, flexDirection: "row", alignItems: "center", gap: 6 }}>
-            <Feather name={selectedIds.length ? "x-circle" : "check-square"} size={16} color={t.secondary} />
-            <Text style={{ color: t.secondary, fontSize: 13 }}>{selectedIds.length ? `Выбрано: ${selectedIds.length}` : "Выбрать"}</Text>
+        {!term && status === "active" && !collectionId ? <>
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+            <Text style={{ color: t.text, fontSize: 18, fontWeight: "700" }}>Коллекции</Text>
+            <Pressable accessibilityRole="button" accessibilityLabel="Все коллекции" onPress={() => setCollectionMenu(true)} style={button}><Text style={{ color: t.secondary }}>Все</Text></Pressable>
+          </View>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: nebulaSpacing.sm }}>
+            {collectionCards.map(c => <Pressable key={c.id} accessibilityRole="button" accessibilityLabel={"Раздел " + c.name}
+              onPress={() => setCollectionId(c.id)} style={{ width: 116, borderRadius: nebulaRadii.field, overflow: "hidden", backgroundColor: t.panel, borderWidth: 1, borderColor: t.line }}>
+              {profile && covers[c.id] ? <MemoryCover profile={profile} entityId={covers[c.id].id} compact height={68} label={"Обложка коллекции " + c.name} />
+                : <View style={{ height: 68, backgroundColor: t.soft, justifyContent: "center", alignItems: "center" }}><Feather name="folder" size={28} color={t.secondary} /></View>}
+              <Text numberOfLines={2} style={{ color: t.text, fontWeight: "600", fontSize: 14, padding: nebulaSpacing.xs }}>{c.name}</Text>
+            </Pressable>)}
+          </ScrollView>
+        </> : null}
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          {collectionId ? <Pressable accessibilityRole="button" accessibilityLabel="Раздел Все записи" onPress={() => setCollectionId(undefined)} style={{ ...button, paddingHorizontal: 8 }}><Feather name="arrow-left" size={20} color={t.secondary} /></Pressable> : null}
+          <Text style={{ flex: 1, color: t.text, fontSize: 18, fontWeight: "700" }}>{term ? "Результаты поиска" : status === "archived" ? "Архив" : status === "trashed" ? "Корзина" : collectionId ? collections.find(c => c.id === collectionId)?.name : "Недавнее"}</Text>
+          <Pressable accessibilityRole="button" accessibilityLabel={grid ? "Показать списком" : "Показать плитками"} onPress={() => setGrid(v => !v)} style={{ ...button, paddingHorizontal: 12 }}>
+            <Feather name={grid ? "list" : "grid"} size={20} color={t.secondary} />
           </Pressable>
         </View>
+        {selectedIds.length ? <Pressable accessibilityRole="button" accessibilityLabel="Снять выбор записей" onPress={() => setSelectedIds([])} style={button}><Text style={{ color: t.secondary }}>Выбрано: {selectedIds.length} · Отменить выбор</Text></Pressable> : null}
         {status === "trashed" ? <Text style={{ color: t.muted, fontSize: 13, lineHeight: 19 }}>
           Удалённые записи исключены из поиска агента. Их можно восстановить или удалить окончательно.
         </Text> : null}
@@ -180,15 +167,31 @@ export function LocalMemoryScreen() {
       ListEmptyComponent={!loading && !error ? <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24, gap: 12 }}><Feather name={term ? "search" : "book-open"} size={40} color={t.secondary} />
         <Text style={{ color: t.text, fontSize: 20, fontWeight: "700", textAlign: "center" }}>{term ? "Ничего не найдено" : status === "archived" ? "Архив пуст" : status === "trashed" ? "Корзина пуста" : "Начните с важного"}</Text>
         <Text style={{ color: t.muted, textAlign: "center", lineHeight: 21 }}>{term ? "Попробуйте другое слово или раздел «Все записи»." : status === "trashed" ? "Здесь будут удалённые заметки, пока вы их не восстановите." : "Создайте запись или добавьте сведения из файла."}</Text></View> : null}
-      renderItem={({ item }) => <MemoryNoteCard note={item}
+      renderItem={({ item }) => <View style={{ flex: 1, maxWidth: columns === 2 ? "50%" : "100%" }}><MemoryNoteCard note={item} grid={columns === 2}
+        cover={profile && memoryNoteHasPhoto(item)
+          ? <MemoryCover profile={profile} entityId={item.id} active={visibleIds.has(item.id)} label={"Обложка " + item.title} /> : undefined}
         sectionName={collections.find(c => c.id === item.collection_id)?.name || "Запись"}
         selected={selectedIds.includes(item.id)}
         onToggleSelection={() => setSelectedIds(ids => ids.includes(item.id) ? ids.filter(id => id !== item.id) : [...ids, item.id])}
         onOpen={() => selectedIds.length
           ? setSelectedIds(ids => ids.includes(item.id) ? ids.filter(id => id !== item.id) : [...ids, item.id])
           : navigation.navigate("MemoryNote", { entityId: item.id })}
-      />}
+      /></View>}
       ListFooterComponent={more && !loading ? <Pressable accessibilityRole="button" accessibilityLabel="Показать ещё заметки" disabled={busy} onPress={() => void loadMore()} style={button}><Text style={{ color: t.secondary }}>{busy ? "Загружаю…" : "Показать ещё"}</Text></Pressable> : null} />
+    <BottomSheet visible={menuOpen} title="Память" onClose={() => setMenuOpen(false)}>
+      <Pressable accessibilityRole="button" accessibilityLabel="Добавить сведения из файла" style={button} onPress={() => { setMenuOpen(false); navigation.navigate("MemoryImport"); }}><Text style={{ color: t.text }}>Добавить фото, файл или ссылку</Text></Pressable>
+      <Pressable accessibilityRole="button" accessibilityLabel="Все коллекции" style={button} onPress={() => { setMenuOpen(false); setCollectionMenu(true); }}><Text style={{ color: t.text }}>Коллекции</Text></Pressable>
+      <Pressable accessibilityRole="button" accessibilityLabel="Выбрать показанные записи" style={button} onPress={() => { setSelectedIds(notes.slice(0, 100).map(n => n.id)); setMenuOpen(false); }}><Text style={{ color: t.text }}>Выбрать показанные записи</Text></Pressable>
+      {(["active", "archived", "trashed"] as const).map((value, i) => <Pressable key={value} accessibilityRole="button"
+        accessibilityLabel={["Открыть текущие записи", "Открыть архив", "Открыть корзину"][i]} style={button}
+        onPress={() => { setStatus(value); setMenuOpen(false); }}><Text style={{ color: t.text }}>{["Все записи", "Архив", "Корзина"][i]}</Text></Pressable>)}
+      <Pressable accessibilityRole="button" accessibilityLabel="Резервные копии" style={button} onPress={() => { setMenuOpen(false); navigation.navigate("MemoryBackup"); }}><Text style={{ color: t.text }}>Резервные копии</Text></Pressable>
+    </BottomSheet>
+    <BottomSheet visible={collectionMenu} title="Коллекции" onClose={() => setCollectionMenu(false)}>
+      {[{ id: undefined, name: "Все записи" }, ...collections].map(c => <Pressable key={c.id || "all"} accessibilityRole="button" accessibilityLabel={"Раздел " + c.name} style={button}
+        onPress={() => { setCollectionId(c.id); setCollectionMenu(false); }}><Text style={{ color: t.text }}>{c.name}</Text></Pressable>)}
+      <Pressable accessibilityRole="button" accessibilityLabel="Новый раздел памяти" style={button} onPress={() => { setCollectionMenu(false); setSectionOpen(true); }}><Text style={{ color: t.secondary }}>Создать коллекцию</Text></Pressable>
+    </BottomSheet>
     <BottomSheet visible={moveOpen} title="Перенести выбранные записи" onClose={() => setMoveOpen(false)}>
       <Text style={{ color: t.muted }}>{selectedNotes.map(n => n.title).join(", ")}</Text>
       {collections.map(c => <Pressable key={c.id} disabled={busy} style={button} onPress={() => void act("move", c.id)}><Text style={{ color: t.secondary }}>{c.name}</Text></Pressable>)}

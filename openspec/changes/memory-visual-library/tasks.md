@@ -1,0 +1,10 @@
+- [x] Inspect current screens, previous references and approved new visual concepts.
+- [x] Implement collection strip, grid/list and contextual management menus.
+- [x] Add disposable local photo covers with cancellation and concurrency bound.
+- [x] Separate note reading/editing and retain advanced metadata and source content.
+- [x] Add typed/voice LLM instruction, preview, original comparison and draft undo.
+- [x] Add privacy, cutoff, cancellation, stale-response and thumbnail lifecycle tests.
+- [x] Update existing browser and optional native note scenarios to new navigation.
+- [x] Complete local browser/typecheck/Jest checks and record exact results.
+- [ ] Publish PR and inspect remote CI.
+- [ ] Android APK acceptance: thumbnails/voice/IME/TalkBack and visual comparison.
