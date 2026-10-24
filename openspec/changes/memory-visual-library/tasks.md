@@ -6,5 +6,5 @@
 - [x] Add privacy, cutoff, cancellation, stale-response and thumbnail lifecycle tests.
 - [x] Update existing browser and optional native note scenarios to new navigation.
 - [x] Complete local browser/typecheck/Jest checks and record exact results.
-- [ ] Publish PR and inspect remote CI.
+- [x] Publish PR #118 and inspect remote CI (status tracked in the PR).
 - [ ] Android APK acceptance: thumbnails/voice/IME/TalkBack and visual comparison.
