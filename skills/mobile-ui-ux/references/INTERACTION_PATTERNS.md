@@ -2,6 +2,22 @@
 
 **Status:** UX defaults for new/reworked scenarios; latest explicit owner decision and approved feature-specific contracts take precedence. Not permission to retrofit existing screens without a scoped task. Applies to React Native / Expo Android, not native Compose implementation.
 
+## Apple → Android translation examples
+
+Apple's first-party apps and [Human Interface Guidelines](https://developer.apple.com/design/human-interface-guidelines/design-principles/) are **valid design references**, especially for hierarchy, spaciousness, progressive disclosure, typography, transitions and craftsmanship. Before adopting an Apple pattern, translate **intent**, not an iOS screenshot, into familiar Android/Material behavior:
+
+| iOS / Apple reference | PersAI Android adaptation |
+| --- | --- |
+| Minimal, content-first layouts; precise spacing and layered surfaces | Keep information hierarchy and restrained actions; use Nebula semantic tokens, Android touch targets and accessible contrast rather than recreating iOS system chrome |
+| iOS edge swipe and navigation-bar back control | Preserve Android hardware/system gesture Back and predictive Back where supported; clear exit from sheet, selection and detail |
+| iOS action sheets, contextual menus and edit modes | Use discoverable Android overflow/contextual menu, appropriate bottom sheet, explicit selection/cancel and TalkBack actions |
+| iOS share sheet and document picker | Use Android Sharesheet/Share intents and system photo/document pickers, respecting Android URI grants and permission lifecycle |
+| iOS Dynamic Type, VoiceOver and safe areas | Use Android font scaling, TalkBack, WindowInsets, IME and system bars; test with real devices |
+| Apple system symbols, tab bars and controls | Use Android-compatible icons, navigation conventions, roles and semantics; don't copy proprietary assets or assume iOS APIs |
+| Apple's fluid motion and layered glass | Adapt timing/feedback to Nebula B+C, Reduce Motion, low-power and actual Android GPU behavior; don't sacrifice readability or responsiveness |
+
+Document any non-obvious translation in the redesign comparison: **reference → user benefit → Android choice → test**. Use [Android's mobile design guidance](https://developer.android.com/design/ui/mobile) for platform constraints.
+
 ## Universal interaction decision table
 
 | Situation | Preferred user-visible behavior | Avoid |
