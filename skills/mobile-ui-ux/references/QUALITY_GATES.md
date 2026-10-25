@@ -50,6 +50,7 @@ Prefer deterministic test fixtures/clock and stable `testID` + `accessibilityRol
 | Goal / before → after | One user-visible scenario; screenshots only if visual |
 | Exact changes / out of scope | Screens, components, stores and handlers touched; unaffected invariants |
 | Source of truth | Owner decision + current approved feature contract and Nebula restrictions |
+| Comparable products / UX benchmark | For substantial redesigns: 2–4 relevant examples, observed behavior, dated links, adopt/adapt/reject; otherwise N/A with a reason |
 | Reused vs new | Shared tokens/components, why custom controls were necessary |
 | Test evidence | Command, SHA and PASS / FAIL / NOT RUN / N/A with justification |
 | Native evidence | Device/emulator, Android version, input method, navigation mode, release APK SHA **or NOT RUN** |
