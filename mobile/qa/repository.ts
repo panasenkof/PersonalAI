@@ -11,6 +11,7 @@ export async function localMemoryRepository(_profile: string): Promise<any> {
     lastNoteOperation: async () => "",
     entity: async (id: string) => notes.find(n => n.id === id) || null,
     searchNotes: async (term: string, limit = 50, offset = 0, filter: any = {}) => notes.filter(n => n.record_status === (filter.status || "active") && (!filter.collectionId || filter.collectionId === n.collection_id) && (!term || JSON.stringify(n).toLowerCase().includes(term.toLowerCase()))).slice(offset, offset + limit),
+    collectionNoteCounts: async () => Object.fromEntries(collections.map(c => [c.id, notes.filter(n => n.collection_id === c.id && n.record_status === "active").length])),
     listCollections: async () => collections,
     createCollection: async (item: any) => { const c = { ...item, id: crypto.randomUUID(), created_at: new Date().toISOString() }; collections.push(c); save(); return c; },
     createEntity: async (item: any) => { const n = { kind: "note", ...item, id: crypto.randomUUID(), record_status: "active", record_version: 1, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }; notes.unshift(n); save(); return n; },

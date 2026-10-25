@@ -53,7 +53,7 @@ describe("U2 Memory library note presentation", () => {
     const home = readFileSync(join(__dirname, "..", "..", "..", "screens", "LocalMemoryScreen.tsx"), "utf8");
     for (const label of ["Новая заметка", "Добавить сведения из файла", "Поиск по заметкам",
       "Раздел ", "Открыть архив", "Открыть текущие записи", "Открыть корзину",
-      "Резервные копии", "Выбрать показанные записи", "Новый раздел памяти"]) {
+      "Резервные копии", "Выбрать записи", "Новый раздел памяти"]) {
       expect(home).toContain(label);
     }
     expect(home).toContain("MemoryNoteCard");

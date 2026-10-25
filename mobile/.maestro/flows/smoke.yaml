@@ -17,7 +17,7 @@ name: PersAI native offline smoke
 - takeScreenshot: 01-composer
 # 2. Navigation preserves drafts and the authenticated session.
 - tapOn: "Вкладка Память"
-- assertVisible: "Новая заметка"
+- assertVisible: "Добавить в память"
 - tapOn: "Вкладка Настройки"
 - tapOn: "Вкладка Главная"
 - assertVisible: "After clear"
@@ -29,6 +29,7 @@ name: PersAI native offline smoke
 - assertNotVisible: "Поиск диалогов"
 # 4. Create/edit a real SQLCipher note, without network/model credentials.
 - tapOn: "Вкладка Память"
+- tapOn: "Добавить в память"
 - tapOn: "Новая заметка"
 - tapOn:
     id: "note-title-input"

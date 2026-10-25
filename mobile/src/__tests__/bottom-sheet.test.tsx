@@ -38,6 +38,7 @@ test("the sheet uses its own native window's system inset and releases its focus
   expect(panel?.props.style.paddingBottom).toBeGreaterThanOrEqual(48);
   expect(applicationModalActive()).toBe(true);
   v.rerender(tree(false)); expect(applicationModalActive()).toBe(false);
+  expect(v.UNSAFE_queryAllByType(Modal)).toHaveLength(0);
   v.rerender(tree(true)); expect(applicationModalActive()).toBe(true);
   v.unmount(); expect(applicationModalActive()).toBe(false);
 });
