@@ -79,7 +79,7 @@ export function AppLock({ children }: { children: React.ReactNode }) {
         if (sessionExpired(leftAt.current)) lock();
         leftAt.current = null;
         if (timer.current) clearTimeout(timer.current);
-        setCovered(nativeInteractionActive());
+        setCovered(nativeInteractionActive() && !applicationModalActive());
       }
     });
     const requested = onApplicationLockRequest(() => {
@@ -95,7 +95,7 @@ export function AppLock({ children }: { children: React.ReactNode }) {
       // Unmounting it here restores Activity focus, remounts it, and loops forever.
       if (!applicationModalActive()) setCovered(true);
     });
-    const focus = AppState.addEventListener("focus", () => { if (AppState.currentState === "active" && !nativeInteractionActive()) setCovered(false); });
+    const focus = AppState.addEventListener("focus", () => { if (AppState.currentState === "active" && (!nativeInteractionActive() || applicationModalActive())) setCovered(false); });
     return () => { if (timer.current) clearTimeout(timer.current); revokeLocalMemorySession(); alive.current = false; app.remove(); blur.remove(); focus.remove(); native(); requested(); };
   }, [unlock, lock]);
   const lockScreen = (

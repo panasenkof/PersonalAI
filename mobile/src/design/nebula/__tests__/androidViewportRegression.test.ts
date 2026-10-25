@@ -68,7 +68,7 @@ describe("Android viewport regressions from real device recordings", () => {
       expect(files).toContain(label);
     }
     // These are dynamic or composed labels; assert their source fragments.
-    expect(files).toContain('"Открыть заметку " +');
+    expect(files).toContain('"Открыть заметку "');
     expect(files).toContain('title="Мои диалоги"');
     expect(files).toContain('"Закрыть панель " +');
     expect(files).toContain('title="Работа ИИ"');

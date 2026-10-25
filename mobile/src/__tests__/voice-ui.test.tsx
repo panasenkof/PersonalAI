@@ -14,10 +14,11 @@ jest.mock("../media/whisper", () => ({ useWhisperStatus: () => ({ state: "absent
 const mockEvents: Record<string, (v: any) => void> = {};
 jest.mock("expo-speech-recognition", () => ({
   useSpeechRecognitionEvent: (name: string, fn: any) => { mockEvents[name] = fn; },
-  ExpoSpeechRecognitionModule: { isRecognitionAvailable: jest.fn(), supportsOnDeviceRecognition: jest.fn(), requestPermissionsAsync: jest.fn(), start: jest.fn(), stop: jest.fn(), abort: jest.fn() },
+  ExpoSpeechRecognitionModule: { isRecognitionAvailable: jest.fn(), supportsOnDeviceRecognition: jest.fn(), getPermissionsAsync: jest.fn(), requestPermissionsAsync: jest.fn(), start: jest.fn(), stop: jest.fn(), abort: jest.fn() },
 }));
 beforeEach(() => {
   jest.clearAllMocks();
+  (Speech.getPermissionsAsync as jest.Mock).mockResolvedValue({ granted: false });
   Object.defineProperty(AppState, "currentState", { value: "active", configurable: true });
   (Speech.isRecognitionAvailable as jest.Mock).mockReturnValue(true);
   (Speech.supportsOnDeviceRecognition as jest.Mock).mockReturnValue(true);
@@ -106,4 +107,14 @@ test("the button cancels while permission is pending and while the last phrase i
   expect(Speech.abort).toHaveBeenCalled();
   expect(v.getByText("План купить")).toBeTruthy();
   expect(v.getByLabelText("Голосовой ввод")).toBeTruthy();
+});
+
+
+test("granted microphone permission does not reopen a native permission window", async () => {
+ (Speech.getPermissionsAsync as jest.Mock).mockResolvedValueOnce({ granted: true });
+ const v = render(<Draft error={jest.fn()} />);
+ fireEvent.press(v.getByLabelText("Голосовой ввод"));
+ await waitFor(() => expect(Speech.start).toHaveBeenCalledTimes(1));
+ expect(Speech.requestPermissionsAsync).not.toHaveBeenCalled();
+ v.unmount();
 });

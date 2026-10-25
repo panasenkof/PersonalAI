@@ -1,3 +1,4 @@
+import { memoryDisplayTitle } from "../design/nebula/memoryNotePresentation";
 import { localMemoryRepository } from "../local-memory/repository";
 import type { MemoryRepository } from "../local-memory/types";
 import { ensureSections, orderCollections } from "../local-memory/sections";
@@ -69,7 +70,7 @@ export async function searchApprovedNotes(
     remaining -= text.length;
     return {
       id: entity.id,
-      title: String(entity.title || "").slice(0, 160),
+      title: memoryDisplayTitle(entity).slice(0, 160),
       body: text,
       ...(complete ? {} : { excerptOnly: true, totalChars: body.length }),
       ...(section ? { section: section.slice(0, 60) } : {}),

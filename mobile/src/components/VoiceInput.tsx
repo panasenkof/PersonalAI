@@ -165,7 +165,10 @@ export function VoiceInput({ value, onChange, disabled = false, onError, showLab
           { text: "Использовать системную службу", onPress: () => { if (generation.current !== token) return; networkConsent = true; void start(true); } },
         ]); return;
       }
-      const permission = await withNativeInteraction(() => Speech.requestPermissionsAsync());
+      const currentPermission = await Speech.getPermissionsAsync?.();
+      if (generation.current !== token) return;
+      const permission = currentPermission?.granted ? currentPermission :
+        await withNativeInteraction(() => Speech.requestPermissionsAsync(), { permissionPrompt: true });
       if (generation.current !== token) return;
       if (!permission.granted) throw new Error("Голосовой ввод: нет разрешения на микрофон. Разрешите микрофон для PersAI в настройках телефона.");
       service.current = recognitionService();

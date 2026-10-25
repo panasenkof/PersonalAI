@@ -29,7 +29,7 @@ jest.mock("react-native-executorch", () => ({
   createFsmnVoiceActivityDetector: jest.fn(async () => mockVad),
 }));
 jest.mock("react-native-audio-api", () => ({
-  AudioManager: { requestRecordingPermissions: jest.fn(async () => "Granted"), setAudioSessionOptions: jest.fn() },
+  AudioManager: { checkRecordingPermissions: jest.fn(async () => "Granted"), requestRecordingPermissions: jest.fn(async () => "Granted"), setAudioSessionOptions: jest.fn() },
   AudioRecorder: jest.fn(() => mockRecorder),
 }));
 jest.mock("expo-secure-store", () => ({ getItemAsync: jest.fn() }));
@@ -142,4 +142,12 @@ test("a live dictation is never released by the drain timeout", async () => {
   jest.advanceTimersByTime(DRAIN_TIMEOUT_MS * 3);
   expect(mockModel.dispose).not.toHaveBeenCalled();
   await session.stop(); await tick();
+});
+
+test("Whisper reuses the granted recording permission without reopening a native dialog", async () => {
+ const session = await startWhisperDictation(jest.fn(), jest.fn(), jest.fn());
+ const { AudioManager } = require("react-native-audio-api");
+ expect(AudioManager.checkRecordingPermissions).toHaveBeenCalled();
+ expect(AudioManager.requestRecordingPermissions).not.toHaveBeenCalled();
+ await session.stop();
 });

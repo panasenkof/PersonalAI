@@ -23,7 +23,7 @@ jest.mock("expo-crypto", () => ({ randomUUID: () => "id" }));
 jest.mock("@expo/vector-icons/Feather", () => () => null);
 jest.mock("../theme", () => ({ useTheme: () => ({}) }));
 jest.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ top: 24, bottom: 24 }) }));
-jest.mock("../components/BottomSheet", () => ({ BottomSheet: ({ visible, children }: any) => visible ? children : null }));
+jest.mock("../components/BottomSheet", () => ({ BottomSheet: ({ visible, children, title, onClose }: any) => { const { Pressable, Text } = require("react-native"); return visible ? <><Pressable accessibilityLabel={"Закрыть панель " + title} onPress={onClose}><Text>Закрыть</Text></Pressable>{children}</> : null; } }));
 jest.mock("@react-navigation/native", () => ({ useNavigation: () => ({ navigate: mockNavigate }), useFocusEffect: (fn: any) => require("react").useEffect(fn, [fn]) }));
 beforeEach(() => jest.clearAllMocks());
 test("all-records clears collection, archive and search from either entry", async () => {
@@ -37,9 +37,9 @@ test("all-records clears collection, archive and search from either entry", asyn
 });
 test("selection starts empty and taps select only the chosen record", async () => {
  const v = render(<LocalMemoryScreen />); await waitFor(() => v.getByLabelText("Открыть заметку Первая"));
- fireEvent.press(v.getByLabelText("Выбрать записи")); expect(v.getByText("Выбрано: 0. Нажимайте на нужные записи.")).toBeTruthy();
- fireEvent.press(v.getByLabelText("Открыть заметку Первая")); expect(v.getByLabelText("Открыть заметку Первая").props.accessibilityState.selected).toBe(true);
- expect(v.getByLabelText("Открыть заметку Вторая").props.accessibilityState.selected).toBe(false); expect(mockNavigate).not.toHaveBeenCalled();
+ fireEvent.press(v.getByLabelText("Выбрать записи")); expect(v.getByText("Выбрано: 0")).toBeTruthy();
+ fireEvent.press(v.getByLabelText("Выбрать заметку Первая")); expect(v.getByLabelText("Выбрать заметку Первая").props.accessibilityState.selected).toBe(true);
+ expect(v.getByLabelText("Выбрать заметку Вторая").props.accessibilityState.selected).toBe(false); expect(mockNavigate).not.toHaveBeenCalled();
  fireEvent.press(v.getByLabelText("Снять выбор записей")); fireEvent.press(v.getByLabelText("Открыть заметку Вторая")); expect(mockNavigate).toHaveBeenCalledWith("MemoryNote", { entityId: "two" });
 });
 test("add menu passes collection to the existing import screen", async () => {
@@ -47,4 +47,25 @@ test("add menu passes collection to the existing import screen", async () => {
  fireEvent.press(v.getByLabelText("Раздел Заметки")); fireEvent.press(v.getByLabelText("Добавить в память"));
  await act(async () => { fireEvent.press(v.getByLabelText("Добавить фото")); });
  expect(mockNavigate).toHaveBeenCalledWith("MemoryImport", { source: "photo", collectionId: "a" });
+});
+
+
+test("selection actions are contextual and stay in one menu", async () => {
+ const v = render(<LocalMemoryScreen />); await waitFor(() => v.getByLabelText("Открыть заметку Первая"));
+ fireEvent.press(v.getByLabelText("Выбрать записи"));
+ expect(v.getByLabelText("Действия с выбранными записями").props.accessibilityState.disabled).toBe(true);
+ fireEvent.press(v.getByLabelText("Выбрать заметку Первая"));
+ expect(v.queryByText("Перенести")).toBeNull();
+ fireEvent.press(v.getByLabelText("Действия с выбранными записями"));
+ expect(v.getByText("Открыть запись")).toBeTruthy();
+ expect(v.queryByText("Объединить записи")).toBeNull();
+ expect(v.getByText("В корзину")).toBeTruthy();
+ fireEvent.press(v.getByLabelText("Закрыть панель Действия с записью"));
+ fireEvent.press(v.getByLabelText("Выбрать заметку Вторая"));
+ fireEvent.press(v.getByLabelText("Действия с выбранными записями"));
+ expect(v.queryByText("Открыть запись")).toBeNull();
+ expect(v.getByText("Объединить записи")).toBeTruthy();
+ fireEvent.press(v.getByText("Перенести"));
+ expect(v.queryByText("Объединить записи")).toBeNull();
+ expect(v.getByText("Первая, Вторая")).toBeTruthy();
 });

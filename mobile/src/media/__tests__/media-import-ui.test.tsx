@@ -6,6 +6,7 @@ import { extractMedia } from '../extract';
 import { importLink } from '../link-import';
 import { analyzeFilesTogether } from '../joint-recognition';
 import * as DocumentPicker from 'expo-document-picker';
+jest.mock('../../components/BottomSheet', () => ({ BottomSheet: ({ visible, children }: any) => visible ? children : null }));
 const mockBack = jest.fn();
 let mockParams: any = undefined;
 jest.mock("../preferences", () => ({ loadMediaPreferences: async () => ({ visionId: "", speechId: "" }) }));
@@ -57,6 +58,7 @@ test('shared text opens an unsaved draft with a section selector and saves only 
   const screen = render(<MemoryImportScreen />);
   await waitFor(() => expect(screen.getByLabelText('Сведения из файла').props.value).toBe('Семейный рецепт'));
   expect(saveMediaNote).not.toHaveBeenCalled();
+  fireEvent.press(screen.getByLabelText('Выбрать раздел импорта'));
   fireEvent.press(screen.getByLabelText('Раздел: Заметки'));
   fireEvent.changeText(screen.getByLabelText('Сведения из файла'), 'Рецепт с моей подписью');
   fireEvent.press(screen.getByLabelText('Сохранить сведения в память'));
@@ -70,6 +72,7 @@ test('recognition does not overwrite the user annotation', async () => {
   fireEvent.press(screen.getByLabelText('Выбрать файл для памяти'));
   await waitFor(() => expect(screen.getByText('photo.png')).toBeTruthy());
   fireEvent.changeText(screen.getByLabelText('Сведения из файла'), 'Куплено для дачи');
+  if (!screen.queryByLabelText('Извлечь сведения из файла')) fireEvent.press(screen.getByLabelText('Распознавание'));
   fireEvent.press(screen.getByLabelText('Извлечь сведения из файла'));
   await waitFor(() => expect(screen.getByLabelText('Распознанное содержимое файла').props.value).toBe('На фото гарантия холодильника'));
   expect(screen.getByLabelText('Сведения из файла').props.value).toBe('Куплено для дачи');
@@ -107,10 +110,12 @@ test('U3 hides provider choices by default but keeps recognition accessible', as
   const screen = render(<MemoryImportScreen />);
   fireEvent.press(screen.getByLabelText('Выбрать файл для памяти'));
   await waitFor(() => expect(screen.getByText('photo.png')).toBeTruthy());
+  fireEvent.press(screen.getByLabelText('Распознавание'));
   expect(screen.getByLabelText('Параметры распознавания').props.accessibilityState.expanded).toBe(false);
   expect(screen.queryByLabelText('Разобрать через Vision')).toBeNull();
   fireEvent.press(screen.getByLabelText('Параметры распознавания'));
   expect(screen.getByLabelText('Разобрать через Vision')).toBeTruthy();
+  if (!screen.queryByLabelText('Извлечь сведения из файла')) fireEvent.press(screen.getByLabelText('Распознавание'));
   fireEvent.press(screen.getByLabelText('Извлечь сведения из файла'));
   await waitFor(() => expect(extractMedia).toHaveBeenCalledTimes(1));
 });
@@ -150,6 +155,7 @@ test("two selected files share one note and support ordered recognition without 
   const screen = render(<MemoryImportScreen />);
   fireEvent.press(screen.getByLabelText("Выбрать файл для памяти"));
   await waitFor(() => expect(screen.getByText("Вложения · 2")).toBeTruthy());
+  fireEvent.press(screen.getByLabelText("Распознавание"));
   expect(screen.getByLabelText("Распознавать по очереди").props.accessibilityState.selected).toBe(true);
   fireEvent.press(screen.getByLabelText("Извлечь сведения из файла"));
   await waitFor(() => expect(screen.getByLabelText("Распознанное содержимое файла").props.value).toContain("Файл 2: b.txt"));
@@ -169,6 +175,7 @@ test("joint mode uses one additional synthesis request and stores the shared res
   const screen = render(<MemoryImportScreen />);
   fireEvent.press(screen.getByLabelText("Выбрать файл для памяти"));
   await waitFor(() => expect(screen.getByText("Вложения · 2")).toBeTruthy());
+  fireEvent.press(screen.getByLabelText("Распознавание"));
   fireEvent.press(screen.getByLabelText("Распознавать вместе"));
   fireEvent.press(screen.getByLabelText("Извлечь сведения из файла"));
   await waitFor(() => expect(screen.getByLabelText("Распознанное содержимое файла").props.value).toContain("Оба файла описывают один рецепт."));
@@ -190,6 +197,7 @@ test("joint analysis failure preserves independently recognized files for one no
   const screen = render(<MemoryImportScreen />);
   fireEvent.press(screen.getByLabelText("Выбрать файл для памяти"));
   await waitFor(() => expect(screen.getByText("Вложения · 2")).toBeTruthy());
+  fireEvent.press(screen.getByLabelText("Распознавание"));
   fireEvent.press(screen.getByLabelText("Распознавать вместе"));
   fireEvent.press(screen.getByLabelText("Извлечь сведения из файла"));
   await waitFor(() => expect(screen.getByText(/совместный анализ не получился/i)).toBeTruthy());
@@ -203,6 +211,7 @@ test("joint recognition is unavailable for sensitive notes and restores sequenti
   const screen = render(<MemoryImportScreen />);
   fireEvent.press(screen.getByLabelText("Выбрать файл для памяти"));
   await waitFor(() => expect(screen.getByText("Вложения · 2")).toBeTruthy());
+  fireEvent.press(screen.getByLabelText("Распознавание"));
   fireEvent.press(screen.getByLabelText("Распознавать вместе"));
   fireEvent.press(screen.getByLabelText("Личные — только на телефоне"));
   expect(screen.getByLabelText("Распознавать вместе").props.accessibilityState.disabled).toBe(true);
@@ -219,4 +228,22 @@ test('gallery uses selected collection without automatic model calls', async () 
   fireEvent.press(screen.getByLabelText('Сохранить сведения в память'));
   await waitFor(() => expect(saveMediaNote).toHaveBeenCalled());
   expect((saveMediaNote as jest.Mock).mock.calls[0][1]).toMatchObject({ collectionId: 'notes', file: { name: 'a.jpg' } });
+});
+
+
+test('compact import hides optional controls and prevents saving a discarded original without text', async () => {
+  const screen = render(<MemoryImportScreen />);
+  fireEvent.press(screen.getByLabelText('Выбрать файл для памяти'));
+  await waitFor(() => screen.getByText('photo.png'));
+  expect(screen.queryByLabelText('Извлечь сведения из файла')).toBeNull();
+  expect(screen.queryByLabelText('Название импортируемой заметки')).toBeNull();
+  expect(screen.queryByLabelText('Раздел: Заметки')).toBeNull();
+  expect(screen.getByTestId('import-save-bar')).toBeTruthy();
+  expect(screen.getByLabelText('Сохранить сведения в память').props.accessibilityState.disabled).toBe(false);
+  fireEvent.press(screen.getByLabelText('Дополнительные параметры'));
+  fireEvent.press(screen.getByRole('checkbox'));
+  expect(screen.getByLabelText('Сохранить сведения в память').props.accessibilityState.disabled).toBe(true);
+  fireEvent.changeText(screen.getByLabelText('Сведения из файла'), 'Подпись');
+  expect(screen.getByLabelText('Сохранить сведения в память').props.accessibilityState.disabled).toBe(false);
+  expect(extractMedia).not.toHaveBeenCalled();
 });

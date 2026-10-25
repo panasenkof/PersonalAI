@@ -16,7 +16,7 @@ import type { RootStackParams } from "../navigation";
 import { useTheme } from "../theme";
 import { nebulaSpacing, nebulaRadii, nebulaTouch } from "../design/nebula/tokens";
 import { MemoryCover } from "../media/MemoryCover";
-import { memoryNoteHasPhoto } from "../design/nebula/memoryNotePresentation";
+import { memoryDisplayTitle, memoryNoteHasPhoto } from "../design/nebula/memoryNotePresentation";
 import { MemoryNoteCard } from "../design/nebula/MemoryNoteCard";
 
 import { mergeText, type NoteAction } from "../local-memory/note-actions";
@@ -30,6 +30,7 @@ export function LocalMemoryScreen() {
   const columns = grid && width >= 350 && fontScale < 1.4 ? 2 : 1;
   const [addOpen, setAddOpen] = useState(false);
   const [selecting, setSelecting] = useState(false);
+  const [actionsOpen, setActionsOpen] = useState(false);
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [menuOpen, setMenuOpen] = useState(false);
   const [collectionMenu, setCollectionMenu] = useState(false);
@@ -47,7 +48,7 @@ export function LocalMemoryScreen() {
   const [undo, setUndo] = useState("");
   const [search, setSearch] = useState(""); const [term, setTerm] = useState("");
   const [notes, setNotes] = useState<EntityRecord[]>([]); const [more, setMore] = useState(false);
-  const selectedNotes = notes.filter(n => selectedIds.includes(n.id));
+  const selectedNotes = selectedIds.map(id => notes.find(n => n.id === id)).filter((note): note is EntityRecord => Boolean(note));
   const [loading, setLoading] = useState(true); const [busy, setBusy] = useState(false);
   const [error, setError] = useState(""); const [retry, setRetry] = useState(0);
   const [sectionOpen, setSectionOpen] = useState(false); const [sectionName, setSectionName] = useState("");
@@ -80,13 +81,19 @@ export function LocalMemoryScreen() {
     setBusy(true); setError("");
     try {
       const token = await repository.current.changeNotes(action, selectedNotes, target);
-      setUndo(token); setSelectedIds([]); setMoveOpen(false); setMergeOpen(false); setRetry(n => n + 1);
+      setUndo(token); setSelectedIds([]); setSelecting(false); setActionsOpen(false); setMoveOpen(false); setMergeOpen(false); setRetry(n => n + 1);
       if (profile) scheduleVectors(profile);
     } catch (e) { setError(memoryErrorMessage(e)); } finally { setBusy(false); }
   }
-  useEffect(() => { setSelectedIds([]); setSelecting(false); }, [collectionId, term, status]);
+  useEffect(() => { setSelectedIds([]); setSelecting(false); setActionsOpen(false); }, [profile, collectionId, term, status]);
   function openAll() { setStatus("active"); setCollectionId(undefined); setSearch(""); setTerm(""); setSelectedIds([]); setSelecting(false); }
   function openStatus(value: typeof status) { openAll(); setStatus(value); setMenuOpen(false); }
+  function toggleSelection(id: string) {
+    if (busy) return;
+    setSelecting(true);
+    if (!selectedIds.includes(id) && selectedIds.length >= 100) { setError("За один раз можно выбрать до 100 записей."); return; }
+    setSelectedIds(ids => ids.includes(id) ? ids.filter(value => value !== id) : [...ids, id]);
+  }
   async function loadMore() {
     if (!repository.current || busy) return;
     const request = generation.current; setBusy(true);
@@ -106,11 +113,17 @@ export function LocalMemoryScreen() {
     finally { setBusy(false); }
   }
   const button = { minHeight: 48, justifyContent: "center" as const, alignItems: "center" as const, borderRadius: 16, paddingHorizontal: 16 };
+  const actionButton = { ...button, alignItems: "flex-start" as const, borderBottomWidth: 1, borderBottomColor: t.line };
   return <View style={{ flex: 1, backgroundColor: t.bg, paddingTop: insets.top }}>
+    {selecting ? <View testID="memory-selection-toolbar" style={{ paddingHorizontal: 16, backgroundColor: t.panel, borderBottomWidth: 1, borderBottomColor: t.line, flexDirection: "row", alignItems: "center", gap: 4 }}>
+      <Pressable disabled={busy} accessibilityRole="button" accessibilityLabel="Снять выбор записей" onPress={() => { setSelectedIds([]); setSelecting(false); setActionsOpen(false); }} style={{ ...button, paddingHorizontal: 12 }}><Feather name="x" size={22} color={t.text} /></Pressable>
+      <Text accessibilityLiveRegion="polite" style={{ flex: 1, color: t.text }}>Выбрано: {selectedIds.length}</Text>
+      <Pressable accessibilityRole="button" accessibilityLabel="Действия с выбранными записями" accessibilityState={{ disabled: busy || !selectedIds.length }} disabled={busy || !selectedIds.length} onPress={() => setActionsOpen(true)} style={{ ...button, opacity: selectedIds.length ? 1 : .45 }}><Text style={{ color: t.secondary }}>Действия</Text></Pressable>
+    </View> : null}
     <FlatList
       testID="memory-note-list" key={columns} numColumns={columns}
       onViewableItemsChanged={onViewableItemsChanged} viewabilityConfig={viewabilityConfig}
-      initialNumToRender={8} windowSize={5} columnWrapperStyle={columns > 1 ? { gap: nebulaSpacing.sm } : undefined}
+      initialNumToRender={8} windowSize={5} columnWrapperStyle={columns > 1 ? { gap: nebulaSpacing.sm, alignItems: "flex-start" } : undefined}
       ListHeaderComponent={<View style={{ paddingTop: nebulaSpacing.sm, paddingBottom: nebulaSpacing.sm, gap: nebulaSpacing.sm }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: nebulaSpacing.xs }}>
           <Text accessibilityRole="header" style={{ flex: 1, color: t.text, fontSize: 28, fontWeight: "800" }}>Память</Text>
@@ -151,22 +164,10 @@ export function LocalMemoryScreen() {
             <Feather name={grid ? "list" : "grid"} size={20} color={t.secondary} />
           </Pressable>
         </View>
-        {selecting ? <View style={{ gap: 4 }}><Text style={{ color: t.text }}>Выбрано: {selectedIds.length}. Нажимайте на нужные записи.</Text>
-          <Pressable accessibilityRole="button" accessibilityLabel="Снять выбор записей" onPress={() => { setSelectedIds([]); setSelecting(false); }} style={button}><Text style={{ color: t.secondary }}>Завершить выбор</Text></Pressable></View>
-          : notes.length ? <Pressable accessibilityRole="button" accessibilityLabel="Выбрать записи" onPress={() => setSelecting(true)} style={{ ...button, alignItems: "flex-start" }}><Text style={{ color: t.secondary }}>Выбрать записи</Text></Pressable> : null}
+        {!selecting && notes.length ? <Pressable accessibilityRole="button" accessibilityLabel="Выбрать записи" onPress={() => setSelecting(true)} style={{ ...button, alignItems: "flex-start" }}><Text style={{ color: t.secondary }}>Выбрать записи</Text></Pressable> : null}
         {status === "trashed" ? <Text style={{ color: t.muted, fontSize: 13, lineHeight: 19 }}>
           Удалённые записи исключены из поиска агента. Их можно восстановить или удалить окончательно.
         </Text> : null}
-      {selectedIds.length ? <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
-        {status === "trashed" ? <>
-          <Pressable disabled={busy} style={button} onPress={() => void act("restore")}><Text style={{ color: t.secondary }}>Восстановить</Text></Pressable>
-          <Pressable disabled={busy} style={button} onPress={() => Alert.alert("Удалить навсегда?", "Исчезнут выбранные записи, их оригиналы и история. Отменить это действие нельзя.\n" + selectedNotes.map(n => n.title).join("\n"), [{ text: "Отмена", style: "cancel" }, { text: "Удалить навсегда", style: "destructive", onPress: () => { if (!repository.current) return; setBusy(true); void repository.current.purgeNotes(selectedNotes).then(() => { setSelectedIds([]); setUndo(""); setRetry(n => n + 1); }).catch(e => setError(memoryErrorMessage(e))).finally(() => setBusy(false)); } }])}><Text style={{ color: t.err }}>Удалить навсегда</Text></Pressable>
-        </> : <>
-          <Pressable disabled={busy} style={button} onPress={() => setMoveOpen(true)}><Text style={{ color: t.secondary }}>Перенести</Text></Pressable>
-          <Pressable disabled={busy || selectedIds.length < 2 || status !== "active"} style={button} onPress={() => setMergeOpen(true)}><Text style={{ color: t.secondary }}>Объединить</Text></Pressable>
-          <Pressable disabled={busy} style={button} onPress={() => Alert.alert("В корзину?", selectedNotes.map(n => n.title || "Без названия").join("\n"), [{ text: "Отмена", style: "cancel" }, { text: "В корзину", onPress: () => void act("trash") }])}><Text style={{ color: t.err }}>Удалить</Text></Pressable>
-        </>}
-      </View> : null}
       {undo ? <Pressable disabled={busy} style={button} onPress={() => { if (!repository.current) return; setBusy(true); void repository.current.undoNotes(undo).then(() => { setUndo(""); setRetry(n => n + 1); if (profile) scheduleVectors(profile); }).catch(e => setError(memoryErrorMessage(e))).finally(() => setBusy(false)); }}><Text style={{ color: t.secondary }}>Отменить последнюю операцию</Text></Pressable> : null}
     {error ? <View style={{ paddingHorizontal: 18, gap: 8 }}><Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text><Pressable accessibilityRole="button" onPress={() => setRetry(n => n + 1)} style={button}><Text style={{ color: t.secondary }}>Повторить загрузку</Text></Pressable></View> : null}
     {loading ? <ActivityIndicator accessibilityLabel="Загрузка записей" /> : null}
@@ -179,13 +180,27 @@ export function LocalMemoryScreen() {
         cover={profile && memoryNoteHasPhoto(item)
           ? <MemoryCover profile={profile} entityId={item.id} active={visibleIds.has(item.id)} label={"Обложка " + item.title} /> : undefined}
         sectionName={collections.find(c => c.id === item.collection_id)?.name || "Запись"}
-        selected={selectedIds.includes(item.id)}
-        onToggleSelection={() => { setSelecting(true); setSelectedIds(ids => ids.includes(item.id) ? ids.filter(id => id !== item.id) : [...ids, item.id]); }}
+        selected={selectedIds.includes(item.id)} selecting={selecting}
+        onToggleSelection={() => toggleSelection(item.id)}
         onOpen={() => selecting
-          ? setSelectedIds(ids => ids.includes(item.id) ? ids.filter(id => id !== item.id) : [...ids, item.id])
+          ? toggleSelection(item.id)
           : navigation.navigate("MemoryNote", { entityId: item.id })}
       /></View>}
       ListFooterComponent={more && !loading ? <Pressable accessibilityRole="button" accessibilityLabel="Показать ещё заметки" disabled={busy} onPress={() => void loadMore()} style={button}><Text style={{ color: t.secondary }}>{busy ? "Загружаю…" : "Показать ещё"}</Text></Pressable> : null} />
+      <BottomSheet visible={actionsOpen && selectedIds.length > 0} title={selectedIds.length === 1 ? "Действия с записью" : `Действия · ${selectedIds.length}`} onClose={() => setActionsOpen(false)}>
+      {error ? <Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text> : null}
+      <Text numberOfLines={2} style={{ color: t.muted }}>{selectedNotes.map(memoryDisplayTitle).join(", ")}</Text>
+      {selectedNotes.length === 1 ? <Pressable accessibilityRole="button" style={actionButton} onPress={() => { setActionsOpen(false); navigation.navigate("MemoryNote", { entityId: selectedNotes[0].id }); }}><Text style={{ color: t.text }}>Открыть запись</Text></Pressable> : null}
+        {status === "trashed" ? <>
+          <Pressable disabled={busy} accessibilityRole="button" style={actionButton} onPress={() => void act("restore")}><Text style={{ color: t.secondary }}>Восстановить</Text></Pressable>
+          <Pressable disabled={busy} accessibilityRole="button" style={actionButton} onPress={() => Alert.alert("Удалить навсегда?", "Исчезнут выбранные записи, их оригиналы и история. Отменить это действие нельзя.\n" + selectedNotes.map(memoryDisplayTitle).join("\n"), [{ text: "Отмена", style: "cancel" }, { text: "Удалить навсегда", style: "destructive", onPress: () => { if (!repository.current) return; setBusy(true); void repository.current.purgeNotes(selectedNotes).then(() => { setSelectedIds([]); setSelecting(false); setActionsOpen(false); setUndo(""); setRetry(n => n + 1); }).catch(e => setError(memoryErrorMessage(e))).finally(() => setBusy(false)); } }])}><Text style={{ color: t.err }}>Удалить навсегда</Text></Pressable>
+        </> : <>
+          <Pressable disabled={busy} accessibilityRole="button" style={actionButton} onPress={() => { setActionsOpen(false); setMoveOpen(true); }}><Text style={{ color: t.secondary }}>Перенести</Text></Pressable>
+          {selectedIds.length >= 2 && status === "active" ? <Pressable disabled={busy} accessibilityRole="button" style={actionButton} onPress={() => { setActionsOpen(false); setMergeOpen(true); }}><Text style={{ color: t.secondary }}>Объединить записи</Text></Pressable> : null}
+          <Pressable disabled={busy} accessibilityRole="button" style={actionButton} onPress={() => Alert.alert("В корзину?", selectedNotes.map(memoryDisplayTitle).join("\n"), [{ text: "Отмена", style: "cancel" }, { text: "В корзину", onPress: () => void act("trash") }])}><Text style={{ color: t.err }}>В корзину</Text></Pressable>
+        </>}
+      </BottomSheet>
+
     <BottomSheet visible={addOpen} title="Добавить в память" onClose={() => setAddOpen(false)}>
       <Pressable accessibilityRole="button" accessibilityLabel="Новая заметка" style={{ ...button, alignItems: "flex-start" }} onPress={() => { setAddOpen(false); navigation.navigate("MemoryNote", { collectionId }); }}><Text style={{ color: t.text, fontSize: 16 }}>Текст или голос</Text><Text style={{ color: t.muted }}>Напишите или надиктуйте мысль</Text></Pressable>
       {(["photo", "file", "link"] as const).map((source, i) => <Pressable key={source} accessibilityRole="button" style={{ ...button, alignItems: "flex-start" }} accessibilityLabel={["Добавить фото", "Добавить файл", "Добавить ссылку"][i]}
@@ -208,11 +223,13 @@ export function LocalMemoryScreen() {
       <Pressable accessibilityRole="button" accessibilityLabel="Новый раздел памяти" style={button} onPress={() => { setCollectionMenu(false); setSectionOpen(true); }}><Text style={{ color: t.secondary }}>Создать коллекцию</Text></Pressable>
     </BottomSheet>
     <BottomSheet visible={moveOpen} title="Перенести выбранные записи" onClose={() => setMoveOpen(false)}>
-      <Text style={{ color: t.muted }}>{selectedNotes.map(n => n.title).join(", ")}</Text>
+      {error ? <Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text> : null}
+      <Text style={{ color: t.muted }}>{selectedNotes.map(memoryDisplayTitle).join(", ")}</Text>
       {collections.map(c => <Pressable key={c.id} disabled={busy} style={button} onPress={() => void act("move", c.id)}><Text style={{ color: t.secondary }}>{c.name}</Text></Pressable>)}
     </BottomSheet>
     <BottomSheet visible={mergeOpen} title="Предпросмотр объединения" onClose={() => setMergeOpen(false)}>
       <Text style={{ color: t.muted }}>Название первой выбранной записи сохраняется. Тексты остаются отдельными блоками; вложения и источники сохраняются. Противоречия не исправляются автоматически.</Text>
+      {error ? <Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text> : null}
       <ScrollView style={{ maxHeight: 300 }}><Text style={{ color: t.text }}>{mergeText(selectedNotes)}</Text></ScrollView>
       <Pressable disabled={busy} style={button} onPress={() => void act("merge")}><Text style={{ color: t.secondary }}>Подтвердить объединение</Text></Pressable>
     </BottomSheet>

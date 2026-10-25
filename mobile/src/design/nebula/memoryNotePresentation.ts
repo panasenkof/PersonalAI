@@ -48,10 +48,12 @@ export function memoryPlainText(source: string): string {
 export function memoryDisplayTitle(note: Pick<EntityRecord, "title" | "payload">): string {
   const title = note.title?.trim() || "";
   const file = typeof note.payload.source_file === "string" ? note.payload.source_file : "";
-  if (!title || title === file || (!file && /\.(jpg|jpeg|png|heic|webp|m4a|mp3|pdf|txt|docx|mp4)$/i.test(title))) {
+  if (!title || title === "Распознанный текст" || title === file || (!file && /\.(jpg|jpeg|png|heic|webp|m4a|mp3|pdf|txt|docx|mp4)$/i.test(title))) {
     const body = typeof note.payload.body === "string" && note.payload.body.trim() ? note.payload.body : typeof note.payload.extracted_text === "string" ? note.payload.extracted_text : "";
-    const first = memoryPlainText(body.split("\n").find(line => line.trim()) || "");
+    const first = memoryPlainText(body.split("\n").find(line => line.trim() && !/^(распознанный текст|результат распознавания)[:：]?$/i.test(memoryPlainText(line))) || "");
     if (first) return first.slice(0, 160);
+    const filename = title || file;
+    if (/^(?:(?:img|dsc|pxl|photo|image)[_ -]?)?\d[\d_ -]*\.(?:jpe?g|png|heic|webp)$/i.test(filename)) return "Фото без подписи";
     if (title) return title.replace(/\.[^.]+$/, "").replace(/_+/g, " ");
   }
   return memoryPlainText(title) || "Без названия";

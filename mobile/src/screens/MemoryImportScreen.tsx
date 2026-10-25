@@ -15,7 +15,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import React, { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, Image, Keyboard, KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useProfile } from "../profile/ProfileContext";
 import { loadDirectConnections, anonymousLocalAllowed, defaultDirectPreferences } from "../direct-agent/settings";
 import type { DirectConnection } from "../direct-agent/settings";
@@ -28,6 +28,7 @@ import type { RootStackParams } from "../navigation";
 import { withNativeInteraction } from "../security/native-interaction";
 import { memoryErrorMessage } from "../local-memory/errors";
 import { useTheme } from "../theme";
+import { BottomSheet } from "../components/BottomSheet";
 import { NoteEditorSection } from "../design/nebula/NoteEditorSection";
 import { useWhisperStatus } from "../media/whisper";
 import { scheduleIndexTerms } from "../direct-agent/enrich-runner";
@@ -42,6 +43,15 @@ export function MemoryImportScreen() {
   const [sourceChoice, setSourceChoice] = useState<"photo" | "file" | "link" | undefined>(route.params?.source);
   const [sourcePickerOpen, setSourcePickerOpen] = useState(true);
   const [processingOptionsOpen, setProcessingOptionsOpen] = useState(false);
+  const [recognitionOpen, setRecognitionOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [sectionOpen, setSectionOpen] = useState(false);
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
+  useEffect(() => {
+    const show = Keyboard.addListener("keyboardDidShow", () => setKeyboardOpen(true));
+    const hide = Keyboard.addListener("keyboardDidHide", () => setKeyboardOpen(false));
+    return () => { show.remove(); hide.remove(); };
+  }, []);
   const cameraStarted = useRef(false);
   const [position, setPosition] = useState(0);
   const [collections, setCollections] = useState<CollectionRecord[]>([]);
@@ -272,16 +282,18 @@ export function MemoryImportScreen() {
     } catch (e) { if (alive.current) setNotice("Не удалось сохранить: " + memoryErrorMessage(e)); }
     finally { if (alive.current) setBusy(false); }
   }
-  return <KeyboardAvoidingView style={{ flex: 1, backgroundColor: t.bg }} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={header}>
-    <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentContainerStyle={{ padding: 18, gap: 15, paddingBottom: insets.bottom + 24 }}>
+  const hasMaterial = Boolean(file || extractedText || (incoming && !preparing));
+  const saveDisabled = busy || preparing || (!body.trim() && !extractedText.trim() && !(file && keepOriginal));
+  return <View style={{ flex: 1, backgroundColor: t.bg, paddingBottom: keyboardOpen ? 0 : insets.bottom }}>
+  <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"} keyboardVerticalOffset={Platform.OS === "ios" ? header : 0}>
+    <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentContainerStyle={{ padding: 18, gap: 15, paddingBottom: 24 }}>
       <Text accessibilityRole="header" style={{ color: t.text, fontSize: 25, fontWeight: "800" }}>{incoming ? `Новая заметка · ${position + 1}/${incoming.length}` : file || extractedText ? "Проверьте и сохраните" : "Выберите материал"}</Text>
-      <Text style={{ color: t.muted, lineHeight: 21 }}>Фото, документы и ссылки сохраняются в заметку. Распознавание — по вашему выбору.</Text>
-      <Text accessibilityRole="header" style={{ color: t.text, fontSize: 18, fontWeight: "700" }}>1 · Источник</Text>
+      {!hasMaterial ? <Text style={{ color: t.muted, lineHeight: 21 }}>Фото, документы и ссылки сохраняются в заметку. Распознавание — по вашему выбору.</Text> : null}
+
       {incoming ? <Text style={{ color: t.muted }}>Получено через «Поделиться». Сохранение — только после подтверждения.</Text> : null}
       {!incoming && (file || extractedText) && !sourcePickerOpen ? <Pressable disabled={busy || preparing} accessibilityRole="button" accessibilityLabel="Изменить источник" onPress={() => { setSourceChoice(undefined); setSourcePickerOpen(true); }}
         style={{ minHeight: 48, justifyContent: "center", padding: 12, backgroundColor: t.panel, borderColor: t.line, borderWidth: 1, borderRadius: 14 }}>
         <Text style={{ color: t.secondary, fontWeight: "700" }}>Изменить источник</Text>
-        <Text style={{ color: t.muted, fontSize: 12 }}>Текущий материал останется до успешного выбора другого.</Text>
       </Pressable> : null}
       {!incoming && (sourcePickerOpen || (!file && !extractedText)) ? <View testID="import-source-choices" style={{ gap: 12, padding: 14, borderRadius: 18, borderWidth: 1, borderColor: t.line, backgroundColor: t.panel }}>
         {(!sourceChoice || sourceChoice === "file") ? <Pressable disabled={busy || preparing} accessibilityRole="button" accessibilityLabel="Выбрать файл для памяти" style={{ ...button, backgroundColor: t.soft, alignItems: "flex-start" }} onPress={() => void pick()}><Text style={{ color: t.text, fontSize: 16, fontWeight: "700" }}>Выбрать файл с телефона</Text><Text style={{ color: t.muted }}>Документ, аудио или видео</Text></Pressable> : null}
@@ -297,15 +309,32 @@ export function MemoryImportScreen() {
         </> : null}
         {sourceChoice ? <Pressable accessibilityRole="button" disabled={busy || preparing} style={{ ...button, backgroundColor: t.panel }} onPress={() => setSourceChoice(undefined)}><Text style={{ color: t.secondary }}>Другой источник</Text></Pressable> : null}
       </View> : null}
-      {file || extractedText ? <Text style={{ color: t.muted, fontSize: 12 }}>Выбранный источник: {files.length > 1 ? files.length + " файлов · одна заметка" : file ? file.name : "Текст по ссылке"}</Text> : null}
+      {!file && extractedText ? <Text style={{ color: t.muted, fontSize: 12 }}>Выбранный источник: текст по ссылке</Text> : null}
       {preparing ? <ActivityIndicator accessibilityLabel="Подготовка входящего файла" /> : null}
-      {file || extractedText ? <Text accessibilityRole="header" style={{ color: t.text, fontSize: 18, fontWeight: "700" }}>2 · Предпросмотр и распознавание</Text> : null}
+
       {file ? <View style={{ backgroundColor: t.panel, padding: 16, borderRadius: 20, borderWidth: 1, borderColor: t.line, gap: 10 }}>
         <Text style={{ color: t.text, fontWeight: "700" }}>{files.length > 1 ? "Вложения · " + files.length : file.name}</Text>
         {files.length > 1 ? files.map((item, index) => <Text key={index} style={{ color: t.muted }}>
           {index + 1}. {item.name} · {mediaKind(item)}
         </Text>) : null}
         {kind === "image" ? <Image source={{ uri: file.uri }} resizeMode="contain" style={{ width: "100%", height: 180, borderRadius: 14 }} /> : null}
+      </View> : null}
+      {busy ? <><ActivityIndicator /><Pressable accessibilityRole="button" onPress={() => controller.current?.abort()} style={{ minHeight: 44 }}><Text style={{ color: t.err }}>Остановить</Text></Pressable></> : null}
+      {incoming && !preparing ? <View style={{ flexDirection: "row", gap: 16 }}>
+        <Pressable disabled={busy} style={{ minHeight: 44 }} onPress={() => setPrepareAttempt(n => n + 1)}><Text style={{ color: t.secondary }}>Повторить подготовку</Text></Pressable>
+        {position + 1 < incoming.length ? <Pressable disabled={busy} style={{ minHeight: 44 }} onPress={() => Alert.alert("Пропустить материал?", "Этот материал не будет сохранён.", [{ text: "Отмена", style: "cancel" }, { text: "Пропустить", onPress: () => setPosition(p => p + 1) }])}><Text style={{ color: t.secondary }}>Пропустить</Text></Pressable> : null}
+      </View> : null}
+      {notice ? <Text accessibilityRole="alert" style={{ color: t.muted }}>{notice}</Text> : null}
+      {hasMaterial ? <>
+        <TextInput accessibilityLabel="Сведения из файла" editable={!busy} multiline value={body} onChangeText={setBody} maxLength={60_000} style={[field, { minHeight: 96, textAlignVertical: "top" }]} placeholder="Добавьте подпись — необязательно" placeholderTextColor={t.muted} />
+        <Pressable accessibilityRole="button" accessibilityLabel="Выбрать раздел импорта" disabled={busy} onPress={() => { Keyboard.dismiss(); setSectionOpen(true); }} style={{ ...button, backgroundColor: t.panel, alignItems: "flex-start" }}><Text style={{ color: t.text }}>Коллекция: {collections.find(c => c.id === collectionId)?.name || "Заметки"} · Изменить</Text></Pressable>
+        {collections.find(c => c.id === collectionId)?.sensitivity !== "standard" ? <Text style={{ color: t.muted }}>Выбранный раздел закрыт для агента независимо от настройки записи.</Text> : null}
+        <Text style={{ color: t.text, fontWeight: "600" }}>Доступ к записи</Text>
+        {([ ["sensitive", "Личные — только на телефоне"], ["standard", "Обычные — доступны агенту и разбору у провайдера"] ] as const).map(([id, label]) =>
+          <Pressable disabled={busy} key={id} accessibilityRole="button" accessibilityLabel={label} onPress={() => { setClassification(id); if (id === "sensitive") setRecognitionMode("sequential"); }} style={{ minHeight: 46, justifyContent: "center" }}>
+            <Text style={{ color: classification === id ? t.secondary : t.text }}>{classification === id ? "● " : "○ "}{label}</Text>
+          </Pressable>)}
+        {file ? <NoteEditorSection title="Распознавание" summary={extractedText ? "Текст получен · можно повторить" : "Необязательно · для поиска по содержимому"} expanded={recognitionOpen} onToggle={() => setRecognitionOpen(v => !v)}>
         <Text style={{ color: t.muted, fontSize: 12 }}>{kind === "video" ? "Речь и пять выборочных кадров обрабатываются отдельно. Максимум 10 минут; частичные результаты явно отмечены." : kind === "audio" ? (localAudio ? "Речь распознаётся на телефоне моделью Whisper; файл никуда не отправляется." : "Речь преобразуется в текст сервисом подключения. Чтобы распознавать на телефоне, скачайте модель: Настройки → Голосовой ввод → Голос без интернета.") : kind === "text" ? "Текстовый файл читается на телефоне, без отправки в интернет." : "Выбранная модель должна поддерживать изображения."}</Text>
         {files.length > 1 ? <View style={{ gap: 6 }}>
           <Text style={{ color: t.text, fontWeight: "700" }}>Режим распознавания</Text>
@@ -323,11 +352,6 @@ export function MemoryImportScreen() {
             В режиме «Вместе» сначала распознаём каждый файл, затем отправляем полученный текст выбранной LLM для общего анализа. Это дополнительный запрос, время и возможные расходы. Для личных записей этот режим недоступен.
           </Text>
         </View> : null}
-        <Text style={{ color: t.text, fontWeight: "600" }}>Обработка файла</Text>
-        {([ ["sensitive", "Личные — только на телефоне"], ["standard", "Обычные — доступны агенту и разбору у провайдера"] ] as const).map(([id, label]) =>
-          <Pressable disabled={busy} key={id} accessibilityRole="button" accessibilityLabel={label} onPress={() => { setClassification(id); if (id === "sensitive") setRecognitionMode("sequential"); }} style={{ minHeight: 46, justifyContent: "center" }}>
-            <Text style={{ color: classification === id ? t.secondary : t.text }}>{classification === id ? "● " : "○ "}{label}</Text>
-          </Pressable>)}
         {(files.length > 1 || (kind !== "text" && !localAudio)) ? <NoteEditorSection testID="import-processing-options" title="Параметры распознавания" summary="Модель и подключение" expanded={processingOptionsOpen} onToggle={() => setProcessingOptionsOpen(v => !v)}>
           <Text style={{ color: t.muted, fontSize: 12 }}>При разборе файл или кадры отправляются выбранному сервису.</Text>
           <Text style={{ color: t.text, fontWeight: "600" }}>Подключение для разбора</Text>
@@ -348,32 +372,28 @@ export function MemoryImportScreen() {
           <Text key={item.index} style={{ color: item.status === "error" ? t.err : t.muted }}>
             {item.index + 1}. {item.name}: {item.status === "success" ? "Распознано" : "Не распознано — " + item.error}
           </Text>) : null}
-      </View> : null}
-      {busy ? <><ActivityIndicator /><Pressable accessibilityRole="button" onPress={() => controller.current?.abort()} style={{ minHeight: 44 }}><Text style={{ color: t.err }}>Остановить</Text></Pressable></> : null}
-      {incoming && !preparing ? <View style={{ flexDirection: "row", gap: 16 }}>
-        <Pressable disabled={busy} style={{ minHeight: 44 }} onPress={() => setPrepareAttempt(n => n + 1)}><Text style={{ color: t.secondary }}>Повторить подготовку</Text></Pressable>
-        {position + 1 < incoming.length ? <Pressable disabled={busy} style={{ minHeight: 44 }} onPress={() => Alert.alert("Пропустить материал?", "Этот материал не будет сохранён.", [{ text: "Отмена", style: "cancel" }, { text: "Пропустить", onPress: () => setPosition(p => p + 1) }])}><Text style={{ color: t.secondary }}>Пропустить</Text></Pressable> : null}
-      </View> : null}
-      {notice ? <Text accessibilityRole="alert" style={{ color: t.muted }}>{notice}</Text> : null}
-      {file || extractedText || (incoming && !preparing) ? <>
-        <Text accessibilityRole="header" style={{ color: t.text, fontSize: 18, fontWeight: "700" }}>3 · Проверить и сохранить</Text>
+        </NoteEditorSection> : null}
+        {extractedText ? <>
+          <Text style={{ color: t.text }}>Распознанный текст</Text>
+          <TextInput accessibilityLabel="Распознанное содержимое файла" editable={!busy} multiline value={extractedText} onChangeText={setExtractedText} maxLength={60_000} style={field} />
+        </> : null}
+        <NoteEditorSection title="Дополнительные параметры" summary="Название и сохранение оригинала" expanded={detailsOpen} onToggle={() => setDetailsOpen(v => !v)}>
+          <Text style={{ color: t.text }}>Название — необязательно</Text>
+          <TextInput accessibilityLabel="Название импортируемой заметки" editable={!busy} value={title} onChangeText={setTitle} style={field} />
         {file ? <Pressable disabled={busy} accessibilityRole="checkbox" accessibilityState={{ checked: !keepOriginal }} onPress={() => setKeepOriginal(v => !v)} style={{ minHeight: 44 }}><Text style={{ color: t.secondary }}>{keepOriginal ? "□" : "☑"} Не сохранять оригинал — оставить только текст</Text></Pressable> : null}
-        <Text style={{ color: t.text }}>Раздел</Text>
-        {collections.find(c => c.id === collectionId)?.sensitivity !== "standard" ? <Text style={{ color: t.muted }}>Выбранный раздел закрыт для агента независимо от настройки записи.</Text> : null}
-        {collections.map(c => <Pressable key={c.id} disabled={busy} accessibilityRole="button" accessibilityLabel={"Раздел: " + c.name} onPress={() => setCollectionId(c.id)} style={{ minHeight: 44 }}><Text style={{ color: c.id === collectionId ? t.secondary : t.text }}>{c.id === collectionId ? "● " : "○ "}{c.name}</Text></Pressable>)}
-        {!file ? <Pressable disabled={busy} accessibilityRole="button" style={button} onPress={() => setClassification(classification === "standard" ? "sensitive" : "standard")}><Text style={{ color: "#fff" }}>{classification === "standard" ? "Доступно агенту" : "Только на телефоне — нажмите, чтобы разрешить агенту"}</Text></Pressable> : null}
-        <Text style={{ color: t.text, fontWeight: "600" }}>Название заметки</Text>
-        <TextInput accessibilityLabel="Название импортируемой заметки" editable={!busy} value={title} onChangeText={setTitle} style={field} />
-        <Text style={{ color: t.text, fontWeight: "600" }}>Ваша заметка к файлу</Text>
-        <TextInput accessibilityLabel="Сведения из файла" editable={!busy} multiline value={body} onChangeText={setBody} maxLength={60_000} style={[field, { minHeight: 200, textAlignVertical: "top" }]} placeholder="Ваш текст" placeholderTextColor={t.muted} />
-        <Text style={{ color: t.text }}>Распознанное содержимое — также участвует в поиске</Text>
-        <TextInput accessibilityLabel="Распознанное содержимое файла" editable={!busy} multiline value={extractedText} onChangeText={setExtractedText} maxLength={60_000} style={field} />
-        <Text style={{ color: t.muted }}>Личные записи не видны агенту. Для поиска по содержимому фото или аудио сначала выполните распознавание. Векторизация работает на телефоне после загрузки модели поиска.</Text>
-        <Pressable disabled={busy} accessibilityRole="button" accessibilityLabel="Сохранить сведения в память" style={[button, { opacity: busy ? .5 : 1 }]} onPress={() => void save()}>
-          <Text style={{ color: "#fff", fontWeight: "700" }}>Сохранить сведения в память</Text>
-        </Pressable>
-        <Text style={{ color: t.muted, fontSize: 12 }}>При сохранении оригиналы останутся в зашифрованной памяти и войдут в резервную копию. Не более 10 файлов и 80 МБ суммарно. Распознавание выполняется по очереди, результаты попадают в одну заметку.</Text>
+          <Text style={{ color: t.muted, fontSize: 13 }}>Оригиналы хранятся зашифрованными. До 10 файлов и 80 МБ в одной записи.</Text>
+        </NoteEditorSection>
+        {file && !keepOriginal && !body.trim() && !extractedText.trim() ? <Text accessibilityRole="alert" style={{ color: t.muted }}>Добавьте подпись или распознайте файл, чтобы сохранить только текст.</Text> : null}
       </> : null}
     </ScrollView>
-  </KeyboardAvoidingView>;
+    {hasMaterial ? <View testID="import-save-bar" style={{ padding: 12, backgroundColor: t.bg, borderTopWidth: 1, borderTopColor: t.line }}>
+      <Pressable disabled={saveDisabled} accessibilityRole="button" accessibilityState={{ disabled: saveDisabled }} accessibilityLabel="Сохранить сведения в память" style={[button, { opacity: saveDisabled ? .45 : 1 }]} onPress={() => { Keyboard.dismiss(); void save(); }}>
+        <Text style={{ color: t.userText, fontWeight: "700" }}>{busy ? "Подождите…" : "Сохранить в память"}</Text>
+      </Pressable>
+    </View> : null}
+  </KeyboardAvoidingView>
+  <BottomSheet visible={sectionOpen} title="Коллекция для записи" onClose={() => setSectionOpen(false)}>
+        {collections.map(c => <Pressable key={c.id} disabled={busy} accessibilityRole="button" accessibilityLabel={"Раздел: " + c.name} onPress={() => { setCollectionId(c.id); setSectionOpen(false); }} style={{ minHeight: 44 }}><Text style={{ color: c.id === collectionId ? t.secondary : t.text }}>{c.id === collectionId ? "● " : "○ "}{c.name}</Text></Pressable>)}
+  </BottomSheet>
+  </View>;
 }

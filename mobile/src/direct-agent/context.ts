@@ -29,10 +29,21 @@ export function todayLine(now: Date = new Date()): string {
     "Считай возраст, сроки и «сейчас» от этой даты, а не от даты своего обучения.";
 }
 
+/** Only complete social turns bypass prefetch; a greeting followed by a task
+ * must retain the normal memory/web path. Follow-up confirmations are not greetings. */
+export function isSocialTurn(prompt: string): boolean {
+  const words = prompt.toLocaleLowerCase("ru-RU").replace(/[^\p{L}\p{N}\s]/gu, " ").replace(/\s+/g, " ").trim();
+  return /^(?:привет|приветик|здравствуй|здравствуйте|куку|ку ку|доброе утро|добрый день|добрый вечер|спасибо|спасибо большое|большое спасибо|пока|до свидания|hello|hi|thanks|thank you)$/.test(words);
+}
+
 export async function prepareDirectContext(options: DirectAgentOptions & { now?: Date }) {
   const { settings, signal, status } = options;
   const check = () => { if (signal?.aborted) throw new Error("Запрос остановлен"); };
   check();
+  if (isSocialTurn(options.prompt)) {
+    options.diagnostic?.("context.social_turn");
+    return { context: todayLine(options.now) + "\nПользователь только приветствует, благодарит или прощается. Ответь кратко по смыслу. Память и интернет для этой реплики не проверялись и не требуются. Не предлагай посторонние личные записи из прошлых ответов.", sources: [] as string[], builtinWeb: false, notes: [] as MemorySnippet[], webError: undefined as string | undefined, openLink: false, used: [] as UsedNote[] };
+  }
   let notes: MemorySnippet[] = [];
   let memoryError = false;
   {
