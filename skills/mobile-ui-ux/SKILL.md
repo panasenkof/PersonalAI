@@ -18,9 +18,23 @@ Priority in a conflict: latest **explicit owner decision** → approved [Nebula 
 
 Do **not** re-run orb asset verification, GPU profiling or Figma comparison on a text-only/behavior-only change that cannot affect them; say N/A and why. Conversely, do not waive these checks for an actual artwork/motion edit.
 
-## 2. Workflow: user journey before component
+## 2. Mandatory benchmark before a substantial redesign
 
-1. **Write the scenario:** who, entry point, user intent, primary action, success, error, cancel/back, recovery, and where the user returns. List existing and future entry points. Identify the canonical owner of each setting/action and duplicates.
+**Before redesigning a screen, navigation flow, collection, chat interaction, complex form or major component**, compare solutions to the **same user task** in current, widely used applications. Do this **before** choosing a new layout or gesture—not after implementation as a style justification. Follow [Android navigation conventions](https://developer.android.com/design/ui/mobile/guides/layout-and-content/layout-and-nav-patterns), [Nielsen Norman Group's competitive usability evaluation method](https://www.nngroup.com/articles/competitive-usability-evaluations/) and the [Apple HIG design principles](https://developer.apple.com/design/human-interface-guidelines/design-principles/) for cross-platform inspiration. Android conventions take priority when iOS and Android differ.
+
+**Research scope (proportionate to impact):**
+1. Name the specific task and failure in PersAI (e.g., multi-select notes, streaming chat, importing media, choosing a model), not an abstract objective like "make it modern".
+2. Compare **2–4 relevant products** performing that task, ideally including both direct competitors and a mature adjacent product. Examples by **category only**: chat assistants (ChatGPT, Claude, Gemini); collections/notes (Google Keep, Obsidian, Notion); capture/share/settings (Android first-party apps and Material conventions). Selection depends on the flow; these are *not* mandatory brands or approval of their current UI.
+3. Use **current, verifiable evidence**: official design guidance, actual app/tested build, authoritative help material or dated screenshots/videos. Note source URLs and observation dates. Explicitly distinguish firsthand observation from documentation and assumptions. If browsing/screenshots are unavailable, report the evidence gap and rely on accessible Android patterns—not invented competitor behavior.
+4. Record a **brief decision matrix**, focused on user behavior rather than appearance: entry/discovery, primary/secondary actions, selection and cancellation, Back, keyboard/scroll, loading/errors, accessibility, strengths/weaknesses and suitability for PersAI.
+5. Make a deliberate choice: **adopt / adapt / reject**, explaining which familiar patterns will be reused, which bad patterns will not be copied, and how Nebula B+C, privacy, offline/local memory and the actual React Native stack are preserved. The most popular app is not automatically correct; accessibility and usability trump novelty.
+6. Include the resulting 3–6-line **benchmark summary with links** in the UX proposal or PR before/after notes. Link to a separate short comparison document only when the redesign is large or spans multiple screens.
+
+**Exceptions:** a copy fix, isolated bug, accessibility correction mandated by the platform, minor spacing change or implementation of an already **approved exact pattern** does not require fresh competitor research. Mark `Benchmark: N/A (reason)` rather than creating research overhead. Reuse an existing still-relevant documented comparison instead of repeating it in every follow-up PR. No brand imitation, unlicensed asset copying, exposure of private screenshots or unapproved redesign.
+
+## 3. Workflow: user journey before component
+
+1. **Study relevant precedents for a substantial redesign** (section 2), then write the scenario: who, entry point, user intent, primary action, success, error, cancel/back, recovery, and where the user returns. List existing and future entry points. Identify the canonical owner of each setting/action and duplicates.
 2. **Map state transitions:** idle, busy, permission, empty, partial result, error, cancel, retry, background/foreground and process/navigation return as applicable. Name the **single source of truth**, including LLM/voice/lock/selection ownership. Check asynchronous races and stale callbacks.
 3. **Choose established interaction first:** Android conventions, progressive disclosure, visible affordance and reversible actions. Prefer one obvious primary action; secondary actions in contextual overflow. A long-press/swipe shortcut always needs a discoverable tap/TalkBack alternative. No gratuitous new tabs or forms.
 4. **Fit the approved visual language:** reuse `mobile/src/design/nebula/tokens.ts`, shared components and native surfaces; keep the B+C orb and scene independently controlled by actual operation state (`resolveNebulaScene`). Do not duplicate spacing, colors, component state machines or handlers to finish one screen.
@@ -29,7 +43,7 @@ Do **not** re-run orb asset verification, GPU profiling or Figma comparison on a
 
 A PR should finish **one coherent user scenario**, not scatter one flow across many decorative PRs; equally, avoid unrelated architectural refactors inside UX work.
 
-## 3. Non-negotiable interaction invariants
+## 4. Non-negotiable interaction invariants
 
 - **User control and recognition:** every selection mode, edit flow, sheet and long-running operation has an obvious exit/back path; Back is predictable (dismiss transient UI → leave selection/detail → navigate back) and never silently discards a draft. Destructive actions are clearly named; use confirmation when recovery is impossible and Undo when feasible.
 - **Stability:** keyboard/system bars, streaming tokens, inline status, bottom navigation and orb must not move the reader's anchor unexpectedly. Preserve chat scroll position if the user scrolled up; show a return-to-latest affordance. Preserve search/filter/selection/draft across safe navigation and lifecycle changes.
@@ -40,7 +54,7 @@ A PR should finish **one coherent user scenario**, not scatter one flow across m
 - **Motion is subordinate to work:** real state drives phases; respect Reduce Motion, low-power and background pause. No orbit/background animation may obscure text, steal touch or trigger relayout; measure native performance only when changing related behavior.
 - **Platform-native interaction:** prefer familiar list, menu, contextual selection, form, picker and back behavior over novel gestures. Use brand expression in surfaces/artwork, not by changing what Back, Save, Cancel or selection means.
 
-## 4. Quality and delivery
+## 5. Quality and delivery
 
 - Follow [QUALITY_GATES](references/QUALITY_GATES.md): at least a changed-path positive scenario and a failure/cancellation/regression scenario when behavior changes, with deterministic state and test IDs/semantic labels instead of brittle text/coordinates alone.
 - Keep required emulator CI **minimal** as agreed for PersAI; focus Jest/browser/native smoke on the touched path. More exhaustive, device-dependent tests belong in U5/native acceptance, not an unrelated required gate. Do not mistake browser screenshots, green TypeScript, or emulator smoke for release APK/TalkBack acceptance.
