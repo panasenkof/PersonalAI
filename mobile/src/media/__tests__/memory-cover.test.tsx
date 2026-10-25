@@ -29,6 +29,7 @@ beforeEach(() => {
 test("offscreen cards never decrypt; visible cards resize locally and delete original", async () => {
   const screen = render(<MemoryCover profile="p" entityId="n" active={false} />);
   expect(materializeAttachment).not.toHaveBeenCalled();
+  expect(screen.getByTestId("memory-cover-n").props.style.height).toBe(132);
   screen.rerender(<MemoryCover profile="p" entityId="n" active />);
   await waitFor(() => expect(screen.getByLabelText("Обложка записи")).toBeTruthy());
   expect(manipulateAsync).toHaveBeenCalledWith("file:///original", [{ resize: { width: 480 } }], expect.anything());
@@ -36,6 +37,7 @@ test("offscreen cards never decrypt; visible cards resize locally and delete ori
   act(() => mockLock(false));
   expect(screen.queryByLabelText("Обложка записи")).toBeNull();
   expect(mockDelete).toHaveBeenCalledWith("file:///cache/persai-previews/thumb.jpg");
+  expect(screen.getByTestId("memory-cover-n").props.style.height).toBe(132);
 });
 test("late image decoding after leaving the app is removed without appearing", async () => {
   let finish!: (value: any) => void;
@@ -62,4 +64,24 @@ test("cover work runs at most two jobs concurrently", async () => {
   }));
   for (let i = 0; i < 5; i++) { await Promise.resolve(); release[i](); await Promise.resolve(); await Promise.resolve(); }
   await Promise.all(tasks); expect(max).toBe(2);
+});
+
+test("missing originals and large photos have explanations", async () => {
+  (attachmentsForEntity as jest.Mock).mockResolvedValue([]);
+  const screen = render(<MemoryCover profile="p" entityId="missing" />);
+  await waitFor(() => expect(screen.getByText("Оригинал фото не сохранён")).toBeTruthy());
+  expect(screen.queryByLabelText("Загрузка обложки")).toBeNull();
+  (attachmentsForEntity as jest.Mock).mockResolvedValue([{ ...items[0], size: 13 * 1024 * 1024 }]);
+  screen.rerender(<MemoryCover profile="p" entityId="large" />);
+  await waitFor(() => expect(screen.getByText(/Большое фото/)).toBeTruthy());
+  expect(materializeAttachment).not.toHaveBeenCalled();
+});
+test("decode failure can be retried", async () => {
+  const { fireEvent } = require("@testing-library/react-native");
+  (manipulateAsync as jest.Mock).mockRejectedValueOnce(new Error("decoder"));
+  const screen = render(<MemoryCover profile="p" entityId="n" />);
+  await waitFor(() => screen.getByLabelText("Повторить загрузку обложки"));
+  expect(mockDelete).toHaveBeenCalledWith("file:///original");
+  fireEvent.press(screen.getByLabelText("Повторить загрузку обложки"));
+  await waitFor(() => screen.getByLabelText("Обложка записи"));
 });

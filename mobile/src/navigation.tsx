@@ -29,7 +29,7 @@ export type RootStackParams = {
   ModelConnections: { presetId?: string } | undefined;
   MemoryNote: { entityId?: string; collectionId?: string };
   MemoryBackup: undefined;
-  MemoryImport: { incoming?: SharePayload[]; camera?: boolean } | undefined;
+  MemoryImport: { incoming?: SharePayload[]; camera?: boolean; source?: "photo" | "file" | "link"; collectionId?: string } | undefined;
   DiagnosticLogs: undefined;
   /** Research-only native graphics screen (not a bottom tab). */
   NebulaLab: undefined;

@@ -82,6 +82,10 @@ export class SqliteMemoryRepository implements MemoryRepository {
   undoNotes(batch: string) { return undoNotes(this.db, batch); }
 
 
+  async collectionNoteCounts(): Promise<Record<string, number>> {
+    const rows = await this.db.getAllAsync<{ collection_id: string; total: number }>("SELECT collection_id, COUNT(*) AS total FROM memory_entities WHERE record_status='active' GROUP BY collection_id");
+    return Object.fromEntries(rows.map(row => [row.collection_id, row.total]));
+  }
   async listCollections(): Promise<CollectionRecord[]> {
     const rows = await this.db.getAllAsync<Row>(
       "SELECT * FROM memory_collections ORDER BY created_at, id",

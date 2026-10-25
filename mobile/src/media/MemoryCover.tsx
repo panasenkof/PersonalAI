@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Image, Text, View } from "react-native";
+import { ActivityIndicator, Image, Pressable, Text, View } from "react-native";
 import Feather from "@expo/vector-icons/Feather";
 import { useIsFocused } from "@react-navigation/native";
 import { Directory, Paths, File } from "expo-file-system";
@@ -33,16 +33,24 @@ export function MemoryCover({ profile, entityId, active = true, height = 132, la
   const t = useTheme(); const focused = useIsFocused(); const visible = useApplicationVisible();
   const [unlocked, setUnlocked] = useState(true);
   const [uri, setUri] = useState(""); const [failed, setFailed] = useState(false);
+  const [noPreview, setNoPreview] = useState(false);
+  useEffect(() => setNoPreview(false), [profile, entityId]);
+  const [message, setMessage] = useState(""); const [loading, setLoading] = useState(false); const [attempt, setAttempt] = useState(0);
   useEffect(() => onLocalMemorySessionChange(setUnlocked), []);
   const enabled = active && focused && visible && unlocked;
   useEffect(() => {
     const controller = new AbortController(); let thumbnail = "";
-    setUri(""); setFailed(false);
+    setUri(""); setFailed(false); setMessage(""); setLoading(enabled);
     if (enabled) void coverSlot(async () => {
       if (controller.signal.aborted) return;
       const items = await attachmentsForEntity(profile, entityId);
       const image = items.find(item => attachmentPreviewKind(item) === "image" && item.size <= 12 * 1024 * 1024);
-      if (!image || controller.signal.aborted) return;
+      if (controller.signal.aborted) return;
+      if (!image) {
+        setNoPreview(true);
+        setMessage(items.some(item => attachmentPreviewKind(item) === "image") ? "Большое фото · откройте оригинал во вложениях" : "Оригинал фото не сохранён");
+        return;
+      }
       let original = "";
       try {
         original = await materializeAttachment(profile, image, controller.signal);
@@ -55,17 +63,19 @@ export function MemoryCover({ profile, entityId, active = true, height = 132, la
           directory.create({ intermediates: true, idempotent: true });
           const destination = new File(directory, Crypto.randomUUID() + ".jpg");
           new File(thumbnail).move(destination); thumbnail = destination.uri;
-          setUri(thumbnail);
+          setNoPreview(false); setUri(thumbnail);
         }
       } finally { removeCoverFile(original); }
-    }).catch(() => { if (!controller.signal.aborted) setFailed(true); });
+    }).catch(() => { if (!controller.signal.aborted) { setFailed(true); setNoPreview(true); setMessage("Не удалось загрузить превью"); } })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => { controller.abort(); removeCoverFile(thumbnail); };
-  }, [enabled, profile, entityId]);
-  return <View style={{ height, backgroundColor: t.soft, justifyContent: "center", alignItems: "center", overflow: "hidden" }}>
+  }, [enabled, profile, entityId, attempt]);
+  return <View testID={"memory-cover-" + entityId} style={{ height: noPreview ? undefined : height, minHeight: compact ? 48 : 64, paddingVertical: uri ? 0 : 8, backgroundColor: t.soft, justifyContent: "center", alignItems: "center", overflow: "hidden" }}>
     {enabled && uri && !failed ? <Image source={{ uri }} accessibilityLabel={label} resizeMode="cover"
-      onError={() => { removeCoverFile(uri); setUri(""); setFailed(true); }} style={{ width: "100%", height: "100%" }} /> : <>
-      <Feather name="image" size={compact ? 24 : 32} color={t.muted} />
-      {!compact ? <Text style={{ color: t.muted, fontSize: 13, padding: 8 }}>{failed ? "Превью недоступно" : "Фото"}</Text> : null}
+      onError={() => { removeCoverFile(uri); setUri(""); setFailed(true); setNoPreview(true); setMessage("Не удалось показать превью"); }} style={{ width: "100%", height: "100%" }} /> : <>
+      {loading ? <ActivityIndicator accessibilityLabel="Загрузка обложки" /> : <Feather name="image" size={compact ? 24 : 28} color={t.muted} />}
+      {!compact ? <Text style={{ color: t.muted, fontSize: 13, padding: 8, textAlign: "center" }}>{loading ? "Загружаю фото…" : message || "Фото"}</Text> : null}
+      {failed && enabled ? <Pressable accessibilityRole="button" accessibilityLabel="Повторить загрузку обложки" onPress={event => { event?.stopPropagation?.(); setAttempt(value => value + 1); }} style={{ minHeight: 48, justifyContent: "center", paddingHorizontal: 12 }}><Text style={{ color: t.secondary }}>Повторить</Text></Pressable> : null}
     </>}
   </View>;
 }

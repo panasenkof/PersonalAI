@@ -39,6 +39,7 @@ export function MemoryImportScreen() {
   const [keepOriginal, setKeepOriginal] = useState(true);
   const [sourceUrl, setSourceUrl] = useState(""); // Confirmed provenance only.
   const [linkDraft, setLinkDraft] = useState(""); // Unconfirmed URL never changes saved provenance.
+  const [sourceChoice, setSourceChoice] = useState<"photo" | "file" | "link" | undefined>(route.params?.source);
   const [sourcePickerOpen, setSourcePickerOpen] = useState(true);
   const [processingOptionsOpen, setProcessingOptionsOpen] = useState(false);
   const cameraStarted = useRef(false);
@@ -82,7 +83,7 @@ export function MemoryImportScreen() {
     };
   }, [profile]);
   useEffect(() => { if (profile) void localMemoryRepository(profile).then(ensureSections).then(cols => {
-    if (alive.current) { setCollections(cols); setCollectionId(cols.find(c => c.slug === "notes")?.id || ""); }
+    if (alive.current) { setCollections(cols); setCollectionId(cols.find(c => c.id === route.params?.collectionId)?.id || cols.find(c => c.slug === "notes")?.id || ""); }
   }).catch(() => { if (alive.current) setNotice("Не удалось загрузить разделы."); }); }, [profile]);
   useEffect(() => {
     const payload = incoming?.[position]; if (!payload) return;
@@ -127,6 +128,28 @@ export function MemoryImportScreen() {
   const field = { color: t.text, backgroundColor: t.panel, borderWidth: 1, borderColor: t.line, borderRadius: 16, padding: 14, minHeight: 50 };
   const button = { backgroundColor: t.accent, padding: 14, borderRadius: 17, minHeight: 50, justifyContent: "center" as const, alignItems: "center" as const };
 
+  async function gallery() {
+    setPreparing(true);
+    const copies: ImportFile[] = [];
+    try {
+      const result = await withNativeInteraction(() => ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], allowsMultipleSelection: true, selectionLimit: MAX_ORIGINALS_PER_NOTE, quality: 1 }));
+      if (result.canceled || !alive.current) return;
+      const originals = result.assets.map(asset => ({ uri: asset.uri, name: asset.fileName || "photo.jpg", mimeType: asset.mimeType || "image/jpeg" }));
+      if (originals.length > MAX_ORIGINALS_PER_NOTE || originals.reduce((sum, asset) => sum + new File(asset.uri).size, 0) > MAX_TOTAL_ORIGINAL_BYTES) throw new Error("Выберите до 10 фото общим размером до 80 МБ.");
+      const directory = new Directory(Paths.cache, "persai-incoming"); directory.create({ intermediates: true, idempotent: true });
+      for (const original of originals) {
+        const target = new File(directory, Crypto.randomUUID() + (original.name.match(/\.[a-z0-9]{1,8}$/i)?.[0] || ".jpg"));
+        copies.push({ ...original, uri: target.uri });
+        await FileSystem.copyAsync({ from: original.uri, to: target.uri });
+      }
+      if (!alive.current) { for (const copy of copies) await FileSystem.deleteAsync(copy.uri, { idempotent: true }); return; }
+      ownedFiles.current.push(...copies.map(copy => copy.uri));
+      setFiles(copies); setRecognitionResults([]); setTitle(""); setSourceUrl(""); setLinkDraft(""); setSourcePickerOpen(false); setProcessingOptionsOpen(false); setKeepOriginal(true); setExtractedText(""); setBody("");
+    } catch (e) {
+      for (const copy of copies) await FileSystem.deleteAsync(copy.uri, { idempotent: true }).catch(() => {});
+      if (alive.current) setNotice(memoryErrorMessage(e));
+    } finally { if (alive.current) setPreparing(false); }
+  }
   async function camera() {
     try {
       const permission = await withNativeInteraction(() => ImagePicker.requestCameraPermissionsAsync());
@@ -251,22 +274,28 @@ export function MemoryImportScreen() {
   }
   return <KeyboardAvoidingView style={{ flex: 1, backgroundColor: t.bg }} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={header}>
     <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentContainerStyle={{ padding: 18, gap: 15, paddingBottom: insets.bottom + 24 }}>
-      <Text accessibilityRole="header" style={{ color: t.text, fontSize: 25, fontWeight: "800" }}>{incoming ? `Новая заметка · ${position + 1}/${incoming.length}` : "Добавить в память"}</Text>
-      <Text style={{ color: t.muted, lineHeight: 21 }}>Выберите источник, проверьте текст и сохраните. Распознавание необязательно; сохранённый оригинал шифруется.</Text>
+      <Text accessibilityRole="header" style={{ color: t.text, fontSize: 25, fontWeight: "800" }}>{incoming ? `Новая заметка · ${position + 1}/${incoming.length}` : file || extractedText ? "Проверьте и сохраните" : "Выберите материал"}</Text>
+      <Text style={{ color: t.muted, lineHeight: 21 }}>Фото, документы и ссылки сохраняются в заметку. Распознавание — по вашему выбору.</Text>
       <Text accessibilityRole="header" style={{ color: t.text, fontSize: 18, fontWeight: "700" }}>1 · Источник</Text>
       {incoming ? <Text style={{ color: t.muted }}>Получено через «Поделиться». Сохранение — только после подтверждения.</Text> : null}
-      {!incoming && (file || extractedText) && !sourcePickerOpen ? <Pressable disabled={busy || preparing} accessibilityRole="button" accessibilityLabel="Изменить источник" onPress={() => setSourcePickerOpen(true)}
+      {!incoming && (file || extractedText) && !sourcePickerOpen ? <Pressable disabled={busy || preparing} accessibilityRole="button" accessibilityLabel="Изменить источник" onPress={() => { setSourceChoice(undefined); setSourcePickerOpen(true); }}
         style={{ minHeight: 48, justifyContent: "center", padding: 12, backgroundColor: t.panel, borderColor: t.line, borderWidth: 1, borderRadius: 14 }}>
         <Text style={{ color: t.secondary, fontWeight: "700" }}>Изменить источник</Text>
         <Text style={{ color: t.muted, fontSize: 12 }}>Текущий материал останется до успешного выбора другого.</Text>
       </Pressable> : null}
       {!incoming && (sourcePickerOpen || (!file && !extractedText)) ? <View testID="import-source-choices" style={{ gap: 12, padding: 14, borderRadius: 18, borderWidth: 1, borderColor: t.line, backgroundColor: t.panel }}>
-        <Pressable disabled={busy || preparing} accessibilityRole="button" accessibilityLabel="Выбрать файл для памяти" style={button} onPress={() => void pick()}><Text style={{ color: "#fff", fontWeight: "700" }}>Выбрать файл с телефона</Text></Pressable>
-        <Pressable disabled={busy || preparing} accessibilityRole="button" accessibilityLabel="Сфотографировать и распознать" style={button} onPress={() => void camera()}><Text style={{ color: "#fff" }}>Сфотографировать</Text></Pressable>
-        <Text style={{ color: t.text, fontWeight: "600" }}>Или публичная HTTPS-ссылка</Text>
-        <TextInput accessibilityLabel="Ссылка для импорта" value={linkDraft} onChangeText={setLinkDraft} editable={!busy} placeholder="https://…" placeholderTextColor={t.muted} style={field} />
-        <Pressable disabled={busy || !linkDraft.trim()} accessibilityRole="button" style={[button, { opacity: busy || !linkDraft.trim() ? .5 : 1 }]} onPress={() => void readLink()}><Text style={{ color: "#fff" }}>Загрузить по ссылке</Text></Pressable>
-        <Text style={{ color: t.muted, fontSize: 12 }}>Без cookies и ключей. Закрытые сайты и перенаправления не поддерживаются.</Text>
+        {(!sourceChoice || sourceChoice === "file") ? <Pressable disabled={busy || preparing} accessibilityRole="button" accessibilityLabel="Выбрать файл для памяти" style={{ ...button, backgroundColor: t.soft, alignItems: "flex-start" }} onPress={() => void pick()}><Text style={{ color: t.text, fontSize: 16, fontWeight: "700" }}>Выбрать файл с телефона</Text><Text style={{ color: t.muted }}>Документ, аудио или видео</Text></Pressable> : null}
+        {(!sourceChoice || sourceChoice === "photo") ? <>
+        <Pressable disabled={busy || preparing} accessibilityRole="button" accessibilityLabel="Выбрать фото из галереи" style={{ ...button, backgroundColor: t.soft, alignItems: "flex-start" }} onPress={() => void gallery()}><Text style={{ color: t.text, fontSize: 16 }}>Выбрать фото из галереи</Text></Pressable>
+        <Pressable disabled={busy || preparing} accessibilityRole="button" accessibilityLabel="Сфотографировать и распознать" style={{ ...button, backgroundColor: t.soft, alignItems: "flex-start" }} onPress={() => void camera()}><Text style={{ color: t.text, fontSize: 16 }}>Сфотографировать</Text></Pressable>
+        </> : null}
+        {(!sourceChoice || sourceChoice === "link") ? <>
+        <Text style={{ color: t.text, fontWeight: "600" }}>Ссылка на статью или файл</Text>
+        <TextInput accessibilityLabel="Ссылка для импорта" value={linkDraft} onChangeText={setLinkDraft} editable={!busy} autoCapitalize="none" autoCorrect={false} keyboardType="url" placeholder="https://…" placeholderTextColor={t.muted} style={field} />
+        <Pressable disabled={busy || !linkDraft.trim()} accessibilityRole="button" style={[button, { opacity: busy || !linkDraft.trim() ? .5 : 1 }]} onPress={() => void readLink()}><Text style={{ color: t.userText }}>Загрузить по ссылке</Text></Pressable>
+        <Text style={{ color: t.muted, fontSize: 13, lineHeight: 20 }}>Ссылка должна открываться без входа на сайт.</Text>
+        </> : null}
+        {sourceChoice ? <Pressable accessibilityRole="button" disabled={busy || preparing} style={{ ...button, backgroundColor: t.panel }} onPress={() => setSourceChoice(undefined)}><Text style={{ color: t.secondary }}>Другой источник</Text></Pressable> : null}
       </View> : null}
       {file || extractedText ? <Text style={{ color: t.muted, fontSize: 12 }}>Выбранный источник: {files.length > 1 ? files.length + " файлов · одна заметка" : file ? file.name : "Текст по ссылке"}</Text> : null}
       {preparing ? <ActivityIndicator accessibilityLabel="Подготовка входящего файла" /> : null}

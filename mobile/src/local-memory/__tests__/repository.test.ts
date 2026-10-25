@@ -389,3 +389,14 @@ test("semantic search follows move, trash, restore, merge, undo and permanent de
   await repo.purgeNotes([await selected(first.id)]);
   expect(await ids()).toEqual([second.id]);
 });
+
+test("collection counts exclude archived records", async () => {
+  const repo = new SqliteMemoryRepository(new FakeSqlite() as never);
+  const a = await repo.createCollection({ name: "Фото", slug: "photos" });
+  const b = await repo.createCollection({ name: "Текст", slug: "text" });
+  await repo.createEntity({ collection_id: a.id, domain: "notes", title: "Один", payload: { body: "A" } });
+  const archived = await repo.createEntity({ collection_id: a.id, domain: "notes", title: "Архив", payload: { body: "B" } });
+  await repo.setEntityStatus(archived.id, archived.record_version, "archived");
+  await repo.createEntity({ collection_id: b.id, domain: "notes", title: "Два", payload: { body: "C" } });
+  expect(await repo.collectionNoteCounts()).toEqual({ [a.id]: 1, [b.id]: 1 });
+});

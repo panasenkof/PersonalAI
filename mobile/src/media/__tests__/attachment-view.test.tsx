@@ -112,3 +112,13 @@ test("native media preview error hides the broken image and offers a retry", asy
   await waitFor(() => expect(screen.getByLabelText("Просмотр изображения снимок.jpg")).toBeTruthy());
   expect(materializeAttachment).toHaveBeenCalledTimes(2);
 });
+
+test("a released native player cannot throw from cleanup", async () => {
+  const screen = render(<AttachmentView profile="guest" entityId="note" />);
+  await waitFor(() => screen.getByLabelText("Прослушать аудио голос.mp3"));
+  fireEvent.press(screen.getByLabelText("Прослушать аудио голос.mp3"));
+  await waitFor(() => screen.getByLabelText("Воспроизвести аудио"));
+  mockPause.mockImplementationOnce(() => { throw new Error("Shared object released"); });
+  expect(() => screen.unmount()).not.toThrow();
+  expect(mockDelete).toHaveBeenCalledWith("file:///preview/audio");
+});
