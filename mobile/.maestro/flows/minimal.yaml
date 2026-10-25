@@ -12,7 +12,7 @@ name: PersAI mandatory minimal native smoke
 - hideKeyboard
 - tapOn: "Вкладка Память"
 - extendedWaitUntil:
-    visible: "Новая заметка"
+    visible: "Добавить в память"
     timeout: 15000
 - tapOn: "Вкладка Настройки"
 - tapOn: "Вкладка Главная"

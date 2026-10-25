@@ -17,8 +17,9 @@ export function BottomSheet({ visible, title, onClose, children }: {
   const close = () => { Keyboard.dismiss(); onClose(); };
   // Remove the native window immediately; a closing slide/fade can otherwise
   // remain above the app privacy cover in the recent-apps screenshot.
-  if (!appVisible) return null;
-  return <Modal visible={visible} transparent animationType="slide" statusBarTranslucent navigationBarTranslucent onRequestClose={close}>
+  // Unmount before navigating: a closing portal must not cover the destination.
+  if (!appVisible || !visible) return null;
+  return <Modal visible={visible} transparent animationType="slide" statusBarTranslucent navigationBarTranslucent={false} onRequestClose={close}>
     <SafeAreaProvider>
       <SheetContent title={title} close={close}>{children}</SheetContent>
     </SafeAreaProvider>
@@ -36,11 +37,11 @@ function SheetContent({ title, close, children }: { title: string; close: () => 
         <View style={{ width: 40, height: 4, borderRadius: 2, alignSelf: "center", backgroundColor: t.line, marginBottom: 6 }} />
         <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 20, gap: 12 }}>
           <Text style={{ flex: 1, color: t.text, fontSize: 22, fontWeight: "800" }}>{title}</Text>
-          <Pressable accessibilityRole="button" accessibilityLabel={"Закрыть панель " + title} style={{ minHeight: 48, minWidth: 44, justifyContent: "center", alignItems: "center" }} onPress={close}>
+          <Pressable accessibilityRole="button" accessibilityLabel={"Закрыть панель " + title} style={{ minHeight: 48, minWidth: 48, justifyContent: "center", alignItems: "center" }} onPress={close}>
             <Feather name="x" size={22} color={t.muted} />
           </Pressable>
         </View>
-        <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentContainerStyle={{ padding: 20, paddingTop: 10, paddingBottom: 28, gap: 12 }}>
+        <ScrollView style={{ flexShrink: 1 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentContainerStyle={{ padding: 20, paddingTop: 10, paddingBottom: 28, gap: 12 }}>
           {children}
         </ScrollView>
       </View>

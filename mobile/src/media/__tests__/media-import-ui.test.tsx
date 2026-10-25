@@ -22,11 +22,12 @@ jest.mock('../../direct-agent/settings', () => ({ loadDirectConnections: async (
 jest.mock('../../direct-agent/enrich-runner', () => ({ scheduleIndexTerms: jest.fn() }));
 jest.mock('../vector-runner', () => ({ scheduleVectors: jest.fn() }));
 jest.mock('../whisper', () => ({ useWhisperStatus: () => ({ state: 'absent' }) }));
-jest.mock('../attachments', () => ({ saveMediaNote: jest.fn(async () => 'note') }));
+jest.mock('../attachments', () => ({ MAX_ORIGINALS_PER_NOTE: 10, MAX_TOTAL_ORIGINAL_BYTES: 80 * 1024 * 1024, saveMediaNote: jest.fn(async () => 'note') }));
 jest.mock('../extract', () => ({ ...jest.requireActual('../kinds'), extractMedia: jest.fn() }));
 jest.mock('../joint-recognition', () => ({ analyzeFilesTogether: jest.fn() }));
 jest.mock('expo-document-picker', () => ({ getDocumentAsync: jest.fn(async () => ({ canceled: false, assets: [{ uri: 'file:///cache/photo.png', name: 'photo.png', mimeType: 'image/png' }] })) }));
-jest.mock('expo-file-system/legacy', () => ({ cacheDirectory: 'file:///cache/', deleteAsync: jest.fn(async () => {}) }));
+jest.mock('expo-image-picker', () => ({ launchImageLibraryAsync: jest.fn(), requestCameraPermissionsAsync: jest.fn(), launchCameraAsync: jest.fn() }));
+jest.mock('expo-file-system/legacy', () => ({ copyAsync: jest.fn(async () => {}), cacheDirectory: 'file:///cache/', deleteAsync: jest.fn(async () => {}) }));
 beforeEach(() => { jest.clearAllMocks(); mockParams = undefined; });
 test('picker lets user save original without transcript, provider or network; user text stays separate', async () => {
   const screen = render(<MemoryImportScreen />);
@@ -206,4 +207,16 @@ test("joint recognition is unavailable for sensitive notes and restores sequenti
   fireEvent.press(screen.getByLabelText("Личные — только на телефоне"));
   expect(screen.getByLabelText("Распознавать вместе").props.accessibilityState.disabled).toBe(true);
   expect(screen.getByLabelText("Распознавать по очереди").props.accessibilityState.selected).toBe(true);
+});
+
+test('gallery uses selected collection without automatic model calls', async () => {
+  mockParams = { source: 'photo', collectionId: 'notes' };
+  require('expo-image-picker').launchImageLibraryAsync.mockResolvedValue({ canceled: false, assets: [{ uri: 'file:///gallery/a.jpg', fileName: 'a.jpg', mimeType: 'image/jpeg' }] });
+  const screen = render(<MemoryImportScreen />);
+  fireEvent.press(screen.getByLabelText('Выбрать фото из галереи'));
+  await waitFor(() => screen.getByLabelText('Сохранить сведения в память'));
+  expect(extractMedia).not.toHaveBeenCalled();
+  fireEvent.press(screen.getByLabelText('Сохранить сведения в память'));
+  await waitFor(() => expect(saveMediaNote).toHaveBeenCalled());
+  expect((saveMediaNote as jest.Mock).mock.calls[0][1]).toMatchObject({ collectionId: 'notes', file: { name: 'a.jpg' } });
 });

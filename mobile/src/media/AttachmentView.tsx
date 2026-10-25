@@ -27,7 +27,7 @@ function VideoPreview({ uri, onError }: { uri: string; onError: (message: string
     const sub = player.addListener("statusChange", event => {
       if (event.status === "error") onError("Не удалось воспроизвести видео. Оригинал сохранён.");
     });
-    return () => { player.pause(); sub.remove(); };
+    return () => { try { player.pause(); } catch { /* Native object already released. */ } finally { sub.remove(); } };
   }, [player, onError]);
   return <VideoView player={player} nativeControls style={{ width: "100%", height: 230 }} allowsPictureInPicture={false} />;
 }
@@ -43,10 +43,10 @@ function AudioPreview({ uri, onError }: { uri: string; onError: (message: string
       if (event.status === "error") onError("Не удалось воспроизвести аудио. Оригинал сохранён.");
     });
     const playback = player.addListener("playingChange", event => setPlaying(event.isPlaying));
-    return () => { player.pause(); status.remove(); playback.remove(); };
+    return () => { try { player.pause(); } catch { /* Native object already released. */ } finally { status.remove(); playback.remove(); } };
   }, [player, onError]);
   return <Pressable accessibilityRole="button" accessibilityLabel={playing ? "Приостановить аудио" : "Воспроизвести аудио"}
-    onPress={() => { if (playing) player.pause(); else player.play(); }}
+    onPress={() => { try { if (playing) player.pause(); else player.play(); } catch { onError("Не удалось воспроизвести аудио. Закройте просмотр и повторите."); } }}
     style={{ minHeight: nebulaTouch.minimum, justifyContent: "center", alignItems: "center", borderRadius: nebulaRadii.field, backgroundColor: t.soft }}>
     <Text style={{ color: t.secondary, fontWeight: "700" }}>{playing ? "Пауза" : "Воспроизвести"} · аудио</Text>
   </Pressable>;

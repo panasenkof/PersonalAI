@@ -28,6 +28,9 @@ export function LocalMemoryScreen() {
   const { width, fontScale } = useWindowDimensions();
   const [grid, setGrid] = useState(true);
   const columns = grid && width >= 350 && fontScale < 1.4 ? 2 : 1;
+  const [addOpen, setAddOpen] = useState(false);
+  const [selecting, setSelecting] = useState(false);
+  const [counts, setCounts] = useState<Record<string, number>>({});
   const [menuOpen, setMenuOpen] = useState(false);
   const [collectionMenu, setCollectionMenu] = useState(false);
   const [collectionCards, setCollectionCards] = useState<CollectionRecord[]>([]);
@@ -50,13 +53,13 @@ export function LocalMemoryScreen() {
   const [sectionOpen, setSectionOpen] = useState(false); const [sectionName, setSectionName] = useState("");
   const repository = useRef<SqliteMemoryRepository | null>(null); const generation = useRef(0);
   useEffect(() => { const timer = setTimeout(() => setTerm(search.trim()), 250); return () => clearTimeout(timer); }, [search]);
-  useEffect(() => { setCollectionId(undefined); setSearch(""); setStatus("active"); setCollections([]); setNotes([]); setCollectionCards([]); setCovers({}); setSelectedIds([]); setVisibleIds(new Set()); }, [profile]);
+  useEffect(() => { setCollectionId(undefined); setSearch(""); setStatus("active"); setCollections([]); setNotes([]); setCollectionCards([]); setCovers({}); setSelectedIds([]); setSelecting(false); setCounts({}); setVisibleIds(new Set()); }, [profile]);
   useFocusEffect(useCallback(() => {
     const request = ++generation.current; setLoading(true); setError("");
     if (profile) void localMemoryRepository(profile).then(async db => {
-      const [sections, page] = await Promise.all([ensureSections(db), db.searchNotes(term, 50, 0, { collectionId, status })]);
+      const [sections, page, totals] = await Promise.all([ensureSections(db), db.searchNotes(term, 50, 0, { collectionId, status }), db.collectionNoteCounts()]);
       if (request !== generation.current) return;
-      repository.current = db; void db.lastNoteOperation().then(value => { if (request === generation.current) setUndo(value); }).catch(() => {}); setCollections(sections); setNotes(page); setMore(page.length === 50);
+      setCounts(totals); repository.current = db; void db.lastNoteOperation().then(value => { if (request === generation.current) setUndo(value); }).catch(() => {}); setCollections(sections); setNotes(page); setMore(page.length === 50);
       const recentIds = [...new Set(page.map(n => n.collection_id))];
       const shownSections = [...sections].sort((a, b) => {
         const rank = (id: string) => recentIds.includes(id) ? recentIds.indexOf(id) : recentIds.length;
@@ -81,7 +84,9 @@ export function LocalMemoryScreen() {
       if (profile) scheduleVectors(profile);
     } catch (e) { setError(memoryErrorMessage(e)); } finally { setBusy(false); }
   }
-  useEffect(() => { setSelectedIds([]); }, [collectionId, term, status]);
+  useEffect(() => { setSelectedIds([]); setSelecting(false); }, [collectionId, term, status]);
+  function openAll() { setStatus("active"); setCollectionId(undefined); setSearch(""); setTerm(""); setSelectedIds([]); setSelecting(false); }
+  function openStatus(value: typeof status) { openAll(); setStatus(value); setMenuOpen(false); }
   async function loadMore() {
     if (!repository.current || busy) return;
     const request = generation.current; setBusy(true);
@@ -109,7 +114,7 @@ export function LocalMemoryScreen() {
       ListHeaderComponent={<View style={{ paddingTop: nebulaSpacing.sm, paddingBottom: nebulaSpacing.sm, gap: nebulaSpacing.sm }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: nebulaSpacing.xs }}>
           <Text accessibilityRole="header" style={{ flex: 1, color: t.text, fontSize: 28, fontWeight: "800" }}>Память</Text>
-          <Pressable accessibilityRole="button" accessibilityLabel="Новая заметка" onPress={() => navigation.navigate("MemoryNote", { collectionId })}
+          <Pressable accessibilityRole="button" accessibilityLabel="Добавить в память" onPress={() => setAddOpen(true)}
             style={{ ...button, paddingHorizontal: 12, backgroundColor: t.accent }}><Feather name="plus" size={24} color={t.userText} /></Pressable>
           <Pressable accessibilityRole="button" accessibilityLabel="Меню памяти" onPress={() => setMenuOpen(true)} style={{ ...button, paddingHorizontal: 12 }}><Feather name="more-vertical" size={24} color={t.text} /></Pressable>
         </View>
@@ -131,21 +136,24 @@ export function LocalMemoryScreen() {
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: nebulaSpacing.sm }}>
             {collectionCards.map(c => <Pressable key={c.id} accessibilityRole="button" accessibilityLabel={"Раздел " + c.name}
-              onPress={() => setCollectionId(c.id)} style={{ width: 116, borderRadius: nebulaRadii.field, overflow: "hidden", backgroundColor: t.panel, borderWidth: 1, borderColor: t.line }}>
-              {profile && covers[c.id] ? <MemoryCover profile={profile} entityId={covers[c.id].id} compact height={68} label={"Обложка коллекции " + c.name} />
-                : <View style={{ height: 68, backgroundColor: t.soft, justifyContent: "center", alignItems: "center" }}><Feather name="folder" size={28} color={t.secondary} /></View>}
-              <Text numberOfLines={2} style={{ color: t.text, fontWeight: "600", fontSize: 14, padding: nebulaSpacing.xs }}>{c.name}</Text>
+              onPress={() => setCollectionId(c.id)} style={{ width: Math.min(width - 48, 180 * Math.min(fontScale, 1.5)), borderRadius: nebulaRadii.field, overflow: "hidden", backgroundColor: t.panel, borderWidth: 1, borderColor: t.line }}>
+              {profile && covers[c.id] ? <MemoryCover profile={profile} entityId={covers[c.id].id} compact height={80} label={"Обложка коллекции " + c.name} />
+                : <View style={{ height: 48, backgroundColor: t.soft, justifyContent: "center", alignItems: "center" }}><Feather name={c.slug === "people" ? "users" : c.slug === "preferences" ? "heart" : c.slug === "events" ? "calendar" : "folder"} size={24} color={t.secondary} /></View>}
+              <Text numberOfLines={2} style={{ color: t.text, fontWeight: "600", fontSize: 15, padding: nebulaSpacing.sm }}>{c.name}</Text>
+              <Text style={{ color: t.muted, fontSize: 13, paddingHorizontal: nebulaSpacing.sm, paddingBottom: nebulaSpacing.sm }}>Записей: {counts[c.id] ?? 0}</Text>
             </Pressable>)}
           </ScrollView>
         </> : null}
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-          {collectionId ? <Pressable accessibilityRole="button" accessibilityLabel="Раздел Все записи" onPress={() => setCollectionId(undefined)} style={{ ...button, paddingHorizontal: 8 }}><Feather name="arrow-left" size={20} color={t.secondary} /></Pressable> : null}
+          {collectionId || status !== "active" || term ? <Pressable accessibilityRole="button" accessibilityLabel="Ко всем записям" onPress={openAll} style={{ ...button, paddingHorizontal: 8 }}><Feather name="arrow-left" size={20} color={t.secondary} /></Pressable> : null}
           <Text style={{ flex: 1, color: t.text, fontSize: 18, fontWeight: "700" }}>{term ? "Результаты поиска" : status === "archived" ? "Архив" : status === "trashed" ? "Корзина" : collectionId ? collections.find(c => c.id === collectionId)?.name : "Недавнее"}</Text>
           <Pressable accessibilityRole="button" accessibilityLabel={grid ? "Показать списком" : "Показать плитками"} onPress={() => setGrid(v => !v)} style={{ ...button, paddingHorizontal: 12 }}>
             <Feather name={grid ? "list" : "grid"} size={20} color={t.secondary} />
           </Pressable>
         </View>
-        {selectedIds.length ? <Pressable accessibilityRole="button" accessibilityLabel="Снять выбор записей" onPress={() => setSelectedIds([])} style={button}><Text style={{ color: t.secondary }}>Выбрано: {selectedIds.length} · Отменить выбор</Text></Pressable> : null}
+        {selecting ? <View style={{ gap: 4 }}><Text style={{ color: t.text }}>Выбрано: {selectedIds.length}. Нажимайте на нужные записи.</Text>
+          <Pressable accessibilityRole="button" accessibilityLabel="Снять выбор записей" onPress={() => { setSelectedIds([]); setSelecting(false); }} style={button}><Text style={{ color: t.secondary }}>Завершить выбор</Text></Pressable></View>
+          : notes.length ? <Pressable accessibilityRole="button" accessibilityLabel="Выбрать записи" onPress={() => setSelecting(true)} style={{ ...button, alignItems: "flex-start" }}><Text style={{ color: t.secondary }}>Выбрать записи</Text></Pressable> : null}
         {status === "trashed" ? <Text style={{ color: t.muted, fontSize: 13, lineHeight: 19 }}>
           Удалённые записи исключены из поиска агента. Их можно восстановить или удалить окончательно.
         </Text> : null}
@@ -166,30 +174,37 @@ export function LocalMemoryScreen() {
       contentContainerStyle={{ paddingHorizontal: nebulaSpacing.md, paddingBottom: nebulaSpacing.xl, gap: nebulaSpacing.sm, flexGrow: 1 }}
       ListEmptyComponent={!loading && !error ? <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24, gap: 12 }}><Feather name={term ? "search" : "book-open"} size={40} color={t.secondary} />
         <Text style={{ color: t.text, fontSize: 20, fontWeight: "700", textAlign: "center" }}>{term ? "Ничего не найдено" : status === "archived" ? "Архив пуст" : status === "trashed" ? "Корзина пуста" : "Начните с важного"}</Text>
-        <Text style={{ color: t.muted, textAlign: "center", lineHeight: 21 }}>{term ? "Попробуйте другое слово или раздел «Все записи»." : status === "trashed" ? "Здесь будут удалённые заметки, пока вы их не восстановите." : "Создайте запись или добавьте сведения из файла."}</Text></View> : null}
+        <Text style={{ color: t.muted, textAlign: "center", lineHeight: 21 }}>{term ? "Попробуйте другое слово или раздел «Все записи»." : status === "trashed" ? "Здесь будут удалённые заметки, пока вы их не восстановите." : status === "archived" ? "Здесь хранятся записи, которые вы отправили в архив. Их можно вернуть в обычную память." : "Создайте запись или добавьте сведения из файла."}</Text></View> : null}
       renderItem={({ item }) => <View style={{ flex: 1, maxWidth: columns === 2 ? "50%" : "100%" }}><MemoryNoteCard note={item} grid={columns === 2}
         cover={profile && memoryNoteHasPhoto(item)
           ? <MemoryCover profile={profile} entityId={item.id} active={visibleIds.has(item.id)} label={"Обложка " + item.title} /> : undefined}
         sectionName={collections.find(c => c.id === item.collection_id)?.name || "Запись"}
         selected={selectedIds.includes(item.id)}
-        onToggleSelection={() => setSelectedIds(ids => ids.includes(item.id) ? ids.filter(id => id !== item.id) : [...ids, item.id])}
-        onOpen={() => selectedIds.length
+        onToggleSelection={() => { setSelecting(true); setSelectedIds(ids => ids.includes(item.id) ? ids.filter(id => id !== item.id) : [...ids, item.id]); }}
+        onOpen={() => selecting
           ? setSelectedIds(ids => ids.includes(item.id) ? ids.filter(id => id !== item.id) : [...ids, item.id])
           : navigation.navigate("MemoryNote", { entityId: item.id })}
       /></View>}
       ListFooterComponent={more && !loading ? <Pressable accessibilityRole="button" accessibilityLabel="Показать ещё заметки" disabled={busy} onPress={() => void loadMore()} style={button}><Text style={{ color: t.secondary }}>{busy ? "Загружаю…" : "Показать ещё"}</Text></Pressable> : null} />
+    <BottomSheet visible={addOpen} title="Добавить в память" onClose={() => setAddOpen(false)}>
+      <Pressable accessibilityRole="button" accessibilityLabel="Новая заметка" style={{ ...button, alignItems: "flex-start" }} onPress={() => { setAddOpen(false); navigation.navigate("MemoryNote", { collectionId }); }}><Text style={{ color: t.text, fontSize: 16 }}>Текст или голос</Text><Text style={{ color: t.muted }}>Напишите или надиктуйте мысль</Text></Pressable>
+      {(["photo", "file", "link"] as const).map((source, i) => <Pressable key={source} accessibilityRole="button" style={{ ...button, alignItems: "flex-start" }} accessibilityLabel={["Добавить фото", "Добавить файл", "Добавить ссылку"][i]}
+        onPress={() => { setAddOpen(false); navigation.navigate("MemoryImport", { source, collectionId }); }}><Text style={{ color: t.text, fontSize: 16 }}>{["Фото · камера или галерея", "Файл · документы, аудио, видео", "Ссылка · статья или файл"][i]}</Text></Pressable>)}
+    </BottomSheet>
     <BottomSheet visible={menuOpen} title="Память" onClose={() => setMenuOpen(false)}>
-      <Pressable accessibilityRole="button" accessibilityLabel="Добавить сведения из файла" style={button} onPress={() => { setMenuOpen(false); navigation.navigate("MemoryImport"); }}><Text style={{ color: t.text }}>Добавить фото, файл или ссылку</Text></Pressable>
-      <Pressable accessibilityRole="button" accessibilityLabel="Все коллекции" style={button} onPress={() => { setMenuOpen(false); setCollectionMenu(true); }}><Text style={{ color: t.text }}>Коллекции</Text></Pressable>
-      <Pressable accessibilityRole="button" accessibilityLabel="Выбрать показанные записи" style={button} onPress={() => { setSelectedIds(notes.slice(0, 100).map(n => n.id)); setMenuOpen(false); }}><Text style={{ color: t.text }}>Выбрать показанные записи</Text></Pressable>
-      {(["active", "archived", "trashed"] as const).map((value, i) => <Pressable key={value} accessibilityRole="button"
-        accessibilityLabel={["Открыть текущие записи", "Открыть архив", "Открыть корзину"][i]} style={button}
-        onPress={() => { setStatus(value); setMenuOpen(false); }}><Text style={{ color: t.text }}>{["Все записи", "Архив", "Корзина"][i]}</Text></Pressable>)}
-      <Pressable accessibilityRole="button" accessibilityLabel="Резервные копии" style={button} onPress={() => { setMenuOpen(false); navigation.navigate("MemoryBackup"); }}><Text style={{ color: t.text }}>Резервные копии</Text></Pressable>
+      <Text style={{ color: t.muted }}>Библиотека</Text>
+      <Pressable accessibilityRole="button" accessibilityLabel="Добавить сведения из файла" style={{ ...button, alignItems: "flex-start" }} onPress={() => { setMenuOpen(false); setAddOpen(true); }}><Text style={{ color: t.text }}>Добавить в память</Text></Pressable>
+      <Pressable accessibilityRole="button" accessibilityLabel="Все коллекции" style={{ ...button, alignItems: "flex-start" }} onPress={() => { setMenuOpen(false); setCollectionMenu(true); }}><Text style={{ color: t.text }}>Коллекции</Text></Pressable>
+      <Text style={{ color: t.muted }}>Показать</Text>
+      {(["active", "archived", "trashed"] as const).map((value, i) => <Pressable key={value} accessibilityRole="button" accessibilityState={{ selected: status === value }}
+        accessibilityLabel={["Открыть текущие записи", "Открыть архив", "Открыть корзину"][i]} style={{ ...button, alignItems: "center", flexDirection: "row", justifyContent: "space-between" }}
+        onPress={() => openStatus(value)}><Text style={{ color: t.text }}>{["Все записи", "Архив", "Корзина"][i]}</Text>{status === value ? <Feather name="check" size={20} color={t.secondary} /> : null}</Pressable>)}
+      <Text style={{ color: t.muted }}>Данные</Text>
+      <Pressable accessibilityRole="button" accessibilityLabel="Резервные копии" style={{ ...button, alignItems: "flex-start" }} onPress={() => { setMenuOpen(false); navigation.navigate("MemoryBackup"); }}><Text style={{ color: t.text }}>Резервные копии</Text></Pressable>
     </BottomSheet>
     <BottomSheet visible={collectionMenu} title="Коллекции" onClose={() => setCollectionMenu(false)}>
-      {[{ id: undefined, name: "Все записи" }, ...collections].map(c => <Pressable key={c.id || "all"} accessibilityRole="button" accessibilityLabel={"Раздел " + c.name} style={button}
-        onPress={() => { setCollectionId(c.id); setCollectionMenu(false); }}><Text style={{ color: t.text }}>{c.name}</Text></Pressable>)}
+      {[{ id: undefined, name: "Все записи" }, ...collections].map(c => <Pressable key={c.id || "all"} accessibilityRole="button" accessibilityLabel={"Раздел " + c.name} style={{ ...button, alignItems: "flex-start" }}
+        onPress={() => { openAll(); setCollectionId(c.id); setCollectionMenu(false); }}><Text style={{ color: t.text }}>{c.name}</Text></Pressable>)}
       <Pressable accessibilityRole="button" accessibilityLabel="Новый раздел памяти" style={button} onPress={() => { setCollectionMenu(false); setSectionOpen(true); }}><Text style={{ color: t.secondary }}>Создать коллекцию</Text></Pressable>
     </BottomSheet>
     <BottomSheet visible={moveOpen} title="Перенести выбранные записи" onClose={() => setMoveOpen(false)}>

@@ -1,3 +1,4 @@
+import { useApplicationVisible } from "../../security/visibility";
 import React, { useCallback, useState } from "react";
 import { useFocusEffect, useIsFocused } from "@react-navigation/native";
 import { View } from "react-native";
@@ -15,6 +16,7 @@ export function NebulaHomeArtwork({ size = 288, phase = "idle" }: {
   size?: number; phase?: NebulaPhase;
 }) {
   const isFocused = useIsFocused();
+  const visible = useApplicationVisible();
   const [mode, setMode] = useState<NebulaVisualMode>("live");
   // Refresh after navigating back from the Diagnostics screen. The async
   // store access is never required for opening the encrypted chat itself.
@@ -29,7 +31,7 @@ export function NebulaHomeArtwork({ size = 288, phase = "idle" }: {
   // remains readable: do not hide the entire subtree.
   return <View testID="nebula-home-approved-art" pointerEvents="none"
     style={{ width: size, minHeight: size, justifyContent: "center", alignItems: "center" }}>
-    {isFocused
+    {isFocused && visible
       ? <NebulaSkiaExperiment phase={phase} size={size}
           clipToCircle={false} homeCanvas pauseAnimation={mode === "static"}
           showStatusText={size > 100} />
