@@ -7,7 +7,7 @@ import { MemoryConflictError } from './types';
 type SQL = Pick<SQLiteDatabase, 'getFirstAsync' | 'getAllAsync' | 'runAsync' | 'execAsync'>;
 type Row = Record<string, any>;
 export type NoteSelection = { id: string; record_version: number };
-export type NoteAction = 'move' | 'trash' | 'restore' | 'merge';
+export type NoteAction = 'move' | 'trash' | 'restore' | 'merge' | 'archive' | 'unarchive';
 export function mergeText(notes: { title: string | null; payload: Record<string, unknown> }[]): string {
   return notes.map(n => `── ${n.title || 'Без названия'} ──\n${memoryText(n.payload)}`).join('\n\n');
 }
@@ -34,7 +34,7 @@ export async function changeNotes(db: SQL, action: NoteAction, selection: NoteSe
     for (const selected of selection) {
       const row = await snapshot(tx, selected.id);
       if (row.record_version !== selected.record_version) throw new MemoryConflictError('stale_memory_version');
-      if (action === 'restore' ? row.record_status !== 'trashed' : action === 'merge' ? row.record_status !== 'active' : !['active', 'archived'].includes(row.record_status)) throw new Error('Статус записи изменился. Обновите список.');
+      if (action === 'restore' ? row.record_status !== 'trashed' : action === 'unarchive' ? row.record_status !== 'archived' : ['merge', 'archive'].includes(action) ? row.record_status !== 'active' : !['active', 'archived'].includes(row.record_status)) throw new Error('Статус записи изменился. Обновите список.');
       rows.push(row);
     }
     if (action === 'move' && (!collectionId || !await tx.getFirstAsync('SELECT id FROM memory_collections WHERE id=?', [collectionId]))) throw new Error('Выберите раздел.');
@@ -48,6 +48,8 @@ export async function changeNotes(db: SQL, action: NoteAction, selection: NoteSe
       const payload = JSON.parse(before.payload_json);
       if (action === 'trash') { after.record_status = 'trashed'; payload.pre_trash_status = before.record_status; payload.trashed_at = new Date().toISOString(); }
       if (action === 'restore') { after.record_status = payload.pre_trash_status === 'archived' ? 'archived' : 'active'; delete payload.trashed_at; delete payload.pre_trash_status; }
+      if (action === 'archive') after.record_status = 'archived';
+      if (action === 'unarchive') after.record_status = 'active';
       if (action === 'move') {
         after.collection_id = collectionId;
         if (levels[i]?.sensitivity === 'secret' || levels[i]?.sensitivity === 'unclassified') after.sensitivity = 'secret';
@@ -70,7 +72,7 @@ export async function changeNotes(db: SQL, action: NoteAction, selection: NoteSe
   return batch;
 }
 export async function undoNotes(db: SQL, batch: string): Promise<void> {
-  if (!/^notes:(move|trash|restore|merge):/.test(batch)) throw new Error('Неизвестная операция.');
+  if (!/^notes:(move|trash|restore|merge|archive|unarchive):/.test(batch)) throw new Error('Неизвестная операция.');
   await withUnlockedTransaction(db, async tx => {
     const revisions = await tx.getAllAsync<Row>('SELECT before_json,after_json FROM memory_revisions WHERE reason=? ORDER BY created_at,id', [batch]);
     if (!revisions.length) throw new Error('Операция не найдена.');
@@ -103,4 +105,9 @@ export async function purgeNotes(db: SQL, selection: NoteSelection[]): Promise<v
       await tx.runAsync('DELETE FROM memory_entities WHERE id=?', [selected.id]);
     }
   });
+}
+
+export function noteUndoLabel(token: string): string {
+  const labels: Record<string, string> = { move: 'Отменить перенос', trash: 'Отменить удаление', restore: 'Отменить восстановление', merge: 'Отменить объединение', archive: 'Отменить архивирование', unarchive: 'Отменить возврат из архива' };
+  return labels[token.split(':')[1]] || 'Отменить операцию с записями';
 }

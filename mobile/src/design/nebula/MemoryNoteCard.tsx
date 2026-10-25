@@ -8,13 +8,14 @@ import { memoryDisplayTitle, memoryNoteDate, memoryNotePreview, memoryNoteType }
 
 /** The library card is display-only: selection, long-press and navigation
  * remain under the owning Memory screen. No persistence or LLM calls here. */
-export function MemoryNoteCard({ note, sectionName, selected, selecting = false, onOpen, onToggleSelection, cover, grid = false }: {
+export function MemoryNoteCard({ note, sectionName, selected, selecting = false, onOpen, onToggleSelection, onActions, cover, grid = false }: {
   cover?: React.ReactNode;
   grid?: boolean;
   note: EntityRecord;
   sectionName: string;
   selected: boolean;
   selecting?: boolean;
+  onActions?: () => void;
   onOpen: () => void;
   onToggleSelection: () => void;
 }) {
@@ -24,7 +25,7 @@ export function MemoryNoteCard({ note, sectionName, selected, selecting = false,
   const preview = memoryNotePreview(note);
   const excerpt = preview === title ? "" : preview.startsWith(title + " ") ? preview.slice(title.length).trim() : preview;
   const date = memoryNoteDate(note.updated_at);
-  return <Pressable testID={"memory-note-" + note.id}
+  return <View style={{ position: "relative" }}><Pressable testID={"memory-note-" + note.id}
     accessibilityRole={selecting ? "checkbox" : "button"} accessibilityLabel={(selecting ? "Выбрать заметку " : "Открыть заметку ") + title}
     accessibilityState={{ selected, ...(selecting ? { checked: selected } : {}) }} accessibilityHint={selecting ? "Нажмите, чтобы изменить выбор" : "Нажмите для открытия, удерживайте для выбора"}
     onLongPress={onToggleSelection} onPress={selected ? onToggleSelection : onOpen}
@@ -33,17 +34,15 @@ export function MemoryNoteCard({ note, sectionName, selected, selecting = false,
       borderRadius: nebulaRadii.card, backgroundColor: pressed ? t.soft : t.panel,
       overflow: "hidden", minHeight: grid ? 164 : 88,
     })}>
+    <View style={{ minHeight: 48, paddingHorizontal: nebulaSpacing.sm, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+      <Feather name={type.icon} size={22} color={t.secondary} />
+      {selecting ? <Feather name={selected ? "check-square" : "square"} size={22} color={t.secondary} /> : null}
+    </View>
     {cover}
     <View style={{ padding: nebulaSpacing.sm, gap: nebulaSpacing.xs }}>
     {grid ? <>
-      {!cover || selecting ? <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-        <Feather name={type.icon} size={22} color={t.secondary} />
-        {selecting ? <Feather name={selected ? "check-square" : "square"} size={22} color={t.secondary} /> : null}
-      </View> : null}
       <Text numberOfLines={3} style={{ color: t.text, fontWeight: "700", fontSize: 16, lineHeight: 23 }}>{title}</Text>
     </> : <View style={{ flexDirection: "row", alignItems: "flex-start", gap: nebulaSpacing.xs }}>
-      <View accessible={false} style={{ padding: nebulaSpacing.xs, borderRadius: nebulaRadii.chip, backgroundColor: t.soft }}><Feather name={type.icon} size={20} color={t.secondary} /></View>
-      {selecting ? <Feather name={selected ? "check-square" : "square"} size={20} color={t.secondary} /> : null}
       <Text numberOfLines={2} style={{ flex: 1, minWidth: 0, color: t.text, fontWeight: "700", fontSize: 16, lineHeight: 23 }}>{title}</Text>
       <Feather name="chevron-right" size={18} color={t.muted} />
     </View>}
@@ -52,5 +51,8 @@ export function MemoryNoteCard({ note, sectionName, selected, selecting = false,
     <Text numberOfLines={2} style={{ color: t.muted, fontSize: 13, lineHeight: 20 }}>{sectionName}</Text>
     {date ? <Text style={{ color: t.muted, fontSize: 13, lineHeight: 20 }}>{date}</Text> : null}
     </View>
-  </Pressable>;
+  </Pressable>
+    {!selecting && onActions ? <Pressable accessibilityRole="button" accessibilityLabel={"Действия с заметкой " + title} onPress={onActions}
+      style={{ position: "absolute", top: 0, right: 0, minHeight: 48, minWidth: 48, alignItems: "center", justifyContent: "center" }}><Feather name="more-vertical" size={22} color={t.secondary} /></Pressable> : null}
+  </View>;
 }

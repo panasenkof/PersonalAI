@@ -400,3 +400,27 @@ test("collection counts exclude archived records", async () => {
   await repo.createEntity({ collection_id: b.id, domain: "notes", title: "Два", payload: { body: "C" } });
   expect(await repo.collectionNoteCounts()).toEqual({ [a.id]: 1, [b.id]: 1 });
 });
+
+test('batch archive/unarchive preserve originals, rollback stale batches and support undo', async () => {
+  const sql = new FakeSqlite(); const repo = new SqliteMemoryRepository(sql as never);
+  const col = await repo.createCollection({ name: 'Заметки', slug: 'notes', sensitivity: 'standard' });
+  const a = await repo.createEntity({ collection_id: col.id, domain: 'notes', title: 'Гарантия', payload: { body: 'Гарантия' } });
+  const b = await repo.createEntity({ collection_id: col.id, domain: 'notes', title: 'Чек', payload: { body: 'Чек' } });
+  await sql.runAsync('INSERT INTO memory_attachments(id,entity_id,name,mime,size,created_at) VALUES (?,?,?,?,?,?)', ['photo', a.id, 'photo.png', 'image/png', 10, 'now']);
+  await expect(repo.changeNotes('archive', [a, { ...b, record_version: 99 }])).rejects.toThrow();
+  expect((await repo.entity(a.id))?.record_status).toBe('active');
+  const token = await repo.changeNotes('archive', [a, b]);
+  expect(await repo.lastNoteOperation()).toBe(token);
+  expect((await repo.searchNotes('', 50, 0, { status: 'archived' })).length).toBe(2);
+  expect(await repo.searchMemory('Гарантия')).toEqual([]);
+  expect((await repo.entity(a.id))?.payload).toEqual(a.payload);
+  expect(await sql.getFirstAsync('SELECT entity_id FROM memory_attachments WHERE id=?', ['photo'])).toEqual({ entity_id: a.id });
+  await repo.undoNotes(token);
+  expect((await repo.entity(a.id))?.record_status).toBe('active');
+  await repo.changeNotes('archive', [(await repo.entity(a.id))!, (await repo.entity(b.id))!]);
+  const back = await repo.changeNotes('unarchive', [(await repo.entity(a.id))!, (await repo.entity(b.id))!]);
+  expect((await repo.entity(a.id))?.record_status).toBe('active');
+  await repo.undoNotes(back);
+  expect((await repo.searchNotes('', 50, 0, { status: 'archived' })).length).toBe(2);
+  await expect(repo.undoNotes(token)).rejects.toThrow();
+});

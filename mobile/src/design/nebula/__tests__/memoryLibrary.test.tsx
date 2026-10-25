@@ -51,7 +51,7 @@ describe("U2 Memory library note presentation", () => {
   });
   it("retains the operations that existing browser/native flows require", () => {
     const home = readFileSync(join(__dirname, "..", "..", "..", "screens", "LocalMemoryScreen.tsx"), "utf8");
-    for (const label of ["Новая заметка", "Добавить сведения из файла", "Поиск по заметкам",
+    for (const label of ["Новая заметка", "Добавить в память", "Поиск по заметкам",
       "Раздел ", "Открыть архив", "Открыть текущие записи", "Открыть корзину",
       "Резервные копии", "Выбрать записи", "Новый раздел памяти"]) {
       expect(home).toContain(label);
@@ -64,4 +64,11 @@ describe("U2 Memory library note presentation", () => {
     expect(home).toContain('void act("trash")');
     expect(home).toContain("undoNotes(undo)");
   });
+});
+
+test("overflow is a separate accessible action and never opens the note", () => {
+ const open = jest.fn(), select = jest.fn(), menu = jest.fn();
+ const v = render(<MemoryNoteCard note={note()} selected={false} sectionName="Заметки" onOpen={open} onToggleSelection={select} onActions={menu} />);
+ fireEvent.press(v.getByLabelText("Действия с заметкой " + note().title));
+ expect(menu).toHaveBeenCalledTimes(1); expect(open).not.toHaveBeenCalled(); expect(select).not.toHaveBeenCalled();
 });
