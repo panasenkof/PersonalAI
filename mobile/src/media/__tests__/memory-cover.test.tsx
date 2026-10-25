@@ -85,3 +85,16 @@ test("decode failure can be retried", async () => {
   fireEvent.press(screen.getByLabelText("Повторить загрузку обложки"));
   await waitFor(() => screen.getByLabelText("Обложка записи"));
 });
+
+test("viewport changes retain a mounted thumbnail; background disposes it", async () => {
+ const v = render(<MemoryCover profile="p" entityId="n" active />);
+ await waitFor(() => v.getByLabelText("Обложка записи"));
+ v.rerender(<MemoryCover profile="p" entityId="n" active={false} />);
+ v.rerender(<MemoryCover profile="p" entityId="n" active />);
+ expect(v.getByLabelText("Обложка записи")).toBeTruthy();
+ expect(manipulateAsync).toHaveBeenCalledTimes(1);
+ expect(mockDelete).not.toHaveBeenCalledWith("file:///cache/persai-previews/thumb.jpg");
+ mockVisible = false; v.rerender(<MemoryCover profile="p" entityId="n" active />);
+ expect(v.queryByLabelText("Обложка записи")).toBeNull();
+ expect(mockDelete).toHaveBeenCalledWith("file:///cache/persai-previews/thumb.jpg");
+});

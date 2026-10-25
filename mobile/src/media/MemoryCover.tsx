@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Image, Pressable, Text, View } from "react-native";
 import Feather from "@expo/vector-icons/Feather";
 import { useIsFocused } from "@react-navigation/native";
@@ -37,7 +37,13 @@ export function MemoryCover({ profile, entityId, active = true, height = 132, la
   useEffect(() => setNoPreview(false), [profile, entityId]);
   const [message, setMessage] = useState(""); const [loading, setLoading] = useState(false); const [attempt, setAttempt] = useState(0);
   useEffect(() => onLocalMemorySessionChange(setUnlocked), []);
-  const enabled = active && focused && visible && unlocked;
+  const activation = useRef({ key: "", seen: false });
+  const key = profile + ":" + entityId;
+  if (activation.current.key !== key || !focused || !visible || !unlocked) activation.current = { key, seen: false };
+  if (active && focused && visible && unlocked) activation.current.seen = true;
+  // Retain only while mounted in the bounded FlatList window. Blur, lock,
+  // background and unmount still dispose the plaintext thumbnail.
+  const enabled = activation.current.seen && focused && visible && unlocked;
   useEffect(() => {
     const controller = new AbortController(); let thumbnail = "";
     setUri(""); setFailed(false); setMessage(""); setLoading(enabled);
