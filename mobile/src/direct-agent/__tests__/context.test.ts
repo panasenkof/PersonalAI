@@ -68,3 +68,18 @@ test("the model is told today's date from the phone clock", async () => {
   const context = await prepareDirectContext({ ...options("Сколько лет Де Ниро", jest.fn(async () => []), jest.fn()), settings: { ...options("x", jest.fn(async () => []), jest.fn()).settings, allowWeb: false }, now: new Date(2026, 9, 15) });
   expect(context.context.startsWith("Сегодня 15 октября 2026 г.")).toBe(true);
 });
+
+
+test.each(["Привет!", "Куку 👋", "Добрый день", "Спасибо большое!"])("social turn %s avoids unsolicited memory, rewrite and web", async prompt => {
+ const lookup = jest.fn(async () => [{ id: "private-topic", title: "Разговор", body: "Посторонняя тема" }]);
+ const transport = jest.fn(); const notify = jest.fn();
+ const result = await prepareDirectContext({ ...options(prompt, lookup, transport), rewrite: true, notify });
+ expect(lookup).not.toHaveBeenCalled(); expect(transport).not.toHaveBeenCalled(); expect(notify).not.toHaveBeenCalled();
+ expect(result.used).toEqual([]); expect(result.builtinWeb).toBe(false);
+ expect(result.context).not.toContain("Посторонняя тема");
+});
+test.each(["Привет, найди рецепт", "Спасибо, а где ключи?", "Куку — название моей заметки"])("social prefix preserves a real request: %s", async prompt => {
+ const lookup = jest.fn(async () => [{ id: "n", title: "Ответ", body: "Текст" }]);
+ await prepareDirectContext(options(prompt, lookup, jest.fn()));
+ expect(lookup).toHaveBeenCalled();
+});

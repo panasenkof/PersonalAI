@@ -2,6 +2,7 @@ import React from "react";
 import { AppState, Pressable, Text } from "react-native";
 import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 import * as LocalAuthentication from "expo-local-authentication";
+import { withNativeInteraction } from "../native-interaction";
 import { AppLock } from "../AppLock";
 import { BottomSheet } from "../../components/BottomSheet";
 import { authenticateExistingMemory, authorizeLocalMemorySession, closeLocalMemory, revokeLocalMemorySession } from "../../local-memory/storage";
@@ -118,4 +119,27 @@ test("a phone without any screen lock is told to enable one and stays locked", a
   expect(v.queryByText("Закрытая память")).toBeNull();
   expect(LocalAuthentication.authenticateAsync).not.toHaveBeenCalled();
   expect(authorizeLocalMemorySession).not.toHaveBeenCalled();
+});
+
+
+test("microphone permission focus loss does not flash the cover, but background and later notification shade still hide data", async () => {
+ const v = render(<AppLock><Text>Диктовка</Text></AppLock>);
+ await waitFor(() => v.getByText("Диктовка"));
+ await act(async () => {
+   await withNativeInteraction(async () => {
+     listeners.get("blur")?.forEach(cb => cb(undefined));
+     return true;
+   }, { permissionPrompt: true });
+ });
+ expect(v.queryByText("PersAI · Защищено")).toBeNull();
+ let finish!: () => void; let pending!: Promise<void>;
+ await act(async () => { pending = withNativeInteraction(() => new Promise<void>(resolve => { finish = resolve; }), { permissionPrompt: true }); });
+ await act(async () => { listeners.get("blur")?.forEach(cb => cb(undefined)); });
+ expect(v.queryByText("PersAI · Защищено")).toBeNull();
+ await change("background"); expect(v.getByText("PersAI · Защищено")).toBeTruthy();
+ await change("active"); expect(v.getByText("Диктовка")).toBeTruthy();
+ await act(async () => { finish(); await pending; });
+ await act(async () => { listeners.get("blur")?.forEach(cb => cb(undefined)); });
+ expect(v.getByText("PersAI · Защищено")).toBeTruthy();
+ expect(LocalAuthentication.authenticateAsync).toHaveBeenCalledTimes(1);
 });

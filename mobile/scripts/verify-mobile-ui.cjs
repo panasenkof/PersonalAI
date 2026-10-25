@@ -448,6 +448,18 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByLabel('Выбрать файл для памяти', { exact: true }).click();
       await page.getByText('note.txt', { exact: true }).waitFor();
       assert.equal(await page.evaluate(() => window.__qa.auth), authenticationCount, 'A short file-picker switch must not ask for biometrics');
+      assert.equal(await page.getByLabel('Извлечь сведения из файла', { exact: true }).count(), 0, 'Recognition is optional and collapsed');
+      assert.equal(await page.getByLabel('Название импортируемой заметки', { exact: true }).count(), 0, 'Metadata is collapsed');
+      for (const bottom of [0, 24, 48]) {
+        await page.evaluate(value => window.__insets(value), bottom);
+        await page.setViewportSize({ width, height: 470 });
+        const save = await page.getByLabel('Сохранить сведения в память', { exact: true }).boundingBox();
+        assert(save && save.y >= 0 && save.y + save.height <= 470 - bottom + 1, 'Import save remains above system bars in a reduced viewport');
+      }
+      await page.evaluate(() => window.__insets(24));
+      await page.setViewportSize({ width, height: 900 });
+      if (process.env.SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, `import-compact-${width}.png`) });
+      await page.getByLabel('Распознавание', { exact: true }).click();
       await page.getByLabel('Извлечь сведения из файла', { exact: true }).click();
       await page.waitForFunction(() => document.querySelector('[aria-label="Распознанное содержимое файла"]').value.includes('индейка'));
       await page.getByLabel('Сохранить сведения в память', { exact: true }).click();
@@ -457,6 +469,18 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
         fs.mkdirSync(process.env.SCREENSHOT_DIR, { recursive: true });
         await page.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, `memory-${width}.png`) });
       }
+      await page.getByLabel('Выбрать записи', { exact: true }).click();
+      assert.equal(await page.getByLabel('Действия с выбранными записями', { exact: true }).isDisabled(), true);
+      await page.getByLabel('Выбрать заметку Индейка', { exact: true }).click();
+      await page.getByLabel('Действия с выбранными записями', { exact: true }).click();
+      await page.getByRole('button', { name: 'Открыть запись', exact: true }).waitFor();
+      assert.equal(await page.getByText('Объединить записи', { exact: true }).count(), 0, 'One record cannot be merged');
+      await page.clock.runFor(500);
+      if (process.env.SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, `selection-menu-${width}.png`), animations: "disabled" });
+      const selectedActionBox = await page.getByRole('button', { name: 'Открыть запись', exact: true }).boundingBox();
+      assert(selectedActionBox && selectedActionBox.y >= 0 && selectedActionBox.y + selectedActionBox.height <= 876, 'Selection actions are inside the visible screen');
+      await page.getByLabel('Закрыть панель Действия с записью', { exact: true }).click();
+      await page.getByLabel('Снять выбор записей', { exact: true }).click();
       // Narrow available height approximates the resized viewport, while the
       // native IME and gesture/three-button navigation still need phone QA.
       await page.getByLabel('Вкладка Главная', { exact: true }).click();

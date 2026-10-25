@@ -1,3 +1,4 @@
+import { registerApplicationModal } from "./visibility";
 import { AppState } from "react-native";
 import { sessionExpired, sessionNow } from "./session";
 import type { SessionTimestamp } from "./session";
@@ -12,7 +13,10 @@ export function onNativeInteractionEnd(listener: (success: boolean) => void) {
  * The app boundary owns authentication; a short picker/share never prompts.
  * Consumers resume database/network work only after this promise succeeds.
  */
-export async function withNativeInteraction<T>(work: () => Promise<T>): Promise<T> {
+export async function withNativeInteraction<T>(work: () => Promise<T>, options?: { permissionPrompt?: boolean }): Promise<T> {
+  // Only the known runtime-permission window is exempt from Android focus loss.
+  // Real inactive/background transitions still hide content and expire sessions.
+  const releaseWindow = options?.permissionPrompt ? registerApplicationModal() : undefined;
   active++;
   let backgrounded = false;
   let leftAt: SessionTimestamp | null = null;
@@ -33,7 +37,7 @@ export async function withNativeInteraction<T>(work: () => Promise<T>): Promise<
     success = true;
     return result;
   } finally {
-    state.remove(); active--;
+    state.remove(); releaseWindow?.(); active--;
     if (!active) for (const listener of listeners) listener(success || !backgrounded);
   }
 }

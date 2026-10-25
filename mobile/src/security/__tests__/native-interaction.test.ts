@@ -1,6 +1,7 @@
 import { AppState } from "react-native";
 import * as LocalAuthentication from "expo-local-authentication";
 import { nativeInteractionActive, withNativeInteraction } from "../native-interaction";
+import { applicationModalActive } from "../visibility";
 import { APP_SESSION_TIMEOUT_MS } from "../session";
 jest.mock("expo-local-authentication", () => ({ authenticateAsync: jest.fn() }));
 let state = "active";
@@ -23,4 +24,13 @@ test("an expired picker cannot resume processing before application unlock", asy
     change("background"); jest.advanceTimersByTime(APP_SESSION_TIMEOUT_MS); change("active"); return "file";
   })).rejects.toThrow("Сеанс приложения истёк");
   expect(LocalAuthentication.authenticateAsync).not.toHaveBeenCalled(); expect(nativeInteractionActive()).toBe(false);
+});
+
+test("failed permission requests always release their focus exemption", async () => {
+ await expect(withNativeInteraction(async () => {
+   expect(applicationModalActive()).toBe(true);
+   throw new Error("permission cancelled");
+ }, { permissionPrompt: true })).rejects.toThrow("permission cancelled");
+ expect(applicationModalActive()).toBe(false);
+ expect(nativeInteractionActive()).toBe(false);
 });

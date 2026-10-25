@@ -1,3 +1,4 @@
+import { withNativeInteraction } from "../security/native-interaction";
 import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
 import { useSyncExternalStore } from "react";
@@ -159,7 +160,10 @@ async function beginWhisperDictation(onText: (text: string) => void, onError: (m
   const model = await loadEngine();
   checkCancelled();
   const { AudioManager, AudioRecorder } = require("react-native-audio-api") as typeof import("react-native-audio-api");
-  const permission = await AudioManager.requestRecordingPermissions();
+  const currentPermission = await AudioManager.checkRecordingPermissions?.();
+  checkCancelled();
+  const permission = currentPermission === "Granted" ? currentPermission :
+    await withNativeInteraction(() => AudioManager.requestRecordingPermissions(), { permissionPrompt: true });
   checkCancelled();
   if (permission !== "Granted") throw new Error("Голос на телефоне: нет разрешения на микрофон. Разрешите микрофон для PersAI в настройках телефона.");
   const saved = await readSaved();

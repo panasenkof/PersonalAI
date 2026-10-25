@@ -8,12 +8,13 @@ import { memoryDisplayTitle, memoryNoteDate, memoryNotePreview, memoryNoteType }
 
 /** The library card is display-only: selection, long-press and navigation
  * remain under the owning Memory screen. No persistence or LLM calls here. */
-export function MemoryNoteCard({ note, sectionName, selected, onOpen, onToggleSelection, cover, grid = false }: {
+export function MemoryNoteCard({ note, sectionName, selected, selecting = false, onOpen, onToggleSelection, cover, grid = false }: {
   cover?: React.ReactNode;
   grid?: boolean;
   note: EntityRecord;
   sectionName: string;
   selected: boolean;
+  selecting?: boolean;
   onOpen: () => void;
   onToggleSelection: () => void;
 }) {
@@ -24,25 +25,25 @@ export function MemoryNoteCard({ note, sectionName, selected, onOpen, onToggleSe
   const excerpt = preview === title ? "" : preview.startsWith(title + " ") ? preview.slice(title.length).trim() : preview;
   const date = memoryNoteDate(note.updated_at);
   return <Pressable testID={"memory-note-" + note.id}
-    accessibilityRole="button" accessibilityLabel={"Открыть заметку " + title}
-    accessibilityState={{ selected }} accessibilityHint="Нажмите для открытия, удерживайте для выбора"
+    accessibilityRole={selecting ? "checkbox" : "button"} accessibilityLabel={(selecting ? "Выбрать заметку " : "Открыть заметку ") + title}
+    accessibilityState={{ selected, ...(selecting ? { checked: selected } : {}) }} accessibilityHint={selecting ? "Нажмите, чтобы изменить выбор" : "Нажмите для открытия, удерживайте для выбора"}
     onLongPress={onToggleSelection} onPress={selected ? onToggleSelection : onOpen}
     style={({ pressed }) => ({
       borderWidth: 1, borderColor: selected ? t.accent : t.line,
       borderRadius: nebulaRadii.card, backgroundColor: pressed ? t.soft : t.panel,
-      overflow: "hidden", minHeight: grid ? 164 : 88, flex: 1,
+      overflow: "hidden", minHeight: grid ? 164 : 88,
     })}>
     {cover}
-    <View style={{ padding: nebulaSpacing.sm, gap: nebulaSpacing.xs, flex: 1 }}>
+    <View style={{ padding: nebulaSpacing.sm, gap: nebulaSpacing.xs }}>
     {grid ? <>
-      {!cover || selected ? <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+      {!cover || selecting ? <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
         <Feather name={type.icon} size={22} color={t.secondary} />
-        {selected ? <Feather name="check-square" size={22} color={t.secondary} /> : null}
+        {selecting ? <Feather name={selected ? "check-square" : "square"} size={22} color={t.secondary} /> : null}
       </View> : null}
       <Text numberOfLines={3} style={{ color: t.text, fontWeight: "700", fontSize: 16, lineHeight: 23 }}>{title}</Text>
     </> : <View style={{ flexDirection: "row", alignItems: "flex-start", gap: nebulaSpacing.xs }}>
       <View accessible={false} style={{ padding: nebulaSpacing.xs, borderRadius: nebulaRadii.chip, backgroundColor: t.soft }}><Feather name={type.icon} size={20} color={t.secondary} /></View>
-      {selected ? <Feather name="check-square" size={20} color={t.secondary} /> : null}
+      {selecting ? <Feather name={selected ? "check-square" : "square"} size={20} color={t.secondary} /> : null}
       <Text numberOfLines={2} style={{ flex: 1, minWidth: 0, color: t.text, fontWeight: "700", fontSize: 16, lineHeight: 23 }}>{title}</Text>
       <Feather name="chevron-right" size={18} color={t.muted} />
     </View>}
