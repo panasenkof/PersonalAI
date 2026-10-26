@@ -179,9 +179,9 @@ test("names and index words are searched with the record and rebuilt on every ch
   await repo.setIndexTerms(lena.id, ["начальница", "босс", "x"], "model:deepseek-chat");
   expect(await repo.indexTerms(lena.id)).toEqual([{ source: "model:deepseek-chat", terms: ["начальница", "босс"] }]);
   expect((await repo.searchNotes("начальница"))[0].id).toBe(lena.id);
-  // A text edit keeps names and index words in the index.
+  // A text edit keeps user names/words, but model words need the new version.
   await repo.reviseEntity(lena.id, 1, { title: "Елена Сергеевна", body: "Директор по продажам" }, "Повышение");
-  expect((await repo.searchNotes("босс"))[0].id).toBe(lena.id);
+  expect(await repo.searchNotes("босс")).toHaveLength(0);
   expect((await repo.searchNotes("директор"))[0].id).toBe(lena.id);
   expect(await repo.searchNotes("руководитель")).toHaveLength(0);
   await repo.setIndexTerms(lena.id, [], "model:deepseek-chat");

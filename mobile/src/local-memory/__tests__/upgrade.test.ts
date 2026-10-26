@@ -98,7 +98,7 @@ test.each([false, true])("upgrading an installed v1 database (chats=%s) opens a 
   expect(await repo.revisions("entity", "note")).toHaveLength(1);
   expect(await repo.listCollections()).toMatchObject([{ id: "recipes", name: "Рецепты" }]);
   expect(mockVault.get(identity.keyName)).toBe("6".repeat(64));
-  expect(mockConnections[0].sqlite.prepare("PRAGMA user_version").get()).toMatchObject({ user_version: 5 });
+  expect(mockConnections[0].sqlite.prepare("PRAGMA user_version").get()).toMatchObject({ user_version: 6 });
   await closeLocalMemory();
   const reopened = conversationRepository("guest");
   expect((await reopened.load()).find(c => c.question === "Можно ввести сообщение")).toBeTruthy();
@@ -148,7 +148,7 @@ test("upgrading v2 to v3 types the records, splits long text into chunks and sea
   await installationV2();
   const repo = await localMemoryRepository("guest");
   const db = mockConnections[0].sqlite;
-  expect(db.prepare("PRAGMA user_version").get()).toMatchObject({ user_version: 5 });
+  expect(db.prepare("PRAGMA user_version").get()).toMatchObject({ user_version: 6 });
   expect(await repo.entity("masha")).toMatchObject({ kind: "person", title: "Маша", record_version: 1 });
   expect(await repo.entity("dacha")).toMatchObject({ kind: "note" });
   expect(db.prepare("SELECT count(*) AS n FROM memory_chunks WHERE entity_id='dacha'").get().n).toBeGreaterThan(1);
@@ -193,9 +193,38 @@ test("v4 attachments upgrade keeps every byte and allows merging two originals",
   expect(Array.from(db.prepare("SELECT bytes FROM memory_attachment_parts").get().bytes)).toEqual([1,2,3]);
   db.prepare("INSERT INTO memory_attachments VALUES (?,?,?,?,?,?)").run("b", "n", "b.png", "image/png", 3, "now");
   expect(db.prepare("SELECT count(*) AS n FROM memory_attachments").get().n).toBe(2);
-  expect(db.prepare("PRAGMA user_version").get().user_version).toBe(5);
+  expect(db.prepare("PRAGMA user_version").get().user_version).toBe(6);
   expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   const repo = await localMemoryRepository("guest");
   expect((await repo.searchMemory("гарантия"))[0].entity.id).toBe("n");
   expect((await repo.pendingVectorChunks("test"))[0].text).toContain("Распознанная гарантия");
+});
+
+test.each([false, true])("v5 enrichment migration (retry=%s) preserves data/key and invalidates unversioned model words", async failFirst => {
+  const { SCHEMA_SQL } = require("../storage");
+  const identity = await localMemoryIdentity("guest");
+  const legacy = new DatabaseSync(path.join(mockDirectory, identity.databaseName));
+  legacy.exec(SCHEMA_SQL.replace("  source_record_version INTEGER, source_collection_name TEXT,\n", ""));
+  legacy.exec(`PRAGMA user_version=5;
+    INSERT INTO memory_collections VALUES ('c','Заметки','notes',NULL,'standard','now');
+    INSERT INTO memory_entities(id,collection_id,domain,payload_json,created_at,updated_at) VALUES ('n','c','notes','{"body":"Исходный текст"}','now','now');
+    INSERT INTO memory_index_terms VALUES ('n','ручное','user','2099'), ('n','устаревшее','model:auto','2099');
+    INSERT INTO memory_attachments VALUES ('a','n','a.txt','text/plain',3,'now');
+    INSERT INTO memory_attachment_parts VALUES ('a',0,X'010203','hash');`);
+  legacy.close(); mockVault.set(identity.keyName, "6".repeat(64)); mockVault.set(identity.keyName + ".initialized", "yes");
+  if (failFirst) {
+    mockIndexFailure = true;
+    await expect(openLocalMemory("guest")).rejects.toThrow("simulated_index_failure");
+    const unchanged = new DatabaseSync(path.join(mockDirectory, identity.databaseName));
+    expect(unchanged.prepare("PRAGMA user_version").get().user_version).toBe(5);
+    expect(unchanged.prepare("PRAGMA table_info(memory_index_terms)").all().map((c: any) => c.name)).not.toContain("source_record_version");
+    unchanged.close(); mockIndexFailure = false;
+  }
+  const repo = await localMemoryRepository("guest");
+  expect((await repo.searchNotes("Исходный"))[0].id).toBe("n");
+  expect((await repo.searchNotes("ручное"))[0].id).toBe("n");
+  expect(await repo.searchNotes("устаревшее")).toEqual([]);
+  expect(await repo.staleIndexTerms("model:auto")).toEqual(["n"]);
+  expect(mockVault.get(identity.keyName)).toBe("6".repeat(64));
+  expect(Array.from(mockConnections.at(-1).sqlite.prepare("SELECT bytes FROM memory_attachment_parts").get().bytes)).toEqual([1,2,3]);
 });

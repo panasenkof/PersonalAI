@@ -9,7 +9,7 @@ jest.mock("expo-file-system/legacy", () => ({
 }));
 jest.mock("expo-sharing", () => ({ isAvailableAsync: jest.fn(), shareAsync: jest.fn() }));
 jest.mock("../storage", () => ({
-  LOCAL_MEMORY_SCHEMA_VERSION: 5,
+  LOCAL_MEMORY_SCHEMA_VERSION: 6,
   withLocalMemoryDatabase: jest.fn(async (_id: string, task: (db: unknown) => Promise<unknown>) => task(mockDb)),
 }));
 
@@ -81,7 +81,7 @@ test("export SQLCipher-encrypts a new independent file before sharing and erases
     "/cache/pia-encrypted-random-id.db", code,
   ]);
   expect(mockDb.getFirstAsync).toHaveBeenCalledWith("SELECT sqlcipher_export('pia_export')");
-  expect(mockDb.execAsync).toHaveBeenCalledWith("PRAGMA pia_export.user_version = 5");
+  expect(mockDb.execAsync).toHaveBeenCalledWith("PRAGMA pia_export.user_version = 6");
   expect(mockDb.execAsync).toHaveBeenCalledWith("DETACH DATABASE pia_export");
   expect(Sharing.shareAsync).toHaveBeenCalledTimes(1);
   expect(FS.deleteAsync).toHaveBeenCalledWith("file:///cache/pia-encrypted-random-id.db", {
@@ -190,7 +190,7 @@ test.each([1, 2, 3])("restores deployed schema v%s including chats into the upgr
   expect(mockDb.execAsync.mock.calls.map(([sql]) => sql)).toContainEqual(expect.stringContaining("INSERT OR IGNORE INTO direct_conversations"));
 });
 
-test.each([0, 6])("rejects unsupported backup schema v%s before copying any memory", async version => {
+test.each([0, 7])("rejects unsupported backup schema v%s before copying any memory", async version => {
   const read = mockDb.getFirstAsync.getMockImplementation()!;
   mockDb.getFirstAsync.mockImplementation(async sql => sql === "PRAGMA pia_import.user_version" ? { user_version: version } : read(sql));
   await expect(restoreEncryptedBackup("guest", "file:///backup.db", code)).rejects.toThrow("incompatible_backup_version");
