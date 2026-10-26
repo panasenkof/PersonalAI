@@ -5,7 +5,7 @@ import * as Sharing from "expo-sharing";
 jest.mock("expo-crypto", () => ({ getRandomBytes: jest.fn(), randomUUID: jest.fn() }));
 jest.mock("expo-file-system/legacy", () => ({
   cacheDirectory: "file:///cache/", copyAsync: jest.fn(),
-  deleteAsync: jest.fn(), getInfoAsync: jest.fn(),
+  deleteAsync: jest.fn(), getInfoAsync: jest.fn(), getFreeDiskStorageAsync: jest.fn(),
 }));
 jest.mock("expo-sharing", () => ({ isAvailableAsync: jest.fn(), shareAsync: jest.fn() }));
 jest.mock("../storage", () => ({
@@ -40,6 +40,7 @@ beforeEach(() => {
   (FS.deleteAsync as jest.Mock).mockResolvedValue(undefined);
   (FS.copyAsync as jest.Mock).mockResolvedValue(undefined);
   (FS.getInfoAsync as jest.Mock).mockResolvedValue({ exists: true, size: 4096, isDirectory: false });
+  (FS.getFreeDiskStorageAsync as jest.Mock).mockResolvedValue(8 * 1024 * 1024 * 1024);
   mockRestored = false;
   mockAlreadyContainsMemory = false;
   mockDb.runAsync.mockResolvedValue({});
@@ -47,6 +48,9 @@ beforeEach(() => {
     if (sql === "COMMIT") mockRestored = true;
   });
   mockDb.getFirstAsync.mockImplementation(async (sql: string): Promise<Record<string, string | number> | null> => {
+    if (sql === "SELECT count(*) AS n FROM memory_entities") return { n: 2 };
+    if (sql === "PRAGMA page_count") return { page_count: 20 };
+    if (sql === "PRAGMA page_size") return { page_size: 4096 };
     if (sql.includes("pia_import.user_version")) return { user_version: 1 };
     if (sql.includes("pia_import.integrity_check")) return { integrity_check: "ok" };
     if (sql.includes("pia_import.memory_entities")) return { n: 2 };
