@@ -18,7 +18,7 @@
 1. **Источник истины:** оригинальный источник (сообщение, документ, аудио, файл) + утверждение со ссылкой на свидетельство. Индекс/эмбеддинг — производные, переиздаваемые данные.
 2. **Личность и стабильные ID:** объект имеет UUID независимо от заголовка/коллекции; слияние сохраняет redirect через merged_into_id и происхождение утверждений. Одинаковое имя не означает один и тот же объект.
 3. **Факт ≠ упоминание:** найденное «Лиза» в аудио — source mention, но не утверждение, что Лиза участвовала в разговоре. Подозрения не выдавать за подтверждённые знания.
-4. **Два времени:** valid_from/valid_to = когда верно в мире; known_from/known_to = когда это было известно системе. Хранить точность даты и неопределённость (не выдумывать день из «в 2023»).
+4. **Два времени:** valid_from/valid_to = когда верно в мире; known_from/known_to = когда это было известно системе. Хранить точность, интервал неопределённости, исходное относительное выражение («год назад»), его дату-основание и часовой пояс. **NULL-окончание не доказывает продолжающееся состояние**: сохранять continuity=ongoing/ended/unknown и last_confirmed_at; не подменять unknown открытым бесконечным периодом.
 5. **Повторение vs замещение:** каждое обслуживание автомобиля — отдельное событие; смена единственного текущего места работы может закрыть прежнее состояние. Нельзя выводить уникальность любого предиката из названия: правила задаются словарём предикатов.
 6. **Подтверждение:** модель предлагает запись/связь/изменение/слияние; предложение не становится принятым фактом само. Возможна пакетная приёмка после предпросмотра; отклонения учитываются, не задаются снова без новой информации.
 7. **Приватность:** политика доступа применяется к факту, исходному сегменту и всему пути обхода графа. Производный факт не может быть доступнее источников, из которых он получен, без явной переклассификации; закрытые данные не уходят облачной модели по умолчанию.
@@ -34,17 +34,17 @@
 | --- | --- | --- |
 | objects | id PK, type, canonical_name, summary, attributes_json, privacy, status, merged_into_id FK nullable, created_at, updated_at | Люди, автомобили, проекты, компании, места, документы как идентифицируемые объекты; только вспомогательные атрибуты в JSON |
 | object_aliases | id PK, object_id FK, name, normalized_name, locale, alias_type | Альтернативные имена, прозвища, варианты записи |
-| claims | id PK, subject_id FK, predicate, object_id FK nullable, value_json nullable, claim_type, qualifiers_json, confidence nullable, status, privacy, occurred_at nullable, valid_from, valid_to, valid_precision, known_from, known_to, supersedes_claim_id FK nullable, created_at | Атомарное утверждение или повторяемое событие; либо объектное значение, либо literal; временная и epistemic история |
-| claim_evidence | claim_id FK, segment_id FK, stance, method, confidence, created_at; PK(claim_id,segment_id,stance) | Доказательство в точном фрагменте, поддерживает/опровергает/упоминает |
-| source_mentions | segment_id FK, object_id FK, role, confidence, status; PK(segment_id,object_id,role) | Неявное обнаружение упоминаний, без утверждения участия |
+| claims | id PK, subject_id FK, predicate, object_id FK nullable, value_json nullable, claim_type, modality, negated, qualifiers_json, confidence nullable, status, privacy, occurred_at nullable, valid_from, valid_to, valid_precision, temporal_uncertainty_json, raw_time, anchor_time, anchor_tz, continuity, state_as_of, last_confirmed_at, known_from, known_to, supersedes_claim_id FK nullable, created_at | Атомарное утверждение, наблюдение или повторяемое событие; объектное или literal-значение; момент/интервал, планы и гипотезы отдельно от реальности; достоверность и история |
+| claim_evidence | claim_id FK, segment_id FK, source_revision, extraction_revision nullable, stance, method, confidence, evidence_status, created_at; PK(claim_id,segment_id,source_revision,stance) | Доказательство в точном фрагменте конкретной версии, поддерживает/опровергает/упоминает; current/stale/withdrawn отдельно от статуса самого факта |
+| source_mentions | segment_id FK, source_revision, object_id FK, role, confidence, status; PK(segment_id,source_revision,object_id,role) | Обнаружение упоминаний в конкретной версии источника, без утверждения личности, участия или причинной связи |
 
-Правила: (object_id IS NOT NULL) XOR (value_json IS NOT NULL) для значимого объектного/literal-предиката; exception для unary-предикатов только явно в каталоге. claim_type: state/event/timeless/preference; status: accepted/disputed/retracted; непроверенные варианты живут в proposals, не в claims. На M1 определить допустимые predicate и payload-схемы: relation cardinality (functional/multi-valued), типы субъектов/объектов, допустимые единицы, направленность/обратный предикат. Предикат не задаётся произвольным SQL от модели. Проверки конфликта/пересечения временных интервалов выполняет транзакционный слой.
+Правила: (object_id IS NOT NULL) XOR (value_json IS NOT NULL) для значимого объектного/literal-предиката; exception для unary-предикатов только явно в каталоге. claim_type: state/event/observation/enduring/preference (и при необходимости отдельные виды эпизода); modality: asserted/planned/hypothetical, negated отдельно; status: accepted/disputed/retracted. Предположения LLM живут в proposals, не в accepted claims; явное заявление пользователя сохраняется по стандартному действию «Сохранить», без повторных вопросов о том же факте. На M1 определить допустимые predicate и payload-схемы: relation cardinality (functional/multi-valued), типы субъектов/объектов, допустимые единицы, направленность/обратный предикат. Предикат не задаётся произвольным SQL от модели. Проверки конфликта/пересечения временных интервалов выполняет транзакционный слой.
 
 ### 3.2. Эпизоды, история сообщений и оригиналы
 | Таблица | Поля | Смысл |
 | --- | --- | --- |
-| sources | id PK, kind, title, origin_uri nullable, external_id nullable, content_hash, privacy, source_time nullable, imported_at, metadata_json | Исходное сообщение/документ/аудио/видео/URL/наблюдение; источник может быть внутренним |
-| source_segments | id PK, source_id FK, ord, text nullable, modality, start_char/end_char nullable, start_ms/end_ms nullable, page_no nullable, region_json nullable, confidence nullable | Адресуемая цитата, диапазон PDF, кадр/регион, интервал аудио; именно сюда ссылается evidence |
+| sources | id PK, kind, title, origin_uri nullable, external_id nullable, content_hash, revision, privacy, source_time nullable, imported_at, metadata_json | Исходное сообщение/документ/аудио/видео/URL/наблюдение; revision+hash защищают доказательства и фоновые обработки |
+| source_segments | id PK, source_id FK, source_revision, extraction_revision, ord, text nullable, modality, start_char/end_char nullable, start_ms/end_ms nullable, page_no nullable, region_json nullable, confidence nullable | Адресуемая **версионная** цитата, диапазон PDF, кадр/регион, интервал аудио; локатор не меняет смысл при правке/повторном распознавании |
 | conversations | id PK, title, created_at, updated_at, status | Переписка без гигантского перезаписываемого snapshot_json |
 | messages | id PK, conversation_id FK, source_id FK, seq, role, text, created_at, status | Сообщение — отдельный документальный источник; сообщения с файлами ссылаются на источники |
 | media_blobs | id PK, sha256 UNIQUE, mime, size, created_at | Дедуп по хешу байтов; только шифрованное содержимое внутри базы |
@@ -57,7 +57,7 @@
 ### 3.3. Контроль и организация
 | Таблица | Поля | Смысл |
 | --- | --- | --- |
-| memory_proposals | id PK, operation, target_kind, target_id nullable, payload_json, reason, confidence nullable, fingerprint, status, created_at, decided_at nullable | Черновик add/update/link/merge/close/forget; принятие, отклонение, пакетное рассмотрение |
+| memory_proposals | id PK, operation, target_kind, target_id nullable, source_ids_json, evidence_refs_json, expected_versions_json, payload_json, reason, confidence nullable, fingerprint, status, decision_actor nullable, created_at, decided_at nullable | Версионный черновик add/update/link/merge/close/forget, доказательства, CAS, принятие/отклонение/«Позже», пакетное рассмотрение |
 | memory_operations | id PK, batch_id, actor, operation, target_kind, target_id, before_json, after_json, reason, created_at | Аудит правок/отмена; физическое забывание очищает персональные снимки |
 | collections | id PK, name, slug UNIQUE, description, privacy, created_at | Разделы как представление, не источник истины и не единственный ACL |
 | collection_items | collection_id FK, item_kind, item_id, PRIMARY KEY(collection_id,item_kind,item_id) | Элемент виден в нескольких разделах без копирования |
@@ -73,6 +73,18 @@
 
 В этой целевой модели перечислено **18 обычных таблиц + 1 виртуальная FTS5 = 19 логических**. Это не финальная DDL; M1 должен утвердить физическую схему, CHECK, FK, индексы, back-up manifest и удалить ненужные атрибуты, если не требуются тестами. SQLite внутренние таблицы FTS в счёт не входят. Индекс вектора версии 2026 нельзя использовать с другим fingerprint. При необходимости вспомогательная таблица модельных метаданных — лишь по доказанной пользе.
 
+### 3.5. Согласование с планами №72 и №66.4 (критично до M1)
+
+Это **одна общая модель**, а не параллельные таблицы для каждого подплана:
+- [TEMPORAL_MEMORY.md](TEMPORAL_MEMORY.md) различает occurrence (событие, в том числе с длительностью), observation/measurement (снимок на дату), state (состояние), enduring (устойчивое знание), а также asserted/planned/hypothetical и отрицание. Все эти измерения должны иметь сериализуемый контракт; событие с длительностью не обязано быть точкой `occurred_at`. Конкретный формат интервальной неопределённости и anchor согласовать до финальной DDL.
+- `valid_to IS NULL` означает «конец не указан», а не обязательно ongoing. Для вопроса «где сейчас работаю» нужно учитывать подтверждённую непрерывность и дату последнего подтверждения; план/гипотеза о переезде не становится фактом при наступлении даты. Условия predicate учитывают контекст и роль: `primary_employer` ≠ `secondary_employer`, адрес регистрации ≠ место проживания.
+- [RELATIONAL_MEMORY.md](RELATIONAL_MEMORY.md) временно предлагает `memory_relation_candidates` + `memory_relation_decisions` поверх legacy `memory_relations`, **если расширять старую v5/v6**. В новой канонической схеме эта функциональность реализуется общими `claims`, `claim_evidence`, `source_mentions`, `memory_proposals` и `memory_operations`. Не строить два одновременно существующих графа и две очереди подтверждений.
+- Разговор/обслуживание/поездка могут требовать идентичности **самого эпизода**: разрешить объект типа `event/episode` с ролями `participant`, `about`, `performed_on`, когда бинарного claim недостаточно. Отдельно хранить упоминание имени, доказанное участие и вычисленный поисковый путь, не подменяя одно другим.
+- При изменении оригинала/расшифровки связанная `claim_evidence` переходит в `stale`/ `withdrawn`, а утверждение пересматривается на основании **всех независимых подтверждений**; копии одного источника не равны независимым свидетельствам. Ручное подтверждение явного факта пользователя не должно заново запрашиваться после обычной индексации.
+- `memory_proposals` обязана хранить точные исходные версии, объектные/смысловые ключи и результаты выбора, чтобы адресные обновления и отказы переживали смену модели, рестарт и переиндексацию без повторного спама; `deferred` не означает `rejected`.
+- Техническая ветка №66.1/schema v6 чинит реальную гонку enrichment, но **не является реализацией vNext**. Перед M1 сделать таблицу соответствия её CAS/source-version решениям, чтобы не реализовать одно и то же повторно; текущая очередь PLAN.md §2 и уже подготовленные исправления сохраняются.
+- Параллельно проверить гарантии SQLite `FOREIGN KEY`/CAS/ACL, обратимость изменения, устойчивость backup/restore; новые требования не оправдывают удаление работоспособных возможностей интерфейса.
+
 ## 4. Как работает ingestion — обязательный контракт M2
 1. Сначала безопасно принять оригинал/сообщение и зафиксировать source_id. При сбое распознавания источник не теряется.
 2. В пределах приватности и бюджета извлечь типизированные кандидаты (JSON-schema; ни одного произвольного SQL/инструмента из ответа модели). Неизвестное оставить неизвестным.
@@ -83,8 +95,8 @@
 7. Асинхронная консолидация эпизодов предложением, а не молчаливая правка; при lock/budget/offline очередь возобновляется без повторных дорогостоящих вызовов.
 
 ## 5. Временная семантика
-- state: «работаю в компании Б с сентября 2025» может закончить старое primary_employer, **только** если правило предиката functional на соответствующем временном интервале; вторую занятость не закрывать.
-- event: замена свечей в 2023 и 2025 — два отдельных claims с одним predicate и разными occurred_at. Второе не supersede первое.
+- state: «работаю в компании Б с сентября 2025» может предложить закончить старое primary_employer, **только** если правило предиката functional с тем же контекстом, и источник действительно свидетельствует о переходе. Вторую занятость не закрывать; если дата/факт завершения прежней работы неизвестны — сохранить uncertainty и предложить уточнение, не выдумывать срок.
+- event: замена свечей в 2023 и 2025 — два отдельных claims с одним predicate и разными occurred_at/интервалами; месячная/годовая точность и длительность не подставляются произвольно. Второе не supersede первое.
 - timeless: «Лиза моя сестра» не устаревает без свидетельства смены/ошибки; отрицание относится к тому же периоду и тоже нуждается в источнике.
 - valid time != observation/ingestion time: «сегодня узнал, что переехал в июне» сохраняет valid_from в июне, known_from сегодня. Для неопределённых дат required valid_precision.
 - Исправление ошибочного утверждения и завершение периода действия — разные операции. Сохранение предшествующей версии и доказательства обязательно.
