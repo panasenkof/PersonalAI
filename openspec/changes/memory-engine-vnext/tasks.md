@@ -13,6 +13,8 @@ Statuses: [x] documentation delivered; [ ] implementation/testing not started. P
 
 ## M1 — New local repository and schema (first implementation PRs)
 - [ ] Define physically executable SQL DDL, CHECK, FK, UNIQUE and indexes; decide source/message/blob deletion and privacy intersection semantics.
+- [ ] Reconcile with existing TEMPORAL_MEMORY/RELATIONAL_MEMORY: observation vs event, plan/negation, ongoing/ended/unknown, time precision/anchor/timezone, exact evidence revisions and lifecycle; avoid duplicate relation/proposal tables.
+- [ ] Compare current technical №66.1/schema v6 CAS/source-version change with vNext repository and keep a single owner for invariant implementation.
 - [ ] Build TS typed repository with transactions, version/conflict checks and deterministic safe predicate catalog.
 - [ ] Split old conversation JSON into normalised conversations/messages; preserve running chat and draft/attachment behavior.
 - [ ] Implement streaming hash/dedup for originals with multiple references; copy verified bytes; ensure SQLCipher locked-state rejects all.
