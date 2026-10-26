@@ -59,6 +59,34 @@ The system SHALL distinguish undoable archive from physical purge; physical purg
 Encrypted backup and isolated restore SHALL verify schema, relations and file checksums; already exported backups require a warning because they cannot be retroactively modified.
 Replacing the prior test schema SHALL NOT silently delete any installed profile's content.
 
+## Requirement: Explainable bulk memory review and user-controlled exceptions
+The system SHALL support a read-only group-level memory cleanup dry-run with stable candidate IDs/source versions, human-readable reason codes, candidate-level exclusion, keep/never-suggest, defer and action override. A model's similarity or obsolescence ranking SHALL NOT autonomously remove user sources, claims, original media, clinical records or historical episodes. A candidate being old, unopened or a URL fetch failure SHALL NOT alone prove that deletion is safe.
+
+Bulk proposals SHALL distinguish hide/archive, undoable trash, rebuildable cache disposal and separately confirmed irreversible purge. The system SHALL calculate graph impact before applying any action, including evidence on accepted claims, shared blobs, source versions, citations, linked notes, collection membership, index effects and backups. It SHALL estimate immediate versus delayed bytes reclaimed without counting shared files more than once.
+
+The system SHALL revalidate all affected identities/versions, profile lock status, privacy, pin/keep/skip decisions and references **after confirmation** and before each atomic apply. Any stale or unsafe element SHALL be skipped with explanation, not deleted. A batch SHALL be idempotent across crash/restart, and undo SHALL restore reversible operations; hard purge SHALL not claim to erase already exported independent backups.
+
+### Scenario: Exclude five items from proposed bulk archive
+- **GIVEN** 20 old watch-later videos are grouped for review and three are pinned
+- **AND** the user explicitly excludes five further items
+- **WHEN** the user confirms archiving the remaining eligible items
+- **THEN** the exclusions and pinned materials SHALL remain unchanged, and the result SHALL enumerate changed/skipped items with explanations and undo.
+
+### Scenario: One source supports accepted claims and multiple notes
+- **GIVEN** a document is linked by multiple notes and provides unique evidence for an accepted claim
+- **WHEN** it appears in a suspected-duplicate or obsolete-content group
+- **THEN** the dry-run SHALL show affected links and evidence and SHALL NOT silently purge the original or leave a seemingly supported claim with destroyed sole evidence.
+
+### Scenario: Medical history and completed events are not obsolete trash
+- **GIVEN** old laboratory results, an expired past prescription, and previous car repairs are retained as history
+- **WHEN** cleanup candidates are generated solely by age
+- **THEN** the system SHALL NOT propose physical removal of these records as expired current-state facts.
+
+### Scenario: Cancel, stale review and no external leaks
+- **GIVEN** a group review with candidates from an unlocked profile
+- **WHEN** the user cancels, or a candidate becomes pinned/changed before apply, or profile locks
+- **THEN** cancel SHALL make no changes; changed or blocked candidates SHALL be skipped; closed metadata SHALL NOT be transmitted to an external model.
+
 ## Requirement: Memory user interface after the engine
 The system SHALL preserve current approved visual style and Home/Nebula while providing navigable object cards, history/time context, source-open-to-fragment, proposal queue, contradiction view, and privacy/forget controls.
 New UI code SHALL follow the UX specification and stable engine API, with Android accessibility, IME/Back and device QA.
