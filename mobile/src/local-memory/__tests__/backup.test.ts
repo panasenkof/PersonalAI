@@ -218,7 +218,8 @@ test("v7 restore brings back explicit keep/skip decisions within the same SQLCip
   const sql = mockDb.execAsync.mock.calls.map(([s]: string[]) => s);
   const restored = sql.find(s => s.includes("FROM pia_import.memory_cleanup_preferences"));
   expect(restored).toContain("INSERT INTO memory_cleanup_preferences");
-  expect(sql.indexOf("COMMIT")).toBeGreaterThan(sql.indexOf(restored));
+  expect(restored).toBeDefined();
+  expect(sql.indexOf("COMMIT")).toBeGreaterThan(sql.indexOf(restored!));
 });
 
 test("v7 backup missing policy table fails before mutation", async () => {
