@@ -93,6 +93,51 @@ test("export SQLCipher-encrypts a new independent file before sharing and erases
   });
 });
 
+test("export preflight rejects an un-restorable entity count before ATTACH", async () => {
+  const previous = mockDb.getFirstAsync.getMockImplementation()!;
+  mockDb.getFirstAsync.mockImplementation(async sql =>
+    sql === "SELECT count(*) AS n FROM memory_entities" ? { n: 100001 } : previous(sql));
+  await expect(shareEncryptedBackup("guest", code)).rejects.toThrow("backup_legacy_entity_limit");
+  expect(mockDb.runAsync).not.toHaveBeenCalled();
+  expect(Sharing.shareAsync).not.toHaveBeenCalled();
+});
+
+test("export preflight refuses oversized database before ATTACH", async () => {
+  const previous = mockDb.getFirstAsync.getMockImplementation()!;
+  mockDb.getFirstAsync.mockImplementation(async sql =>
+    sql === "PRAGMA page_count" ? { page_count: 600000 } : previous(sql));
+  await expect(shareEncryptedBackup("guest", code)).rejects.toThrow("backup_legacy_size_limit");
+  expect(mockDb.runAsync).not.toHaveBeenCalled();
+});
+
+test("export preflight rejects low free storage without creating ciphertext", async () => {
+  (FS.getFreeDiskStorageAsync as jest.Mock).mockResolvedValue(1000);
+  await expect(shareEncryptedBackup("guest", code)).rejects.toThrow("backup_insufficient_space");
+  expect(mockDb.runAsync).not.toHaveBeenCalled();
+});
+
+test("restore checks provider storage before copying content URI", async () => {
+  (FS.getFreeDiskStorageAsync as jest.Mock).mockResolvedValueOnce(1024);
+  await expect(restoreEncryptedBackup("guest", "content://provider/backup", code))
+    .rejects.toThrow("backup_insufficient_space");
+  expect(FS.copyAsync).not.toHaveBeenCalled();
+  expect(withLocalMemoryDatabase).not.toHaveBeenCalled();
+});
+
+test("restore rejects a provider with unknown size before copying", async () => {
+  (FS.getInfoAsync as jest.Mock).mockResolvedValueOnce({ exists: true, isDirectory: false });
+  await expect(restoreEncryptedBackup("guest", "content://provider/unknown-size", code))
+    .rejects.toThrow("invalid_backup_size");
+  expect(FS.copyAsync).not.toHaveBeenCalled();
+});
+
+test("disk space query failure does not imply unlimited storage", async () => {
+  (FS.getFreeDiskStorageAsync as jest.Mock).mockRejectedValueOnce(new Error("permission"));
+  await expect(restoreEncryptedBackup("guest", "file:///backup.db", code))
+    .rejects.toThrow("backup_storage_unavailable");
+  expect(FS.copyAsync).not.toHaveBeenCalled();
+});
+
 test("failed share deletes ciphertext from cache", async () => {
   (Sharing.shareAsync as jest.Mock).mockRejectedValueOnce(new Error("cancelled"));
   await expect(shareEncryptedBackup("guest", code)).rejects.toThrow("cancelled");
