@@ -16,8 +16,17 @@ class FakeSqlite {
 const settings = { ...defaultDirectPreferences, provider: "openai-compatible" as const, baseUrl: "https://llm.example.org/v1", model: "some-model", apiKey: "sk-test-key-123", webSearchKey: "" };
 const reply = (content: string) => ({ ok: true, status: 200, json: async () => ({ choices: [{ message: { role: "assistant", content } }] }) });
 
+function delayedReply(content = '{"terms":["устаревшее"],"people":["Аня"]}') {
+  let started!: () => void, finish!: (response: ReturnType<typeof reply>) => void;
+  const waiting = new Promise<void>(resolve => { started = resolve; });
+  const response = new Promise<ReturnType<typeof reply>>(resolve => { finish = resolve; });
+  const transport = jest.fn(async () => { started(); return response; }) as unknown as typeof fetch;
+  return { waiting, transport, finish: () => finish(reply(content)) };
+}
+
 async function setup() {
-  const repo = new SqliteMemoryRepository(new FakeSqlite() as never);
+  const db = new FakeSqlite();
+  const repo = new SqliteMemoryRepository(db as never);
   const people = await repo.createCollection({ name: "Люди", slug: "people", sensitivity: "standard" });
   const about = await repo.createCollection({ name: "Обо мне", slug: "about", sensitivity: "standard" });
   const docs = await repo.createCollection({ name: "Документы", slug: "documents", sensitivity: "sensitive" });
@@ -25,7 +34,7 @@ async function setup() {
   const likes = await repo.createEntity({ collection_id: people.id, domain: "notes", kind: "preference", title: "Что любит", payload: { body: "Обожает капучино" } });
   const car = await repo.createEntity({ collection_id: about.id, domain: "notes", title: "Машина", payload: { body: "Шкода Октавия" } });
   const osago = await repo.createEntity({ collection_id: docs.id, domain: "notes", title: "ОСАГО", payload: { body: "Полис до мая" }, sensitivity: "sensitive" });
-  return { repo, anya, likes, car, osago };
+  return { repo, db, people, about, docs, anya, likes, car, osago };
 }
 
 test("the answer is read even inside a code block; anything that is not a short string is dropped", () => {
@@ -85,6 +94,111 @@ test("«Документы» are never sent; an edit makes the record pending ag
   const pass = await enrichPending(repo, settings, { transport: failing as unknown as typeof fetch });
   expect(pass.failed).toBe(1); expect(pass.error).toContain("401");
   expect(await repo.staleIndexTerms(MODEL_TERMS_SOURCE)).toEqual([car.id]);
+});
+
+test.each(["edit", "archive", "trash", "delete", "move", "private", "rename", "section-private"])(
+  "a late answer after %s saves neither words nor inferred links", async change => {
+    const { repo, db, car, about, docs } = await setup();
+    const delayed = delayedReply();
+    const work = enrichEntity(repo, car.id, settings, delayed.transport);
+    await delayed.waiting;
+    if (change === "edit") await repo.reviseEntity(car.id, 1, { body: "Другая машина" }, "Правка");
+    if (change === "archive") await repo.setEntityStatus(car.id, 1, "archived");
+    if (change === "trash") await repo.changeNotes("trash", [car]);
+    if (change === "delete") await db.runAsync("DELETE FROM memory_entities WHERE id=?", [car.id]);
+    if (change === "move") await repo.reviseEntity(car.id, 1, car.payload, "Перенос", docs.id);
+    if (change === "private") await db.runAsync("UPDATE memory_entities SET sensitivity='secret' WHERE id=?", [car.id]);
+    if (change === "rename") await db.runAsync("UPDATE memory_collections SET name='Автопарк' WHERE id=?", [about.id]);
+    if (change === "section-private") await db.runAsync("UPDATE memory_collections SET sensitivity='secret' WHERE id=?", [about.id]);
+    delayed.finish();
+    expect(await work).toBe("skipped");
+    expect(await repo.indexTerms(car.id)).toEqual([]);
+    expect(await repo.relationsForEntity(car.id)).toEqual([]);
+    expect(await repo.searchNotes("устаревшее")).toEqual([]);
+    if (["edit", "rename"].includes(change)) {
+      expect(await repo.staleIndexTerms(MODEL_TERMS_SOURCE)).toContain(car.id);
+      const fresh = jest.fn(async () => reply('{"terms":["актуальное"],"people":[]}'));
+      expect(await enrichEntity(repo, car.id, settings, fresh as unknown as typeof fetch)).toBe("enriched");
+      expect((await repo.searchNotes("актуальное"))[0].id).toBe(car.id);
+    }
+  });
+
+test("same-millisecond edits invalidate model terms but preserve user words and names", async () => {
+  const { repo, db, car } = await setup();
+  const instant = new Date("2026-10-26T12:00:00.000Z");
+  const clock = jest.spyOn(Date.prototype, "toISOString").mockReturnValue(instant.toISOString());
+  try {
+    await repo.setIndexTerms(car.id, ["ручное"], "user");
+    await repo.setAliases(car.id, ["Ласточка"]);
+    await enrichEntity(repo, car.id, settings, jest.fn(async () => reply('{"terms":["старое"],"people":[]}')) as unknown as typeof fetch);
+    await repo.reviseEntity(car.id, 1, { body: "Новая машина" }, "Правка");
+    expect(await repo.searchNotes("старое")).toEqual([]);
+    expect((await repo.searchNotes("ручное"))[0].id).toBe(car.id);
+    expect((await repo.searchNotes("Ласточка"))[0].id).toBe(car.id);
+    expect(await repo.staleIndexTerms(MODEL_TERMS_SOURCE)).toContain(car.id);
+    expect(await repo.indexTermsStatus(MODEL_TERMS_SOURCE)).toEqual({ done: 0, pending: 3 });
+    // A legacy row's future timestamp is not evidence of a matching source.
+    await db.runAsync("UPDATE memory_index_terms SET created_at='2099',source_record_version=NULL WHERE entity_id=? AND source=?", [car.id, MODEL_TERMS_SOURCE]);
+    expect(await repo.staleIndexTerms(MODEL_TERMS_SOURCE)).toContain(car.id);
+  } finally { clock.mockRestore(); }
+});
+
+test.each(["abort", "index-failure"])("%s rolls back words and links together, retaining manual data", async mode => {
+  const { repo, db, car, likes } = await setup();
+  const manual = await repo.linkEntities(car.id, likes.id, "about");
+  await repo.setIndexTerms(car.id, ["ручное"], "user");
+  const controller = new AbortController();
+  const original = db.runAsync.bind(db);
+  jest.spyOn(db, "runAsync").mockImplementation(async (sql, params) => {
+    const result = await original(sql, params);
+    if (sql.startsWith("INSERT INTO memory_search_fts")) {
+      if (mode === "abort") controller.abort(); else throw new Error("disk_full");
+    }
+    return result;
+  });
+  const transport = jest.fn(async () => reply('{"terms":["модельное"],"people":["Аня"]}')) as unknown as typeof fetch;
+  await expect(enrichEntity(repo, car.id, settings, transport, controller.signal)).rejects.toThrow(mode === "abort" ? "Подбор слов остановлен" : "disk_full");
+  expect(await repo.indexTerms(car.id)).toEqual([{ source: "user", terms: ["ручное"] }]);
+  expect(await repo.relationsForEntity(car.id)).toEqual([manual]);
+  expect(await repo.searchNotes("модельное")).toEqual([]);
+  expect((await repo.searchNotes("ручное"))[0].id).toBe(car.id);
+});
+
+test("late transport ignores abort, but cancelled enrichment still cannot commit", async () => {
+  const { repo, car } = await setup();
+  const controller = new AbortController(), delayed = delayedReply();
+  const work = enrichEntity(repo, car.id, settings, delayed.transport, controller.signal);
+  const rejected = expect(work).rejects.toThrow();
+  await delayed.waiting; controller.abort(); delayed.finish(); await rejected;
+  expect(await repo.indexTerms(car.id)).toEqual([]);
+  expect(await repo.relationsForEntity(car.id)).toEqual([]);
+});
+
+test.each(["ambiguous", "protected"])("%s person is not an inferred target", async mode => {
+  const { repo, db, car, anya, people } = await setup();
+  if (mode === "ambiguous") await repo.createEntity({ collection_id: people.id, domain: "notes", title: "Аня", payload: { body: "Другая Аня" } });
+  else await db.runAsync("UPDATE memory_entities SET sensitivity='secret' WHERE id=?", [anya.id]);
+  const transport = jest.fn(async () => reply('{"terms":["автомобиль"],"people":["Аня"]}')) as unknown as typeof fetch;
+  expect(await enrichEntity(repo, car.id, settings, transport)).toBe("enriched");
+  expect(await repo.relationsForEntity(car.id)).toEqual([]);
+});
+
+test("re-enrichment replaces only its own links; an edited source no longer expands through old people", async () => {
+  const { repo, car, likes, anya } = await setup();
+  const manual = await repo.linkEntities(car.id, likes.id, "about");
+  const answer = jest.fn(async () => reply('{"terms":[],"people":["Аня"]}')) as unknown as typeof fetch;
+  await enrichEntity(repo, car.id, settings, answer);
+  await enrichEntity(repo, car.id, settings, answer);
+  expect(await repo.relationsForEntity(car.id)).toHaveLength(2);
+  expect((await repo.searchMemory("Аня")).map(h => h.entity.id)).toContain(car.id);
+  await repo.reviseEntity(car.id, 1, { body: "Другая машина" }, "Правка");
+  expect(await repo.relationsForEntity(car.id)).toEqual([manual]);
+  expect((await repo.searchMemory("Аня")).map(h => h.entity.id)).not.toContain(car.id);
+  const empty = jest.fn(async () => reply('{"terms":[],"people":[]}')) as unknown as typeof fetch;
+  await enrichEntity(repo, car.id, settings, empty);
+  expect(await repo.relationsForEntity(car.id)).toEqual([manual]);
+  expect(await repo.relationsForEntity(anya.id)).toEqual([]);
+  expect(await repo.staleIndexTerms(MODEL_TERMS_SOURCE)).not.toContain(car.id);
 });
 
 const cut = (content: string, reasoning = "") => ({ ok: true, status: 200, json: async () => ({ choices: [{ finish_reason: "length", message: { role: "assistant", content, reasoning_content: reasoning } }] }) });

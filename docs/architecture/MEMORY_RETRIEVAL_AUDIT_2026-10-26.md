@@ -82,6 +82,8 @@
 
 ### M10 — гонка enrichment и противоречие документации о внешних запросах
 
+**Продолжение 26.10:** гонка исправлена в технической ветке №66.1, schema v6; [контракт](../../openspec/changes/memory-enrichment-snapshot/proposal.md), [результаты](MEMORY_TECHNICAL_PROGRESS_2026-10-26.md). Ниже сохранено исходное наблюдение. Видимая политика/квота №54а и reviewable relations №66.4 остаются открытыми.
+
 **Факт кода, подтверждён probe:** `enrich.ts:enrichEntity` читает entity, ждёт LLM, вызывает setIndexTerms без expectedVersion/inputHash. Последний пишет created_at=now; staleIndexTerms сравнивает timestamp с entity.updated_at. Если entity изменён во время LLM, старые terms получат более новый timestamp и будут считаться свежими. Комментарий «next pass redoes it» этому не соответствует. Model about-связи не имеют provenance модели/версии и не очищаются после изменения источника.
 
 Enrichment использует body[:3000], не extracted_text. enabled=true по умолчанию; запускается после сохранения/старта, обрабатывает только разрешённые обычные записи. На проверяемом SHA это расходилось с docs/MEMORY_AND_SECURITY.md «к провайдеру … только в момент запроса». В документационном PR #129 описание исправлено; выбор default-on режима/политика внешнего enrichment и отдельные бюджеты ещё требуют функционального решения. Это **не доказательство отправки secret-записей**.
