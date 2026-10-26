@@ -36,7 +36,7 @@ describe("Nebula Home native B+C screen contracts", () => {
     expect(home).toContain("<VoiceInput");
     expect(home).toContain("normalization.toggle(settings)");
     expect(home).toContain("void store.send(settings)");
-    expect(home).toContain('navigation.navigate("MemoryImport")');
+    expect(home).toContain('accessibilityLabel="Прикрепить файл к сообщению"');
     expect(home).toContain('navigation.navigate("MemoryImport", { camera: true })');
     expect(home).toContain('navigation.navigate("MemoryNote", { entityId: m.id })');
     expect(home).toContain("needsSetup");

@@ -193,3 +193,24 @@ test("reopened chat restores selection and network denial beyond history window"
   store.setQuestion("На двоих"); await store.send(settings);
   expect((runner.mock.calls as any)[0][0].taskState).toMatchObject({ selection: "Форель", webPreference: "deny" }); store.dispose();
 });
+
+test('attachment drafts survive a new store; picking does not call model or save a note; Send carries bytes', async () => {
+  const {repo, records}=repository(); const runner=jest.fn().mockResolvedValue({text:'Файл прочитан',sources:[],requests:1});
+  const store=new DirectChatStore('guest',repo,runner);await store.initialize(); const id=store.getSnapshot().activeId!;
+  const file={id:'file',name:'note.txt',kind:'text' as const,mime:'text/plain',data:'Содержимое файла',size:30};
+  store.setAttachments(id,[file]);await store.checkpoint();expect(runner).not.toHaveBeenCalled();expect(saveApprovedNote).not.toHaveBeenCalled();
+  const reopened=new DirectChatStore('guest',repo,runner);await reopened.initialize();
+  expect(reopened.getSnapshot().conversations[0].attachments?.[0].data).toBe(file.data);
+  await reopened.send(settings);expect(runner.mock.calls[0][0].attachments[0].data).toBe(file.data);
+  expect(records.get(id)?.rows[0].attachments?.[0].data).toBe(file.data);expect(records.get(id)?.attachments).toEqual([]);
+  reopened.setQuestion('Расскажи подробнее');await reopened.send(settings);
+  expect(runner.mock.calls[1][0].history[0].attachments[0].data).toBe(file.data);
+  store.dispose();reopened.dispose();
+});
+test('failure before transport restores files and question; removal affects only the draft',async()=>{
+  const {repo}=repository();const runner=jest.fn();const store=new DirectChatStore('guest',repo,runner);await store.initialize();const id=store.getSnapshot().activeId!;
+  store.setQuestion('Вопрос');store.setAttachments(id,[{id:'f',name:'x.txt',kind:'text',mime:'text/plain',data:'Text',size:4}]);
+  (loadModelCallLimit as jest.Mock).mockRejectedValueOnce(new Error('bad limit'));
+  await store.send(settings);expect(runner).not.toHaveBeenCalled();expect(store.getSnapshot().conversations[0].attachments).toHaveLength(1);
+  store.setAttachments(id,[]);expect(store.getSnapshot().conversations[0].attachments).toEqual([]);expect(store.getSnapshot().conversations[0].rows[0].attachments).toHaveLength(1);store.dispose();
+});

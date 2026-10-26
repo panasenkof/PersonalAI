@@ -432,3 +432,13 @@ test("neither Responses nor compatible endpoints silently slice a long submitted
   const compatible = JSON.parse(response.mock.calls[0][1].body);
   expect(compatible.messages.at(-1).content).toContain("Заправка в самом конце.");
 });
+
+test.each(['openai','compatible','anthropic'] as const)('actual %s transport receives current and historical attachments', async provider=>{
+  const transport=jest.fn().mockResolvedValue({ok:true,status:200,json:async()=>provider==='openai'? {status:'completed',output:[{type:'message',content:[{type:'output_text',text:'Done'}]}]} : provider==='anthropic'? {content:[{type:'text',text:'Done'}]} : {choices:[{message:{role:'assistant',content:'Done'}}]}});
+  const file={id:'f',name:'x.png',kind:'image' as const,mime:'image/png',data:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aVz8AAAAASUVORK5CYII=',size:68};
+  await start({provider:provider==='compatible'?'openai-compatible':provider,baseUrl:'https://example.com/v1'},transport,{prompt:'Опиши',attachments:[file],history:[{role:'user',content:'Первый снимок',attachments:[file]}]});
+  const body=JSON.parse(transport.mock.calls[0][1].body),messages=body.input||body.messages;
+  expect(JSON.stringify(messages)).toContain(file.data);
+  const users=messages.filter((m:any)=>m.role==='user');expect(users).toHaveLength(2);
+  for(const message of users){expect(Array.isArray(message.content)).toBe(true);expect(message.attachments).toBeUndefined();}
+});
