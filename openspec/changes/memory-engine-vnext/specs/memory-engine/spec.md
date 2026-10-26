@@ -24,6 +24,25 @@ The system SHALL apply predicate-specific cardinality rules before suggesting a 
 - **GIVEN** spark plugs were replaced in 2023 and again in 2025
 - **THEN** both events remain independently retrievable.
 
+## Requirement: Aligned claim semantics and versioned evidence
+The system SHALL represent event/observation/state/enduring knowledge independently from asserted/planned/hypothetical modality and negation. A null end date SHALL NOT be treated as proof that a state is currently ongoing. Relative dates SHALL preserve their original phrase, source-time anchor/timezone, precision and uncertainty. An event spanning multiple days SHALL remain an interval.
+The system SHALL link claim evidence to immutable source/extraction revisions and mark stale/withdrawn evidence separately from accepted/disputed/retracted claims. A proposed relation SHALL carry exact source and target identities, expected record versions and evidence refs; rejection/deferment SHALL survive reindexing without repeated prompts.
+
+### Scenario: Planned move is not a completed move
+- **GIVEN** a user says they plan to move in December
+- **WHEN** December arrives without a confirming source
+- **THEN** the system SHALL NOT mark their old residence ended or the planned residence current.
+
+### Scenario: Existing fact loses a derived source
+- **GIVEN** a fact is independently confirmed by two sources
+- **WHEN** one extraction is corrected or withdrawn
+- **THEN** only its dependent evidence becomes stale and the remaining valid evidence is preserved.
+
+### Scenario: No parallel relations architecture
+- **GIVEN** the old temporary v5/v6 plan describes memory_relation_candidates and memory_relation_decisions
+- **WHEN** the new canonical schema is implemented
+- **THEN** these behaviors SHALL be provided by shared claims/evidence/proposals/operations rather than a second competing graph.
+
 ## Requirement: Controlled updates and conflicts
 The system SHALL validate typed proposals in deterministic code before committing, SHALL present consequential conflicting identity/relationship/state changes for confirmation, and SHALL make rejection durable to prevent repeated identical prompts.
 Contradictory claims SHALL retain both evidence trails until resolved. Reject and cancel SHALL NOT modify accepted knowledge.
