@@ -1,6 +1,7 @@
 export * from "react-native-web";
 import React from "react";
 import { Modal as WebModal } from "react-native-web";
+import * as ReactNativeWeb from "react-native-web";
 const listeners = new Map<string, Set<(state?: string) => void>>();
 export const AppState = {
   currentState: "active",
@@ -25,3 +26,15 @@ export function Modal(props: React.ComponentProps<typeof WebModal>) {
 }
 export const Alert = { alert(_title: string, _message: string, buttons: any[] = []) { buttons.at(-1)?.onPress?.(); } };
 export const ToastAndroid = { SHORT: 0, show(message: string) { (window as any).__qa.lastHint = message; } };
+
+// react-native-web's declaration exposes Platform as a type in this QA build.
+// Read its optional runtime export without importing the type as a value.
+const webPlatform = (ReactNativeWeb as unknown as { Platform?: { OS: string } }).Platform;
+export const Platform = {
+  ...webPlatform,
+  get OS() { return (window as any).__qa?.androidShare ? "android" : webPlatform?.OS ?? "web"; },
+  select<T>(options: { android?: T; ios?: T; native?: T; web?: T; default?: T }): T | undefined {
+    const os = Platform.OS;
+    return (options as Record<string, T | undefined>)[os] ?? (os === "android" ? options.native : undefined) ?? options.default;
+  },
+};

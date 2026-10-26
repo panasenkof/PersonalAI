@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { MemoryImportScreen } from '../../screens/MemoryImportScreen';
 import { saveMediaNote } from '../attachments';
 import { extractMedia } from '../extract';
@@ -11,7 +11,8 @@ const mockBack = jest.fn();
 let mockParams: any = undefined;
 jest.mock("../preferences", () => ({ loadMediaPreferences: async () => ({ visionId: "", speechId: "" }) }));
 jest.mock('../link-import', () => ({ importLink: jest.fn(), linkImportErrorMessage: (error: Error) => error.message }));
-jest.mock("../../local-memory/storage", () => ({ onLocalMemorySessionChange: () => () => {} }));
+const mockSessionListeners=new Set<(unlocked:boolean)=>void>();
+jest.mock("../../local-memory/storage", () => ({ onLocalMemorySessionChange: (fn:any) => {mockSessionListeners.add(fn);return ()=>mockSessionListeners.delete(fn);} }));
 jest.mock('../../local-memory/repository', () => ({ localMemoryRepository: async () => ({}) }));
 jest.mock('../../local-memory/sections', () => ({ ensureSections: async () => [{ id: 'notes', name: 'Заметки', slug: 'notes', sensitivity: 'standard' }] }));
 jest.mock('@react-navigation/native', () => ({ useNavigation: () => ({ goBack: mockBack }), useRoute: () => ({ params: mockParams }), usePreventRemove: jest.fn() }));
@@ -29,7 +30,7 @@ jest.mock('../joint-recognition', () => ({ analyzeFilesTogether: jest.fn() }));
 jest.mock('expo-document-picker', () => ({ getDocumentAsync: jest.fn(async () => ({ canceled: false, assets: [{ uri: 'file:///cache/photo.png', name: 'photo.png', mimeType: 'image/png' }] })) }));
 jest.mock('expo-image-picker', () => ({ launchImageLibraryAsync: jest.fn(), requestCameraPermissionsAsync: jest.fn(), launchCameraAsync: jest.fn() }));
 jest.mock('expo-file-system/legacy', () => ({ copyAsync: jest.fn(async () => {}), cacheDirectory: 'file:///cache/', deleteAsync: jest.fn(async () => {}) }));
-beforeEach(() => { jest.clearAllMocks(); mockParams = undefined; });
+beforeEach(() => { jest.clearAllMocks(); mockParams = undefined; mockSessionListeners.clear(); });
 test('picker lets user save original without transcript, provider or network; user text stays separate', async () => {
   const screen = render(<MemoryImportScreen />);
   fireEvent.press(screen.getByLabelText('Выбрать файл для памяти'));
@@ -246,4 +247,20 @@ test('compact import hides optional controls and prevents saving a discarded ori
   fireEvent.changeText(screen.getByLabelText('Сведения из файла'), 'Подпись');
   expect(screen.getByLabelText('Сохранить сведения в память').props.accessibilityState.disabled).toBe(false);
   expect(extractMedia).not.toHaveBeenCalled();
+});
+
+
+const mockIncomingDelete=jest.fn();
+jest.mock('expo-file-system',()=>({Paths:{cache:'file:///cache'},Directory:class {uri:string;constructor(...p:string[]){this.uri=p.join('/');}create(){}},File:class {uri:string;exists=true;size=100;constructor(p:any,n?:string){this.uri=typeof p==='string'?p:p.uri+'/'+n;}get name(){return this.uri.split('/').pop();}delete(){mockIncomingDelete(this.uri);}}}));
+test('incoming memory preview removes partial copy on failure and never saves it',async()=>{
+  const fs=require('expo-file-system/legacy');fs.copyAsync.mockRejectedValueOnce(new Error('copy failed'));
+  mockParams={incoming:[{shareType:'image',value:'content://gallery/photo.jpg',mimeType:'image/jpeg'}]};
+  render(<MemoryImportScreen/>);await waitFor(()=>expect(mockIncomingDelete).toHaveBeenCalled());expect(saveMediaNote).not.toHaveBeenCalled();
+});
+test('lock during incoming copy discards late result and deletes it again after copy completes',async()=>{
+  let resolve:any;const fs=require('expo-file-system/legacy');fs.copyAsync.mockImplementationOnce(()=>new Promise(r=>{resolve=r;}));
+  mockParams={incoming:[{shareType:'image',value:'content://gallery/photo.jpg',mimeType:'image/jpeg'}]};
+  const s=render(<MemoryImportScreen/>);await waitFor(()=>expect(resolve).toBeDefined());
+  act(()=>mockSessionListeners.forEach(fn=>fn(false)));const deletes=mockIncomingDelete.mock.calls.length;
+  await act(async()=>resolve());expect(mockIncomingDelete.mock.calls.length).toBeGreaterThan(deletes);expect(saveMediaNote).not.toHaveBeenCalled();expect(s.getByText('Подготовка прервана блокировкой. Повторите приём после разблокировки.')).toBeTruthy();
 });

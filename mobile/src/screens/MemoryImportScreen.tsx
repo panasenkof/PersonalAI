@@ -97,7 +97,13 @@ export function MemoryImportScreen() {
   }).catch(() => { if (alive.current) setNotice("Не удалось загрузить разделы."); }); }, [profile]);
   useEffect(() => {
     const payload = incoming?.[position]; if (!payload) return;
-    let cancelled = false;
+    let cancelled = false; let staged: File | undefined;
+    const cleanup = () => { try { if (staged?.exists) staged.delete(); } catch { /* Cache may already be removed. */ } };
+    const off = onLocalMemorySessionChange(unlocked => {
+      if (unlocked) return;
+      cancelled = true; cleanup(); setFiles([]); setPreparing(false);
+      setNotice("Подготовка прервана блокировкой. Повторите приём после разблокировки.");
+    });
     setPreparing(true); setTitle(""); setFiles([]); setRecognitionResults([]); setRecognizingIndex(-1); setBody(""); setExtractedText(""); setNotice(""); setSourceUrl(""); setLinkDraft(""); setSourcePickerOpen(false); setProcessingOptionsOpen(false); setKeepOriginal(true);
     void (async () => {
       if (incoming!.length > 30) throw new Error("Отправляйте не более 30 файлов за один раз.");
@@ -106,14 +112,14 @@ export function MemoryImportScreen() {
       if (text) { if (!cancelled) { if (payload.shareType === "url") { setSourceUrl(payload.value); setLinkDraft(payload.value); } setTitle(payload.shareType === "url" ? "Ссылка" : payload.value.split("\n")[0].slice(0, 160)); setBody(payload.value); } return; }
       const source = new File(payload.value);
       const dir = new Directory(Paths.cache, "persai-incoming"); dir.create({ intermediates: true, idempotent: true });
-      const target = new File(dir, Crypto.randomUUID());
+      const target = new File(dir, Crypto.randomUUID()); staged = target;
       await FileSystem.copyAsync({ from: payload.value, to: target.uri });
-      if (cancelled) { if (target.exists) target.delete(); return; }
+      if (cancelled) { cleanup(); return; }
       ownedFiles.current.push(target.uri);
       const asset = { uri: target.uri, name: source.name || "Входящий файл", mimeType: payload.mimeType };
       mediaKind(asset); setFiles([asset]); setRecognitionResults([]); setTitle(asset.name.slice(0, 160));
-    })().catch(e => { if (!cancelled) setNotice(memoryErrorMessage(e)); }).finally(() => { if (!cancelled) setPreparing(false); });
-    return () => { cancelled = true; };
+    })().catch(e => { cleanup(); if (!cancelled) setNotice(memoryErrorMessage(e)); }).finally(() => { if (!cancelled) setPreparing(false); });
+    return () => { cancelled = true; off(); cleanup(); };
   }, [incoming, position, prepareAttempt]);
   usePreventRemove(!leaving && Boolean(incoming || file || body || extractedText), ({ data }) => {
     if (busy) { setNotice("Дождитесь завершения операции или остановите её."); return; }
