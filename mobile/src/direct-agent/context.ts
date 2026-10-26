@@ -40,7 +40,7 @@ export async function prepareDirectContext(options: DirectAgentOptions & { now?:
   const { settings, signal, status } = options;
   const check = () => { if (signal?.aborted) throw new Error("Запрос остановлен"); };
   check();
-  if (isSocialTurn(options.prompt)) {
+  if (!options.attachments?.length && isSocialTurn(options.prompt)) {
     options.diagnostic?.("context.social_turn");
     return { context: todayLine(options.now) + "\nПользователь только приветствует, благодарит или прощается. Ответь кратко по смыслу. Память и интернет для этой реплики не проверялись и не требуются. Не предлагай посторонние личные записи из прошлых ответов.", sources: [] as string[], builtinWeb: false, notes: [] as MemorySnippet[], webError: undefined as string | undefined, openLink: false, used: [] as UsedNote[] };
   }
@@ -83,7 +83,7 @@ export async function prepareDirectContext(options: DirectAgentOptions & { now?:
   const previous = options.previousSources || [];
   // A request to open a link already shown reads that page instead of searching again.
   const openLink = asksAboutLink;
-  const useWeb = settings.allowWeb && !denyWeb && !aboutMe && !openLink && !options.history.length && (!notes.length || explicitWeb);
+  const useWeb = settings.allowWeb && !options.attachments?.length && !denyWeb && !aboutMe && !openLink && !options.history.length && (!notes.length || explicitWeb);
   options.diagnostic?.("context.search_decision", {
     memoryFound: notes.length, memoryError, webSettingEnabled: settings.allowWeb, explicitWeb,
     aboutMe, denyWeb, openLink, useWeb,

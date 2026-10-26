@@ -1,3 +1,4 @@
+import { chatContent } from "./chat-attachments";
 import type { DirectAgentOptions, DirectResult } from "./engine";
 import type { DirectAgentSettings } from "./settings";
 import { anonymousLocalAllowed, validateBaseUrl, validateModel } from "./settings";
@@ -30,8 +31,8 @@ function apiEndpoint(settings: DirectAgentSettings): string {
 function conversation(options: DirectAgentOptions, search: WebContext) {
   return [
     { role: "system", content: system(options.sections) },
-    ...dialogueHistory(options.history),
-    { role: "user", content: withData(search.context, options.prompt.trim()) },
+    ...dialogueHistory(options.history).map(turn => ({role:turn.role, content:chatContent(turn.content, turn.attachments, options.settings.provider === "anthropic" ? "anthropic" : "chat")})),
+    { role: "user", content: chatContent(withData(search.context, options.prompt.trim()), options.attachments, options.settings.provider === "anthropic" ? "anthropic" : "chat") },
   ];
 }
 

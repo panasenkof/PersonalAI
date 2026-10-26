@@ -1,3 +1,4 @@
+import { checkedChatAttachments, MAX_CONVERSATION_FILE_BYTES, type ChatAttachment } from "./chat-attachments";
 import * as Crypto from "expo-crypto";
 import { beginTask, mergeTaskReceipts, recordEvidence } from "./task-state";
 import { webPreference } from "./dialogue";
@@ -122,6 +123,14 @@ export class DirectChatStore {
   setQuestion(question: string) {
     if (this.snapshot.activeId) this.update(this.snapshot.activeId, { question });
   }
+  setAttachments(id: string, files: ChatAttachment[]) {
+    const current = this.snapshot.conversations.find(c => c.id === id);
+    if (!current || current.busy || current.deleting || this.disposed) return;
+    const checked = checkedChatAttachments(files);
+    const total = [...current.rows.flatMap(r => r.attachments || []), ...checked].reduce((sum, f) => sum + f.size, 0);
+    if (total > MAX_CONVERSATION_FILE_BYTES) throw new Error("Вложения этого диалога занимают больше 24 МБ. Начните новый диалог.");
+    this.update(id, {attachments:checked}, true);
+  }
   async checkpoint() {
     const ids = this.snapshot.conversations.map(c => c.id);
     for (const id of ids) {
@@ -148,8 +157,9 @@ export class DirectChatStore {
   async send(settings: DirectAgentSettings) {
     const id = this.snapshot.activeId;
     const current = this.snapshot.conversations.find(c => c.id === id);
-    if (!id || !current || current.busy || current.deleting || !current.question.trim() || this.disposed) return;
-    const prompt = current.question.trim();
+    if (!id || !current || current.busy || current.deleting || (!current.question.trim() && !current.attachments?.length) || this.disposed) return;
+    const prompt = current.question.trim() || "Посмотри приложенные файлы.";
+    const attachments = checkedChatAttachments(current.attachments);
     if (prompt.length > MAX_USER_PROMPT_CHARS) {
       this.publish({ error: "Сообщение длиннее 24 000 символов. Разделите его на части: текст не отправлен и не обрезан." });
       return;
@@ -160,13 +170,13 @@ export class DirectChatStore {
     this.requests.set(id, aborter);
     const previousSources = [...current.rows].reverse().filter(r => r.role === "assistant" && r.sources?.length).slice(0, 3).flatMap(r => r.sources!).slice(0, 15);
     const history = current.rows.filter(r => r.role !== "info").slice(-8)
-      .map(r => ({ role: r.role as "user" | "assistant", content: r.text }));
+      .map(r => ({ role: r.role as "user" | "assistant", content: r.text, ...(r.attachments?.length ? {attachments:r.attachments} : {}) }));
     const taskState = { ...beginTask(current.taskState, prompt), webPreference: webPreference({ prompt, history, taskState: current.taskState }) };
     this.publish({ error: "" });
     const pending = this.update(id, {
-      taskState, question: "", busy: true, progress: "Сохраняю вопрос…", updatedAt: new Date().toISOString(),
+      taskState, question: "", attachments: [], busy: true, progress: "Сохраняю вопрос…", updatedAt: new Date().toISOString(),
       title: current.rows.length ? current.title : prompt.slice(0, 60),
-      rows: [...current.rows, { id: Crypto.randomUUID(), role: "user", text: prompt }],
+      rows: [...current.rows, { id: Crypto.randomUUID(), role: "user", text: prompt, ...(attachments.length ? {attachments} : {}) }],
     })!;
     let modelStarted = false;
     let beforeModelError = "Запрос не отправлен: не удалось сохранить историю.";
@@ -196,7 +206,7 @@ export class DirectChatStore {
       const maxRequests = await loadModelCallLimit(this.profile);
       if (this.disposed || aborter.signal.aborted) throw new Error("aborted");
       modelStarted = true;
-      const result = await this.runner({ settings, maxRequests, prompt, history, previousSources, taskState, pendingNotes: current.drafts,
+      const result = await this.runner({ settings, maxRequests, prompt, attachments, history, previousSources, taskState, pendingNotes: current.drafts,
         onTaskState: next => {
           const active = this.snapshot.conversations.find(c => c.id === id);
           if (active && !aborter.signal.aborted) this.update(id, { taskState: mergeTaskReceipts(next, active.taskState) }, true);
@@ -245,7 +255,7 @@ export class DirectChatStore {
       const c = this.snapshot.conversations.find(c => c.id === id);
       if (c && !this.disposed) this.update(id, {
         taskState: { ...(c.taskState || taskState), turnStatus: "interrupted" },
-        ...(!modelStarted && !aborter.signal.aborted ? { question: c.question || prompt } : {}),
+        ...(!modelStarted && !aborter.signal.aborted ? { question: c.question || prompt, attachments } : {}),
         rows: [...c.rows, { id: Crypto.randomUUID(), role: "info",
           text: aborter.signal.aborted ? "Запрос остановлен" : !modelStarted ? beforeModelError : String((e as Error).message) }],
       });

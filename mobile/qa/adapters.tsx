@@ -25,7 +25,7 @@ export const closeLocalMemory = async () => { stats.closes++; };
 export const onLocalMemorySessionChange = (_listener: (unlocked: boolean) => void) => () => {};
 export const localMemorySessionUnlocked = () => Boolean(stats.authorized);
 export const cacheDirectory = "file:///qa-cache/";
-export const EncodingType = { Base64: "base64" };
+export const EncodingType = { Base64: "base64", UTF8: "utf8" };
 export const getInfoAsync = async () => ({ exists: true, isDirectory: false, size: 100 });
 export const readAsStringAsync = async (_uri: string, options?: any) => options?.encoding === "base64" ? "dGVzdA==" : "Рецепт: индейка, чеснок, паприка. Запекать до готовности.";
 export const deleteAsync = async (uri: string) => { stats.deletes.push(uri); };
@@ -79,7 +79,7 @@ export class AsyncLocalStorage<T> { getStore(): T | undefined { return undefined
 export const Paths = { cache: "file:///qa-cache/" };
 export const FileMode = { ReadOnly: "r", WriteOnly: "w" };
 export class Directory { exists = false; constructor(..._parts: unknown[]) {} delete() {} }
-export class File { constructor(..._parts: unknown[]) {} }
+export class File { uri: string; size = 100; exists = true; constructor(...parts: any[]) { this.uri=parts.map(p => p.uri || p).join("/"); } delete() { stats.deletes.push(this.uri); } }
 export const getSharedPayloads = () => [];
 export const clearSharedPayloads = () => {};
 export const getResolvedSharedPayloadsAsync = async () => [];

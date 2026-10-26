@@ -73,6 +73,10 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       });
       await page.route('**/v1/responses', async route => {
         replyNumber++;
+        if (replyNumber === 1) {
+          const body = route.request().postDataJSON();
+          assert(JSON.stringify(body.input).includes('Рецепт: индейка'), 'Real Responses transport receives the attached text');
+        }
         await new Promise(resolve => { releaseReply = resolve; });
         await route.fulfill({ json: { output: [{ type: 'message', content: [{ type: 'output_text', text: 'Ответ ' + replyNumber }] }] } });
       });
@@ -152,7 +156,7 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByTestId('action-hint').waitFor();
       const improveHint = await page.getByTestId('action-hint').boundingBox();
       let composerRowY = null;
-      for (const label of ['Добавить сведения из файла', 'Сфотографировать и распознать', 'Голосовой ввод', 'Вернуть исходный текст', 'Отправить запрос']) {
+      for (const label of ['Прикрепить файл к сообщению', 'Сфотографировать и распознать', 'Голосовой ввод', 'Вернуть исходный текст', 'Отправить запрос']) {
         const box = await page.getByTestId('composer-actions').getByLabel(label, { exact: true }).boundingBox();
         assert(box.x >= 0 && box.x + box.width <= width, `Composer action ${label} stays inside the viewport`);
         assert(box.height >= 46, `Composer action ${label} has a usable touch target`);
@@ -206,6 +210,17 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByLabel('Голосовой ввод', { exact: true }).click();
       await page.waitForFunction(() => document.querySelector('[aria-label="Сообщение ассистенту"]').value.includes('Купить молоко'));
       assert.equal(replyNumber, 0, 'Dictation never autosends');
+      await page.getByLabel('Прикрепить файл к сообщению', { exact: true }).click();
+      await page.clock.runFor(100);
+      await page.getByLabel('Убрать вложение note.txt', { exact: true }).waitFor();
+      assert.equal(replyNumber, 0, 'Picking never sends to the model');
+      await page.getByLabel('Убрать вложение note.txt', { exact: true }).click();
+      await page.getByLabel('Прикрепить файл к сообщению', { exact: true }).click();
+      await page.clock.runFor(100);
+      await page.getByLabel('Убрать вложение note.txt', { exact: true }).waitFor();
+      await page.clock.runFor(6000);
+      if (process.env.SCREENSHOT_DIR) await page.screenshot({animations:'disabled', path:path.join(process.env.SCREENSHOT_DIR, `chat-attachment-${width}.png`)});
+
       // Sending a draft also ends any still-active dictation for that draft.
       await page.evaluate(() => { window.__qa.holdSpeech = true; });
       await page.getByLabel('Голосовой ввод', { exact: true }).click();

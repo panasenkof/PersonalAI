@@ -1,3 +1,4 @@
+import { chatContent, type ChatAttachment } from "./chat-attachments";
 import type { DirectAgentSettings } from "./settings";
 import { anonymousLocalAllowed, validateBaseUrl, validateModel } from "./settings";
 import { runCompatibleAgent } from "./compatible";
@@ -15,7 +16,7 @@ import type { MemorySnippet, NoteProposal } from "./memory";
 import { FACT_TOOL_NAME, factGuide } from "./fact-tool";
 import type { MemorySection } from "./fact-tool";
 
-export type AgentTurn = { role: "user" | "assistant"; content: string };
+export type AgentTurn = { role: "user" | "assistant"; content: string; attachments?: ChatAttachment[] };
 /** `notice` is shown to the user before the answer, e.g. why web search failed. */
 /** `memory`: the records the answer was based on, shown under it («Из памяти»). */
 export type DirectResult = { text: string; sources: string[]; requests: number; notice?: string; memory?: UsedNote[]; taskState?: TaskState; proposalIds?: string[] };
@@ -24,6 +25,7 @@ export type DirectAgentOptions = {
   settings: DirectAgentSettings;
   prompt: string;
   history: AgentTurn[];
+  attachments?: ChatAttachment[];
   taskState?: TaskState;
   onTaskState?: (state: TaskState) => void;
   pendingNotes?: Array<NoteProposal & { id: string }>;
@@ -140,8 +142,8 @@ export async function runDirectAgent(options: DirectAgentOptions): Promise<Direc
     used: web.used.length, webSources: web.sources.length, builtinWeb: web.builtinWeb, webFailed: Boolean(web.webError) });
   const input: unknown[] = [
     { role: "system", content: systemPrompt(options.sections) },
-    ...dialogueHistory(options.history),
-    { role: "user", content: withData(web.context, prompt) },
+    ...dialogueHistory(options.history).map(turn => ({role:turn.role, content:chatContent(turn.content, turn.attachments, "responses")})),
+    { role: "user", content: chatContent(withData(web.context, prompt), options.attachments, "responses") },
   ];
   const toolSources = [...web.sources];
   const catalog = createToolCatalog(options, toolSources, web.notes, web.used);

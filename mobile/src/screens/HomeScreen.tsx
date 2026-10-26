@@ -1,3 +1,5 @@
+import { ChatAttachmentList } from "../media/ChatAttachmentList";
+import { useChatAttachments } from "../media/useChatAttachments";
 import { useFocusEffect, useIsFocused, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
@@ -40,6 +42,7 @@ function NebulaHomeContent() {
   const { store, ready, error, notice: historyNotice, conversations, active, sections } = useDirectChat();
   const [settings, setSettings] = useState<DirectAgentSettings | null>(null);
   const [notice, setNotice] = useState("");
+  const {picking: pickingAttachment, pick: pickAttachment} = useChatAttachments(store, active?.id, isFocused, setNotice);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [voiceReset, setVoiceReset] = useState(0);
   const [dictating, setDictating] = useState(false);
@@ -90,7 +93,7 @@ function NebulaHomeContent() {
     // Changing focus does not own or abort an agent request.
     return () => { alive = false; };
   }, [profile, store]));
-  const canSend = Boolean(ready && !active?.deleting && settings && (settings.apiKey || anonymousLocalAllowed(settings)));
+  const canSend = Boolean(ready && !pickingAttachment && !active?.deleting && settings && (settings.apiKey || anonymousLocalAllowed(settings)));
   const question = active?.question || "";
   const busy = active?.busy || false;
   const statusSignals = { voicePhase, busy, streamText: active?.streamText, progress: active?.progress, error, ready };
@@ -164,6 +167,7 @@ function NebulaHomeContent() {
         borderWidth: item.role === "assistant" ? 1 : 0, borderColor: t.line, borderRadius: 20, padding: 15, gap: 10 }}>
         {item.role === "assistant" ? <MarkdownText text={item.text} style={{ color: t.text, lineHeight: 23 }} /> :
           <Text selectable style={{ color: item.role === "user" ? t.userText : item.role === "info" ? t.muted : t.text, lineHeight: 23 }}>{item.text}</Text>}
+        {item.attachments?.length ? <ChatAttachmentList files={item.attachments}/> : null}
         {item.memory?.length ? <View style={{ gap: 4 }}><Text style={{ color: t.muted, fontSize: 12 }}>Из памяти</Text>
           {item.memory.map(m => <Pressable key={m.id} accessibilityRole="link" accessibilityLabel={"Открыть запись " + m.title}
             onPress={() => navigation.navigate("MemoryNote", { entityId: m.id })} style={{ minHeight: 40, justifyContent: "center" }}>
@@ -204,9 +208,13 @@ function NebulaHomeContent() {
       {error && ready ? <Pressable accessibilityRole="button" onPress={() => void store.checkpoint().catch(() => {})} style={{ minHeight: 44, justifyContent: "center" }}><Text style={{ color: t.accent }}>Повторить сохранение истории</Text></Pressable> : null}</View> : null}
     {!canSend && ready && !(needsSetup && !active?.rows.length) ? <Pressable accessibilityRole="button" onPress={() => openConnections()} style={{ paddingHorizontal: 16, minHeight: 44, justifyContent: "center" }}><Text style={{ color: t.accent }}>Добавьте модель в настройках подключений →</Text></Pressable> : null}
     <View style={{ zIndex: 3, padding: 10, gap: 5, backgroundColor: t.panel, borderTopWidth: 1, borderColor: t.line }}>
+      {active?.attachments?.length ? <>
+        <ChatAttachmentList files={active.attachments} disabled={busy || pickingAttachment} onRemove={id => { try {store.setAttachments(active.id, active.attachments!.filter(f => f.id !== id));} catch(e) {setNotice((e as Error).message);} }}/>
+        <Text style={{color:t.muted,fontSize:12}}>Файлы отправятся выбранной модели вместе с сообщением. Для изображений нужна модель с поддержкой зрения.</Text>
+      </> : null}
       <PromptInput value={question} onChange={value => store.setQuestion(value)} onClear={() => { normalization.reset(); setVoiceReset(n => n + 1); }} editable={ready} onFocusChange={setComposerFocused} />
       <View testID="composer-actions" style={{ zIndex: 1, flexDirection: "row", alignItems: "center", gap: 4 }}>
-        <IconAction compact icon="plus" label="В память" accessibilityLabel="Добавить сведения из файла" hint="Сохранить файл в память. Это не прикрепление файла к сообщению в чате." hintAbove hintAlign="start" onPress={() => navigation.navigate("MemoryImport")} />
+        <IconAction compact icon="paperclip" label="Файл" accessibilityLabel="Прикрепить файл к сообщению" hint="JPEG, PNG, WebP или текст UTF-8. До 3 файлов, каждый до 2 МБ; текст вместе до 24 000 символов. Файлы не сохраняются как заметки." hintAbove hintAlign="start" disabled={!ready || busy || pickingAttachment || dictating} onPress={() => void pickAttachment()} />
         <IconAction compact icon="camera" label="Камера" accessibilityLabel="Сфотографировать и распознать" hint="Снять фото для заметки в памяти, а не отправить снимок в диалог." hintAbove onPress={() => navigation.navigate("MemoryImport", { camera: true })} />
         <VoiceInput key={`${active?.id}:${voiceReset}`} value={question} onChange={value => { if (store.getSnapshot().activeId === active?.id) store.setQuestion(value); }} disabled={!ready || busy} onError={setNotice} showLabel={false} onBegin={normalization.reset} onActiveChange={setDictating} onPhaseChange={setVoicePhase} />
         <IconAction compact icon={normalization.busy ? "x" : normalization.normalized ? "rotate-ccw" : "edit-3"}
@@ -219,7 +227,7 @@ function NebulaHomeContent() {
         <View style={{ flex: 1, minWidth: 0 }} />
         <IconAction compact icon={busy ? "square" : "arrow-up"} label={busy ? "Стоп" : "Отправить"} accessibilityLabel={busy ? "Остановить запрос" : "Отправить запрос"}
           hint={busy ? "Остановить ответ ИИ в этом диалоге." : "Отправить написанное сообщение выбранной модели."} hintAbove emphasized={!busy}
-          disabled={!busy && (!canSend || !question.trim())} onPress={sendOrStop} />
+          disabled={!busy && (!canSend || (!question.trim() && !active?.attachments?.length))} onPress={sendOrStop} />
       </View>
     </View>
     <ConversationHistorySheet visible={historyOpen} conversations={conversations} activeId={active?.id}

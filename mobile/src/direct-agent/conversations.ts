@@ -1,3 +1,4 @@
+import { checkedChatAttachments, type ChatAttachment } from "./chat-attachments";
 import { withLocalMemoryDatabase } from "../local-memory/storage";
 import type { NoteProposal } from "./memory";
 import { parseTaskState } from "./task-state";
@@ -6,12 +7,12 @@ import { restoredProposal } from "./fact-tool";
 
 /** `memory`: records the answer used, with how each was found («Из памяти»). */
 export type ChatMemoryRef = { id: string; title: string; section?: string; via: "search" | "rewrite" | "assistant" };
-export type ChatRow = { id: string; role: "user" | "assistant" | "info"; text: string; sources?: string[]; memory?: ChatMemoryRef[] };
+export type ChatRow = { id: string; role: "user" | "assistant" | "info"; text: string; sources?: string[]; memory?: ChatMemoryRef[]; attachments?: ChatAttachment[] };
 const VIA = new Set(["search", "rewrite", "assistant"]);
 export type ChatDraft = NoteProposal & { id: string };
 export type SavedConversation = {
   id: string; title: string; createdAt: string; updatedAt: string;
-  rows: ChatRow[]; drafts: ChatDraft[]; question: string; interrupted?: boolean; taskState?: TaskState;
+  attachments?: ChatAttachment[]; rows: ChatRow[]; drafts: ChatDraft[]; question: string; interrupted?: boolean; taskState?: TaskState;
 };
 export interface ConversationRepository {
   load(): Promise<SavedConversation[]>;
@@ -29,12 +30,16 @@ export function parseConversation(json: string): SavedConversation | null {
   try { value = JSON.parse(json); } catch { return null; }
   if (!value || typeof value !== "object" || typeof value.id !== "string" || !value.id ||
       typeof value.createdAt !== "string" || typeof value.updatedAt !== "string") return null;
+  try {
+    checkedChatAttachments(value.attachments);
+    for (const row of value.rows || []) checkedChatAttachments(row?.attachments);
+  } catch { return null; } // Keep the unreadable snapshot in SQLCipher for recovery.
   const rows: ChatRow[] = (Array.isArray(value.rows) ? value.rows : []).flatMap((r: any): ChatRow[] => {
     if (!r || typeof r.id !== "string" || typeof r.text !== "string" || !ROLES.has(r.role)) return [];
     const sources = Array.isArray(r.sources) ? r.sources.filter((url: unknown) => typeof url === "string" && url.startsWith("https://")) : undefined;
     const memory = Array.isArray(r.memory) ? r.memory.filter((m: any) => m && typeof m.id === "string" && typeof m.title === "string" && VIA.has(m.via))
       .slice(0, 8).map((m: any) => ({ id: m.id, title: m.title.slice(0, 160), via: m.via, ...(typeof m.section === "string" ? { section: m.section.slice(0, 60) } : {}) })) : undefined;
-    return [{ id: r.id, role: r.role, text: r.text, ...(sources?.length ? { sources } : {}), ...(memory?.length ? { memory } : {}) }];
+    return [{ id: r.id, role: r.role, text: r.text, ...(r.attachments?.length ? {attachments:checkedChatAttachments(r.attachments)} : {}), ...(sources?.length ? { sources } : {}), ...(memory?.length ? { memory } : {}) }];
   });
   const drafts: ChatDraft[] = (Array.isArray(value.drafts) ? value.drafts : []).filter((d: any) =>
     d && typeof d.id === "string" && typeof d.title === "string" && typeof d.body === "string")
@@ -45,7 +50,7 @@ export function parseConversation(json: string): SavedConversation | null {
     });
   return {
     id: value.id, title: typeof value.title === "string" && value.title ? value.title : "Диалог",
-    createdAt: value.createdAt, updatedAt: value.updatedAt, rows, drafts,
+    createdAt: value.createdAt, updatedAt: value.updatedAt, rows, drafts, ...(value.attachments?.length ? {attachments:checkedChatAttachments(value.attachments)} : {}),
     question: typeof value.question === "string" ? value.question : "",
     ...(parseTaskState(value.taskState) ? { taskState: parseTaskState(value.taskState) } : {}),
     ...(value.interrupted === true ? { interrupted: true } : {}),

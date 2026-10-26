@@ -83,3 +83,11 @@ test.each(["Привет, найди рецепт", "Спасибо, а где �
  await prepareDirectContext(options(prompt, lookup, jest.fn()));
  expect(lookup).toHaveBeenCalled();
 });
+
+test('attached files are not treated as a greeting or automatically sent into a web-prefetch query', async()=>{
+  const lookup=jest.fn(async()=>[]), transport=jest.fn();
+  const context=await prepareDirectContext({...options('Привет',lookup,transport),attachments:[{id:'f',name:'x.txt',kind:'text',mime:'text/plain',data:'private file text',size:17}]});
+  expect(context.context).not.toContain('Пользователь только приветствует');
+  expect(transport).not.toHaveBeenCalled();
+  expect(JSON.stringify(lookup.mock.calls)).not.toContain('private file text');
+});
