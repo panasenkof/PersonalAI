@@ -90,22 +90,32 @@ PersAI registration is required. Recognition requires an installed service and
 language support; microphone denial is handled explicitly.
 
 Memory and Home offer **Add information from a file**:
-- Text: read on the phone, no provider transmission; up to 60,000 characters.
+- Text: read on the phone, no extraction-provider transmission; up to 1 MB and 60,000 characters.
 - JPEG/PNG/WebP/GIF: selected vision model; up to 8 MB.
-- Audio: selected OpenAI-compatible `/audio/transcriptions` endpoint and configured
-  transcription model (`whisper-1` default); up to 20 MB. Anthropic does not provide
-  this endpoint; select another saved connection for audio.
+- Audio: up to 20 MB for extraction. When downloaded Whisper is ready, transcription
+  runs on the phone. The external `/audio/transcriptions` path requires an approved
+  operation and a compatible configured provider; it is not a permission inferred
+  from saving the file. Do not describe all audio imports as cloud transcription.
 - Video: five ordered frames at 2/25/50/75/97 percent of the duration; up to 80 MB.
-  This samples visual content, **does not transcribe the audio track** and cannot
-  describe every event in the video.
+  Extraction also attempts speech from the audio track and reports partial failures.
+  Five frames do not cover every visual event; this is not yet a complete located
+  transcript/segment index. See [the source/extraction roadmap](../Plans/MEMORY_RELIABILITY.md).
 
 Media is private by default. External extraction is a separate explicit action
 for the selected file; it requires selecting ordinary data and the provider.
 Review/edit the extracted text, then save it as a note with source filename and
-sensitivity. Original media is not retained in the notes backup. Picker copies
-and extracted frames are cleaned up. Encrypted backup/restore is a separate screen reached from Memory or Settings;
+sensitivity. If the user chooses to retain originals, their encrypted parts are
+stored in SQLCipher and included in the full notes backup. Notes saved without
+originals cannot reconstruct a missing file. New/append paths limit a note to
+10 originals and 80 MB combined; merge consistency remains an audit follow-up.
+Picker copies and extracted frames are cleaned up. Encrypted backup/restore is a separate screen reached from Memory or Settings;
 notes and local chat history are included. The recovery code is kept separately
 from the exported file. Backups created before chat history are still supported.
+The current 2 GiB backup and 100k-entity restore ceilings are not proof that every
+possible stored corpus can be restored; [M08 and the next work packages](architecture/MEMORY_RETRIEVAL_AUDIT_2026-10-26.md)
+track that limitation. Multi-file notes, appending files, basic chat attachments
+and the external Share destination choice are implemented; their Android results
+and remaining formats are recorded separately in [PLAN.md](../PLAN.md).
 
 ## Home, history and application session
 
