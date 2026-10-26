@@ -1,5 +1,7 @@
 # Организация, администрирование памяти и проверка поиска: пп. 65–66
 
+> **Решение 26.10, Memory Engine vNext:** новые объекты/временные claims/доказательства и предложения описаны в [OpenSpec](../memory-engine-vnext/proposal.md) и [архитектуре](../../../Plans/MEMORY_ENGINE_ARCHITECTURE.md). Уже проведённые проверки №65–66 и вновь добавленные [M01–M19](../../../docs/architecture/MEMORY_RETRIEVAL_AUDIT_2026-10-26.md), [RELATIONAL_MEMORY](../../../Plans/RELATIONAL_MEMORY.md) и [TEMPORAL_MEMORY](../../../Plans/TEMPORAL_MEMORY.md) — обязательные входные требования, не альтернативные очереди. Код текущей v5/v6 работает до отдельного внедрения новой схемы. [План обновления интерфейса](../../../Plans/MEMORY_ENGINE_UI.md) — после стабильного API.
+
 ## Что найдено в текущем коде
 
 Проверка базы `b60c052`: `local-memory/storage.ts`, `vectors.ts`, `repository.ts`,
