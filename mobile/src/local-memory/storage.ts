@@ -42,7 +42,7 @@ export function onLocalMemorySessionChange(listener: (unlocked: boolean) => void
 }
 export const localMemorySessionUnlocked = () => applicationSessionUnlocked;
 const requireApplicationSession = () => { if (!applicationSessionUnlocked) throw new Error("application_locked"); };
-export const LOCAL_MEMORY_SCHEMA_VERSION = 6;
+export const LOCAL_MEMORY_SCHEMA_VERSION = 7;
 const KIND_CHECK = `CHECK(kind IN (${MEMORY_KINDS.map(k => `'${k}'`).join(",")}))`;
 
 /** All memory (including full-text indexes, revisions, and WAL) is in SQLCipher. */
@@ -128,6 +128,13 @@ CREATE TABLE IF NOT EXISTS memory_vectors (
   chunk_id TEXT NOT NULL REFERENCES memory_chunks(id) ON DELETE CASCADE,
   model TEXT NOT NULL, dim INTEGER NOT NULL, vector BLOB NOT NULL, content_hash TEXT NOT NULL,
   PRIMARY KEY(chunk_id, model)
+);
+CREATE TABLE IF NOT EXISTS memory_cleanup_preferences (
+  entity_id TEXT PRIMARY KEY REFERENCES memory_entities(id) ON DELETE CASCADE,
+  guard TEXT NOT NULL DEFAULT 'normal' CHECK(guard IN ('normal','pinned','never_suggest')),
+  skip_until TEXT,
+  version INTEGER NOT NULL DEFAULT 1 CHECK(version > 0),
+  updated_at TEXT NOT NULL
 );
 CREATE VIRTUAL TABLE IF NOT EXISTS memory_search_fts USING fts5(
   entity_id UNINDEXED, chunk_id UNINDEXED, title, body, terms, aliases, prefix='2 3 4'
@@ -299,7 +306,8 @@ async function initialize(profileId: string): Promise<SQLite.SQLiteDatabase> {
         await upgradeToV6(tx);
         if (version < 3) await upgradeToV3(tx);
         if (version === 4) await upgradeToV5(tx);
-        if (version >= 3) await reindexAll(tx);
+        // v6→v7 adds only private review metadata: never rewrite existing FTS on this upgrade.
+        if (version >= 3 && version < 6) await reindexAll(tx);
         await tx.execAsync(`PRAGMA user_version = ${LOCAL_MEMORY_SCHEMA_VERSION}`);
       });
     }

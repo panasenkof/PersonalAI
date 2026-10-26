@@ -29,7 +29,7 @@ const V3_TABLES = {
 } as const;
 const ENTITY_COLUMNS = "id,collection_id,domain,schema_version,title,payload_json,record_status,sensitivity," +
   "source_kind,source_ref,valid_from,valid_until,created_at,updated_at,record_version";
-export const RESTORABLE_VERSIONS = [1, 2, 3, 4, 5, 6];
+export const RESTORABLE_VERSIONS = [1, 2, 3, 4, 5, 6, 7];
 const MAX_BACKUP_BYTES = 2 * 1024 * 1024 * 1024;
 
 function checkedRecoveryCode(value: string): string {
@@ -191,6 +191,13 @@ export async function restoreEncryptedBackup(
               if (!available.has(table)) throw new Error("incompatible_backup_schema");
               await tx.execAsync(`INSERT INTO ${table} SELECT * FROM pia_import.${table}`);
             }
+          }
+          // Hygienic keep/pin/defer are user decisions, NEVER a rebuildable index.
+          // v1–v6 backups legitimately have no such preferences.
+          if (version.user_version >= 7) {
+            if (!available.has("memory_cleanup_preferences")) throw new Error("incompatible_backup_schema");
+            await tx.execAsync(`INSERT INTO memory_cleanup_preferences(entity_id,guard,skip_until,version,updated_at)
+              SELECT entity_id,guard,skip_until,version,updated_at FROM pia_import.memory_cleanup_preferences`);
           }
           // Chunks and the search index are derived: rebuilt here from the
           // restored records, so a backup can never carry a mismatched index.

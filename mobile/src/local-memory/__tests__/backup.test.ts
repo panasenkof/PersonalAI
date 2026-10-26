@@ -9,7 +9,7 @@ jest.mock("expo-file-system/legacy", () => ({
 }));
 jest.mock("expo-sharing", () => ({ isAvailableAsync: jest.fn(), shareAsync: jest.fn() }));
 jest.mock("../storage", () => ({
-  LOCAL_MEMORY_SCHEMA_VERSION: 6,
+  LOCAL_MEMORY_SCHEMA_VERSION: 7,
   withLocalMemoryDatabase: jest.fn(async (_id: string, task: (db: unknown) => Promise<unknown>) => task(mockDb)),
 }));
 
@@ -81,7 +81,7 @@ test("export SQLCipher-encrypts a new independent file before sharing and erases
     "/cache/pia-encrypted-random-id.db", code,
   ]);
   expect(mockDb.getFirstAsync).toHaveBeenCalledWith("SELECT sqlcipher_export('pia_export')");
-  expect(mockDb.execAsync).toHaveBeenCalledWith("PRAGMA pia_export.user_version = 6");
+  expect(mockDb.execAsync).toHaveBeenCalledWith("PRAGMA pia_export.user_version = 7");
   expect(mockDb.execAsync).toHaveBeenCalledWith("DETACH DATABASE pia_export");
   expect(Sharing.shareAsync).toHaveBeenCalledTimes(1);
   expect(FS.deleteAsync).toHaveBeenCalledWith("file:///cache/pia-encrypted-random-id.db", {
@@ -190,7 +190,7 @@ test.each([1, 2, 3])("restores deployed schema v%s including chats into the upgr
   expect(mockDb.execAsync.mock.calls.map(([sql]) => sql)).toContainEqual(expect.stringContaining("INSERT OR IGNORE INTO direct_conversations"));
 });
 
-test.each([0, 7])("rejects unsupported backup schema v%s before copying any memory", async version => {
+test.each([0, 8])("rejects unsupported backup schema v%s before copying any memory", async version => {
   const read = mockDb.getFirstAsync.getMockImplementation()!;
   mockDb.getFirstAsync.mockImplementation(async sql => sql === "PRAGMA pia_import.user_version" ? { user_version: version } : read(sql));
   await expect(restoreEncryptedBackup("guest", "file:///backup.db", code)).rejects.toThrow("incompatible_backup_version");
@@ -207,4 +207,30 @@ test("v4 restores original metadata and bytes in the same transaction", async ()
   expect(statements).toContain("INSERT INTO memory_attachments SELECT * FROM pia_import.memory_attachments");
   expect(statements).toContain("INSERT INTO memory_attachment_parts SELECT * FROM pia_import.memory_attachment_parts");
   expect(statements.indexOf("COMMIT")).toBeGreaterThan(statements.indexOf("INSERT INTO memory_attachment_parts SELECT * FROM pia_import.memory_attachment_parts"));
+});
+
+test("v7 restore brings back explicit keep/skip decisions within the same SQLCipher transaction", async () => {
+  const read = mockDb.getFirstAsync.getMockImplementation()!;
+  mockDb.getFirstAsync.mockImplementation(async sql =>
+    sql === "PRAGMA pia_import.user_version" ? { user_version: 7 } : read(sql));
+  tablesOnce([...names, "memory_attachments", "memory_attachment_parts", "memory_cleanup_preferences"]);
+  await restoreEncryptedBackup("guest", "file:///backup.db", code);
+  const sql = mockDb.execAsync.mock.calls.map(([s]: string[]) => s);
+  const restored = sql.find(s => s.includes("FROM pia_import.memory_cleanup_preferences"));
+  expect(restored).toContain("INSERT INTO memory_cleanup_preferences");
+  expect(restored).toBeDefined();
+  expect(sql.indexOf("COMMIT")).toBeGreaterThan(sql.indexOf(restored!));
+});
+
+test("v7 backup missing policy table fails before mutation", async () => {
+  const read = mockDb.getFirstAsync.getMockImplementation()!;
+  mockDb.getFirstAsync.mockImplementation(async sql =>
+    sql === "PRAGMA pia_import.user_version" ? { user_version: 7 } : read(sql));
+  tablesOnce([...names, "memory_attachments", "memory_attachment_parts"]);
+  await expect(restoreEncryptedBackup("guest", "file:///backup.db", code))
+    .rejects.toThrow("incompatible_backup_schema");
+  // Schema check may run during a transaction, but the entire transaction rolls back.
+  const statements = mockDb.execAsync.mock.calls.map(([s]: string[]) => s);
+  expect(statements).toContain("ROLLBACK");
+  expect(statements).not.toContain("COMMIT");
 });

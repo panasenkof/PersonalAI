@@ -1,4 +1,5 @@
 import { changeNotes, undoNotes, purgeNotes, type NoteAction, type NoteSelection } from "./note-actions";
+import { MemoryHygieneService } from "./hygiene";
 import * as Crypto from "expo-crypto";
 import type * as SQLite from "expo-sqlite";
 
@@ -74,6 +75,8 @@ function validPayload(payload: Record<string, unknown>) {
 
 export class SqliteMemoryRepository implements MemoryRepository {
   constructor(private readonly db: SQL) {}
+  /** M1/№79а: read-only review and persistent user exceptions; no automatic deletes. */
+  hygiene() { return new MemoryHygieneService(this.db); }
   changeNotes(action: NoteAction, selection: NoteSelection[], collectionId?: string) { return changeNotes(this.db, action, selection, collectionId); }
   purgeNotes(selection: NoteSelection[]) { return purgeNotes(this.db, selection); }
   async lastNoteOperation(): Promise<string> {
