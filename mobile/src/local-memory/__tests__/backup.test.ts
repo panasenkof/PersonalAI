@@ -208,3 +208,28 @@ test("v4 restores original metadata and bytes in the same transaction", async ()
   expect(statements).toContain("INSERT INTO memory_attachment_parts SELECT * FROM pia_import.memory_attachment_parts");
   expect(statements.indexOf("COMMIT")).toBeGreaterThan(statements.indexOf("INSERT INTO memory_attachment_parts SELECT * FROM pia_import.memory_attachment_parts"));
 });
+
+test("v7 restore brings back explicit keep/skip decisions within the same SQLCipher transaction", async () => {
+  const read = mockDb.getFirstAsync.getMockImplementation()!;
+  mockDb.getFirstAsync.mockImplementation(async sql =>
+    sql === "PRAGMA pia_import.user_version" ? { user_version: 7 } : read(sql));
+  tablesOnce([...names, "memory_attachments", "memory_attachment_parts", "memory_cleanup_preferences"]);
+  await restoreEncryptedBackup("guest", "file:///backup.db", code);
+  const sql = mockDb.execAsync.mock.calls.map(([s]: string[]) => s);
+  const restored = sql.find(s => s.includes("FROM pia_import.memory_cleanup_preferences"));
+  expect(restored).toContain("INSERT INTO memory_cleanup_preferences");
+  expect(sql.indexOf("COMMIT")).toBeGreaterThan(sql.indexOf(restored));
+});
+
+test("v7 backup missing policy table fails before mutation", async () => {
+  const read = mockDb.getFirstAsync.getMockImplementation()!;
+  mockDb.getFirstAsync.mockImplementation(async sql =>
+    sql === "PRAGMA pia_import.user_version" ? { user_version: 7 } : read(sql));
+  tablesOnce([...names, "memory_attachments", "memory_attachment_parts"]);
+  await expect(restoreEncryptedBackup("guest", "file:///backup.db", code))
+    .rejects.toThrow("incompatible_backup_schema");
+  // Schema check may run during a transaction, but the entire transaction rolls back.
+  const statements = mockDb.execAsync.mock.calls.map(([s]: string[]) => s);
+  expect(statements).toContain("ROLLBACK");
+  expect(statements).not.toContain("COMMIT");
+});
