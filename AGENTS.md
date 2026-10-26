@@ -1,5 +1,14 @@
 # Instructions for agents working in PersAI
 
+## Mandatory checkpoint for EVERY implementation step (owner decision 26 October 2026)
+
+Read and follow **[docs/DEVELOPMENT_GATES.md](docs/DEVELOPMENT_GATES.md)** for **every** task and PR, not only mobile UI. This is an actionable project rule; Cursor also has an always-applied rule in `.cursor/rules`.
+
+- **Before coding:** refresh actual `main`/PR status; check `PLAN.md` §2, `Plans/ROADMAP_STATUS.md` and **all relevant feature subplans/OpenSpec** for current requirements and contradictions; examine existing code and tests. Check approved references and relevant best practices. For substantial UI or architecture work compare **current verifiable** sources/analogues and adapt them to Android, local-only storage and Nebula; preserve user decisions. Update stale plans before/alongside code. Avoid redundant research for trivial changes; state N/A with a reason.
+- **At the end of EACH partial implementation:** review **only the implemented slice and its genuinely affected regressions**, not future features. Run relevant success/error/lock/rollback/backup/UI tests as applicable; mark actual PASS/FAIL/NOT RUN/NOT IMPLEMENTED with exact SHA.
+- **Mandatory second final review: PLAN CONFORMANCE.** Compare the **actual diff and verified behavior** against the applicable current-step requirements in `PLAN.md` **and feature subplans/OpenSpec**. Report MATCH / PARTIAL / DEVIATION / NOT IMPLEMENTED (future) / NOT VERIFIED. Fix unjustified departures before declaring completion, or explicitly justify and synchronize PLAN, status register and subplans/specs if an approved change is needed; do not quietly redefine requirements after coding. An unresolved required deviation means PARTIAL/BLOCKED.
+- Each PR summary must report plan version/step, subplans, references (or N/A), scope/exclusions, tests and status, affected regressions, **end-of-step conformance matrix**, remaining work and next step. Keep `PLAN.md` the only task order; do not let subplans silently create a second queue.
+
 For **mobile UI, UX, navigation, motion, launcher icons, voice controls, previews and attachment pickers**:
 
 1. Read [skills/mobile-ui-ux/SKILL.md](skills/mobile-ui-ux/SKILL.md), [docs/UI_GUIDELINES.md](docs/UI_GUIDELINES.md), and the **approved** [Nebula visual contract](docs/design/NEBULA_VISUAL_CONTRACT.md) **before modifying mobile UI**.
