@@ -166,7 +166,7 @@ export class SqliteMemoryRepository implements MemoryRepository {
     return record;
   }
 
-  async reviseEntity(id: string, expectedVersion: number, payload: Record<string, unknown>, reason: string, collectionId?: string, allowAgent = false): Promise<EntityRecord> {
+  async reviseEntity(id: string, expectedVersion: number, payload: Record<string, unknown>, reason: string, collectionId?: string, allowAgent = false, writeAttachment?: (tx: SQL, entityId: string) => Promise<void>): Promise<EntityRecord> {
     safeReason(reason);
     if (expectedVersion < 1) throw new Error("invalid_expected_version");
     const data = validPayload(payload);
@@ -208,6 +208,7 @@ export class SqliteMemoryRepository implements MemoryRepository {
           JSON.stringify(before), JSON.stringify(after), timestamp],
       );
       await indexEntity(tx, id, timestamp);
+      if (writeAttachment) await writeAttachment(tx, id);
       updated = after;
     });
     if (!updated) throw new Error("revision_not_committed");

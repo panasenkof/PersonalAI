@@ -1,3 +1,4 @@
+import { AppendNoteAttachments } from "../media/AppendNoteAttachments";
 import { useNavigation, usePreventRemove, useRoute } from "@react-navigation/native";
 import type { RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
@@ -65,7 +66,9 @@ export function MemoryNoteScreen() {
   // the final keystroke to the component state on a fast press.
   const namesForSave = useRef("");
   const [terms, setTerms] = useState(""); const [modelTerms, setModelTerms] = useState<string[]>([]);
-  const [loading, setLoading] = useState(true); const [busy, setBusy] = useState(false); const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true); const [working, setBusy] = useState(false);
+  const [attachmentBusy, setAttachmentBusy] = useState(false); const [attachmentDraft, setAttachmentDraft] = useState(false);
+  const busy = working || attachmentBusy; const [error, setError] = useState("");
   const [retry, setRetry] = useState(0); const [leaving, setLeaving] = useState(false);
   const [sectionOpen, setSectionOpen] = useState(false); const [details, setDetails] = useState(false);
   const [metadataOpen, setMetadataOpen] = useState(false); const [fileContentOpen, setFileContentOpen] = useState(false);
@@ -83,7 +86,7 @@ export function MemoryNoteScreen() {
   const dirty = allowAgent || extractedText !== String(selected?.payload.extracted_text || "") || title !== baseline.current.title || body !== baseline.current.body || collectionId !== baseline.current.collectionId ||
     kind !== baseline.current.kind || splitNames(names).join(",") !== splitNames(baseline.current.names).join(",") ||
     terms.trim() !== baseline.current.terms.trim();
-  usePreventRemove(!leaving && (busy || dirty || voiceActive), ({ data }) => {
+  usePreventRemove(!leaving && (busy || dirty || voiceActive || attachmentDraft), ({ data }) => {
     if (busy || voiceActive) { setError("Дождитесь завершения сохранения или диктовки."); return; }
     Alert.alert("Изменения не сохранены", "Закрыть запись без сохранения?", [
       { text: "Продолжить редактирование", style: "cancel" },
@@ -183,7 +186,7 @@ export function MemoryNoteScreen() {
           {profile && selected && memoryNoteHasPhoto(selected) ? <View style={{ borderRadius: nebulaRadii.card, overflow: "hidden" }}><MemoryCover profile={profile} entityId={selected.id} height={210} label={title} /></View> : null}
           <Text accessibilityRole="header" selectable style={{ color: t.text, fontSize: 28, lineHeight: 36, fontWeight: "800" }}>{readingTitle || "Без названия"}</Text>
           {body && body.trim() !== readingTitle ? <View testID="note-read-body"><MarkdownText text={body} style={{ color: t.text, ...nebulaTypography.body }} /></View> : null}
-          {selected && profile ? <AttachmentView profile={profile} entityId={selected.id} /> : null}
+          {selected && profile ? <AttachmentView key={selected.record_version} profile={profile} entityId={selected.id} /> : null}
           {!body && extractedText ? <MarkdownText text={extractedText} style={{ color: t.text, ...nebulaTypography.body }} /> : null}
           {typeof selected?.payload.source_url === "string" && /^https:\/\//.test(selected.payload.source_url) ? <Pressable accessibilityRole="link" style={button} onPress={() => void Linking.openURL(String(selected.payload.source_url)).catch(() => setError("Не удалось открыть источник."))}><Text style={{ color: t.secondary }}>Открыть источник</Text></Pressable> : null}
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: nebulaSpacing.sm, marginTop: nebulaSpacing.md }}>
@@ -252,7 +255,7 @@ export function MemoryNoteScreen() {
         </> : null}
         {typeof selected?.payload.source_url === "string" ? <Pressable accessibilityRole="link" style={button} onPress={() => { const url = String(selected.payload.source_url); if (/^https:\/\//.test(url)) void Linking.openURL(url).catch(() => setError("Не удалось открыть ссылку.")); }}><Text style={{ color: t.secondary }}>Источник: {selected.payload.source_url}</Text></Pressable> : null}
         {Array.isArray(selected?.payload.merged_sources) ? <View><Text style={{ color: t.muted }}>Исходные записи, их даты и связи сохранены:</Text>{(selected.payload.merged_sources as { id: string; title: string }[]).filter(n => n.id !== selected.id).map(n => <Pressable key={n.id} style={button} onPress={() => navigation.push("MemoryNote", { entityId: n.id })}><Text style={{ color: t.secondary }}>{n.title || "Исходная запись"}</Text></Pressable>)}</View> : null}
-        {selected && profile ? <AttachmentView profile={profile} entityId={selected.id} /> : null}
+        {selected && profile ? <AttachmentView key={selected.record_version} profile={profile} entityId={selected.id} /> : null}
         {selected ? <>
           {selected.record_status === "trashed" ? <Text style={{ color: t.muted }}>Запись в корзине. Восстановите её на странице памяти, чтобы агент снова мог её находить.</Text> : null}
           <Pressable accessibilityRole="button" accessibilityLabel="История, события и связи" accessibilityState={{ expanded: details }} onPress={() => details ? setDetails(false) : void loadDetails()} style={{ ...button, backgroundColor: t.soft }}><Text style={{ color: t.text }}>История, события и связи {details ? "⌃" : "⌄"}</Text></Pressable>
@@ -277,6 +280,10 @@ export function MemoryNoteScreen() {
           })}><Text style={{ color: t.muted }}>{selected.record_status === "archived" ? "Вернуть из архива" : "Перенести в архив"}</Text></Pressable>
         </> : null}
         </>}
+        {selected && profile && ["active", "archived"].includes(selected.record_status) ? <AppendNoteAttachments
+          key={profile + selected.id} profile={profile} note={selected} disabled={working || dirty || voiceActive}
+          onBusyChange={setAttachmentBusy} onDraftChange={setAttachmentDraft}
+          onSaved={updated => { setSelected(updated); setBeforeAi(null); scheduleVectors(profile); }} /> : null}
       </> : null}
       {error ? <Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text> : null}
       {!loading && !repository.current ? <Pressable accessibilityRole="button" style={button} onPress={() => setRetry(n => n + 1)}><Text style={{ color: t.secondary }}>Повторить загрузку</Text></Pressable> : null}

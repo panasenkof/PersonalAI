@@ -2,6 +2,7 @@ import * as Crypto from 'expo-crypto';
 import { Directory, File, FileMode, Paths } from 'expo-file-system';
 import type { SQLiteDatabase } from 'expo-sqlite';
 import { localMemorySessionUnlocked, withLocalMemoryDatabase } from '../local-memory/storage';
+import { MemoryConflictError } from '../local-memory/types';
 import { SqliteMemoryRepository } from '../local-memory/repository';
 import type { ImportFile } from './kinds';
 import { mediaKind } from './kinds';
@@ -25,9 +26,12 @@ async function hash(bytes: Uint8Array<ArrayBuffer>) {
   const result = await Crypto.digest(Crypto.CryptoDigestAlgorithm.SHA256, bytes);
   return Array.from(new Uint8Array(result), b => b.toString(16).padStart(2, '0')).join('');
 }
+function originalKind(file: ImportFile) {
+  return file.mimeType === 'application/pdf' || /\.pdf$/i.test(file.name) ? 'document' : mediaKind(file);
+}
 export async function writeOriginal(db: Pick<SQLiteDatabase, 'runAsync'>, entityId: string, file: ImportFile, signal?: AbortSignal) {
   if (!/^(file|content):\/\//.test(file.uri)) throw new Error('Для оригинала нужен локальный файл.');
-  mediaKind(file);
+  originalKind(file);
   const source = new File(file.uri);
   const handle = source.open(FileMode.ReadOnly);
   try {
@@ -127,4 +131,37 @@ export async function materializeAttachment(profile: string, attachment: Attachm
 
 export async function attachmentsForEntity(profile: string, entityId: string): Promise<Attachment[]> {
   return withLocalMemoryDatabase(profile, db => db.getAllAsync<Attachment>('SELECT * FROM memory_attachments WHERE entity_id=? ORDER BY created_at,id', [entityId]));
+}
+
+/** Revision, metadata and all originals commit together; no recognition or model upload. */
+export async function appendNoteAttachments(profile: string, entityId: string, expectedVersion: number, files: ImportFile[], signal?: AbortSignal) {
+  return withLocalMemoryDatabase(profile, async db => {
+    check(signal);
+    if (!files.length) throw new Error('Выберите файлы для добавления.');
+    const repo = new SqliteMemoryRepository(db), note = await repo.entity(entityId);
+    if (!note) throw new Error('Запись не найдена.');
+    if (note.record_version !== expectedVersion) throw new MemoryConflictError('stale_memory_version');
+    if (!['active', 'archived'].includes(note.record_status)) throw new Error('Сначала восстановите запись из корзины.');
+    const existing = await db.getAllAsync<Attachment>('SELECT * FROM memory_attachments WHERE entity_id=? ORDER BY created_at,id', [entityId]);
+    if (existing.length + files.length > MAX_ORIGINALS_PER_NOTE) throw new Error('Не более 10 вложений в одной заметке, включая сохранённые.');
+    let bytes = existing.reduce((sum, item) => sum + item.size, 0);
+    const kinds = files.map(file => {
+      if (!/^(file|content):\/\//.test(file.uri)) throw new Error('Для оригинала нужен локальный файл.');
+      const kind = originalKind(file), size = new File(file.uri).size;
+      if (!size || size > MAX_ORIGINAL_BYTES) throw new Error('Выберите непустой файл размером до 80 МБ.');
+      bytes += size; return kind;
+    });
+    if (bytes > MAX_TOTAL_ORIGINAL_BYTES) throw new Error('Размер всех вложений заметки вместе не должен превышать 80 МБ.');
+    const previousKinds = existing.map(item => { try { return originalKind({ uri: '', name: item.name, mimeType: item.mime }); } catch { return 'document'; } });
+    const payload = { ...note.payload, source_file: note.payload.source_file || existing[0]?.name || files[0].name,
+      source_media: note.payload.source_media || previousKinds[0] || kinds[0],
+      source_files: [...existing.map(item => item.name), ...files.map(item => item.name)], source_media_types: [...previousKinds, ...kinds] };
+    return repo.reviseEntity(entityId, expectedVersion, payload, `Добавлены вложения: ${files.length}`, undefined, false, async (tx, id) => {
+      check(signal);
+      for (const file of files) await writeOriginal(tx, id, file, signal);
+      const totals = await tx.getFirstAsync<{ count: number; bytes: number }>('SELECT COUNT(*) AS count, COALESCE(SUM(size),0) AS bytes FROM memory_attachments WHERE entity_id=?', [id]);
+      if (!totals || totals.count > MAX_ORIGINALS_PER_NOTE || totals.bytes > MAX_TOTAL_ORIGINAL_BYTES) throw new Error('Лимит вложений: 10 файлов и 80 МБ на заметку.');
+      check(signal);
+    });
+  });
 }
