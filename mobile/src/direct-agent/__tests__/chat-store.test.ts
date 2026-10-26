@@ -214,3 +214,12 @@ test('failure before transport restores files and question; removal affects only
   await store.send(settings);expect(runner).not.toHaveBeenCalled();expect(store.getSnapshot().conversations[0].attachments).toHaveLength(1);
   store.setAttachments(id,[]);expect(store.getSnapshot().conversations[0].attachments).toEqual([]);expect(store.getSnapshot().conversations[0].rows[0].attachments).toHaveLength(1);store.dispose();
 });
+
+test('external Share appends atomically to the current draft without model invocation or note save',async()=>{
+  const {repo,records}=repository(),runner=jest.fn();const store=new DirectChatStore('guest',repo,runner);await store.initialize();const id=store.getSnapshot().activeId!;
+  const file={id:'share',name:'x.txt',kind:'text' as const,mime:'text/plain',data:'File',size:12};store.setQuestion('Мой черновик');
+  store.sharedDraft(id,'https://example.org',[file]);expect(store.getSnapshot().conversations[0].question).toBe('Мой черновик');
+  store.appendSharedDraft(id,'https://example.org',[file]);await store.checkpoint();expect(records.get(id)?.question).toBe('Мой черновик\n\nhttps://example.org');expect(records.get(id)?.attachments).toHaveLength(1);expect(runner).not.toHaveBeenCalled();expect(saveApprovedNote).not.toHaveBeenCalled();
+  const before=JSON.stringify(store.getSnapshot());expect(()=>store.appendSharedDraft(id,'x'.repeat(24000),[])).toThrow('24 000');expect(()=>store.appendSharedDraft(id,'new',Array(3).fill(file))).toThrow('3 файлов');expect(JSON.stringify(store.getSnapshot())).toBe(before);
+  store.create();expect(()=>store.appendSharedDraft(id,'late',[])).toThrow('недоступен');store.dispose();
+});

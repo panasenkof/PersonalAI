@@ -78,10 +78,10 @@ export class AsyncLocalStorage<T> { getStore(): T | undefined { return undefined
 // New native media interfaces: browser checks do not claim codec/SQLCipher coverage.
 export const Paths = { cache: "file:///qa-cache/" };
 export const FileMode = { ReadOnly: "r", WriteOnly: "w" };
-export class Directory { exists = false; constructor(..._parts: unknown[]) {} delete() {} }
-export class File { uri: string; size = 100; exists = true; constructor(...parts: any[]) { this.uri=parts.map(p => p.uri || p).join("/"); } delete() { stats.deletes.push(this.uri); } }
-export const getSharedPayloads = () => [];
-export const clearSharedPayloads = () => {};
+export class Directory { exists = false; uri: string; constructor(...parts: any[]) {this.uri=parts.map(p=>p.uri || p).join("/");} create() {} delete() {} }
+export class File { uri: string; size = 100; exists = true; constructor(...parts: any[]) { this.uri=parts.map(p => p.uri || p).join("/"); } get name() { return this.uri.split("/").pop() || "Входящий файл"; } delete() { stats.deletes.push(this.uri); } }
+export const getSharedPayloads = () => (window as any).__incoming || [];
+export const clearSharedPayloads = () => { (window as any).__incoming=[]; };
 export const getResolvedSharedPayloadsAsync = async () => [];
 export const useVideoPlayer = () => null;
 export const VideoView = () => null;

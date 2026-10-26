@@ -123,13 +123,29 @@ export class DirectChatStore {
   setQuestion(question: string) {
     if (this.snapshot.activeId) this.update(this.snapshot.activeId, { question });
   }
-  setAttachments(id: string, files: ChatAttachment[]) {
-    const current = this.snapshot.conversations.find(c => c.id === id);
-    if (!current || current.busy || current.deleting || this.disposed) return;
+  private validateDraftAttachments(current: LiveConversation, files: ChatAttachment[]) {
     const checked = checkedChatAttachments(files);
     const total = [...current.rows.flatMap(r => r.attachments || []), ...checked].reduce((sum, f) => sum + f.size, 0);
     if (total > MAX_CONVERSATION_FILE_BYTES) throw new Error("Вложения этого диалога занимают больше 24 МБ. Начните новый диалог.");
-    this.update(id, {attachments:checked}, true);
+    return checked;
+  }
+  setAttachments(id: string, files: ChatAttachment[]) {
+    const current = this.snapshot.conversations.find(c => c.id === id);
+    if (!current || current.busy || current.deleting || this.disposed) return;
+    this.update(id, {attachments:this.validateDraftAttachments(current, files)}, true);
+  }
+  /** Validate without mutation for the Share chooser; repeat atomically on confirmation. */
+  sharedDraft(id: string, text: string, files: ChatAttachment[]) {
+    const current = this.snapshot.conversations.find(c => c.id === id);
+    if (!this.snapshot.ready || this.disposed || !current || id !== this.snapshot.activeId) throw new Error("Текущий диалог недоступен.");
+    if (current.busy || current.deleting) throw new Error("Дождитесь завершения работы в текущем диалоге.");
+    const question = [current.question, text].filter(Boolean).join("\n\n");
+    if (question.length > MAX_USER_PROMPT_CHARS) throw new Error("Вместе с черновиком получится больше 24 000 символов.");
+    return {question, attachments:this.validateDraftAttachments(current, [...(current.attachments || []), ...files])};
+  }
+  appendSharedDraft(id: string, text: string, files: ChatAttachment[]) {
+    const patch = this.sharedDraft(id, text, files);
+    this.update(id, patch, true);
   }
   async checkpoint() {
     const ids = this.snapshot.conversations.map(c => c.id);

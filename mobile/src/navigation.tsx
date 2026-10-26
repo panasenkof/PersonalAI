@@ -1,3 +1,4 @@
+import { ShareDestinationScreen } from "./screens/ShareDestinationScreen";
 import Feather from "@expo/vector-icons/Feather";
 import type { SharePayload } from "expo-sharing";
 import { StackActions } from "@react-navigation/native";
@@ -30,6 +31,7 @@ export type RootStackParams = {
   MemoryNote: { entityId?: string; collectionId?: string };
   MemoryBackup: undefined;
   MemoryImport: { incoming?: SharePayload[]; camera?: boolean; source?: "photo" | "file" | "link"; collectionId?: string } | undefined;
+  ShareDestination: { incoming: SharePayload[] };
   DiagnosticLogs: undefined;
   /** Research-only native graphics screen (not a bottom tab). */
   NebulaLab: undefined;
@@ -79,11 +81,12 @@ function ThemedRootNavigator() {
   const t = useTheme();
   return (
     <NavigationContainer ref={navigationRef} theme={dark ? DarkTheme : DefaultTheme}>
-      <IncomingShares open={incoming => { if (!navigationRef.isReady()) return false; navigationRef.dispatch(StackActions.push("MemoryImport", { incoming })); return true; }} />
+      <IncomingShares open={incoming => { if (!navigationRef.isReady()) return false; const route = navigationRef.getCurrentRoute(); if (route?.name === "ShareDestination" || (route?.name === "MemoryImport" && (route.params as RootStackParams["MemoryImport"])?.incoming)) return false; navigationRef.dispatch(StackActions.push("ShareDestination", { incoming })); return true; }} />
       <Stack.Navigator screenOptions={{
         headerStyle: { backgroundColor: t.panel }, headerTintColor: t.text,
       }}>
         <Stack.Screen name="Tabs" component={Tabs} options={{ headerShown: false }} />
+        <Stack.Screen name="ShareDestination" component={ShareDestinationScreen} options={{ title: "Полученный материал" }} />
         <Stack.Screen name="MemoryImport" component={MemoryImportScreen} options={{ title: "Добавить в память" }} />
         <Stack.Screen name="MemoryNote" component={MemoryNoteScreen} options={{ title: "Запись" }} />
         <Stack.Screen name="MemoryBackup" component={MemoryBackupScreen} options={{ title: "Резервные копии" }} />

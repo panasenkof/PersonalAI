@@ -1,6 +1,6 @@
 export * from "react-native-web";
 import React from "react";
-import { Modal as WebModal } from "react-native-web";
+import { Modal as WebModal, Platform as WebPlatform } from "react-native-web";
 const listeners = new Map<string, Set<(state?: string) => void>>();
 export const AppState = {
   currentState: "active",
@@ -25,3 +25,5 @@ export function Modal(props: React.ComponentProps<typeof WebModal>) {
 }
 export const Alert = { alert(_title: string, _message: string, buttons: any[] = []) { buttons.at(-1)?.onPress?.(); } };
 export const ToastAndroid = { SHORT: 0, show(message: string) { (window as any).__qa.lastHint = message; } };
+
+export const Platform = {...WebPlatform, get OS() { return (window as any).__qa?.androidShare ? "android" : WebPlatform.OS; }};
