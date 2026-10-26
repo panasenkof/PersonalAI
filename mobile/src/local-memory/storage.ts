@@ -42,7 +42,7 @@ export function onLocalMemorySessionChange(listener: (unlocked: boolean) => void
 }
 export const localMemorySessionUnlocked = () => applicationSessionUnlocked;
 const requireApplicationSession = () => { if (!applicationSessionUnlocked) throw new Error("application_locked"); };
-export const LOCAL_MEMORY_SCHEMA_VERSION = 5;
+export const LOCAL_MEMORY_SCHEMA_VERSION = 6;
 const KIND_CHECK = `CHECK(kind IN (${MEMORY_KINDS.map(k => `'${k}'`).join(",")}))`;
 
 /** All memory (including full-text indexes, revisions, and WAL) is in SQLCipher. */
@@ -121,6 +121,7 @@ CREATE INDEX IF NOT EXISTS ix_memory_aliases_normalized ON memory_aliases(normal
 CREATE TABLE IF NOT EXISTS memory_index_terms (
   entity_id TEXT NOT NULL REFERENCES memory_entities(id) ON DELETE CASCADE,
   terms TEXT NOT NULL, source TEXT NOT NULL, created_at TEXT NOT NULL,
+  source_record_version INTEGER, source_collection_name TEXT,
   UNIQUE(entity_id, source)
 );
 CREATE TABLE IF NOT EXISTS memory_vectors (
@@ -146,6 +147,13 @@ async function upgradeToV3(tx: SQLite.SQLiteDatabase): Promise<void> {
   await tx.execAsync("CREATE INDEX IF NOT EXISTS ix_memory_entities_kind ON memory_entities(kind)");
   await reindexAll(tx);
   await tx.execAsync("DROP TABLE IF EXISTS memory_notes_fts");
+}
+
+/** Legacy model timestamps cannot prove which version was actually processed. */
+async function upgradeToV6(tx: SQLite.SQLiteDatabase): Promise<void> {
+  const columns = await tx.getAllAsync<{ name: string }>("PRAGMA table_info(memory_index_terms)");
+  if (!columns.some(c => c.name === "source_record_version")) await tx.execAsync("ALTER TABLE memory_index_terms ADD COLUMN source_record_version INTEGER");
+  if (!columns.some(c => c.name === "source_collection_name")) await tx.execAsync("ALTER TABLE memory_index_terms ADD COLUMN source_collection_name TEXT");
 }
 
 /** Remove the old one-original-per-note restriction without cascading away bytes.
@@ -288,6 +296,7 @@ async function initialize(profileId: string): Promise<SQLite.SQLiteDatabase> {
     if (version < LOCAL_MEMORY_SCHEMA_VERSION) {
       await withUnlockedTransaction(db, async tx => {
         await tx.execAsync(SCHEMA_SQL);
+        await upgradeToV6(tx);
         if (version < 3) await upgradeToV3(tx);
         if (version === 4) await upgradeToV5(tx);
         if (version >= 3) await reindexAll(tx);

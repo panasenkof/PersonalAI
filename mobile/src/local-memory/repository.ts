@@ -13,6 +13,7 @@ import type {
   ObservationRecord, RelationRecord, RevisionRecord, RecordSensitivity,
 } from "./types";
 import { MemoryAccessError, MemoryConflictError } from "./types";
+import { CURRENT_MODEL_TERMS, enrichable, type EnrichmentSnapshot } from "./enrichment-policy";
 
 type SQL = Pick<SQLite.SQLiteDatabase, "getFirstAsync" | "getAllAsync" | "runAsync" | "execAsync">;
 type Row = Record<string, unknown>;
@@ -332,9 +333,13 @@ export class SqliteMemoryRepository implements MemoryRepository {
   async relationsForEntity(id: string): Promise<RelationRecord[]> {
     if (!await this.entity(id)) return [];
     const rows = await this.db.getAllAsync<Row>(
-      `SELECT * FROM memory_relations
-       WHERE source_entity_id=? OR target_entity_id=?
-       ORDER BY created_at, id`, [id, id],
+      `SELECT r.* FROM memory_relations r JOIN memory_entities e ON e.id=r.source_entity_id
+       JOIN memory_collections c ON c.id=e.collection_id
+       LEFT JOIN memory_index_terms t ON t.entity_id=e.id AND t.source='model:auto'
+       WHERE (r.source_entity_id=? OR r.target_entity_id=?)
+         AND (r.source_kind IS NULL OR r.source_kind<>'model:auto' OR
+           (r.source_ref=CAST(e.record_version AS TEXT) AND ${CURRENT_MODEL_TERMS}))
+       ORDER BY r.created_at, r.id`, [id, id],
     );
     return rows.map(r => ({
       id: String(r.id), source_entity_id: String(r.source_entity_id),
@@ -442,13 +447,61 @@ export class SqliteMemoryRepository implements MemoryRepository {
     if (!/^(user|model:[a-z0-9._-]{1,60})$/i.test(source)) throw new Error("invalid_index_terms_source");
     const words = checkedTerms(terms);
     await withUnlockedTransaction(this.db, async tx => {
-      if (!await tx.getFirstAsync<Row>("SELECT id FROM memory_entities WHERE id=?", [entityId])) throw new MemoryAccessError("entity_not_found");
+      const input = await tx.getFirstAsync<Row>("SELECT e.record_version,c.name FROM memory_entities e JOIN memory_collections c ON c.id=e.collection_id WHERE e.id=?", [entityId]);
+      if (!input) throw new MemoryAccessError("entity_not_found");
       await tx.runAsync("DELETE FROM memory_index_terms WHERE entity_id=? AND source=?", [entityId, source]);
       // A model's empty answer is kept too: it marks the record as done.
-      if (words || source.startsWith("model:")) await tx.runAsync("INSERT INTO memory_index_terms(entity_id,terms,source,created_at) VALUES (?,?,?,?)", [entityId, words, source, now()]);
+      if (words || source.startsWith("model:")) await tx.runAsync(
+        "INSERT INTO memory_index_terms(entity_id,terms,source,created_at,source_record_version,source_collection_name) VALUES (?,?,?,?,?,?)",
+        [entityId, words, source, now(), Number(input.record_version), String(input.name)]);
       await indexEntity(tx, entityId);
     });
     return words.split(" ").filter(Boolean);
+  }
+
+  /** Compare the request snapshot and commit words + inferred links together.
+   * The database lease pins the profile. Abort is checked inside the transaction,
+   * including after async indexing, so a lock/disable cannot leave half an answer. */
+  async applyIndexEnrichment(snapshot: EnrichmentSnapshot, terms: string[], people: string[], signal?: AbortSignal): Promise<boolean> {
+    const checkCancelled = () => { if (signal?.aborted) throw new Error("Подбор слов остановлен"); };
+    let applied = false;
+    await withUnlockedTransaction(this.db, async tx => {
+      checkCancelled();
+      const entity = await this.entity(snapshot.entityId);
+      const collections = await this.listCollections();
+      const collection = collections.find(c => c.id === entity?.collection_id);
+      if (!entity || !enrichable(entity, collection) || entity.record_version !== snapshot.recordVersion ||
+          entity.sensitivity !== snapshot.sensitivity || entity.collection_id !== snapshot.collectionId ||
+          collection!.name !== snapshot.collectionName || collection!.slug !== snapshot.collectionSlug) return;
+      const source = "model:auto", timestamp = now();
+      await tx.runAsync("DELETE FROM memory_index_terms WHERE entity_id=? AND source=?", [entity.id, source]);
+      await tx.runAsync(
+        "INSERT INTO memory_index_terms(entity_id,terms,source,created_at,source_record_version,source_collection_name) VALUES (?,?,?,?,?,?)",
+        [entity.id, checkedTerms(terms), source, timestamp, entity.record_version, collection!.name]);
+      // Only replace links we can attribute to this automatic operation. Legacy
+      // source_kind=NULL links may be manual and must not be guessed away.
+      await tx.runAsync("DELETE FROM memory_relations WHERE source_entity_id=? AND source_kind=?", [entity.id, source]);
+      for (const name of [...new Set(people)].slice(0, 8)) {
+        checkCancelled();
+        const candidates = (await this.entitiesByAlias(name, "person")).filter(p =>
+          p.id !== entity.id && enrichable(p, collections.find(c => c.id === p.collection_id)));
+        // Never choose an arbitrary namesake or a protected target.
+        if (candidates.length !== 1) continue;
+        const person = candidates[0];
+        const existing = await tx.getFirstAsync<Row>(
+          `SELECT id FROM memory_relations WHERE
+           (source_entity_id=? AND target_entity_id=?) OR (source_entity_id=? AND target_entity_id=?)`,
+          [entity.id, person.id, person.id, entity.id]);
+        if (existing) continue;
+        await tx.runAsync(
+          "INSERT INTO memory_relations(id,source_entity_id,target_entity_id,kind,source_kind,source_ref,created_at) VALUES (?,?,?,?,?,?,?)",
+          [uid(), entity.id, person.id, "about", source, String(entity.record_version), timestamp]);
+      }
+      await indexEntity(tx, entity.id, timestamp);
+      checkCancelled();
+      applied = true;
+    });
+    return applied;
   }
 
   /** Chunks whose vector for `model` is missing or older than the text and
@@ -538,8 +591,8 @@ export class SqliteMemoryRepository implements MemoryRepository {
   /** How many enrichable records have current index words from `source`, and how many wait. */
   async indexTermsStatus(source: string): Promise<{ done: number; pending: number }> {
     const row = await this.db.getFirstAsync<Row>(
-      `SELECT sum(CASE WHEN t.entity_id IS NOT NULL AND t.created_at >= e.updated_at THEN 1 ELSE 0 END) AS done,
-              sum(CASE WHEN t.entity_id IS NULL OR t.created_at < e.updated_at THEN 1 ELSE 0 END) AS pending
+      `SELECT sum(CASE WHEN ${CURRENT_MODEL_TERMS} THEN 1 ELSE 0 END) AS done,
+              sum(CASE WHEN ${CURRENT_MODEL_TERMS} THEN 0 ELSE 1 END) AS pending
        FROM memory_entities e JOIN memory_collections c ON c.id=e.collection_id
        LEFT JOIN memory_index_terms t ON t.entity_id=e.id AND t.source=?
        WHERE e.record_status='active' AND e.domain='notes' AND c.sensitivity='standard' AND c.slug<>'documents'
@@ -548,13 +601,13 @@ export class SqliteMemoryRepository implements MemoryRepository {
   }
 
   /** Active records of ordinary sections whose index words from `source` are
-   * missing or older than their last edit, oldest first. */
+   * missing or computed for another source version/section, oldest first. */
   async staleIndexTerms(source: string, limit = 20): Promise<string[]> {
     const rows = await this.db.getAllAsync<Row>(
       `SELECT e.id FROM memory_entities e JOIN memory_collections c ON c.id=e.collection_id
        LEFT JOIN memory_index_terms t ON t.entity_id=e.id AND t.source=?
        WHERE e.record_status='active' AND e.domain='notes' AND c.sensitivity='standard' AND c.slug<>'documents'
-         AND e.sensitivity IN ('standard','inherit') AND (t.entity_id IS NULL OR t.created_at < e.updated_at)
+         AND e.sensitivity IN ('standard','inherit') AND COALESCE(${CURRENT_MODEL_TERMS},0)=0
        ORDER BY e.updated_at, e.id LIMIT ?`, [source, Math.min(200, Math.max(1, Math.trunc(limit)))]);
     return rows.map(r => String(r.id));
   }
@@ -613,7 +666,11 @@ export class SqliteMemoryRepository implements MemoryRepository {
     if (options.sensitivities) { filters.push(`e.sensitivity IN (${options.sensitivities.map(() => "?").join(",")})`); params.push(...options.sensitivities); }
     return this.db.getAllAsync<Row>(
       `SELECT e.*, NULL AS match_chunk FROM memory_relations r JOIN memory_entities e ON e.id=r.source_entity_id
+       JOIN memory_collections c ON c.id=e.collection_id
+       LEFT JOIN memory_index_terms t ON t.entity_id=e.id AND t.source='model:auto'
        WHERE r.kind='about' AND r.target_entity_id=? AND ${filters.join(" AND ")}
+         AND (r.source_kind IS NULL OR r.source_kind<>'model:auto' OR
+           (r.source_ref=CAST(e.record_version AS TEXT) AND ${CURRENT_MODEL_TERMS}))
        ORDER BY e.updated_at DESC LIMIT 8`, params);
   }
 

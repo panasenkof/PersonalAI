@@ -1,4 +1,5 @@
 import type { MemoryKind } from "./search-index";
+import type { EnrichmentSnapshot } from "./enrichment-policy";
 export type { MemoryKind } from "./search-index";
 
 /** Device-local mirror of the server MemoryRepository contract.
@@ -75,6 +76,7 @@ export interface MemoryRepository {
   entitiesByAlias(name: string, kind?: MemoryKind): Promise<EntityRecord[]>;
   indexTerms(entityId: string): Promise<Array<{ source: string; terms: string[] }>>;
   setIndexTerms(entityId: string, terms: string[], source: string): Promise<string[]>;
+  applyIndexEnrichment(snapshot: EnrichmentSnapshot, terms: string[], people: string[], signal?: AbortSignal): Promise<boolean>;
   staleIndexTerms(source: string, limit?: number): Promise<string[]>;
   indexTermsStatus(source: string): Promise<{ done: number; pending: number }>;
   searchMemory(query: string, options?: { collectionIds?: string[]; sensitivities?: string[]; limit?: number; vector?: { model: string; values: Float32Array } }): Promise<MemoryHit[]>;

@@ -29,7 +29,7 @@ const V3_TABLES = {
 } as const;
 const ENTITY_COLUMNS = "id,collection_id,domain,schema_version,title,payload_json,record_status,sensitivity," +
   "source_kind,source_ref,valid_from,valid_until,created_at,updated_at,record_version";
-export const RESTORABLE_VERSIONS = [1, 2, 3, 4, 5];
+export const RESTORABLE_VERSIONS = [1, 2, 3, 4, 5, 6];
 const MAX_BACKUP_BYTES = 2 * 1024 * 1024 * 1024;
 
 function checkedRecoveryCode(value: string): string {
@@ -182,7 +182,9 @@ export async function restoreEncryptedBackup(
           }
           if (!typed) await tx.execAsync("UPDATE memory_entities SET kind='person' WHERE collection_id IN (SELECT id FROM memory_collections WHERE slug='people')");
           for (const [table, columns] of Object.entries(V3_TABLES)) {
-            if (available.has(table)) await tx.execAsync(`INSERT INTO ${table}(${columns}) SELECT ${columns} FROM pia_import.${table}`);
+            const copyColumns = table === "memory_index_terms" && version.user_version >= 6
+              ? columns + ",source_record_version,source_collection_name" : columns;
+            if (available.has(table)) await tx.execAsync(`INSERT INTO ${table}(${copyColumns}) SELECT ${copyColumns} FROM pia_import.${table}`);
           }
           if (version.user_version >= 4) {
             for (const table of ["memory_attachments", "memory_attachment_parts"] as const) {

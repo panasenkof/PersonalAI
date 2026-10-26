@@ -39,25 +39,34 @@ export async function refreshIndexTermsStatus(profile: string): Promise<void> {
 }
 
 let current: AbortController | null = null;
+let currentProfile: string | null = null;
+let requestedProfile: string | null = null;
+let queuedProfile: string | null = null;
 let timer: ReturnType<typeof setTimeout> | null = null;
 let again = false;
 /** Runs passes until nothing is left, a pass fails, the app locks or the
  * feature is switched off. Repeated calls while running queue one more pass. */
 export function scheduleIndexTerms(profile: string, delayMs = 1500): void {
   if (!profile) return;
-  if (current) { again = true; return; }
+  requestedProfile = profile;
+  if (current) {
+    if (currentProfile !== profile || current.signal.aborted) { queuedProfile = profile; current.abort(); }
+    else again = true;
+    return;
+  }
   if (timer) clearTimeout(timer);
   timer = setTimeout(() => { timer = null; void run(profile); }, delayMs);
 }
 
 async function run(profile: string): Promise<void> {
   await loadIndexTermsPreference();
-  if (!state.enabled || current || !localMemorySessionUnlocked()) return;
-  const aborter = new AbortController(); current = aborter;
+  if (!state.enabled || current || profile !== requestedProfile || !localMemorySessionUnlocked()) return;
+  const aborter = new AbortController(); current = aborter; currentProfile = profile;
   const unsubscribe = onLocalMemorySessionChange(unlocked => { if (!unlocked) aborter.abort(); });
   publish({ running: true, error: "" });
   try {
     const connections = await loadDirectConnections(profile);
+    if (aborter.signal.aborted) return;
     const settings = connections.connections.find(c => c.id === connections.activeId);
     if (!canEnrich(settings)) { publish({ error: "Нет подключения к модели: Настройки → Модели и подключения." }); return; }
     publish({ model: settings.name + " · " + indexTermsModel(settings).model });
@@ -65,6 +74,7 @@ async function run(profile: string): Promise<void> {
     for (let pass = 0; pass < 50 && !aborter.signal.aborted && state.enabled; pass++) {
       again = false;
       const result = await enrichPending(repo, settings, { limit: 10, signal: aborter.signal });
+      if (aborter.signal.aborted) break;
       publish(await repo.indexTermsStatus(MODEL_TERMS_SOURCE));
       if (result.error) { if (!aborter.signal.aborted) publish({ error: result.error }); break; }
       if (!result.done && !again) break;
@@ -72,10 +82,16 @@ async function run(profile: string): Promise<void> {
   } catch (e) {
     if (!aborter.signal.aborted) publish({ error: String((e as Error)?.message || e) });
   } finally {
-    unsubscribe(); current = null; publish({ running: false });
+    unsubscribe();
+    if (current === aborter) {
+      current = null; currentProfile = null; publish({ running: false });
+      const next = queuedProfile; queuedProfile = null;
+      if (next && state.enabled && localMemorySessionUnlocked()) scheduleIndexTerms(next, 0);
+    }
   }
 }
 
 /** Test hook. */
 export function resetIndexTermsRunner() { current?.abort(); current = null; loading = null; again = false; if (timer) clearTimeout(timer); timer = null;
+  currentProfile = null; requestedProfile = null; queuedProfile = null;
   state = { loaded: false, enabled: true, running: false, done: 0, pending: 0, error: "", model: "" }; }

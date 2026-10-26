@@ -4,6 +4,7 @@
  * shows a stale version. Backups carry the records; the index is rebuilt. */
 import type * as SQLite from "expo-sqlite";
 import { foldText } from "./query";
+import { CURRENT_MODEL_TERMS } from "./enrichment-policy";
 
 type SQL = Pick<SQLite.SQLiteDatabase, "getAllAsync" | "getFirstAsync" | "runAsync">;
 type Row = Record<string, unknown>;
@@ -91,7 +92,10 @@ export async function indexEntity(db: SQL, entityId: string, timestamp = new Dat
     old.delete(id);
   }
   for (const id of old.keys()) await db.runAsync("DELETE FROM memory_chunks WHERE id=?", [id]);
-  const terms = (await db.getAllAsync<Row>("SELECT terms FROM memory_index_terms WHERE entity_id=? ORDER BY source", [entityId]))
+  const terms = (await db.getAllAsync<Row>(
+    `SELECT t.terms FROM memory_index_terms t JOIN memory_entities e ON e.id=t.entity_id
+     JOIN memory_collections c ON c.id=e.collection_id
+     WHERE t.entity_id=? AND (t.source NOT LIKE 'model:%' OR ${CURRENT_MODEL_TERMS}) ORDER BY t.source`, [entityId]))
     .map(r => String(r.terms)).join(" ");
   const aliases = (await db.getAllAsync<Row>("SELECT alias FROM memory_aliases WHERE entity_id=? ORDER BY normalized", [entityId]))
     .map(r => String(r.alias)).join("; ");
