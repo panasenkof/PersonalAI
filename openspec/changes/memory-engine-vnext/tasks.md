@@ -13,6 +13,9 @@ Statuses: [x] documentation delivered; [ ] implementation/testing not started. P
 
 ## M1 — New local repository and schema (first implementation PRs)
 - [ ] Define physically executable SQL DDL, CHECK, FK, UNIQUE and indexes; decide source/message/blob deletion and privacy intersection semantics.
+- [ ] Verify link-only bookmark source (nullable content hash, acquisition status, canonical URL, saved date, user annotation, favorite/read-later) without compulsory download/extraction, and stable dedup of snapshot revisions.
+- [ ] Specify validated number+unit/range/date typed observations and optional safe healthcare domain view; separate medical prescription from consumption and from cooking recipe. Default privacy for health material must deny automatic cloud enrichment.
+- [ ] Check source content coverage from Plans/MEMORY_CONTENT_COVERAGE.md without introducing separate memory databases or blocking ordinary text/URL capture. 
 - [ ] Reconcile with existing TEMPORAL_MEMORY/RELATIONAL_MEMORY: observation vs event, plan/negation, ongoing/ended/unknown, time precision/anchor/timezone, exact evidence revisions and lifecycle; avoid duplicate relation/proposal tables.
 - [ ] Compare current technical №66.1/schema v6 CAS/source-version change with vNext repository and keep a single owner for invariant implementation.
 - [ ] Build TS typed repository with transactions, version/conflict checks and deterministic safe predicate catalog.
