@@ -1,0 +1,17 @@
+---
+description: Mandatory PersAI development checkpoints: fresh PLAN/subplans, references, scoped tests, and end-of-stage plan conformance
+alwaysApply: true
+---
+
+# PersAI required engineering workflow (every task/PR)
+
+The canonical checklist is [docs/DEVELOPMENT_GATES.md](../../docs/DEVELOPMENT_GATES.md) and root [AGENTS.md](../../AGENTS.md). **Read the current files**, do not rely on older prompts or outdated plan snapshots.
+
+1. BEFORE: Refresh `main`/open PRs; check `PLAN.md` §2 + `Plans/ROADMAP_STATUS.md` + relevant feature subplans, OpenSpec, latest explicit owner decisions, code and tests. Identify conflicts or duplicate work; update outdated plans with the implementation.
+2. REFERENCES: Check approved existing references; for substantial UX, architecture, library/API shifts, research current verified examples and best practices, record sources/observed date and adopt/adapt/reject rationale. Apple HIG inspires UX quality; Android Material/Back/TalkBack and approved Nebula govern implementation. For small fixes use existing references / N/A with explanation, no unnecessary repeated broad research.
+3. BUILD: One cohesive small verifiable step per PR; protect current code, data, encryption, offline behavior and user-approved design. Do not overstate readiness.
+4. AFTER: Check **only newly implemented functionality + genuinely affected regressions**, including negative cases, locked/error state, migrations and backup where relevant. Cite exact run/SHA and PASS/FAIL/NOT RUN/NOT IMPLEMENTED.
+5. END-OF-STAGE PLAN AUDIT IS MANDATORY: Compare actual code/behavior point-by-point against **current-step** PLAN.md and each relevant subplan/OpenSpec. Mark MATCH/PARTIAL/DEVIATION/NOT IMPLEMENTED (later)/NOT VERIFIED. Fix unjustified divergence or explicitly justify, authorize where necessary, and update PLAN + subplan + status; a required unaddressed deviation is PARTIAL/BLOCKED, not DONE.
+6. PR summary: plan revision/step, subplans, references, scope vs deferred work, tests, impacted regressions, final plan-conformance matrix, known gaps and next step. PLAN.md remains the single priority order.
+
+Do not require future/unimplemented phases to pass today's tests. Preserve approved owner decisions and prevent silent data loss.
