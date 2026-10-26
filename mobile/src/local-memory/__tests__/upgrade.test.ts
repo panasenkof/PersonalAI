@@ -228,3 +228,27 @@ test.each([false, true])("v5 enrichment migration (retry=%s) preserves data/key 
   expect(mockVault.get(identity.keyName)).toBe("6".repeat(64));
   expect(Array.from(mockConnections.at(-1).sqlite.prepare("SELECT bytes FROM memory_attachment_parts").get().bytes)).toEqual([1,2,3]);
 });
+
+test("v6 to v7 adds isolated hygiene preferences without changing existing notes or indexes", async () => {
+  const { SCHEMA_SQL } = require("../storage");
+  const identity = await localMemoryIdentity("guest");
+  const legacy = new DatabaseSync(path.join(mockDirectory, identity.databaseName));
+  // A real v6 installation has no hygiene table. Keep every other v6 table.
+  legacy.exec(SCHEMA_SQL.replace(/CREATE TABLE IF NOT EXISTS memory_cleanup_preferences \([\s\S]*?\);\n/, ""));
+  legacy.exec(`PRAGMA user_version=6;
+    INSERT INTO memory_collections(id,name,slug,sensitivity,created_at)
+      VALUES ('c','Заметки','notes','standard','now');
+    INSERT INTO memory_entities(id,collection_id,domain,payload_json,created_at,updated_at)
+      VALUES ('e','c','notes','{"body":"Не терять"}','now','now');`);
+  legacy.close();
+  mockVault.set(identity.keyName, "6".repeat(64));
+  mockVault.set(identity.keyName + ".initialized", "yes");
+  const repo = await localMemoryRepository("guest");
+  const db = mockConnections[0].sqlite;
+  expect(db.prepare("PRAGMA user_version").get().user_version).toBe(7);
+  expect(db.prepare("SELECT count(*) AS n FROM memory_cleanup_preferences").get().n).toBe(0);
+  expect((await repo.entity("e"))?.payload.body).toBe("Не терять");
+  expect(mockVault.get(identity.keyName)).toBe("6".repeat(64));
+  const violation = db.prepare("PRAGMA foreign_key_check").all();
+  expect(violation).toEqual([]);
+});
