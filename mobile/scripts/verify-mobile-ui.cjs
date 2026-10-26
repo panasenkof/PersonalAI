@@ -17,7 +17,7 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
     // a browser-backed save implementation; native attachment code remains real.
     build.onResolve({ filter: /^\.\.\/media\/attachments$/ }, args =>
       args.importer.includes('/screens/MemoryImportScreen.') ? ({ path: path.join(qa, 'media-attachments.ts') }) : undefined);
-    build.onResolve({ filter: /^\.\/attachments$/ }, args => /media\/(MemoryCover|AttachmentView)\./.test(args.importer) ? ({ path: path.join(qa, 'memory-previews.ts') }) : undefined);
+    build.onResolve({ filter: /^\.\/attachments$/ }, args => /media\/(MemoryCover|AttachmentView|AppendNoteAttachments)\./.test(args.importer) ? ({ path: path.join(qa, 'memory-previews.ts') }) : undefined);
     build.onResolve({ filter: /^\.\/storage$/ }, args => args.importer.includes('/local-memory/') ? ({ path: path.join(qa, 'adapters.tsx') }) : undefined);
     build.onResolve({ filter: /local-memory\/storage$/ }, () => ({ path: path.join(qa, 'adapters.tsx') }));
     build.onResolve({ filter: /local-memory\/repository$/ }, () => ({ path: path.join(qa, 'repository.ts') }));
@@ -360,6 +360,18 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       assert.equal(await page.getByLabel('Текст заметки', { exact: true }).count(), 0, 'Opening a saved note shows reading, not a form');
       await page.clock.runFor(500);
       if (process.env.SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, `note-reading-${width}.png`) });
+      await page.getByLabel('Добавить файлы к заметке', { exact: true }).click();
+      await page.clock.runFor(100);
+      await page.getByLabel('Сохранить новые вложения', { exact: true }).waitFor();
+      assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('qa.notes')).find(n => n.title === 'Индейка').payload.source_file), undefined, 'Picking does not persist');
+      await page.getByLabel('Отменить добавление файлов', { exact: true }).click();
+      await page.getByLabel('Добавить файлы к заметке', { exact: true }).click();
+      await page.clock.runFor(100);
+      await page.getByLabel('Сохранить новые вложения', { exact: true }).waitFor();
+      if (process.env.SCREENSHOT_DIR) await page.screenshot({ animations: "disabled", path: path.join(process.env.SCREENSHOT_DIR, `append-files-${width}.png`) });
+      await page.getByLabel('Сохранить новые вложения', { exact: true }).click();
+      await page.getByText('Вложения · 1', { exact: true }).waitFor();
+      assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('qa.notes')).find(n => n.title === 'Индейка').payload.body), 'Чеснок и паприка', 'Appending preserves note text');
       await page.getByLabel('Изменить заметку с ИИ', { exact: true }).click();
       await page.getByLabel('Команда для редактирования заметки', { exact: true }).click();
       await page.getByLabel('Команда для редактирования заметки', { exact: true }).fill('Добавь перец');
@@ -402,7 +414,7 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       assert.equal(persistedAliases, 'Индюшка, индюк', 'Aliases persist after save and reopen');
       assert.equal(await page.getByLabel('Тип записи: Факт', { exact: true }).getAttribute('aria-selected'), 'true', 'The chosen record type is kept');
       await page.getByLabel('История, события и связи', { exact: true }).click();
-      await page.getByText('История изменений · версия 3', { exact: true }).waitFor();
+      await page.getByText('История изменений · версия 4', { exact: true }).waitFor();
       // Rejecting an unsaved edit must return to the list without overwriting the saved record.
       await page.getByLabel('Текст заметки', { exact: true }).fill('Черновик — НЕ СОХРАНЯТЬ');
       await page.getByLabel(/back/i).click();

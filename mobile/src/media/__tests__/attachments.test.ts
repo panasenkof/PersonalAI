@@ -1,5 +1,5 @@
 import { SqliteMemoryRepository } from '../../local-memory/repository';
-import { writeOriginal, materializeAttachment, saveMediaNote, MAX_ORIGINAL_BYTES, MAX_ORIGINALS_PER_NOTE } from '../attachments';
+import { appendNoteAttachments, writeOriginal, materializeAttachment, saveMediaNote, MAX_ORIGINAL_BYTES, MAX_ORIGINALS_PER_NOTE } from '../attachments';
 import { SCHEMA_SQL } from '../../local-memory/storage';
 const { DatabaseSync } = require('node:sqlite');
 const crypto = require('node:crypto');
@@ -139,4 +139,57 @@ test("multiple originals cannot exceed limits and cannot mix two file input form
   mockSizes.set(multi[0].uri, 50 * 1024 * 1024);
   mockSizes.set(multi[1].uri, 40 * 1024 * 1024);
   await expect(saveMediaNote("guest", { files: multi.slice(0, 2), title: "Together too big", body: "", sensitivity: "standard" })).rejects.toThrow("Размер вложений вместе не должен превышать 80 МБ.");
+});
+
+
+async function savedNote() {
+  const id = await saveMediaNote('guest', { ...input, body: 'Keep my text', sourceUrl: 'https://example.org/source' });
+  return (await new SqliteMemoryRepository(mockDb).entity(id))!;
+}
+function snapshot() {
+  return ['memory_entities', 'memory_attachments', 'memory_attachment_parts', 'memory_revisions', 'memory_search_fts']
+    .map(table => sqlite.prepare('SELECT * FROM ' + table).all());
+}
+test('append preserves text, classification and provenance; PDF bytes survive reopen and stale retries do not duplicate', async () => {
+  const before = await savedNote(), pdf = {uri:'file:///doc.pdf', name:'doc.pdf', mimeType:'application/pdf'};
+  mockFiles.set(pdf.uri, new Uint8Array([37, 80, 68, 70, 45, 49]));
+  const after = await appendNoteAttachments('guest', before.id, before.record_version, [pdf]);
+  expect(after.record_version).toBe(before.record_version + 1);
+  for (const key of ['title', 'sensitivity', 'collection_id', 'record_status'] as const) expect(after[key]).toEqual(before[key]);
+  for (const [key, value] of Object.entries(before.payload)) expect(after.payload[key]).toEqual(value);
+  expect(after.payload.source_files).toEqual(['photo.png', 'doc.pdf']);
+  const row = sqlite.prepare("SELECT * FROM memory_attachments WHERE name='doc.pdf'").get();
+  const uri = await materializeAttachment('guest', row);
+  expect(mockFiles.get(uri)).toEqual(mockFiles.get(pdf.uri));
+  await expect(appendNoteAttachments('guest', before.id, before.record_version, [pdf])).rejects.toThrow('stale_memory_version');
+  expect(sqlite.prepare('SELECT COUNT(*) n FROM memory_attachments').get().n).toBe(2);
+});
+test('failed second append file rolls back revision, index and every new original', async () => {
+  const note = await savedNote(), before = snapshot();
+  mockFiles.set(multi[1].uri, new Uint8Array(600000)); mockFailUri = multi[1].uri;
+  await expect(appendNoteAttachments('guest', note.id, note.record_version, multi.slice(0, 2))).rejects.toThrow('disk read failed');
+  expect(snapshot()).toEqual(before);
+});
+test.each(['abort', 'lock'])('mid-write %s leaves existing note and originals intact', async mode => {
+  const note = await savedNote(), before = snapshot(), controller = new AbortController();
+  const run = mockDb.runAsync;
+  mockDb.runAsync = async (sql: string, params: any[]) => {
+    const result = await run(sql, params);
+    if (sql.startsWith('INSERT INTO memory_attachment_parts')) {
+      if (mode === 'abort') controller.abort(); else mockUnlocked = false;
+    }
+    return result;
+  };
+  await expect(appendNoteAttachments('guest', note.id, note.record_version, [input.file], controller.signal)).rejects.toThrow();
+  expect(snapshot()).toEqual(before);
+});
+test('append limits include existing originals, disallow trash and remote input', async () => {
+  const note = await savedNote(), before = snapshot();
+  await expect(appendNoteAttachments('guest', note.id, note.record_version, Array(10).fill(input.file))).rejects.toThrow('10 вложений');
+  mockSizes.set(input.file.uri, MAX_ORIGINAL_BYTES);
+  await expect(appendNoteAttachments('guest', note.id, note.record_version, [input.file])).rejects.toThrow('вместе');
+  await expect(appendNoteAttachments('guest', note.id, note.record_version, [{...input.file, uri:'https://example.org/a.png'}])).rejects.toThrow('локальный');
+  expect(snapshot()).toEqual(before);
+  sqlite.prepare("UPDATE memory_entities SET record_status='trashed' WHERE id=?").run(note.id);
+  await expect(appendNoteAttachments('guest', note.id, note.record_version, [input.file])).rejects.toThrow('корзины');
 });
