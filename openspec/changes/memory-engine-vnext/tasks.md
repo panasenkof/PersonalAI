@@ -47,6 +47,14 @@ Statuses: [x] documentation delivered; [ ] implementation/testing not started. P
 - [ ] UX3: source viewers, privacy/forget, backup, Share/import integration; Android physical QA at 320–430dp and TalkBack.
 - [ ] Preserve Home, Nebula sphere, icon, keyboard layout, chat attachment flow; regression tests.
 
+## №79 — Batch memory hygiene / review (staged with M1–M4, richer analysis later)
+- [x] M0: document classification, user-led bulk review, exclusions, safety, schema hooks, negative cases in [Plans/MEMORY_HYGIENE.md](../../../Plans/MEMORY_HYGIENE.md); M0 is design only.
+- [ ] M1: define lifecycle/pin/never-suggest/defer and versioned intent fields, shared blob reference and source-evidence dependency traversal, rebuildable-cache proof and trash/undo semantics.
+- [ ] M3 / №79б: implement bounded **local** candidate grouping and read-only `dryRunImpact` for exact duplicates, old read-later queues, closed projects and obsolete derivative indexes; expose evidence and bytes estimate. No automatic purge.
+- [ ] M4-UX / №79в: grouped candidate UI, per-item exclusion, keep forever, defer, action override, clear affected items, separate confirm for irreversible actions, Android/TalkBack tests.
+- [ ] №79г, late: optional local semantic review, public-link rechecks with explicit opt-in/policy, optional periodic **suggestions**; no default cloud memory upload and no model-triggered original purge.
+- [ ] Tests: age-only historic lab/prescription/car repair protection, one file shared by 3 notes, final claim evidence, pin/excluded video group, 403/429/404 with local snapshot, CAS/lock races, crash/retry, backups/FTS/index purge, 1k/10k pagination.
+
 ## M5–M6 — subsequent measured extensions
 - [ ] M5: multimodal index per Plans/LOCAL_MULTIMODAL_AI.md and number 83, including audio timestamps and OCR.
 - [ ] M6: consented consolidation/optional procedural memory and geo reminders (#81), not executable instructions from untrusted sources.
