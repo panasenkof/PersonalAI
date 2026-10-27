@@ -113,3 +113,18 @@ test("switching a model and editing while another is active triggers a fresh bou
     expect(await jobs.complete("model-A", [{ job: aAgain, vector: vector() }])).toBe(1);
   } finally { db.close(); }
 });
+
+test("unarchived source gets fresh work even after bootstrap cursor is complete", async () => {
+  const { db, repo, jobs, note } = await setup();
+  try {
+    const old = (await jobs.claim("toy"))[0];
+    const archived = await repo.setEntityStatus(note.id, 1, "archived");
+    expect(await jobs.complete("toy", [{ job: old, vector: vector() }])).toBe(0);
+    expect(await jobs.claim("toy")).toEqual([]);
+    await repo.setEntityStatus(note.id, archived.record_version, "active");
+    const fresh = (await jobs.claim("toy"))[0];
+    expect(fresh.chunkId).toBe(old.chunkId);
+    expect(fresh.generation).toBeGreaterThan(old.generation);
+    expect(await jobs.complete("toy", [{ job: fresh, vector: vector() }])).toBe(1);
+  } finally { db.close(); }
+});
