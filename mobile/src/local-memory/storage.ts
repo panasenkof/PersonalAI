@@ -42,7 +42,7 @@ export function onLocalMemorySessionChange(listener: (unlocked: boolean) => void
 }
 export const localMemorySessionUnlocked = () => applicationSessionUnlocked;
 const requireApplicationSession = () => { if (!applicationSessionUnlocked) throw new Error("application_locked"); };
-export const LOCAL_MEMORY_SCHEMA_VERSION = 10;
+export const LOCAL_MEMORY_SCHEMA_VERSION = 11;
 const KIND_CHECK = `CHECK(kind IN (${MEMORY_KINDS.map(k => `'${k}'`).join(",")}))`;
 
 /** All memory (including full-text indexes, revisions, and WAL) is in SQLCipher. */
@@ -200,6 +200,64 @@ CREATE TABLE IF NOT EXISTS memory_vector_jobs (
 );
 CREATE INDEX IF NOT EXISTS ix_memory_vector_jobs_ready
   ON memory_vector_jobs(model,state,available_at,lease_until,updated_at);
+-- Temporal claim candidates are user-owned and never derived FTS.
+-- A null valid-time bound does NOT prove current status. Proposal rows cannot
+-- close an existing state: explicit user apply/CAS belongs to T2.
+CREATE TABLE IF NOT EXISTS memory_temporal_claims (
+  id TEXT PRIMARY KEY,
+  entity_id TEXT NOT NULL REFERENCES memory_entities(id) ON DELETE CASCADE,
+  source_record_version INTEGER NOT NULL CHECK(source_record_version>0),
+  subject_id TEXT, predicate TEXT NOT NULL, context TEXT NOT NULL, value TEXT NOT NULL,
+  temporal_kind TEXT NOT NULL CHECK(temporal_kind IN ('event','state','observation','enduring')),
+  modality TEXT NOT NULL CHECK(modality IN ('asserted','planned','hypothetical')),
+  negated INTEGER NOT NULL CHECK(negated IN (0,1)),
+  cardinality TEXT NOT NULL CHECK(cardinality IN ('single','multiple','unknown')),
+  started_json TEXT, ended_json TEXT,
+  end_confirmed INTEGER NOT NULL CHECK(end_confirmed IN (0,1)),
+  knowledge_recorded_at TEXT NOT NULL,
+  claim_version INTEGER NOT NULL DEFAULT 1 CHECK(claim_version>0)
+);
+CREATE INDEX IF NOT EXISTS ix_temporal_claim_subject
+  ON memory_temporal_claims(subject_id,predicate,context,knowledge_recorded_at,id);
+CREATE INDEX IF NOT EXISTS ix_temporal_claim_source
+  ON memory_temporal_claims(entity_id,source_record_version);
+CREATE TABLE IF NOT EXISTS memory_temporal_evidence (
+  id TEXT PRIMARY KEY,
+  claim_id TEXT NOT NULL REFERENCES memory_temporal_claims(id) ON DELETE CASCADE,
+  entity_id TEXT NOT NULL REFERENCES memory_entities(id) ON DELETE CASCADE,
+  source_record_version INTEGER NOT NULL CHECK(source_record_version>0),
+  quote TEXT NOT NULL CHECK(length(quote)>0 AND length(quote)<=6000),
+  origin TEXT NOT NULL CHECK(origin IN ('direct','derived')),
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_temporal_evidence_claim ON memory_temporal_evidence(claim_id);
+CREATE TABLE IF NOT EXISTS memory_temporal_proposals (
+  id TEXT PRIMARY KEY,
+  previous_claim_id TEXT NOT NULL REFERENCES memory_temporal_claims(id) ON DELETE CASCADE,
+  incoming_claim_id TEXT NOT NULL REFERENCES memory_temporal_claims(id) ON DELETE CASCADE,
+  review_kind TEXT NOT NULL CHECK(review_kind IN ('possible_change','possible_reconfirmation')),
+  status TEXT NOT NULL DEFAULT 'pending'
+    CHECK(status IN ('pending','deferred','dismissed','applied')),
+  previous_version INTEGER NOT NULL CHECK(previous_version>0),
+  incoming_version INTEGER NOT NULL CHECK(incoming_version>0),
+  proposal_version INTEGER NOT NULL DEFAULT 1 CHECK(proposal_version>0),
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  UNIQUE(previous_claim_id,incoming_claim_id),
+  CHECK(previous_claim_id<>incoming_claim_id)
+);
+CREATE INDEX IF NOT EXISTS ix_temporal_proposal_pending
+  ON memory_temporal_proposals(status,created_at,id);
+CREATE TABLE IF NOT EXISTS memory_temporal_decisions (
+  id TEXT PRIMARY KEY,
+  proposal_id TEXT NOT NULL REFERENCES memory_temporal_proposals(id) ON DELETE CASCADE,
+  action TEXT NOT NULL CHECK(action IN ('accept','keep_both','adjust_dates','defer','dismiss','undo')),
+  actor_kind TEXT NOT NULL CHECK(actor_kind='user'),
+  expected_proposal_version INTEGER NOT NULL CHECK(expected_proposal_version>0),
+  details_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_temporal_decision_proposal
+  ON memory_temporal_decisions(proposal_id,created_at,id);
 CREATE TABLE IF NOT EXISTS memory_cleanup_preferences (
   entity_id TEXT PRIMARY KEY REFERENCES memory_entities(id) ON DELETE CASCADE,
   guard TEXT NOT NULL DEFAULT 'normal' CHECK(guard IN ('normal','pinned','never_suggest')),
