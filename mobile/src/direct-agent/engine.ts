@@ -40,6 +40,8 @@ export type DirectAgentOptions = {
   read?: (id: string, version: number, offset?: number, budget?: number) => Promise<Record<string, unknown>>;
   /** List metadata/short previews from source-attached extraction records for
    * an already authorized record/version; all ACL checks repeat on the phone. */
+  /** Searches only FTS-indexed source segments that independently pass note ACL. */
+  searchSources?: (query: string, limit?: number) => Promise<Record<string, unknown>>;
   listSources?: (id: string, version: number, limit?: number) => Promise<Record<string, unknown>>;
   /** Read exactly one verified-source-version segment, with bounded cursor. */
   readSource?: (id: string, version: number, attachmentId: string,
@@ -88,6 +90,7 @@ const systemPrompt = (sections?: MemorySection[]) =>
   "Ты персональный помощник PersAI, работающий на телефоне пользователя. " +
   "Для вопросов о предпочтениях и заметках используй search_local_notes, если он доступен. " +
   "Если найденного фрагмента недостаточно, используй read_local_note с id и version из поиска; не считай отрывок полным документом. " +
+  "Если слова встречаются только внутри вложений, используй search_local_source_segments с 1–3 ключевыми словами, затем read_local_source_segment с найденными ID. " +
   "Если в заметке есть распознанный материал, можешь проверить list_local_sources по её id/version и затем read_local_source_segment по точным идентификаторам. " +
   "locationConfidence=producer_reported значит место указал обработчик; это не независимое подтверждение страницы или таймкода из оригинала. unknown означает, что координаты нет. " +
   "Ссылайся на факты из памяти только по проверяемым evidence.recordId/recordVersion/startChar/endChar; нельзя придумывать страницу PDF или таймкод. coverage=excerpt значит источник прочитан частично. " +
