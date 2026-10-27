@@ -6,7 +6,7 @@
  * Caller MUST supply ACL-scoped and source-version-verified graph edges.
  * The future SQLCipher relation evidence store feeds this pure contract.
  */
-export type RelationProofKind = "sister_of" | "brother_of" | "sibling_of" | "participant_of" | "mentioned_in" | "about";
+export type RelationProofKind = "has_sister" | "brother_of" | "sibling_of" | "participant_of" | "mentioned_in" | "about";
 export type RelationProofStatus = "pending" | "confirmed" | "rejected" | "deferred" | "retracted";
 export type RelationProof = {
   id: string;
@@ -55,7 +55,7 @@ export function isEligibleRelationProof(edge: RelationProof, access: ProofAccess
     access.readableEvidence.has(edge.evidenceEntityId);
 }
 
-/** Only explicitly typed sister_of + participant_of yield a sister-conversation path.
+/** Only explicitly typed has_sister + participant_of yield a sister-conversation path.
  *
  * "Lisa is mentioned in the audio" never proves "I talked to Lisa".
  * The result contains conversation entity IDs, NOT invented media URLs,
@@ -70,12 +70,12 @@ export function resolveSiblingConversationPaths(
     throw new Error("relational_owner_id_invalid");
   }
   const visible = edges.filter(e => isEligibleRelationProof(e, access) &&
-    (e.kind === "sister_of" || e.kind === "participant_of"));
+    (e.kind === "has_sister" || e.kind === "participant_of"));
   const limited = visible.slice(0,MAX_EDGES);
   const siblings = new Map<string,string>();
   for (const edge of limited) {
     // The user's viewpoint is one stable person entity, never a name search.
-    if (edge.kind === "sister_of" && edge.sourceEntityId === ownPersonId) {
+    if (edge.kind === "has_sister" && edge.sourceEntityId === ownPersonId) {
       siblings.set(edge.targetEntityId,edge.id);
     }
   }
