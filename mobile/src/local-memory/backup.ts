@@ -160,6 +160,24 @@ export async function shareEncryptedBackup(profileId: string, recoveryCode: stri
         // revisions, names and the encrypted index without passing plaintext to JS.
         await db.getFirstAsync("SELECT sqlcipher_export('pia_export')");
         await db.execAsync(`PRAGMA pia_export.user_version = ${LOCAL_MEMORY_SCHEMA_VERSION}`);
+        // The manifest lives INSIDE SQLCipher ciphertext. No plaintext sidecar.
+        await db.execAsync("CREATE TABLE pia_export.persai_backup_manifest (" +
+          "format_version INTEGER NOT NULL, schema_version INTEGER NOT NULL," +
+          "entities INTEGER NOT NULL, collections INTEGER NOT NULL, observations INTEGER NOT NULL," +
+          "attachments INTEGER NOT NULL, attachment_parts INTEGER NOT NULL," +
+          "receipts INTEGER NOT NULL, chats INTEGER NOT NULL)");
+        const counts = await db.getFirstAsync<BackupCounts>(backupCountsQuery(""));
+        if (!counts || !validBackupCounts(counts)) throw new Error("backup_manifest_unavailable");
+        await db.runAsync(
+          "INSERT INTO pia_export.persai_backup_manifest " +
+            "(format_version,schema_version,entities,collections,observations,attachments,attachment_parts,receipts,chats) " +
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+          [MANIFEST_FORMAT_VERSION, LOCAL_MEMORY_SCHEMA_VERSION, ...backupCountValues(counts)],
+        );
+        const cipherIntegrity = await db.getFirstAsync<{ integrity_check: string }>(
+          "PRAGMA pia_export.integrity_check",
+        );
+        if (cipherIntegrity?.integrity_check !== "ok") throw new Error("backup_integrity_check_failed");
         const check = await db.getFirstAsync<{ n: number }>(
           "SELECT count(*) AS n FROM pia_export.memory_collections",
         );
@@ -243,7 +261,26 @@ export async function restoreEncryptedBackup(
         const incoming = await db.getFirstAsync<{ n: number }>(
           "SELECT count(*) AS n FROM pia_import.memory_entities",
         );
-        if (!incoming || incoming.n > MAX_RESTORABLE_ENTITIES) throw new Error("invalid_backup_records");
+        if (!incoming || !Number.isSafeInteger(incoming.n) || incoming.n < 0) {
+          throw new Error("invalid_backup_records");
+        }
+        if (available.has(MANIFEST_TABLE)) {
+          const manifest = await db.getFirstAsync<BackupManifest>(
+            "SELECT * FROM pia_import.persai_backup_manifest",
+          );
+          if (!manifest || manifest.format_version !== MANIFEST_FORMAT_VERSION ||
+              manifest.schema_version !== version.user_version || !validBackupCounts(manifest)) {
+            throw new Error("backup_manifest_invalid");
+          }
+          const actual = await db.getFirstAsync<BackupCounts>(backupCountsQuery("pia_import."));
+          if (!actual || !validBackupCounts(actual) ||
+              backupCountValues(manifest).some((n, i) => n !== backupCountValues(actual)[i])) {
+            throw new Error("backup_manifest_mismatch");
+          }
+        } else if (incoming.n > LEGACY_MAX_RESTORABLE_ENTITIES ||
+                   info.size > LEGACY_MAX_BACKUP_BYTES) {
+          throw new Error("backup_legacy_limit_without_manifest");
+        }
         // Roll back *all* copied records if any table, FK or FTS operation
         // fails. Never replace a profile containing existing memory.
         // ATTACH and the SQLCipher key are scoped to this unlocked connection.
