@@ -301,8 +301,9 @@ test("v7 backup missing policy table fails before mutation", async () => {
   tablesOnce([...names, "memory_attachments", "memory_attachment_parts"]);
   await expect(restoreEncryptedBackup("guest", "file:///backup.db", code))
     .rejects.toThrow("incompatible_backup_schema");
-  // Schema check may run during a transaction, but the entire transaction rolls back.
+  // v7 now checks required tables BEFORE entering a write transaction.
   const statements = mockDb.execAsync.mock.calls.map(([s]: string[]) => s);
-  expect(statements).toContain("ROLLBACK");
+  expect(statements).not.toContain("BEGIN IMMEDIATE");
   expect(statements).not.toContain("COMMIT");
+  expect(statements.some(sql => sql.includes("INSERT INTO memory_entities"))).toBe(false);
 });
