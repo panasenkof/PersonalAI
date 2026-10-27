@@ -55,6 +55,7 @@ beforeEach(() => {
     if (sql.includes("(SELECT count(*) FROM ")) return { entities: 2, collections: 1, observations: 1, attachments: 0, attachment_parts: 0, receipts: 0, chats: 0 };
     if (sql.includes("pia_import.user_version")) return { user_version: 1 };
     if (sql.includes("pia_import.integrity_check")) return { integrity_check: "ok" };
+    if (sql === "SELECT count(*) AS n FROM pia_import.persai_backup_manifest") return { n: 1 };
     if (sql.includes("pia_import.memory_entities")) return { n: 2 };
     if (sql === "SELECT count(*) AS n FROM memory_collections") {
       return { n: mockAlreadyContainsMemory || mockRestored ? 1 : 0 };
