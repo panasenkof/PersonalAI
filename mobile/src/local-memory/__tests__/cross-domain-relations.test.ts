@@ -41,7 +41,7 @@ const roleCases: readonly [string,DirectPersonRelation,string,string][]=[
 ];
 test.each(roleCases)("%s: confirmed role %s and participant proof finds %s",(_id,kind,person,conversation)=>{
   const a=proof(kind,person,"kin"), b=proof("participant_of",person,conversation);
-  const paths=resolveDirectRelationConversationPaths("owner-1", [b,a],scope([a,b]));
+  const paths=resolveDirectRelationConversationPaths("owner-1", kind,[b,a],scope([a,b]));
   expect(paths).toEqual({
     paths:[{
       conversationId:conversation,relativeId:person,
