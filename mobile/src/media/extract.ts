@@ -1,4 +1,5 @@
 import { videoAudio } from "./video-audio";
+import { extractPdfPages } from "./pdf-pages";
 import * as FileSystem from "expo-file-system/legacy";
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import { createVideoPlayer } from "expo-video";
@@ -113,6 +114,12 @@ async function extractMediaCore(file: ImportFile, settings: DirectAgentSettings,
   const kind = mediaKind(file);
   check(signal);
   await fileSize(file, (kind === "video" ? 80 : kind === "text" ? 1 : kind === "image" ? 8 : 20) * 1024 * 1024);
+  if (kind === "document") {
+    const pages=await extractPdfPages(file,signal);
+    check(signal);
+    if(onTimedSegments)onTimedSegments(pages.segments);
+    return pages.text;
+  }
   if (kind === "text") {
     const text = await FileSystem.readAsStringAsync(file.uri);
     check(signal);
