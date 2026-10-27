@@ -12,6 +12,23 @@ import type { SourceLocation } from "./extractions";
 
 type SQL = Pick<SQLite.SQLiteDatabase, "getFirstAsync" | "getAllAsync" | "runAsync" | "execAsync">;
 type Row = Record<string, unknown>;
+export type ApprovedSourcePreview = {
+  attachmentId: string; attachmentName: string; mime: string;
+  extractionId: string; segmentId: string; sourceVersion: string;
+  producerKind: string; producerId: string; producerRevision: string;
+  status: string; coverage: string; ordinal: number;
+  preview: string; totalChars: number; location: SourceLocation;
+  locationConfidence: "producer_reported"; sourceCheck: "part_manifest_revision";
+};
+export type ApprovedSourceList = {
+  recordId: string; recordVersion: number; segments: ApprovedSourcePreview[];
+  hasMore: boolean; metadataOnly: true; scope: "standard_active_notes"; scanLimit: number;
+};
+export type ApprovedSourceRead = Omit<ApprovedSourcePreview,
+  "mime" | "ordinal" | "preview" | "totalChars"> & {
+    recordId: string; recordVersion: number; content: string;
+    offset: number; totalChars: number; hasMore: boolean; nextOffset?: number;
+  };
 const MAX_IDS = 128;
 const checkedId = (id: string): string => {
   if (typeof id !== "string" || !id || id.length > MAX_IDS || /[\u0000-\u001f]/.test(id))
@@ -59,7 +76,7 @@ export async function listApprovedSourceSegments(
 ) {
   checkedId(recordId); checkedVersion(version);
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 30) throw new Error("invalid_source_list_limit");
-  let result: Record<string, unknown> = {};
+  let result!: ApprovedSourceList;
   await withUnlockedTransaction(db, async tx => {
     await requireAllowed(tx, recordId, version);
     const cap = 150;
@@ -76,7 +93,7 @@ export async function listApprovedSourceSegments(
         WHERE a.entity_id=? AND r.status IN ('complete','partial')
         ORDER BY r.created_at DESC,r.id DESC,s.ord ASC LIMIT ?`,
       [recordId, cap + 1]);
-    const matched: Record<string, unknown>[] = [];
+    const matched: ApprovedSourcePreview[] = [];
     const current = new Map<string, string | null>();
     for (const row of rows) {
       const attachmentId = String(row.attachment_id);
@@ -122,7 +139,7 @@ export async function readApprovedSourceSegment(
   if (!Number.isSafeInteger(offset) || offset < 0 || offset > 6000 ||
       !Number.isSafeInteger(budget) || budget < 1 || budget > 4000)
     throw new Error("invalid_source_read_range");
-  let result: Record<string, unknown> | null = null;
+  let result!: ApprovedSourceRead;
   await withUnlockedTransaction(db, async tx => {
     await requireAllowed(tx, recordId, version);
     const row = await tx.getFirstAsync<Row>(
@@ -155,7 +172,7 @@ export async function readApprovedSourceSegment(
       ...evidenceLocation(row),
     };
   });
-  return result!;
+  return result;
 }
 
 export const listLocalApprovedSourceSegments = (
