@@ -229,7 +229,7 @@ export class DirectChatStore {
         }, rewrite: true, signal: aborter.signal, onText, sections,
         diagnostic: trace,
         lookup: query => searchApprovedNotes(this.profile, query),
-        read: (id, version, offset, budget) => readApprovedNote(this.profile, id, version, offset, budget),
+        read: async (id, version, offset, budget) => ({ ...await readApprovedNote(this.profile, id, version, offset, budget) }),
         notify: text => {
           trace("turn.notice", { chars: text.length }, { notice: text });
           const c = this.snapshot.conversations.find(c => c.id === id);
