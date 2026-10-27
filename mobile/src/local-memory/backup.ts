@@ -287,6 +287,17 @@ export async function restoreEncryptedBackup(
                    info.size > LEGACY_MAX_BACKUP_BYTES) {
           throw new Error("backup_legacy_limit_without_manifest");
         }
+        // A current profile may already contain chats even when its memory
+        // collections are empty. Silently ignoring colliding chat IDs would
+        // lose backed-up conversation content; refuse before any destination write.
+        if (available.has("direct_conversations")) {
+          const duplicates = await db.getFirstAsync<{ n: number }>(
+            "SELECT count(*) AS n FROM pia_import.direct_conversations incoming " +
+            "JOIN main.direct_conversations current ON current.id=incoming.id",
+          );
+          if (!duplicates || !Number.isSafeInteger(duplicates.n)) throw new Error("backup_chat_preflight_unavailable");
+          if (duplicates.n > 0) throw new Error("backup_chat_conflict");
+        }
         // Roll back *all* copied records if any table, FK or FTS operation
         // fails. Never replace a profile containing existing memory.
         // ATTACH and the SQLCipher key are scoped to this unlocked connection.
@@ -338,7 +349,7 @@ export async function restoreEncryptedBackup(
           // Older backups have no chats. Import newer ones without replacing
           // any existing local conversation (including its pending proposals).
           if (available.has("direct_conversations")) await tx.execAsync(
-            `INSERT OR IGNORE INTO direct_conversations(id,title,snapshot_json,created_at,updated_at)
+            `INSERT INTO direct_conversations(id,title,snapshot_json,created_at,updated_at)
              SELECT id,title,snapshot_json,created_at,updated_at FROM pia_import.direct_conversations`,
           );
           const violation = await tx.getFirstAsync("PRAGMA foreign_key_check");
