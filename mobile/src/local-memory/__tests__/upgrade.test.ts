@@ -437,3 +437,132 @@ test("v10 temporal schema disk-full failure rolls back and preserves every old b
   await openLocalMemory("guest");
   expect(mockConnections.at(-1).sqlite.prepare("PRAGMA user_version").get().user_version).toBe(11);
 });
+
+
+test("T2a user confirms a state ended with unknown date and undoes without erasing history", async () => {
+  const { stageTemporalCandidate, stageTemporalReviewProposal } = require("../temporal-store");
+  const { decideTemporalReview, undoTemporalReview } = require("../temporal-decisions");
+  await openLocalMemory("guest");
+  const bridge = mockConnections[0], db = bridge.sqlite;
+  db.prepare("INSERT INTO memory_collections(id,name,slug,created_at) VALUES ('people','Люди','people','now')").run();
+  for (const id of ["a","b"]) {
+    db.prepare("INSERT INTO memory_entities(id,collection_id,domain,payload_json,created_at,updated_at) VALUES (?,'people','notes','{}','now','now')").run(id);
+  }
+  const make = (entityId: string, value: string): import("../temporal-claims").TemporalClaimCandidate => ({
+    recordedAt:"2026-10-27T12:00:00.000Z",subjectId:"person-1",
+    predicate:"employment",context:"primary",value,kind:"state",modality:"asserted",
+    negated:false,cardinality:"single",occurredOrStarted:null,ended:null,endConfirmed:false,
+    evidence:{entityId,recordVersion:1,quote:"Работаю в "+value,origin:"direct"},
+  });
+  const firstId=await stageTemporalCandidate(bridge,make("a","А"));
+  const secondId=await stageTemporalCandidate(bridge,make("b","Б"));
+  const proposalId=await stageTemporalReviewProposal(bridge,firstId,secondId);
+  expect(proposalId).not.toBeNull();
+  const requested = {proposalId:proposalId!,expectedProposalVersion:1,
+    expectedPreviousClaimVersion:1,expectedIncomingClaimVersion:1};
+  const unknown={normalized:null,precision:"unknown" as const,
+    raw:"Пользователь подтвердил: больше не работаю в А",anchorDate:null,sourceTimeZone:null};
+  await expect(decideTemporalReview(bridge,{...requested,choice:"accept"}))
+    .rejects.toThrow("temporal_user_end_required");
+  const applied=await decideTemporalReview(bridge,{...requested,choice:"accept",confirmedEnd:unknown});
+  expect(applied.nextProposalVersion).toBe(2);
+  expect(db.prepare("SELECT status,proposal_version FROM memory_temporal_proposals WHERE id=?").get(proposalId))
+    .toMatchObject({status:"applied",proposal_version:2});
+  const ended=db.prepare("SELECT end_confirmed,ended_json,claim_version FROM memory_temporal_claims WHERE id=?").get(firstId);
+  expect(ended.end_confirmed).toBe(1);
+  expect(ended.claim_version).toBe(2);
+  expect(JSON.parse(ended.ended_json)).toEqual(unknown);
+  expect(db.prepare("SELECT count(*) AS n FROM memory_temporal_decisions").get().n).toBe(1);
+  // Stale UI cannot overwrite an already reviewed proposal.
+  await expect(decideTemporalReview(bridge,{...requested,choice:"defer"}))
+    .rejects.toThrow("temporal_proposal_stale");
+  const undone=await undoTemporalReview(bridge,{
+    proposalId:proposalId!,decisionId:applied.decisionId,
+    expectedProposalVersion:2,expectedPreviousClaimVersion:2,expectedIncomingClaimVersion:1,
+  });
+  expect(undone.nextProposalVersion).toBe(3);
+  expect(db.prepare("SELECT end_confirmed,ended_json,claim_version FROM memory_temporal_claims WHERE id=?").get(firstId))
+    .toMatchObject({end_confirmed:0,ended_json:null,claim_version:3});
+  expect(db.prepare("SELECT status,previous_version FROM memory_temporal_proposals WHERE id=?").get(proposalId))
+    .toMatchObject({status:"pending",previous_version:3});
+  expect(db.prepare("SELECT action FROM memory_temporal_decisions ORDER BY rowid").all())
+    .toEqual([{action:"accept"},{action:"undo"}]);
+  await expect(undoTemporalReview(bridge,{
+    proposalId:proposalId!,decisionId:applied.decisionId,
+    expectedProposalVersion:3,expectedPreviousClaimVersion:3,expectedIncomingClaimVersion:1,
+  })).rejects.toThrow("temporal_undo_stale");
+  expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+});
+
+test("T2a keep both/dismissal does not close a state or repeatedly reopen the proposal", async () => {
+  const { stageTemporalCandidate, stageTemporalReviewProposal } = require("../temporal-store");
+  const { decideTemporalReview, undoTemporalReview } = require("../temporal-decisions");
+  await openLocalMemory("guest");
+  const bridge=mockConnections[0],db=bridge.sqlite;
+  db.prepare("INSERT INTO memory_collections(id,name,slug,created_at) VALUES ('c','Работа','work','now')").run();
+  for (const id of ["a","b"]) db.prepare("INSERT INTO memory_entities(id,collection_id,domain,payload_json,created_at,updated_at) VALUES (?,'c','notes','{}','now','now')").run(id);
+  const make=(entityId:string,value:string):import("../temporal-claims").TemporalClaimCandidate=>({
+    recordedAt:"2026-10-27T12:00:00.000Z",subjectId:"person-1",
+    predicate:"employment",context:"primary",value,kind:"state",modality:"asserted",
+    negated:false,cardinality:"single",occurredOrStarted:null,ended:null,endConfirmed:false,
+    evidence:{entityId,recordVersion:1,quote:"Текст "+value,origin:"direct"},
+  });
+  const a=await stageTemporalCandidate(bridge,make("a","А"));
+  const b=await stageTemporalCandidate(bridge,make("b","Б"));
+  const id=(await stageTemporalReviewProposal(bridge,a,b))!;
+  const expected={proposalId:id,expectedProposalVersion:1,expectedPreviousClaimVersion:1,expectedIncomingClaimVersion:1};
+  const result=await decideTemporalReview(bridge,{...expected,choice:"keep_both"});
+  expect(db.prepare("SELECT status FROM memory_temporal_proposals WHERE id=?").get(id).status).toBe("dismissed");
+  expect(db.prepare("SELECT end_confirmed FROM memory_temporal_claims WHERE id=?").get(a).end_confirmed).toBe(0);
+  expect(await stageTemporalReviewProposal(bridge,a,b)).toBe(id);
+  expect(db.prepare("SELECT status FROM memory_temporal_proposals WHERE id=?").get(id).status).toBe("dismissed");
+  await undoTemporalReview(bridge,{proposalId:id,decisionId:result.decisionId,
+    expectedProposalVersion:2,expectedPreviousClaimVersion:1,expectedIncomingClaimVersion:1});
+  expect(db.prepare("SELECT status FROM memory_temporal_proposals WHERE id=?").get(id).status).toBe("pending");
+});
+
+test("T2a rollback on decision journal disk-full and reject stale/invalid source dates", async () => {
+  const { stageTemporalCandidate, stageTemporalReviewProposal } = require("../temporal-store");
+  const { decideTemporalReview } = require("../temporal-decisions");
+  await openLocalMemory("guest");
+  const bridge=mockConnections[0],db=bridge.sqlite;
+  db.prepare("INSERT INTO memory_collections(id,name,slug,created_at) VALUES ('c','Работа','work','now')").run();
+  for (const id of ["a","b"]) db.prepare("INSERT INTO memory_entities(id,collection_id,domain,payload_json,created_at,updated_at) VALUES (?,'c','notes','{}','now','now')").run(id);
+  const date={normalized:"2022-01-01",precision:"day" as const,raw:"1 января 2022",
+    anchorDate:null,sourceTimeZone:null};
+  const make=(entityId:string,value:string):import("../temporal-claims").TemporalClaimCandidate=>({
+    recordedAt:"2026-10-27T12:00:00.000Z",subjectId:"person-1",
+    predicate:"employment",context:"primary",value,kind:"state",modality:"asserted",
+    negated:false,cardinality:"single",occurredOrStarted:date,ended:null,endConfirmed:false,
+    evidence:{entityId,recordVersion:1,quote:"Текст "+value,origin:"direct"},
+  });
+  const a=await stageTemporalCandidate(bridge,make("a","А"));
+  const b=await stageTemporalCandidate(bridge,make("b","Б"));
+  const id=(await stageTemporalReviewProposal(bridge,a,b))!;
+  const expected={proposalId:id,expectedProposalVersion:1,expectedPreviousClaimVersion:1,expectedIncomingClaimVersion:1};
+  const end={normalized:"2021-01-01",precision:"day" as const,
+    raw:"1 января 2021",anchorDate:null,sourceTimeZone:null};
+  await expect(decideTemporalReview(bridge,{...expected,choice:"accept",confirmedEnd:end}))
+    .rejects.toThrow("temporal_end_before_start");
+  await expect(decideTemporalReview(bridge,{...expected,choice:"accept",
+    confirmedEnd:{normalized:"2021",precision:"year",raw:"В 2021 году",
+      anchorDate:null,sourceTimeZone:null}}))
+    .rejects.toThrow("temporal_end_before_start");
+  const before=bridge.runAsync;
+  bridge.runAsync=async (sql:string, params:unknown[]=[])=>{
+    if (sql.startsWith("INSERT INTO memory_temporal_decisions")) throw new Error("disk_full_journal");
+    return before(sql,params);
+  };
+  await expect(decideTemporalReview(bridge,{...expected,choice:"accept",
+    confirmedEnd:{...end,normalized:"2024-01-01",raw:"1 января 2024"}}))
+    .rejects.toThrow("disk_full_journal");
+  bridge.runAsync=before;
+  expect(db.prepare("SELECT claim_version,end_confirmed FROM memory_temporal_claims WHERE id=?").get(a))
+    .toMatchObject({claim_version:1,end_confirmed:0});
+  expect(db.prepare("SELECT status,proposal_version FROM memory_temporal_proposals WHERE id=?").get(id))
+    .toMatchObject({status:"pending",proposal_version:1});
+  expect(db.prepare("SELECT count(*) AS n FROM memory_temporal_decisions").get().n).toBe(0);
+  db.prepare("UPDATE memory_entities SET record_version=2 WHERE id='a'").run();
+  await expect(decideTemporalReview(bridge,{...expected,choice:"defer"}))
+    .rejects.toThrow("temporal_source_stale");
+});
