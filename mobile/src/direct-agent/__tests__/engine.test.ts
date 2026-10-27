@@ -442,3 +442,19 @@ test.each(['openai','compatible','anthropic'] as const)('actual %s transport rec
   const users=messages.filter((m:any)=>m.role==='user');expect(users).toHaveLength(2);
   for(const message of users){expect(Array.isArray(message.content)).toBe(true);expect(message.attachments).toBeUndefined();}
 });
+
+
+test("read_local_note uses an OpenAI strict-compatible schema and nullable pagination", async () => {
+  const transport = jest.fn().mockResolvedValueOnce(toolResponse("read_local_note",
+    { id: "note-1", version: 2, offset: null, budget: null }))
+    .mockResolvedValueOnce(final("Прочитано"));
+  const read = jest.fn().mockResolvedValue({
+    id: "note-1", revision: 2, content: "Достоверная выдержка", hasMore: false,
+  });
+  await start({}, transport, { read });
+  const tools = JSON.parse(transport.mock.calls[0][1].body).tools;
+  const tool = tools.find((x: any) => x.name === "read_local_note");
+  expect(tool.parameters.required).toEqual(["id", "version", "offset", "budget"]);
+  expect(tool.parameters.properties.offset.type).toEqual(["integer", "null"]);
+  expect(read).toHaveBeenCalledWith("note-1", 2, 0, 4000);
+});
