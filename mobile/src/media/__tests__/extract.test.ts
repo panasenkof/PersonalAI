@@ -123,7 +123,7 @@ test("broken vendor time positions are never passed to memory, but full plain te
 });
 
 test("custom OpenAI-compatible provider keeps old JSON request and never invents timestamps", async()=>{
-  const transport=jest.fn(async()=>({ok:true,json:async()=>({text:"Совместимый сервис"})}));
+  const transport=jest.fn(async (..._args:any[])=>({ok:true,json:async()=>({text:"Совместимый сервис"})}));
   const captured=jest.fn();
   const text=await extractMedia({uri:"file:///cache/audio.mp3",name:"audio.mp3"},
     {...settings,provider:"openai-compatible",baseUrl:"https://api.example.org/v1",transcriptionModel:"whisper-1"},
