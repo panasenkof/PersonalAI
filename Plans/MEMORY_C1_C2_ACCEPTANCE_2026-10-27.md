@@ -27,3 +27,5 @@
 Synthetic corpus — SQLite :memory: с close() в finally; в пользовательский SQLCipher и UI не добавлены QA-страницы, debug seed и тестовые записи. Очищать приложение после проверки не требуется. CI лог без личных данных с retention 7 суток, APK артефакт 3 суток. Постоянные regression tests не являются мусором и остаются.
 
 **№72.2/T2b (текущий PR):** Синтетические C1: атомарная запись typed claim + evidence + bounded proposals, сравнение state А→Б без auto-close, event independence, standard same-collection ACL, skipped_privacy для unclassified/private, disk-full rollback, stale source, cap32/truncated. До CI exact SHA status PENDING. Native SQLCipher и реальный UI C2 NOT VERIFIED.
+ 
+**№72.3/T3a (stacked PR):** C1 synthetic cursor pagination без OFFSET, отсутствие подтверждения для непроверенных кандидатов, точность valid vs knowledge time, source evidence/version, ACL standard-only, скрытие private/secret/unclassified из списка и nextCursor. CI exact SHA PENDING; native physical C2/agent current/as-of NOT VERIFIED.
