@@ -101,9 +101,15 @@ export async function saveMediaNote(profile: string, input: { file?: ImportFile;
       // created. Pages/timestamps remain UNKNOWN until a producer supplies them.
       const extracted = input.extractedText?.trim();
       if (attachmentIds.length === 1 && extracted) {
-        const segments = extracted.match(/[\\s\\S]{1,6000}/g)!.map(text => ({
-          text, location: { kind: 'unknown' as const },
-        }));
+        // Split by code points so UTF-16 surrogate pairs remain intact.
+        const codepoints = Array.from(extracted);
+        const segments: Array<{ text: string; location: { kind: 'unknown' } }> = [];
+        for (let pos = 0; pos < codepoints.length; pos += 6000) {
+          segments.push({
+            text: codepoints.slice(pos, pos + 6000).join(''),
+            location: { kind: 'unknown' },
+          });
+        }
         await appendExtractionInTransaction(tx, {
           attachmentId: attachmentIds[0], producerKind: 'unknown',
           producerId: 'legacy-media-extract', producerRevision: 'unspecified-v1',
