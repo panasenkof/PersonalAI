@@ -3,7 +3,7 @@ import { Platform } from "react-native";
 import { useSyncExternalStore } from "react";
 import type { TextEmbedder, TextEmbedderModel } from "react-native-executorch";
 import { whisperSupported } from "./whisper-core";
-import { VECTOR_MODEL } from "../local-memory/vectors";
+import { VECTOR_MODEL, vectorSpaceKey, type VectorArtifacts } from "../local-memory/vectors";
 
 /** On-device sentence vectors (п. 13): paraphrase-multilingual-MiniLM-L12-v2,
  * downloaded once on request. Texts never leave the phone. */
@@ -16,7 +16,14 @@ export type EmbedderStatus =
 
 export const EMBEDDER_APPROX_MB = 380;
 const KEY = "pia.memory.embedder.v1";
-type Saved = { model: string; resolved: TextEmbedderModel };
+type Saved = { model: string; resolved: TextEmbedderModel; sha256?: VectorArtifacts };
+/** The model artifacts are shared across user profiles, but the *vectors*
+ * remain in each profile's separate SQLCipher database. Never log paths or
+ * checksums from the private app directory.
+ */
+let verifiedSpace: string | null = null;
+let verifying: Promise<string> | null = null;
+const SHA256 = /^[a-f0-9]{64}$/;
 // The same requirement as Whisper: react-native-executorch needs Android 13+ / iOS 17+.
 let status: EmbedderStatus = { state: whisperSupported(Platform.OS, Platform.Version) ? "absent" : "unsupported" };
 let initialized: Promise<void> | null = null;
@@ -34,6 +41,54 @@ const config = (): TextEmbedderModel => {
   return Platform.OS === "ios" ? group.COREML_FP16 : group.XNNPACK_8DA4W;
 };
 const pathsOf = (m?: TextEmbedderModel) => m ? [m.modelPath, m.tokenizerPath].filter(p => p && !/^https?:/.test(p)) : [];
+/** Native hashing streams 380+ MB directly in native code, never through JS.
+ * These are *local* fingerprints, not a vendor-signed authenticity guarantee.
+ */
+async function artifactHashes(m: TextEmbedderModel): Promise<VectorArtifacts> {
+  if (typeof m.modelPath !== "string" || typeof m.tokenizerPath !== "string" ||
+      !m.modelPath.trim() || !m.tokenizerPath.trim() ||
+      [m.modelPath, m.tokenizerPath].some(path => /^(https?:|content:)/i.test(path))) {
+    throw new Error("model_artifacts_not_local");
+  }
+  const BlobUtil = (require("react-native-blob-util") as typeof import("react-native-blob-util")).default;
+  const [weights, tokenizer] = await Promise.all([m.modelPath, m.tokenizerPath].map(
+    path => BlobUtil.fs.hash(path.replace(/^file:\/\//, ""), "sha256")));
+  const result = { model: String(weights).toLowerCase(), tokenizer: String(tokenizer).toLowerCase() };
+  if (!SHA256.test(result.model) || !SHA256.test(result.tokenizer)) throw new Error("invalid_model_sha256");
+  return result;
+}
+
+/** The current embedding namespace is derived from actual downloaded bytes.
+ * Old installations get a one-time local checksum on first use, not a new
+ * download. Existing unversioned vectors are safely reindexed under the hash.
+ * A changed checksum on later launches FAILS CLOSED instead of mixing vectors.
+ */
+export function verifiedVectorSpace(): Promise<string> {
+  if (verifiedSpace) return Promise.resolve(verifiedSpace);
+  if (verifying) return verifying;
+  verifying = (async () => {
+    const saved = await readSaved();
+    if (!saved) throw new Error("model_artifacts_absent");
+    const actual = await artifactHashes(saved.resolved);
+    if (saved.sha256 && (saved.sha256.model !== actual.model ||
+                         saved.sha256.tokenizer !== actual.tokenizer)) {
+      throw new Error("model_artifacts_checksum_mismatch");
+    }
+    if (!saved.sha256) {
+      // Legacy model: persist the first observed checksums. These hashes
+      // establish future consistency, not vendor authenticity.
+      await SecureStore.setItemAsync(KEY, JSON.stringify({ ...saved, sha256: actual } satisfies Saved));
+    }
+    const key = vectorSpaceKey(Platform.OS === "ios" ? "ios" : "android", actual);
+    verifiedSpace = key;
+    return key;
+  })().catch(error => {
+    if (status.state !== "unsupported") set({ state: "error",
+      message: "Поиск по смыслу: не удалось проверить целостность локальной модели. Удалите её и скачайте заново." });
+    throw error;
+  }).finally(() => { verifying = null; });
+  return verifying;
+}
 async function readSaved(): Promise<Saved | null> {
   try {
     const raw = await SecureStore.getItemAsync(KEY);
@@ -70,8 +125,11 @@ export async function downloadEmbedder(): Promise<void> {
     const resolved = await rne.download(config(), { signal, onProgress: progress => {
       if (!signal.aborted) set({ state: "downloading", progress: Math.round(progress * 100) });
     } });
-    await SecureStore.setItemAsync(KEY, JSON.stringify({ model: VECTOR_MODEL, resolved } satisfies Saved));
+    const sha256 = await artifactHashes(resolved);
+    if (signal.aborted) throw new Error("model_download_cancelled");
+    await SecureStore.setItemAsync(KEY, JSON.stringify({ model: VECTOR_MODEL, resolved, sha256 } satisfies Saved));
     engine?.dispose(); engine = null;
+    verifiedSpace = vectorSpaceKey(Platform.OS === "ios" ? "ios" : "android", sha256);
     set({ state: "ready" });
   } catch (e) {
     if (signal.aborted) { set((await readSaved()) ? { state: "ready" } : { state: "absent" }); return; }
@@ -84,6 +142,7 @@ export async function deleteEmbedder(): Promise<void> {
   aborter?.abort();
   await queue.catch(() => undefined);
   engine?.dispose(); engine = null;
+  verifiedSpace = null;
   const saved = await readSaved();
   await SecureStore.deleteItemAsync(KEY);
   if (saved) {
@@ -98,7 +157,11 @@ async function load(): Promise<TextEmbedder> {
   return loading ??= (async () => {
     const saved = await readSaved();
     if (!saved) throw new Error("Модель поиска по смыслу не скачана: Настройки → Умный поиск по памяти.");
-    try { engine = await executorch().createTextEmbedder(saved.resolved); return engine; }
+    try {
+      await verifiedVectorSpace();
+      engine = await executorch().createTextEmbedder(saved.resolved);
+      return engine;
+    }
     catch (e) { throw new Error(message(e, "load")); }
     finally { loading = null; }
   })();

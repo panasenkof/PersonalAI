@@ -3,8 +3,7 @@ import { localMemoryRepository, SqliteMemoryRepository } from "../local-memory/r
 import { withLocalMemoryDatabase } from "../local-memory/storage";
 import type { MemoryRepository } from "../local-memory/types";
 import { ensureSections, orderCollections } from "../local-memory/sections";
-import { vectorSpaceKey } from "../local-memory/vectors";
-import { Platform } from "react-native";
+
 import { memoryText, normalizeAlias as normalizeName } from "../local-memory/search-index";
 import { DEFAULT_SECTIONS, MAX_NOTE_BODY_CHARS, PROPOSABLE_KINDS, findSection, proposableSections } from "./fact-tool";
 import type { MemorySection, NoteProposal } from "./fact-tool";
@@ -56,8 +55,15 @@ export async function searchApprovedNotes(
   const standards = collections.filter(c => c.sensitivity === "standard").map(c => c.id);
   if (!standards.length) return [];
   const values = embed ? await embed(query.trim().slice(0, 500)).catch(() => null) : null;
+  // An injected test embedder does not carry a verifiable model identity.
+  // Only native, locally verified artifacts are allowed into production
+  // semantic search; otherwise fall back to permission-filtered FTS.
+  const space = values && !repository
+    ? await (require("../media/embedder") as typeof import("../media/embedder"))
+        .verifiedVectorSpace().catch(() => null)
+    : null;
   const hits = await db.searchMemory(query, { collectionIds: standards, sensitivities: ["standard", "inherit"], limit: 5,
-    ...(values ? { vector: { model: vectorSpaceKey(Platform.OS === "ios" ? "ios" : "android"), values } } : {}) });
+    ...(values && space ? { vector: { model: space, values } } : {}) });
   const allowed = hits.filter(({ entity }) => standards.includes(entity.collection_id) && entity.record_status === "active" &&
     ["standard", "inherit"].includes(entity.sensitivity));
   let remaining = MAX_CONTEXT_NOTE_CHARS;

@@ -3,15 +3,9 @@
  * the app locks, on an error, or when the model is deleted. Computed on the
  * phone, so every section is indexed — «Документы» included. */
 import { useSyncExternalStore } from "react";
-import { Platform } from "react-native";
 import { localMemoryRepository } from "../local-memory/repository";
 import { localMemorySessionUnlocked, onLocalMemorySessionChange } from "../local-memory/storage";
-import { vectorSpaceKey } from "../local-memory/vectors";
-import { embedTexts, embedderReady } from "./embedder";
-
-// The downloader still identifies the model by its friendly name; persisted
-// vectors use a versioned namespace that changes when inference does.
-const ACTIVE_VECTOR_SPACE = vectorSpaceKey(Platform.OS === "ios" ? "ios" : "android");
+import { embedTexts, embedderReady, verifiedVectorSpace } from "./embedder";
 
 export type VectorState = { running: boolean; done: number; total: number; error: string; perChunkMs?: number };
 let state: VectorState = { running: false, done: 0, total: 0, error: "" };
@@ -23,7 +17,11 @@ export function useVectorState(): VectorState {
 }
 
 export async function refreshVectorStatus(profile: string): Promise<void> {
-  try { publish(await (await localMemoryRepository(profile)).vectorStatus(ACTIVE_VECTOR_SPACE)); } catch { /* locked */ }
+  try {
+    if (!(await embedderReady())) return;
+    const space = await verifiedVectorSpace();
+    publish(await (await localMemoryRepository(profile)).vectorStatus(space));
+  } catch { /* locked, absent or unverified model: normal lexical search remains */ }
 }
 
 let current: AbortController | null = null;
@@ -52,15 +50,18 @@ async function run(profile: string): Promise<void> {
   let retryDelay: number | null = null;
   publish({ running: true, error: "" });
   try {
+    // The exact SHA-256-identified namespace is shared with foreground queries.
+    // Verify before claiming work; a tampered model cannot complete jobs.
+    const space = await verifiedVectorSpace();
     const repo = await localMemoryRepository(profile);
-    publish(await repo.vectorStatus(ACTIVE_VECTOR_SPACE));
+    publish(await repo.vectorStatus(space));
     // Four chunks per native batch bound the time a foreground semantic query
     // waits behind background indexing on the shared on-device embedder.
     for (let batch = 0; batch < 2000 && !aborter.signal.aborted; batch++) {
       again = false;
-      const jobs = await repo.claimVectorJobs(ACTIVE_VECTOR_SPACE, 4);
+      const jobs = await repo.claimVectorJobs(space, 4);
       if (!jobs.length) {
-        const wake = await repo.nextVectorWakeMs(ACTIVE_VECTOR_SPACE);
+        const wake = await repo.nextVectorWakeMs(space);
         if (wake === 0) { again = true; break; } // cursor bootstrap still active
         if (wake !== null) retryDelay = Math.max(1000, wake);
         break;
@@ -71,27 +72,27 @@ async function run(profile: string): Promise<void> {
         if (aborter.signal.aborted) {
           // A lock may close SQLCipher before this call; the persistent lease
           // expires safely even if the graceful release cannot be committed.
-          await repo.releaseVectorJobs(ACTIVE_VECTOR_SPACE, jobs).catch(() => undefined);
+          await repo.releaseVectorJobs(space, jobs).catch(() => undefined);
           break;
         }
-        await repo.completeVectorJobs(ACTIVE_VECTOR_SPACE,
+        await repo.completeVectorJobs(space,
           jobs.map((job, i) => ({ job, vector: vectors[i] })));
         if (batch % 8 === 0) {
-          publish({ ...(await repo.vectorStatus(ACTIVE_VECTOR_SPACE)),
+          publish({ ...(await repo.vectorStatus(space)),
             perChunkMs: Math.round((Date.now() - started) / jobs.length) });
         }
       } catch (error) {
         if (aborter.signal.aborted) {
-          await repo.releaseVectorJobs(ACTIVE_VECTOR_SPACE, jobs).catch(() => undefined);
+          await repo.releaseVectorJobs(space, jobs).catch(() => undefined);
           break;
         }
         // Retry is bounded and persisted; no hot-loop or loss on process death.
-        await repo.failVectorJobs(ACTIVE_VECTOR_SPACE, jobs).catch(() => undefined);
+        await repo.failVectorJobs(space, jobs).catch(() => undefined);
         throw error;
       }
       if (batch === 1999) again = true; // bounded work per invocation
     }
-    if (!aborter.signal.aborted) publish(await repo.vectorStatus(ACTIVE_VECTOR_SPACE));
+    if (!aborter.signal.aborted) publish(await repo.vectorStatus(space));
   } catch (e) {
     if (!aborter.signal.aborted) {
       publish({ error: String((e as Error)?.message || e) });
