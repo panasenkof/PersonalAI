@@ -675,3 +675,94 @@ test("T2b review scan is capped at 32 and reports incomplete history", async () 
   expect(staged.proposalIds).toHaveLength(32);
   expect(db.prepare("SELECT count(*) AS n FROM memory_temporal_proposals").get().n).toBe(32);
 });
+
+
+test("T3a knowledge history paginates source-current claims, retaining original occurrence dates", async () => {
+  const { stageTemporalCandidate, listTemporalKnowledgeHistory } = require("../temporal-store");
+  await openLocalMemory("guest");
+  const bridge=mockConnections[0],db=bridge.sqlite;
+  db.prepare("INSERT INTO memory_collections(id,name,slug,sensitivity,created_at) VALUES ('people','Люди','people','standard','now')").run();
+  for (const id of ["a","b","c","d"]) {
+    db.prepare("INSERT INTO memory_entities(id,collection_id,domain,payload_json,created_at,updated_at) VALUES (?,'people','notes','{}','now','now')").run(id);
+  }
+  const bound={normalized:"2024",precision:"year" as const,raw:"в 2024 году",
+    anchorDate:null,sourceTimeZone:null};
+  const make=(entityId:string,kind:"state"|"event",day:number):import("../temporal-claims").TemporalClaimCandidate=>({
+    recordedAt:"2026-10-"+String(day).padStart(2,"0")+"T12:00:00.000Z",
+    subjectId:"person-1",predicate:kind==="state"?"employment":"repair",
+    context:kind==="state"?"primary":"spark-plugs",
+    value:entityId,kind,modality:"asserted",negated:false,cardinality:"single",
+    occurredOrStarted:bound,ended:null,endConfirmed:false,
+    evidence:{entityId,recordVersion:1,quote:"Источник "+entityId,origin:"direct"},
+  });
+  const a=await stageTemporalCandidate(bridge,make("a","event",20));
+  const b=await stageTemporalCandidate(bridge,make("b","state",21));
+  const c=await stageTemporalCandidate(bridge,make("c","event",22));
+  const d=await stageTemporalCandidate(bridge,make("d","state",23));
+  const input={subjectId:"person-1",collectionId:"people",mode:"all" as const,limit:2};
+  const first=await listTemporalKnowledgeHistory(bridge,input);
+  expect(first.items.map((x:{claimId:string})=>x.claimId)).toEqual([d,c]);
+  expect(first.items.map((x:{verification:string})=>x.verification)).toEqual([
+    "candidate_unconfirmed","candidate_unconfirmed",
+  ]);
+  expect(first.items[0].claim.occurredOrStarted).toEqual(bound);
+  expect(first.items[0].claim.evidence).toMatchObject({
+    entityId:"d",recordVersion:1,quote:"Источник d",origin:"direct",
+  });
+  const second=await listTemporalKnowledgeHistory(bridge,{...input,before:first.nextCursor!});
+  expect(second.items.map((x:{claimId:string})=>x.claimId)).toEqual([b,a]);
+  expect(second.nextCursor).toBeNull();
+  const events=await listTemporalKnowledgeHistory(bridge,{...input,mode:"events"});
+  expect(events.items.map((x:{claimId:string})=>x.claimId)).toEqual([c,a]);
+  const states=await listTemporalKnowledgeHistory(bridge,{...input,mode:"states"});
+  expect(states.items.map((x:{claimId:string})=>x.claimId)).toEqual([d,b]);
+  // A newly edited source can no longer testify to the old text.
+  db.prepare("UPDATE memory_entities SET record_version=2 WHERE id='d'").run();
+  const current=await listTemporalKnowledgeHistory(bridge,input);
+  expect(current.items.map((x:{claimId:string})=>x.claimId)).toEqual([c,b]);
+});
+
+test("T3a history never leaks through collection/record sensitivity or metadata-only count", async () => {
+  const { stageTemporalCandidate, listTemporalKnowledgeHistory } = require("../temporal-store");
+  await openLocalMemory("guest");
+  const bridge=mockConnections[0],db=bridge.sqlite;
+  for(const [id,sensitivity] of [["visible","standard"],["hidden","private"],["unknown","unclassified"]]) {
+    db.prepare("INSERT INTO memory_collections(id,name,slug,sensitivity,created_at) VALUES (?,?,?,?, 'now')").run(id,id,id,sensitivity);
+    db.prepare("INSERT INTO memory_entities(id,collection_id,domain,payload_json,created_at,updated_at) VALUES (?,?,'notes','{}','now','now')").run(id,id);
+  }
+  db.prepare("INSERT INTO memory_entities(id,collection_id,domain,sensitivity,payload_json,created_at,updated_at) VALUES ('secret-record','visible','notes','secret','{}','now','now')").run();
+  const make=(entityId:string):import("../temporal-claims").TemporalClaimCandidate=>({
+    recordedAt:"2026-10-27T12:00:00.000Z",subjectId:"person-1",
+    predicate:"residence",context:"actual",value:"Private residence",
+    kind:"state",modality:"asserted",negated:false,cardinality:"single",
+    occurredOrStarted:null,ended:null,endConfirmed:false,
+    evidence:{entityId,recordVersion:1,quote:"Do not leak "+entityId,origin:"direct"},
+  });
+  const visibleId=await stageTemporalCandidate(bridge,make("visible"));
+  await stageTemporalCandidate(bridge,make("hidden"));
+  await stageTemporalCandidate(bridge,make("unknown"));
+  await stageTemporalCandidate(bridge,make("secret-record"));
+  const visible=await listTemporalKnowledgeHistory(bridge,{
+    subjectId:"person-1",collectionId:"visible",mode:"all",
+  });
+  expect(visible.items.map((x:{claimId:string})=>x.claimId)).toEqual([visibleId]);
+  expect(visible.nextCursor).toBeNull();
+  for(const collectionId of ["hidden","unknown"]) {
+    const result=await listTemporalKnowledgeHistory(bridge,{
+      subjectId:"person-1",collectionId,mode:"all",
+    });
+    expect(result.items).toEqual([]);
+    expect(result.nextCursor).toBeNull();
+  }
+  await expect(listTemporalKnowledgeHistory(bridge,{
+    subjectId:"person-1",collectionId:"visible",mode:"all",limit:0,
+  })).rejects.toThrow("temporal_history_limit_invalid");
+  await expect(listTemporalKnowledgeHistory(bridge,{
+    subjectId:"person-1",collectionId:"visible",mode:"all",
+    before:{recordedAt:"2026-02-30T00:00:00.000Z",claimId:"bad"},
+  })).rejects.toThrow("temporal_history_cursor_invalid");
+  db.prepare("UPDATE memory_entities SET record_status='trashed' WHERE id='visible'").run();
+  expect((await listTemporalKnowledgeHistory(bridge,{
+    subjectId:"person-1",collectionId:"visible",mode:"all",
+  })).items).toEqual([]);
+});

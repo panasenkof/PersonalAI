@@ -223,3 +223,89 @@ export async function stageTemporalCandidateWithReview(
   });
   return result;
 }
+
+
+/**
+ * №72.3/T3a: source-backed, bounded knowledge-history listing.
+ *
+ * This is intentionally NOT a "what is true now?" query: temporal rows are
+ * candidates until the full accepted-claim lifecycle has been implemented.
+ * No claim with a stale/archived source or outside standard ACL is surfaced.
+ * The cursor orders by *knowledge/recorded time*, never pretending it is the
+ * occurrence date. Native current/as-of/events reasoning follows in T3b.
+ */
+export type TemporalHistoryMode = "all" | "states" | "events";
+export type TemporalHistoryCursor = { recordedAt: string; claimId: string };
+export type TemporalHistoryItem = {
+  claimId: string; claimVersion: number;
+  claim: TemporalClaimCandidate;
+  /** A proposal to revise is not sufficient to mark this claim confirmed. */
+  verification: "candidate_unconfirmed";
+};
+export type TemporalHistoryPage = {
+  items: TemporalHistoryItem[]; nextCursor: TemporalHistoryCursor | null;
+};
+export type TemporalHistoryQuery = {
+  subjectId: string; collectionId: string;
+  mode: TemporalHistoryMode; limit?: number;
+  before?: TemporalHistoryCursor;
+};
+
+export async function listTemporalKnowledgeHistory(
+  db: ScanSQL, query: TemporalHistoryQuery,
+): Promise<TemporalHistoryPage> {
+  if (!query.subjectId?.trim() || !query.collectionId?.trim() ||
+      query.subjectId.length > 256 || query.collectionId.length > 256 ||
+      !["all","states","events"].includes(query.mode)) {
+    throw new Error("temporal_history_scope_invalid");
+  }
+  const limit=query.limit ?? 20;
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50) {
+    throw new Error("temporal_history_limit_invalid");
+  }
+  if (query.before && (!query.before.claimId?.trim() ||
+      query.before.claimId.length > 256 ||
+      !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(query.before.recordedAt) ||
+      !Number.isFinite(Date.parse(query.before.recordedAt)) ||
+      new Date(query.before.recordedAt).toISOString() !== query.before.recordedAt)) {
+    throw new Error("temporal_history_cursor_invalid");
+  }
+  const where=[
+    "c.subject_id=?", "e.collection_id=?", "col.sensitivity='standard'",
+    "e.sensitivity IN ('standard','inherit')",
+    "e.record_status='active'", "e.record_version=c.source_record_version",
+  ];
+  const params: (string|number)[]=[query.subjectId,query.collectionId];
+  if (query.mode !== "all") {
+    where.push("c.temporal_kind=?");
+    params.push(query.mode==="states"?"state":"event");
+  }
+  if (query.before) {
+    where.push("(c.knowledge_recorded_at<? OR (c.knowledge_recorded_at=? AND c.id<?))");
+    params.push(query.before.recordedAt,query.before.recordedAt,query.before.claimId);
+  }
+  params.push(limit+1);
+  const rows=await db.getAllAsync<ClaimRow>(
+    "SELECT c.*, evidence.quote, evidence.origin FROM memory_temporal_claims c " +
+    "JOIN memory_entities e ON e.id=c.entity_id " +
+    "JOIN memory_collections col ON col.id=e.collection_id " +
+    "JOIN memory_temporal_evidence evidence ON evidence.id=(" +
+    "SELECT ev.id FROM memory_temporal_evidence ev WHERE ev.claim_id=c.id " +
+    "AND ev.entity_id=c.entity_id AND ev.source_record_version=c.source_record_version " +
+    "ORDER BY ev.created_at,ev.id LIMIT 1) " +
+    "WHERE "+where.join(" AND ")+" "+
+    "ORDER BY c.knowledge_recorded_at DESC,c.id DESC LIMIT ?",
+    params,
+  );
+  const visible=rows.slice(0,limit);
+  const items=visible.map(row=>({
+    claimId:row.id,claimVersion:row.claim_version,claim:fromRow(row),
+    verification:"candidate_unconfirmed" as const,
+  }));
+  const last=visible.at(-1);
+  return {
+    items,
+    nextCursor:rows.length>limit && last
+      ? { recordedAt:last.knowledge_recorded_at,claimId:last.id } : null,
+  };
+}
