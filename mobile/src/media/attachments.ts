@@ -4,6 +4,7 @@ import type { SQLiteDatabase } from 'expo-sqlite';
 import { localMemorySessionUnlocked, withLocalMemoryDatabase } from '../local-memory/storage';
 import { MemoryConflictError } from '../local-memory/types';
 import { SqliteMemoryRepository } from '../local-memory/repository';
+import { appendExtractionInTransaction } from '../local-memory/extractions';
 import type { ImportFile } from './kinds';
 import { mediaKind } from './kinds';
 
@@ -49,6 +50,7 @@ export async function writeOriginal(db: Pick<SQLiteDatabase, 'runAsync'>, entity
       total += bytes.length;
     }
     check(signal);
+    return id;
   } finally { handle.close(); }
 }
 /** Note + original + receipt commit together. Cancellation never leaves a partial note. */
@@ -92,7 +94,22 @@ export async function saveMediaNote(profile: string, input: { file?: ImportFile;
         ...(originals.length > 1 ? { source_files: originals.map(f => f.name), source_media_types: originals.map(mediaKind) } : {}) } : {}) },
       sensitivity: input.sensitivity, source_kind: 'user', source_ref: input.receipt ? 'android-share' : 'device-import',
     }, async (tx, entityId) => {
-      for (const original of originals) await writeOriginal(tx, entityId, original, signal);
+      const attachmentIds: string[] = [];
+      for (const original of originals) attachmentIds.push(await writeOriginal(tx, entityId, original, signal));
+      // Only one original is unambiguous. For multi-file combined recognition
+      // the existing extracted_text is retained, but NO false source link is
+      // created. Pages/timestamps remain UNKNOWN until a producer supplies them.
+      const extracted = input.extractedText?.trim();
+      if (attachmentIds.length === 1 && extracted) {
+        const segments = extracted.match(/[\\s\\S]{1,6000}/g)!.map(text => ({
+          text, location: { kind: 'unknown' as const },
+        }));
+        await appendExtractionInTransaction(tx, {
+          attachmentId: attachmentIds[0], producerKind: 'unknown',
+          producerId: 'legacy-media-extract', producerRevision: 'unspecified-v1',
+          status: 'partial', coverage: 'unknown', segments,
+        });
+      }
       check(signal);
       await tx.runAsync('INSERT INTO memory_received_shares(fingerprint,entity_id) VALUES (?,?)', [receipt, entityId]);
     });
