@@ -35,7 +35,10 @@ export type ExtractionEvidence = {
 
 type AttachmentRow = { id: string; size: number };
 type PartRow = { ord: number; n: number; sha256: string };
-async function fingerprint(db: SQL, attachmentId: string): Promise<string> {
+/** A source revision over the encrypted part-hash manifest (not a verified
+ * full-file digest): safe to compare within the same SQLCipher lease.
+ */
+export async function fingerprintExtractionSource(db: SQL, attachmentId: string): Promise<string> {
   const attachment = await db.getFirstAsync<AttachmentRow>(
     "SELECT id,size FROM memory_attachments WHERE id=?", [attachmentId]);
   if (!attachment || !Number.isSafeInteger(attachment.size) || attachment.size<=0) {
@@ -101,7 +104,7 @@ function checked(input: ExtractionRunInput){
 export async function appendExtractionInTransaction(db: SQL,input:ExtractionRunInput):Promise<string>{
   checked(input);
   const id=Crypto.randomUUID(), timestamp=new Date().toISOString();
-  const revision=await fingerprint(db,input.attachmentId);
+  const revision=await fingerprintExtractionSource(db,input.attachmentId);
     await db.runAsync(
       `INSERT INTO memory_extractions
         (id,attachment_id,source_version,producer_kind,producer_id,producer_revision,language,coverage,status,created_at)
@@ -141,7 +144,7 @@ export async function extractionEvidence(db: SQL, entityId: string, attachmentId
     coverage:ExtractionRunInput["coverage"];status:ExtractionRunInput["status"];created_at:string;
   }>("SELECT * FROM memory_extractions WHERE attachment_id=? ORDER BY created_at DESC,id DESC LIMIT ?",
     [attachmentId,cap]);
-  const actual=rows.length?await fingerprint(db,attachmentId):null;
+  const actual=rows.length?await fingerprintExtractionSource(db,attachmentId):null;
   const out:ExtractionEvidence[]=[];
   for(const row of rows){
     // Version mismatches do not become evidence of current original bytes.

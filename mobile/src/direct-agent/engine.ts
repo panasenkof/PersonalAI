@@ -38,6 +38,12 @@ export type DirectAgentOptions = {
   lookup: (query: string) => Promise<MemorySnippet[]>;
   /** Recheck access and record version before reading a source excerpt. */
   read?: (id: string, version: number, offset?: number, budget?: number) => Promise<Record<string, unknown>>;
+  /** List metadata/short previews from source-attached extraction records for
+   * an already authorized record/version; all ACL checks repeat on the phone. */
+  listSources?: (id: string, version: number, limit?: number) => Promise<Record<string, unknown>>;
+  /** Read exactly one verified-source-version segment, with bounded cursor. */
+  readSource?: (id: string, version: number, attachmentId: string,
+    extractionId: string, segmentId: string, offset?: number, budget?: number) => Promise<Record<string, unknown>>;
   list?: (options: { collectionId?: string; query?: string; limit?: number; beforeUpdatedAt?: string; beforeId?: string }) => Promise<Record<string, unknown>>;
   count?: (options: { collectionId?: string; query?: string }) => Promise<Record<string, unknown>>;
   propose: (note: NoteProposal) => string | void;
@@ -82,6 +88,8 @@ const systemPrompt = (sections?: MemorySection[]) =>
   "Ты персональный помощник PersAI, работающий на телефоне пользователя. " +
   "Для вопросов о предпочтениях и заметках используй search_local_notes, если он доступен. " +
   "Если найденного фрагмента недостаточно, используй read_local_note с id и version из поиска; не считай отрывок полным документом. " +
+  "Если в заметке есть распознанный материал, можешь проверить list_local_sources по её id/version и затем read_local_source_segment по точным идентификаторам. " +
+  "locationConfidence=producer_reported значит место указал обработчик; это не независимое подтверждение страницы или таймкода из оригинала. unknown означает, что координаты нет. " +
   "Ссылайся на факты из памяти только по проверяемым evidence.recordId/recordVersion/startChar/endChar; нельзя придумывать страницу PDF или таймкод. coverage=excerpt значит источник прочитан частично. " +
   "Никогда не выдумывай содержимое памяти. Если нужно что-либо запомнить, вызови " + FACT_TOOL_NAME + " — один факт на вызов; " +
   "запись будет сохранена только после подтверждения пользователя. " +
