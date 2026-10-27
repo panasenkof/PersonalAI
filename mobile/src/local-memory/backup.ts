@@ -203,6 +203,10 @@ export async function restoreEncryptedBackup(
         if (!version || !RESTORABLE_VERSIONS.includes(version.user_version) || version.user_version > LOCAL_MEMORY_SCHEMA_VERSION) {
           throw new Error("incompatible_backup_version");
         }
+        // A v7 archive must carry the user-owned Android Share receipts.
+        if (version.user_version >= 7 && !available.has("memory_received_shares")) {
+          throw new Error("incompatible_backup_schema");
+        }
         // Validate the *source* before any destination writes. A forged
         // SQLCipher file with the right table names can still have corruption.
         const integrity = await db.getFirstAsync<{ integrity_check: string }>(
@@ -245,6 +249,13 @@ export async function restoreEncryptedBackup(
               if (!available.has(table)) throw new Error("incompatible_backup_schema");
               await tx.execAsync(`INSERT INTO ${table} SELECT * FROM pia_import.${table}`);
             }
+          }
+          // Keep imported Android Share deduplication fingerprints: a source
+          // is never re-imported merely because it was restored on another phone.
+          // The earlier v1-v6 deployed formats may omit this optional table.
+          if (available.has("memory_received_shares")) {
+            await tx.execAsync(`INSERT INTO memory_received_shares(fingerprint,entity_id)
+              SELECT fingerprint,entity_id FROM pia_import.memory_received_shares`);
           }
           // Hygienic keep/pin/defer are user decisions, NEVER a rebuildable index.
           // v1–v6 backups legitimately have no such preferences.
