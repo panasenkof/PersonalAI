@@ -515,20 +515,34 @@ export class SqliteMemoryRepository implements MemoryRepository {
    * title, with the text to embed. Every section is included: vectors never
    * leave the phone, and what reaches the model is filtered at search time. */
   async pendingVectorChunks(model: string, limit = 32): Promise<Array<{ chunkId: string; text: string; hash: string }>> {
-    const rows = await this.db.getAllAsync<Row>(
-      `SELECT c.id, c.text, e.title, v.content_hash AS vhash FROM memory_chunks c
-       JOIN memory_entities e ON e.id=c.entity_id
-       LEFT JOIN memory_vectors v ON v.chunk_id=c.id AND v.model=?
-       WHERE e.record_status='active' AND e.domain='notes' ORDER BY e.updated_at DESC, c.ord`, [model]);
+    const cap = Math.min(200, Math.max(1, Number.isFinite(limit) ? Math.trunc(limit) : 32));
+    const batchSize = Math.max(64, Math.min(256, cap * 4));
     const out: Array<{ chunkId: string; text: string; hash: string }> = [];
-    for (const r of rows) {
-      const text = embeddingText(TEXT(r.title), String(r.text));
-      if (!text) continue;
-      const hash = embeddingHash(TEXT(r.title), String(r.text));
-      if (r.vhash !== hash) out.push({ chunkId: String(r.id), text, hash });
-      if (out.length >= limit) break;
+    let cursor: { date: string; id: string; ord: number } | null = null;
+    for (;;) {
+      // Keyset cursor is stable within the read; avoids quadratic deep OFFSET
+      // paging. The durable dirty queue is a later, separate SQLCipher stage.
+      const rows: Row[] = await this.db.getAllAsync<Row>(
+        `SELECT c.id,c.ord,c.text,e.id AS eid,e.updated_at,e.title,
+                v.content_hash AS vhash FROM memory_chunks c
+         JOIN memory_entities e ON e.id=c.entity_id
+         LEFT JOIN memory_vectors v ON v.chunk_id=c.id AND v.model=?
+         WHERE e.record_status='active' AND e.domain='notes'
+           ${cursor ? "AND (e.updated_at < ? OR (e.updated_at=? AND (e.id > ? OR (e.id=? AND c.ord > ?))))" : ""}
+         ORDER BY e.updated_at DESC,e.id,c.ord LIMIT ?`,
+        cursor ? [model, cursor.date, cursor.date, cursor.id, cursor.id, cursor.ord, batchSize]
+               : [model, batchSize]);
+      for (const r of rows) {
+        const text = embeddingText(TEXT(r.title), String(r.text));
+        if (!text) continue;
+        const hash = embeddingHash(TEXT(r.title), String(r.text));
+        if (r.vhash !== hash) out.push({ chunkId: String(r.id), text, hash });
+        if (out.length >= cap) return out;
+      }
+      if (rows.length < batchSize) return out;
+      const last: Row = rows[rows.length - 1];
+      cursor = { date: String(last.updated_at), id: String(last.eid), ord: Number(last.ord) };
     }
-    return out;
   }
 
   /** Accept results only for the current text/title: edits may race inference. */
@@ -550,16 +564,27 @@ export class SqliteMemoryRepository implements MemoryRepository {
 
   /** Chunks of active records with a current vector, and all such chunks. */
   async vectorStatus(model: string): Promise<{ done: number; total: number }> {
-    const rows = await this.db.getAllAsync<Row>(
-      `SELECT c.text, e.title, v.content_hash AS vhash FROM memory_chunks c JOIN memory_entities e ON e.id=c.entity_id
-       LEFT JOIN memory_vectors v ON v.chunk_id=c.id AND v.model=? WHERE e.record_status='active' AND e.domain='notes'`, [model]);
     let done = 0, total = 0;
-    for (const r of rows) {
-      if (!embeddingText(TEXT(r.title), String(r.text))) continue;
-      total++;
-      if (r.vhash === embeddingHash(TEXT(r.title), String(r.text))) done++;
+    let cursor: { id: string; ord: number } | null = null;
+    const pageSize = 256;
+    for (;;) {
+      const rows: Row[] = await this.db.getAllAsync<Row>(
+        `SELECT c.text,c.ord,e.id AS eid,e.title,v.content_hash AS vhash
+         FROM memory_chunks c JOIN memory_entities e ON e.id=c.entity_id
+         LEFT JOIN memory_vectors v ON v.chunk_id=c.id AND v.model=?
+         WHERE e.record_status='active' AND e.domain='notes'
+           ${cursor ? "AND (e.id > ? OR (e.id=? AND c.ord > ?))" : ""}
+         ORDER BY e.id,c.ord LIMIT ?`,
+        cursor ? [model, cursor.id, cursor.id, cursor.ord, pageSize] : [model, pageSize]);
+      for (const r of rows) {
+        if (!embeddingText(TEXT(r.title), String(r.text))) continue;
+        total++;
+        if (r.vhash === embeddingHash(TEXT(r.title), String(r.text))) done++;
+      }
+      if (rows.length < pageSize) return { done, total };
+      const last: Row = rows[rows.length - 1];
+      cursor = { id: String(last.eid), ord: Number(last.ord) };
     }
-    return { done, total };
   }
 
   /** Records whose chunks are closest in meaning to the question vector, best

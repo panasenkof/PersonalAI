@@ -475,3 +475,36 @@ test("search requiring negation and year does not return affirmative or wrong-ye
   expect(found.map(h => h.entity.id)).not.toContain(old.id);
   expect(await repo.searchMemory("Кто не любит кофе в 2023?")).toEqual([]);
 });
+
+test("vector queue and progress page in SQL without materializing the full corpus", async () => {
+  const db = new FakeSqlite();
+  const repo = new SqliteMemoryRepository(db as never);
+  const col = await repo.createCollection({ name: "Заметки", slug: "notes", sensitivity: "standard" });
+  for (let i = 0; i < 5; i++) await repo.createEntity({
+    collection_id: col.id, domain: "notes", title: "Файл " + i,
+    payload: { body: "Данные разные " + i },
+  });
+  const spy = jest.spyOn(db, "getAllAsync");
+  expect((await repo.pendingVectorChunks("model-a", 2))).toHaveLength(2);
+  expect(spy.mock.calls.some(([sql, args]) => String(sql).includes("ORDER BY e.updated_at DESC,e.id,c.ord LIMIT ?") &&
+    Array.isArray(args) && args[0] === "model-a")).toBe(true);
+  expect(await repo.vectorStatus("model-a")).toEqual({ done: 0, total: 5 });
+  expect(spy.mock.calls.filter(([sql]) => String(sql).includes("LEFT JOIN memory_vectors"))
+    .every(([sql]) => String(sql).includes("LIMIT ?") && !String(sql).includes("OFFSET ?"))).toBe(true);
+});
+
+
+test("vector status resumes after SQL keyset cursor across 256 rows", async () => {
+  const db = new FakeSqlite();
+  const repo = new SqliteMemoryRepository(db as never);
+  const col = await repo.createCollection({ name: "Большой корпус", slug: "notes", sensitivity: "standard" });
+  for (let i = 0; i < 260; i++) {
+    await repo.createEntity({ collection_id: col.id, domain: "notes",
+      title: "Запись " + i, payload: { body: "Данные " + i } });
+  }
+  const spy = jest.spyOn(db, "getAllAsync");
+  expect(await repo.vectorStatus("not-downloaded")).toEqual({ done: 0, total: 260 });
+  const vec = spy.mock.calls.filter(([sql]) => String(sql).includes("LEFT JOIN memory_vectors"));
+  expect(vec.length).toBeGreaterThanOrEqual(2);
+  expect(vec.some(([sql, args]) => String(sql).includes("AND (e.id > ?") && Array.isArray(args) && args.length === 5)).toBe(true);
+});
