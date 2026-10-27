@@ -20,7 +20,8 @@ class PdfTextPageReaderInstrumentedTest {
   private fun pdf(vararg pageTexts: String?): File {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     val file = File.createTempFile("persai-pdf-", ".pdf", context.cacheDir)
-    PdfDocument().use { pdf ->
+    val pdf = PdfDocument()
+    try {
       pageTexts.forEachIndexed { index, text ->
         val page = pdf.startPage(
           PdfDocument.PageInfo.Builder(595, 842, index + 1).create()
@@ -32,6 +33,8 @@ class PdfTextPageReaderInstrumentedTest {
         pdf.finishPage(page)
       }
       file.outputStream().use { pdf.writeTo(it) }
+    } finally {
+      pdf.close()
     }
     return file
   }
