@@ -86,7 +86,30 @@ function checkedRecognitions(originals: ImportFile[], values?: FileRecognition[]
     const text = item.text.trim();
     total += text.length;
     if (total > 60_000) throw new Error('recognition_source_text_too_large');
-    return { index: item.index, status: 'success' as const, text };
+    // Timestamp ranges are accepted only for audio and only when a processor
+    // supplied ALL of them. They mark source intervals, not word-level proof.
+    const segments = item.segments;
+    if (segments !== undefined) {
+      if (mediaKind(originals[item.index]) !== 'audio' ||
+          !Array.isArray(segments) || !segments.length || segments.length > 128) {
+        throw new Error('invalid_recognition_segments');
+      }
+      let previousEnd = 0, totalSegmentChars = 0;
+      for (const part of segments) {
+        const loc = part?.location;
+        if (typeof part?.text !== 'string' || !part.text.trim() || part.text.length > 6000 ||
+            loc?.kind !== 'time' || !Number.isSafeInteger(loc.startMs) ||
+            !Number.isSafeInteger(loc.endMs) || loc.startMs < previousEnd ||
+            loc.endMs <= loc.startMs || loc.endMs > 24 * 60 * 60 * 1000) {
+          throw new Error('invalid_recognition_segments');
+        }
+        previousEnd = loc.endMs;
+        totalSegmentChars += part.text.length;
+      }
+      if (totalSegmentChars > 60_000) throw new Error('invalid_recognition_segments');
+    }
+    return { index: item.index, status: 'success' as const, text,
+      ...(segments ? { segments } : {}) };
   });
 }
 /** Note + original + receipt commit together. Cancellation never leaves a partial note. */
@@ -115,7 +138,7 @@ export async function saveMediaNote(profile: string, input: { file?: ImportFile;
       originalHashes.push(fingerprint);
     }
     const contentHash: string | string[] | null = originals.length > 1 ? originalHashes : originalHashes[0] || null;
-    const receipt = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, JSON.stringify([input.receipt || 'device-import', contentHash, input.title, input.body, input.extractedText || "", input.sensitivity, input.collectionId || "", input.sourceUrl || "", ...(verified ? [verified.filter(x => x.status === 'success').map(x => [x.index, x.text])] : [])]));
+    const receipt = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, JSON.stringify([input.receipt || 'device-import', contentHash, input.title, input.body, input.extractedText || "", input.sensitivity, input.collectionId || "", input.sourceUrl || "", ...(verified ? [verified.filter(x => x.status === 'success').map(x => [x.index, x.text, x.segments || null])] : [])]));
     {
       const old = await db.getFirstAsync<{ entity_id: string }>('SELECT entity_id FROM memory_received_shares WHERE fingerprint=?', [receipt]);
       if (old) return old.entity_id;
@@ -144,9 +167,10 @@ export async function saveMediaNote(profile: string, input: { file?: ImportFile;
             attachmentId: attachmentIds[run.index],
             producerKind: kind === 'audio' ? 'asr' : kind === 'image' ? 'vision' :
               kind === 'text' ? 'text' : 'unknown',
-            producerId: 'persai-media-extract', producerRevision: 'source-text-v1',
+            producerId: run.segments ? 'openai-whisper-1' : 'persai-media-extract',
+            producerRevision: run.segments ? 'official-segment-time-v1' : 'source-text-v1',
             status: 'partial', coverage: 'unknown',
-            segments: unknownSegments(run.text),
+            segments: run.segments || unknownSegments(run.text),
           });
         }
       } else {
