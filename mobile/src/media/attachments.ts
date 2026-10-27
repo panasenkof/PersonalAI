@@ -90,20 +90,26 @@ function checkedRecognitions(originals: ImportFile[], values?: FileRecognition[]
     // supplied ALL of them. They mark source intervals, not word-level proof.
     const segments = item.segments;
     if (segments !== undefined) {
-      if (mediaKind(originals[item.index]) !== 'audio' ||
+      const sourceKind=mediaKind(originals[item.index]);
+      if (!['audio','document'].includes(sourceKind) ||
           !Array.isArray(segments) || !segments.length || segments.length > 128) {
         throw new Error('invalid_recognition_segments');
       }
       let previousEnd = 0, totalSegmentChars = 0;
       for (const part of segments) {
         const loc = part?.location;
+        const validTime = sourceKind === 'audio' && loc?.kind === 'time' &&
+          Number.isSafeInteger(loc.startMs) && Number.isSafeInteger(loc.endMs) &&
+          loc.startMs >= previousEnd && loc.endMs > loc.startMs &&
+          loc.endMs <= 24 * 60 * 60 * 1000;
+        const validPage = sourceKind === 'document' && loc?.kind === 'page' &&
+          Number.isSafeInteger(loc.page) && loc.page >= 1 && loc.page <= 128 &&
+          loc.page >= previousEnd;
         if (typeof part?.text !== 'string' || !part.text.trim() || part.text.length > 6000 ||
-            loc?.kind !== 'time' || !Number.isSafeInteger(loc.startMs) ||
-            !Number.isSafeInteger(loc.endMs) || loc.startMs < previousEnd ||
-            loc.endMs <= loc.startMs || loc.endMs > 24 * 60 * 60 * 1000) {
+            (!validTime && !validPage)) {
           throw new Error('invalid_recognition_segments');
         }
-        previousEnd = loc.endMs;
+        previousEnd = loc.kind === 'time' ? loc.endMs : loc.page;
         totalSegmentChars += part.text.length;
       }
       if (totalSegmentChars > 60_000) throw new Error('invalid_recognition_segments');
@@ -165,10 +171,12 @@ export async function saveMediaNote(profile: string, input: { file?: ImportFile;
           const kind = mediaKind(originals[run.index]);
           await appendExtractionInTransaction(tx, {
             attachmentId: attachmentIds[run.index],
-            producerKind: kind === 'audio' ? 'asr' : kind === 'image' ? 'vision' :
-              kind === 'text' ? 'text' : 'unknown',
-            producerId: run.segments ? 'openai-whisper-1' : 'persai-media-extract',
-            producerRevision: run.segments ? 'official-segment-time-v1' : 'source-text-v1',
+            producerKind: kind === 'audio' ? 'asr' : kind === 'document' ? 'pdf' :
+              kind === 'image' ? 'vision' : kind === 'text' ? 'text' : 'unknown',
+            producerId: run.segments && kind === 'document' ? 'android-pdf-text' :
+              run.segments ? 'openai-whisper-1' : 'persai-media-extract',
+            producerRevision: run.segments && kind === 'document' ? 'native-page-v1' :
+              run.segments ? 'official-segment-time-v1' : 'source-text-v1',
             status: 'partial', coverage: 'unknown',
             segments: run.segments || unknownSegments(run.text),
           });
