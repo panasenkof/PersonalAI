@@ -162,7 +162,7 @@ export async function shareEncryptedBackup(profileId: string, recoveryCode: stri
         await db.execAsync(`PRAGMA pia_export.user_version = ${LOCAL_MEMORY_SCHEMA_VERSION}`);
         // The manifest lives INSIDE SQLCipher ciphertext. No plaintext sidecar.
         await db.execAsync("CREATE TABLE pia_export.persai_backup_manifest (" +
-          "format_version INTEGER NOT NULL, schema_version INTEGER NOT NULL," +
+          "format_version INTEGER PRIMARY KEY CHECK(format_version=1), schema_version INTEGER NOT NULL," +
           "entities INTEGER NOT NULL, collections INTEGER NOT NULL, observations INTEGER NOT NULL," +
           "attachments INTEGER NOT NULL, attachment_parts INTEGER NOT NULL," +
           "receipts INTEGER NOT NULL, chats INTEGER NOT NULL)");
@@ -271,7 +271,10 @@ export async function restoreEncryptedBackup(
           const manifest = await db.getFirstAsync<BackupManifest>(
             "SELECT * FROM pia_import.persai_backup_manifest",
           );
-          if (!manifest || manifest.format_version !== MANIFEST_FORMAT_VERSION ||
+          const manifestRows = await db.getFirstAsync<{ n: number }>(
+            "SELECT count(*) AS n FROM pia_import.persai_backup_manifest",
+          );
+          if (manifestRows?.n !== 1 || !manifest || manifest.format_version !== MANIFEST_FORMAT_VERSION ||
               manifest.schema_version !== version.user_version || !validBackupCounts(manifest)) {
             throw new Error("backup_manifest_invalid");
           }
