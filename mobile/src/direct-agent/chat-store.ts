@@ -7,7 +7,7 @@ import { diagnosticTrace, redactDiagnostic } from "./diagnostics";
 import { MAX_USER_PROMPT_CHARS } from "./limits";
 import { loadModelCallLimit } from "./agent-preferences";
 import { hostOf } from "./net";
-import { proposableMemorySections, saveApprovedNote, searchApprovedNotes } from "./memory";
+import { proposableMemorySections, saveApprovedNote, searchApprovedNotes, readApprovedNote } from "./memory";
 import { DEFAULT_SECTIONS } from "./fact-tool";
 import type { MemorySection } from "./fact-tool";
 import { conversationRepository } from "./conversations";
@@ -229,6 +229,7 @@ export class DirectChatStore {
         }, rewrite: true, signal: aborter.signal, onText, sections,
         diagnostic: trace,
         lookup: query => searchApprovedNotes(this.profile, query),
+        read: (id, version, offset, budget) => readApprovedNote(this.profile, id, version, offset, budget),
         notify: text => {
           trace("turn.notice", { chars: text.length }, { notice: text });
           const c = this.snapshot.conversations.find(c => c.id === id);
