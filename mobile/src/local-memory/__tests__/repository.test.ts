@@ -424,3 +424,37 @@ test('batch archive/unarchive preserve originals, rollback stale batches and sup
   expect((await repo.searchNotes('', 50, 0, { status: 'archived' })).length).toBe(2);
   await expect(repo.undoNotes(token)).rejects.toThrow();
 });
+
+test("search projection tracks allowlisted metadata, observations and attachment filenames", async () => {
+  const db = new FakeSqlite();
+  const repo = new SqliteMemoryRepository(db as never);
+  const col = await repo.createCollection({ name: "Заметки", slug: "notes", sensitivity: "standard" });
+  const note = await repo.createEntity({ collection_id: col.id, domain: "notes", title: "Объект",
+    payload: { body: "Описание", city: "Ростов", private_token: "secretNeverIndex842",
+      source_files: ["Warranty-77881.pdf"] }, sensitivity: "standard" });
+  expect((await repo.searchMemory("Ростов")).map(v => v.entity.id)).toContain(note.id);
+  expect((await repo.searchMemory("Warranty")).map(v => v.entity.id)).toContain(note.id);
+  expect(await repo.searchMemory("secretNeverIndex842")).toEqual([]);
+  const o = await repo.createObservation({ entity_id: note.id, kind: "event",
+    payload: { text: "Поменял фильтры", hidden: "neverSearch554" }, occurred_at: "2025-10-10T10:00:00Z" });
+  expect((await repo.searchMemory("фильтры")).map(v => v.entity.id)).toContain(note.id);
+  await repo.reviseObservation(o.id, 1, { text: "Поменял свечи" }, "Исправление");
+  expect(await repo.searchMemory("фильтры")).toEqual([]);
+  expect((await repo.searchMemory("свечи")).map(v => v.entity.id)).toContain(note.id);
+  expect(await repo.searchMemory("neverSearch554")).toEqual([]);
+  await repo.createObservation({ entity_id: note.id, kind: "private",
+    payload: { text: "секретноеисследование999" }, occurred_at: "2024-03-01T10:00:00Z", sensitivity: "secret" });
+  expect(await repo.searchMemory("секретноеисследование999")).toEqual([]);
+});
+
+test("attachment metadata is searchable on create and append only after atomic commit", async () => {
+  const db = new FakeSqlite();
+  const repo = new SqliteMemoryRepository(db as never);
+  const col = await repo.createCollection({ name: "Заметки", slug: "notes", sensitivity: "standard" });
+  const file = await repo.createEntity({ collection_id: col.id, domain: "notes", title: "Приложения",
+    payload: { body: "Пустое описание" } }, async (tx, entityId) => {
+    await tx.runAsync("INSERT INTO memory_attachments(id,entity_id,name,mime,size,created_at) VALUES (?,?,?,?,?,?)",
+      ["receipt-a", entityId, "warranty2025.pdf", "application/pdf", 1, "2025-01-01"]);
+  });
+  expect((await repo.searchMemory("warranty2025")).map(v => v.entity.id)).toContain(file.id);
+});
