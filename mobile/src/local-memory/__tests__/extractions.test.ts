@@ -5,9 +5,9 @@ import { saveExtractionRun, extractionEvidence, type ExtractionRunInput } from "
 
 jest.mock("expo-crypto", () => ({
   CryptoDigestAlgorithm: { SHA256: "SHA-256" },
-  randomUUID: () => randomUUID(),
+  randomUUID: () => require("node:crypto").randomUUID(),
   digestStringAsync: async (_kind:string,text:string) =>
-    createHash("sha256").update(text).digest("hex"),
+    require("node:crypto").createHash("sha256").update(text).digest("hex"),
 }));
 const { DatabaseSync } = require("node:sqlite");
 
@@ -34,7 +34,7 @@ async function fixture(){
   await db.runAsync("INSERT INTO memory_attachments(id,entity_id,name,mime,size,created_at) VALUES (?,?,?,?,?,?)",
     ["src-1",entity.id,"insurance.pdf","application/pdf",3,"2026-10-27"]);
   const bytes=Uint8Array.from([1,2,3]);
-  const sha=createHash("sha256").update(bytes).digest("hex");
+  const sha=require("node:crypto").createHash("sha256").update(bytes).digest("hex");
   await db.runAsync("INSERT INTO memory_attachment_parts(attachment_id,ord,bytes,sha256) VALUES (?,?,?,?)",
     ["src-1",0,bytes,sha]);
   return {db,repo,entity,sha};
