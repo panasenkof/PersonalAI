@@ -1,7 +1,5 @@
 import { extractPdfPages, validateNativePdfPages } from "../pdf-pages";
 
-jest.mock("expo-modules-core", () => ({ requireOptionalNativeModule: jest.fn(() => null) }));
-
 const file={uri:"file:///cache/report.pdf",name:"report.pdf",mimeType:"application/pdf"};
 test("native digital PDF page numbers remain real and create bounded segments",async()=>{
  const reader={extractPages:jest.fn(async()=>[
