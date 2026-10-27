@@ -1,5 +1,6 @@
 import { memoryDisplayTitle } from "../design/nebula/memoryNotePresentation";
-import { localMemoryRepository } from "../local-memory/repository";
+import { localMemoryRepository, SqliteMemoryRepository } from "../local-memory/repository";
+import { withLocalMemoryDatabase } from "../local-memory/storage";
 import type { MemoryRepository } from "../local-memory/types";
 import { ensureSections, orderCollections } from "../local-memory/sections";
 import { VECTOR_MODEL } from "../local-memory/vectors";
@@ -8,7 +9,7 @@ import { DEFAULT_SECTIONS, MAX_NOTE_BODY_CHARS, PROPOSABLE_KINDS, findSection, p
 import type { MemorySection, NoteProposal } from "./fact-tool";
 
 /** `section` is the name of the memory section the note lives in. */
-export type MemorySnippet = { id: string; title: string; body: string; section?: string; excerptOnly?: boolean; totalChars?: number };
+export type MemorySnippet = { id: string; title: string; body: string; section?: string; version?: number; excerptOnly?: boolean; totalChars?: number };
 /** Return complete ordinary notes when possible, but bound the total data sent to an external LLM. */
 const FULL_NOTE_CHARS = 12_000;
 const MAX_CONTEXT_NOTE_CHARS = 24_000;
@@ -70,12 +71,55 @@ export async function searchApprovedNotes(
     remaining -= text.length;
     return {
       id: entity.id,
+      ...(typeof entity.record_version === "number" ? { version: entity.record_version } : {}),
       title: memoryDisplayTitle(entity).slice(0, 160),
       body: text,
       ...(complete ? {} : { excerptOnly: true, totalChars: body.length }),
       ...(section ? { section: section.slice(0, 60) } : {}),
     };
   });
+}
+
+export type ReadMemoryEvidence = {
+  id: string; revision: number; title: string; content: string;
+  offset: number; totalChars: number; hasMore: boolean; nextOffset?: number;
+  source: { recordId: string; sourceRef: string | null; location: "unknown" };
+};
+
+/** Read a stable, bounded range of an allowed note. Runs on one SQLCipher lease,
+ * independently checks scope/lock and refuses stale version from a search hit. */
+export async function readApprovedNote(
+  profile: string, id: string, expectedVersion: number, offset = 0, requestedChars = 4000,
+  repository?: MemoryRepository,
+): Promise<ReadMemoryEvidence> {
+  if (!id || !Number.isSafeInteger(expectedVersion) || expectedVersion < 1 ||
+      !Number.isSafeInteger(offset) || offset < 0 || offset > 2_000_000 ||
+      !Number.isSafeInteger(requestedChars) || requestedChars < 1) {
+    throw new Error("invalid_memory_read_request");
+  }
+  const read = async (db: MemoryRepository): Promise<ReadMemoryEvidence> => {
+    const entity = await db.entity(id);
+    if (!entity || entity.record_status !== "active" || entity.domain !== "notes" ||
+        !["standard", "inherit"].includes(entity.sensitivity)) {
+      throw new Error("memory_read_not_available");
+    }
+    const collection = (await db.listCollections()).find(c => c.id === entity.collection_id);
+    if (!collection || collection.sensitivity !== "standard") throw new Error("memory_read_not_available");
+    if (entity.record_version !== expectedVersion) throw new Error("stale_memory_version");
+    const body = memoryText(entity.payload);
+    const count = Math.min(6000, requestedChars);
+    const content = body.slice(offset, offset + count);
+    const nextOffset = offset + content.length;
+    return {
+      id: entity.id, revision: entity.record_version,
+      title: memoryDisplayTitle(entity).slice(0, 160),
+      content, offset, totalChars: body.length, hasMore: nextOffset < body.length,
+      ...(nextOffset < body.length ? { nextOffset } : {}),
+      source: { recordId: entity.id, sourceRef: entity.source_ref, location: "unknown" },
+    };
+  };
+  if (repository) return read(repository);
+  return withLocalMemoryDatabase(profile, db => read(new SqliteMemoryRepository(db)));
 }
 
 export async function saveApprovedNote(
