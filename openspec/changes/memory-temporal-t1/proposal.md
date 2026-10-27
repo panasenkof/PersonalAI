@@ -41,13 +41,9 @@ invalid calendar date/precision, origin/version assertions; measurements and
 enduring attributes. Native Android/SQLCipher migration/backup/restore are
 **NOT TESTED by T1a**. CI on exact SHA required after PR creation.
 
-## T1b and T2 dependency — still open
+## T1b durable staging (separate PR, C1/Android pending)
 
-One future versioned SQLCipher migration must introduce claim/evidence/
-proposal/decision/versions (not parallel note storage), safe indexing and
-source revisions/ACL, legacy restore migration and updated encrypted
-backup/restore for all new user-owned rows. T1b must verify fault rollback,
-old schema restore and source freshness. Do not add a schema version number
+T1b introduces v11 SQLCipher tables for claim/evidence/proposal/decision and versions, a source-version-checked staging API, and strict backup v2 manifest counts for each new user-owned table. Earlier manifests and v1–v10 archives remain supported. The current source and quote are committed together; proposals are only staged and do not apply transitions. Full ACL-scoped T3 reads and UI are not implemented. T1b must verify fault rollback, old schema restore and source freshness on its exact commit SHA. Jest tests and native run are pending. Do not add a schema version number
 before the migration is implemented and tested. Atomic apply/undo CAS,
 deduplicated proposals, source invalidation, privacy-scoped lookup and
 approval UI belong in T2; current/history/list/count with provenance in T3.
@@ -57,8 +53,7 @@ Do not label any of these complete by merging T1a alone.
 
 - MATCH: contract preserves the knowledge-kind and dual-time distinctions,
   unknown dates, direct-vs-derived source, bounded property/context logic.
-- OPEN: durable claim/evidence storage and all associated workflows, UI,
-  history, retrieval, migration, restore and native tests.
+- PARTIAL: T1b durable schema/staging, migration and backup code proposed; exact-SHA C1 and native proof pending. OPEN: approval actions/CAS/undo, UI, history, ACL-scoped retrieval and device proof.
 - No automatic closure/deletion, external upload or evidence fabrication.
 
 ## C3 — architecture consolidation
