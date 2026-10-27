@@ -51,6 +51,8 @@ beforeEach(() => {
     if (sql === "SELECT count(*) AS n FROM memory_entities") return { n: 2 };
     if (sql === "PRAGMA page_count") return { page_count: 20 };
     if (sql === "PRAGMA page_size") return { page_size: 4096 };
+    if (sql === "PRAGMA pia_export.integrity_check") return { integrity_check: "ok" };
+    if (sql.includes("(SELECT count(*) FROM ")) return { entities: 2, collections: 1, observations: 1, attachments: 0, attachment_parts: 0, receipts: 0, chats: 0 };
     if (sql.includes("pia_import.user_version")) return { user_version: 1 };
     if (sql.includes("pia_import.integrity_check")) return { integrity_check: "ok" };
     if (sql.includes("pia_import.memory_entities")) return { n: 2 };
@@ -93,21 +95,25 @@ test("export SQLCipher-encrypts a new independent file before sharing and erases
   });
 });
 
-test("export preflight rejects an un-restorable entity count before ATTACH", async () => {
+test("verified export accepts more than 100k records and writes an encrypted manifest", async () => {
   const previous = mockDb.getFirstAsync.getMockImplementation()!;
   mockDb.getFirstAsync.mockImplementation(async sql =>
-    sql === "SELECT count(*) AS n FROM memory_entities" ? { n: 100001 } : previous(sql));
-  await expect(shareEncryptedBackup("guest", code)).rejects.toThrow("backup_legacy_entity_limit");
-  expect(mockDb.runAsync).not.toHaveBeenCalled();
-  expect(Sharing.shareAsync).not.toHaveBeenCalled();
+    sql === "SELECT count(*) AS n FROM memory_entities" ? { n: 100001 } :
+    sql.includes("(SELECT count(*) FROM ") ? { entities: 100001, collections: 1, observations: 1,
+      attachments: 0, attachment_parts: 0, receipts: 0, chats: 0 } : previous(sql));
+  await shareEncryptedBackup("guest", code);
+  expect(mockDb.execAsync).toHaveBeenCalledWith(expect.stringContaining("CREATE TABLE pia_export.persai_backup_manifest"));
+  expect(mockDb.runAsync).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO pia_export.persai_backup_manifest"),
+    [1, 7, 100001, 1, 1, 0, 0, 0, 0]);
+  expect(Sharing.shareAsync).toHaveBeenCalledTimes(1);
 });
 
-test("export preflight refuses oversized database before ATTACH", async () => {
+test("manifest export admits over 2 GiB when private cache has conservative free space", async () => {
   const previous = mockDb.getFirstAsync.getMockImplementation()!;
   mockDb.getFirstAsync.mockImplementation(async sql =>
     sql === "PRAGMA page_count" ? { page_count: 600000 } : previous(sql));
-  await expect(shareEncryptedBackup("guest", code)).rejects.toThrow("backup_legacy_size_limit");
-  expect(mockDb.runAsync).not.toHaveBeenCalled();
+  await shareEncryptedBackup("guest", code);
+  expect(Sharing.shareAsync).toHaveBeenCalledTimes(1);
 });
 
 test("export preflight rejects low free storage without creating ciphertext", async () => {
@@ -194,11 +200,10 @@ test("rejects unknown schema or oversized import before any transaction", async 
   await expect(restoreEncryptedBackup("guest", "file:///backup.db", code))
     .rejects.toThrow("incompatible_backup_schema");
   expect(mockDb.execAsync.mock.calls.some(([sql]: string[]) => sql.startsWith("INSERT INTO"))).toBe(false);
-  (FS.getInfoAsync as jest.Mock).mockResolvedValueOnce({
-    exists: true, size: 3 * 1024 * 1024 * 1024, isDirectory: false,
-  });
+  (FS.getFreeDiskStorageAsync as jest.Mock).mockResolvedValue(32 * 1024 * 1024 * 1024);
+  (FS.getInfoAsync as jest.Mock).mockResolvedValue({ exists: true, size: 3 * 1024 * 1024 * 1024, isDirectory: false });
   await expect(restoreEncryptedBackup("guest", "file:///huge.db", code))
-    .rejects.toThrow("invalid_backup_size");
+    .rejects.toThrow("backup_legacy_limit_without_manifest");
 });
 
 
@@ -292,6 +297,48 @@ test("v4 archives with receipts preserve fingerprints and originals", async () =
   await restoreEncryptedBackup("guest", "file:///v4.db", code);
   expect(mockDb.execAsync.mock.calls.map(([sql]) => sql)).toContainEqual(
     expect.stringContaining("FROM pia_import.memory_received_shares"));
+});
+
+test("verified SQLCipher archive with over 100k records restores after manifest verification", async () => {
+  const prior = mockDb.getFirstAsync.getMockImplementation()!;
+  mockDb.getFirstAsync.mockImplementation(async sql =>
+    sql === "PRAGMA pia_import.user_version" ? { user_version: 7 } :
+    sql === "SELECT * FROM pia_import.persai_backup_manifest" ?
+      { format_version: 1, schema_version: 7, entities: 100001, collections: 1,
+        observations: 1, attachments: 0, attachment_parts: 0, receipts: 0, chats: 0 } :
+    sql.includes("(SELECT count(*) FROM pia_import.") ?
+      { entities: 100001, collections: 1, observations: 1, attachments: 0,
+        attachment_parts: 0, receipts: 0, chats: 0 } :
+    sql === "SELECT count(*) AS n FROM pia_import.memory_entities" ? { n: 100001 } : prior(sql));
+  tablesOnce([...names, "memory_attachments", "memory_attachment_parts", "memory_received_shares",
+    "memory_cleanup_preferences", "direct_conversations", "persai_backup_manifest"]);
+  const out = await restoreEncryptedBackup("guest", "file:///large-manifest.db", code);
+  expect(out.entities).toBe(100001);
+  expect(mockDb.execAsync).toHaveBeenCalledWith("COMMIT");
+});
+
+test("manifest mismatch is rejected without any destination insert", async () => {
+  const prior = mockDb.getFirstAsync.getMockImplementation()!;
+  mockDb.getFirstAsync.mockImplementation(async sql =>
+    sql === "PRAGMA pia_import.user_version" ? { user_version: 7 } :
+    sql === "SELECT * FROM pia_import.persai_backup_manifest" ?
+      { format_version: 1, schema_version: 7, entities: 100001, collections: 1,
+        observations: 1, attachments: 0, attachment_parts: 0, receipts: 0, chats: 0 } :
+    prior(sql));
+  tablesOnce([...names, "memory_attachments", "memory_attachment_parts", "memory_received_shares",
+    "memory_cleanup_preferences", "direct_conversations", "persai_backup_manifest"]);
+  await expect(restoreEncryptedBackup("guest", "file:///mismatched.db", code))
+    .rejects.toThrow("backup_manifest_mismatch");
+  expect(mockDb.execAsync.mock.calls.some(([sql]) => String(sql).startsWith("INSERT INTO"))).toBe(false);
+});
+
+test("rejects a truncated Android content URI before opening SQLCipher", async () => {
+  (FS.getInfoAsync as jest.Mock)
+    .mockResolvedValueOnce({ exists: true, isDirectory: false, size: 12345 })
+    .mockResolvedValueOnce({ exists: true, isDirectory: false, size: 1234 });
+  await expect(restoreEncryptedBackup("guest", "content://provider/partial", code))
+    .rejects.toThrow("backup_source_size_mismatch");
+  expect(withLocalMemoryDatabase).not.toHaveBeenCalled();
 });
 
 test("v7 backup missing policy table fails before mutation", async () => {
