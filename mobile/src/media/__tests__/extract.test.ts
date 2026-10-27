@@ -1,7 +1,7 @@
 import * as FileSystem from "expo-file-system/legacy";
 import { createVideoPlayer } from "expo-video";
 import { ImageManipulator } from "expo-image-manipulator";
-import { extractMedia } from "../extract";
+import { extractMedia, parseProviderTimeSegments } from "../extract";
 import { getWhisperStatus, transcribeAudioFile } from "../whisper";
 import { defaultDirectPreferences } from "../../direct-agent/settings";
 jest.mock("expo-file-system/legacy", () => ({ getInfoAsync: jest.fn(), readAsStringAsync: jest.fn(), deleteAsync: jest.fn(), EncodingType: { Base64: "base64" } }));
@@ -77,4 +77,64 @@ test("video retains visual result when audio fails and labels missing speech", a
   const text = await extractMedia({ uri: "file:///clip.mp4", name: "clip.mp4" }, settings, true, undefined, transport as unknown as typeof fetch);
   expect(text).toContain("Речь не распознана"); expect(text).toContain("На кадре рецепт");
   expect(text).toContain("выборочных кадров");
+});
+
+test("official Whisper-1 requests real segment timestamps in one approved upload", async () => {
+  const segments = [
+    { start: 0, end: 1.23, text: "Привет" },
+    { start: 1.23, end: 3.5, text: "Как дела?" },
+  ];
+  const transport = jest.fn(async (..._args:any[]) => ({ok:true,json:async()=>({
+    text:"Привет Как дела?",duration:3.5,segments,
+  })}));
+  const captured=jest.fn();
+  const text=await extractMedia({uri:"file:///cache/audio.mp3",name:"audio.mp3",mimeType:"audio/mpeg"},
+    { ...settings, provider:"openai",baseUrl:"https://api.openai.com/v1",transcriptionModel:"whisper-1" },
+    true,undefined,transport as unknown as typeof fetch,undefined,captured);
+  expect(text).toBe("Привет Как дела?");
+  expect(captured).toHaveBeenCalledTimes(1);
+  expect(captured).toHaveBeenCalledWith([
+    {text:"Привет",location:{kind:"time",startMs:0,endMs:1230}},
+    {text:"Как дела?",location:{kind:"time",startMs:1230,endMs:3500}},
+  ]);
+  expect(transport).toHaveBeenCalledTimes(1);
+  const request = transport.mock.calls[0][1] as any;
+  expect(request.method).toBe("POST");
+  // FormData is intentionally opaque to JSON.stringify in RN/Jest.
+  const form = request.body as {
+    get?: (key:string)=>unknown;
+    getParts?: ()=>Array<{fieldName:string;string?:string}>;
+  };
+  const field = (key:string)=>form.get?.(key) ?? form.getParts?.().find(part=>part.fieldName===key)?.string;
+  expect(field("response_format")).toBe("verbose_json");
+  expect(field("timestamp_granularities[]")).toBe("segment");
+});
+
+test("broken vendor time positions are never passed to memory, but full plain text survives",async()=>{
+  const transport=jest.fn(async (..._args:any[])=>({ok:true,json:async()=>({
+    text:"Слова остаются",duration:3,segments:[
+      {start:0,end:1,text:"Слова"},
+      {start:-3,end:2,text:"остаются"},
+    ],
+  })}));
+  const captured=jest.fn();
+  expect(await extractMedia({uri:"file:///cache/audio.mp3",name:"audio.mp3"},
+    {...settings,provider:"openai",baseUrl:"https://api.openai.com/v1",transcriptionModel:"whisper-1"},
+    true,undefined,transport as unknown as typeof fetch,undefined,captured)).toBe("Слова остаются");
+  expect(captured).not.toHaveBeenCalled();
+  expect(parseProviderTimeSegments([{start:0,end:0.1,text:"A"},{start:0.05,end:1,text:"B"}])).toBeNull();
+  expect(parseProviderTimeSegments([{start:0,end:1,text:"A"}],0.2)).toBeNull();
+  expect(parseProviderTimeSegments([{start:0,end:NaN,text:"A"}])).toBeNull();
+  expect(parseProviderTimeSegments([{start:0,end:1,text:"A"},{start:1,end:2,text:"B"}])).toHaveLength(2);
+});
+
+test("custom OpenAI-compatible provider keeps old JSON request and never invents timestamps", async()=>{
+  const transport=jest.fn(async (..._args:any[])=>({ok:true,json:async()=>({text:"Совместимый сервис"})}));
+  const captured=jest.fn();
+  const text=await extractMedia({uri:"file:///cache/audio.mp3",name:"audio.mp3"},
+    {...settings,provider:"openai-compatible",baseUrl:"https://api.example.org/v1",transcriptionModel:"whisper-1"},
+    true,undefined,transport as unknown as typeof fetch,undefined,captured);
+  expect(text).toBe("Совместимый сервис");
+  expect(captured).not.toHaveBeenCalled();
+  expect(JSON.stringify(transport.mock.calls[0][1].body)).not.toContain("verbose_json");
 });

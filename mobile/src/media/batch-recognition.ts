@@ -1,10 +1,13 @@
 import type { ImportFile } from "./kinds";
+import type { ExtractionSegmentInput } from "../local-memory/extractions";
 
 export type FileRecognition = {
   index: number;
   name: string;
   status: "success" | "error";
   text?: string;
+  /** Source-provided audio intervals only; absent for local Whisper. */
+  segments?: ExtractionSegmentInput[];
   error?: string;
 };
 

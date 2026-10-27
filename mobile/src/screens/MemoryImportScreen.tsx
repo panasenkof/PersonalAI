@@ -224,15 +224,20 @@ export function MemoryImportScreen() {
       const vision = selected || { ...defaultDirectPreferences, apiKey: "", webSearchKey: "" };
       const speech = connections.find(c => c.id === speechConnectionId) || selected;
       if (files.length === 1) {
-        const text = await extractMedia(file, vision, classification === "standard", aborter.signal, undefined, speech);
+        let timedSegments: FileRecognition["segments"];
+        const text = await extractMedia(file, vision, classification === "standard", aborter.signal, undefined, speech,
+          segments => { timedSegments = segments; });
         if (alive.current && !aborter.signal.aborted) {
-          setRecognitionResults([{ index: 0, name: file.name, status: "success", text }]);
+          setRecognitionResults([{ index: 0, name: file.name, status: "success", text,
+            ...(timedSegments ? { segments: timedSegments } : {}) }]);
           setExtractedText(text);
           setNotice("Проверьте и отредактируйте текст. В памяти он появится после сохранения.");
         }
       } else {
-        const results = await recognizeFilesSequentially(files,
-          async item => extractMedia(item, vision, classification === "standard", aborter.signal, undefined, speech),
+        const segmentsByFile = new Map<number, NonNullable<FileRecognition["segments"]>>();
+        const rawResults = await recognizeFilesSequentially(files,
+          async (item, index) => extractMedia(item, vision, classification === "standard",
+            aborter.signal, undefined, speech, segments => { segmentsByFile.set(index, segments); }),
           aborter.signal, (done, current) => {
             if (alive.current) {
               setRecognitionResults(done);
@@ -240,7 +245,10 @@ export function MemoryImportScreen() {
               try { setExtractedText(combinedRecognitionText(done, files.length)); } catch { /* final length check reports failure */ }
             }
           });
+        const results = rawResults.map(item => item.status === "success" && segmentsByFile.has(item.index)
+          ? { ...item, segments: segmentsByFile.get(item.index)! } : item);
         if (alive.current && !aborter.signal.aborted) {
+          setRecognitionResults(results);
           const text = combinedRecognitionText(results, files.length);
           // Keep the original per-file text, even when the additional joint
           // request fails; that failure must never erase recognized sources.
