@@ -23,7 +23,7 @@ const now = () => Date.now();
 /** All updates happen inside the source-edit transaction that called indexEntity.
  * A second update invalidates a running lease via generation, never by time alone.
  */
-export async function markEntityVectorsDirty(db: SQL, entityId: string, timestamp: string): Promise<void> {
+export async function markEntityVectorsDirty(db: Pick<SQLite.SQLiteDatabase, "runAsync">, entityId: string, timestamp: string): Promise<void> {
   await db.runAsync(
     `INSERT INTO memory_vector_jobs(chunk_id,model,generation,state,attempts,lease_token,lease_until,available_at,updated_at)
      SELECT c.id,m.model,1,'pending',0,NULL,NULL,NULL,?
