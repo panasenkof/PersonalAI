@@ -204,10 +204,17 @@ export class DurableVectorJobs {
    */
   async nextWakeMs(model: string): Promise<number | null> {
     const row = await this.db.getFirstAsync<Row>(
-      `SELECT m.scan_complete, MIN(CASE WHEN j.state='pending' THEN j.available_at
-                                WHEN j.state='leased' THEN j.lease_until END) AS next_time,
-         SUM(CASE WHEN j.state='pending' AND j.available_at IS NULL THEN 1 ELSE 0 END) AS ready
-       FROM memory_vector_models m LEFT JOIN memory_vector_jobs j ON j.model=m.model
+      `SELECT m.scan_complete,
+         MIN(CASE WHEN e.record_status='active' AND e.domain='notes'
+                    AND j.state='pending' THEN j.available_at
+                  WHEN e.record_status='active' AND e.domain='notes'
+                    AND j.state='leased' THEN j.lease_until END) AS next_time,
+         SUM(CASE WHEN e.record_status='active' AND e.domain='notes'
+                    AND j.state='pending' AND j.available_at IS NULL THEN 1 ELSE 0 END) AS ready
+       FROM memory_vector_models m
+       LEFT JOIN memory_vector_jobs j ON j.model=m.model
+       LEFT JOIN memory_chunks c ON c.id=j.chunk_id
+       LEFT JOIN memory_entities e ON e.id=c.entity_id
        WHERE m.model=? GROUP BY m.model`, [model]);
     if (!row || Number(row.scan_complete) !== 1 || Number(row.ready) > 0) return 0;
     return row.next_time ? Math.max(0, Date.parse(String(row.next_time)) - now()) : null;
