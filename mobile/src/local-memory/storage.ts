@@ -42,7 +42,7 @@ export function onLocalMemorySessionChange(listener: (unlocked: boolean) => void
 }
 export const localMemorySessionUnlocked = () => applicationSessionUnlocked;
 const requireApplicationSession = () => { if (!applicationSessionUnlocked) throw new Error("application_locked"); };
-export const LOCAL_MEMORY_SCHEMA_VERSION = 9;
+export const LOCAL_MEMORY_SCHEMA_VERSION = 10;
 const KIND_CHECK = `CHECK(kind IN (${MEMORY_KINDS.map(k => `'${k}'`).join(",")}))`;
 
 /** All memory (including full-text indexes, revisions, and WAL) is in SQLCipher. */
@@ -112,6 +112,24 @@ CREATE TABLE IF NOT EXISTS memory_extraction_segments (
 );
 CREATE INDEX IF NOT EXISTS ix_memory_extraction_segments_run
   ON memory_extraction_segments(extraction_id,ord);
+-- Derived encrypted FTS5: safe to erase/recreate; never part of user-owned archive.
+-- Triggers keep updates/deletions/cascades atomic with the source segment.
+CREATE VIRTUAL TABLE IF NOT EXISTS memory_extraction_fts USING fts5(
+  segment_id UNINDEXED, body, prefix='2 3 4'
+);
+CREATE TRIGGER IF NOT EXISTS tr_extraction_fts_insert AFTER INSERT ON memory_extraction_segments
+BEGIN
+  INSERT INTO memory_extraction_fts(segment_id,body) VALUES(new.id,replace(replace(new.text,'ё','е'),'Ё','Е'));
+END;
+CREATE TRIGGER IF NOT EXISTS tr_extraction_fts_update AFTER UPDATE OF text ON memory_extraction_segments
+BEGIN
+  DELETE FROM memory_extraction_fts WHERE segment_id=old.id;
+  INSERT INTO memory_extraction_fts(segment_id,body) VALUES(new.id,replace(replace(new.text,'ё','е'),'Ё','Е'));
+END;
+CREATE TRIGGER IF NOT EXISTS tr_extraction_fts_delete AFTER DELETE ON memory_extraction_segments
+BEGIN
+  DELETE FROM memory_extraction_fts WHERE segment_id=old.id;
+END;
 CREATE TABLE IF NOT EXISTS memory_received_shares (
   fingerprint TEXT PRIMARY KEY, entity_id TEXT NOT NULL REFERENCES memory_entities(id) ON DELETE CASCADE
 );
@@ -361,6 +379,15 @@ async function initialize(profileId: string): Promise<SQLite.SQLiteDatabase> {
         if (version === 4) await upgradeToV5(tx);
         // v6→v7 adds only private review metadata: never rewrite existing FTS on this upgrade.
         if (version >= 3 && version < 6) await reindexAll(tx);
+        // Old v9 segments existed before the v10 FTS triggers. Build once in
+        // the same rollback-safe migration; a failed upgrade keeps v9 intact.
+        // New inserts are maintained incrementally by the triggers above.
+        if (version < 10) {
+          await tx.execAsync(`INSERT INTO memory_extraction_fts(segment_id,body)
+            SELECT s.id,replace(replace(s.text,'ё','е'),'Ё','Е')
+              FROM memory_extraction_segments s
+             WHERE NOT EXISTS (SELECT 1 FROM memory_extraction_fts f WHERE f.segment_id=s.id)`);
+        }
         await tx.execAsync(`PRAGMA user_version = ${LOCAL_MEMORY_SCHEMA_VERSION}`);
       });
     }

@@ -1,7 +1,7 @@
 import { SqliteMemoryRepository } from "../repository";
 import { SCHEMA_SQL } from "../storage";
 import { saveExtractionRun } from "../extractions";
-import { listApprovedSourceSegments, readApprovedSourceSegment } from "../source-retrieval";
+import { listApprovedSourceSegments, readApprovedSourceSegment, searchApprovedSourceSegments } from "../source-retrieval";
 
 jest.mock("expo-crypto", () => ({
   CryptoDigestAlgorithm: { SHA256: "SHA-256" },
@@ -141,5 +141,69 @@ test("source revision mismatch fails closed, no stale PDF page or source preview
     expect((await listApprovedSourceSegments(db as never,entity.id,1)).segments).toEqual([]);
     await expect(readApprovedSourceSegment(db as never,entity.id,1,"a1",run,id))
       .rejects.toThrow("stale_extraction_source_version");
+  } finally {db.close();}
+});
+
+test("FTS source-only search finds exact extracted text absent from the note body",async()=>{
+  const {db,entity,run}=await fixture();
+  try {
+    const searched=await searchApprovedSourceSegments(db as never,"информация");
+    expect(searched).toMatchObject({scope:"standard_active_notes",
+      matchMode:"exact_fts_phrase",hasMore:false});
+    expect(searched.segments).toHaveLength(1);
+    expect(searched.segments[0]).toMatchObject({
+      recordId:entity.id,recordVersion:1,attachmentId:"a1",
+      extractionId:run,location:{kind:"page",page:3},
+      locationConfidence:"producer_reported",sourceCheck:"part_manifest_revision",
+    });
+    const exact=await readApprovedSourceSegment(db as never,entity.id,1,"a1",run,
+      searched.segments[0].segmentId);
+    expect(exact.content).toContain("информация со страницы три");
+    expect((await searchApprovedSourceSegments(db as never,"неизвестный")).segments).toEqual([]);
+    expect((await searchApprovedSourceSegments(db as never,'"` OR *')).segments).toEqual([]);
+    await expect(searchApprovedSourceSegments(db as never,"x".repeat(121)))
+      .rejects.toThrow("invalid_source_search_query");
+  }finally{db.close();}
+});
+
+test.each([["sensitive","standard"],["standard","sensitive"]])(
+  "FTS never leaks %s section or %s record to the assistant",
+  async (section,status)=>{
+    const {db}=await fixture(section as "sensitive"|"standard",
+      status as "sensitive"|"standard");
+    try{expect((await searchApprovedSourceSegments(db as never,"информация")).segments).toEqual([]);}
+    finally{db.close();}
+  },
+);
+
+test("FTS query ignores archived, deleted and invalidated original revisions",async()=>{
+  const {db,repo,entity}=await fixture();
+  try{
+    expect((await searchApprovedSourceSegments(db as never,"информация")).segments).toHaveLength(1);
+    await db.runAsync("UPDATE memory_attachment_parts SET sha256=? WHERE attachment_id=?",
+      ["c".repeat(64),"a1"]);
+    expect((await searchApprovedSourceSegments(db as never,"информация")).segments).toEqual([]);
+    await db.runAsync("UPDATE memory_attachment_parts SET sha256=? WHERE attachment_id=?",
+      [require("node:crypto").createHash("sha256").update(new Uint8Array([1,2,3])).digest("hex"),"a1"]);
+    await repo.setEntityStatus(entity.id,1,"archived");
+    expect((await searchApprovedSourceSegments(db as never,"информация")).segments).toEqual([]);
+  }finally{db.close();}
+});
+
+test("transactional FTS triggers update, delete, and cascade with source segments",async()=>{
+  const {db,repo,entity,run}=await fixture();
+  try {
+    const segment=(await db.getFirstAsync<{id:string}>(
+      "SELECT id FROM memory_extraction_segments WHERE extraction_id=? LIMIT 1",[run]))!.id;
+    expect((await searchApprovedSourceSegments(db as never,"информация")).segments).toHaveLength(1);
+    await db.runAsync("UPDATE memory_extraction_segments SET text=? WHERE id=?",
+      ["Исправленная новая формулировка",segment]);
+    expect((await searchApprovedSourceSegments(db as never,"информация")).segments).toEqual([]);
+    expect((await searchApprovedSourceSegments(db as never,"формулировка")).segments).toHaveLength(1);
+    await db.runAsync("DELETE FROM memory_extraction_segments WHERE id=?",[segment]);
+    expect((await searchApprovedSourceSegments(db as never,"формулировка")).segments).toEqual([]);
+    expect((await db.getFirstAsync<{n:number}>("SELECT count(*) AS n FROM memory_extraction_fts"))!.n).toBe(1);
+    await db.runAsync("DELETE FROM memory_entities WHERE id=?",[entity.id]);
+    expect((await db.getFirstAsync<{n:number}>("SELECT count(*) AS n FROM memory_extraction_fts"))!.n).toBe(0);
   } finally {db.close();}
 });
