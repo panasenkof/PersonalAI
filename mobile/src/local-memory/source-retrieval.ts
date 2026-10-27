@@ -9,6 +9,7 @@ import { withLocalMemoryDatabase } from "./storage";
 import { fingerprintExtractionSource } from "./extractions";
 import { withUnlockedTransaction } from "./transaction";
 import type { SourceLocation } from "./extractions";
+import { ftsPhrase } from "./query";
 
 type SQL = Pick<SQLite.SQLiteDatabase, "getFirstAsync" | "getAllAsync" | "runAsync" | "execAsync">;
 type Row = Record<string, unknown>;
@@ -183,3 +184,71 @@ export const readLocalApprovedSourceSegment = (
   extractionId: string, segmentId: string, offset = 0, budget = 3000,
 ) => withLocalMemoryDatabase(profile, db => readApprovedSourceSegment(
   db, recordId, version, attachmentId, extractionId, segmentId, offset, budget));
+
+/** A new, bounded source-only FTS5 search. Search input is one literal phrase,
+ * not user-provided FTS syntax or an exhaustive dump of private originals.
+ * Candidates are checked against record and collection access in SQL and
+ * exact source revision in the same encrypted connection.
+ */
+export async function searchApprovedSourceSegments(db: SQL, query: string, limit = 8) {
+  if (typeof query !== "string" || query.trim().length < 2 || query.length > 120)
+    throw new Error("invalid_source_search_query");
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 20)
+    throw new Error("invalid_source_search_limit");
+  let result: {
+    segments: Array<ApprovedSourcePreview & { recordId: string; recordVersion: number; recordTitle: string }>;
+    scope: "standard_active_notes"; matchMode: "exact_fts_phrase";
+    hasMore: boolean; candidateLimit: number;
+  } = { segments: [], scope: "standard_active_notes", matchMode: "exact_fts_phrase",
+      hasMore: false, candidateLimit: 80 };
+  await withUnlockedTransaction(db, async tx => {
+    const candidates = await tx.getAllAsync<Row>(
+      `SELECT e.id AS record_id,e.record_version,e.title AS record_title,
+              a.id AS attachment_id,a.name AS attachment_name,a.mime AS attachment_mime,
+              r.id AS extraction_id,r.source_version,r.producer_kind,r.producer_id,
+              r.producer_revision,r.status,r.coverage,
+              s.id AS segment_id,s.ord,s.location_kind,s.page,s.start_ms,s.end_ms,
+              s.char_start,s.char_end,substr(s.text,1,220) AS preview,
+              length(s.text) AS total_chars
+         FROM memory_extraction_fts f
+         JOIN memory_extraction_segments s ON s.id=f.segment_id
+         JOIN memory_extractions r ON r.id=s.extraction_id
+         JOIN memory_attachments a ON a.id=r.attachment_id
+         JOIN memory_entities e ON e.id=a.entity_id
+         JOIN memory_collections c ON c.id=e.collection_id
+        WHERE memory_extraction_fts MATCH ?
+          AND e.domain='notes' AND e.record_status='active'
+          AND e.sensitivity IN ('standard','inherit')
+          AND c.sensitivity='standard'
+          AND r.status IN ('complete','partial')
+        ORDER BY bm25(memory_extraction_fts),s.id LIMIT ?`,
+      [ftsPhrase(query.trim()), result.candidateLimit+1],
+    );
+    const revisions=new Map<string,string|null>();
+    for(const row of candidates.slice(0,result.candidateLimit)){
+      const attachmentId=String(row.attachment_id);
+      if(!revisions.has(attachmentId)){
+        revisions.set(attachmentId,await fingerprintExtractionSource(tx,attachmentId).catch(()=>null));
+      }
+      if(revisions.get(attachmentId)!==row.source_version)continue;
+      result.segments.push({
+        recordId:String(row.record_id),recordVersion:Number(row.record_version),
+        recordTitle:String(row.record_title??"").slice(0,160),
+        attachmentId,attachmentName:String(row.attachment_name).slice(0,240),
+        mime:String(row.attachment_mime),extractionId:String(row.extraction_id),
+        segmentId:String(row.segment_id),sourceVersion:String(row.source_version),
+        producerKind:String(row.producer_kind),producerId:String(row.producer_id),
+        producerRevision:String(row.producer_revision),status:String(row.status),
+        coverage:String(row.coverage),ordinal:Number(row.ord),
+        preview:String(row.preview),totalChars:Number(row.total_chars),
+        ...evidenceLocation(row),
+      });
+      if(result.segments.length>limit)break;
+    }
+    result.hasMore=result.segments.length>limit||candidates.length>result.candidateLimit;
+    result.segments=result.segments.slice(0,limit);
+  });
+  return result;
+}
+export const searchLocalApprovedSourceSegments=(profile:string,query:string,limit=8)=>
+  withLocalMemoryDatabase(profile,db=>searchApprovedSourceSegments(db,query,limit));
