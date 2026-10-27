@@ -9,7 +9,7 @@ jest.mock("expo-file-system/legacy", () => ({
 }));
 jest.mock("expo-sharing", () => ({ isAvailableAsync: jest.fn(), shareAsync: jest.fn() }));
 jest.mock("../storage", () => ({
-  LOCAL_MEMORY_SCHEMA_VERSION: 8,
+  LOCAL_MEMORY_SCHEMA_VERSION: 9,
   withLocalMemoryDatabase: jest.fn(async (_id: string, task: (db: unknown) => Promise<unknown>) => task(mockDb)),
 }));
 
@@ -90,7 +90,7 @@ test("export SQLCipher-encrypts a new independent file before sharing and erases
     "/cache/pia-encrypted-random-id.db", code,
   ]);
   expect(mockDb.getFirstAsync).toHaveBeenCalledWith("SELECT sqlcipher_export('pia_export')");
-  expect(mockDb.execAsync).toHaveBeenCalledWith("PRAGMA pia_export.user_version = 8");
+  expect(mockDb.execAsync).toHaveBeenCalledWith("PRAGMA pia_export.user_version = 9");
   expect(mockDb.execAsync).toHaveBeenCalledWith("DETACH DATABASE pia_export");
   expect(Sharing.shareAsync).toHaveBeenCalledTimes(1);
   expect(FS.deleteAsync).toHaveBeenCalledWith("file:///cache/pia-encrypted-random-id.db", {
@@ -107,7 +107,7 @@ test("verified export accepts more than 100k records and writes an encrypted man
   await shareEncryptedBackup("guest", code);
   expect(mockDb.execAsync).toHaveBeenCalledWith(expect.stringContaining("CREATE TABLE pia_export.persai_backup_manifest"));
   expect(mockDb.runAsync).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO pia_export.persai_backup_manifest"),
-    [1, 8, 100001, 1, 1, 0, 0, 0, 0]);
+    [1, 9, 100001, 1, 1, 0, 0, 0, 0]);
   expect(Sharing.shareAsync).toHaveBeenCalledTimes(1);
 });
 
@@ -257,7 +257,7 @@ test.each([1, 2, 3])("restores deployed schema v%s including chats into the upgr
   expect(mockDb.execAsync.mock.calls.map(([sql]) => sql)).toContainEqual(expect.stringContaining("INSERT INTO direct_conversations"));
 });
 
-test.each([0, 9])("rejects unsupported backup schema v%s before copying any memory", async version => {
+test.each([0, 10])("rejects unsupported backup schema v%s before copying any memory", async version => {
   const read = mockDb.getFirstAsync.getMockImplementation()!;
   mockDb.getFirstAsync.mockImplementation(async sql => sql === "PRAGMA pia_import.user_version" ? { user_version: version } : read(sql));
   await expect(restoreEncryptedBackup("guest", "file:///backup.db", code)).rejects.toThrow("incompatible_backup_version");
@@ -393,4 +393,32 @@ test("v7 backup missing policy table fails before mutation", async () => {
   expect(statements).not.toContain("BEGIN IMMEDIATE");
   expect(statements).not.toContain("COMMIT");
   expect(statements.some(sql => sql.includes("INSERT INTO memory_entities"))).toBe(false);
+});
+
+test("v9 archive cannot drop extraction evidence tables before any destination write",async()=>{
+  const previous=mockDb.getFirstAsync.getMockImplementation()!;
+  mockDb.getFirstAsync.mockImplementation(async sql=>
+    sql==="PRAGMA pia_import.user_version"?{user_version:9}:previous(sql));
+  tablesOnce([...names,"memory_attachments","memory_attachment_parts","memory_received_shares",
+    "memory_cleanup_preferences","persai_backup_manifest"]);
+  await expect(restoreEncryptedBackup("guest","file:///missing-provenance.db",code))
+    .rejects.toThrow("incompatible_backup_schema");
+  expect(mockDb.execAsync.mock.calls.some(([sql]:string[])=>sql.includes("INSERT INTO memory_entities"))).toBe(false);
+});
+
+test("v9 backup preserves source/version/page/time evidence in the encrypted restore transaction",async()=>{
+  const previous=mockDb.getFirstAsync.getMockImplementation()!;
+  mockDb.getFirstAsync.mockImplementation(async sql=>{
+    if(sql==="PRAGMA pia_import.user_version")return {user_version:9};
+    if(sql.includes("count(*) AS n FROM pia_import.memory_extraction"))return {n:2};
+    if(sql.includes("count(*) AS n FROM memory_extraction"))return {n:2};
+    return previous(sql);
+  });
+  tablesOnce([...names,"memory_attachments","memory_attachment_parts","memory_received_shares",
+    "memory_cleanup_preferences","memory_extractions","memory_extraction_segments"]);
+  await restoreEncryptedBackup("guest","file:///valid-v9.db",code);
+  const sql=mockDb.execAsync.mock.calls.map(([s]:string[])=>s);
+  expect(sql).toContain("INSERT INTO memory_extractions SELECT * FROM pia_import.memory_extractions");
+  expect(sql).toContain("INSERT INTO memory_extraction_segments SELECT * FROM pia_import.memory_extraction_segments");
+  expect(sql.indexOf("COMMIT")).toBeGreaterThan(sql.indexOf("INSERT INTO memory_extraction_segments SELECT * FROM pia_import.memory_extraction_segments"));
 });
