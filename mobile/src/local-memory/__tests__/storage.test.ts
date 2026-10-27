@@ -169,7 +169,7 @@ test("refuses invalid stored keys, future schemas and malformed profile ids", as
     const db = newDatabase();
     db.getFirstAsync.mockImplementation(async (sql: string) =>
       sql === "PRAGMA cipher_version" ? { cipher_version: "4.6.0" }
-        : sql === "PRAGMA user_version" ? { user_version: 9 } : { count: 1 });
+        : sql === "PRAGMA user_version" ? { user_version: 10 } : { count: 1 });
     return db;
   });
   await expect(openLocalMemory(owner)).rejects.toThrow("local_memory_schema_too_new");
