@@ -515,20 +515,31 @@ export class SqliteMemoryRepository implements MemoryRepository {
    * title, with the text to embed. Every section is included: vectors never
    * leave the phone, and what reaches the model is filtered at search time. */
   async pendingVectorChunks(model: string, limit = 32): Promise<Array<{ chunkId: string; text: string; hash: string }>> {
-    const rows = await this.db.getAllAsync<Row>(
-      `SELECT c.id, c.text, e.title, v.content_hash AS vhash FROM memory_chunks c
-       JOIN memory_entities e ON e.id=c.entity_id
-       LEFT JOIN memory_vectors v ON v.chunk_id=c.id AND v.model=?
-       WHERE e.record_status='active' AND e.domain='notes' ORDER BY e.updated_at DESC, c.ord`, [model]);
+    // Page metadata in SQL instead of transferring the entire private corpus to
+    // JS on every batch. This is an interim bounded scan, NOT a durable dirty
+    // queue; a separate #66.3 step must replace repeated scanning entirely.
+    const cap = Math.min(200, Math.max(1, Number.isFinite(limit) ? Math.trunc(limit) : 32));
+    const batchSize = Math.max(64, Math.min(256, cap * 4));
     const out: Array<{ chunkId: string; text: string; hash: string }> = [];
-    for (const r of rows) {
-      const text = embeddingText(TEXT(r.title), String(r.text));
-      if (!text) continue;
-      const hash = embeddingHash(TEXT(r.title), String(r.text));
-      if (r.vhash !== hash) out.push({ chunkId: String(r.id), text, hash });
-      if (out.length >= limit) break;
+    let offset = 0;
+    for (;;) {
+      const rows = await this.db.getAllAsync<Row>(
+        `SELECT c.id, c.text, e.title, v.content_hash AS vhash FROM memory_chunks c
+         JOIN memory_entities e ON e.id=c.entity_id
+         LEFT JOIN memory_vectors v ON v.chunk_id=c.id AND v.model=?
+         WHERE e.record_status='active' AND e.domain='notes'
+         ORDER BY e.updated_at DESC, e.id, c.ord LIMIT ? OFFSET ?`,
+        [model, batchSize, offset]);
+      for (const r of rows) {
+        const text = embeddingText(TEXT(r.title), String(r.text));
+        if (!text) continue;
+        const hash = embeddingHash(TEXT(r.title), String(r.text));
+        if (r.vhash !== hash) out.push({ chunkId: String(r.id), text, hash });
+        if (out.length >= cap) return out;
+      }
+      if (rows.length < batchSize) return out;
+      offset += rows.length;
     }
-    return out;
   }
 
   /** Accept results only for the current text/title: edits may race inference. */
@@ -550,16 +561,26 @@ export class SqliteMemoryRepository implements MemoryRepository {
 
   /** Chunks of active records with a current vector, and all such chunks. */
   async vectorStatus(model: string): Promise<{ done: number; total: number }> {
-    const rows = await this.db.getAllAsync<Row>(
-      `SELECT c.text, e.title, v.content_hash AS vhash FROM memory_chunks c JOIN memory_entities e ON e.id=c.entity_id
-       LEFT JOIN memory_vectors v ON v.chunk_id=c.id AND v.model=? WHERE e.record_status='active' AND e.domain='notes'`, [model]);
-    let done = 0, total = 0;
-    for (const r of rows) {
-      if (!embeddingText(TEXT(r.title), String(r.text))) continue;
-      total++;
-      if (r.vhash === embeddingHash(TEXT(r.title), String(r.text))) done++;
+    // Bounded JS memory even for long-lived photo/text archives. Counts are
+    // calculated from the actual current model hash, not only vector presence.
+    let done = 0, total = 0, offset = 0;
+    const pageSize = 256;
+    for (;;) {
+      const rows = await this.db.getAllAsync<Row>(
+        `SELECT c.text, e.title, v.content_hash AS vhash FROM memory_chunks c
+         JOIN memory_entities e ON e.id=c.entity_id
+         LEFT JOIN memory_vectors v ON v.chunk_id=c.id AND v.model=?
+         WHERE e.record_status='active' AND e.domain='notes'
+         ORDER BY e.id, c.ord LIMIT ? OFFSET ?`,
+        [model, pageSize, offset]);
+      for (const r of rows) {
+        if (!embeddingText(TEXT(r.title), String(r.text))) continue;
+        total++;
+        if (r.vhash === embeddingHash(TEXT(r.title), String(r.text))) done++;
+      }
+      if (rows.length < pageSize) return { done, total };
+      offset += rows.length;
     }
-    return { done, total };
   }
 
   /** Records whose chunks are closest in meaning to the question vector, best
