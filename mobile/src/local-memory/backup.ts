@@ -29,7 +29,7 @@ const V3_TABLES = {
 } as const;
 const ENTITY_COLUMNS = "id,collection_id,domain,schema_version,title,payload_json,record_status,sensitivity," +
   "source_kind,source_ref,valid_from,valid_until,created_at,updated_at,record_version";
-export const RESTORABLE_VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+export const RESTORABLE_VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 const LEGACY_MAX_BACKUP_BYTES = 2 * 1024 * 1024 * 1024;
 const MANIFEST_FORMAT_VERSION = 1;
 const MANIFEST_TABLE = 'persai_backup_manifest' as const;
