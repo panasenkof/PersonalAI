@@ -46,7 +46,7 @@ const COUNT_TABLES = {
   receipts: "memory_received_shares", chats: "direct_conversations",
 } as const;
 const COUNT_KEYS = Object.keys(COUNT_TABLES) as Array<keyof BackupCounts>;
-function backupCountsQuery(prefix: "" | "pia_import."): string {
+function backupCountsQuery(prefix: "" | "pia_import." | "pia_export."): string {
   // These identifiers are constants, never interpolated user input.
   return "SELECT " + COUNT_KEYS.map(k =>
     "(SELECT count(*) FROM " + prefix + COUNT_TABLES[k] + ") AS " + k).join(", ");
@@ -166,7 +166,7 @@ export async function shareEncryptedBackup(profileId: string, recoveryCode: stri
           "entities INTEGER NOT NULL, collections INTEGER NOT NULL, observations INTEGER NOT NULL," +
           "attachments INTEGER NOT NULL, attachment_parts INTEGER NOT NULL," +
           "receipts INTEGER NOT NULL, chats INTEGER NOT NULL)");
-        const counts = await db.getFirstAsync<BackupCounts>(backupCountsQuery(""));
+        const counts = await db.getFirstAsync<BackupCounts>(backupCountsQuery("pia_export."));
         if (!counts || !validBackupCounts(counts)) throw new Error("backup_manifest_unavailable");
         await db.runAsync(
           "INSERT INTO pia_export.persai_backup_manifest " +
@@ -267,6 +267,7 @@ export async function restoreEncryptedBackup(
         if (!incoming || !Number.isSafeInteger(incoming.n) || incoming.n < 0) {
           throw new Error("invalid_backup_records");
         }
+        let verifiedCounts: BackupCounts | null = null;
         if (available.has(MANIFEST_TABLE)) {
           const manifest = await db.getFirstAsync<BackupManifest>(
             "SELECT * FROM pia_import.persai_backup_manifest",
@@ -283,6 +284,7 @@ export async function restoreEncryptedBackup(
               backupCountValues(manifest).some((n, i) => n !== backupCountValues(actual)[i])) {
             throw new Error("backup_manifest_mismatch");
           }
+          verifiedCounts = actual;
         } else if (incoming.n > LEGACY_MAX_RESTORABLE_ENTITIES ||
                    info.size > LEGACY_MAX_BACKUP_BYTES) {
           throw new Error("backup_legacy_limit_without_manifest");
@@ -303,6 +305,8 @@ export async function restoreEncryptedBackup(
         // ATTACH and the SQLCipher key are scoped to this unlocked connection.
         // Expo's exclusiveTransaction opens a DIFFERENT, still-locked DB.
         await withUnlockedTransaction(db, async tx => {
+          const oldChats = verifiedCounts ? await tx.getFirstAsync<{ n: number }>(
+            "SELECT count(*) AS n FROM direct_conversations") : null;
           const existing = await tx.getFirstAsync<{ n: number }>(
             "SELECT count(*) AS n FROM memory_collections",
           );
@@ -352,6 +356,16 @@ export async function restoreEncryptedBackup(
             `INSERT INTO direct_conversations(id,title,snapshot_json,created_at,updated_at)
              SELECT id,title,snapshot_json,created_at,updated_at FROM pia_import.direct_conversations`,
           );
+          if (verifiedCounts) {
+            // Catch missing rows/partial imports BEFORE COMMIT. Existing unrelated
+            // chats are allowed, but imported IDs must not collide (preflight).
+            const actual = await tx.getFirstAsync<BackupCounts>(backupCountsQuery(""));
+            if (!actual || !validBackupCounts(actual) || !oldChats ||
+                backupCountValues(verifiedCounts).some((n, i) =>
+                  n + (COUNT_KEYS[i] === "chats" ? oldChats.n : 0) !== backupCountValues(actual)[i])) {
+              throw new Error("backup_restore_count_mismatch");
+            }
+          }
           const violation = await tx.getFirstAsync("PRAGMA foreign_key_check");
           if (violation !== null) throw new Error("invalid_backup_references");
         });
