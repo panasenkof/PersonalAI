@@ -8,7 +8,7 @@ import { MAX_USER_PROMPT_CHARS } from "./limits";
 import { loadModelCallLimit } from "./agent-preferences";
 import { hostOf } from "./net";
 import { proposableMemorySections, saveApprovedNote, searchApprovedNotes, readApprovedNote } from "./memory";
-import { listLocalApprovedSourceSegments, readLocalApprovedSourceSegment } from "../local-memory/source-retrieval";
+import { searchLocalApprovedSourceSegments, listLocalApprovedSourceSegments, readLocalApprovedSourceSegment } from "../local-memory/source-retrieval";
 import { listAllowedNotes, countAllowedNotes } from "../local-memory/agent-catalog";
 import { withLocalMemoryDatabase } from "../local-memory/storage";
 import { DEFAULT_SECTIONS } from "./fact-tool";
@@ -233,6 +233,9 @@ export class DirectChatStore {
         diagnostic: trace,
         lookup: query => searchApprovedNotes(this.profile, query),
         read: async (id, version, offset, budget) => ({ ...await readApprovedNote(this.profile, id, version, offset, budget) }),
+        searchSources: async (query, limit) => ({
+          ...await searchLocalApprovedSourceSegments(this.profile, query, limit),
+        }),
         listSources: async (id, version, limit) => ({
           ...await listLocalApprovedSourceSegments(this.profile, id, version, limit),
         }),
