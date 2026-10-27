@@ -128,3 +128,14 @@ test("unarchived source gets fresh work even after bootstrap cursor is complete"
     expect(await jobs.complete("toy", [{ job: fresh, vector: vector() }])).toBe(1);
   } finally { db.close(); }
 });
+
+test("archived pending work does not cause a wake-up spin", async () => {
+  const { db, repo, jobs, note } = await setup();
+  try {
+    const claimed = (await jobs.claim("toy"))[0];
+    await jobs.release("toy", [claimed]);
+    await repo.setEntityStatus(note.id, 1, "archived");
+    expect(await jobs.claim("toy")).toEqual([]);
+    expect(await jobs.nextWakeMs("toy")).toBeNull();
+  } finally { db.close(); }
+});
