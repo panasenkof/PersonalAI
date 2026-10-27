@@ -319,7 +319,8 @@ test("verified SQLCipher archive with over 100k records restores after manifest 
     sql === "SELECT * FROM pia_import.persai_backup_manifest" ?
       { format_version: 1, schema_version: 7, entities: 100001, collections: 1,
         observations: 1, attachments: 0, attachment_parts: 0, receipts: 0, chats: 0 } :
-    sql.includes("(SELECT count(*) FROM pia_import.") ?
+    sql.includes("(SELECT count(*) FROM pia_import.") ||
+    sql.includes("(SELECT count(*) FROM memory_entities") ?
       { entities: 100001, collections: 1, observations: 1, attachments: 0,
         attachment_parts: 0, receipts: 0, chats: 0 } :
     sql === "SELECT count(*) AS n FROM pia_import.memory_entities" ? { n: 100001 } : prior(sql));
