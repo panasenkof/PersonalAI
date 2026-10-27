@@ -865,3 +865,42 @@ test("T2c inbox excludes stale, protected, and cross-collection proposals before
   expect(stale.items).toHaveLength(0);
   expect(stale.nextCursor).toBeNull();
 });
+
+
+test("TM05 SQLCipher v11: a late-imported older employer document never closes the newer role",async()=>{
+  await openLocalMemory("guest");
+  const bridge=mockConnections[0], db=bridge.sqlite;
+  const repo=await localMemoryRepository("guest");
+  db.prepare("INSERT INTO memory_collections(id,name,slug,sensitivity,created_at) VALUES ('jobs','Работа','jobs','standard','now')").run();
+  for(const id of ["latest","archival","future"]){
+    db.prepare("INSERT INTO memory_entities(id,collection_id,domain,payload_json,created_at,updated_at) VALUES (?,'jobs','notes','{}','now','now')").run(id);
+  }
+  const make=(entityId:string,value:string,year:string,recordedAt:string):import("../temporal-claims").TemporalClaimCandidate=>({
+    recordedAt,subjectId:"person-1",predicate:"employment",context:"primary",value,
+    kind:"state",modality:"asserted",negated:false,cardinality:"single",
+    occurredOrStarted:{
+      normalized:year,precision:"year",raw:"С "+year+" года",
+      anchorDate:null,sourceTimeZone:null,
+    },
+    ended:null,endConfirmed:false,
+    evidence:{entityId,recordVersion:1,quote:"Работа в "+value,origin:"direct"},
+  });
+  const current=await repo.stageTypedTemporalFact(make(
+    "latest","Работодатель Б","2024","2026-10-20T10:00:00.000Z"));
+  expect(current.proposalIds).toEqual([]);
+  const archival=await repo.stageTypedTemporalFact(make(
+    "archival","Работодатель А","2019","2026-10-27T10:00:00.000Z"));
+  expect(archival.proposalIds).toEqual([]);
+  // The historical record still survives as a distinct typed claim.
+  expect(db.prepare("SELECT COUNT(*) AS n FROM memory_temporal_claims").get().n).toBe(2);
+  expect((await repo.temporalKnowledgeHistory({
+    subjectId:"person-1",collectionId:"jobs",mode:"states",
+  })).items.map(x=>x.claim.value)).toEqual(["Работодатель А","Работодатель Б"]);
+  const future=await repo.stageTypedTemporalFact(make(
+    "future","Работодатель В","2025","2026-10-28T10:00:00.000Z"));
+  expect(future.proposalIds).toHaveLength(2);
+  expect(db.prepare("SELECT COUNT(*) AS n FROM memory_temporal_proposals").get().n).toBe(2);
+  expect(db.prepare("SELECT COUNT(*) AS n FROM memory_temporal_decisions").get().n).toBe(0);
+  expect(db.prepare("SELECT COUNT(*) AS n FROM memory_temporal_claims WHERE end_confirmed=1").get().n).toBe(0);
+  expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+});
