@@ -33,6 +33,18 @@ test("search steps: the phrase, words without helper words, then stems; a questi
   expect(searchSteps("a")).toEqual([]);
 });
 
+test("long Russian question retains discriminating final terms, dates and numbers", () => {
+  const query = "Что говорится про ремонт и оплату ".repeat(12) +
+    "в счёте 2025 года, где указан серийный номер ZX77881?";
+  const terms = searchSteps(query).filter(s => !s.prefix).map(s => s.term);
+  expect(terms).toContain("zx77881");
+  expect(terms).toContain("2025");
+  expect(terms).not.toContain(query.slice(0, 120));
+  expect(searchSteps(query).length).toBeLessThanOrEqual(40);
+  const extended = "вводная ".repeat(700) + "Уникальный термин ВЕЛОСИПЕД999";
+  expect(searchSteps(extended).some(s => s.term === "велосипед999")).toBe(true);
+});
+
 test("sections for proposals: the user's own are included, «Документы», secret and unclassified never", () => {
   const { proposableSections, factProposal, restoredProposal, findSection } = require("../../direct-agent/fact-tool");
   const col = (slug: string, name: string, sensitivity: string) => ({ id: slug, slug, name, sensitivity, description: null, created_at: "" });
