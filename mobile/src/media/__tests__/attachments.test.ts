@@ -360,3 +360,51 @@ test("forged ASR interval on image, overlapping or unbounded times fail before a
   for(const table of ["memory_entities","memory_extractions","memory_attachment_parts","memory_extraction_fts"])
     expect(sqlite.prepare("SELECT count(*) n FROM "+table).get().n).toBe(0);
 });
+
+test("digital PDF real page evidence is linked to its original and indexed without fake pages",async()=>{
+  const pdf={uri:"file:///manual.pdf",name:"manual.pdf",mimeType:"application/pdf"};
+  mockFiles.set(pdf.uri,new Uint8Array([37,80,68,70,45,49]));
+  const id=await saveMediaNote("guest",{
+    file:pdf,title:"Инструкция",body:"Моя заметка",sensitivity:"standard",
+    extractedText:"Страница 2: Цепь\n\nСтраница 4: Подключение",
+    recognitions:[{index:0,name:pdf.name,status:"success",text:"Цепь Подключение",segments:[
+      {text:"Цепь",location:{kind:"page",page:2}},
+      {text:"Подключение",location:{kind:"page",page:4}},
+    ]}],
+  });
+  const rows=sqlite.prepare(`SELECT r.producer_kind,r.producer_id,r.producer_revision,s.text,
+    s.location_kind,s.page FROM memory_extraction_segments s
+    JOIN memory_extractions r ON r.id=s.extraction_id
+    JOIN memory_attachments a ON a.id=r.attachment_id
+    WHERE a.entity_id=? ORDER BY s.ord`).all(id);
+  expect(rows).toEqual([
+    expect.objectContaining({producer_kind:"pdf",producer_id:"android-pdf-text",producer_revision:"native-page-v1",
+      text:"Цепь",location_kind:"page",page:2}),
+    expect.objectContaining({producer_kind:"pdf",text:"Подключение",location_kind:"page",page:4}),
+  ]);
+  expect(sqlite.prepare("SELECT COUNT(*) AS n FROM memory_extraction_fts WHERE memory_extraction_fts MATCH ?")
+    .get('"подключение"').n).toBe(1);
+  const original=sqlite.prepare("SELECT * FROM memory_attachments WHERE entity_id=?").get(id);
+  const reopened=await materializeAttachment("guest",original);
+  expect(mockFiles.get(reopened)).toEqual(mockFiles.get(pdf.uri));
+});
+test("a forged page number on audio or non-monotonic PDF pages are rejected before writes",async()=>{
+  mockFiles.set("file:///voice.mp3",new Uint8Array([1,2,3]));
+  mockFiles.set("file:///manual.pdf",new Uint8Array([37,80,68,70]));
+  const pdf={uri:"file:///manual.pdf",name:"manual.pdf",mimeType:"application/pdf"};
+  await expect(saveMediaNote("guest",{
+    file:pdf,title:"Неверный порядок",body:"",sensitivity:"standard",
+    recognitions:[{index:0,name:"manual.pdf",status:"success",text:"проверка",segments:[
+      {text:"Часть 1",location:{kind:"page",page:3}},
+      {text:"Часть 2",location:{kind:"page",page:2}},
+    ]}],
+  })).rejects.toThrow("invalid_recognition_segments");
+  await expect(saveMediaNote("guest",{
+    file:{uri:"file:///voice.mp3",name:"voice.mp3",mimeType:"audio/mpeg"},
+    title:"Фальшивая страница",body:"",sensitivity:"standard",
+    recognitions:[{index:0,name:"voice.mp3",status:"success",text:"проверка",segments:[
+      {text:"Не страница",location:{kind:"page",page:1}},
+    ]}],
+  })).rejects.toThrow("invalid_recognition_segments");
+  expect(sqlite.prepare("SELECT COUNT(*) AS n FROM memory_entities").get().n).toBe(0);
+});
