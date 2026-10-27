@@ -42,7 +42,7 @@ export function onLocalMemorySessionChange(listener: (unlocked: boolean) => void
 }
 export const localMemorySessionUnlocked = () => applicationSessionUnlocked;
 const requireApplicationSession = () => { if (!applicationSessionUnlocked) throw new Error("application_locked"); };
-export const LOCAL_MEMORY_SCHEMA_VERSION = 7;
+export const LOCAL_MEMORY_SCHEMA_VERSION = 8;
 const KIND_CHECK = `CHECK(kind IN (${MEMORY_KINDS.map(k => `'${k}'`).join(",")}))`;
 
 /** All memory (including full-text indexes, revisions, and WAL) is in SQLCipher. */
@@ -129,6 +129,22 @@ CREATE TABLE IF NOT EXISTS memory_vectors (
   model TEXT NOT NULL, dim INTEGER NOT NULL, vector BLOB NOT NULL, content_hash TEXT NOT NULL,
   PRIMARY KEY(chunk_id, model)
 );
+CREATE TABLE IF NOT EXISTS memory_vector_models (
+  model TEXT PRIMARY KEY, active INTEGER NOT NULL DEFAULT 0,
+  scan_cursor TEXT NOT NULL DEFAULT '', scan_complete INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS memory_vector_jobs (
+  chunk_id TEXT NOT NULL REFERENCES memory_chunks(id) ON DELETE CASCADE,
+  model TEXT NOT NULL REFERENCES memory_vector_models(model) ON DELETE CASCADE,
+  generation INTEGER NOT NULL DEFAULT 1, state TEXT NOT NULL DEFAULT 'pending'
+    CHECK(state IN ('pending','leased','failed')),
+  attempts INTEGER NOT NULL DEFAULT 0, lease_token TEXT, lease_until TEXT,
+  available_at TEXT, updated_at TEXT NOT NULL,
+  PRIMARY KEY(chunk_id,model)
+);
+CREATE INDEX IF NOT EXISTS ix_memory_vector_jobs_ready
+  ON memory_vector_jobs(model,state,available_at,lease_until,updated_at);
 CREATE TABLE IF NOT EXISTS memory_cleanup_preferences (
   entity_id TEXT PRIMARY KEY REFERENCES memory_entities(id) ON DELETE CASCADE,
   guard TEXT NOT NULL DEFAULT 'normal' CHECK(guard IN ('normal','pinned','never_suggest')),
