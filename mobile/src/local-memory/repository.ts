@@ -1,6 +1,6 @@
 import { changeNotes, undoNotes, purgeNotes, type NoteAction, type NoteSelection } from "./note-actions";
 import { MemoryHygieneService } from "./hygiene";
-import { DurableVectorJobs, type ClaimedVectorJob, type CompletedVectorJob } from "./vector-jobs";
+import { DurableVectorJobs, markEntityVectorsDirty, type ClaimedVectorJob, type CompletedVectorJob } from "./vector-jobs";
 import * as Crypto from "expo-crypto";
 import type * as SQLite from "expo-sqlite";
 
@@ -246,6 +246,7 @@ export class SqliteMemoryRepository implements MemoryRepository {
          VALUES (?,?,?,?,?,?,?,?,?,?)`,
         [uid(), "entity", id, null, after.record_version, status === "archived" ? "Перенос в архив" : "Возврат из архива", "user", JSON.stringify(before), JSON.stringify(after), timestamp],
       );
+      if (status === 'active') await markEntityVectorsDirty(tx, id, timestamp);
       updated = after;
     });
     if (!updated) throw new Error("revision_not_committed");
