@@ -48,11 +48,11 @@ export async function prepareDirectContext(options: DirectAgentOptions & { now?:
   let memoryError = false;
   {
     status?.("Сначала проверяю память телефона");
-    try { notes = await options.lookup(options.prompt.slice(0, 120));
+    try { notes = await options.lookup(options.prompt);
       options.diagnostic?.("memory.initial_search", { found: notes.length,
         noteIds: notes.map(n => n.id), excerptCount: notes.filter(n => n.excerptOnly).length,
         totalBodyChars: notes.reduce((sum, n) => sum + n.body.length, 0),
-        queryChars: Math.min(options.prompt.length, 120) }); }
+        queryChars: options.prompt.length }); }
     catch { memoryError = true; options.diagnostic?.("memory.initial_search_failed"); }
     check();
   }

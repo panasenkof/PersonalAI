@@ -91,3 +91,10 @@ test('attached files are not treated as a greeting or automatically sent into a 
   expect(transport).not.toHaveBeenCalled();
   expect(JSON.stringify(lookup.mock.calls)).not.toContain('private file text');
 });
+
+test("the agent prefetch keeps the end of a long user question", async () => {
+  const lookup = jest.fn(async () => []);
+  const tail = "квитанция ZX77881 за октябрь 2025";
+  await prepareDirectContext(options("Найди документы о покупке. ".repeat(10) + tail, lookup, jest.fn()));
+  expect(lookup).toHaveBeenCalledWith(expect.stringContaining(tail));
+});

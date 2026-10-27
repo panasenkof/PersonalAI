@@ -36,17 +36,29 @@ export type MemorySearchStep = { term: string; prefix: boolean; weight: number; 
 /** Searches from the most specific to the broadest. A question about the user
  * («что ты знаешь обо мне») returns one empty search: the latest records. */
 export function searchSteps(query: string): MemorySearchStep[] {
-  const q = query.trim().slice(0, 120);
+  // Bound work without silently removing the end of a long question.
+  // Exact identifiers, dates and the last clause often determine the intent.
+  const raw = query.trim();
+  const q = raw.length > 4096 ? raw.slice(0, 2048) + " " + raw.slice(-2048) : raw;
   if (q.length < 2) return [];
   if (/(?:помнишь|знаешь|расскажи).*(?:обо? мне|про меня)|кто я\b/iu.test(q)) return [{ term: "", prefix: false, weight: 1 }];
   const tokens = q.split(/[^\p{L}\p{N}-]+/u).filter(Boolean);
   // A capitalised word after the first is a name («Маше», «Аню»): its stem may be short.
   const names = new Set(tokens.slice(1).filter(t => /^\p{Lu}\p{Ll}/u.test(t)).map(t => t.toLowerCase()));
-  const words = [...new Set(tokens.map(t => t.toLowerCase()).filter(s => (s.length >= 3 || names.has(s)) && !STOP_WORDS.has(s)))].slice(0, 6);
+  const eligible = [...new Set(tokens.map(t => t.toLowerCase())
+    .filter(s => (s.length >= 3 || names.has(s)) && !STOP_WORDS.has(s)))];
+  // Front + tail + exact dates/numbers; a long question must not lose its
+  // discriminating final clause. Max 16 lexical searches plus bounded stems.
+  const selected = eligible.length <= 16 ? eligible : [
+    ...eligible.slice(0, 5),
+    ...eligible.filter(w => /\d/u.test(w)).slice(0, 4),
+    ...eligible.slice(-7),
+  ];
+  const words = [...new Set(selected)].slice(0, 16);
   const stemOf = (w: string) => names.has(w) ? w.replace(/(ой|ей|ею|ою|[аяеиыуюо])$/u, "") : wordStem(w);
   const stems = words.map(w => ({ term: stemOf(w), word: w })).filter(s => s.term !== s.word);
   return [
-    { term: q, prefix: false, weight: 4 },
+    ...(q.length <= 160 ? [{ term: q, prefix: false, weight: 4 }] : []),
     ...words.map(w => ({ term: w, prefix: false, weight: 2 })),
     // A stem shorter than four letters («как», «лет») matches too much; names may be shorter.
     ...stems.filter(s => s.term.length >= (names.has(s.word) ? 2 : 4)).map(s => ({ term: s.term, prefix: true, weight: 1 })),
