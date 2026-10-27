@@ -68,6 +68,18 @@ export function memoryText(payload: Record<string, unknown>): string {
   return [payload.body, payload.extracted_text, typeof payload.source_url === "string" ? "Источник: " + payload.source_url : ""].filter((v): v is string => typeof v === "string" && Boolean(v.trim())).join("\n\n");
 }
 
+/** Explicit allowlist: never index an arbitrary payload JSON or diagnostic
+ * metadata into human/agent search. Source file labels are user-owned data. */
+export function searchableStructuredText(payload: Record<string, unknown>): string {
+  const allowed = ["city", "date", "location", "source_file", "source_files"] as const;
+  return allowed.flatMap(key => {
+    const value = payload[key];
+    const parts = typeof value === "string" ? [value] :
+      Array.isArray(value) ? value.filter((s): s is string => typeof s === "string") : [];
+    return parts.filter(s => s.trim()).slice(0, 20).map(s => s.slice(0, 240));
+  }).join("\n");
+}
+
 /** Rebuilds the chunks and search rows of one record. Vectors of chunks whose
  * text changed are dropped (memory_vectors cascades) and rebuilt later. */
 export async function indexEntity(db: SQL, entityId: string, timestamp = new Date().toISOString()): Promise<void> {
@@ -75,8 +87,23 @@ export async function indexEntity(db: SQL, entityId: string, timestamp = new Dat
   await db.runAsync("DELETE FROM memory_search_fts WHERE entity_id=?", [entityId]);
   if (!entity) { await db.runAsync("DELETE FROM memory_chunks WHERE entity_id=?", [entityId]); return; }
   let body = "";
-  try { const payload = JSON.parse(String(entity.payload_json)); body = memoryText(payload); }
-  catch { /* an unreadable payload is still found by its title */ }
+  try {
+    const payload = JSON.parse(String(entity.payload_json)) as Record<string, unknown>;
+    body = [memoryText(payload), searchableStructuredText(payload)].filter(Boolean).join("\n");
+  } catch { /* an unreadable payload is still found by its title */ }
+  // Only public/inherited observations enter the parent note's index; secret
+  // observation text must never leak through a standard note's cloud scope.
+  const observations = await db.getAllAsync<Row>(
+    "SELECT payload_json FROM memory_observations WHERE entity_id=? AND sensitivity IN ('standard','inherit') ORDER BY occurred_at,id",
+    [entityId]);
+  const observationText = observations.flatMap(row => {
+    try {
+      const p = JSON.parse(String(row.payload_json)) as Record<string, unknown>;
+      return [p.text, p.body].filter((v): v is string => typeof v === "string").map(v => v.slice(0, 4000));
+    } catch { return []; }
+  }).join("\n");
+  const files = await db.getAllAsync<Row>("SELECT name FROM memory_attachments WHERE entity_id=? ORDER BY created_at,id", [entityId]);
+  body = [body, observationText, ...files.map(f => String(f.name).slice(0, 240))].filter(Boolean).join("\n");
   const title = foldText(String(entity.title ?? ""));
   const texts = chunkText(body);
   if (!texts.length) texts.push("");
