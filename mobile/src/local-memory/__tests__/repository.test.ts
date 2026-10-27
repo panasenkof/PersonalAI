@@ -1,5 +1,5 @@
 import { SqliteMemoryRepository } from "../repository";
-import { VECTOR_DIM, VECTOR_MODEL, vectorSpaceKey } from "../vectors";
+import { VECTOR_DIM, VECTOR_MODEL, isCurrentVectorSpace, vectorSpaceKey } from "../vectors";
 import { MemoryAccessError, MemoryConflictError } from "../types";
 
 jest.mock("expo-crypto", () => ({
@@ -544,4 +544,32 @@ test("model-space manifest avoids old and cross-backend vectors without deleting
   expect(await repo.vectorStatus(android)).toEqual({ done: 1, total: 1 });
   // The user-authored source never changed during derived-index repair.
   expect((await repo.entity(note.id))?.payload.body).toBe("Замена масла");
+});
+
+test("real SHA-256 model/tokenizer bytes identify incompatible vector spaces", async () => {
+  const db = new FakeSqlite();
+  const repo = new SqliteMemoryRepository(db as never);
+  const collection = await repo.createCollection({ name: "Личное", slug: "personal", sensitivity: "standard" });
+  await repo.createEntity({ collection_id: collection.id, domain: "notes",
+    title: "Исходник", payload: { body: "Сохранённый разговор" } });
+  const a = { model: "a".repeat(64), tokenizer: "b".repeat(64) };
+  const b = { model: "a".repeat(64), tokenizer: "c".repeat(64) };
+  const spaceA = vectorSpaceKey("android", a);
+  const spaceB = vectorSpaceKey("android", b);
+  expect(isCurrentVectorSpace(spaceA)).toBe(true);
+  expect(spaceA).not.toBe(spaceB);
+  expect(spaceA).not.toBe(vectorSpaceKey("ios", a));
+  expect(isCurrentVectorSpace(spaceA + "junk")).toBe(false);
+  expect(() => vectorSpaceKey("android", { model: "not-sha", tokenizer: b.tokenizer })).toThrow("invalid_vector_artifact_fingerprint");
+  const item = (await repo.pendingVectorChunks(spaceA))[0];
+  const vector = new Float32Array(VECTOR_DIM);
+  vector[0] = 1;
+  expect(await repo.saveVectors(spaceA, [{ ...item, vector }])).toBe(1);
+  expect(await repo.vectorStatus(spaceA)).toEqual({ done: 1, total: 1 });
+  expect(await repo.vectorStatus(spaceB)).toEqual({ done: 0, total: 1 });
+  expect(await repo.vectorMatches(spaceB, vector)).toEqual([]);
+  expect((await repo.pendingVectorChunks(spaceB)).map(x => x.chunkId)).toEqual([item.chunkId]);
+  expect(await repo.saveVectors(spaceB, [{ ...item, vector: new Float32Array(12) }])).toBe(0);
+  expect(await repo.saveVectors(spaceB, [{ ...item, vector }])).toBe(1);
+  expect((await repo.vectorMatches(spaceB, vector)).length).toBe(1);
 });
