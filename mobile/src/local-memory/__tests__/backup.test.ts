@@ -107,7 +107,7 @@ test("verified export accepts more than 100k records and writes an encrypted man
   await shareEncryptedBackup("guest", code);
   expect(mockDb.execAsync).toHaveBeenCalledWith(expect.stringContaining("CREATE TABLE pia_export.persai_backup_manifest"));
   expect(mockDb.runAsync).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO pia_export.persai_backup_manifest"),
-    [1, 7, 100001, 1, 1, 0, 0, 0, 0]);
+    [1, 8, 100001, 1, 1, 0, 0, 0, 0]);
   expect(Sharing.shareAsync).toHaveBeenCalledTimes(1);
 });
 
