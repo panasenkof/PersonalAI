@@ -28,7 +28,7 @@ export function inspectSharedMaterial(payloads: SharePayload[]): SharedMaterial 
     const source = new File(p.value);
     const file={uri:p.value, name:source.name || 'Входящий файл', mimeType:p.mimeType};
     files.push(file);names.push(file.name);
-    try { mediaKind(file); } catch { memoryError='Этот формат пока нельзя импортировать в новую заметку. PDF можно добавить к существующей заметке.'; }
+    try { mediaKind(file); } catch { memoryError='Этот формат пока нельзя импортировать в память. Выберите изображение, PDF, аудио, видео или текстовый файл.'; }
     try { chatFileFormat(file); } catch { chatError='В чат доступны JPEG, PNG, WebP и текст UTF-8. Этот формат не поддерживается.'; }
     // ContentResolver metadata can be unavailable; actual bytes are checked after a private copy.
     try { const size=source.size; if(size>MAX_CHAT_FILE_BYTES)chatError='Для чата каждый файл должен быть не больше 2 МБ.'; if(size>80*1024*1024)memoryError='Оригинал для памяти должен быть не больше 80 МБ.'; } catch { /* Copy/read gives a recoverable access error. */ }
