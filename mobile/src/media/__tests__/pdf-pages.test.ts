@@ -49,3 +49,15 @@ test("native reader remains local; remote/content URI rejected before native acc
 test("scanned document with no native text layer refuses fabricated OCR page",async()=>{
  await expect(extractPdfPages(file,undefined,{extractPages:async()=>[]})).rejects.toThrow("не найден текстовый слой");
 });
+
+test("native device capability gate prevents speculative page extraction",async()=>{
+ const reader={isAvailable:jest.fn(()=>false),extractPages:jest.fn(async()=>[{page:1,text:"fake"}])};
+ await expect(extractPdfPages(file,undefined,reader)).rejects.toThrow("нет системного извлечения");
+ expect(reader.isAvailable).toHaveBeenCalledTimes(1);
+ expect(reader.extractPages).not.toHaveBeenCalled();
+});
+test("native extension-supported device uses same validated pages",async()=>{
+ const reader={isAvailable:jest.fn(()=>true),extractPages:jest.fn(async()=>[{page:2,text:"Текст второй страницы"}])};
+ const result=await extractPdfPages(file,undefined,reader);
+ expect(result.segments).toEqual([{text:"Текст второй страницы",location:{kind:"page",page:2}}]);
+});
