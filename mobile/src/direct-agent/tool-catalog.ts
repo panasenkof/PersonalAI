@@ -44,8 +44,8 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
     ...(options.read ? [{
       definition: { name: "read_local_note", description: "Дочитать разрешённую заметку по id и version из search_local_notes. Указать offset для следующей части; источник может измениться и чтение тогда откажет.", parameters: {
         type: "object", properties: { id: { type: "string" }, version: { type: "integer" },
-          offset: { type: "integer" }, budget: { type: "integer" } },
-        required: ["id", "version"], additionalProperties: false,
+          offset: { type: ["integer", "null"] }, budget: { type: ["integer", "null"] } },
+        required: ["id", "version", "offset", "budget"], additionalProperties: false,
       } },
       effect: "read" as const,
       execute: async (args: Record<string, unknown>) => {
