@@ -22,7 +22,8 @@
               "audio/*",
               "video/*",
               "text/*",
-              "application/json"
+              "application/json",
+              "application/pdf"
             ],
             "multipleShareMimeTypes": [
               "image/*",
