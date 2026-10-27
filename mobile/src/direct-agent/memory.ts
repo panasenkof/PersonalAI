@@ -110,6 +110,7 @@ export async function readApprovedNote(
     if (!collection || collection.sensitivity !== "standard") throw new Error("memory_read_not_available");
     if (entity.record_version !== expectedVersion) throw new Error("stale_memory_version");
     const body = memoryText(entity.payload);
+    if (offset > body.length) throw new Error("invalid_memory_read_range");
     const count = Math.min(6000, requestedChars);
     const content = body.slice(offset, offset + count);
     const nextOffset = offset + content.length;
