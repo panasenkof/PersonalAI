@@ -9,6 +9,7 @@ const date = (normalized: string): TemporalBound => ({
 });
 function claim(patch: Partial<TemporalClaimCandidate> = {}): TemporalClaimCandidate {
   return {
+    recordedAt: "2026-10-27T12:00:00.000Z",
     subjectId: "person-user", predicate: "employment", context: "primary",
     value: "A", kind: "state", modality: "asserted", negated: false,
     cardinality: "single", occurredOrStarted: date("2020-01-01"),
@@ -114,4 +115,14 @@ test("observations and lasting attributes are not automatically overwritten", ()
     expect(compareTemporalCandidates(claim({ kind }), claim({ kind, value: "B" })))
       .toBe("independent");
   }
+});
+
+
+test("historical valid time differs from record time; malformed record time rejected", () => {
+  const enteredToday = claim({ occurredOrStarted: date("2024-09-01") });
+  expect(enteredToday.recordedAt).toBe("2026-10-27T12:00:00.000Z");
+  expect(enteredToday.occurredOrStarted?.normalized).toBe("2024-09-01");
+  expect(() => validateTemporalClaim(enteredToday)).not.toThrow();
+  expect(() => validateTemporalClaim(claim({ recordedAt: "2026-02-30T12:00:00.000Z" })))
+    .toThrow("temporal_recorded_at_invalid");
 });
