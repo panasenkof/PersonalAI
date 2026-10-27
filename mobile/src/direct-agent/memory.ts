@@ -3,7 +3,8 @@ import { localMemoryRepository, SqliteMemoryRepository } from "../local-memory/r
 import { withLocalMemoryDatabase } from "../local-memory/storage";
 import type { MemoryRepository } from "../local-memory/types";
 import { ensureSections, orderCollections } from "../local-memory/sections";
-import { VECTOR_MODEL } from "../local-memory/vectors";
+import { vectorSpaceKey } from "../local-memory/vectors";
+import { Platform } from "react-native";
 import { memoryText, normalizeAlias as normalizeName } from "../local-memory/search-index";
 import { DEFAULT_SECTIONS, MAX_NOTE_BODY_CHARS, PROPOSABLE_KINDS, findSection, proposableSections } from "./fact-tool";
 import type { MemorySection, NoteProposal } from "./fact-tool";
@@ -56,7 +57,7 @@ export async function searchApprovedNotes(
   if (!standards.length) return [];
   const values = embed ? await embed(query.trim().slice(0, 500)).catch(() => null) : null;
   const hits = await db.searchMemory(query, { collectionIds: standards, sensitivities: ["standard", "inherit"], limit: 5,
-    ...(values ? { vector: { model: VECTOR_MODEL, values } } : {}) });
+    ...(values ? { vector: { model: vectorSpaceKey(Platform.OS === "ios" ? "ios" : "android"), values } } : {}) });
   const allowed = hits.filter(({ entity }) => standards.includes(entity.collection_id) && entity.record_status === "active" &&
     ["standard", "inherit"].includes(entity.sensitivity));
   let remaining = MAX_CONTEXT_NOTE_CHARS;

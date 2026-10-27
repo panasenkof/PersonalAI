@@ -3,10 +3,15 @@
  * the app locks, on an error, or when the model is deleted. Computed on the
  * phone, so every section is indexed — «Документы» included. */
 import { useSyncExternalStore } from "react";
+import { Platform } from "react-native";
 import { localMemoryRepository } from "../local-memory/repository";
 import { localMemorySessionUnlocked, onLocalMemorySessionChange } from "../local-memory/storage";
-import { VECTOR_MODEL } from "../local-memory/vectors";
+import { vectorSpaceKey } from "../local-memory/vectors";
 import { embedTexts, embedderReady } from "./embedder";
+
+// The downloader still identifies the model by its friendly name; persisted
+// vectors use a versioned namespace that changes when inference does.
+const ACTIVE_VECTOR_SPACE = vectorSpaceKey(Platform.OS === "ios" ? "ios" : "android");
 
 export type VectorState = { running: boolean; done: number; total: number; error: string; perChunkMs?: number };
 let state: VectorState = { running: false, done: 0, total: 0, error: "" };
@@ -18,7 +23,7 @@ export function useVectorState(): VectorState {
 }
 
 export async function refreshVectorStatus(profile: string): Promise<void> {
-  try { publish(await (await localMemoryRepository(profile)).vectorStatus(VECTOR_MODEL)); } catch { /* locked */ }
+  try { publish(await (await localMemoryRepository(profile)).vectorStatus(ACTIVE_VECTOR_SPACE)); } catch { /* locked */ }
 }
 
 let current: AbortController | null = null;
@@ -39,16 +44,16 @@ async function run(profile: string): Promise<void> {
   publish({ running: true, error: "" });
   try {
     const repo = await localMemoryRepository(profile);
-    publish(await repo.vectorStatus(VECTOR_MODEL));
+    publish(await repo.vectorStatus(ACTIVE_VECTOR_SPACE));
     for (let batch = 0; batch < 2000 && !aborter.signal.aborted; batch++) {
       again = false;
-      const pending = await repo.pendingVectorChunks(VECTOR_MODEL, 16);
+      const pending = await repo.pendingVectorChunks(ACTIVE_VECTOR_SPACE, 16);
       if (!pending.length) { if (again) continue; break; }
       const started = Date.now();
       const vectors = await embedTexts(pending.map(p => p.text));
       if (aborter.signal.aborted) break;
-      await repo.saveVectors(VECTOR_MODEL, pending.map((p, i) => ({ chunkId: p.chunkId, vector: vectors[i], hash: p.hash })));
-      publish({ ...(await repo.vectorStatus(VECTOR_MODEL)), perChunkMs: Math.round((Date.now() - started) / pending.length) });
+      await repo.saveVectors(ACTIVE_VECTOR_SPACE, pending.map((p, i) => ({ chunkId: p.chunkId, vector: vectors[i], hash: p.hash })));
+      publish({ ...(await repo.vectorStatus(ACTIVE_VECTOR_SPACE)), perChunkMs: Math.round((Date.now() - started) / pending.length) });
     }
   } catch (e) {
     if (!aborter.signal.aborted) publish({ error: String((e as Error)?.message || e) });

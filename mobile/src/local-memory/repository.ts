@@ -8,7 +8,7 @@ import { withUnlockedTransaction } from "./transaction";
 import { defaultKind, indexEntity, isMemoryKind, normalizeAlias } from "./search-index";
 import type { MemoryKind } from "./search-index";
 import { ftsPhrase, requiredSearchEvidence, searchSteps } from "./query";
-import { MIN_SIMILARITY, cosine, embeddingHash, embeddingText, fromBlob, fuseRanks, toBlob } from "./vectors";
+import { MIN_SIMILARITY, VECTOR_DIM, cosine, embeddingHash, embeddingText, fromBlob, fuseRanks, isCurrentVectorSpace, toBlob } from "./vectors";
 import type {
   CollectionRecord, EntityRecord, MemoryHit, MemoryPage, MemoryRepository, NewEntity, NewObservation,
   ObservationRecord, RelationRecord, RevisionRecord, RecordSensitivity,
@@ -22,6 +22,12 @@ const now = (): string => new Date().toISOString();
 const uid = (): string => Crypto.randomUUID();
 const clone = (value: Record<string, unknown>): Record<string, unknown> => JSON.parse(JSON.stringify(value));
 const TEXT = (value: unknown) => typeof value === "string" ? value : null;
+// Corrupted dimensions and old model-space revisions are missing work, not
+// completed results; old vectors remain derived data but are never compared.
+const validVectorJoin = (model: string) =>
+  "LEFT JOIN memory_vectors v ON v.chunk_id=c.id AND v.model=? " +
+  "AND v.dim>0 AND length(v.vector)=4*v.dim" +
+  (isCurrentVectorSpace(model) ? " AND v.dim=" + VECTOR_DIM : "");
 const entityFrom = (row: Row): EntityRecord => ({
   id: String(row.id), collection_id: String(row.collection_id),
   domain: String(row.domain), schema_version: String(row.schema_version),
@@ -526,7 +532,7 @@ export class SqliteMemoryRepository implements MemoryRepository {
         `SELECT c.id,c.ord,c.text,e.id AS eid,e.updated_at,e.title,
                 v.content_hash AS vhash FROM memory_chunks c
          JOIN memory_entities e ON e.id=c.entity_id
-         LEFT JOIN memory_vectors v ON v.chunk_id=c.id AND v.model=?
+         ${validVectorJoin(model)}
          WHERE e.record_status='active' AND e.domain='notes'
            ${cursor ? "AND (e.updated_at < ? OR (e.updated_at=? AND (e.id > ? OR (e.id=? AND c.ord > ?))))" : ""}
          ORDER BY e.updated_at DESC,e.id,c.ord LIMIT ?`,
@@ -553,7 +559,8 @@ export class SqliteMemoryRepository implements MemoryRepository {
         const current = await tx.getFirstAsync<Row>(
           "SELECT c.text,e.title,e.record_status FROM memory_chunks c JOIN memory_entities e ON e.id=c.entity_id WHERE c.id=?", [item.chunkId]);
         if (!current || current.record_status !== "active" || item.hash !== embeddingHash(TEXT(current.title), String(current.text))) continue;
-        if (!item.vector.length || !item.vector.every(Number.isFinite)) continue;
+        if (!item.vector.length || !item.vector.every(Number.isFinite) ||
+            (isCurrentVectorSpace(model) && item.vector.length !== VECTOR_DIM)) continue;
         await tx.runAsync("INSERT OR REPLACE INTO memory_vectors(chunk_id,model,dim,vector,content_hash) VALUES (?,?,?,?,?)",
           [item.chunkId, model, item.vector.length, toBlob(item.vector), item.hash]);
         saved++;
@@ -571,7 +578,7 @@ export class SqliteMemoryRepository implements MemoryRepository {
       const rows: Row[] = await this.db.getAllAsync<Row>(
         `SELECT c.text,c.ord,e.id AS eid,e.title,v.content_hash AS vhash
          FROM memory_chunks c JOIN memory_entities e ON e.id=c.entity_id
-         LEFT JOIN memory_vectors v ON v.chunk_id=c.id AND v.model=?
+         ${validVectorJoin(model)}
          WHERE e.record_status='active' AND e.domain='notes'
            ${cursor ? "AND (e.id > ? OR (e.id=? AND c.ord > ?))" : ""}
          ORDER BY e.id,c.ord LIMIT ?`,
@@ -591,8 +598,10 @@ export class SqliteMemoryRepository implements MemoryRepository {
    * chunk per record, above MIN_SIMILARITY, within the same filters. */
   async vectorMatches(model: string, query: Float32Array, options: { collectionIds?: string[]; sensitivities?: string[]; limit?: number } = {}):
     Promise<Array<{ row: Row; chunkId: string; similarity: number }>> {
+    if (!query.length || !query.every(Number.isFinite) ||
+        (isCurrentVectorSpace(model) && query.length !== VECTOR_DIM)) return [];
     const filters = ["e.domain='notes'", "e.record_status='active'"];
-    const params: SQLite.SQLiteBindValue[] = [model];
+    const params: SQLite.SQLiteBindValue[] = [model, query.length];
     if (options.collectionIds) {
       if (!options.collectionIds.length) return [];
       filters.push(`e.collection_id IN (${options.collectionIds.map(() => "?").join(",")})`); params.push(...options.collectionIds);
@@ -600,7 +609,7 @@ export class SqliteMemoryRepository implements MemoryRepository {
     if (options.sensitivities) { filters.push(`e.sensitivity IN (${options.sensitivities.map(() => "?").join(",")})`); params.push(...options.sensitivities); }
     const rows = await this.db.getAllAsync<Row>(
       `SELECT v.chunk_id, v.vector, v.content_hash, c.entity_id, c.text, e.title FROM memory_vectors v JOIN memory_chunks c ON c.id=v.chunk_id
-       JOIN memory_entities e ON e.id=c.entity_id WHERE v.model=? AND ${filters.join(" AND ")}`, params);
+       JOIN memory_entities e ON e.id=c.entity_id WHERE v.model=? AND v.dim=? AND length(v.vector)=4*v.dim AND ${filters.join(" AND ")}`, params);
     const best = new Map<string, { chunkId: string; similarity: number }>();
     for (const r of rows) {
       if (r.content_hash !== embeddingHash(TEXT(r.title), String(r.text))) continue;

@@ -5,6 +5,27 @@ import { contentHash } from "./search-index";
 /** paraphrase-multilingual-MiniLM-L12-v2: 384 dimensions, unit length. */
 export const VECTOR_MODEL = "paraphrase-multilingual-minilm-l12-v2";
 export const VECTOR_DIM = 384;
+
+/**
+ * Stable encrypted-DB namespace for a particular embedding space, not a UI
+ * model name. Bump this contract whenever native weights, tokenizer, runtime
+ * semantics or embeddingText preprocessing change. The Android and iOS weight
+ * variants are intentionally distinct: restored backups must re-embed locally,
+ * not compare vectors produced by different backends.
+ *
+ * This is a versioned MANIFEST ID, not a cryptographic checksum of downloaded
+ * weights. Native artifact verification remains a separate acceptance gate.
+ * Legacy rows under plain VECTOR_MODEL are left intact but are never read
+ * by the active vector runner (lexical search works during reindex).
+ */
+export const VECTOR_SPACE_REVISION = "rnet-0.10.5|tokenizer-bundled-v1|title-text-trim-2000-v1";
+export function vectorSpaceKey(platform: "android" | "ios"): string {
+  const weights = platform === "ios" ? "coreml-fp16" : "xnnpack-8da4w";
+  return [VECTOR_MODEL, "space-v1", weights, VECTOR_SPACE_REVISION, "dim-" + VECTOR_DIM].join("|");
+}
+export function isCurrentVectorSpace(value: string): boolean {
+  return value === vectorSpaceKey("android") || value === vectorSpaceKey("ios");
+}
 /** Below this similarity a chunk is not «about» the question. MiniLM puts
  * unrelated Russian sentences around 0.1–0.35 and paraphrases above 0.5;
  * the value is checked on the phone with the question set (п. 13). */

@@ -1,4 +1,5 @@
 import { SqliteMemoryRepository } from "../repository";
+import { VECTOR_DIM, VECTOR_MODEL, vectorSpaceKey } from "../vectors";
 import { MemoryAccessError, MemoryConflictError } from "../types";
 
 jest.mock("expo-crypto", () => ({
@@ -507,4 +508,40 @@ test("vector status resumes after SQL keyset cursor across 256 rows", async () =
   const vec = spy.mock.calls.filter(([sql]) => String(sql).includes("LEFT JOIN memory_vectors"));
   expect(vec.length).toBeGreaterThanOrEqual(2);
   expect(vec.some(([sql, args]) => String(sql).includes("AND (e.id > ?") && Array.isArray(args) && args.length === 5)).toBe(true);
+});
+
+test("model-space manifest avoids old and cross-backend vectors without deleting originals", async () => {
+  const db = new FakeSqlite();
+  const repo = new SqliteMemoryRepository(db as never);
+  const collection = await repo.createCollection({ name: "Личное", slug: "personal", sensitivity: "standard" });
+  const note = await repo.createEntity({
+    collection_id: collection.id, domain: "notes", title: "Машина", payload: { body: "Замена масла" },
+  });
+  const old = (await repo.pendingVectorChunks(VECTOR_MODEL))[0];
+  const vector = new Float32Array(VECTOR_DIM);
+  vector[0] = 1;
+  // A vector from the old (unversioned) runtime is NOT an active-space result.
+  expect(await repo.saveVectors(VECTOR_MODEL, [{ ...old, vector }])).toBe(1);
+  const android = vectorSpaceKey("android"), ios = vectorSpaceKey("ios");
+  expect(android).not.toBe(ios);
+  expect(android).not.toBe(VECTOR_MODEL);
+  expect(await repo.vectorMatches(android, vector)).toEqual([]);
+  expect(await repo.vectorStatus(android)).toEqual({ done: 0, total: 1 });
+  const [fresh] = await repo.pendingVectorChunks(android);
+  expect(fresh.chunkId).toBe(old.chunkId);
+  expect(await repo.saveVectors(android, [{ ...fresh, vector: new Float32Array([1, 0]) }])).toBe(0);
+  expect(await repo.saveVectors(android, [{ ...fresh, vector }])).toBe(1);
+  expect((await repo.vectorMatches(android, vector))[0].row.id).toBe(note.id);
+  expect(await repo.vectorStatus(ios)).toEqual({ done: 0, total: 1 });
+  expect(await repo.vectorMatches(ios, vector)).toEqual([]);
+  expect(await repo.vectorMatches(android, new Float32Array([1, 0]))).toEqual([]);
+  // Corruption: wrong declared dimension must become pending, not "done".
+  await db.runAsync("UPDATE memory_vectors SET dim=128 WHERE chunk_id=? AND model=?", [fresh.chunkId, android]);
+  expect(await repo.vectorMatches(android, vector)).toEqual([]);
+  expect(await repo.vectorStatus(android)).toEqual({ done: 0, total: 1 });
+  expect((await repo.pendingVectorChunks(android)).map(c => c.chunkId)).toEqual([fresh.chunkId]);
+  expect(await repo.saveVectors(android, [{ ...fresh, vector }])).toBe(1);
+  expect(await repo.vectorStatus(android)).toEqual({ done: 1, total: 1 });
+  // The user-authored source never changed during derived-index repair.
+  expect((await repo.entity(note.id))?.payload.body).toBe("Замена масла");
 });
