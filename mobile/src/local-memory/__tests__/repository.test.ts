@@ -458,3 +458,20 @@ test("attachment metadata is searchable on create and append only after atomic c
   });
   expect((await repo.searchMemory("warranty2025")).map(v => v.entity.id)).toContain(file.id);
 });
+
+test("vector queue and progress page in SQL without materializing the full corpus", async () => {
+  const db = new FakeSqlite();
+  const repo = new SqliteMemoryRepository(db as never);
+  const col = await repo.createCollection({ name: "Заметки", slug: "notes", sensitivity: "standard" });
+  for (let i = 0; i < 5; i++) await repo.createEntity({
+    collection_id: col.id, domain: "notes", title: "Файл " + i,
+    payload: { body: "Данные разные " + i },
+  });
+  const spy = jest.spyOn(db, "getAllAsync");
+  expect((await repo.pendingVectorChunks("model-a", 2))).toHaveLength(2);
+  expect(spy.mock.calls.some(([sql, args]) => String(sql).includes("LIMIT ? OFFSET ?") &&
+    Array.isArray(args) && args.length === 3 && args[0] === "model-a")).toBe(true);
+  expect(await repo.vectorStatus("model-a")).toEqual({ done: 0, total: 5 });
+  expect(spy.mock.calls.filter(([sql]) => String(sql).includes("LEFT JOIN memory_vectors"))
+    .every(([sql]) => String(sql).includes("LIMIT ? OFFSET ?"))).toBe(true);
+});
