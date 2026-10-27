@@ -77,7 +77,7 @@ function fromRow(row: ClaimRow): TemporalClaimCandidate {
   return claim;
 }
 
-async function readCurrentCandidate(
+export async function readCurrentCandidate(
   db: SQL, id: string,
 ): Promise<{ claim: TemporalClaimCandidate; version: number }> {
   // Verify source freshness and active status at proposal creation.
