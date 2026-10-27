@@ -33,7 +33,7 @@ test('copy failure does not expose provider path and leaves recovery through mem
   mockCopy.mockRejectedValue(new Error('private content://provider/secret'));
   const result=await prepareSharedMaterial([file],new AbortController().signal);expect(result.chatError).not.toContain('content://');expect(result.memoryError).toBe('');expect(mockDelete).toHaveBeenCalled();
 });
-test('remote binary and empty inputs are rejected; PDF is not promised in new-note import',()=>{
+test('remote binary and empty inputs rejected, PDF can be saved as an original but not sent to chat',()=>{
   expect(()=>inspectSharedMaterial([{...file,value:'https://example.org/file'}])).toThrow('локальный');expect(()=>inspectSharedMaterial([])).toThrow();
-  const pdf=inspectSharedMaterial([{...file,value:'content://provider/file.pdf',mimeType:'application/pdf'}]);expect(pdf.chatError).toBeTruthy();expect(pdf.memoryError).toContain('существующей');
+  const pdf=inspectSharedMaterial([{...file,value:'content://provider/file.pdf',mimeType:'application/pdf'}]);expect(pdf.chatError).toBeTruthy();expect(pdf.memoryError).toBe('');
 });
