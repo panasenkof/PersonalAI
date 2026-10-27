@@ -378,7 +378,7 @@ test("v10 to v11 stores candidate, evidence, and non-applying state review trans
   const db = mockConnections[0].sqlite;
   const bridge = mockConnections[0];
   expect(db.prepare("PRAGMA user_version").get().user_version).toBe(11);
-  const make = (entityId: string, value: string, kind: "state" | "event" = "state") => ({
+  const make = (entityId: string, value: string, kind: "state" | "event" = "state"): import("../temporal-claims").TemporalClaimCandidate => ({
     recordedAt: "2026-10-27T12:00:00.000Z", subjectId: "person-1",
     predicate: "employment", context: "primary", value, kind,
     modality: "asserted", negated: false, cardinality: "single",
