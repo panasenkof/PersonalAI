@@ -9,7 +9,7 @@ import type * as SQLite from "expo-sqlite";
 import type { TemporalClaimCandidate } from "./temporal-claims";
 import { readCurrentCandidate } from "./temporal-store";
 
-type SQL = Pick<SQLite.SQLiteDatabase, "getAllAsync" | "getFirstAsync">;
+type SQL = Pick<SQLite.SQLiteDatabase, "getAllAsync" | "getFirstAsync" | "runAsync" | "execAsync">;
 export type TemporalInboxStatus = "pending" | "deferred";
 export type TemporalInboxCursor = { createdAt: string; proposalId: string };
 export type TemporalInboxQuery = {
@@ -74,7 +74,6 @@ export async function listTemporalReviewInbox(
   }
   const where = [
     "p.status IN ('pending','deferred')",
-    "pre.entity_id<>post.entity_id OR pre.id<>post.id",
     "src_pre.collection_id=? AND src_post.collection_id=?",
     "col_pre.sensitivity='standard' AND col_post.sensitivity='standard'",
     "src_pre.sensitivity IN ('standard','inherit')",
