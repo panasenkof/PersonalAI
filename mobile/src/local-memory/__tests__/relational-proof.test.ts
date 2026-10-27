@@ -30,7 +30,7 @@ function allowed(edges: RelationProof[], override: Record<string,number> = {}): 
 
 test("R1: user→sister Lisa→actual participant in a conversation returns a defensible path",()=>{
   const edges=[
-    edge("kin","sibling_of","me","lisa"),
+    edge("kin","sister_of","me","lisa"),
     edge("participant","participant_of","conversation-a","lisa"),
   ];
   expect(resolveSiblingConversationPaths("me",edges,allowed(edges))).toEqual({
@@ -44,16 +44,26 @@ test("R1: user→sister Lisa→actual participant in a conversation returns a de
 
 test("R6: mentioning Lisa in another person's conversation does not establish participation",()=>{
   const edges=[
-    edge("kin","sibling_of","me","lisa"),
+    edge("kin","sister_of","me","lisa"),
     edge("mention","mentioned_in","conversation-a","lisa"),
     edge("about","about","conversation-b","lisa"),
   ];
   expect(resolveSiblingConversationPaths("me",edges,allowed(edges)).paths).toEqual([]);
 });
 
+test("generic sibling_of or brother_of does not prove the user asked for a sister",()=>{
+  for (const kind of ["sibling_of","brother_of"] as const) {
+    const edges=[
+      edge("kin",kind,"me","alex"),
+      edge("part","participant_of","conversation","alex"),
+    ];
+    expect(resolveSiblingConversationPaths("me",edges,allowed(edges)).paths).toEqual([]);
+  }
+});
+
 test("R4: two people named Lisa cannot be merged by label or substring",()=>{
   const edges=[
-    edge("kin","sibling_of","me","lisa-id-1"),
+    edge("kin","sister_of","me","lisa-id-1"),
     edge("someone","participant_of","conversation-b","lisa-id-2"),
     edge("correct","participant_of","conversation-a","lisa-id-1"),
   ];
@@ -64,7 +74,7 @@ test("R4: two people named Lisa cannot be merged by label or substring",()=>{
 
 test("R7: stale entity version, withdrawn evidence, pending model link and ambiguous identity give no paths",()=>{
   const edges=[
-    edge("kin","sibling_of","me","lisa"),
+    edge("kin","sister_of","me","lisa"),
     edge("participant","participant_of","conversation-a","lisa"),
   ];
   const access=allowed(edges,{"lisa":2});
@@ -83,7 +93,7 @@ test("R7: stale entity version, withdrawn evidence, pending model link and ambig
 
 test("R8/R11: protected intermediate evidence blocks the chain without disclosing hidden names",()=>{
   const edges=[
-    edge("kin","sibling_of","me","lisa"),
+    edge("kin","sister_of","me","lisa"),
     edge("participant","participant_of","conversation-a","lisa"),
   ];
   const access=allowed(edges);
@@ -102,7 +112,7 @@ test("R8/R11: protected intermediate evidence blocks the chain without disclosin
 });
 
 test("R9: capped, deduplicated evidence paths report partial results, never invented audio/timecodes",()=>{
-  const edges=[edge("kin","sibling_of","me","lisa")];
+  const edges=[edge("kin","sister_of","me","lisa")];
   for(let i=0;i<26;i++) {
     edges.push(edge("part-"+i,"participant_of","conversation-"+i,"lisa"));
   }
@@ -115,7 +125,7 @@ test("R9: capped, deduplicated evidence paths report partial results, never inve
 });
 
 test("malformed/self-referential/unsupported or user-unapproved proofs fail closed",()=>{
-  const normal=edge("kin","sibling_of","me","lisa");
+  const normal=edge("kin","sister_of","me","lisa");
   expect(isEligibleRelationProof({...normal,targetEntityId:"me"},allowed([normal]))).toBe(false);
   expect(isEligibleRelationProof({...normal,evidenceQuote:""},allowed([normal]))).toBe(false);
   expect(isEligibleRelationProof({...normal,sourceRecordVersion:0},allowed([normal]))).toBe(false);
