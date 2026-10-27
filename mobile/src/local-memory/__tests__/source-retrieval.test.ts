@@ -203,7 +203,7 @@ test("transactional FTS triggers update, delete, and cascade with source segment
     await db.runAsync("DELETE FROM memory_extraction_segments WHERE id=?",[segment]);
     expect((await searchApprovedSourceSegments(db as never,"формулировка")).segments).toEqual([]);
     expect((await db.getFirstAsync<{n:number}>("SELECT count(*) AS n FROM memory_extraction_fts"))!.n).toBe(1);
-    await repo.purgeEntity(entity.id);
+    await db.runAsync("DELETE FROM memory_entities WHERE id=?",[entity.id]);
     expect((await db.getFirstAsync<{n:number}>("SELECT count(*) AS n FROM memory_extraction_fts"))!.n).toBe(0);
   } finally {db.close();}
 });
