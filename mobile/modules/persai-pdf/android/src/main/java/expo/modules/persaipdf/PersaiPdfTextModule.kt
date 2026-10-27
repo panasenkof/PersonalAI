@@ -18,6 +18,11 @@ import java.net.URI
 class PersaiPdfTextModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("PersaiPdfText")
+    Function("isSupported") {
+      Build.VERSION.SDK_INT >= 35 ||
+        (Build.VERSION.SDK_INT >= 31 &&
+          SdkExtensions.getExtensionVersion(Build.VERSION_CODES.S) >= 13)
+    }
 
     AsyncFunction("extractPages") { uri: String, pageLimit: Int ->
       val api35 = Build.VERSION.SDK_INT >= 35
