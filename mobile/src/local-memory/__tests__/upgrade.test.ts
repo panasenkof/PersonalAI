@@ -98,7 +98,7 @@ test.each([false, true])("upgrading an installed v1 database (chats=%s) opens a 
   expect(await repo.revisions("entity", "note")).toHaveLength(1);
   expect(await repo.listCollections()).toMatchObject([{ id: "recipes", name: "Рецепты" }]);
   expect(mockVault.get(identity.keyName)).toBe("6".repeat(64));
-  expect(mockConnections[0].sqlite.prepare("PRAGMA user_version").get()).toMatchObject({ user_version: 9 });
+  expect(mockConnections[0].sqlite.prepare("PRAGMA user_version").get()).toMatchObject({ user_version: 10 });
   await closeLocalMemory();
   const reopened = conversationRepository("guest");
   expect((await reopened.load()).find(c => c.question === "Можно ввести сообщение")).toBeTruthy();
@@ -148,7 +148,7 @@ test("upgrading v2 to v3 types the records, splits long text into chunks and sea
   await installationV2();
   const repo = await localMemoryRepository("guest");
   const db = mockConnections[0].sqlite;
-  expect(db.prepare("PRAGMA user_version").get()).toMatchObject({ user_version: 9 });
+  expect(db.prepare("PRAGMA user_version").get()).toMatchObject({ user_version: 10 });
   expect(await repo.entity("masha")).toMatchObject({ kind: "person", title: "Маша", record_version: 1 });
   expect(await repo.entity("dacha")).toMatchObject({ kind: "note" });
   expect(db.prepare("SELECT count(*) AS n FROM memory_chunks WHERE entity_id='dacha'").get().n).toBeGreaterThan(1);
@@ -193,7 +193,7 @@ test("v4 attachments upgrade keeps every byte and allows merging two originals",
   expect(Array.from(db.prepare("SELECT bytes FROM memory_attachment_parts").get().bytes)).toEqual([1,2,3]);
   db.prepare("INSERT INTO memory_attachments VALUES (?,?,?,?,?,?)").run("b", "n", "b.png", "image/png", 3, "now");
   expect(db.prepare("SELECT count(*) AS n FROM memory_attachments").get().n).toBe(2);
-  expect(db.prepare("PRAGMA user_version").get().user_version).toBe(9);
+  expect(db.prepare("PRAGMA user_version").get().user_version).toBe(10);
   expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   const repo = await localMemoryRepository("guest");
   expect((await repo.searchMemory("гарантия"))[0].entity.id).toBe("n");
@@ -245,7 +245,7 @@ test("v6 to v8 adds isolated hygiene and derived job tables without changing ori
   mockVault.set(identity.keyName + ".initialized", "yes");
   const repo = await localMemoryRepository("guest");
   const db = mockConnections[0].sqlite;
-  expect(db.prepare("PRAGMA user_version").get().user_version).toBe(9);
+  expect(db.prepare("PRAGMA user_version").get().user_version).toBe(10);
   expect(db.prepare("SELECT count(*) AS n FROM memory_cleanup_preferences").get().n).toBe(0);
   expect((await repo.entity("e"))?.payload.body).toBe("Не терять");
   expect(mockVault.get(identity.keyName)).toBe("6".repeat(64));
@@ -275,7 +275,7 @@ test("installed v7 SQLCipher migrates to v8 without touching notes, index rows o
   mockVault.set(identity.keyName + ".initialized", "yes");
   const repo = await localMemoryRepository("guest");
   const db = mockConnections[0].sqlite;
-  expect(db.prepare("PRAGMA user_version").get().user_version).toBe(9);
+  expect(db.prepare("PRAGMA user_version").get().user_version).toBe(10);
   expect((await repo.entity("e"))?.payload.body).toBe("Сохранённый разговор");
   expect(db.prepare("SELECT count(*) AS n FROM memory_chunks").get().n).toBe(1);
   expect(db.prepare("SELECT count(*) AS n FROM memory_search_fts").get().n).toBe(1);
@@ -308,10 +308,45 @@ test("real installed v8 database adds v9 evidence without touching ciphertext ke
   mockVault.set(identity.keyName+".initialized","yes");
   const repo=await localMemoryRepository("guest");
   const db=mockConnections[0].sqlite;
-  expect(db.prepare("PRAGMA user_version").get().user_version).toBe(9);
+  expect(db.prepare("PRAGMA user_version").get().user_version).toBe(10);
   expect((await repo.entity("e"))?.payload.body).toBe("Мой текст");
   expect(Array.from(db.prepare("SELECT bytes FROM memory_attachment_parts").get().bytes)).toEqual([1,2,3]);
   expect(db.prepare("SELECT count(*) AS n FROM memory_extractions").get().n).toBe(0);
+  expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+  expect(mockVault.get(identity.keyName)).toBe("6".repeat(64));
+});
+
+test("real installed v9 extraction evidence upgrades to v10 FTS without changing originals", async () => {
+  const { SCHEMA_SQL } = require("../storage");
+  const identity = await localMemoryIdentity("guest");
+  const legacy = new DatabaseSync(path.join(mockDirectory, identity.databaseName));
+  const schemaV9 = SCHEMA_SQL.replace(
+    /-- Derived encrypted FTS5:[\\s\\S]*?CREATE TABLE IF NOT EXISTS memory_received_shares \\(/,
+    "CREATE TABLE IF NOT EXISTS memory_received_shares (");
+  expect(schemaV9).not.toContain("tr_extraction_fts_insert");
+  legacy.exec(schemaV9);
+  legacy.exec(`PRAGMA user_version=9;
+    INSERT INTO memory_collections(id,name,slug,sensitivity,created_at)
+      VALUES ('c','Личное','notes','standard','now');
+    INSERT INTO memory_entities(id,collection_id,domain,title,payload_json,created_at,updated_at)
+      VALUES ('e','c','notes','Важная запись','{"body":"Мой оригинал"}','now','now');
+    INSERT INTO memory_attachments(id,entity_id,name,mime,size,created_at)
+      VALUES ('a','e','audio.wav','audio/wav',3,'now');
+    INSERT INTO memory_attachment_parts(attachment_id,ord,bytes,sha256)
+      VALUES ('a',0,X'010203','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+    INSERT INTO memory_extractions(id,attachment_id,source_version,producer_kind,producer_id,
+      producer_revision,coverage,status,created_at)
+      VALUES ('r','a','v1','asr','whisper','rev1','partial','partial','now');
+    INSERT INTO memory_extraction_segments(id,extraction_id,ord,text,location_kind)
+      VALUES ('s','r',0,'Осенний фестиваль','unknown');`);
+  legacy.close();
+  mockVault.set(identity.keyName,"6".repeat(64));
+  mockVault.set(identity.keyName+".initialized","yes");
+  const db=(await localMemoryRepository("guest"),mockConnections[0].sqlite);
+  expect(db.prepare("PRAGMA user_version").get().user_version).toBe(10);
+  expect(db.prepare("SELECT count(*) AS n FROM memory_extraction_segments").get().n).toBe(1);
+  expect(db.prepare("SELECT segment_id FROM memory_extraction_fts WHERE memory_extraction_fts MATCH ?").get('"фестиваль"').segment_id).toBe("s");
+  expect(Array.from(db.prepare("SELECT bytes FROM memory_attachment_parts").get().bytes)).toEqual([1,2,3]);
   expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   expect(mockVault.get(identity.keyName)).toBe("6".repeat(64));
 });
