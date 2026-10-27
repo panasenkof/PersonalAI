@@ -318,3 +318,45 @@ test("Unicode ASR transcript splits into valid SQLCipher segments without cuttin
   expect(texts.join("")).toBe(rich);
   expect(texts.every((text:string)=>text.length<=6000)).toBe(true);
 });
+
+test("real provider-reported ASR time intervals survive save and source FTS",async()=>{
+  mockFiles.set("file:///voice.mp3",new Uint8Array([1,2,3]));
+  const id=await saveMediaNote("guest",{
+    file:{uri:"file:///voice.mp3",name:"voice.mp3",mimeType:"audio/mpeg"},
+    title:"Расшифровка",body:"",sensitivity:"standard",
+    extractedText:"Проверенный текст и разбор",
+    recognitions:[{index:0,name:"voice.mp3",status:"success",text:"Привет мир",
+      segments:[
+        {text:"Привет",location:{kind:"time",startMs:0,endMs:1200}},
+        {text:"мир",location:{kind:"time",startMs:1200,endMs:2500}},
+      ]}],
+  });
+  const runs=sqlite.prepare(`SELECT r.producer_id,r.producer_revision,s.text,s.location_kind,
+    s.start_ms,s.end_ms FROM memory_extraction_segments s JOIN memory_extractions r
+    ON r.id=s.extraction_id JOIN memory_attachments a ON a.id=r.attachment_id
+    WHERE a.entity_id=? ORDER BY s.ord`).all(id);
+  expect(runs).toEqual([
+    expect.objectContaining({producer_id:"openai-whisper-1",producer_revision:"official-segment-time-v1",
+      text:"Привет",location_kind:"time",start_ms:0,end_ms:1200}),
+    expect.objectContaining({producer_id:"openai-whisper-1",
+      text:"мир",location_kind:"time",start_ms:1200,end_ms:2500}),
+  ]);
+  expect(sqlite.prepare("SELECT count(*) n FROM memory_extraction_fts WHERE memory_extraction_fts MATCH ?")
+    .get('"привет"').n).toBe(1);
+});
+
+test("forged ASR interval on image, overlapping or unbounded times fail before any writes",async()=>{
+  mockFiles.set("file:///voice.mp3",new Uint8Array([1,2,3]));
+  const voice={uri:"file:///voice.mp3",name:"voice.mp3",mimeType:"audio/mpeg"};
+  const image={index:0,name:"photo.png",status:"success" as const,text:"Изображение",
+    segments:[{text:"Изображение",location:{kind:"time" as const,startMs:0,endMs:1000}}]};
+  await expect(saveMediaNote("guest",{...input,recognitions:[image]}))
+    .rejects.toThrow("invalid_recognition_segments");
+  const overlapping={file:voice,title:"ASR",body:"",sensitivity:"standard" as const,
+    recognitions:[{index:0,name:"voice.mp3",status:"success" as const,text:"Привет мир",
+      segments:[{text:"Привет",location:{kind:"time" as const,startMs:0,endMs:1500}},
+        {text:"мир",location:{kind:"time" as const,startMs:1200,endMs:2500}}]}]};
+  await expect(saveMediaNote("guest",overlapping)).rejects.toThrow("invalid_recognition_segments");
+  for(const table of ["memory_entities","memory_extractions","memory_attachment_parts","memory_extraction_fts"])
+    expect(sqlite.prepare("SELECT count(*) n FROM "+table).get().n).toBe(0);
+});
