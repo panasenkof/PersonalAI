@@ -10,7 +10,7 @@ import { fingerprintExtractionSource } from "./extractions";
 import { withUnlockedTransaction } from "./transaction";
 import type { SourceLocation } from "./extractions";
 
-type SQL = Pick<SQLite.SQLiteDatabase, "getFirstAsync" | "getAllAsync" | "execAsync">;
+type SQL = Pick<SQLite.SQLiteDatabase, "getFirstAsync" | "getAllAsync" | "runAsync" | "execAsync">;
 type Row = Record<string, unknown>;
 const MAX_IDS = 128;
 const checkedId = (id: string): string => {
