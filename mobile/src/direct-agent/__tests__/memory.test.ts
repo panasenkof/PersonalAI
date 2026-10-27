@@ -22,6 +22,7 @@ function fake() {
       { id: "archived", collection_id: "standard", sensitivity: "standard", record_status: "archived",
         title: "Архив", payload: { body: "Нельзя отправлять" } },
     ].map(entity => ({ entity, chunk: "", score: 1 }))),
+    entity: jest.fn().mockResolvedValue(null),
     createEntity: jest.fn().mockResolvedValue({ id: "new-note" }),
     createCollection: jest.fn(async (c: any) => ({ id: c.slug, description: null, created_at: "2026-10-14", ...c })),
   };
