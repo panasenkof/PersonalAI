@@ -84,7 +84,7 @@ test("official Whisper-1 requests real segment timestamps in one approved upload
     { start: 0, end: 1.23, text: "Привет" },
     { start: 1.23, end: 3.5, text: "Как дела?" },
   ];
-  const transport = jest.fn(async () => ({ok:true,json:async()=>({
+  const transport = jest.fn(async (..._args:any[]) => ({ok:true,json:async()=>({
     text:"Привет Как дела?",duration:3.5,segments,
   })}));
   const captured=jest.fn();
@@ -105,7 +105,7 @@ test("official Whisper-1 requests real segment timestamps in one approved upload
 });
 
 test("broken vendor time positions are never passed to memory, but full plain text survives",async()=>{
-  const transport=jest.fn(async()=>({ok:true,json:async()=>({
+  const transport=jest.fn(async (..._args:any[])=>({ok:true,json:async()=>({
     text:"Слова остаются",duration:3,segments:[
       {start:0,end:1,text:"Слова"},
       {start:-3,end:2,text:"остаются"},
