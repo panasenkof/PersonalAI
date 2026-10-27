@@ -544,6 +544,10 @@ test("T2a rollback on decision journal disk-full and reject stale/invalid source
     raw:"1 января 2021",anchorDate:null,sourceTimeZone:null};
   await expect(decideTemporalReview(bridge,{...expected,choice:"accept",confirmedEnd:end}))
     .rejects.toThrow("temporal_end_before_start");
+  await expect(decideTemporalReview(bridge,{...expected,choice:"accept",
+    confirmedEnd:{normalized:"2021",precision:"year",raw:"В 2021 году",
+      anchorDate:null,sourceTimeZone:null}}))
+    .rejects.toThrow("temporal_end_before_start");
   const before=bridge.runAsync;
   bridge.runAsync=async (sql:string, params:unknown[]=[])=>{
     if (sql.startsWith("INSERT INTO memory_temporal_decisions")) throw new Error("disk_full_journal");
