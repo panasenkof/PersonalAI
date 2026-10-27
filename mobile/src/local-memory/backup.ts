@@ -31,6 +31,51 @@ const ENTITY_COLUMNS = "id,collection_id,domain,schema_version,title,payload_jso
   "source_kind,source_ref,valid_from,valid_until,created_at,updated_at,record_version";
 export const RESTORABLE_VERSIONS = [1, 2, 3, 4, 5, 6, 7];
 const MAX_BACKUP_BYTES = 2 * 1024 * 1024 * 1024;
+const MAX_RESTORABLE_ENTITIES = 100000;
+const TEMP_STORAGE_RESERVE_BYTES = 64 * 1024 * 1024;
+
+/**
+ * Conservative admission guard for the legacy single-file format. Free space
+ * may change during an operation; SQLite rollback and cleanup remain required.
+ */
+async function requireTemporarySpace(estimatedBytes: number, multiplier: number): Promise<void> {
+  if (!Number.isSafeInteger(estimatedBytes) || estimatedBytes <= 0) {
+    throw new Error("backup_preflight_unavailable");
+  }
+  let freeBytes: number;
+  try {
+    freeBytes = await FileSystem.getFreeDiskStorageAsync();
+  } catch {
+    throw new Error("backup_storage_unavailable");
+  }
+  if (!Number.isSafeInteger(freeBytes) || freeBytes < 0) {
+    throw new Error("backup_storage_unavailable");
+  }
+  if (freeBytes < Math.ceil(estimatedBytes * multiplier) + TEMP_STORAGE_RESERVE_BYTES) {
+    throw new Error("backup_insufficient_space");
+  }
+}
+
+/** Refuse to export a backup which exceeds the format's restore contract. */
+async function preflightLegacyExport(db: SQLite.SQLiteDatabase): Promise<void> {
+  const count = await db.getFirstAsync<{ n: number }>("SELECT count(*) AS n FROM memory_entities");
+  if (!count || !Number.isSafeInteger(count.n) || count.n < 0) {
+    throw new Error("backup_preflight_unavailable");
+  }
+  if (count.n > MAX_RESTORABLE_ENTITIES) throw new Error("backup_legacy_entity_limit");
+  const pages = await db.getFirstAsync<{ page_count: number }>("PRAGMA page_count");
+  const pageSize = await db.getFirstAsync<{ page_size: number }>("PRAGMA page_size");
+  if (!pages || !pageSize || !Number.isSafeInteger(pages.page_count) ||
+      !Number.isSafeInteger(pageSize.page_size) || pages.page_count <= 0 || pageSize.page_size <= 0) {
+    throw new Error("backup_preflight_unavailable");
+  }
+  const estimatedBytes = pages.page_count * pageSize.page_size;
+  if (!Number.isSafeInteger(estimatedBytes) || estimatedBytes > MAX_BACKUP_BYTES) {
+    throw new Error("backup_legacy_size_limit");
+  }
+  // Export may have encryption overhead. Its actual size is rechecked after writing.
+  await requireTemporarySpace(estimatedBytes, 1.25);
+}
 
 function checkedRecoveryCode(value: string): string {
   const code = value.trim().toLowerCase();
@@ -83,6 +128,7 @@ export async function shareEncryptedBackup(profileId: string, recoveryCode: stri
   try {
     await withLocalMemoryDatabase(profileId, async db => {
       try {
+        await preflightLegacyExport(db);
         await attach(db, "pia_export", path, code);
         attached = true;
         // sqlcipher_export copies *all* memory, provenance, relations,
@@ -125,6 +171,14 @@ export async function restoreEncryptedBackup(
   if (!sourceUri || !/^(content|file):\/\//.test(sourceUri)) throw new Error("invalid_backup_uri");
   const path = temporaryPath();
   try {
+    // Inspect content:// providers before filling private cache.
+    const sourceInfo = await FileSystem.getInfoAsync(sourceUri);
+    if (!sourceInfo.exists || sourceInfo.isDirectory || !Number.isSafeInteger(sourceInfo.size) ||
+        sourceInfo.size <= 0 || sourceInfo.size > MAX_BACKUP_BYTES) {
+      throw new Error("invalid_backup_size");
+    }
+    // Source copy plus destination pages, WAL and regenerated search index.
+    await requireTemporarySpace(sourceInfo.size, 3);
     await FileSystem.copyAsync({ from: sourceUri, to: path });
     const info = await FileSystem.getInfoAsync(path);
     if (!info.exists || info.isDirectory || !info.size || info.size > MAX_BACKUP_BYTES) {
@@ -160,7 +214,7 @@ export async function restoreEncryptedBackup(
         const incoming = await db.getFirstAsync<{ n: number }>(
           "SELECT count(*) AS n FROM pia_import.memory_entities",
         );
-        if (!incoming || incoming.n > 100000) throw new Error("invalid_backup_records");
+        if (!incoming || incoming.n > MAX_RESTORABLE_ENTITIES) throw new Error("invalid_backup_records");
         // Roll back *all* copied records if any table, FK or FTS operation
         // fails. Never replace a profile containing existing memory.
         // ATTACH and the SQLCipher key are scoped to this unlocked connection.
