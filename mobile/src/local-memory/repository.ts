@@ -7,7 +7,7 @@ import { openLocalMemory, withLocalMemoryDatabase } from "./storage";
 import { withUnlockedTransaction } from "./transaction";
 import { defaultKind, indexEntity, isMemoryKind, normalizeAlias } from "./search-index";
 import type { MemoryKind } from "./search-index";
-import { ftsPhrase, searchSteps } from "./query";
+import { ftsPhrase, requiredSearchEvidence, searchSteps } from "./query";
 import { MIN_SIMILARITY, cosine, embeddingHash, embeddingText, fromBlob, fuseRanks, toBlob } from "./vectors";
 import type {
   CollectionRecord, EntityRecord, MemoryHit, MemoryPage, MemoryRepository, NewEntity, NewObservation,
@@ -729,6 +729,25 @@ export class SqliteMemoryRepository implements MemoryRepository {
         const fused = fuseRanks([top.map(t => String(t.row.id)), near.map(n => String(n.row.id))]);
         top = [...scored.values()].sort((a, b) => (fused.get(String(b.row.id)) || 0) - (fused.get(String(a.row.id)) || 0) || a.order - b.order);
       }
+    }
+    const required = requiredSearchEvidence(query);
+    if (required.length) {
+      const verified: typeof top = [];
+      // Do not infer a negative statement or an exact year from a positive
+      // keyword/embedding hit. The original encrypted FTS is the evidence.
+      for (const candidate of top) {
+        let complete = true;
+        for (const phrase of required) {
+          const witness = await this.db.getFirstAsync<Row>(
+            "SELECT 1 AS ok FROM memory_search_fts WHERE memory_search_fts MATCH ? AND entity_id=? LIMIT 1",
+            [ftsPhrase(phrase), String(candidate.row.id)],
+          );
+          if (!witness) { complete = false; break; }
+        }
+        if (complete) verified.push(candidate);
+        if (verified.length >= limit) break;
+      }
+      top = verified;
     }
     top = top.slice(0, limit);
     const hits: MemoryHit[] = [];
