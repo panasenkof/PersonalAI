@@ -315,7 +315,7 @@ export async function restoreEncryptedBackup(
           const manifestRows = await db.getFirstAsync<{ n: number }>(
             "SELECT count(*) AS n FROM pia_import.persai_backup_manifest",
           );
-          if (manifestRows?.n !== 1 || !manifest || manifest.format_version !== MANIFEST_FORMAT_VERSION ||
+          if (manifestRows?.n !== 1 || !manifest ||
               manifest.schema_version !== version.user_version || !validBackupCounts(manifest) ||
               manifest.format_version !== (version.user_version >= 11 ? 2 : 1)) {
             throw new Error("backup_manifest_invalid");
