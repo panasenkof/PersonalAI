@@ -82,32 +82,35 @@ export function resolveDirectRelationConversationPaths(
   ].includes(relationKind)) {
     throw new Error("relational_role_invalid");
   }
-  const visible = edges.filter(e => isEligibleRelationProof(e,access) &&
-    (e.kind===relationKind || e.kind==="participant_of"));
-  // Discovery is ordered by the caller; the bounded subset is deliberately
-  // partial, not proof that no later valid path exists.
-  const limited=visible.slice(0,MAX_EDGES);
+  // Two passes avoid the "256 unrelated participants before one relevant
+  // relative" failure. Query-time ACL and exact role are both essential.
+  // Bounded maps/results, linear over already-scoped input, no N² traversal.
   const related=new Map<string,string>();
-  for(const edge of limited) {
-    if(edge.kind===relationKind && edge.sourceEntityId===ownPersonId &&
-       !related.has(edge.targetEntityId)) {
-      related.set(edge.targetEntityId,edge.id);
-    }
+  let overflow=false;
+  for(const edge of edges) {
+    if(edge.kind!==relationKind || edge.sourceEntityId!==ownPersonId ||
+       !isEligibleRelationProof(edge,access)) continue;
+    if(related.has(edge.targetEntityId)) continue;
+    if(related.size>=MAX_EDGES) {overflow=true;break;}
+    related.set(edge.targetEntityId,edge.id);
   }
   const paths:RelativeConversation[]=[];
   const seen=new Set<string>();
-  for(const edge of limited) {
-    if(edge.kind!=="participant_of") continue;
-    const proof=related.get(edge.targetEntityId);
-    if(!proof) continue;
+  let relevantParticipants=0;
+  for(const edge of edges) {
+    if(edge.kind!=="participant_of" || !related.has(edge.targetEntityId) ||
+       !isEligibleRelationProof(edge,access)) continue;
+    if(relevantParticipants>=MAX_EDGES) {overflow=true;break;}
+    relevantParticipants++;
     const key=edge.sourceEntityId+"\u0000"+edge.targetEntityId;
     if(seen.has(key)) continue;
     seen.add(key);
     paths.push({conversationId:edge.sourceEntityId,relativeId:edge.targetEntityId,
-      relationEvidenceId:proof,participantEvidenceId:edge.id});
+      relationEvidenceId:related.get(edge.targetEntityId)!,
+      participantEvidenceId:edge.id});
   }
   return {paths:paths.slice(0,MAX_PATHS),
-    truncated:visible.length>MAX_EDGES || paths.length>MAX_PATHS};
+    truncated:overflow || paths.length>MAX_PATHS};
 }
 
 /** Backwards-compatible strict sister query; a generic sibling does not qualify. */
