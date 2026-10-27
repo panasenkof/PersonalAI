@@ -164,8 +164,8 @@ export class SqliteMemoryRepository implements MemoryRepository {
           validPayload(payload), record.record_status, record.sensitivity,
           record.source_kind, record.source_ref, record.valid_from, null, timestamp, timestamp, 1, kind],
       );
-      await indexEntity(tx, id, timestamp);
       if (writeAttachment) await writeAttachment(tx, id);
+      await indexEntity(tx, id, timestamp);
     });
     return record;
   }
@@ -211,8 +211,8 @@ export class SqliteMemoryRepository implements MemoryRepository {
         [uid(), "entity", id, null, after.record_version, reason.trim(), "user",
           JSON.stringify(before), JSON.stringify(after), timestamp],
       );
-      await indexEntity(tx, id, timestamp);
       if (writeAttachment) await writeAttachment(tx, id);
+      await indexEntity(tx, id, timestamp);
       updated = after;
     });
     if (!updated) throw new Error("revision_not_committed");
@@ -271,13 +271,16 @@ export class SqliteMemoryRepository implements MemoryRepository {
       valid_from: null, valid_until: null, source_kind: item.source_kind ?? null,
       source_ref: item.source_ref ?? null, confidence: null, record_version: 1,
     };
-    await this.db.runAsync(
-      `INSERT INTO memory_observations(
-      id,entity_id,kind,payload_json,occurred_at,created_at,sensitivity,valid_from,valid_until,
-      source_kind,source_ref,confidence,record_version) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [id, item.entity_id, item.kind, validPayload(record.payload), item.occurred_at, timestamp,
-        record.sensitivity, null, null, record.source_kind, record.source_ref, null, 1],
-    );
+    await withUnlockedTransaction(this.db, async tx => {
+      await tx.runAsync(
+        `INSERT INTO memory_observations(
+        id,entity_id,kind,payload_json,occurred_at,created_at,sensitivity,valid_from,valid_until,
+        source_kind,source_ref,confidence,record_version) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [id, item.entity_id, item.kind, validPayload(record.payload), item.occurred_at, timestamp,
+          record.sensitivity, null, null, record.source_kind, record.source_ref, null, 1],
+      );
+      await indexEntity(tx, item.entity_id, timestamp);
+    });
     return record;
   }
 
@@ -303,6 +306,7 @@ export class SqliteMemoryRepository implements MemoryRepository {
         [uid(), "observation", null, id, after.record_version, reason.trim(), "user",
           JSON.stringify(before), JSON.stringify(after), now()],
       );
+      await indexEntity(tx, before.entity_id);
       updated = after;
     });
     if (!updated) throw new Error("revision_not_committed");
