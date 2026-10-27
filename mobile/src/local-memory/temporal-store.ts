@@ -11,6 +11,7 @@ import {
 import { withUnlockedTransaction } from "./transaction";
 
 type SQL = Pick<SQLite.SQLiteDatabase, "getFirstAsync" | "runAsync" | "execAsync">;
+type ScanSQL = SQL & Pick<SQLite.SQLiteDatabase, "getAllAsync">;
 type ClaimRow = {
   id: string; entity_id: string; source_record_version: number;
   subject_id: string | null; predicate: string; context: string; value: string;
@@ -38,27 +39,33 @@ export async function stageTemporalCandidate(
   validateTemporalClaim(candidate);
   const id = uid(), evidenceId = uid();
   await withUnlockedTransaction(db, async tx => {
-    await requireCurrentSource(tx, candidate.evidence.entityId, candidate.evidence.recordVersion);
-    await tx.runAsync(
-      "INSERT INTO memory_temporal_claims " +
-      "(id,entity_id,source_record_version,subject_id,predicate,context,value,temporal_kind," +
-      "modality,negated,cardinality,started_json,ended_json,end_confirmed," +
-      "knowledge_recorded_at,claim_version) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)",
-      [id,candidate.evidence.entityId,candidate.evidence.recordVersion,candidate.subjectId,
-       candidate.predicate,candidate.context,candidate.value,candidate.kind,candidate.modality,
-       candidate.negated ? 1 : 0,candidate.cardinality,
-       candidate.occurredOrStarted === null ? null : JSON.stringify(candidate.occurredOrStarted),
-       candidate.ended === null ? null : JSON.stringify(candidate.ended),
-       candidate.endConfirmed ? 1 : 0,candidate.recordedAt],
-    );
-    await tx.runAsync(
-      "INSERT INTO memory_temporal_evidence " +
-      "(id,claim_id,entity_id,source_record_version,quote,origin,created_at) VALUES (?,?,?,?,?,?,?)",
-      [evidenceId,id,candidate.evidence.entityId,candidate.evidence.recordVersion,
-       candidate.evidence.quote,candidate.evidence.origin,candidate.recordedAt],
-    );
+    await insertTemporalCandidate(tx, candidate, id, evidenceId);
   });
   return id;
+}
+
+async function insertTemporalCandidate(
+  db: SQL, candidate: TemporalClaimCandidate, id: string, evidenceId: string,
+): Promise<void> {
+  await requireCurrentSource(db, candidate.evidence.entityId, candidate.evidence.recordVersion);
+  await db.runAsync(
+    "INSERT INTO memory_temporal_claims " +
+    "(id,entity_id,source_record_version,subject_id,predicate,context,value,temporal_kind," +
+    "modality,negated,cardinality,started_json,ended_json,end_confirmed," +
+    "knowledge_recorded_at,claim_version) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)",
+    [id,candidate.evidence.entityId,candidate.evidence.recordVersion,candidate.subjectId,
+     candidate.predicate,candidate.context,candidate.value,candidate.kind,candidate.modality,
+     candidate.negated ? 1 : 0,candidate.cardinality,
+     candidate.occurredOrStarted === null ? null : JSON.stringify(candidate.occurredOrStarted),
+     candidate.ended === null ? null : JSON.stringify(candidate.ended),
+     candidate.endConfirmed ? 1 : 0,candidate.recordedAt],
+  );
+  await db.runAsync(
+    "INSERT INTO memory_temporal_evidence " +
+    "(id,claim_id,entity_id,source_record_version,quote,origin,created_at) VALUES (?,?,?,?,?,?,?)",
+    [evidenceId,id,candidate.evidence.entityId,candidate.evidence.recordVersion,
+     candidate.evidence.quote,candidate.evidence.origin,candidate.recordedAt],
+  );
 }
 
 function fromRow(row: ClaimRow): TemporalClaimCandidate {
@@ -121,6 +128,98 @@ export async function stageTemporalReviewProposal(
        incoming.claim.recordedAt,incoming.claim.recordedAt],
     );
     result = id;
+  });
+  return result;
+}
+
+
+/** T2b: one bounded *same-collection standard-scope* scan on explicit typed input.
+ *
+ * Caller still owns the decision to extract/submit a claim and must provide a
+ * stable source revision. This API never executes a background LLM or resolves
+ * identities by names. A result is a proposal, not an accepted current fact.
+ */
+export type TemporalStagedReview = {
+  claimId: string;
+  proposalIds: string[];
+  /** True means candidate search was capped and is NOT exhaustive. */
+  truncated: boolean;
+  /** Protected/unclassified sources are preserved, but never cross-scope scanned. */
+  reviewScope: "standard" | "skipped_privacy" | "not_eligible";
+};
+const MAX_TEMPORAL_PREVIOUS = 32;
+
+type EligibleSource = {
+  collection_id: string; collection_sensitivity: string; entity_sensitivity: string;
+};
+type ExistingReview = { id: string };
+type PreviousReviewCandidate = { id: string };
+
+export async function stageTemporalCandidateWithReview(
+  db: ScanSQL, candidate: TemporalClaimCandidate,
+): Promise<TemporalStagedReview> {
+  validateTemporalClaim(candidate);
+  const id = uid(), evidenceId = uid();
+  const result: TemporalStagedReview = {
+    claimId:id,proposalIds:[],truncated:false,reviewScope:"not_eligible",
+  };
+  await withUnlockedTransaction(db, async tx => {
+    // A single transaction guards both source revision and candidate discovery.
+    await insertTemporalCandidate(tx,candidate,id,evidenceId);
+    if (candidate.kind !== "state" || candidate.cardinality !== "single" ||
+        !candidate.subjectId || candidate.modality !== "asserted" ||
+        candidate.negated || candidate.endConfirmed || candidate.evidence.origin !== "direct") return;
+    const source = await tx.getFirstAsync<EligibleSource>(
+      "SELECT e.collection_id, col.sensitivity AS collection_sensitivity," +
+      "e.sensitivity AS entity_sensitivity FROM memory_entities e " +
+      "JOIN memory_collections col ON col.id=e.collection_id " +
+      "WHERE e.id=? AND e.record_version=? AND e.record_status='active'",
+      [candidate.evidence.entityId,candidate.evidence.recordVersion],
+    );
+    if (!source) throw new Error("temporal_source_stale");
+    // Deliberately avoid cross-collection and private/unclassified metadata
+    // disclosure. A future user-scoped review API may support them separately.
+    if (source.collection_sensitivity !== "standard" ||
+        !["standard","inherit"].includes(source.entity_sensitivity)) {
+      result.reviewScope = "skipped_privacy"; return;
+    }
+    result.reviewScope = "standard";
+    const previous = await tx.getAllAsync<PreviousReviewCandidate>(
+      "SELECT c.id FROM memory_temporal_claims c " +
+      "JOIN memory_entities e ON e.id=c.entity_id " +
+      "AND e.record_version=c.source_record_version AND e.record_status='active' " +
+      "JOIN memory_collections col ON col.id=e.collection_id " +
+      "WHERE c.subject_id=? AND c.predicate=? AND c.context=? " +
+      "AND c.id<>? AND c.temporal_kind='state' AND c.modality='asserted' " +
+      "AND c.negated=0 AND c.cardinality='single' AND c.end_confirmed=0 " +
+      "AND c.knowledge_recorded_at<=? AND e.collection_id=? " +
+      "AND col.sensitivity='standard' AND e.sensitivity IN ('standard','inherit') " +
+      "ORDER BY c.knowledge_recorded_at DESC,c.id DESC LIMIT ?",
+      [candidate.subjectId,candidate.predicate,candidate.context,id,
+       candidate.recordedAt,source.collection_id,MAX_TEMPORAL_PREVIOUS+1],
+    );
+    result.truncated=previous.length>MAX_TEMPORAL_PREVIOUS;
+    // Leave the latest 32 candidates unchanged; old events, unresolved
+    // identities and other roles are never closed merely due to new notes.
+    for (const row of previous.slice(0,MAX_TEMPORAL_PREVIOUS)) {
+      const before = await readCurrentCandidate(tx,row.id);
+      const kind = compareTemporalCandidates(before.claim,candidate);
+      if (kind !== "possible_change" && kind !== "possible_reconfirmation") continue;
+      const already = await tx.getFirstAsync<ExistingReview>(
+        "SELECT id FROM memory_temporal_proposals WHERE previous_claim_id=? AND incoming_claim_id=?",
+        [row.id,id],
+      );
+      if (already) continue; // preserve previous reject/defer/accept decisions
+      const proposalId=uid();
+      await tx.runAsync(
+        "INSERT INTO memory_temporal_proposals " +
+        "(id,previous_claim_id,incoming_claim_id,review_kind,status,previous_version," +
+        "incoming_version,proposal_version,created_at,updated_at) " +
+        "VALUES (?,?,?,?,'pending',?,?,1,?,?)",
+        [proposalId,row.id,id,kind,before.version,1,candidate.recordedAt,candidate.recordedAt],
+      );
+      result.proposalIds.push(proposalId);
+    }
   });
   return result;
 }

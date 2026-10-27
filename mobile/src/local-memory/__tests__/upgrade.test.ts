@@ -566,3 +566,112 @@ test("T2a rollback on decision journal disk-full and reject stale/invalid source
   await expect(decideTemporalReview(bridge,{...expected,choice:"defer"}))
     .rejects.toThrow("temporal_source_stale");
 });
+
+
+test("T2b atomically stages typed state and bounded same-scope review, never closes old state", async () => {
+  const { stageTemporalCandidate, stageTemporalCandidateWithReview } = require("../temporal-store");
+  await openLocalMemory("guest");
+  const bridge=mockConnections[0], db=bridge.sqlite;
+  db.prepare("INSERT INTO memory_collections(id,name,slug,sensitivity,created_at) VALUES ('people','Люди','people','standard','now')").run();
+  for (const id of ["old","new","event"]) {
+    db.prepare("INSERT INTO memory_entities(id,collection_id,domain,payload_json,created_at,updated_at) VALUES (?,'people','notes','{}','now','now')").run(id);
+  }
+  const make=(entityId:string,value:string,kind:"state"|"event"="state"):import("../temporal-claims").TemporalClaimCandidate=>({
+    recordedAt:"2026-10-27T12:00:00.000Z",subjectId:"person-1",predicate:"employment",
+    context:"primary",value,kind,modality:"asserted",negated:false,cardinality:"single",
+    occurredOrStarted:null,ended:null,endConfirmed:false,
+    evidence:{entityId,recordVersion:1,quote:"Я работаю в "+value,origin:"direct"},
+  });
+  const a=await stageTemporalCandidate(bridge,make("old","А"));
+  const event=await stageTemporalCandidate(bridge,make("event","Техническая проверка","event"));
+  const staged=await stageTemporalCandidateWithReview(bridge,make("new","Б"));
+  expect(staged.reviewScope).toBe("standard");
+  expect(staged.truncated).toBe(false);
+  expect(staged.proposalIds).toHaveLength(1);
+  expect(db.prepare("SELECT previous_claim_id,incoming_claim_id,review_kind,status FROM memory_temporal_proposals").get())
+    .toMatchObject({previous_claim_id:a,incoming_claim_id:staged.claimId,
+      review_kind:"possible_change",status:"pending"});
+  expect(db.prepare("SELECT count(*) AS n FROM memory_temporal_evidence").get().n).toBe(3);
+  expect(db.prepare("SELECT end_confirmed,ended_json FROM memory_temporal_claims WHERE id=?").get(a))
+    .toMatchObject({end_confirmed:0,ended_json:null});
+  expect(db.prepare("SELECT count(*) AS n FROM memory_temporal_proposals WHERE previous_claim_id=?").get(event).n).toBe(0);
+  expect(db.prepare("SELECT count(*) AS n FROM memory_temporal_decisions").get().n).toBe(0);
+  expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+});
+
+test("T2b never scans unclassified or cross-collection evidence; event input has no state review", async () => {
+  const { stageTemporalCandidate, stageTemporalCandidateWithReview } = require("../temporal-store");
+  await openLocalMemory("guest");
+  const bridge=mockConnections[0],db=bridge.sqlite;
+  for (const [id,sensitivity] of [["standard","standard"],["other","standard"],["private","private"],["unknown","unclassified"]]) {
+    db.prepare("INSERT INTO memory_collections(id,name,slug,sensitivity,created_at) VALUES (?,?,?,?, 'now')").run(id,id,id,sensitivity);
+    db.prepare("INSERT INTO memory_entities(id,collection_id,domain,payload_json,created_at,updated_at) VALUES (? ,?,'notes','{}','now','now')").run(id,id);
+  }
+  const make=(entityId:string,value:string,kind:"state"|"event"="state"):import("../temporal-claims").TemporalClaimCandidate=>({
+    recordedAt:"2026-10-27T12:00:00.000Z",subjectId:"person-1",predicate:"employment",
+    context:"primary",value,kind,modality:"asserted",negated:false,cardinality:"single",
+    occurredOrStarted:null,ended:null,endConfirmed:false,
+    evidence:{entityId,recordVersion:1,quote:"Работаю в "+value,origin:"direct"},
+  });
+  await stageTemporalCandidate(bridge,make("other","А"));
+  await stageTemporalCandidate(bridge,make("private","Секрет"));
+  await stageTemporalCandidate(bridge,make("unknown","Неизвестно"));
+  const result=await stageTemporalCandidateWithReview(bridge,make("standard","Б"));
+  expect(result).toMatchObject({proposalIds:[],reviewScope:"standard",truncated:false});
+  const hidden=await stageTemporalCandidateWithReview(bridge,make("private","В"));
+  expect(hidden).toMatchObject({proposalIds:[],reviewScope:"skipped_privacy"});
+  const unclassified=await stageTemporalCandidateWithReview(bridge,make("unknown","Г"));
+  expect(unclassified).toMatchObject({proposalIds:[],reviewScope:"skipped_privacy"});
+  const event=await stageTemporalCandidateWithReview(bridge,make("standard","Замена свечей","event"));
+  expect(event).toMatchObject({proposalIds:[],reviewScope:"not_eligible"});
+  expect(db.prepare("SELECT count(*) AS n FROM memory_temporal_proposals").get().n).toBe(0);
+});
+
+test("T2b rolls back claim+evidence when proposal write fails or source revision changes", async () => {
+  const { stageTemporalCandidate, stageTemporalCandidateWithReview } = require("../temporal-store");
+  await openLocalMemory("guest");
+  const bridge=mockConnections[0],db=bridge.sqlite;
+  db.prepare("INSERT INTO memory_collections(id,name,slug,sensitivity,created_at) VALUES ('p','Люди','p','standard','now')").run();
+  for (const id of ["old","new"]) db.prepare("INSERT INTO memory_entities(id,collection_id,domain,payload_json,created_at,updated_at) VALUES (?,'p','notes','{}','now','now')").run(id);
+  const make=(entityId:string,value:string):import("../temporal-claims").TemporalClaimCandidate=>({
+    recordedAt:"2026-10-27T12:00:00.000Z",subjectId:"person-1",predicate:"employment",
+    context:"primary",value,kind:"state",modality:"asserted",negated:false,cardinality:"single",
+    occurredOrStarted:null,ended:null,endConfirmed:false,
+    evidence:{entityId,recordVersion:1,quote:"Работаю в "+value,origin:"direct"},
+  });
+  await stageTemporalCandidate(bridge,make("old","А"));
+  const previous=bridge.runAsync;
+  bridge.runAsync=async(sql:string,params:unknown[]=[])=>{
+    if (sql.startsWith("INSERT INTO memory_temporal_proposals")) throw new Error("simulated_proposal_disk_full");
+    return previous(sql,params);
+  };
+  await expect(stageTemporalCandidateWithReview(bridge,make("new","Б")))
+    .rejects.toThrow("simulated_proposal_disk_full");
+  bridge.runAsync=previous;
+  expect(db.prepare("SELECT count(*) AS n FROM memory_temporal_claims").get().n).toBe(1);
+  expect(db.prepare("SELECT count(*) AS n FROM memory_temporal_evidence").get().n).toBe(1);
+  expect(db.prepare("SELECT count(*) AS n FROM memory_temporal_proposals").get().n).toBe(0);
+  db.prepare("UPDATE memory_entities SET record_version=2 WHERE id='new'").run();
+  await expect(stageTemporalCandidateWithReview(bridge,make("new","Б")))
+    .rejects.toThrow("temporal_source_stale");
+  expect(db.prepare("SELECT count(*) AS n FROM memory_temporal_claims").get().n).toBe(1);
+});
+
+test("T2b review scan is capped at 32 and reports incomplete history", async () => {
+  const { stageTemporalCandidate, stageTemporalCandidateWithReview } = require("../temporal-store");
+  await openLocalMemory("guest");
+  const bridge=mockConnections[0],db=bridge.sqlite;
+  db.prepare("INSERT INTO memory_collections(id,name,slug,sensitivity,created_at) VALUES ('p','Люди','p','standard','now')").run();
+  for (const id of ["old","new"]) db.prepare("INSERT INTO memory_entities(id,collection_id,domain,payload_json,created_at,updated_at) VALUES (?,'p','notes','{}','now','now')").run(id);
+  const make=(entityId:string,value:string):import("../temporal-claims").TemporalClaimCandidate=>({
+    recordedAt:"2026-10-27T12:00:00.000Z",subjectId:"person-1",predicate:"employment",
+    context:"primary",value,kind:"state",modality:"asserted",negated:false,cardinality:"single",
+    occurredOrStarted:null,ended:null,endConfirmed:false,
+    evidence:{entityId,recordVersion:1,quote:"Работаю в "+value,origin:"direct"},
+  });
+  for(let i=0;i<33;i++) await stageTemporalCandidate(bridge,make("old","Предыдущая "+i));
+  const staged=await stageTemporalCandidateWithReview(bridge,make("new","Следующая"));
+  expect(staged).toMatchObject({reviewScope:"standard",truncated:true});
+  expect(staged.proposalIds).toHaveLength(32);
+  expect(db.prepare("SELECT count(*) AS n FROM memory_temporal_proposals").get().n).toBe(32);
+});

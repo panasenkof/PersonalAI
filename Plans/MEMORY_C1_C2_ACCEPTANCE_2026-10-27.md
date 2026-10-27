@@ -1,6 +1,6 @@
 # C1/C2 приёмка памяти PersAI — 27.10.2026
 
-**Единственная очередь:** PLAN.md §2. №72.1/T1b SQLCipher v11: added test cases for v10 migration rollback, source-versioned claims and evidence, non-applying proposal, v11 backup count symmetry and old manifests; **not PASS before required CI exact SHA and Android native gate**. No claim about device-backed restore without device evidence. T2a (#169) добавляет синтетические проверки explicit unknown end, keep_both, CAS, source stale, undo и журнал rollback; CI точного SHA и Android C2 до завершения прогонов — NOT VERIFIED. Здесь доказательства и классификация проверок, а не новый roadmap или этап №72/66.4.
+**Единственная очередь:** PLAN.md §2. №72.1/T1b SQLCipher v11: added test cases for v10 migration rollback, source-versioned claims and evidence, non-applying proposal, v11 backup count symmetry and old manifests; **C1 required CI PASS на PR #168; физический телефон для restore не проверен**. No claim about device-backed restore without device evidence. T2a (#169) добавляет синтетические проверки explicit unknown end, keep_both, CAS, source stale, undo и журнал rollback; CI точного SHA и Android C2 до завершения прогонов — NOT VERIFIED. Здесь доказательства и классификация проверок, а не новый roadmap или этап №72/66.4.
 
 ## Автоматически проверяется
 - №63а.1: #134/#141/#146/#151 — SQLCipher encrypted manifest, совместимость v1–v7, запись Android Share receipts, защита от неверного ключа, обрыва, нехватки места и потери строк. Jest edge-case/rollback и native Android SQLCipher build/emulator Maestro smoke. Mock >2 GiB и 100001 entity **не равен** настоящему многогигабайтному восстановлению.
@@ -25,3 +25,5 @@
 
 ## Очистка
 Synthetic corpus — SQLite :memory: с close() в finally; в пользовательский SQLCipher и UI не добавлены QA-страницы, debug seed и тестовые записи. Очищать приложение после проверки не требуется. CI лог без личных данных с retention 7 суток, APK артефакт 3 суток. Постоянные regression tests не являются мусором и остаются.
+
+**№72.2/T2b (текущий PR):** Синтетические C1: атомарная запись typed claim + evidence + bounded proposals, сравнение state А→Б без auto-close, event independence, standard same-collection ACL, skipped_privacy для unclassified/private, disk-full rollback, stale source, cap32/truncated. До CI exact SHA status PENDING. Native SQLCipher и реальный UI C2 NOT VERIFIED.
