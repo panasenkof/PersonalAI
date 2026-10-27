@@ -73,3 +73,14 @@ test("vectors: cosine, BLOB round trip and rank fusion", () => {
   const fused = fuseRanks([["x", "y"], ["z", "x"]]);
   expect([...fused.entries()].sort((p, q) => q[1] - p[1])[0][0]).toBe("x");
 });
+
+
+test("negation and exact year require literal source evidence, rather than an unrelated positive hit", () => {
+  const { requiredSearchEvidence } = require("../query");
+  expect(requiredSearchEvidence("Кто не любит кофе в 2025 году?")).toEqual(["не любит", "2025"]);
+  expect(searchSteps("Кто не любит кофе в 2025 году?")).toContainEqual({
+    term: "не любит", prefix: false, weight: 6,
+  });
+  expect(requiredSearchEvidence("Событие в 2024, а не 2025?")).toEqual(["2024"]);
+  expect(requiredSearchEvidence("Что не стоит готовить мне на ужин?")).toEqual([]);
+});

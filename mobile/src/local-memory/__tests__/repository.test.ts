@@ -458,3 +458,20 @@ test("attachment metadata is searchable on create and append only after atomic c
   });
   expect((await repo.searchMemory("warranty2025")).map(v => v.entity.id)).toContain(file.id);
 });
+
+
+test("search requiring negation and year does not return affirmative or wrong-year records", async () => {
+  const repo = new SqliteMemoryRepository(new FakeSqlite() as never);
+  const col = await repo.createCollection({ name: "Факты", slug: "notes", sensitivity: "standard" });
+  const positive = await repo.createEntity({ collection_id: col.id, domain: "notes",
+    title: "Про кофе", payload: { body: "Любит кофе с 2025 года" } });
+  const negative = await repo.createEntity({ collection_id: col.id, domain: "notes",
+    title: "Про кофе", payload: { body: "Не любит кофе в 2025 году" } });
+  const old = await repo.createEntity({ collection_id: col.id, domain: "notes",
+    title: "Про кофе", payload: { body: "Не любит кофе в 2024 году" } });
+  const found = await repo.searchMemory("Кто не любит кофе в 2025?");
+  expect(found.map(h => h.entity.id)).toContain(negative.id);
+  expect(found.map(h => h.entity.id)).not.toContain(positive.id);
+  expect(found.map(h => h.entity.id)).not.toContain(old.id);
+  expect(await repo.searchMemory("Кто не любит кофе в 2023?")).toEqual([]);
+});

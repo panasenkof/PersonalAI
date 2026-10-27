@@ -33,6 +33,24 @@ export function wordStem(word: string): string {
  * («шеф» from «шефа») is too broad for the text but fine for chosen words. */
 export type MemorySearchStep = { term: string; prefix: boolean; weight: number; column?: "terms" };
 
+/** Literal facts that MUST occur in a matched source. Without such a gate,
+ * lexical/semantic rank fusion can answer a negated or dated question from an
+ * unrelated affirmative note. The gate is deliberately conservative: it
+ * protects against false positives, not a substitute for temporal claims. */
+export function requiredSearchEvidence(query: string): string[] {
+  const tail = query.trim();
+  const exceptYears = new Set([...tail.matchAll(/(?:^|[^\p{L}])не\s+((?:19|20)\d{2})(?!\d)/giu)].map(m => m[1]));
+  const years = [...tail.matchAll(/\b(?:19|20)\d{2}\b/g)]
+    .map(m => m[0]).filter(year => !exceptYears.has(year));
+  // Negated helper verbs are an instruction about the answer, NOT evidence
+  // that the source must literally contain the phrase «не стоит».
+  const helpers = new Set(["стоит", "нужно", "надо", "следует", "показывай", "ищи"]);
+  const negations = [...tail.matchAll(/(?:^|[^\p{L}])не\s+([\p{L}][\p{L}\p{N}-]{2,})/giu)]
+    .map(m => m[1].toLowerCase()).filter(word => !helpers.has(word))
+    .map(word => "не " + word);
+  return [...new Set([...negations.slice(0, 3), ...years.slice(0, 4)])];
+}
+
 /** Searches from the most specific to the broadest. A question about the user
  * («что ты знаешь обо мне») returns one empty search: the latest records. */
 export function searchSteps(query: string): MemorySearchStep[] {
@@ -58,6 +76,7 @@ export function searchSteps(query: string): MemorySearchStep[] {
   const stemOf = (w: string) => names.has(w) ? w.replace(/(ой|ей|ею|ою|[аяеиыуюо])$/u, "") : wordStem(w);
   const stems = words.map(w => ({ term: stemOf(w), word: w })).filter(s => s.term !== s.word);
   return [
+    ...requiredSearchEvidence(q).map(term => ({ term, prefix: false, weight: 6 })),
     ...(q.length <= 160 ? [{ term: q, prefix: false, weight: 4 }] : []),
     ...words.map(w => ({ term: w, prefix: false, weight: 2 })),
     // A stem shorter than four letters («как», «лет») matches too much; names may be shorter.
