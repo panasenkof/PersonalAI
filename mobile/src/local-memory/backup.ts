@@ -227,6 +227,9 @@ export async function restoreEncryptedBackup(
     if (!info.exists || info.isDirectory || !Number.isSafeInteger(info.size) || !info.size) {
       throw new Error("invalid_backup_size");
     }
+    // A malicious/buggy content provider may truncate the stream during copy.
+    // Never treat a partial cache file as a valid archive.
+    if (info.size !== sourceInfo.size) throw new Error("backup_source_size_mismatch");
     return await withLocalMemoryDatabase(profileId, async db => {
       let attached = false;
       try {
