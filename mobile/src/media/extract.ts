@@ -113,7 +113,7 @@ async function extractMediaCore(file: ImportFile, settings: DirectAgentSettings,
   onTimedSegments?: (segments: ExtractionSegmentInput[]) => void): Promise<string> {
   const kind = mediaKind(file);
   check(signal);
-  await fileSize(file, (kind === "video" ? 80 : kind === "text" ? 1 : kind === "image" ? 8 : 20) * 1024 * 1024);
+  await fileSize(file, (kind === "video" || kind === "document" ? 80 : kind === "text" ? 1 : kind === "image" ? 8 : 20) * 1024 * 1024);
   if (kind === "document") {
     const pages=await extractPdfPages(file,signal);
     check(signal);
