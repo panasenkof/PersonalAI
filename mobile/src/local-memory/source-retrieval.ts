@@ -210,8 +210,8 @@ export async function searchApprovedSourceSegments(db: SQL, query: string, limit
               s.id AS segment_id,s.ord,s.location_kind,s.page,s.start_ms,s.end_ms,
               s.char_start,s.char_end,substr(s.text,1,220) AS preview,
               length(s.text) AS total_chars
-         FROM memory_extraction_fts f
-         JOIN memory_extraction_segments s ON s.id=f.segment_id
+         FROM memory_extraction_fts
+         JOIN memory_extraction_segments s ON s.id=memory_extraction_fts.segment_id
          JOIN memory_extractions r ON r.id=s.extraction_id
          JOIN memory_attachments a ON a.id=r.attachment_id
          JOIN memory_entities e ON e.id=a.entity_id
