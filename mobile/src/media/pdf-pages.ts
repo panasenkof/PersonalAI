@@ -4,7 +4,7 @@ import type { ExtractionSegmentInput } from "../local-memory/extractions";
 import type { ImportFile } from "./kinds";
 
 type Page = { page: number; text: string };
-type NativePdf = { extractPages: (uri: string, limit: number) => Promise<unknown> };
+type NativePdf = { extractPages: (uri: string, limit: number) => Promise<unknown>; isAvailable?: () => boolean };
 export type PdfTextPages = {
   text: string; segments: ExtractionSegmentInput[];
   coverage: "partial"; extractedPageCount: number;
@@ -44,8 +44,8 @@ export function validateNativePdfPages(value: unknown): PdfTextPages {
   return {text,segments,coverage:"partial",extractedPageCount:value.length};
 }
 /** Local digital PDF text layer only. No OCR, no network, no hidden upload.
- * Availability is limited to Android 15+ pending a reviewed older-Android
- * implementation; saving the encrypted original still works on other phones.
+ * Supports Android 15+ and Android 12–14 only with system S Extensions 13+.
+ * Android 9–11 and unsupported devices still retain encrypted originals.
  */
 export async function extractPdfPages(
   file:ImportFile, signal?:AbortSignal,
@@ -54,10 +54,14 @@ export async function extractPdfPages(
   if(!/\.pdf$/i.test(file.name) && file.mimeType!=="application/pdf")throw new Error("not_pdf_file");
   if(!file.uri.startsWith("file://"))throw new Error("pdf_copy_to_app_cache_required");
   if(signal?.aborted)throw new Error("Разбор файла остановлен");
-  if(!nativeReader && (Platform.OS!=="android" || Number(Platform.Version)<35))
-    throw new Error("Для чтения страниц PDF нужен Android 15 или новее. Оригинал можно сохранить без распознавания.");
+  if(!nativeReader && Platform.OS!=="android")
+    throw new Error("Чтение страниц PDF пока доступно только на поддерживаемых Android. Оригинал можно сохранить без распознавания.");
   const reader=nativeReader||requireOptionalNativeModule<NativePdf>("PersaiPdfText");
   if(!reader)throw new Error("Чтение страниц PDF недоступно в этой сборке. Сохраните оригинал или обновите приложение.");
+  // Android 12–14 may expose this system API via S Extensions 13; an Android
+  // version number alone is not a reliable availability check.
+  if (reader.isAvailable ? !reader.isAvailable() : !nativeReader && Number(Platform.Version)<35)
+    throw new Error("На этом устройстве нет системного извлечения текста PDF (Android 15+ или расширение Android 12–14 S v13). Оригинал можно сохранить.");
   const result=await reader.extractPages(file.uri,PAGE_LIMIT);
   if(signal?.aborted)throw new Error("Разбор файла остановлен");
   try{return validateNativePdfPages(result);}
