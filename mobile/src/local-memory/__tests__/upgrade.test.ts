@@ -98,7 +98,7 @@ test.each([false, true])("upgrading an installed v1 database (chats=%s) opens a 
   expect(await repo.revisions("entity", "note")).toHaveLength(1);
   expect(await repo.listCollections()).toMatchObject([{ id: "recipes", name: "Рецепты" }]);
   expect(mockVault.get(identity.keyName)).toBe("6".repeat(64));
-  expect(mockConnections[0].sqlite.prepare("PRAGMA user_version").get()).toMatchObject({ user_version: 7 });
+  expect(mockConnections[0].sqlite.prepare("PRAGMA user_version").get()).toMatchObject({ user_version: 8 });
   await closeLocalMemory();
   const reopened = conversationRepository("guest");
   expect((await reopened.load()).find(c => c.question === "Можно ввести сообщение")).toBeTruthy();
@@ -148,7 +148,7 @@ test("upgrading v2 to v3 types the records, splits long text into chunks and sea
   await installationV2();
   const repo = await localMemoryRepository("guest");
   const db = mockConnections[0].sqlite;
-  expect(db.prepare("PRAGMA user_version").get()).toMatchObject({ user_version: 7 });
+  expect(db.prepare("PRAGMA user_version").get()).toMatchObject({ user_version: 8 });
   expect(await repo.entity("masha")).toMatchObject({ kind: "person", title: "Маша", record_version: 1 });
   expect(await repo.entity("dacha")).toMatchObject({ kind: "note" });
   expect(db.prepare("SELECT count(*) AS n FROM memory_chunks WHERE entity_id='dacha'").get().n).toBeGreaterThan(1);
@@ -193,7 +193,7 @@ test("v4 attachments upgrade keeps every byte and allows merging two originals",
   expect(Array.from(db.prepare("SELECT bytes FROM memory_attachment_parts").get().bytes)).toEqual([1,2,3]);
   db.prepare("INSERT INTO memory_attachments VALUES (?,?,?,?,?,?)").run("b", "n", "b.png", "image/png", 3, "now");
   expect(db.prepare("SELECT count(*) AS n FROM memory_attachments").get().n).toBe(2);
-  expect(db.prepare("PRAGMA user_version").get().user_version).toBe(7);
+  expect(db.prepare("PRAGMA user_version").get().user_version).toBe(8);
   expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   const repo = await localMemoryRepository("guest");
   expect((await repo.searchMemory("гарантия"))[0].entity.id).toBe("n");
@@ -245,7 +245,7 @@ test("v6 to v7 adds isolated hygiene preferences without changing existing notes
   mockVault.set(identity.keyName + ".initialized", "yes");
   const repo = await localMemoryRepository("guest");
   const db = mockConnections[0].sqlite;
-  expect(db.prepare("PRAGMA user_version").get().user_version).toBe(7);
+  expect(db.prepare("PRAGMA user_version").get().user_version).toBe(8);
   expect(db.prepare("SELECT count(*) AS n FROM memory_cleanup_preferences").get().n).toBe(0);
   expect((await repo.entity("e"))?.payload.body).toBe("Не терять");
   expect(mockVault.get(identity.keyName)).toBe("6".repeat(64));
