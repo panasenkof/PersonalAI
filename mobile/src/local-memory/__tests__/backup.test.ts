@@ -56,6 +56,7 @@ beforeEach(() => {
     if (sql.includes("pia_import.user_version")) return { user_version: 1 };
     if (sql.includes("pia_import.integrity_check")) return { integrity_check: "ok" };
     if (sql === "SELECT count(*) AS n FROM pia_import.persai_backup_manifest") return { n: 1 };
+    if (sql.includes("JOIN main.direct_conversations current")) return { n: 0 };
     if (sql.includes("pia_import.memory_entities")) return { n: 2 };
     if (sql === "SELECT count(*) AS n FROM memory_collections") {
       return { n: mockAlreadyContainsMemory || mockRestored ? 1 : 0 };
@@ -234,7 +235,17 @@ test("native ATTACH decodes Expo file:// URI and binds the filesystem path", asy
 test("new backups also import chats without overwriting existing conversations; old backups remain valid", async () => {
   tablesOnce([...names, "direct_conversations"]);
   await restoreEncryptedBackup("guest", "file:///backup.db", code);
-  expect(mockDb.execAsync.mock.calls.map(([sql]) => sql)).toContainEqual(expect.stringContaining("INSERT OR IGNORE INTO direct_conversations"));
+  expect(mockDb.execAsync.mock.calls.map(([sql]) => sql)).toContainEqual(expect.stringContaining("INSERT INTO direct_conversations"));
+});
+
+test("chat ID collision refuses restore without overwriting old or dropping imported conversation", async () => {
+  const previous = mockDb.getFirstAsync.getMockImplementation()!;
+  mockDb.getFirstAsync.mockImplementation(async sql =>
+    String(sql).includes("JOIN main.direct_conversations current") ? { n: 1 } : previous(sql));
+  tablesOnce([...names, "direct_conversations"]);
+  await expect(restoreEncryptedBackup("guest", "file:///colliding-chat.db", code))
+    .rejects.toThrow("backup_chat_conflict");
+  expect(mockDb.execAsync.mock.calls.some(([sql]) => String(sql).startsWith("INSERT INTO"))).toBe(false);
 });
 
 test.each([1, 2, 3])("restores deployed schema v%s including chats into the upgraded memory", async version => {
@@ -242,7 +253,7 @@ test.each([1, 2, 3])("restores deployed schema v%s including chats into the upgr
   mockDb.getFirstAsync.mockImplementation(async sql => sql === "PRAGMA pia_import.user_version" ? { user_version: version } : read(sql));
   tablesOnce([...names, "direct_conversations"]);
   await restoreEncryptedBackup("guest", "file:///backup.db", code);
-  expect(mockDb.execAsync.mock.calls.map(([sql]) => sql)).toContainEqual(expect.stringContaining("INSERT OR IGNORE INTO direct_conversations"));
+  expect(mockDb.execAsync.mock.calls.map(([sql]) => sql)).toContainEqual(expect.stringContaining("INSERT INTO direct_conversations"));
 });
 
 test.each([0, 8])("rejects unsupported backup schema v%s before copying any memory", async version => {
