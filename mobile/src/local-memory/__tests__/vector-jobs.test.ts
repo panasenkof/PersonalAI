@@ -76,7 +76,9 @@ test("concurrent edit invalidates a claimed vector atomically with FTS, CAS and 
     expect(await repo.vectorStatus("toy")).toEqual({ done: 0, total: 1 });
     const fresh = (await jobs.claim("toy"))[0];
     expect(fresh.hash).not.toBe(old.hash);
-    expect(fresh.generation).toBeGreaterThan(old.generation);
+    // FTS reindex drops/recreates the chunk, so FK cascade resets generation;
+    // an unrelated fresh lease token still prevents the ABA save.
+    expect(fresh.token).not.toBe(old.token);
     expect(await jobs.complete("toy", [{ job: fresh, vector: vector() }])).toBe(1);
     expect(await repo.searchNotes("Первый разговор")).toEqual([]);
     expect((await repo.searchNotes("Другой разговор"))[0].id).toBe(note.id);
