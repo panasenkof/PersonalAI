@@ -321,7 +321,7 @@ test("real installed v9 extraction evidence upgrades to v10 FTS without changing
   const identity = await localMemoryIdentity("guest");
   const legacy = new DatabaseSync(path.join(mockDirectory, identity.databaseName));
   const schemaV9 = SCHEMA_SQL.replace(
-    /-- Derived encrypted FTS5:[\\s\\S]*?CREATE TABLE IF NOT EXISTS memory_received_shares \\(/,
+    /-- Derived encrypted FTS5:[\s\S]*?CREATE TABLE IF NOT EXISTS memory_received_shares \(/,
     "CREATE TABLE IF NOT EXISTS memory_received_shares (");
   expect(schemaV9).not.toContain("tr_extraction_fts_insert");
   legacy.exec(schemaV9);
