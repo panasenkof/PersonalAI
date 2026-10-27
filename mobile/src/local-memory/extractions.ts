@@ -96,12 +96,13 @@ function checked(input: ExtractionRunInput){
 /** Complete transaction: no orphan runs, no synthetic coordinates, no
  * overwriting previous attempts. Source attachments must already be saved.
  */
-export async function saveExtractionRun(db: SQL, input: ExtractionRunInput): Promise<string> {
+/** Call only within an already-open SQLCipher BEGIN IMMEDIATE transaction,
+ * e.g. while saving original + note + receipt together. */
+export async function appendExtractionInTransaction(db: SQL,input:ExtractionRunInput):Promise<string>{
   checked(input);
   const id=Crypto.randomUUID(), timestamp=new Date().toISOString();
-  await withUnlockedTransaction(db, async tx=>{
-    const revision=await fingerprint(tx,input.attachmentId);
-    await tx.runAsync(
+  const revision=await fingerprint(db,input.attachmentId);
+    await db.runAsync(
       `INSERT INTO memory_extractions
         (id,attachment_id,source_version,producer_kind,producer_id,producer_revision,language,coverage,status,created_at)
        VALUES(?,?,?,?,?,?,?,?,?,?)`,
@@ -109,7 +110,7 @@ export async function saveExtractionRun(db: SQL, input: ExtractionRunInput): Pro
        input.producerRevision.trim(),input.language||null,input.coverage,input.status,timestamp]);
     for(let i=0;i<input.segments.length;i++){
       const segment=input.segments[i],loc=segment.location;
-      await tx.runAsync(
+      await db.runAsync(
         `INSERT INTO memory_extraction_segments
          (id,extraction_id,ord,text,location_kind,page,start_ms,end_ms,char_start,char_end)
          VALUES(?,?,?,?,?,?,?,?,?,?)`,
@@ -118,7 +119,12 @@ export async function saveExtractionRun(db: SQL, input: ExtractionRunInput): Pro
          loc.kind==="time"?loc.endMs:null,loc.kind==="char"?loc.start:null,
          loc.kind==="char"?loc.end:null]);
     }
-  });
+  return id;
+}
+/** Atomic standalone call for a source already committed to the profile. */
+export async function saveExtractionRun(db:SQL,input:ExtractionRunInput):Promise<string>{
+  let id="";
+  await withUnlockedTransaction(db,async tx=>{id=await appendExtractionInTransaction(tx,input);});
   return id;
 }
 /** Read-only, explicit attachment + entity scope. No mass export and no
