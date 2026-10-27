@@ -1,0 +1,51 @@
+name: PersAI synthetic memory scale
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'mobile/src/local-memory/**'
+      - 'mobile/src/direct-agent/**'
+      - 'mobile/src/local-memory/__tests__/synthetic-scale.test.ts'
+      - '.github/workflows/memory-scale.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: memory-scale-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  synthetic-10k:
+    name: SQLite 10k synthetic memory-only profile
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - name: Install locked test dependencies
+        env:
+          RNET_SKIP_DOWNLOAD: '1'
+        run: npm ci --no-audit --no-fund
+      - name: Measure 10k local SQLite FTS/vector scans and privacy
+        env:
+          PIA_MEMORY_SCALE_10000: '1'
+        run: |
+          npx jest --ci --runInBand src/local-memory/__tests__/synthetic-scale.test.ts 2>&1 | tee "$RUNNER_TEMP/memory-scale-10k.log"
+      - name: Save synthetic metrics only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: synthetic-memory-scale-${{ github.sha }}
+          path: ${{ runner.temp }}/memory-scale-10k.log
+          if-no-files-found: ignore
+          retention-days: 7
