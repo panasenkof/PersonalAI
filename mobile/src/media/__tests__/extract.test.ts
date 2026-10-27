@@ -100,8 +100,14 @@ test("official Whisper-1 requests real segment timestamps in one approved upload
   expect(transport).toHaveBeenCalledTimes(1);
   const request = transport.mock.calls[0][1] as any;
   expect(request.method).toBe("POST");
-  expect(JSON.stringify(request.body)).toContain("verbose_json");
-  expect(JSON.stringify(request.body)).toContain("timestamp_granularities[]");
+  // FormData is intentionally opaque to JSON.stringify in RN/Jest.
+  const form = request.body as {
+    get?: (key:string)=>unknown;
+    getParts?: ()=>Array<{fieldName:string;string?:string}>;
+  };
+  const field = (key:string)=>form.get?.(key) ?? form.getParts?.().find(part=>part.fieldName===key)?.string;
+  expect(field("response_format")).toBe("verbose_json");
+  expect(field("timestamp_granularities[]")).toBe("segment");
 });
 
 test("broken vendor time positions are never passed to memory, but full plain text survives",async()=>{
