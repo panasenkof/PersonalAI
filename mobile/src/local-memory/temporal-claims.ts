@@ -30,6 +30,8 @@ export type TemporalEvidenceRef = {
 };
 
 export type TemporalClaimCandidate = {
+  /** Knowledge/ingestion time, separate from when the statement held in life. */
+  recordedAt: string;
   /** Identity must already be resolved before suggesting a change. */
   subjectId: string | null;
   predicate: string;
@@ -48,6 +50,11 @@ export type TemporalClaimCandidate = {
   evidence: TemporalEvidenceRef;
 };
 
+function isRecordedInstant(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) return false;
+  const time = Date.parse(value);
+  return Number.isFinite(time) && new Date(time).toISOString() === value;
+}
 function isCalendarDate(date: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
   const [year, month, day] = date.split("-").map(Number);
@@ -75,6 +82,7 @@ function validBound(bound: TemporalBound | null): boolean {
 
 /** Reject guessed precision and provenance before any future persistence. */
 export function validateTemporalClaim(value: TemporalClaimCandidate): void {
+  if (!isRecordedInstant(value.recordedAt)) throw new Error("temporal_recorded_at_invalid");
   if (!value.predicate.trim() || !value.context.trim() || !value.value.trim() ||
       value.predicate.length > 120 || value.context.length > 120 ||
       value.value.length > 3000) throw new Error("temporal_claim_fields_invalid");
