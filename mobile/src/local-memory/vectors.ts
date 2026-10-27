@@ -19,12 +19,31 @@ export const VECTOR_DIM = 384;
  * by the active vector runner (lexical search works during reindex).
  */
 export const VECTOR_SPACE_REVISION = "rnet-0.10.5|tokenizer-bundled-v1|title-text-trim-2000-v1";
-export function vectorSpaceKey(platform: "android" | "ios"): string {
+export type VectorArtifacts = { model: string; tokenizer: string };
+const DIGEST = /^[a-f0-9]{64}$/;
+/** Fingerprints are SHA-256 of the *actual native model and tokenizer files*,
+ * not a server/model label. Both files are required to avoid half-validated
+ * embedding spaces. Names alone remain available only for legacy derived rows.
+ */
+export function vectorSpaceKey(platform: "android" | "ios", artifacts?: VectorArtifacts): string {
   const weights = platform === "ios" ? "coreml-fp16" : "xnnpack-8da4w";
-  return [VECTOR_MODEL, "space-v1", weights, VECTOR_SPACE_REVISION, "dim-" + VECTOR_DIM].join("|");
+  const base = [VECTOR_MODEL, "space-v1", weights, VECTOR_SPACE_REVISION, "dim-" + VECTOR_DIM].join("|");
+  if (!artifacts) return base;
+  if (!DIGEST.test(artifacts.model) || !DIGEST.test(artifacts.tokenizer)) {
+    throw new Error("invalid_vector_artifact_fingerprint");
+  }
+  return base + "|sha256:" + artifacts.model + ":" + artifacts.tokenizer;
 }
 export function isCurrentVectorSpace(value: string): boolean {
-  return value === vectorSpaceKey("android") || value === vectorSpaceKey("ios");
+  for (const platform of ["android", "ios"] as const) {
+    const prefix = vectorSpaceKey(platform);
+    if (value === prefix) return true; // older derived index, still dimension-checked
+    if (value.startsWith(prefix + "|sha256:")) {
+      const hashes = value.slice(prefix.length + "|sha256:".length).split(":");
+      if (hashes.length === 2 && hashes.every(x => DIGEST.test(x))) return true;
+    }
+  }
+  return false;
 }
 /** Below this similarity a chunk is not «about» the question. MiniLM puts
  * unrelated Russian sentences around 0.1–0.35 and paraphrases above 0.5;
