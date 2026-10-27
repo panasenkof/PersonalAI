@@ -229,7 +229,7 @@ test.each([false, true])("v5 enrichment migration (retry=%s) preserves data/key 
   expect(Array.from(mockConnections.at(-1).sqlite.prepare("SELECT bytes FROM memory_attachment_parts").get().bytes)).toEqual([1,2,3]);
 });
 
-test("v6 to v7 adds isolated hygiene preferences without changing existing notes or indexes", async () => {
+test("v6 to v8 adds isolated hygiene and derived job tables without changing originals", async () => {
   const { SCHEMA_SQL } = require("../storage");
   const identity = await localMemoryIdentity("guest");
   const legacy = new DatabaseSync(path.join(mockDirectory, identity.databaseName));
@@ -251,4 +251,37 @@ test("v6 to v7 adds isolated hygiene preferences without changing existing notes
   expect(mockVault.get(identity.keyName)).toBe("6".repeat(64));
   const violation = db.prepare("PRAGMA foreign_key_check").all();
   expect(violation).toEqual([]);
+});
+
+test("installed v7 SQLCipher migrates to v8 without touching notes, index rows or key", async () => {
+  const { SCHEMA_SQL } = require("../storage");
+  const identity = await localMemoryIdentity("guest");
+  const legacy = new DatabaseSync(path.join(mockDirectory, identity.databaseName));
+  const oldSchema = SCHEMA_SQL.replace(
+    /CREATE TABLE IF NOT EXISTS memory_vector_models \([\s\S]*?CREATE INDEX IF NOT EXISTS ix_memory_vector_jobs_ready[\s\S]*?;\n/, "");
+  expect(oldSchema).not.toContain("CREATE TABLE IF NOT EXISTS memory_vector_models");
+  legacy.exec(oldSchema);
+  legacy.exec(`PRAGMA user_version=7;
+    INSERT INTO memory_collections(id,name,slug,sensitivity,created_at)
+      VALUES ('c','История','notes','standard','now');
+    INSERT INTO memory_entities(id,collection_id,domain,title,payload_json,created_at,updated_at)
+      VALUES ('e','c','notes','Лиза','{"body":"Сохранённый разговор"}','now','now');
+    INSERT INTO memory_chunks(id,entity_id,ord,text,content_hash,created_at)
+      VALUES ('e:0','e',0,'Сохранённый разговор','old-hash','now');
+    INSERT INTO memory_search_fts(entity_id,chunk_id,title,body,terms,aliases)
+      VALUES ('e','e:0','Лиза','Сохранённый разговор','','');`);
+  legacy.close();
+  mockVault.set(identity.keyName, "6".repeat(64));
+  mockVault.set(identity.keyName + ".initialized", "yes");
+  const repo = await localMemoryRepository("guest");
+  const db = mockConnections[0].sqlite;
+  expect(db.prepare("PRAGMA user_version").get().user_version).toBe(8);
+  expect((await repo.entity("e"))?.payload.body).toBe("Сохранённый разговор");
+  expect(db.prepare("SELECT count(*) AS n FROM memory_chunks").get().n).toBe(1);
+  expect(db.prepare("SELECT count(*) AS n FROM memory_search_fts").get().n).toBe(1);
+  expect(mockVault.get(identity.keyName)).toBe("6".repeat(64));
+  const jobs = await repo.claimVectorJobs("toy", 2);
+  expect(jobs).toHaveLength(1);
+  expect(jobs[0].text).toContain("Сохранённый разговор");
+  expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
 });
