@@ -262,13 +262,36 @@ test("v7 restore brings back explicit keep/skip decisions within the same SQLCip
   const read = mockDb.getFirstAsync.getMockImplementation()!;
   mockDb.getFirstAsync.mockImplementation(async sql =>
     sql === "PRAGMA pia_import.user_version" ? { user_version: 7 } : read(sql));
-  tablesOnce([...names, "memory_attachments", "memory_attachment_parts", "memory_cleanup_preferences"]);
+  tablesOnce([...names, "memory_attachments", "memory_attachment_parts", "memory_received_shares", "memory_cleanup_preferences"]);
   await restoreEncryptedBackup("guest", "file:///backup.db", code);
   const sql = mockDb.execAsync.mock.calls.map(([s]: string[]) => s);
   const restored = sql.find(s => s.includes("FROM pia_import.memory_cleanup_preferences"));
   expect(restored).toContain("INSERT INTO memory_cleanup_preferences");
   expect(restored).toBeDefined();
+  const shareReceipt = sql.find(v => v.includes("FROM pia_import.memory_received_shares"));
+  expect(shareReceipt).toContain("INSERT INTO memory_received_shares");
+  expect(sql.indexOf("COMMIT")).toBeGreaterThan(sql.indexOf(shareReceipt!));
   expect(sql.indexOf("COMMIT")).toBeGreaterThan(sql.indexOf(restored!));
+});
+
+test("v7 archive lacking Android Share receipts is rejected before target writes", async () => {
+  const prev = mockDb.getFirstAsync.getMockImplementation()!;
+  mockDb.getFirstAsync.mockImplementation(async sql =>
+    sql === "PRAGMA pia_import.user_version" ? { user_version: 7 } : prev(sql));
+  tablesOnce([...names, "memory_attachments", "memory_attachment_parts", "memory_cleanup_preferences"]);
+  await expect(restoreEncryptedBackup("guest", "file:///truncated-v7.db", code))
+    .rejects.toThrow("incompatible_backup_schema");
+  expect(mockDb.execAsync.mock.calls.some(([sql]: string[]) => sql.includes("INSERT INTO memory_entities"))).toBe(false);
+});
+
+test("v4 archives with receipts preserve fingerprints and originals", async () => {
+  const prev = mockDb.getFirstAsync.getMockImplementation()!;
+  mockDb.getFirstAsync.mockImplementation(async sql =>
+    sql === "PRAGMA pia_import.user_version" ? { user_version: 4 } : prev(sql));
+  tablesOnce([...names, "memory_attachments", "memory_attachment_parts", "memory_received_shares"]);
+  await restoreEncryptedBackup("guest", "file:///v4.db", code);
+  expect(mockDb.execAsync.mock.calls.map(([sql]) => sql)).toContainEqual(
+    expect.stringContaining("FROM pia_import.memory_received_shares"));
 });
 
 test("v7 backup missing policy table fails before mutation", async () => {
