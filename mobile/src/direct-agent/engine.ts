@@ -38,6 +38,8 @@ export type DirectAgentOptions = {
   lookup: (query: string) => Promise<MemorySnippet[]>;
   /** Recheck access and record version before reading a source excerpt. */
   read?: (id: string, version: number, offset?: number, budget?: number) => Promise<Record<string, unknown>>;
+  list?: (options: { collectionId?: string; query?: string; limit?: number; beforeUpdatedAt?: string; beforeId?: string }) => Promise<Record<string, unknown>>;
+  count?: (options: { collectionId?: string; query?: string }) => Promise<Record<string, unknown>>;
   propose: (note: NoteProposal) => string | void;
   /** The user's memory sections the assistant may propose records for. */
   sections?: MemorySection[];

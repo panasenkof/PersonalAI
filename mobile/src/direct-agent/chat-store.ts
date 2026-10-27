@@ -8,6 +8,8 @@ import { MAX_USER_PROMPT_CHARS } from "./limits";
 import { loadModelCallLimit } from "./agent-preferences";
 import { hostOf } from "./net";
 import { proposableMemorySections, saveApprovedNote, searchApprovedNotes, readApprovedNote } from "./memory";
+import { listAllowedNotes, countAllowedNotes } from "../local-memory/agent-catalog";
+import { withLocalMemoryDatabase } from "../local-memory/storage";
 import { DEFAULT_SECTIONS } from "./fact-tool";
 import type { MemorySection } from "./fact-tool";
 import { conversationRepository } from "./conversations";
@@ -230,6 +232,8 @@ export class DirectChatStore {
         diagnostic: trace,
         lookup: query => searchApprovedNotes(this.profile, query),
         read: async (id, version, offset, budget) => ({ ...await readApprovedNote(this.profile, id, version, offset, budget) }),
+        list: async filters => ({ ...await withLocalMemoryDatabase(this.profile, db => listAllowedNotes(db, filters)) }),
+        count: async filters => ({ ...await withLocalMemoryDatabase(this.profile, db => countAllowedNotes(db, filters)) }),
         notify: text => {
           trace("turn.notice", { chars: text.length }, { notice: text });
           const c = this.snapshot.conversations.find(c => c.id === id);
