@@ -81,6 +81,13 @@ test("RE14: one verified relation joins many recordings but yields bounded disti
   expect(r.paths).toHaveLength(20);
   expect(r.truncated).toBe(true);
   expect(new Set(r.paths.map(x=>x.conversationId)).size).toBe(20);
+  // Hundreds of unrelated confirmed participants must not consume the role
+  // budget ahead of a valid family conversation.
+  const strangers=Array.from({length:300},(_,i)=>proof("participant_of","stranger-"+i,"elsewhere-"+i));
+  const scoped=[...strangers,kin,proof("participant_of","Ирина","specific-call")];
+  const found=resolveDirectRelationConversationPaths("owner-1","has_mother",scoped,scope(scoped));
+  expect(found.paths.map(x=>x.conversationId)).toEqual(["specific-call"]);
+  expect(found.truncated).toBe(false);
 });
 
 test("RE15: a former colleague relation needs valid-time filtering before it may be used to answer about a date",()=>{
@@ -134,6 +141,19 @@ test("RE26: removed source version invalidates a relationship instead of yieldin
   expect(resolveDirectRelationConversationPaths("owner-1","has_friend",edges,{
     ...access,recordVersions:versions,
   }).paths).toEqual([]);
+  // Two independent proofs: losing one does not erase the surviving user
+  // confirmed relation and its separate evidence source.
+  const second=proof("has_friend","friend-old","other-independent-note");
+  const all=[a,second,b];
+  const readable=scope(all);
+  const oldEvidenceStale=new Map(readable.recordVersions);
+  oldEvidenceStale.set(a.evidenceEntityId,2);
+  const found=resolveDirectRelationConversationPaths("owner-1","has_friend",all,{
+    ...readable,recordVersions:oldEvidenceStale,
+  });
+  expect(found.paths).toMatchObject([{
+    relationEvidenceId:second.id,participantEvidenceId:b.id,
+  }]);
 });
 test("RE27: unsupported relation type never creates a relation path",()=>{
   const a=proof("has_friend","p","friend");
