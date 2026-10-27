@@ -22,6 +22,7 @@ function fake() {
       { id: "archived", collection_id: "standard", sensitivity: "standard", record_status: "archived",
         title: "Архив", payload: { body: "Нельзя отправлять" } },
     ].map(entity => ({ entity, chunk: "", score: 1 }))),
+    entity: jest.fn().mockResolvedValue(null),
     createEntity: jest.fn().mockResolvedValue({ id: "new-note" }),
     createCollection: jest.fn(async (c: any) => ({ id: c.slug, description: null, created_at: "2026-10-14", ...c })),
   };
@@ -162,4 +163,42 @@ test("approved and model-proposed notes over 4000 characters are never silently 
   expect(() => factProposal({ title: "Салат", body: "A".repeat(MAX_NOTE_BODY_CHARS + 1) })).toThrow("note_body_too_long");
   await expect(saveApprovedNote("guest", { title: "Салат", body: "A".repeat(MAX_NOTE_BODY_CHARS + 1) },
     repo as unknown as MemoryRepository)).rejects.toThrow("слишком длинная");
+});
+
+test("read evidence is version checked, paginated and never implies full coverage", async () => {
+  const { readApprovedNote } = require("../memory");
+  const repo = fake();
+  const body = "Начало.".repeat(1300) + "КОНЕЦ";
+  repo.entity = jest.fn().mockResolvedValue({
+    id: "allow", collection_id: "standard", domain: "notes", sensitivity: "standard",
+    record_status: "active", record_version: 7, title: "Длинная заметка",
+    source_ref: "local-original", payload: { body },
+  });
+  const first = await readApprovedNote("guest", "allow", 7, 0, 500, repo as unknown as MemoryRepository);
+  expect(first).toMatchObject({ id: "allow", revision: 7, offset: 0, hasMore: true,
+    totalChars: body.length, nextOffset: 500, source: { recordId: "allow", sourceRef: "local-original", location: "unknown" } });
+  expect(first.content).toBe(body.slice(0, 500));
+  const last = await readApprovedNote("guest", "allow", 7, first.nextOffset, 500, repo as unknown as MemoryRepository);
+  expect(last.offset).toBe(500);
+  await expect(readApprovedNote("guest", "allow", 6, 0, 500, repo as unknown as MemoryRepository))
+    .rejects.toThrow("stale_memory_version");
+});
+
+test("read evidence rechecks privacy, status and bound before exposing text", async () => {
+  const { readApprovedNote } = require("../memory");
+  const repo = fake();
+  repo.entity = jest.fn().mockResolvedValue({
+    id: "hidden", collection_id: "secret", domain: "notes", sensitivity: "standard",
+    record_status: "active", record_version: 1, title: "Секрет", payload: { body: "закрытый текст" },
+  });
+  await expect(readApprovedNote("guest", "hidden", 1, 0, 900, repo as unknown as MemoryRepository))
+    .rejects.toThrow("memory_read_not_available");
+  repo.entity.mockResolvedValueOnce({
+    id: "deleted", collection_id: "standard", domain: "notes", sensitivity: "standard",
+    record_status: "trashed", record_version: 1, payload: { body: "архив" },
+  });
+  await expect(readApprovedNote("guest", "deleted", 1, 0, 900, repo as unknown as MemoryRepository))
+    .rejects.toThrow("memory_read_not_available");
+  await expect(readApprovedNote("guest", "hidden", 0, 0, 900, repo as unknown as MemoryRepository))
+    .rejects.toThrow("invalid_memory_read_request");
 });
