@@ -49,3 +49,17 @@ test("native reader remains local; remote/content URI rejected before native acc
 test("scanned document with no native text layer refuses fabricated OCR page",async()=>{
  await expect(extractPdfPages(file,undefined,{extractPages:async()=>[]})).rejects.toThrow("не найден текстовый слой");
 });
+
+test("Android with S extension reader extracts pages through same validated pathway", async()=>{
+ const reader={isSupported:jest.fn(()=>true),extractPages:jest.fn(async()=>[
+   {page:4,text:"Страница расширения"},
+ ])};
+ const result=await extractPdfPages(file,undefined,reader);
+ expect(reader.isSupported).toHaveBeenCalledTimes(1);
+ expect(result.segments).toEqual([{text:"Страница расширения",location:{kind:"page",page:4}}]);
+});
+test("older Android without S Extensions 13 refuses PDF extraction before opening",async()=>{
+ const reader={isSupported:jest.fn(()=>false),extractPages:jest.fn()};
+ await expect(extractPdfPages(file,undefined,reader)).rejects.toThrow("S Extensions 13");
+ expect(reader.extractPages).not.toHaveBeenCalled();
+});
