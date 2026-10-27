@@ -41,6 +41,27 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
         options.diagnostic?.("memory.tool_search", { queryChars: query.length, found: found.length, noteIds: found.map(n => n.id), excerptCount: found.filter(n => n.excerptOnly).length }, { query });
         return { notes: found };
       }, verify: r => Array.isArray(r.notes) ? r.notes.length ? "found" : "empty" : "failed" },
+    ...(options.read ? [{
+      definition: { name: "read_local_note", description: "Дочитать разрешённую заметку по id и version из search_local_notes. Указать offset для следующей части; источник может измениться и чтение тогда откажет.", parameters: {
+        type: "object", properties: { id: { type: "string" }, version: { type: "integer" },
+          offset: { type: "integer" }, budget: { type: "integer" } },
+        required: ["id", "version"], additionalProperties: false,
+      } },
+      effect: "read" as const,
+      execute: async (args: Record<string, unknown>) => {
+        const id = text(args.id, 128);
+        const version = args.version;
+        const offset = args.offset ?? 0;
+        const budget = args.budget ?? 4000;
+        if (!id || !Number.isSafeInteger(version) || Number(version) < 1 ||
+            !Number.isSafeInteger(offset) || Number(offset) < 0 ||
+            !Number.isSafeInteger(budget) || Number(budget) < 1) return { error: "invalid_memory_read_request" };
+        const result = await options.read!(id, Number(version), Number(offset), Number(budget));
+        return result;
+      },
+      verify: (r: Record<string, unknown>) => typeof r.content === "string" &&
+        typeof r.revision === "number" && typeof r.hasMore === "boolean" ? "read" as const : "failed" as const,
+    }] : []),
     { definition: { name: FACT_TOOL_NAME, description: FACT_TOOL_DESCRIPTION, parameters: factToolParameters(options.sections) }, effect: "proposal",
       execute: async args => {
         const proposal = factProposal(args, options.sections);
