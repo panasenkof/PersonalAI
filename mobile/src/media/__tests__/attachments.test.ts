@@ -193,3 +193,29 @@ test('append limits include existing originals, disallow trash and remote input'
   sqlite.prepare("UPDATE memory_entities SET record_status='trashed' WHERE id=?").run(note.id);
   await expect(appendNoteAttachments('guest', note.id, note.record_version, [input.file])).rejects.toThrow('корзины');
 });
+
+test("single original with extracted text records UNKNOWN locator and producer without pretending PDF page",async()=>{
+  const id=await saveMediaNote("guest",{...input,extractedText:"Отдельно распознанный текст"});
+  const attachment=sqlite.prepare("SELECT id FROM memory_attachments WHERE entity_id=?").get(id);
+  const run=sqlite.prepare("SELECT * FROM memory_extractions WHERE attachment_id=?").get(attachment.id);
+  expect(run).toMatchObject({producer_kind:"unknown",producer_id:"legacy-media-extract",
+    coverage:"unknown",status:"partial"});
+  expect(run.source_version).toMatch(/^[a-f0-9]{64}$/);
+  const segment=sqlite.prepare("SELECT * FROM memory_extraction_segments WHERE extraction_id=?").get(run.id);
+  expect(segment.text).toBe("Отдельно распознанный текст");
+  expect(segment.location_kind).toBe("unknown");
+  expect(segment.page).toBeNull();
+  expect(segment.start_ms).toBeNull();
+  expect(segment.end_ms).toBeNull();
+  expect(await saveMediaNote("guest",{...input,extractedText:"Отдельно распознанный текст"})).toBe(id);
+  expect(sqlite.prepare("SELECT count(*) AS n FROM memory_extractions").get().n).toBe(1);
+});
+
+test("combined recognitions of two originals are not falsely bound to either source",async()=>{
+  mockFiles.set("file:///voice.mp3",new Uint8Array([1,2,3]));
+  const id=await saveMediaNote("guest",{files:[input.file,{uri:"file:///voice.mp3",name:"voice.mp3",mimeType:"audio/mpeg"}],
+    title:"Заметка",body:"Текст",extractedText:"Содержимое обоих файлов",sensitivity:"sensitive"});
+  expect(sqlite.prepare("SELECT COUNT(*) AS n FROM memory_attachments WHERE entity_id=?").get(id).n).toBe(2);
+  expect(sqlite.prepare("SELECT count(*) AS n FROM memory_extractions").get().n).toBe(0);
+  expect(sqlite.prepare("SELECT payload_json FROM memory_entities WHERE id=?").get(id).payload_json).toContain("Содержимое обоих файлов");
+});

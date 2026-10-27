@@ -42,7 +42,7 @@ export function onLocalMemorySessionChange(listener: (unlocked: boolean) => void
 }
 export const localMemorySessionUnlocked = () => applicationSessionUnlocked;
 const requireApplicationSession = () => { if (!applicationSessionUnlocked) throw new Error("application_locked"); };
-export const LOCAL_MEMORY_SCHEMA_VERSION = 8;
+export const LOCAL_MEMORY_SCHEMA_VERSION = 9;
 const KIND_CHECK = `CHECK(kind IN (${MEMORY_KINDS.map(k => `'${k}'`).join(",")}))`;
 
 /** All memory (including full-text indexes, revisions, and WAL) is in SQLCipher. */
@@ -75,6 +75,43 @@ CREATE TABLE IF NOT EXISTS memory_attachment_parts (
   attachment_id TEXT NOT NULL REFERENCES memory_attachments(id) ON DELETE CASCADE,
   ord INTEGER NOT NULL, bytes BLOB NOT NULL, sha256 TEXT NOT NULL, PRIMARY KEY(attachment_id, ord)
 );
+-- Source/extraction records are USER DATA: backup/restore must preserve them.
+-- A source_version hashes the immutable part hashes, not guessed file paths.
+CREATE TABLE IF NOT EXISTS memory_extractions (
+  id TEXT PRIMARY KEY,
+  attachment_id TEXT NOT NULL REFERENCES memory_attachments(id) ON DELETE CASCADE,
+  source_version TEXT NOT NULL,
+  producer_kind TEXT NOT NULL CHECK(producer_kind IN ('manual','text','ocr','asr','vision','pdf','unknown')),
+  producer_id TEXT NOT NULL,
+  producer_revision TEXT NOT NULL,
+  language TEXT,
+  coverage TEXT NOT NULL CHECK(coverage IN ('full','partial','unknown')),
+  status TEXT NOT NULL CHECK(status IN ('complete','partial','failed')),
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_memory_extractions_source
+  ON memory_extractions(attachment_id,created_at,id);
+CREATE TABLE IF NOT EXISTS memory_extraction_segments (
+  id TEXT PRIMARY KEY,
+  extraction_id TEXT NOT NULL REFERENCES memory_extractions(id) ON DELETE CASCADE,
+  ord INTEGER NOT NULL,
+  text TEXT NOT NULL CHECK(length(text)>0 AND length(text)<=6000),
+  location_kind TEXT NOT NULL CHECK(location_kind IN ('page','time','char','unknown')),
+  page INTEGER,
+  start_ms INTEGER,
+  end_ms INTEGER,
+  char_start INTEGER,
+  char_end INTEGER,
+  UNIQUE(extraction_id,ord),
+  CHECK (
+    (location_kind='unknown' AND page IS NULL AND start_ms IS NULL AND end_ms IS NULL AND char_start IS NULL AND char_end IS NULL)
+    OR (location_kind='page' AND page>0 AND start_ms IS NULL AND end_ms IS NULL AND char_start IS NULL AND char_end IS NULL)
+    OR (location_kind='time' AND page IS NULL AND start_ms>=0 AND end_ms>start_ms AND char_start IS NULL AND char_end IS NULL)
+    OR (location_kind='char' AND page IS NULL AND start_ms IS NULL AND end_ms IS NULL AND char_start>=0 AND char_end>char_start)
+  )
+);
+CREATE INDEX IF NOT EXISTS ix_memory_extraction_segments_run
+  ON memory_extraction_segments(extraction_id,ord);
 CREATE TABLE IF NOT EXISTS memory_received_shares (
   fingerprint TEXT PRIMARY KEY, entity_id TEXT NOT NULL REFERENCES memory_entities(id) ON DELETE CASCADE
 );

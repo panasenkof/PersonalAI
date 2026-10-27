@@ -29,7 +29,7 @@ const V3_TABLES = {
 } as const;
 const ENTITY_COLUMNS = "id,collection_id,domain,schema_version,title,payload_json,record_status,sensitivity," +
   "source_kind,source_ref,valid_from,valid_until,created_at,updated_at,record_version";
-export const RESTORABLE_VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8];
+export const RESTORABLE_VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9];
 const LEGACY_MAX_BACKUP_BYTES = 2 * 1024 * 1024 * 1024;
 const MANIFEST_FORMAT_VERSION = 1;
 const MANIFEST_TABLE = 'persai_backup_manifest' as const;
@@ -253,6 +253,13 @@ export async function restoreEncryptedBackup(
         if (version.user_version >= 7 && !available.has("memory_received_shares")) {
           throw new Error("incompatible_backup_schema");
         }
+        // V9 extraction evidence is first-class USER DATA, not a derived index.
+        // A broken/partial archive must not silently drop a transcript and
+        // its exact source location, even if base manifest counts still match.
+        if (version.user_version >= 9 && (!available.has("memory_extractions") ||
+             !available.has("memory_extraction_segments"))) {
+          throw new Error("incompatible_backup_schema");
+        }
         // Validate the *source* before any destination writes. A forged
         // SQLCipher file with the right table names can still have corruption.
         const integrity = await db.getFirstAsync<{ integrity_check: string }>(
@@ -331,6 +338,21 @@ export async function restoreEncryptedBackup(
             for (const table of ["memory_attachments", "memory_attachment_parts"] as const) {
               if (!available.has(table)) throw new Error("incompatible_backup_schema");
               await tx.execAsync(`INSERT INTO ${table} SELECT * FROM pia_import.${table}`);
+            }
+          }
+          if (version.user_version >= 9) {
+            // Parents/parts were copied above. Preserve all attempts and
+            // location records exactly; the source original is immutable.
+            await tx.execAsync("INSERT INTO memory_extractions SELECT * FROM pia_import.memory_extractions");
+            await tx.execAsync("INSERT INTO memory_extraction_segments SELECT * FROM pia_import.memory_extraction_segments");
+            for (const table of ["memory_extractions", "memory_extraction_segments"] as const) {
+              const expected = await tx.getFirstAsync<{ n:number }>(
+                "SELECT count(*) AS n FROM pia_import." + table);
+              const actual = await tx.getFirstAsync<{ n:number }>(
+                "SELECT count(*) AS n FROM " + table);
+              if (!expected || !actual || expected.n!==actual.n) {
+                throw new Error("backup_extraction_count_mismatch");
+              }
             }
           }
           // Keep imported Android Share deduplication fingerprints: a source
