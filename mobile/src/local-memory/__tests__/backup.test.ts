@@ -104,6 +104,8 @@ test("verified export accepts more than 100k records and writes an encrypted man
   const previous = mockDb.getFirstAsync.getMockImplementation()!;
   mockDb.getFirstAsync.mockImplementation(async sql =>
     sql === "SELECT count(*) AS n FROM memory_entities" ? { n: 100001 } :
+    sql.includes("(SELECT count(*) FROM ") && sql.includes("memory_temporal_claims") ?
+      { temporal_claims: 0, temporal_evidence: 0, temporal_proposals: 0, temporal_decisions: 0 } :
     sql.includes("(SELECT count(*) FROM ") ? { entities: 100001, collections: 1, observations: 1,
       attachments: 0, attachment_parts: 0, receipts: 0, chats: 0 } : previous(sql));
   await shareEncryptedBackup("guest", code);
