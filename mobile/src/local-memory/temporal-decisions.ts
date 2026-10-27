@@ -72,12 +72,30 @@ async function checkedReview(db: SQL, expected: TemporalDecisionExpected) {
   }
   return { review, previous, incoming };
 }
+function possibleEarliest(bound: TemporalBound): string | null {
+  if (!bound.normalized) return null;
+  if (bound.precision === "day") return bound.normalized;
+  if (bound.precision === "month") return bound.normalized + "-01";
+  if (bound.precision === "year") return bound.normalized + "-01-01";
+  return null;
+}
+function possibleLatest(bound: TemporalBound): string | null {
+  if (!bound.normalized) return null;
+  if (bound.precision === "day") return bound.normalized;
+  if (bound.precision === "year") return bound.normalized + "-12-31";
+  if (bound.precision === "month") {
+    const [year, month] = bound.normalized.split("-").map(Number);
+    const last = new Date(Date.UTC(year,month,0)).getUTCDate();
+    return bound.normalized + "-" + String(last).padStart(2,"0");
+  }
+  return null;
+}
 function validEndAgainstStart(start: TemporalBound | null, end: TemporalBound): boolean {
-  if (!start?.normalized || !end.normalized) return true;
-  // Comparison is only meaningful at equal exact calendar precision.
-  if (start.precision !== end.precision) return true;
-  if (!["day","month","year"].includes(end.precision)) return true;
-  return end.normalized >= start.normalized;
+  if (!start) return true;
+  // Bound precision gives a range, not a fabricated day. Reject only when
+  // *all* possible end dates precede *every* possible start date.
+  const firstStart = possibleEarliest(start), lastEnd = possibleLatest(end);
+  return !firstStart || !lastEnd || lastEnd >= firstStart;
 }
 
 /** One explicit decision; no model-generated or inferred closure. */
