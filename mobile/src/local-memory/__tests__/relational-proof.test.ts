@@ -87,12 +87,18 @@ test("R8/R11: protected intermediate evidence blocks the chain without disclosin
     edge("participant","participant_of","conversation-a","lisa"),
   ];
   const access=allowed(edges);
-  access.readableEvidence.delete("fact-kin");
-  expect(resolveSiblingConversationPaths("me",edges,access))
+  const hiddenEvidence:ProofAccess={
+    ...access,
+    readableEvidence:new Set([...access.readableEvidence].filter(id=>id!=="fact-kin")),
+  };
+  expect(resolveSiblingConversationPaths("me",edges,hiddenEvidence))
     .toEqual({paths:[],truncated:false});
   const sourceVisible=allowed(edges);
-  sourceVisible.recordVersions.delete("fact-participant");
-  expect(resolveSiblingConversationPaths("me",edges,sourceVisible).paths).toEqual([]);
+  const missingSource:ProofAccess={
+    ...sourceVisible,
+    recordVersions:new Map([...sourceVisible.recordVersions].filter(([id])=>id!=="fact-participant")),
+  };
+  expect(resolveSiblingConversationPaths("me",edges,missingSource).paths).toEqual([]);
 });
 
 test("R9: capped, deduplicated evidence paths report partial results, never invented audio/timecodes",()=>{
