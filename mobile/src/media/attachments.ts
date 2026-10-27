@@ -6,6 +6,7 @@ import { MemoryConflictError } from '../local-memory/types';
 import { SqliteMemoryRepository } from '../local-memory/repository';
 import { appendExtractionInTransaction } from '../local-memory/extractions';
 import type { ImportFile } from './kinds';
+import type { FileRecognition } from './batch-recognition';
 import { mediaKind } from './kinds';
 
 export const MAX_ORIGINAL_BYTES = 80 * 1024 * 1024;
@@ -53,8 +54,43 @@ export async function writeOriginal(db: Pick<SQLiteDatabase, 'runAsync'>, entity
     return id;
   } finally { handle.close(); }
 }
+/** UTF-16-safe bounded segments; avoids fabricating PDF pages or audio times.
+ * <=3000 codepoints keeps UTF-16 .length <=6000 even with astral characters.
+ */
+function unknownSegments(text: string) {
+  const characters = Array.from(text);
+  const segments: Array<{ text: string; location: { kind: 'unknown' } }> = [];
+  for (let pos = 0; pos < characters.length; pos += 3000) {
+    segments.push({ text: characters.slice(pos, pos + 3000).join(''), location: { kind: 'unknown' } });
+  }
+  return segments;
+}
+/** The recognition was produced separately for each saved original, before
+ * the user edited the combined note. Do not infer page/time or trust filenames
+ * alone: indexes and file names must match the ORIGINAL selection order. */
+function checkedRecognitions(originals: ImportFile[], values?: FileRecognition[]) {
+  if (values === undefined) return undefined;
+  if (!Array.isArray(values) || !originals.length || values.length > originals.length) throw new Error('invalid_recognition_sources');
+  const used = new Set<number>();
+  let total = 0;
+  return values.map(item => {
+    if (!Number.isSafeInteger(item.index) || item.index < 0 || item.index >= originals.length ||
+        used.has(item.index) || item.name !== originals[item.index].name ||
+        !['success','error'].includes(item.status)) throw new Error('invalid_recognition_sources');
+    used.add(item.index);
+    if (item.status === 'error') {
+      if (item.text !== undefined) throw new Error('invalid_recognition_sources');
+      return { index: item.index, status: 'error' as const };
+    }
+    if (typeof item.text !== 'string' || !item.text.trim()) throw new Error('invalid_recognition_sources');
+    const text = item.text.trim();
+    total += text.length;
+    if (total > 60_000) throw new Error('recognition_source_text_too_large');
+    return { index: item.index, status: 'success' as const, text };
+  });
+}
 /** Note + original + receipt commit together. Cancellation never leaves a partial note. */
-export async function saveMediaNote(profile: string, input: { file?: ImportFile; files?: ImportFile[]; title: string; body: string; extractedText?: string; sensitivity: 'sensitive' | 'standard'; receipt?: string; collectionId?: string; sourceUrl?: string }, signal?: AbortSignal): Promise<string> {
+export async function saveMediaNote(profile: string, input: { file?: ImportFile; files?: ImportFile[]; title: string; body: string; extractedText?: string; recognitions?: FileRecognition[]; sensitivity: 'sensitive' | 'standard'; receipt?: string; collectionId?: string; sourceUrl?: string }, signal?: AbortSignal): Promise<string> {
   return withLocalMemoryDatabase(profile, async db => {
     check(signal);
     // One canonical list for old single-file clients and future multi-picker UI.
@@ -62,6 +98,7 @@ export async function saveMediaNote(profile: string, input: { file?: ImportFile;
     if (input.file && input.files !== undefined) throw new Error('Передайте оригиналы одним способом.');
     const originals = input.files || (input.file ? [input.file] : []);
     if (originals.length > MAX_ORIGINALS_PER_NOTE) throw new Error('Не более 10 вложений в одной заметке.');
+    const verified = checkedRecognitions(originals, input.recognitions);
     const originalHashes: string[] = [];
     let combinedSize = 0;
     // Native MD5 is only a deduplication fingerprint; per-part SHA-256 verifies
@@ -78,7 +115,7 @@ export async function saveMediaNote(profile: string, input: { file?: ImportFile;
       originalHashes.push(fingerprint);
     }
     const contentHash: string | string[] | null = originals.length > 1 ? originalHashes : originalHashes[0] || null;
-    const receipt = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, JSON.stringify([input.receipt || 'device-import', contentHash, input.title, input.body, input.extractedText || "", input.sensitivity, input.collectionId || "", input.sourceUrl || ""]));
+    const receipt = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, JSON.stringify([input.receipt || 'device-import', contentHash, input.title, input.body, input.extractedText || "", input.sensitivity, input.collectionId || "", input.sourceUrl || "", ...(verified ? [verified.filter(x => x.status === 'success').map(x => [x.index, x.text])] : [])]));
     {
       const old = await db.getFirstAsync<{ entity_id: string }>('SELECT entity_id FROM memory_received_shares WHERE fingerprint=?', [receipt]);
       if (old) return old.entity_id;
@@ -96,25 +133,34 @@ export async function saveMediaNote(profile: string, input: { file?: ImportFile;
     }, async (tx, entityId) => {
       const attachmentIds: string[] = [];
       for (const original of originals) attachmentIds.push(await writeOriginal(tx, entityId, original, signal));
-      // Only one original is unambiguous. For multi-file combined recognition
-      // the existing extracted_text is retained, but NO false source link is
-      // created. Pages/timestamps remain UNKNOWN until a producer supplies them.
-      const extracted = input.extractedText?.trim();
-      if (attachmentIds.length === 1 && extracted) {
-        // Split by code points so UTF-16 surrogate pairs remain intact.
-        const codepoints = Array.from(extracted);
-        const segments: Array<{ text: string; location: { kind: 'unknown' } }> = [];
-        for (let pos = 0; pos < codepoints.length; pos += 6000) {
-          segments.push({
-            text: codepoints.slice(pos, pos + 6000).join(''),
-            location: { kind: 'unknown' },
+      // Use only indexed recognition results that were captured separately
+      // for the very same ORIGINAL selection. A failed file has no evidence.
+      // The user-edited/joint text in payload remains a distinct summary.
+      if (verified) {
+        for (const run of verified) {
+          if (run.status !== 'success') continue;
+          const kind = mediaKind(originals[run.index]);
+          await appendExtractionInTransaction(tx, {
+            attachmentId: attachmentIds[run.index],
+            producerKind: kind === 'audio' ? 'asr' : kind === 'image' ? 'vision' :
+              kind === 'text' ? 'text' : 'unknown',
+            producerId: 'persai-media-extract', producerRevision: 'source-text-v1',
+            status: 'partial', coverage: 'unknown',
+            segments: unknownSegments(run.text),
           });
         }
-        await appendExtractionInTransaction(tx, {
-          attachmentId: attachmentIds[0], producerKind: 'unknown',
-          producerId: 'legacy-media-extract', producerRevision: 'unspecified-v1',
-          status: 'partial', coverage: 'unknown', segments,
-        });
+      } else {
+        // Backward-compatible single-file fallback: never bind an edited
+        // multi-file or joint summary to a made-up original.
+        const extracted = input.extractedText?.trim();
+        if (attachmentIds.length === 1 && extracted) {
+          await appendExtractionInTransaction(tx, {
+            attachmentId: attachmentIds[0], producerKind: 'unknown',
+            producerId: 'legacy-media-extract', producerRevision: 'unspecified-v1',
+            status: 'partial', coverage: 'unknown',
+            segments: unknownSegments(extracted),
+          });
+        }
       }
       check(signal);
       await tx.runAsync('INSERT INTO memory_received_shares(fingerprint,entity_id) VALUES (?,?)', [receipt, entityId]);

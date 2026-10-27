@@ -281,7 +281,22 @@ export function MemoryImportScreen() {
       const content = !extractedText.trim() && files.length === 1 && file && mediaKind(file) === "text"
         ? await extractMedia(file, selected || { ...defaultDirectPreferences, apiKey: "", webSearchKey: "" }, false, aborter.signal)
         : extractedText;
-      await saveMediaNote(profile, { ...(keepOriginal && files.length > 1 ? { files } : { file: keepOriginal ? file || undefined : undefined }), title, body, extractedText: content, sourceUrl: sourceUrl || undefined, sensitivity: classification, collectionId: collectionId || undefined, ...(incoming ? { receipt: JSON.stringify(incoming[position]) } : {}) }, aborter.signal);
+      // Captured per-file recognitions are immutable evidence; user edits of
+      // the combined text (or an extra joint analysis) are only note content.
+      // When a text file is opened locally at Save without prior recognition,
+      // record that successful read under its own original as well.
+      const sourceRecognitions: FileRecognition[] = recognitionResults.length
+        ? recognitionResults
+        : keepOriginal && files.length === 1 && file && mediaKind(file) === "text" && content.trim()
+          ? [{ index: 0, name: file.name, status: "success", text: content }]
+          : [];
+      await saveMediaNote(profile, {
+        ...(keepOriginal && files.length > 1 ? { files } : { file: keepOriginal ? file || undefined : undefined }),
+        title, body, extractedText: content,
+        ...(keepOriginal && sourceRecognitions.length ? { recognitions: sourceRecognitions } : {}),
+        sourceUrl: sourceUrl || undefined, sensitivity: classification, collectionId: collectionId || undefined,
+        ...(incoming ? { receipt: JSON.stringify(incoming[position]) } : {}),
+      }, aborter.signal);
       scheduleIndexTerms(profile); scheduleVectors(profile);
       if (!keepOriginal) for (const item of files) { await FileSystem.deleteAsync(item.uri, { idempotent: true }).catch(() => {}); }
       if (alive.current) { if (incoming && position + 1 < incoming.length) setPosition(p => p + 1); else setLeaving(true); }
