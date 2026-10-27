@@ -18,6 +18,10 @@ import { reindexAll } from "./search-index";
 
 const CODE_PATTERN = /^[a-f0-9]{64}$/;
 /** The records themselves, present in every version (v1–v3). */
+const TEMPORAL_TABLES = [
+  "memory_temporal_claims", "memory_temporal_evidence",
+  "memory_temporal_proposals", "memory_temporal_decisions",
+] as const;
 const BACKUP_TABLES = [
   "memory_collections", "memory_entities", "memory_observations",
   "memory_relations", "memory_revisions",
@@ -29,16 +33,19 @@ const V3_TABLES = {
 } as const;
 const ENTITY_COLUMNS = "id,collection_id,domain,schema_version,title,payload_json,record_status,sensitivity," +
   "source_kind,source_ref,valid_from,valid_until,created_at,updated_at,record_version";
-export const RESTORABLE_VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+export const RESTORABLE_VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
 const LEGACY_MAX_BACKUP_BYTES = 2 * 1024 * 1024 * 1024;
-const MANIFEST_FORMAT_VERSION = 1;
+const MANIFEST_FORMAT_VERSION = 2;
 const MANIFEST_TABLE = 'persai_backup_manifest' as const;
 const LEGACY_MAX_RESTORABLE_ENTITIES = 100000;
 const TEMP_STORAGE_RESERVE_BYTES = 64 * 1024 * 1024;
 
 type BackupCounts = { entities: number; collections: number; observations: number;
   attachments: number; attachment_parts: number; receipts: number; chats: number };
-type BackupManifest = BackupCounts & { format_version: number; schema_version: number };
+type TemporalCounts = { temporal_claims: number; temporal_evidence: number;
+  temporal_proposals: number; temporal_decisions: number };
+type BackupManifest = BackupCounts & Partial<TemporalCounts> &
+  { format_version: number; schema_version: number };
 const COUNT_TABLES = {
   entities: "memory_entities", collections: "memory_collections",
   observations: "memory_observations", attachments: "memory_attachments",
@@ -46,6 +53,21 @@ const COUNT_TABLES = {
   receipts: "memory_received_shares", chats: "direct_conversations",
 } as const;
 const COUNT_KEYS = Object.keys(COUNT_TABLES) as Array<keyof BackupCounts>;
+const TEMPORAL_COUNT_TABLES = {
+  temporal_claims: "memory_temporal_claims", temporal_evidence: "memory_temporal_evidence",
+  temporal_proposals: "memory_temporal_proposals", temporal_decisions: "memory_temporal_decisions",
+} as const;
+const TEMPORAL_COUNT_KEYS = Object.keys(TEMPORAL_COUNT_TABLES) as Array<keyof TemporalCounts>;
+function temporalCountsQuery(prefix: "" | "pia_import." | "pia_export."): string {
+  return "SELECT " + TEMPORAL_COUNT_KEYS.map(k =>
+    "(SELECT count(*) FROM " + prefix + TEMPORAL_COUNT_TABLES[k] + ") AS " + k).join(", ");
+}
+function validTemporalCounts(counts: TemporalCounts): boolean {
+  return TEMPORAL_COUNT_KEYS.every(k => Number.isSafeInteger(counts[k]) && counts[k] >= 0);
+}
+function temporalCountValues(counts: TemporalCounts): number[] {
+  return TEMPORAL_COUNT_KEYS.map(k => counts[k]);
+}
 function backupCountsQuery(prefix: "" | "pia_import." | "pia_export."): string {
   // These identifiers are constants, never interpolated user input.
   return "SELECT " + COUNT_KEYS.map(k =>
@@ -162,17 +184,23 @@ export async function shareEncryptedBackup(profileId: string, recoveryCode: stri
         await db.execAsync(`PRAGMA pia_export.user_version = ${LOCAL_MEMORY_SCHEMA_VERSION}`);
         // The manifest lives INSIDE SQLCipher ciphertext. No plaintext sidecar.
         await db.execAsync("CREATE TABLE pia_export.persai_backup_manifest (" +
-          "format_version INTEGER PRIMARY KEY CHECK(format_version=1), schema_version INTEGER NOT NULL," +
+          "format_version INTEGER PRIMARY KEY CHECK(format_version=2), schema_version INTEGER NOT NULL," +
           "entities INTEGER NOT NULL, collections INTEGER NOT NULL, observations INTEGER NOT NULL," +
           "attachments INTEGER NOT NULL, attachment_parts INTEGER NOT NULL," +
-          "receipts INTEGER NOT NULL, chats INTEGER NOT NULL)");
+          "receipts INTEGER NOT NULL, chats INTEGER NOT NULL," +
+          "temporal_claims INTEGER NOT NULL, temporal_evidence INTEGER NOT NULL," +
+          "temporal_proposals INTEGER NOT NULL, temporal_decisions INTEGER NOT NULL)");
         const counts = await db.getFirstAsync<BackupCounts>(backupCountsQuery("pia_export."));
         if (!counts || !validBackupCounts(counts)) throw new Error("backup_manifest_unavailable");
+        const temporalCounts = await db.getFirstAsync<TemporalCounts>(temporalCountsQuery("pia_export."));
+        if (!temporalCounts || !validTemporalCounts(temporalCounts)) throw new Error("backup_manifest_unavailable");
         await db.runAsync(
           "INSERT INTO pia_export.persai_backup_manifest " +
-            "(format_version,schema_version,entities,collections,observations,attachments,attachment_parts,receipts,chats) " +
-            "VALUES (?,?,?,?,?,?,?,?,?)",
-          [MANIFEST_FORMAT_VERSION, LOCAL_MEMORY_SCHEMA_VERSION, ...backupCountValues(counts)],
+            "(format_version,schema_version,entities,collections,observations,attachments,attachment_parts,receipts,chats," +
+            "temporal_claims,temporal_evidence,temporal_proposals,temporal_decisions) " +
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+          [MANIFEST_FORMAT_VERSION, LOCAL_MEMORY_SCHEMA_VERSION, ...backupCountValues(counts),
+            ...temporalCountValues(temporalCounts)],
         );
         const cipherIntegrity = await db.getFirstAsync<{ integrity_check: string }>(
           "PRAGMA pia_export.integrity_check",
@@ -260,6 +288,10 @@ export async function restoreEncryptedBackup(
              !available.has("memory_extraction_segments"))) {
           throw new Error("incompatible_backup_schema");
         }
+        if (version.user_version >= 11 && (!available.has(MANIFEST_TABLE) ||
+            !TEMPORAL_TABLES.every(table => available.has(table)))) {
+          throw new Error("incompatible_backup_schema");
+        }
         // Validate the *source* before any destination writes. A forged
         // SQLCipher file with the right table names can still have corruption.
         const integrity = await db.getFirstAsync<{ integrity_check: string }>(
@@ -275,6 +307,7 @@ export async function restoreEncryptedBackup(
           throw new Error("invalid_backup_records");
         }
         let verifiedCounts: BackupCounts | null = null;
+        let verifiedTemporal: TemporalCounts | null = null;
         if (available.has(MANIFEST_TABLE)) {
           const manifest = await db.getFirstAsync<BackupManifest>(
             "SELECT * FROM pia_import.persai_backup_manifest",
@@ -282,8 +315,9 @@ export async function restoreEncryptedBackup(
           const manifestRows = await db.getFirstAsync<{ n: number }>(
             "SELECT count(*) AS n FROM pia_import.persai_backup_manifest",
           );
-          if (manifestRows?.n !== 1 || !manifest || manifest.format_version !== MANIFEST_FORMAT_VERSION ||
-              manifest.schema_version !== version.user_version || !validBackupCounts(manifest)) {
+          if (manifestRows?.n !== 1 || !manifest ||
+              manifest.schema_version !== version.user_version || !validBackupCounts(manifest) ||
+              manifest.format_version !== (version.user_version >= 11 ? 2 : 1)) {
             throw new Error("backup_manifest_invalid");
           }
           const actual = await db.getFirstAsync<BackupCounts>(backupCountsQuery("pia_import."));
@@ -292,6 +326,14 @@ export async function restoreEncryptedBackup(
             throw new Error("backup_manifest_mismatch");
           }
           verifiedCounts = actual;
+          if (version.user_version >= 11) {
+            const actualTemporal = await db.getFirstAsync<TemporalCounts>(temporalCountsQuery("pia_import."));
+            if (!actualTemporal || !validTemporalCounts(actualTemporal) ||
+                !TEMPORAL_COUNT_KEYS.every(k => manifest[k] === actualTemporal[k])) {
+              throw new Error("backup_manifest_mismatch");
+            }
+            verifiedTemporal = actualTemporal;
+          }
         } else if (incoming.n > LEGACY_MAX_RESTORABLE_ENTITIES ||
                    info.size > LEGACY_MAX_BACKUP_BYTES) {
           throw new Error("backup_legacy_limit_without_manifest");
@@ -355,6 +397,20 @@ export async function restoreEncryptedBackup(
               }
             }
           }
+          if (version.user_version >= 11) {
+            // Claims, their evidence, review proposals and decision history
+            // are user-owned. Restore in FK order, never rebuild from LLM.
+            for (const table of TEMPORAL_TABLES) {
+              await tx.execAsync("INSERT INTO " + table + " SELECT * FROM pia_import." + table);
+              const expected = await tx.getFirstAsync<{ n: number }>(
+                "SELECT count(*) AS n FROM pia_import." + table);
+              const actual = await tx.getFirstAsync<{ n: number }>(
+                "SELECT count(*) AS n FROM " + table);
+              if (!expected || !actual || expected.n !== actual.n) {
+                throw new Error("backup_temporal_count_mismatch");
+              }
+            }
+          }
           // Keep imported Android Share deduplication fingerprints: a source
           // is never re-imported merely because it was restored on another phone.
           // The earlier v1-v6 deployed formats may omit this optional table.
@@ -386,6 +442,13 @@ export async function restoreEncryptedBackup(
                 backupCountValues(verifiedCounts).some((n, i) =>
                   n + (COUNT_KEYS[i] === "chats" ? oldChats.n : 0) !== backupCountValues(actual)[i])) {
               throw new Error("backup_restore_count_mismatch");
+            }
+          }
+          if (verifiedTemporal) {
+            const actual = await tx.getFirstAsync<TemporalCounts>(temporalCountsQuery(""));
+            if (!actual || !validTemporalCounts(actual) ||
+                TEMPORAL_COUNT_KEYS.some(k => actual[k] !== verifiedTemporal![k])) {
+              throw new Error("backup_temporal_count_mismatch");
             }
           }
           const violation = await tx.getFirstAsync("PRAGMA foreign_key_check");

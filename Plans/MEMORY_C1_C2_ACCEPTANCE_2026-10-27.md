@@ -1,6 +1,6 @@
 # C1/C2 приёмка памяти PersAI — 27.10.2026
 
-**Единственная очередь:** PLAN.md §2. Здесь доказательства и классификация проверок, а не новый roadmap или этап №72/66.4.
+**Единственная очередь:** PLAN.md §2. №72.1/T1b SQLCipher v11: added test cases for v10 migration rollback, source-versioned claims and evidence, non-applying proposal, v11 backup count symmetry and old manifests; **not PASS before required CI exact SHA and Android native gate**. No claim about device-backed restore without device evidence. Здесь доказательства и классификация проверок, а не новый roadmap или этап №72/66.4.
 
 ## Автоматически проверяется
 - №63а.1: #134/#141/#146/#151 — SQLCipher encrypted manifest, совместимость v1–v7, запись Android Share receipts, защита от неверного ключа, обрыва, нехватки места и потери строк. Jest edge-case/rollback и native Android SQLCipher build/emulator Maestro smoke. Mock >2 GiB и 100001 entity **не равен** настоящему многогигабайтному восстановлению.
