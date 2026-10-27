@@ -22,7 +22,7 @@ let mockAlreadyContainsMemory = false;
 const mockDb = {
   runAsync: jest.fn(async (_sql: string, _params?: unknown[]) => ({})),
   execAsync: jest.fn(async (_sql: string) => {}),
-  getFirstAsync: jest.fn(async (_sql: string): Promise<Record<string, string | number> | null> => ({})),
+  getFirstAsync: jest.fn(async (_sql: string): Promise<Record<string, string | number | undefined> | null> => ({})),
   getAllAsync: jest.fn(async (_sql: string): Promise<Array<{ name: string }>> => []),
   withExclusiveTransactionAsync: jest.fn(async () => { throw new Error("new_connection_forbidden"); }),
 };
@@ -47,7 +47,7 @@ beforeEach(() => {
   mockDb.execAsync.mockImplementation(async (sql: string) => {
     if (sql === "COMMIT") mockRestored = true;
   });
-  mockDb.getFirstAsync.mockImplementation(async (sql: string): Promise<Record<string, string | number> | null> => {
+  mockDb.getFirstAsync.mockImplementation(async (sql: string): Promise<Record<string, string | number | undefined> | null> => {
     if (sql === "SELECT count(*) AS n FROM memory_entities") return { n: 2 };
     if (sql === "PRAGMA page_count") return { page_count: 20 };
     if (sql === "PRAGMA page_size") return { page_size: 4096 };
@@ -185,7 +185,7 @@ test("restore imports the five record tables atomically on the unlocked connecti
 
 test("rejects corrupt backup contents before target transaction", async () => {
   // Match the source integrity-check pragma regardless of invocation order.
-  mockDb.getFirstAsync.mockImplementation(async (sql: string): Promise<Record<string, string | number> | null> => {
+  mockDb.getFirstAsync.mockImplementation(async (sql: string): Promise<Record<string, string | number | undefined> | null> => {
     if (sql.includes("pia_import.user_version")) return { user_version: 1 };
     if (sql.includes("pia_import.integrity_check")) return { integrity_check: "corrupt" };
     return { n: 0 };
