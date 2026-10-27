@@ -91,7 +91,7 @@ export class DurableVectorJobs {
    * active leases are never stolen. Failed tasks stay visible for repair.
    */
   async claim(model: string, limit = 4): Promise<ClaimedVectorJob[]> {
-    if (!model || model.length > 250) throw new Error("invalid_vector_space");
+    if (!model || model.length > 512) throw new Error("invalid_vector_space");
     const cap = Math.min(16, Math.max(1, Math.trunc(limit) || 4));
     const result: ClaimedVectorJob[] = [];
     await withUnlockedTransaction(this.db, async tx => {
