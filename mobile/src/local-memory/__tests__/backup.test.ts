@@ -9,7 +9,7 @@ jest.mock("expo-file-system/legacy", () => ({
 }));
 jest.mock("expo-sharing", () => ({ isAvailableAsync: jest.fn(), shareAsync: jest.fn() }));
 jest.mock("../storage", () => ({
-  LOCAL_MEMORY_SCHEMA_VERSION: 10,
+  LOCAL_MEMORY_SCHEMA_VERSION: 11,
   withLocalMemoryDatabase: jest.fn(async (_id: string, task: (db: unknown) => Promise<unknown>) => task(mockDb)),
 }));
 
@@ -52,6 +52,8 @@ beforeEach(() => {
     if (sql === "PRAGMA page_count") return { page_count: 20 };
     if (sql === "PRAGMA page_size") return { page_size: 4096 };
     if (sql === "PRAGMA pia_export.integrity_check") return { integrity_check: "ok" };
+    if (sql.includes("(SELECT count(*) FROM ") && sql.includes("memory_temporal_claims")) return {
+      temporal_claims: 0, temporal_evidence: 0, temporal_proposals: 0, temporal_decisions: 0 };
     if (sql.includes("(SELECT count(*) FROM ")) return { entities: 2, collections: 1, observations: 1, attachments: 0, attachment_parts: 0, receipts: 0, chats: 0 };
     if (sql.includes("pia_import.user_version")) return { user_version: 1 };
     if (sql.includes("pia_import.integrity_check")) return { integrity_check: "ok" };
@@ -90,7 +92,7 @@ test("export SQLCipher-encrypts a new independent file before sharing and erases
     "/cache/pia-encrypted-random-id.db", code,
   ]);
   expect(mockDb.getFirstAsync).toHaveBeenCalledWith("SELECT sqlcipher_export('pia_export')");
-  expect(mockDb.execAsync).toHaveBeenCalledWith("PRAGMA pia_export.user_version = 10");
+  expect(mockDb.execAsync).toHaveBeenCalledWith("PRAGMA pia_export.user_version = 11");
   expect(mockDb.execAsync).toHaveBeenCalledWith("DETACH DATABASE pia_export");
   expect(Sharing.shareAsync).toHaveBeenCalledTimes(1);
   expect(FS.deleteAsync).toHaveBeenCalledWith("file:///cache/pia-encrypted-random-id.db", {
@@ -107,7 +109,7 @@ test("verified export accepts more than 100k records and writes an encrypted man
   await shareEncryptedBackup("guest", code);
   expect(mockDb.execAsync).toHaveBeenCalledWith(expect.stringContaining("CREATE TABLE pia_export.persai_backup_manifest"));
   expect(mockDb.runAsync).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO pia_export.persai_backup_manifest"),
-    [1, 10, 100001, 1, 1, 0, 0, 0, 0]);
+    [2, 11, 100001, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0]);
   expect(Sharing.shareAsync).toHaveBeenCalledTimes(1);
 });
 
@@ -257,7 +259,7 @@ test.each([1, 2, 3])("restores deployed schema v%s including chats into the upgr
   expect(mockDb.execAsync.mock.calls.map(([sql]) => sql)).toContainEqual(expect.stringContaining("INSERT INTO direct_conversations"));
 });
 
-test.each([0, 11])("rejects unsupported backup schema v%s before copying any memory", async version => {
+test.each([0, 12])("rejects unsupported backup schema v%s before copying any memory", async version => {
   const read = mockDb.getFirstAsync.getMockImplementation()!;
   mockDb.getFirstAsync.mockImplementation(async sql => sql === "PRAGMA pia_import.user_version" ? { user_version: version } : read(sql));
   await expect(restoreEncryptedBackup("guest", "file:///backup.db", code)).rejects.toThrow("incompatible_backup_version");
@@ -421,4 +423,71 @@ test("v9 backup preserves source/version/page/time evidence in the encrypted res
   expect(sql).toContain("INSERT INTO memory_extractions SELECT * FROM pia_import.memory_extractions");
   expect(sql).toContain("INSERT INTO memory_extraction_segments SELECT * FROM pia_import.memory_extraction_segments");
   expect(sql.indexOf("COMMIT")).toBeGreaterThan(sql.indexOf("INSERT INTO memory_extraction_segments SELECT * FROM pia_import.memory_extraction_segments"));
+});
+
+
+test("v11 restore requires all user-owned temporal tables and the upgraded manifest", async () => {
+  const before = mockDb.getFirstAsync.getMockImplementation()!;
+  mockDb.getFirstAsync.mockImplementation(async sql =>
+    sql === "PRAGMA pia_import.user_version" ? {user_version: 11} : before(sql));
+  tablesOnce([...names, "memory_attachments","memory_attachment_parts",
+    "memory_received_shares","memory_cleanup_preferences",
+    "memory_extractions","memory_extraction_segments","persai_backup_manifest"]);
+  await expect(restoreEncryptedBackup("guest","file:///truncated-v11.db",code))
+    .rejects.toThrow("incompatible_backup_schema");
+  expect(mockDb.execAsync.mock.calls.some(([sql]) => String(sql).startsWith("INSERT INTO"))).toBe(false);
+});
+
+test("v11 manifest counts all claims, evidence, proposals and decisions before atomic restore", async () => {
+  const old = mockDb.getFirstAsync.getMockImplementation()!;
+  const extra = { temporal_claims: 2, temporal_evidence: 2, temporal_proposals: 1, temporal_decisions: 1 };
+  mockDb.getFirstAsync.mockImplementation(async sql => {
+    if (sql === "PRAGMA pia_import.user_version") return {user_version: 11};
+    if (sql === "SELECT * FROM pia_import.persai_backup_manifest") return {
+      format_version: 2, schema_version: 11, entities: 2, collections: 1, observations: 1,
+      attachments: 0, attachment_parts: 0, receipts: 0, chats: 0, ...extra };
+    if (sql.includes("(SELECT count(*) FROM ") && sql.includes("memory_temporal_claims")) return extra;
+    if (sql.startsWith("SELECT count(*) AS n FROM ") && sql.includes("memory_temporal_")) {
+      if (sql.includes("memory_temporal_proposals") || sql.includes("memory_temporal_decisions")) return {n: 1};
+      return {n: 2};
+    }
+    return old(sql);
+  });
+  tablesOnce([...names,"memory_attachments","memory_attachment_parts",
+    "memory_received_shares","memory_cleanup_preferences",
+    "memory_extractions","memory_extraction_segments","persai_backup_manifest",
+    "memory_temporal_claims","memory_temporal_evidence",
+    "memory_temporal_proposals","memory_temporal_decisions"]);
+  const restored = await restoreEncryptedBackup("guest","file:///v11.db",code);
+  expect(restored.entities).toBe(2);
+  const sql = mockDb.execAsync.mock.calls.map(([s]) => String(s));
+  const indices = ["memory_temporal_claims","memory_temporal_evidence",
+    "memory_temporal_proposals","memory_temporal_decisions"]
+    .map(name => sql.indexOf("INSERT INTO "+name+" SELECT * FROM pia_import."+name));
+  expect(indices.every(index => index >= 0)).toBe(true);
+  expect(indices).toEqual([...indices].sort((a,b) => a-b));
+  expect(sql.indexOf("COMMIT")).toBeGreaterThan(indices[3]);
+});
+
+test("v11 forged manifest temporal counts abort restore before destination writes", async () => {
+  const old = mockDb.getFirstAsync.getMockImplementation()!;
+  mockDb.getFirstAsync.mockImplementation(async sql => {
+    if (sql === "PRAGMA pia_import.user_version") return {user_version: 11};
+    if (sql === "SELECT * FROM pia_import.persai_backup_manifest") return {
+      format_version: 2, schema_version: 11, entities: 2, collections: 1, observations: 1,
+      attachments: 0, attachment_parts: 0, receipts: 0, chats: 0,
+      temporal_claims: 3, temporal_evidence: 2, temporal_proposals: 1, temporal_decisions: 1 };
+    if (sql.includes("(SELECT count(*) FROM ") && sql.includes("memory_temporal_claims")) {
+      return {temporal_claims: 2, temporal_evidence: 2, temporal_proposals: 1, temporal_decisions: 1};
+    }
+    return old(sql);
+  });
+  tablesOnce([...names,"memory_attachments","memory_attachment_parts",
+    "memory_received_shares","memory_cleanup_preferences",
+    "memory_extractions","memory_extraction_segments","persai_backup_manifest",
+    "memory_temporal_claims","memory_temporal_evidence",
+    "memory_temporal_proposals","memory_temporal_decisions"]);
+  await expect(restoreEncryptedBackup("guest","file:///tampered-v11.db",code))
+    .rejects.toThrow("backup_manifest_mismatch");
+  expect(mockDb.execAsync.mock.calls.some(([sql]) => String(sql).startsWith("INSERT INTO"))).toBe(false);
 });
