@@ -56,6 +56,7 @@ beforeEach(() => {
     if (sql.includes("pia_import.user_version")) return { user_version: 1 };
     if (sql.includes("pia_import.integrity_check")) return { integrity_check: "ok" };
     if (sql === "SELECT count(*) AS n FROM pia_import.persai_backup_manifest") return { n: 1 };
+    if (sql === "SELECT count(*) AS n FROM direct_conversations") return { n: 0 };
     if (sql.includes("JOIN main.direct_conversations current")) return { n: 0 };
     if (sql.includes("pia_import.memory_entities")) return { n: 2 };
     if (sql === "SELECT count(*) AS n FROM memory_collections") {
@@ -318,7 +319,8 @@ test("verified SQLCipher archive with over 100k records restores after manifest 
     sql === "SELECT * FROM pia_import.persai_backup_manifest" ?
       { format_version: 1, schema_version: 7, entities: 100001, collections: 1,
         observations: 1, attachments: 0, attachment_parts: 0, receipts: 0, chats: 0 } :
-    sql.includes("(SELECT count(*) FROM pia_import.") ?
+    sql.includes("(SELECT count(*) FROM pia_import.") ||
+    sql.includes("(SELECT count(*) FROM memory_entities") ?
       { entities: 100001, collections: 1, observations: 1, attachments: 0,
         attachment_parts: 0, receipts: 0, chats: 0 } :
     sql === "SELECT count(*) AS n FROM pia_import.memory_entities" ? { n: 100001 } : prior(sql));
@@ -327,6 +329,32 @@ test("verified SQLCipher archive with over 100k records restores after manifest 
   const out = await restoreEncryptedBackup("guest", "file:///large-manifest.db", code);
   expect(out.entities).toBe(100001);
   expect(mockDb.execAsync).toHaveBeenCalledWith("COMMIT");
+});
+
+test("verified restore checks row-count symmetry inside transaction before COMMIT", async () => {
+  const before = mockDb.getFirstAsync.getMockImplementation()!;
+  mockDb.getFirstAsync.mockImplementation(async sql => {
+    if (sql === "PRAGMA pia_import.user_version") return { user_version: 7 };
+    if (sql === "SELECT * FROM pia_import.persai_backup_manifest") return {
+      format_version: 1, schema_version: 7, entities: 2, collections: 1,
+      observations: 1, attachments: 0, attachment_parts: 0, receipts: 0, chats: 0,
+    };
+    if (sql.includes("(SELECT count(*) FROM ")) {
+      const inserted = mockDb.execAsync.mock.calls.some(([text]: string[]) =>
+        text.includes("INSERT INTO memory_entities"));
+      const original = { entities: 2, collections: 1, observations: 1,
+        attachments: 0, attachment_parts: 0, receipts: 0, chats: 0 };
+      return sql.includes("pia_import.") || !inserted ? original : { ...original, entities: 1 };
+    }
+    return before(sql);
+  });
+  tablesOnce([...names, "memory_attachments", "memory_attachment_parts", "memory_received_shares",
+    "memory_cleanup_preferences", "direct_conversations", "persai_backup_manifest"]);
+  await expect(restoreEncryptedBackup("guest", "file:///rowloss.db", code))
+    .rejects.toThrow("backup_restore_count_mismatch");
+  const commands = mockDb.execAsync.mock.calls.map(([sql]) => String(sql));
+  expect(commands).toContain("ROLLBACK");
+  expect(commands).not.toContain("COMMIT");
 });
 
 test("manifest mismatch is rejected without any destination insert", async () => {
