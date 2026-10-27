@@ -1,5 +1,6 @@
 import { changeNotes, undoNotes, purgeNotes, type NoteAction, type NoteSelection } from "./note-actions";
 import { MemoryHygieneService } from "./hygiene";
+import { DurableVectorJobs, type ClaimedVectorJob, type CompletedVectorJob } from "./vector-jobs";
 import * as Crypto from "expo-crypto";
 import type * as SQLite from "expo-sqlite";
 
@@ -515,6 +516,23 @@ export class SqliteMemoryRepository implements MemoryRepository {
       applied = true;
     });
     return applied;
+  }
+
+  /** All methods remain inside localMemoryRepository's encrypted profile lease. */
+  claimVectorJobs(model: string, limit = 4): Promise<ClaimedVectorJob[]> {
+    return new DurableVectorJobs(this.db).claim(model, limit);
+  }
+  completeVectorJobs(model: string, items: CompletedVectorJob[]): Promise<number> {
+    return new DurableVectorJobs(this.db).complete(model, items);
+  }
+  failVectorJobs(model: string, jobs: ClaimedVectorJob[]): Promise<void> {
+    return new DurableVectorJobs(this.db).fail(model, jobs);
+  }
+  releaseVectorJobs(model: string, jobs: ClaimedVectorJob[]): Promise<void> {
+    return new DurableVectorJobs(this.db).release(model, jobs);
+  }
+  nextVectorWakeMs(model: string): Promise<number | null> {
+    return new DurableVectorJobs(this.db).nextWakeMs(model);
   }
 
   /** Chunks whose vector for `model` is missing or older than the text and
