@@ -5,6 +5,7 @@
 import type * as SQLite from "expo-sqlite";
 import { foldText } from "./query";
 import { CURRENT_MODEL_TERMS } from "./enrichment-policy";
+import { markEntityVectorsDirty } from "./vector-jobs";
 
 type SQL = Pick<SQLite.SQLiteDatabase, "getAllAsync" | "getFirstAsync" | "runAsync">;
 type Row = Record<string, unknown>;
@@ -130,6 +131,8 @@ export async function indexEntity(db: SQL, entityId: string, timestamp = new Dat
     await db.runAsync("INSERT INTO memory_search_fts(entity_id,chunk_id,title,body,terms,aliases) VALUES (?,?,?,?,?,?)",
       [entityId, chunkId(entityId, ord), title, foldText(text), foldText(terms), foldText(aliases)]);
   }
+  // Durable invalidation is committed atomically with the original's FTS.
+  await markEntityVectorsDirty(db, entityId, timestamp);
 }
 
 /** Indexes every record: the v3 upgrade and a restored backup. */
