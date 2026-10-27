@@ -10,7 +10,8 @@ import {
 } from "./temporal-claims";
 import { withUnlockedTransaction } from "./transaction";
 
-type SQL = Pick<SQLite.SQLiteDatabase, "getFirstAsync" | "getAllAsync" | "runAsync" | "execAsync">;
+type SQL = Pick<SQLite.SQLiteDatabase, "getFirstAsync" | "runAsync" | "execAsync">;
+type ScanSQL = SQL & Pick<SQLite.SQLiteDatabase, "getAllAsync">;
 type ClaimRow = {
   id: string; entity_id: string; source_record_version: number;
   subject_id: string | null; predicate: string; context: string; value: string;
@@ -155,7 +156,7 @@ type ExistingReview = { id: string };
 type PreviousReviewCandidate = { id: string };
 
 export async function stageTemporalCandidateWithReview(
-  db: SQL, candidate: TemporalClaimCandidate,
+  db: ScanSQL, candidate: TemporalClaimCandidate,
 ): Promise<TemporalStagedReview> {
   validateTemporalClaim(candidate);
   const id = uid(), evidenceId = uid();
