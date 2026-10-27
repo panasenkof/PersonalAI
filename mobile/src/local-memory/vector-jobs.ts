@@ -47,7 +47,7 @@ export class DurableVectorJobs {
     if (exists?.active === 1) return;
     await tx.runAsync("UPDATE memory_vector_models SET active=0 WHERE active=1");
     await tx.runAsync(
-      "INSERT INTO memory_vector_models(model,active,scan_cursor,scan_complete,created_at) VALUES (?,1,'',0,?) ON CONFLICT(model) DO UPDATE SET active=1",
+      "INSERT INTO memory_vector_models(model,active,scan_cursor,scan_complete,created_at) VALUES (?,1,'',0,?) ON CONFLICT(model) DO UPDATE SET active=1,scan_cursor='',scan_complete=0",
       [model, timestamp],
     );
   }
