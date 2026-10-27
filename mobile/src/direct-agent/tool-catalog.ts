@@ -62,6 +62,26 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
       verify: (r: Record<string, unknown>) => typeof r.content === "string" &&
         typeof r.revision === "number" && typeof r.hasMore === "boolean" ? "read" as const : "failed" as const,
     }] : []),
+    ...(options.searchSources ? [{
+      definition: { name: "search_local_source_segments",
+        description: "Искать точную последовательность 1–3 ключевых слов внутри распознанного текста оригинальных вложений. Возвращает лишь разрешённые активные заметки и короткие превью; не является поиском по закрытым документам, а страница/таймкод только по данным обработчика.",
+        parameters: { type: "object", properties: {
+          query: { type: "string" }, limit: { type: ["integer","null"] },
+        }, required: ["query","limit"], additionalProperties: false },
+      }, effect: "read" as const,
+      execute: async (args: Record<string,unknown>) => {
+        const query = typeof args.query === "string" ? args.query.trim() : "";
+        const limit = args.limit ?? 8;
+        if (query.length < 2 || query.length > 120 ||
+            !Number.isSafeInteger(limit) || Number(limit) < 1 || Number(limit) > 20) {
+          return { error: "invalid_source_search_request" };
+        }
+        return options.searchSources!(query, Number(limit));
+      },
+      verify: (r: Record<string,unknown>) => Array.isArray(r.segments) &&
+        r.scope === "standard_active_notes" &&
+        r.matchMode === "exact_fts_phrase" ? "read" as const : "failed" as const,
+    }] : []),
     ...(options.listSources ? [{
       definition: { name: "list_local_sources",
         description: "Получить только названия источников, короткие превью и координаты извлечённых фрагментов конкретной ранее найденной заметки по id/version. Список не является полным текстом; указанная обработчиком страница/время не проверены независимо по оригиналу.",
