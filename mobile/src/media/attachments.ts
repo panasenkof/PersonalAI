@@ -115,7 +115,7 @@ export async function saveMediaNote(profile: string, input: { file?: ImportFile;
       originalHashes.push(fingerprint);
     }
     const contentHash: string | string[] | null = originals.length > 1 ? originalHashes : originalHashes[0] || null;
-    const receipt = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, JSON.stringify([input.receipt || 'device-import', contentHash, input.title, input.body, input.extractedText || "", input.sensitivity, input.collectionId || "", input.sourceUrl || "", verified?.filter(x => x.status === 'success').map(x => [x.index, x.text]) || null]));
+    const receipt = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, JSON.stringify([input.receipt || 'device-import', contentHash, input.title, input.body, input.extractedText || "", input.sensitivity, input.collectionId || "", input.sourceUrl || "", ...(verified ? [verified.filter(x => x.status === 'success').map(x => [x.index, x.text])] : [])]));
     {
       const old = await db.getFirstAsync<{ entity_id: string }>('SELECT entity_id FROM memory_received_shares WHERE fingerprint=?', [receipt]);
       if (old) return old.entity_id;
