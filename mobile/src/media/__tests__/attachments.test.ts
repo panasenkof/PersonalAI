@@ -219,3 +219,102 @@ test("combined recognitions of two originals are not falsely bound to either sou
   expect(sqlite.prepare("SELECT count(*) AS n FROM memory_extractions").get().n).toBe(0);
   expect(sqlite.prepare("SELECT payload_json FROM memory_entities WHERE id=?").get(id).payload_json).toContain("Содержимое обоих файлов");
 });
+
+test("mixed successful and failed recognitions bind to exact original indices, not joint text", async () => {
+  const files = [input.file,
+    { uri: "file:///voice.mp3", name: "voice.mp3", mimeType: "audio/mpeg" },
+    { uri: "file:///draft.txt", name: "draft.txt", mimeType: "text/plain" }];
+  mockFiles.set(files[1].uri, new Uint8Array([1,2,3]));
+  mockFiles.set(files[2].uri, new Uint8Array([4,5,6]));
+  const request = {
+    files, title: "Три источника", body: "Моя подпись", sensitivity: "standard" as const,
+    extractedText: "Распознанное и отредактированное резюме общего анализа",
+    recognitions: [
+      { index: 0, name: "photo.png", status: "success" as const, text: "Чек: кофе 350" },
+      { index: 1, name: "voice.mp3", status: "error" as const, error: "Неизвестный сервис" },
+      { index: 2, name: "draft.txt", status: "success" as const, text: "Договор подписан" },
+    ],
+  };
+  const id=await saveMediaNote("guest",request);
+  expect(await saveMediaNote("guest",request)).toBe(id);
+  const rows=sqlite.prepare(`SELECT a.name,s.text,r.producer_kind,s.location_kind,
+      r.status,r.coverage FROM memory_extraction_segments s
+      JOIN memory_extractions r ON r.id=s.extraction_id
+      JOIN memory_attachments a ON a.id=r.attachment_id ORDER BY a.name`).all();
+  expect(rows).toEqual([
+    expect.objectContaining({name:"draft.txt",text:"Договор подписан",producer_kind:"text",
+      location_kind:"unknown",status:"partial",coverage:"unknown"}),
+    expect.objectContaining({name:"photo.png",text:"Чек: кофе 350",producer_kind:"vision",
+      location_kind:"unknown",status:"partial",coverage:"unknown"}),
+  ]);
+  expect(sqlite.prepare("SELECT COUNT(*) n FROM memory_extractions").get().n).toBe(2);
+  expect(sqlite.prepare("SELECT COUNT(*) n FROM memory_attachments").get().n).toBe(3);
+  expect(sqlite.prepare("SELECT payload_json FROM memory_entities WHERE id=?").get(id).payload_json)
+    .toContain("отредактированное резюме");
+  expect(sqlite.prepare("SELECT count(*) n FROM memory_extraction_fts WHERE memory_extraction_fts MATCH ?").get('"договор"').n).toBe(1);
+  expect(sqlite.prepare("SELECT count(*) n FROM memory_extraction_fts WHERE memory_extraction_fts MATCH ?").get('"резюме"').n).toBe(0);
+});
+
+test("duplicate filenames are disambiguated by selection indices, not by names",async()=>{
+  const files = [input.file,{...input.file,uri:"file:///alternate.png"}];
+  mockFiles.set(files[1].uri,new Uint8Array([1,2,3]));
+  const id=await saveMediaNote("guest",{
+    files, title:"Одинаковые имена",body:"",sensitivity:"standard",
+    recognitions:[
+      {index:0,name:"photo.png",status:"success",text:"Первая фотография"},
+      {index:1,name:"photo.png",status:"success",text:"Вторая фотография"},
+    ],
+  });
+  const rows=sqlite.prepare(`SELECT a.id,s.text FROM memory_extraction_segments s
+       JOIN memory_extractions r ON r.id=s.extraction_id JOIN memory_attachments a ON a.id=r.attachment_id
+       WHERE a.entity_id=?`).all(id);
+  expect(rows).toHaveLength(2);
+  expect(new Set(rows.map((r:any)=>r.id)).size).toBe(2);
+  expect(new Set(rows.map((r:any)=>r.text))).toEqual(new Set(["Первая фотография","Вторая фотография"]));
+});
+
+test("rejects forged source indices/names and duplicate source receipts without changing memory",async()=>{
+  mockFiles.set("file:///voice.mp3",new Uint8Array([1,2,3]));
+  const files=[input.file,{uri:"file:///voice.mp3",name:"voice.mp3",mimeType:"audio/mpeg"}];
+  const good={files,title:"Источники",body:"",sensitivity:"standard" as const};
+  const invalid=[
+    [{index:2,name:"voice.mp3",status:"success",text:"Текст"}],
+    [{index:0,name:"voice.mp3",status:"success",text:"Текст"}],
+    [{index:0,name:"photo.png",status:"success",text:"А"},{index:0,name:"photo.png",status:"success",text:"Б"}],
+    [{index:0,name:"photo.png",status:"success",text:"   "}],
+    [{index:1,name:"voice.mp3",status:"error",text:"Нельзя"}],
+  ];
+  for(const items of invalid){
+    await expect(saveMediaNote("guest",{...good,recognitions:items as any})).rejects.toThrow("invalid_recognition_sources");
+  }
+  for(const table of ["memory_entities","memory_attachments","memory_extractions","memory_extraction_segments","memory_extraction_fts"])
+    expect(sqlite.prepare("SELECT COUNT(*) n FROM "+table).get().n).toBe(0);
+});
+
+test("a per-file extraction failure rolls back parent note, originals and FTS together",async()=>{
+  mockFiles.set("file:///voice.mp3",new Uint8Array([1,2,3]));
+  const old=mockDb.runAsync;
+  mockDb.runAsync=async (sql:string,params:any[]=[])=>{
+    if(sql.includes("INSERT INTO memory_extraction_segments"))throw new Error("simulated_segment_disk_failure");
+    return old(sql,params);
+  };
+  await expect(saveMediaNote("guest",{files:[input.file,{uri:"file:///voice.mp3",name:"voice.mp3",mimeType:"audio/mpeg"}],
+    title:"Транзакция",body:"",sensitivity:"standard",
+    recognitions:[{index:0,name:"photo.png",status:"success",text:"Провал записи"}]}))
+    .rejects.toThrow("simulated_segment_disk_failure");
+  for(const table of ["memory_entities","memory_attachments","memory_attachment_parts","memory_extractions","memory_extraction_segments","memory_extraction_fts","memory_received_shares"])
+    expect(sqlite.prepare("SELECT COUNT(*) n FROM "+table).get().n).toBe(0);
+});
+
+test("Unicode ASR transcript splits into valid SQLCipher segments without cutting surrogate pairs",async()=>{
+  const rich="🎵".repeat(3200);
+  const id=await saveMediaNote("guest",{...input,
+    recognitions:[{index:0,name:"photo.png",status:"success",text:rich}]});
+  const texts=sqlite.prepare(`SELECT s.text FROM memory_extraction_segments s
+      JOIN memory_extractions r ON r.id=s.extraction_id
+      JOIN memory_attachments a ON a.id=r.attachment_id
+      WHERE a.entity_id=? ORDER BY s.ord`).all(id).map((r:any)=>r.text);
+  expect(texts).toHaveLength(2);
+  expect(texts.join("")).toBe(rich);
+  expect(texts.every((text:string)=>text.length<=6000)).toBe(true);
+});
