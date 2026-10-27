@@ -62,6 +62,55 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
       verify: (r: Record<string, unknown>) => typeof r.content === "string" &&
         typeof r.revision === "number" && typeof r.hasMore === "boolean" ? "read" as const : "failed" as const,
     }] : []),
+    ...(options.listSources ? [{
+      definition: { name: "list_local_sources",
+        description: "Получить только названия источников, короткие превью и координаты извлечённых фрагментов конкретной ранее найденной заметки по id/version. Список не является полным текстом; указанная обработчиком страница/время не проверены независимо по оригиналу.",
+        parameters: { type: "object", properties: {
+          id: { type: "string" }, version: { type: "integer" }, limit: { type: ["integer","null"] },
+        }, required: ["id","version","limit"], additionalProperties: false },
+      }, effect: "read" as const,
+      execute: async (args: Record<string,unknown>) => {
+        const id = text(args.id, 128);
+        const version = args.version, limit = args.limit ?? 15;
+        if (!id || !Number.isSafeInteger(version) || Number(version) < 1 ||
+            !Number.isSafeInteger(limit) || Number(limit) < 1 || Number(limit) > 30) {
+          return { error: "invalid_source_list_request" };
+        }
+        return options.listSources!(id, Number(version), Number(limit));
+      },
+      verify: (r: Record<string, unknown>) => Array.isArray(r.segments) &&
+        r.metadataOnly === true && r.scope === "standard_active_notes" ? "read" as const : "failed" as const,
+    }] : []),
+    ...(options.readSource ? [{
+      definition: { name: "read_local_source_segment",
+        description: "Читать ограниченный текст одного сегмента конкретного вложения. Использовать только идентификаторы из list_local_sources, в той же версии записи. Повторно проверяет права и исходник. Координаты имеют уровень producer_reported, а unknown не является страницей/таймкодом.",
+        parameters: { type: "object", properties: {
+          id: { type: "string" }, version: { type: "integer" },
+          attachmentId: { type: "string" }, extractionId: { type: "string" },
+          segmentId: { type: "string" }, offset: { type: ["integer","null"] },
+          budget: { type: ["integer","null"] },
+        }, required: ["id","version","attachmentId","extractionId","segmentId","offset","budget"],
+        additionalProperties: false },
+      }, effect: "read" as const,
+      execute: async (args: Record<string,unknown>) => {
+        const id = text(args.id, 128);
+        const attachmentId = text(args.attachmentId, 128);
+        const extractionId = text(args.extractionId, 128);
+        const segmentId = text(args.segmentId, 128);
+        const version = args.version, offset = args.offset ?? 0, budget = args.budget ?? 3000;
+        if (!id || !attachmentId || !extractionId || !segmentId ||
+            !Number.isSafeInteger(version) || Number(version) < 1 ||
+            !Number.isSafeInteger(offset) || Number(offset) < 0 || Number(offset) > 6000 ||
+            !Number.isSafeInteger(budget) || Number(budget) < 1 || Number(budget) > 4000) {
+          return { error: "invalid_source_read_request" };
+        }
+        return options.readSource!(id, Number(version), attachmentId, extractionId, segmentId,
+          Number(offset), Number(budget));
+      },
+      verify: (r: Record<string, unknown>) => typeof r.content === "string" &&
+        typeof r.hasMore === "boolean" && r.sourceCheck === "part_manifest_revision" &&
+        r.locationConfidence === "producer_reported" ? "read" as const : "failed" as const,
+    }] : []),
     ...(options.list ? [{
       definition: { name: "list_local_notes", description: "Постраничный список метаданных только разрешённых активных заметок. Не является полным чтением. Поиск query означает точную FTS-фразу, не семантическое совпадение.", parameters: {
         type: "object", properties: { query: { type: ["string", "null"] }, collectionId: { type: ["string", "null"] },
