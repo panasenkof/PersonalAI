@@ -141,3 +141,17 @@ test("archived pending work does not cause a wake-up spin", async () => {
     expect(await jobs.nextWakeMs("toy")).toBeNull();
   } finally { db.close(); }
 });
+
+test("title-only edit keeps chunk id but increments CAS generation", async () => {
+  const { db, repo, jobs, note } = await setup();
+  try {
+    const first = (await jobs.claim("toy"))[0];
+    await repo.reviseEntity(note.id, 1,
+      { title: "Другой заголовок", body: "Первый разговор" }, "Retitle");
+    expect(await jobs.complete("toy", [{ job: first, vector: vector() }])).toBe(0);
+    const next = (await jobs.claim("toy"))[0];
+    expect(next.chunkId).toBe(first.chunkId);
+    expect(next.generation).toBeGreaterThan(first.generation);
+    expect(next.hash).not.toBe(first.hash);
+  } finally { db.close(); }
+});
