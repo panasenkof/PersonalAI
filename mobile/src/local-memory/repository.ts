@@ -6,6 +6,13 @@ import type * as SQLite from "expo-sqlite";
 
 import { openLocalMemory, withLocalMemoryDatabase } from "./storage";
 import { withUnlockedTransaction } from "./transaction";
+import { stageTemporalCandidateWithReview, listTemporalKnowledgeHistory } from "./temporal-store";
+import { listTemporalReviewInbox as readTemporalReviewInbox } from "./temporal-review-inbox";
+import { decideTemporalReview, undoTemporalReview } from "./temporal-decisions";
+import type { TemporalClaimCandidate } from "./temporal-claims";
+import type { TemporalHistoryQuery } from "./temporal-store";
+import type { TemporalInboxQuery } from "./temporal-review-inbox";
+import type { TemporalDecisionRequest, TemporalDecisionExpected } from "./temporal-decisions";
 import { defaultKind, indexEntity, isMemoryKind, normalizeAlias } from "./search-index";
 import type { MemoryKind } from "./search-index";
 import { ftsPhrase, requiredSearchEvidence, searchSteps } from "./query";
@@ -82,6 +89,27 @@ function validPayload(payload: Record<string, unknown>) {
 
 export class SqliteMemoryRepository implements MemoryRepository {
   constructor(private readonly db: SQL) {}
+
+  /** Explicit typed user workflow. Not exposed as an automatic agent tool. */
+  stageTypedTemporalFact(candidate: TemporalClaimCandidate) {
+    return stageTemporalCandidateWithReview(this.db, candidate);
+  }
+  /** Review items include source-version snapshots for the CAS action. */
+  temporalReviewInbox(query: TemporalInboxQuery) {
+    return readTemporalReviewInbox(this.db, query);
+  }
+  /** Decisions require an actual UI/user action and an explicit end bound. */
+  decideTemporalChange(request: TemporalDecisionRequest) {
+    return decideTemporalReview(this.db, request);
+  }
+  undoTemporalChange(request: TemporalDecisionExpected & { decisionId: string }) {
+    return undoTemporalReview(this.db, request);
+  }
+  /** History is explicitly labeled candidate/unconfirmed, not "current". */
+  temporalKnowledgeHistory(query: TemporalHistoryQuery) {
+    return listTemporalKnowledgeHistory(this.db, query);
+  }
+
   /** M1/№79а: read-only review and persistent user exceptions; no automatic deletes. */
   hygiene() { return new MemoryHygieneService(this.db); }
   changeNotes(action: NoteAction, selection: NoteSelection[], collectionId?: string) { return changeNotes(this.db, action, selection, collectionId); }
