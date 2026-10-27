@@ -30,9 +30,34 @@ const V3_TABLES = {
 const ENTITY_COLUMNS = "id,collection_id,domain,schema_version,title,payload_json,record_status,sensitivity," +
   "source_kind,source_ref,valid_from,valid_until,created_at,updated_at,record_version";
 export const RESTORABLE_VERSIONS = [1, 2, 3, 4, 5, 6, 7];
-const MAX_BACKUP_BYTES = 2 * 1024 * 1024 * 1024;
-const MAX_RESTORABLE_ENTITIES = 100000;
+const LEGACY_MAX_BACKUP_BYTES = 2 * 1024 * 1024 * 1024;
+const MANIFEST_FORMAT_VERSION = 1;
+const MANIFEST_TABLE = 'persai_backup_manifest' as const;
+const LEGACY_MAX_RESTORABLE_ENTITIES = 100000;
 const TEMP_STORAGE_RESERVE_BYTES = 64 * 1024 * 1024;
+
+type BackupCounts = { entities: number; collections: number; observations: number;
+  attachments: number; attachment_parts: number; receipts: number; chats: number };
+type BackupManifest = BackupCounts & { format_version: number; schema_version: number };
+const COUNT_TABLES = {
+  entities: "memory_entities", collections: "memory_collections",
+  observations: "memory_observations", attachments: "memory_attachments",
+  attachment_parts: "memory_attachment_parts",
+  receipts: "memory_received_shares", chats: "direct_conversations",
+} as const;
+const COUNT_KEYS = Object.keys(COUNT_TABLES) as Array<keyof BackupCounts>;
+function backupCountsQuery(prefix: "" | "pia_import."): string {
+  // These identifiers are constants, never interpolated user input.
+  return "SELECT " + COUNT_KEYS.map(k =>
+    "(SELECT count(*) FROM " + prefix + COUNT_TABLES[k] + ") AS " + k).join(", ");
+}
+function validBackupCounts(counts: BackupCounts): boolean {
+  return COUNT_KEYS.every(k => Number.isSafeInteger(counts[k]) && counts[k] >= 0);
+}
+function backupCountValues(counts: BackupCounts): number[] {
+  return COUNT_KEYS.map(k => counts[k]);
+}
+
 
 /**
  * Conservative admission guard for the legacy single-file format. Free space
@@ -57,12 +82,12 @@ async function requireTemporarySpace(estimatedBytes: number, multiplier: number)
 }
 
 /** Refuse to export a backup which exceeds the format's restore contract. */
-async function preflightLegacyExport(db: SQLite.SQLiteDatabase): Promise<void> {
+async function preflightExport(db: SQLite.SQLiteDatabase): Promise<void> {
   const count = await db.getFirstAsync<{ n: number }>("SELECT count(*) AS n FROM memory_entities");
   if (!count || !Number.isSafeInteger(count.n) || count.n < 0) {
     throw new Error("backup_preflight_unavailable");
   }
-  if (count.n > MAX_RESTORABLE_ENTITIES) throw new Error("backup_legacy_entity_limit");
+  // Current exports are format-verified; the 100k cap applies to old incoming files only.
   const pages = await db.getFirstAsync<{ page_count: number }>("PRAGMA page_count");
   const pageSize = await db.getFirstAsync<{ page_size: number }>("PRAGMA page_size");
   if (!pages || !pageSize || !Number.isSafeInteger(pages.page_count) ||
@@ -70,8 +95,8 @@ async function preflightLegacyExport(db: SQLite.SQLiteDatabase): Promise<void> {
     throw new Error("backup_preflight_unavailable");
   }
   const estimatedBytes = pages.page_count * pageSize.page_size;
-  if (!Number.isSafeInteger(estimatedBytes) || estimatedBytes > MAX_BACKUP_BYTES) {
-    throw new Error("backup_legacy_size_limit");
+  if (!Number.isSafeInteger(estimatedBytes) || estimatedBytes <= 0) {
+    throw new Error("backup_preflight_unavailable");
   }
   // Export may have encryption overhead. Its actual size is rechecked after writing.
   await requireTemporarySpace(estimatedBytes, 1.25);
@@ -128,13 +153,31 @@ export async function shareEncryptedBackup(profileId: string, recoveryCode: stri
   try {
     await withLocalMemoryDatabase(profileId, async db => {
       try {
-        await preflightLegacyExport(db);
+        await preflightExport(db);
         await attach(db, "pia_export", path, code);
         attached = true;
         // sqlcipher_export copies *all* memory, provenance, relations,
         // revisions, names and the encrypted index without passing plaintext to JS.
         await db.getFirstAsync("SELECT sqlcipher_export('pia_export')");
         await db.execAsync(`PRAGMA pia_export.user_version = ${LOCAL_MEMORY_SCHEMA_VERSION}`);
+        // The manifest lives INSIDE SQLCipher ciphertext. No plaintext sidecar.
+        await db.execAsync("CREATE TABLE pia_export.persai_backup_manifest (" +
+          "format_version INTEGER PRIMARY KEY CHECK(format_version=1), schema_version INTEGER NOT NULL," +
+          "entities INTEGER NOT NULL, collections INTEGER NOT NULL, observations INTEGER NOT NULL," +
+          "attachments INTEGER NOT NULL, attachment_parts INTEGER NOT NULL," +
+          "receipts INTEGER NOT NULL, chats INTEGER NOT NULL)");
+        const counts = await db.getFirstAsync<BackupCounts>(backupCountsQuery(""));
+        if (!counts || !validBackupCounts(counts)) throw new Error("backup_manifest_unavailable");
+        await db.runAsync(
+          "INSERT INTO pia_export.persai_backup_manifest " +
+            "(format_version,schema_version,entities,collections,observations,attachments,attachment_parts,receipts,chats) " +
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+          [MANIFEST_FORMAT_VERSION, LOCAL_MEMORY_SCHEMA_VERSION, ...backupCountValues(counts)],
+        );
+        const cipherIntegrity = await db.getFirstAsync<{ integrity_check: string }>(
+          "PRAGMA pia_export.integrity_check",
+        );
+        if (cipherIntegrity?.integrity_check !== "ok") throw new Error("backup_integrity_check_failed");
         const check = await db.getFirstAsync<{ n: number }>(
           "SELECT count(*) AS n FROM pia_export.memory_collections",
         );
@@ -148,7 +191,7 @@ export async function shareEncryptedBackup(profileId: string, recoveryCode: stri
     });
     const info = await FileSystem.getInfoAsync(path);
     if (!info.exists || info.isDirectory || !info.size) throw new Error("backup_file_missing");
-    if (info.size > MAX_BACKUP_BYTES) throw new Error("backup_file_too_large");
+    if (!Number.isSafeInteger(info.size)) throw new Error("invalid_backup_size");
     // The shared file is SQLCipher ciphertext; code must be stored
     // separately and never included in the name or exported file.
     await Sharing.shareAsync(path, {
@@ -174,16 +217,19 @@ export async function restoreEncryptedBackup(
     // Inspect content:// providers before filling private cache.
     const sourceInfo = await FileSystem.getInfoAsync(sourceUri);
     if (!sourceInfo.exists || sourceInfo.isDirectory || !Number.isSafeInteger(sourceInfo.size) ||
-        sourceInfo.size <= 0 || sourceInfo.size > MAX_BACKUP_BYTES) {
+        sourceInfo.size <= 0) {
       throw new Error("invalid_backup_size");
     }
     // Source copy plus destination pages, WAL and regenerated search index.
     await requireTemporarySpace(sourceInfo.size, 3);
     await FileSystem.copyAsync({ from: sourceUri, to: path });
     const info = await FileSystem.getInfoAsync(path);
-    if (!info.exists || info.isDirectory || !info.size || info.size > MAX_BACKUP_BYTES) {
+    if (!info.exists || info.isDirectory || !Number.isSafeInteger(info.size) || !info.size) {
       throw new Error("invalid_backup_size");
     }
+    // A malicious/buggy content provider may truncate the stream during copy.
+    // Never treat a partial cache file as a valid archive.
+    if (info.size !== sourceInfo.size) throw new Error("backup_source_size_mismatch");
     return await withLocalMemoryDatabase(profileId, async db => {
       let attached = false;
       try {
@@ -218,7 +264,40 @@ export async function restoreEncryptedBackup(
         const incoming = await db.getFirstAsync<{ n: number }>(
           "SELECT count(*) AS n FROM pia_import.memory_entities",
         );
-        if (!incoming || incoming.n > MAX_RESTORABLE_ENTITIES) throw new Error("invalid_backup_records");
+        if (!incoming || !Number.isSafeInteger(incoming.n) || incoming.n < 0) {
+          throw new Error("invalid_backup_records");
+        }
+        if (available.has(MANIFEST_TABLE)) {
+          const manifest = await db.getFirstAsync<BackupManifest>(
+            "SELECT * FROM pia_import.persai_backup_manifest",
+          );
+          const manifestRows = await db.getFirstAsync<{ n: number }>(
+            "SELECT count(*) AS n FROM pia_import.persai_backup_manifest",
+          );
+          if (manifestRows?.n !== 1 || !manifest || manifest.format_version !== MANIFEST_FORMAT_VERSION ||
+              manifest.schema_version !== version.user_version || !validBackupCounts(manifest)) {
+            throw new Error("backup_manifest_invalid");
+          }
+          const actual = await db.getFirstAsync<BackupCounts>(backupCountsQuery("pia_import."));
+          if (!actual || !validBackupCounts(actual) ||
+              backupCountValues(manifest).some((n, i) => n !== backupCountValues(actual)[i])) {
+            throw new Error("backup_manifest_mismatch");
+          }
+        } else if (incoming.n > LEGACY_MAX_RESTORABLE_ENTITIES ||
+                   info.size > LEGACY_MAX_BACKUP_BYTES) {
+          throw new Error("backup_legacy_limit_without_manifest");
+        }
+        // A current profile may already contain chats even when its memory
+        // collections are empty. Silently ignoring colliding chat IDs would
+        // lose backed-up conversation content; refuse before any destination write.
+        if (available.has("direct_conversations")) {
+          const duplicates = await db.getFirstAsync<{ n: number }>(
+            "SELECT count(*) AS n FROM pia_import.direct_conversations incoming " +
+            "JOIN main.direct_conversations current ON current.id=incoming.id",
+          );
+          if (!duplicates || !Number.isSafeInteger(duplicates.n)) throw new Error("backup_chat_preflight_unavailable");
+          if (duplicates.n > 0) throw new Error("backup_chat_conflict");
+        }
         // Roll back *all* copied records if any table, FK or FTS operation
         // fails. Never replace a profile containing existing memory.
         // ATTACH and the SQLCipher key are scoped to this unlocked connection.
@@ -270,7 +349,7 @@ export async function restoreEncryptedBackup(
           // Older backups have no chats. Import newer ones without replacing
           // any existing local conversation (including its pending proposals).
           if (available.has("direct_conversations")) await tx.execAsync(
-            `INSERT OR IGNORE INTO direct_conversations(id,title,snapshot_json,created_at,updated_at)
+            `INSERT INTO direct_conversations(id,title,snapshot_json,created_at,updated_at)
              SELECT id,title,snapshot_json,created_at,updated_at FROM pia_import.direct_conversations`,
           );
           const violation = await tx.getFirstAsync("PRAGMA foreign_key_check");
