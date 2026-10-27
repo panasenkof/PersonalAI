@@ -458,3 +458,18 @@ test("read_local_note uses an OpenAI strict-compatible schema and nullable pagin
   expect(tool.parameters.properties.offset.type).toEqual(["integer", "null"]);
   expect(read).toHaveBeenCalledWith("note-1", 2, 0, 4000);
 });
+
+test("list/count schemas are strict OpenAI functions with nullable optional filters", async () => {
+  const transport = jest.fn().mockResolvedValueOnce(toolResponse("count_local_notes",
+    { query: null, collectionId: null }))
+    .mockResolvedValueOnce(final("Всего две"));
+  const count = jest.fn().mockResolvedValue({ count: 2, scope: "standard_active_notes" });
+  const list = jest.fn().mockResolvedValue({ records: [], hasMore: false, contentIncluded: false });
+  await start({}, transport, { count, list });
+  const tools = JSON.parse(transport.mock.calls[0][1].body).tools;
+  const counts = tools.find((x: any) => x.name === "count_local_notes");
+  const lists = tools.find((x: any) => x.name === "list_local_notes");
+  expect(counts.parameters.required).toEqual(["query", "collectionId"]);
+  expect(lists.parameters.required).toEqual(["query", "collectionId", "limit", "beforeUpdatedAt", "beforeId"]);
+  expect(count).toHaveBeenCalledWith({});
+});

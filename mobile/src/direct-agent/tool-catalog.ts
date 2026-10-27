@@ -62,6 +62,46 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
       verify: (r: Record<string, unknown>) => typeof r.content === "string" &&
         typeof r.revision === "number" && typeof r.hasMore === "boolean" ? "read" as const : "failed" as const,
     }] : []),
+    ...(options.list ? [{
+      definition: { name: "list_local_notes", description: "Постраничный список метаданных только разрешённых активных заметок. Не является полным чтением. Поиск query означает точную FTS-фразу, не семантическое совпадение.", parameters: {
+        type: "object", properties: { query: { type: ["string", "null"] }, collectionId: { type: ["string", "null"] },
+          limit: { type: ["integer", "null"] }, beforeUpdatedAt: { type: ["string", "null"] }, beforeId: { type: ["string", "null"] } },
+        required: ["query","collectionId","limit","beforeUpdatedAt","beforeId"], additionalProperties: false,
+      } }, effect: "read" as const,
+      execute: async (args: Record<string, unknown>) => {
+        const opts = {
+          ...(typeof args.collectionId === "string" ? { collectionId: args.collectionId } : {}),
+          ...(typeof args.query === "string" ? { query: args.query } : {}),
+          ...(typeof args.limit === "number" ? { limit: args.limit } : {}),
+          ...(typeof args.beforeUpdatedAt === "string" ? { beforeUpdatedAt: args.beforeUpdatedAt } : {}),
+          ...(typeof args.beforeId === "string" ? { beforeId: args.beforeId } : {}),
+        };
+        if (Object.keys(args).some(key => !["query","collectionId","limit","beforeUpdatedAt","beforeId"].includes(key) ||
+          (args[key] !== null && !(key in opts)))) return { error: "invalid_catalog_arguments" };
+        return options.list!(opts);
+      },
+      verify: (r: Record<string, unknown>) => Array.isArray(r.records) &&
+        typeof r.hasMore === "boolean" && r.contentIncluded === false ? "read" as const : "failed" as const,
+    }] : []),
+    ...(options.count ? [{
+      definition: { name: "count_local_notes", description: "Точное количество заметок только в разрешённом scope. query = exact FTS phrase, не все смысловые совпадения.", parameters: {
+        type: "object", properties: { query: { type: ["string", "null"] }, collectionId: { type: ["string", "null"] } },
+        required: ["query","collectionId"], additionalProperties: false,
+      } }, effect: "read" as const,
+      execute: async (args: Record<string, unknown>) => {
+        if (Object.keys(args).some(key => !["query","collectionId"].includes(key)) ||
+            (args.query != null && typeof args.query !== "string") ||
+            (args.collectionId != null && typeof args.collectionId !== "string")) {
+          return { error: "invalid_catalog_arguments" };
+        }
+        return options.count!({
+          ...(typeof args.query === "string" ? { query: args.query } : {}),
+          ...(typeof args.collectionId === "string" ? { collectionId: args.collectionId } : {}),
+        });
+      },
+      verify: (r: Record<string, unknown>) => typeof r.count === "number" &&
+        r.scope === "standard_active_notes" ? "read" as const : "failed" as const,
+    }] : []),
     { definition: { name: FACT_TOOL_NAME, description: FACT_TOOL_DESCRIPTION, parameters: factToolParameters(options.sections) }, effect: "proposal",
       execute: async args => {
         const proposal = factProposal(args, options.sections);
