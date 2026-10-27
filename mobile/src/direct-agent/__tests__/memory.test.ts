@@ -178,6 +178,8 @@ test("read evidence is version checked, paginated and never implies full coverag
   expect(first).toMatchObject({ id: "allow", revision: 7, offset: 0, hasMore: true,
     totalChars: body.length, nextOffset: 500, source: { recordId: "allow", sourceRef: "local-original", location: "unknown" } });
   expect(first.content).toBe(body.slice(0, 500));
+  expect(first.evidence).toEqual({ recordId: "allow", recordVersion: 7, startChar: 0,
+    endChar: 500, coverage: "excerpt", originalPage: null, originalTime: null });
   const last = await readApprovedNote("guest", "allow", 7, first.nextOffset, 500, repo as unknown as MemoryRepository);
   expect(last.offset).toBe(500);
   await expect(readApprovedNote("guest", "allow", 6, 0, 500, repo as unknown as MemoryRepository))
