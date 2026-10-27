@@ -84,6 +84,9 @@ export type ReadMemoryEvidence = {
   id: string; revision: number; title: string; content: string;
   offset: number; totalChars: number; hasMore: boolean; nextOffset?: number;
   source: { recordId: string; sourceRef: string | null; location: "unknown" };
+  /** Proven byte-free locator in the record-text projection (NOT PDF page). */
+  evidence: { recordId: string; recordVersion: number; startChar: number; endChar: number;
+    coverage: "excerpt" | "complete"; originalPage: null; originalTime: null };
 };
 
 /** Read a stable, bounded range of an allowed note. Runs on one SQLCipher lease,
@@ -107,6 +110,7 @@ export async function readApprovedNote(
     if (!collection || collection.sensitivity !== "standard") throw new Error("memory_read_not_available");
     if (entity.record_version !== expectedVersion) throw new Error("stale_memory_version");
     const body = memoryText(entity.payload);
+    if (offset > body.length) throw new Error("invalid_memory_read_range");
     const count = Math.min(6000, requestedChars);
     const content = body.slice(offset, offset + count);
     const nextOffset = offset + content.length;
@@ -116,6 +120,10 @@ export async function readApprovedNote(
       content, offset, totalChars: body.length, hasMore: nextOffset < body.length,
       ...(nextOffset < body.length ? { nextOffset } : {}),
       source: { recordId: entity.id, sourceRef: entity.source_ref, location: "unknown" },
+      evidence: { recordId: entity.id, recordVersion: entity.record_version,
+        startChar: offset, endChar: nextOffset,
+        coverage: offset === 0 && nextOffset >= body.length ? "complete" : "excerpt",
+        originalPage: null, originalTime: null },
     };
   };
   if (repository) return read(repository);
