@@ -766,3 +766,102 @@ test("T3a history never leaks through collection/record sensitivity or metadata-
     subjectId:"person-1",collectionId:"visible",mode:"all",
   })).items).toEqual([]);
 });
+
+
+test("T2c review inbox lists source-backed standard proposals with cursor, CAS and undo via leased repository", async () => {
+  const { stageTemporalCandidate } = require("../temporal-store");
+  await openLocalMemory("guest");
+  const db=mockConnections[0].sqlite,bridge=mockConnections[0];
+  const repo=await localMemoryRepository("guest");
+  db.prepare("INSERT INTO memory_collections(id,name,slug,sensitivity,created_at) VALUES ('work','Работа','work','standard','now')").run();
+  for (const id of ["a","b","c"]) {
+    db.prepare("INSERT INTO memory_entities(id,collection_id,domain,payload_json,created_at,updated_at) VALUES (?,'work','notes','{}','now','now')").run(id);
+  }
+  const make=(entityId:string,value:string,day:number):import("../temporal-claims").TemporalClaimCandidate=>({
+    recordedAt:"2026-10-"+String(day).padStart(2,"0")+"T12:00:00.000Z",
+    subjectId:"person-1",predicate:"employment",context:"primary",value,
+    kind:"state",modality:"asserted",negated:false,cardinality:"single",
+    occurredOrStarted:null,ended:null,endConfirmed:false,
+    evidence:{entityId,recordVersion:1,quote:"Работаю в "+value,origin:"direct"},
+  });
+  const firstId=await stageTemporalCandidate(bridge,make("a","А",20));
+  const b=await repo.stageTypedTemporalFact(make("b","Б",21));
+  const c=await repo.stageTypedTemporalFact(make("c","В",22));
+  expect(b).toMatchObject({reviewScope:"standard",truncated:false});
+  expect(b.proposalIds).toHaveLength(1);
+  expect(c.proposalIds).toHaveLength(2);
+  const page1=await repo.temporalReviewInbox({collectionId:"work",limit:2});
+  expect(page1.items).toHaveLength(2);
+  expect(page1.nextCursor).not.toBeNull();
+  expect(page1.items[0]).toMatchObject({
+    reviewKind:"possible_change",status:"pending",expectedProposalVersion:1,
+  });
+  expect(page1.items[0].incoming.evidence.quote).toBe("Работаю в В");
+  const page2=await repo.temporalReviewInbox({
+    collectionId:"work",limit:2,before:page1.nextCursor!,
+  });
+  expect(page2.items).toHaveLength(1);
+  expect(page2.nextCursor).toBeNull();
+  expect(new Set([...page1.items,...page2.items].map(x=>x.proposalId)).size).toBe(3);
+  const target=page2.items[0];
+  expect(target.previous.value).toBe("А");
+  expect(target.incoming.value).toBe("Б");
+  const accepted=await repo.decideTemporalChange({
+    proposalId:target.proposalId,
+    expectedProposalVersion:target.expectedProposalVersion,
+    expectedPreviousClaimVersion:target.expectedPreviousClaimVersion,
+    expectedIncomingClaimVersion:target.expectedIncomingClaimVersion,
+    choice:"accept",
+    confirmedEnd:{normalized:null,precision:"unknown",raw:"Пользователь подтвердил завершение без даты",
+      anchorDate:null,sourceTimeZone:null},
+  });
+  expect(db.prepare("SELECT end_confirmed FROM memory_temporal_claims WHERE id=?").get(firstId).end_confirmed).toBe(1);
+  const undone=await repo.undoTemporalChange({
+    proposalId:target.proposalId,decisionId:accepted.decisionId,
+    expectedProposalVersion:accepted.nextProposalVersion,
+    expectedPreviousClaimVersion:target.expectedPreviousClaimVersion+1,
+    expectedIncomingClaimVersion:target.expectedIncomingClaimVersion,
+  });
+  expect(undone.nextProposalVersion).toBe(3);
+  expect(db.prepare("SELECT end_confirmed FROM memory_temporal_claims WHERE id=?").get(firstId).end_confirmed).toBe(0);
+  const after=await repo.temporalReviewInbox({collectionId:"work",limit:10});
+  expect(after.items.map(x=>x.proposalId)).toContain(target.proposalId);
+  await expect(repo.temporalReviewInbox({collectionId:"work",limit:0}))
+    .rejects.toThrow("temporal_review_limit_invalid");
+  await expect(repo.temporalReviewInbox({collectionId:"work",before:{
+    createdAt:"2026-10-99T00:00:00.000Z",proposalId:"bad",
+  }})).rejects.toThrow("temporal_review_cursor_invalid");
+});
+
+test("T2c inbox excludes stale, protected, and cross-collection proposals before pagination", async () => {
+  const { stageTemporalCandidate, stageTemporalReviewProposal } = require("../temporal-store");
+  await openLocalMemory("guest");
+  const db=mockConnections[0].sqlite,bridge=mockConnections[0];
+  const repo=await localMemoryRepository("guest");
+  for (const [id,level] of [["visible","standard"],["hidden","private"],["unknown","unclassified"],["other","standard"]]) {
+    db.prepare("INSERT INTO memory_collections(id,name,slug,sensitivity,created_at) VALUES (?,?,?,?, 'now')").run(id,id,id,level);
+    for (const i of ["a","b"]) {
+      db.prepare("INSERT INTO memory_entities(id,collection_id,domain,payload_json,created_at,updated_at) VALUES (?,?,'notes','{}','now','now')").run(id+"-"+i,id);
+    }
+  }
+  const make=(entityId:string,value:string,day:number):import("../temporal-claims").TemporalClaimCandidate=>({
+    recordedAt:"2026-10-"+String(day).padStart(2,"0")+"T12:00:00.000Z",
+    subjectId:"person-1",predicate:"residence",context:"actual",value,
+    kind:"state",modality:"asserted",negated:false,cardinality:"single",
+    occurredOrStarted:null,ended:null,endConfirmed:false,
+    evidence:{entityId,recordVersion:1,quote:"Живу в "+value,origin:"direct"},
+  });
+  for (const prefix of ["visible","hidden","unknown","other"]) {
+    const a=await stageTemporalCandidate(bridge,make(prefix+"-a","А",20));
+    const b=await stageTemporalCandidate(bridge,make(prefix+"-b","Б",21));
+    expect(await stageTemporalReviewProposal(bridge,a,b)).not.toBeNull();
+  }
+  expect((await repo.temporalReviewInbox({collectionId:"visible"})).items).toHaveLength(1);
+  expect((await repo.temporalReviewInbox({collectionId:"hidden"})).items).toHaveLength(0);
+  expect((await repo.temporalReviewInbox({collectionId:"unknown"})).items).toHaveLength(0);
+  expect((await repo.temporalReviewInbox({collectionId:"other"})).items).toHaveLength(1);
+  db.prepare("UPDATE memory_entities SET record_version=2 WHERE id='visible-b'").run();
+  const stale=await repo.temporalReviewInbox({collectionId:"visible",limit:1});
+  expect(stale.items).toHaveLength(0);
+  expect(stale.nextCursor).toBeNull();
+});
