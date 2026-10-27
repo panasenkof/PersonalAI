@@ -1,5 +1,9 @@
 import type { MemoryKind } from "./search-index";
 import type { EnrichmentSnapshot } from "./enrichment-policy";
+import type { TemporalClaimCandidate } from "./temporal-claims";
+import type { TemporalHistoryQuery, TemporalHistoryPage, TemporalStagedReview } from "./temporal-store";
+import type { TemporalInboxQuery, TemporalInboxPage } from "./temporal-review-inbox";
+import type { TemporalDecisionRequest, TemporalDecisionExpected, TemporalDecisionResult } from "./temporal-decisions";
 export type { MemoryKind } from "./search-index";
 
 /** Device-local mirror of the server MemoryRepository contract.
@@ -67,6 +71,12 @@ export interface MemoryRepository {
   observations(entityId: string): Promise<ObservationRecord[]>;
   createObservation(item: NewObservation): Promise<ObservationRecord>;
   reviseObservation(id: string, expectedVersion: number, payload: Record<string, unknown>, reason: string): Promise<ObservationRecord>;
+  /** User-facing typed memory workflow, never a blind LLM approval path. */
+  stageTypedTemporalFact(candidate: TemporalClaimCandidate): Promise<TemporalStagedReview>;
+  temporalReviewInbox(query: TemporalInboxQuery): Promise<TemporalInboxPage>;
+  decideTemporalChange(request: TemporalDecisionRequest): Promise<TemporalDecisionResult>;
+  undoTemporalChange(request: TemporalDecisionExpected & { decisionId: string }): Promise<TemporalDecisionResult>;
+  temporalKnowledgeHistory(query: TemporalHistoryQuery): Promise<TemporalHistoryPage>;
   linkEntities(sourceId: string, targetId: string, kind: string): Promise<RelationRecord>;
   relationsForEntity(id: string): Promise<RelationRecord[]>;
   revisions(type: "entity" | "observation", id: string): Promise<RevisionRecord[]>;
