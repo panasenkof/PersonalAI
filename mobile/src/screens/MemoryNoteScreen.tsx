@@ -36,6 +36,7 @@ import { extractMedia } from "../media/extract";
 import { maySendOriginalToProvider } from "../media/recognitionPolicy";
 import { mediaConnections } from "../media/preferences";
 import { AttachmentView } from "../media/AttachmentView";
+import { VerifiedRelativeConversations } from "./VerifiedRelativeConversations";
 import { useTheme } from "../theme";
 import { nebulaRadii, nebulaSpacing, nebulaTouch, nebulaTypography } from "../design/nebula/tokens";
 import { memoryNoteHasPhoto, memoryDisplayTitle } from "../design/nebula/memoryNotePresentation";
@@ -186,6 +187,7 @@ export function MemoryNoteScreen() {
           {profile && selected && !route.params?.verifiedOriginal && memoryNoteHasPhoto(selected) ? <View style={{ borderRadius: nebulaRadii.card, overflow: "hidden" }}><MemoryCover profile={profile} entityId={selected.id} height={210} label={title} /></View> : null}
           <Text accessibilityRole="header" selectable style={{ color: t.text, fontSize: 28, lineHeight: 36, fontWeight: "800" }}>{readingTitle || "Без названия"}</Text>
           {body && body.trim() !== readingTitle ? <View testID="note-read-body"><MarkdownText text={body} style={{ color: t.text, ...nebulaTypography.body }} /></View> : null}
+          {profile && selected?.kind === "person" && selected.record_status === "active" ? <VerifiedRelativeConversations key={profile + ":" + selected.id + ":" + selected.record_version} profile={profile} personId={selected.id} personTitle={readingTitle} /> : null}
           {selected && profile ? <AttachmentView key={selected.record_version + ":" + (route.params?.verifiedOriginal?.attachmentId || "")} profile={profile} entityId={selected.id} verifiedOriginal={route.params?.verifiedOriginal} /> : null}
           {!body && extractedText ? <MarkdownText text={extractedText} style={{ color: t.text, ...nebulaTypography.body }} /> : null}
           {typeof selected?.payload.source_url === "string" && /^https:\/\//.test(selected.payload.source_url) ? <Pressable accessibilityRole="link" style={button} onPress={() => void Linking.openURL(String(selected.payload.source_url)).catch(() => setError("Не удалось открыть источник."))}><Text style={{ color: t.secondary }}>Открыть источник</Text></Pressable> : null}
