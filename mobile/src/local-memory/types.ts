@@ -28,7 +28,17 @@ export type EntityRecord = {
   kind: MemoryKind;
 };
 /** A search result: the record and its chunk that matched best. */
+/** Metadata for an original whose encrypted parts are present and contiguous.
+ * Never a file:// URL, decrypted bytes, ASR proof, page or timecode.
+ * Read/open needs an independent fresh app-lock + ACL + source check. */
+export type VerifiedOriginalLocator = {
+  attachmentId: string; recordId: string; recordVersion: number;
+  name: string; mime: string; size: number; kind: "audio" | "video" | "document" | "image" | "other";
+  metadataOnly: true; originalTime: null; originalPage: null;
+};
 export type MemoryHit = { entity: EntityRecord; chunk: string; score: number;
+  /** Only the confirmed relationship→participant branch provides locators. */
+  originals?: VerifiedOriginalLocator[];
   /** Only verified relation→participant results carry a proof; plain FTS never does. */
   proof?: { relativeId: string; relationEvidenceId: string; participantEvidenceId: string; truncated: boolean };
 };
