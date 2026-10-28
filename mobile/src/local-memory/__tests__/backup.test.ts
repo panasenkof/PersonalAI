@@ -637,3 +637,76 @@ test("v13 backup restores shared user review actions after their witness parents
   expect(journal).toBeGreaterThan(relation);
   expect(sql.indexOf("COMMIT")).toBeGreaterThan(journal);
 });
+
+
+test("v14 missing shared review candidate table fails before any destination mutation",async()=>{
+  const previous=mockDb.getFirstAsync.getMockImplementation()!;
+  mockDb.getFirstAsync.mockImplementation(async sql=>
+    sql==="PRAGMA pia_import.user_version"?{user_version:14}:previous(sql));
+  tablesOnce([...names,"memory_relation_evidence","memory_attachments","memory_attachment_parts",
+    "memory_received_shares","memory_cleanup_preferences","memory_extractions",
+    "memory_extraction_segments","persai_backup_manifest","memory_temporal_claims",
+    "memory_temporal_evidence","memory_temporal_proposals","memory_temporal_decisions",
+    "memory_review_actions"]);
+  await expect(restoreEncryptedBackup("guest","file:///missing-pending.db",code))
+    .rejects.toThrow("incompatible_backup_schema");
+  expect(mockDb.execAsync.mock.calls.some(([sql])=>String(sql).includes("INSERT INTO memory_entities"))).toBe(false);
+});
+
+test("v14 proposal count mismatch is rejected in encrypted manifest preflight",async()=>{
+  const previous=mockDb.getFirstAsync.getMockImplementation()!;
+  mockDb.getFirstAsync.mockImplementation(async sql=>{
+    if(sql==="PRAGMA pia_import.user_version")return {user_version:14};
+    if(sql==="SELECT * FROM pia_import.persai_backup_manifest")return {
+      format_version:5,schema_version:14,entities:2,collections:1,observations:1,
+      attachments:0,attachment_parts:0,receipts:0,chats:0,temporal_claims:0,
+      temporal_evidence:0,temporal_proposals:0,temporal_decisions:0,
+      relation_links:0,relation_evidence:0,review_actions:0,review_proposals:3,
+    };
+    if(sql.includes("(SELECT count(*) FROM ")&&sql.includes("memory_review_proposals"))
+      return {review_proposals:2};
+    return previous(sql);
+  });
+  tablesOnce([...names,"memory_relation_evidence","memory_review_proposals",
+    "memory_review_actions","memory_attachments","memory_attachment_parts",
+    "memory_received_shares","memory_cleanup_preferences","memory_extractions",
+    "memory_extraction_segments","persai_backup_manifest","memory_temporal_claims",
+    "memory_temporal_evidence","memory_temporal_proposals","memory_temporal_decisions"]);
+  await expect(restoreEncryptedBackup("guest","file:///forged-pending.db",code))
+    .rejects.toThrow("backup_manifest_mismatch");
+  expect(mockDb.execAsync.mock.calls.some(([sql])=>String(sql).includes("INSERT INTO memory_entities"))).toBe(false);
+});
+
+test("v14 restore copies review proposals after their source FK parents and retains old user journal",async()=>{
+  const previous=mockDb.getFirstAsync.getMockImplementation()!;
+  mockDb.getFirstAsync.mockImplementation(async sql=>{
+    if(sql==="PRAGMA pia_import.user_version")return {user_version:14};
+    if(sql==="SELECT * FROM pia_import.persai_backup_manifest")return {
+      format_version:5,schema_version:14,entities:2,collections:1,observations:1,
+      attachments:0,attachment_parts:0,receipts:0,chats:0,temporal_claims:0,
+      temporal_evidence:0,temporal_proposals:0,temporal_decisions:0,
+      relation_links:0,relation_evidence:0,review_actions:0,review_proposals:0,
+    };
+    if(sql.includes("(SELECT count(*) FROM ")&&sql.includes("memory_review_proposals"))
+      return {review_proposals:0};
+    if(sql==="SELECT count(*) AS n FROM pia_import.memory_review_proposals"||
+       sql==="SELECT count(*) AS n FROM memory_review_proposals"||
+       sql==="SELECT count(*) AS n FROM pia_import.memory_review_actions"||
+       sql==="SELECT count(*) AS n FROM memory_review_actions"||
+       sql==="SELECT count(*) AS n FROM pia_import.memory_relation_evidence"||
+       sql==="SELECT count(*) AS n FROM memory_relation_evidence")return {n:0};
+    return previous(sql);
+  });
+  tablesOnce([...names,"memory_relation_evidence","memory_review_proposals",
+    "memory_review_actions","memory_attachments","memory_attachment_parts",
+    "memory_received_shares","memory_cleanup_preferences","memory_extractions",
+    "memory_extraction_segments","persai_backup_manifest","memory_temporal_claims",
+    "memory_temporal_evidence","memory_temporal_proposals","memory_temporal_decisions"]);
+  await restoreEncryptedBackup("guest","file:///valid-pending.db",code);
+  const statements=mockDb.execAsync.mock.calls.map(([sql])=>String(sql));
+  const notes=statements.findIndex(sql=>sql.startsWith("INSERT INTO memory_entities("));
+  const proposals=statements.indexOf("INSERT INTO memory_review_proposals SELECT * FROM pia_import.memory_review_proposals");
+  const commit=statements.indexOf("COMMIT");
+  expect(proposals).toBeGreaterThan(notes);
+  expect(commit).toBeGreaterThan(proposals);
+});
