@@ -64,7 +64,7 @@ function isCalendarDate(date: string): boolean {
 }
 function isDateForPrecision(date: string, precision: TemporalPrecision): boolean {
   if (precision === "day") return isCalendarDate(date);
-  if (precision === "month") return /^\d{4}-(0[1-9]|1[0-2])$/.test(date);
+  if (precision === "month") return /^(1\d{3}|[2-9]\d{3})-(0[1-9]|1[0-2])$/.test(date);
   if (precision === "year") return /^(1\d{3}|[2-9]\d{3})$/.test(date);
   return false; // approximate and unknown cannot silently become exact
 }
@@ -80,8 +80,36 @@ function validBound(bound: TemporalBound | null): boolean {
   return bound.normalized !== null && isDateForPrecision(bound.normalized, bound.precision);
 }
 
+
+/** Inclusive calendar range of a date with declared precision.
+ * Unknown/approximate never become a guessed exact date. */
+function earliestValidDay(bound: TemporalBound | null): string | null {
+  if (!bound?.normalized) return null;
+  if (bound.precision === "day") return bound.normalized;
+  if (bound.precision === "month") return bound.normalized + "-01";
+  if (bound.precision === "year") return bound.normalized + "-01-01";
+  return null;
+}
+function latestValidDay(bound: TemporalBound | null): string | null {
+  if (!bound?.normalized) return null;
+  if (bound.precision === "day") return bound.normalized;
+  if (bound.precision === "year") return bound.normalized + "-12-31";
+  if (bound.precision === "month") {
+    const [year, month] = bound.normalized.split("-").map(Number);
+    const last = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    return bound.normalized + "-" + String(last).padStart(2,"0");
+  }
+  return null;
+}
+
 /** Reject guessed precision and provenance before any future persistence. */
 export function validateTemporalClaim(value: TemporalClaimCandidate): void {
+  if (!["state","event","observation","enduring"].includes(value.kind) ||
+      !["asserted","planned","hypothetical"].includes(value.modality) ||
+      !["single","multiple","unknown"].includes(value.cardinality) ||
+      typeof value.negated !== "boolean" || typeof value.endConfirmed !== "boolean") {
+    throw new Error("temporal_type_invalid");
+  }
   if (!isRecordedInstant(value.recordedAt)) throw new Error("temporal_recorded_at_invalid");
   if (!value.predicate.trim() || !value.context.trim() || !value.value.trim() ||
       value.predicate.length > 120 || value.context.length > 120 ||
@@ -97,6 +125,15 @@ export function validateTemporalClaim(value: TemporalClaimCandidate): void {
   }
   if (value.ended !== null && !value.endConfirmed) {
     throw new Error("end_requires_explicit_confirmation");
+  }
+  // Reject impossible closed intervals; a coarse year/month denotes a range,
+  // not its first guessed day. Unknown/approximate endpoints remain unknown.
+  if (value.endConfirmed && value.ended !== null) {
+    const earliestStart = earliestValidDay(value.occurredOrStarted);
+    const latestEnd = latestValidDay(value.ended);
+    if (earliestStart && latestEnd && latestEnd < earliestStart) {
+      throw new Error("temporal_end_before_start");
+    }
   }
   if (!value.evidence.entityId.trim() ||
       !Number.isSafeInteger(value.evidence.recordVersion) ||
@@ -131,6 +168,14 @@ export function compareTemporalCandidates(
   // Part-time jobs and addresses can coexist; only explicitly single-valued
   // property+role combinations are even eligible for a proposed transition.
   if (previous.cardinality !== "single" || incoming.cardinality !== "single") {
+    return "independent";
+  }
+  // An old payslip or historical residence entered today must not propose
+  // terminating a newer state. Compare VALID time, not ingestion timestamps.
+  // A separate "historical overlap/conflict" review will handle these cases.
+  const earlierStart = earliestValidDay(previous.occurredOrStarted);
+  const latestIncomingStart = latestValidDay(incoming.occurredOrStarted);
+  if (earlierStart && latestIncomingStart && latestIncomingStart < earlierStart) {
     return "independent";
   }
   return previous.value === incoming.value

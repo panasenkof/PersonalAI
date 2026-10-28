@@ -6,7 +6,13 @@
  * Caller MUST supply ACL-scoped and source-version-verified graph edges.
  * The future SQLCipher relation evidence store feeds this pure contract.
  */
-export type RelationProofKind = "has_sister" | "brother_of" | "sibling_of" | "participant_of" | "mentioned_in" | "about";
+/** Relation roles are directional: from viewpoint owner to a distinct person. */
+export type DirectPersonRelation =
+  | "has_sister" | "has_brother" | "has_mother" | "has_father"
+  | "has_spouse" | "has_child" | "has_friend" | "has_colleague"
+  | "has_doctor" | "has_teacher";
+export type RelationProofKind = DirectPersonRelation | "brother_of" | "sibling_of"
+  | "participant_of" | "mentioned_in" | "about";
 export type RelationProofStatus = "pending" | "confirmed" | "rejected" | "deferred" | "retracted";
 export type RelationProof = {
   id: string;
@@ -55,44 +61,63 @@ export function isEligibleRelationProof(edge: RelationProof, access: ProofAccess
     access.readableEvidence.has(edge.evidenceEntityId);
 }
 
-/** Only explicitly typed has_sister + participant_of yield a sister-conversation path.
- *
- * "Lisa is mentioned in the audio" never proves "I talked to Lisa".
- * The result contains conversation entity IDs, NOT invented media URLs,
- * transcripts, timecodes, or claims that audio exists.
+/**
+ * Resolve a direct role with a specific person, then a confirmed participation
+ * edge to a conversation entity. This is a pure proof contract, not a search
+ * over names. Time-specific queries additionally need validity filtering in
+ * the future SQLCipher reader before creating the ProofAccess/edge set.
  */
-export function resolveSiblingConversationPaths(
+export function resolveDirectRelationConversationPaths(
   ownPersonId: string,
+  relationKind: DirectPersonRelation,
   edges: readonly RelationProof[],
   access: ProofAccess,
 ): RelativeConversationResult {
   if (!ownPersonId?.trim() || ownPersonId.length > 256) {
     throw new Error("relational_owner_id_invalid");
   }
-  const visible = edges.filter(e => isEligibleRelationProof(e, access) &&
-    (e.kind === "has_sister" || e.kind === "participant_of"));
-  const limited = visible.slice(0,MAX_EDGES);
-  const siblings = new Map<string,string>();
-  for (const edge of limited) {
-    // The user's viewpoint is one stable person entity, never a name search.
-    if (edge.kind === "has_sister" && edge.sourceEntityId === ownPersonId) {
-      siblings.set(edge.targetEntityId,edge.id);
-    }
+  if (![
+    "has_sister","has_brother","has_mother","has_father","has_spouse",
+    "has_child","has_friend","has_colleague","has_doctor","has_teacher",
+  ].includes(relationKind)) {
+    throw new Error("relational_role_invalid");
   }
-  const paths: RelativeConversation[]=[];
-  const seen = new Set<string>();
-  for (const edge of limited) {
-    if (edge.kind !== "participant_of") continue;
-    const siblingEvidence=siblings.get(edge.targetEntityId);
-    if (!siblingEvidence || !access.recordVersions.has(edge.sourceEntityId)) continue;
+  // Two passes avoid the "256 unrelated participants before one relevant
+  // relative" failure. Query-time ACL and exact role are both essential.
+  // Bounded maps/results, linear over already-scoped input, no N² traversal.
+  const related=new Map<string,string>();
+  let overflow=false;
+  for(const edge of edges) {
+    if(edge.kind!==relationKind || edge.sourceEntityId!==ownPersonId ||
+       !isEligibleRelationProof(edge,access)) continue;
+    if(related.has(edge.targetEntityId)) continue;
+    if(related.size>=MAX_EDGES) {overflow=true;break;}
+    related.set(edge.targetEntityId,edge.id);
+  }
+  const paths:RelativeConversation[]=[];
+  const seen=new Set<string>();
+  let relevantParticipants=0;
+  for(const edge of edges) {
+    if(edge.kind!=="participant_of" || !related.has(edge.targetEntityId) ||
+       !isEligibleRelationProof(edge,access)) continue;
+    if(relevantParticipants>=MAX_EDGES) {overflow=true;break;}
+    relevantParticipants++;
     const key=edge.sourceEntityId+"\u0000"+edge.targetEntityId;
-    if (seen.has(key)) continue;
+    if(seen.has(key)) continue;
     seen.add(key);
     paths.push({conversationId:edge.sourceEntityId,relativeId:edge.targetEntityId,
-      relationEvidenceId:siblingEvidence,participantEvidenceId:edge.id});
+      relationEvidenceId:related.get(edge.targetEntityId)!,
+      participantEvidenceId:edge.id});
   }
-  // If more confirmed paths are available, disclose only that the visible
-  // result set is partial, not hidden counts or protected graph metadata.
   return {paths:paths.slice(0,MAX_PATHS),
-    truncated:visible.length>MAX_EDGES || paths.length>MAX_PATHS};
+    truncated:overflow || paths.length>MAX_PATHS};
+}
+
+/** Backwards-compatible strict sister query; a generic sibling does not qualify. */
+export function resolveSiblingConversationPaths(
+  ownPersonId: string,
+  edges: readonly RelationProof[],
+  access: ProofAccess,
+): RelativeConversationResult {
+  return resolveDirectRelationConversationPaths(ownPersonId,"has_sister",edges,access);
 }
