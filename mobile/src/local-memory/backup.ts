@@ -33,9 +33,9 @@ const V3_TABLES = {
 } as const;
 const ENTITY_COLUMNS = "id,collection_id,domain,schema_version,title,payload_json,record_status,sensitivity," +
   "source_kind,source_ref,valid_from,valid_until,created_at,updated_at,record_version";
-export const RESTORABLE_VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14];
+export const RESTORABLE_VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
 const LEGACY_MAX_BACKUP_BYTES = 2 * 1024 * 1024 * 1024;
-const MANIFEST_FORMAT_VERSION = 5;
+const MANIFEST_FORMAT_VERSION = 6;
 const MANIFEST_TABLE = 'persai_backup_manifest' as const;
 const LEGACY_MAX_RESTORABLE_ENTITIES = 100000;
 const TEMP_STORAGE_RESERVE_BYTES = 64 * 1024 * 1024;
@@ -208,7 +208,7 @@ export async function shareEncryptedBackup(profileId: string, recoveryCode: stri
         await db.execAsync(`PRAGMA pia_export.user_version = ${LOCAL_MEMORY_SCHEMA_VERSION}`);
         // The manifest lives INSIDE SQLCipher ciphertext. No plaintext sidecar.
         await db.execAsync("CREATE TABLE pia_export.persai_backup_manifest (" +
-          "format_version INTEGER PRIMARY KEY CHECK(format_version=5), schema_version INTEGER NOT NULL," +
+          "format_version INTEGER PRIMARY KEY CHECK(format_version=6), schema_version INTEGER NOT NULL," +
           "entities INTEGER NOT NULL, collections INTEGER NOT NULL, observations INTEGER NOT NULL," +
           "attachments INTEGER NOT NULL, attachment_parts INTEGER NOT NULL," +
           "receipts INTEGER NOT NULL, chats INTEGER NOT NULL," +
@@ -361,7 +361,7 @@ export async function restoreEncryptedBackup(
           );
           if (manifestRows?.n !== 1 || !manifest ||
               manifest.schema_version !== version.user_version || !validBackupCounts(manifest) ||
-              manifest.format_version !== (version.user_version >= 14 ? 5 : version.user_version >= 13 ? 4 : version.user_version >= 12 ? 3 : version.user_version >= 11 ? 2 : 1)) {
+              manifest.format_version !== (version.user_version >= 15 ? 6 : version.user_version >= 14 ? 5 : version.user_version >= 13 ? 4 : version.user_version >= 12 ? 3 : version.user_version >= 11 ? 2 : 1)) {
             throw new Error("backup_manifest_invalid");
           }
           const actual = await db.getFirstAsync<BackupCounts>(backupCountsQuery("pia_import."));
@@ -497,17 +497,8 @@ export async function restoreEncryptedBackup(
               throw new Error("backup_relation_count_mismatch");
             }
           }
-          if(version.user_version>=13){
-            await tx.execAsync("INSERT INTO memory_review_actions SELECT * FROM pia_import.memory_review_actions");
-            const expected=await tx.getFirstAsync<{n:number}>(
-              "SELECT count(*) AS n FROM pia_import.memory_review_actions");
-            const actual=await tx.getFirstAsync<{n:number}>(
-              "SELECT count(*) AS n FROM memory_review_actions");
-            if(!expected||!actual||expected.n!==actual.n)
-              throw new Error("backup_review_count_mismatch");
-          }
           if(version.user_version>=14){
-            // FK parents are the original note and person entities, not guessed edges.
+            // Restore source-bound proposals BEFORE their v15 journal references.
             await tx.execAsync("INSERT INTO memory_review_proposals SELECT * FROM pia_import.memory_review_proposals");
             const expected=await tx.getFirstAsync<{n:number}>(
               "SELECT count(*) AS n FROM pia_import.memory_review_proposals");
@@ -515,6 +506,28 @@ export async function restoreEncryptedBackup(
               "SELECT count(*) AS n FROM memory_review_proposals");
             if(!expected||!actual||expected.n!==actual.n)
               throw new Error("backup_review_proposal_count_mismatch");
+          }
+          if(version.user_version>=13){
+            if(version.user_version>=15){
+              await tx.execAsync("INSERT INTO memory_review_actions SELECT * FROM pia_import.memory_review_actions");
+            }else{
+              // v13/v14 immutable history had no review_proposal_id. The new
+              // column defaults NULL; exact IDs and undo references survive.
+              await tx.execAsync(
+                "INSERT INTO memory_review_actions "+
+                "(id,target_kind,relation_evidence_id,temporal_proposal_id,action,"+
+                "expected_version,before_state,after_state,undoes_id,actor_kind,created_at) "+
+                "SELECT id,target_kind,relation_evidence_id,temporal_proposal_id,action,"+
+                "expected_version,before_state,after_state,undoes_id,actor_kind,created_at "+
+                "FROM pia_import.memory_review_actions "+
+                "ORDER BY CASE WHEN undoes_id IS NULL THEN 0 ELSE 1 END,created_at,id");
+            }
+            const expected=await tx.getFirstAsync<{n:number}>(
+              "SELECT count(*) AS n FROM pia_import.memory_review_actions");
+            const actual=await tx.getFirstAsync<{n:number}>(
+              "SELECT count(*) AS n FROM memory_review_actions");
+            if(!expected||!actual||expected.n!==actual.n)
+              throw new Error("backup_review_count_mismatch");
           }
           // Keep imported Android Share deduplication fingerprints: a source
           // is never re-imported merely because it was restored on another phone.
