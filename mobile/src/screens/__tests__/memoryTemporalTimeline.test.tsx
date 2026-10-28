@@ -21,6 +21,7 @@ const first={
 };
 const planned={...first,claimId:"plan-2027",claim:{
   ...first.claim,value:"Замена свечей в 2027",modality:"planned",
+  occurredOrStarted:bound("2027 год","2027-01-01"),
   evidence:{entityId:"plan-source",recordVersion:1,quote:"Планирую заменить свечи",origin:"direct"},
 }};
 const mockDb={
