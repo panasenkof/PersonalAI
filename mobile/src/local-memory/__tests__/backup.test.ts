@@ -745,7 +745,7 @@ test("v15 forged journal count fails preflight before any user memory write",asy
   expect(mockDb.execAsync.mock.calls.flat().join("\n")).not.toContain("INSERT INTO memory_entities");
 });
 
-test("v16 encrypted backup export has exactly one v7 manifest with confirmed review history",async()=>{
+test("v17 encrypted backup export has exactly one v8 manifest with confirmed review history",async()=>{
   await shareEncryptedBackup("guest",code);
   const exported=mockDb.execAsync.mock.calls.map(([sql])=>String(sql)).join("\n");
   expect(exported).toContain("PRAGMA pia_export.user_version = 17");
@@ -762,4 +762,60 @@ test("v17 SQLCipher export carries one self-person slot and its count in the enc
     expect.arrayContaining([8,17]));
   const call=mockDb.runAsync.mock.calls.find(([sql])=>sql.startsWith("INSERT INTO pia_export.persai_backup_manifest"));
   expect(call?.[1]?.at(-1)).toBe(1);
+});
+
+
+const v17ArchiveTables = [...names,"memory_relation_evidence","memory_review_proposals",
+  "memory_review_actions","memory_attachments","memory_attachment_parts",
+  "memory_received_shares","memory_cleanup_preferences","memory_extractions",
+  "memory_extraction_segments","persai_backup_manifest","memory_temporal_claims",
+  "memory_temporal_evidence","memory_temporal_proposals","memory_temporal_decisions",
+  "memory_profile_self"];
+
+function v17Manifest(selfCount:number) {
+  return {format_version:8,schema_version:17,entities:2,collections:1,observations:1,
+    attachments:0,attachment_parts:0,receipts:0,chats:0,
+    temporal_claims:0,temporal_evidence:0,temporal_proposals:0,temporal_decisions:0,
+    relation_links:0,relation_evidence:0,review_actions:0,review_proposals:0,
+    profile_self_binding:selfCount};
+}
+
+test("BKP-05/R3c1: encrypted v17 restore retains self-person FK after imported entities, before commit",async()=>{
+  const original=mockDb.getFirstAsync.getMockImplementation()!;
+  mockDb.getFirstAsync.mockImplementation(async(sql:string)=>{
+    if(sql==="PRAGMA pia_import.user_version")return {user_version:17};
+    if(sql==="SELECT * FROM pia_import.persai_backup_manifest")return v17Manifest(1);
+    if(sql.includes("(SELECT count(*) FROM ")&&sql.includes("memory_profile_self"))
+      return {profile_self_binding:1};
+    if(sql.includes("(SELECT count(*) FROM ")&&sql.includes("memory_review_proposals"))
+      return {review_proposals:0};
+    if(sql.includes("(SELECT count(*) FROM ")&&sql.includes("memory_review_actions"))
+      return {review_actions:0};
+    if(sql.includes("(SELECT count(*) FROM ")&&sql.includes("memory_relation_evidence"))
+      return {relation_links:0,relation_evidence:0};
+    return original(sql);
+  });
+  tablesOnce(v17ArchiveTables);
+  await restoreEncryptedBackup("guest","file:///encrypted-v17.db",code);
+  const statements=mockDb.execAsync.mock.calls.map(([sql])=>String(sql));
+  const people=statements.findIndex(sql=>sql.startsWith("INSERT INTO memory_entities("));
+  const bind=statements.findIndex(sql=>sql.startsWith("INSERT INTO memory_profile_self("));
+  const commit=statements.indexOf("COMMIT");
+  expect(bind).toBeGreaterThan(people);
+  expect(commit).toBeGreaterThan(bind);
+});
+
+test("BKP-08/R3c1: v17 forged identity count fails before restoring a single note",async()=>{
+  const original=mockDb.getFirstAsync.getMockImplementation()!;
+  mockDb.getFirstAsync.mockImplementation(async(sql:string)=>{
+    if(sql==="PRAGMA pia_import.user_version")return {user_version:17};
+    if(sql==="SELECT * FROM pia_import.persai_backup_manifest")return v17Manifest(0);
+    if(sql.includes("(SELECT count(*) FROM ")&&sql.includes("memory_profile_self"))
+      return {profile_self_binding:1};
+    return original(sql);
+  });
+  tablesOnce(v17ArchiveTables);
+  await expect(restoreEncryptedBackup("guest","file:///forged-self-v17.db",code))
+    .rejects.toThrow("backup_manifest_mismatch");
+  expect(mockDb.execAsync.mock.calls.some(([sql])=>String(sql).includes("INSERT INTO memory_entities"))).toBe(false);
 });
