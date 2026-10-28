@@ -148,31 +148,58 @@ export async function saveApprovedNote(
   const all = await ensureSections(db);
   let col = proposal.section ? all.find(c => c.slug === proposal.section) : undefined;
   const requested = proposal.newSection?.trim().slice(0, 60);
+  let newSection: string | undefined;
   if (!col && requested) {
-    // The user confirmed a section that did not exist when it was proposed;
-    // it may have been created since, so look it up by name first.
+    // Validate the complete approval first. A rejected identity must not
+    // leave an unused custom section behind.
     const existing = findSection(requested, all.map(c => ({ slug: c.slug, name: c.name })));
-    col = existing ? all.find(c => c.slug === existing.slug) :
-      await db.createCollection({ name: requested, slug: "section-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8), sensitivity: "standard" });
+    if (existing) col = all.find(c => c.slug === existing.slug);
+    else newSection = requested;
   }
   col ||= all.find(c => c.slug === "notes");
   if (!col) throw new Error("Раздел для заметки не найден");
+  const plannedSensitivity = newSection ? "standard" : col.sensitivity;
   // A proposal may land in a personal section (e.g. documents) but never in a
   // secret or unclassified one: those are only filled by the user directly.
-  if (col.sensitivity !== "standard" && col.sensitivity !== "sensitive") throw new Error("Раздел «" + col.name + "» ограничен по доступу");
+  if (plannedSensitivity !== "standard" && plannedSensitivity !== "sensitive") throw new Error("Раздел «" + col.name + "» ограничен по доступу");
   const kind = proposal.kind && (PROPOSABLE_KINDS as readonly string[]).includes(proposal.kind) ? proposal.kind : undefined;
+  const person = proposal.person?.trim();
+  // Resolve identity BEFORE writing any note. A name match is not a stable ID.
+  // Never infer a person from a private collection in a standard LLM flow.
+  let target: Awaited<ReturnType<MemoryRepository["entitiesByAlias"]>>[number] | undefined;
+  if (person && kind !== "person") {
+    if (plannedSensitivity !== "standard") {
+      throw new Error("Связь с человеком в закрытом разделе требует отдельного подтверждения. Сохраните без связи.");
+    }
+    const matches = await db.entitiesByAlias(person, "person");
+    if (matches.length > 1) {
+      throw new Error("Личность неоднозначна. Уточните человека или сохраните запись без связи.");
+    }
+    target = matches[0];
+    if (target) {
+      const currentSection = all.find(c => c.id === target!.collection_id);
+      if (target.record_status !== "active" ||
+          currentSection?.sensitivity !== "standard" ||
+          !["standard","inherit"].includes(target.sensitivity)) {
+        throw new Error("Автоматическая связь с этим человеком недоступна. Сохраните запись без связи.");
+      }
+    }
+  }
+  if (newSection) {
+    col = await db.createCollection({ name: newSection,
+      slug: "section-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+      sensitivity: "standard" });
+  }
   const saved = await db.createEntity({
     collection_id: col.id, domain: "notes", title,
     payload: { type: "note", title, body, ...(proposal.date ? { date: proposal.date } : {}) },
-    sensitivity: col.sensitivity, source_kind: "user", source_ref: "device-approved-agent",
+    sensitivity: plannedSensitivity, source_kind: "user", source_ref: "device-approved-agent",
     ...(kind ? { kind } : {}),
     ...(proposal.date ? { valid_from: proposal.date } : {}),
   });
-  const person = proposal.person?.trim();
   // A fact about someone is linked to that person's record; a person seen for
   // the first time gets a record in «Люди», saved with the same confirmation.
   if (person && kind !== "person") {
-    let target = (await db.entitiesByAlias(person, "person"))[0];
     if (!target) {
       const people = all.find(c => c.slug === "people");
       if (people) target = await db.createEntity({ collection_id: people.id, domain: "notes", title: person.slice(0, 160),
