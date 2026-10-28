@@ -122,3 +122,42 @@ test("a released native player cannot throw from cleanup", async () => {
   expect(() => screen.unmount()).not.toThrow();
   expect(mockDelete).toHaveBeenCalledWith("file:///preview/audio");
 });
+
+const proofOriginal = {
+  attachmentId: "audio", recordId: "note", recordVersion: 1,
+  name: "голос.mp3", mime: "audio/mpeg", size: 880000,
+  kind: "audio" as const, metadataOnly: true as const,
+  originalTime: null, originalPage: null,
+};
+
+test("R3b2a/REL-06/SEC-08: only the verified audio appears; opening uses the source-bound materializer", async () => {
+  const ui = render(<AttachmentView profile="guest" entityId="note" verifiedOriginal={proofOriginal} />);
+  await waitFor(() => expect(ui.getByText("Вложения · 1")).toBeTruthy());
+  expect(ui.queryByText("снимок.jpg")).toBeNull();
+  expect(ui.queryByText("document.bin")).toBeNull();
+  expect(materializeAttachment).not.toHaveBeenCalled();
+  fireEvent.press(ui.getByLabelText("Прослушать аудио голос.mp3"));
+  await waitFor(() => expect(materializeAttachment).toHaveBeenCalledWith(
+    "guest", items[1], expect.anything(), proofOriginal,
+  ));
+  await waitFor(() => expect(ui.getByLabelText("Воспроизвести аудио")).toBeTruthy());
+});
+
+test("R3b2a/SEC-08: a missing verified original must never fall back to other local originals", async () => {
+  (attachmentsForEntity as jest.Mock).mockResolvedValue([items[0], items[2]]);
+  const ui = render(<AttachmentView profile="guest" entityId="note" verifiedOriginal={proofOriginal} />);
+  await waitFor(() => expect(ui.getByText("Источник изменён или недоступен. Повторите поиск.")).toBeTruthy());
+  expect(ui.queryByLabelText("Открыть фото снимок.jpg")).toBeNull();
+  expect(materializeAttachment).not.toHaveBeenCalled();
+});
+
+test("R3b2a/SEARCH-06: invalid or stale source version never exposes bytes or a different attachment", async () => {
+  (materializeAttachment as jest.Mock).mockRejectedValueOnce(new Error("memory_source_not_available_or_stale"));
+  const ui = render(<AttachmentView profile="guest" entityId="note" verifiedOriginal={{...proofOriginal,recordVersion:7}} />);
+  await waitFor(() => ui.getByLabelText("Прослушать аудио голос.mp3"));
+  fireEvent.press(ui.getByLabelText("Прослушать аудио голос.mp3"));
+  await waitFor(() => expect(ui.getByText("memory_source_not_available_or_stale")).toBeTruthy());
+  expect(ui.queryByLabelText("Воспроизвести аудио")).toBeNull();
+  expect(materializeAttachment).toHaveBeenCalledTimes(1);
+  expect((materializeAttachment as jest.Mock).mock.calls[0][3]).toMatchObject({recordVersion:7});
+});

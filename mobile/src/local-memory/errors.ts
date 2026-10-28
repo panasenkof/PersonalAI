@@ -5,6 +5,7 @@ export function memoryErrorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : "";
   const known: Record<string, string> = {
     application_locked: "Для доступа войдите в приложение.",
+    memory_source_not_available_or_stale: "Источник изменён или недоступен. Повторите поиск.",
     local_memory_unlock_failed: "Ключ существующей памяти недоступен. Исходная база сохранена; не удаляйте приложение.",
     sqlcipher_required_native_build: "Для шифрованной памяти нужна нативная сборка с SQLCipher. Expo Go не подходит.",
     local_memory_schema_too_new: "Память создана более новой версией приложения. Обновите PersAI.",

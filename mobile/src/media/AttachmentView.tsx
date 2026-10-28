@@ -9,6 +9,7 @@ import { useTheme } from "../theme";
 import { nebulaRadii, nebulaSpacing, nebulaTouch } from "../design/nebula/tokens";
 import { attachmentsForEntity, materializeAttachment } from "./attachments";
 import type { Attachment } from "./attachments";
+import type { VerifiedOriginalLocator } from "../local-memory/types";
 import { attachmentKindLabel, attachmentPreviewKind, readableAttachmentSize } from "./attachmentPresentation";
 import type { AttachmentPreviewKind } from "./attachmentPresentation";
 
@@ -52,7 +53,7 @@ function AudioPreview({ uri, onError }: { uri: string; onError: (message: string
   </Pressable>;
 }
 
-export function AttachmentView({ profile, entityId }: { profile: string; entityId: string }) {
+export function AttachmentView({ profile, entityId, verifiedOriginal }: { profile: string; entityId: string; verifiedOriginal?: VerifiedOriginalLocator }) {
   const t = useTheme();
   const focused = useIsFocused();
   const appVisible = useApplicationVisible();
@@ -73,12 +74,20 @@ export function AttachmentView({ profile, entityId }: { profile: string; entityI
     return () => { alive = false; };
   }, [profile, entityId, retry]);
 
+  // A search-proven source may display ONLY the original that the proof returned.
+  // Missing/stale metadata never silently falls back to other note attachments.
+  const scoped = verifiedOriginal ? attachments.filter(item =>
+    item.id === verifiedOriginal.attachmentId &&
+    item.entity_id === verifiedOriginal.recordId &&
+    item.entity_id === entityId) : attachments;
+  const missingVerified = Boolean(verifiedOriginal && !loading && !error && scoped.length !== 1);
   // Background, navigation away and app lock immediately disable all previews.
   useEffect(() => { if (!visible) setOpenId(null); }, [visible]);
+  useEffect(() => { setOpenId(null); }, [verifiedOriginal?.attachmentId, verifiedOriginal?.recordVersion]);
 
-  if (!loading && !error && attachments.length === 0) return null;
+  if (!loading && !error && scoped.length === 0 && !verifiedOriginal) return null;
   return <View style={{ gap: nebulaSpacing.sm }}>
-    <Text accessibilityRole="header" style={{ color: t.text, fontSize: 18, fontWeight: "700" }}>Вложения{attachments.length ? " · " + attachments.length : ""}</Text>
+    <Text accessibilityRole="header" style={{ color: t.text, fontSize: 18, fontWeight: "700" }}>Вложения{scoped.length ? " · " + scoped.length : ""}</Text>
     {loading ? <Text style={{ color: t.muted }}>Загружаю список вложений…</Text> : null}
     {error ? <>
       <Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text>
@@ -87,15 +96,17 @@ export function AttachmentView({ profile, entityId }: { profile: string; entityI
         <Text style={{ color: t.secondary }}>Повторить загрузку</Text>
       </Pressable>
     </> : null}
-    {attachments.map(attachment => <OneAttachment key={attachment.id} profile={profile} attachment={attachment}
+    {missingVerified ? <Text accessibilityRole="alert" style={{ color: t.err }}>Источник изменён или недоступен. Повторите поиск.</Text> : null}
+    {scoped.map(attachment => <OneAttachment key={attachment.id} profile={profile} attachment={attachment} verified={verifiedOriginal}
       expanded={visible && openId === attachment.id} visible={visible}
       onToggle={() => setOpenId(id => id === attachment.id ? null : attachment.id)} />)}
   </View>;
 }
 
-function OneAttachment({ profile, attachment, expanded, visible, onToggle }: {
+function OneAttachment({ profile, attachment, expanded, visible, onToggle, verified }: {
   profile: string;
   attachment: Attachment;
+  verified?: VerifiedOriginalLocator;
   expanded: boolean;
   visible: boolean;
   onToggle: () => void;
@@ -117,7 +128,7 @@ function OneAttachment({ profile, attachment, expanded, visible, onToggle }: {
     setLoading(active);
     if (active) {
       setError("");
-      void materializeAttachment(profile, attachment, controller.signal)
+      void materializeAttachment(profile, attachment, controller.signal, verified)
         .then(value => {
           temporary = value;
           if (alive && !controller.signal.aborted) setUri(value);
@@ -131,7 +142,7 @@ function OneAttachment({ profile, attachment, expanded, visible, onToggle }: {
       controller.abort();
       if (temporary) deleteTemporary(temporary);
     };
-  }, [active, attachment, profile, attempt]);
+  }, [active, attachment, profile, attempt, verified]);
 
   const action = kind === "image" ? "Открыть фото" : kind === "audio" ? "Прослушать аудио" : "Открыть видео";
   return <View style={{ padding: nebulaSpacing.md, gap: nebulaSpacing.sm, borderWidth: 1, borderColor: t.line,
