@@ -262,3 +262,15 @@ test("CLEAN-04/SEC-08: excludes private/unclassified documents and refuses forge
   })).rejects.toThrow("invalid_hygiene_apply_selection");
   expect((await repo.entity(b.id))?.record_status).toBe("active");
 });
+
+test("SEC-04/CLEAN-08: locked profile cannot apply a reviewed batch or alter an original",async()=>{
+  const col=await repo.createCollection({name:"Рабочие записи",slug:"lock-review",sensitivity:"standard"});
+  const n=await note("Техосмотр автомобиля",col.id);
+  const preview=await review.previewWithExclusions([{id:n.id,recordVersion:1}],[],"archive");
+  revokeLocalMemorySession();
+  await expect(repo.changeNotes("archive",[{id:n.id,record_version:1}],undefined,{
+    expectedPreferences:preview.included.map(row=>({id:row.id,preferenceVersion:row.expectedPreferenceVersion})),
+  })).rejects.toThrow("application_locked");
+  expect((await repo.entity(n.id))?.record_status).toBe("active");
+  expect((await repo.entity(n.id))?.record_version).toBe(1);
+});
