@@ -42,7 +42,7 @@ export function onLocalMemorySessionChange(listener: (unlocked: boolean) => void
 }
 export const localMemorySessionUnlocked = () => applicationSessionUnlocked;
 const requireApplicationSession = () => { if (!applicationSessionUnlocked) throw new Error("application_locked"); };
-export const LOCAL_MEMORY_SCHEMA_VERSION = 13;
+export const LOCAL_MEMORY_SCHEMA_VERSION = 14;
 const KIND_CHECK = `CHECK(kind IN (${MEMORY_KINDS.map(k => `'${k}'`).join(",")}))`;
 
 /** All memory (including full-text indexes, revisions, and WAL) is in SQLCipher. */
@@ -190,6 +190,33 @@ CREATE TABLE IF NOT EXISTS memory_review_actions (
 );
 CREATE INDEX IF NOT EXISTS ix_memory_review_actions_relation
   ON memory_review_actions(relation_evidence_id,created_at,id);
+-- v14: non-confirmed candidates for the ONE review UI. Never insert into
+-- memory_relations before a deliberate user confirmation; temporal proposals
+-- keep their existing authority during the migration.
+CREATE TABLE IF NOT EXISTS memory_review_proposals (
+  id TEXT PRIMARY KEY,
+  target_kind TEXT NOT NULL DEFAULT 'relation' CHECK(target_kind='relation'),
+  source_entity_id TEXT NOT NULL REFERENCES memory_entities(id) ON DELETE CASCADE,
+  target_entity_id TEXT NOT NULL REFERENCES memory_entities(id) ON DELETE CASCADE,
+  relation_kind TEXT NOT NULL CHECK(relation_kind IN (
+    'has_sister','has_brother','has_mother','has_father','has_spouse',
+    'has_child','has_friend','has_colleague','has_doctor','has_teacher','participant_of')),
+  source_record_version INTEGER NOT NULL CHECK(source_record_version>0),
+  target_record_version INTEGER NOT NULL CHECK(target_record_version>0),
+  evidence_entity_id TEXT NOT NULL REFERENCES memory_entities(id) ON DELETE CASCADE,
+  evidence_record_version INTEGER NOT NULL CHECK(evidence_record_version>0),
+  quote TEXT NOT NULL CHECK(length(quote)>0 AND length(quote)<=6000),
+  status TEXT NOT NULL DEFAULT 'pending'
+    CHECK(status IN ('pending','deferred','rejected','accepted')),
+  proposal_version INTEGER NOT NULL DEFAULT 1 CHECK(proposal_version>0),
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  CHECK(source_entity_id<>target_entity_id),
+  UNIQUE(source_entity_id,target_entity_id,relation_kind,evidence_entity_id,
+         evidence_record_version,quote)
+);
+CREATE INDEX IF NOT EXISTS ix_memory_review_proposals_inbox
+  ON memory_review_proposals(status,created_at,id);
+
 
 
 CREATE TABLE IF NOT EXISTS memory_revisions (
