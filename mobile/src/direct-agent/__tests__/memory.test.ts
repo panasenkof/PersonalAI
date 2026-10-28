@@ -225,6 +225,22 @@ test.each([
   expect(repo.linkEntities).not.toHaveBeenCalled();
 });
 
+test("ambiguous identity never creates the user-requested custom section",async()=>{
+  const repo=fake();
+  repo.entitiesByAlias.mockResolvedValue([
+    {id:"person-a",collection_id:"standard",sensitivity:"standard",record_status:"active"},
+    {id:"person-b",collection_id:"standard",sensitivity:"standard",record_status:"active"},
+  ]);
+  await expect(saveApprovedNote("guest",{
+    title:"Разговор",body:"Обсудили маршрут",person:"Мария",
+    newSection:"Новый проект без источников",
+  },repo as unknown as MemoryRepository)).rejects.toThrow("Личность неоднозначна");
+  expect(repo.createCollection).not.toHaveBeenCalledWith(
+    expect.objectContaining({name:"Новый проект без источников"}));
+  expect(repo.createEntity).not.toHaveBeenCalled();
+  expect(repo.linkEntities).not.toHaveBeenCalled();
+});
+
 test.each([
   ["secret","secret","standard"],
   ["standard","standard","secret"],
