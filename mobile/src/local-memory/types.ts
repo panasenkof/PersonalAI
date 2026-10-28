@@ -2,7 +2,7 @@ import type { MemoryKind } from "./search-index";
 import type { EnrichmentSnapshot } from "./enrichment-policy";
 import type { TemporalClaimCandidate } from "./temporal-claims";
 import type { TemporalHistoryQuery, TemporalHistoryPage, TemporalStagedReview, TemporalAtDateQuery, TemporalAtDatePage } from "./temporal-store";
-import type { ConfirmRelationInput, ConfirmRelationResult, RelationReviewExpected, RelationReviewDecision } from "./relation-evidence";
+import type { ConfirmRelationInput, ConfirmRelationResult, RelationReviewExpected, RelationReviewDecision, RelationReviewActionItem } from "./relation-evidence";
 import type { DirectPersonRelation, RelationProof, RelativeConversationResult } from "./relational-proof";
 import type { TemporalInboxQuery, TemporalInboxPage } from "./temporal-review-inbox";
 import type { TemporalDecisionRequest, TemporalDecisionExpected, TemporalDecisionResult } from "./temporal-decisions";
@@ -87,6 +87,10 @@ export interface MemoryRepository {
   currentConfirmedRelationProofs(query: {
     sourceId: string; kind?: DirectPersonRelation | "participant_of"; limit?: number;
   }): Promise<{items: RelationProof[];partial: boolean}>;
+  relationReviewHistory(query:{evidenceId:string;limit?:number}): Promise<{
+    items:RelationReviewActionItem[];hasMore:boolean;
+    currentState:"confirmed"|"retracted";decisionVersion:number;
+  }>;
   retractRelationWitness(expected: RelationReviewExpected): Promise<RelationReviewDecision>;
   undoRelationRetraction(expected: RelationReviewExpected & {actionId:string}): Promise<RelationReviewDecision>;
   confirmedRelativeConversationPaths(query: {
