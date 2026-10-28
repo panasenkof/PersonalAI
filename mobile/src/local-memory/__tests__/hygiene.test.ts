@@ -165,7 +165,8 @@ test("CLEAN-05/CLEAN-07/SAVE-04: review 25 sources with exclusions, guards and r
 });
 
 test("CLEAN-01/CLEAN-04/SEC-04: all excluded is a valid no-op; malformed exclusion fails closed",async()=>{
-  const n1=await note("Медицинский документ 2018"),n2=await note("Видео 2021");
+  const col=await repo.createCollection({name:"Материалы",slug:"review-materials"});
+  const n1=await note("Медицинский документ 2018",col.id),n2=await note("Видео 2021",col.id);
   const targets=[{id:n1.id,recordVersion:1},{id:n2.id,recordVersion:1}];
   const preview=await review.previewWithExclusions(targets,[n2.id,n1.id],"trash");
   expect(preview).toMatchObject({
