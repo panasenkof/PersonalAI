@@ -45,3 +45,19 @@
 - Не обнаружено второго физического графа родства в #179–185: единственный authoritative relation-edge — `memory_relations`, evidence — `memory_relation_evidence`; FTS/vector — производные. Это **не** означает полностью завершённую общую модель review.
 - #166–185 прошли ретроспективную **статическую архитектурную** сверку по фактическому diff и current code. **Отсутствующие индивидуальные pre/post C3-отчёты задним числом не объявляются выполненными**; этот документ фиксирует реальный охват и исключения.
 - Новые PR: обязательная явная архитектурная сверка **ДО и ПОСЛЕ** (матрица operation→authoritative store→writer→read→ACL/CAS→backup), записи F1–F6 в реальных pre/post PR-отчётах, C1/C2 отдельно. Приоритет P1 F1 до расширения R2b/agent-facing read, затем новый user-facing workflow в `PLAN.md §2`, без самостоятельной очереди из находок.
+
+
+## Дополнение после #186–188 и перед R2b1 (28.10.2026)
+
+**Примечание к исторической секции выше:** статус F1 «первым исправить» описывает момент ревизии #166–185, а не нынешний `main`.
+
+| PR | Архитектура ДО → ПОСЛЕ | Итог и непокрытое |
+| --- | --- | --- |
+| #186 | До: C0-A/C3-B не были явно представлены в шаблоне; после: AGENTS/Cursor/DEVELOPMENT_GATES/PR template требуют обе карты, старый audit не выдаётся за историю выполненных preflight | PASS docs-only, no runtime table/index/queue; правило проверять по diff, не по галочке |
+| #187 | До: P1 F1 read proof→conversation и history не были единым SQLCipher snapshot; после: `withUnlockedTransaction` защищает обе связанные read-операции, без второго graph/search/helper | F1 исправлен **для внутренней операции чтения в БД**, required CI PASS. Перед внешней LLM всё ещё нужен check-at-use; physical device NOT RUN |
+| #188 | До: temporal proposals/decisions и relation witness/review actions частично расходятся; после: единый review contract на уровне спецификации, без новой таблицы, клиента или исполняемого workflow | MATCH DESIGN ONLY; нельзя объявлять F2 закрытым до реализации R2b2/R2c и последующей C3 |
+| #190, C0-A | До: v13 один canonical relation edge/evidence, один temporal authoritative journal, R2b design; missing persisted unconfirmed candidates | EXTEND `memory_review_proposals` **только для гипотез**, one source+ACL guard, current versions/quote, no confirmation edge; encrypted manifest count. C3-B после тестов подтвердить, что источник истины/решения не задвоены и нет новой P1 |
+
+В этой ревизии проверены оба реальных направления идентификации (`person→person`, `note→person`), изменение источника, две тёзки, чувствительность каждого промежуточного узла, отмена и блокировка старого решения. Старые `about` остаются только legacy mention; `memory_review_proposals` не является уже доказанной связью. **F2 остаётся PARTIAL:** единый пользовательский экран и общий typed inbox ещё не включены, временные `memory_temporal_decisions` не копируются в `memory_review_actions`. Массовый рефакторинг C3 ждёт приёмки M1–M4.
+
+**C3-B для #190 (дополнить итогом CI):** operation/staging → `memory_review_proposals` (неистинная гипотеза) → existing profile-leased `stageRelationCandidate` / `relationCandidateInbox` → тот же original-note ACL/версии/quote, что у confirmed writer → manifest v5 + v13 old-archive migration; `memory_relations/evidence` остаются единственными подтверждениями, `memory_temporal_proposals/decisions` не тронуты, новые FTS/vector indexes отсутствуют. Уменьшение дублирования: общий `validatedCandidate` применяется и при stage, и при confirm. Отложено строго по PLAN §2: R2b2 actions and unified read, R2c UI, C3 historic journals. Physical SQLCipher restore C2 NOT RUN.
