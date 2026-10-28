@@ -112,7 +112,7 @@ export function MemoryTemporalTimeline({profile,subjectId,collectionId}:{
       {items.map(item=><View key={item.claimId} style={{padding:nebulaSpacing.md,borderWidth:1,
         borderColor:t.line,borderRadius:nebulaRadii.card,gap:nebulaSpacing.sm}}>
         <Text style={{color:t.text,fontWeight:"700"}}>
-          {item.claim.kind==="event"?"Событие":"Состояние"} · {item.claim.value}
+          {item.claim.kind==="event"?"Событие":item.claim.kind==="observation"?"Наблюдение":item.claim.kind==="enduring"?"Длительное обстоятельство":"Состояние"} · {item.claim.value}
         </Text>
         <Text style={{color:t.muted}}>{item.claim.predicate} · {item.claim.context}</Text>
         <Text style={{color:t.muted}}>Относится к: {displayTemporalBound(item.claim.occurredOrStarted)}</Text>
@@ -120,6 +120,7 @@ export function MemoryTemporalTimeline({profile,subjectId,collectionId}:{
           {item.claim.endConfirmed?" · граница подтверждена пользователем":""}</Text>:null}
         <Text style={{color:t.muted}}>Записано в память: {new Date(item.claim.recordedAt).toLocaleDateString()}</Text>
         <Text style={{color:t.muted}}>{item.claim.modality==="planned"?"План, не свершившийся факт":
+          item.claim.modality==="hypothetical"?"Гипотеза, не факт":
           item.claim.negated?"Отрицательное утверждение источника":"Не подтверждено как текущий факт"}</Text>
         <Text style={{color:t.muted}}>Источник: «{item.claim.evidence.quote}»</Text>
         <Pressable accessibilityRole="button" accessibilityLabel={"Проверить источник "+item.claimId}
