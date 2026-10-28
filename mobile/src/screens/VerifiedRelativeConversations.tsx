@@ -121,7 +121,7 @@ export function VerifiedRelativeConversations({ profile, personId, personTitle }
       {busy ? <ActivityIndicator accessibilityLabel="Проверяю доказательства разговоров" /> : null}
       {error ? <Text accessibilityRole="alert" style={{color:t.err}}>{error}</Text> : null}
       {hits?.length===0 ? <Text style={{color:t.muted}}>Подтверждённых разговоров в доступной части памяти не найдено. Это не означает, что упоминаний или записей нет.</Text> : null}
-      {hits?.map(hit => <Pressable key={hit.entity.id} accessibilityRole="button"
+      {hits?.map(hit => <Pressable key={hit.entity.id + ":" + hit.proof?.relativeId} accessibilityRole="button"
         accessibilityLabel={"Открыть подтверждённый разговор "+memoryDisplayTitle(hit.entity)}
         disabled={busy} onPress={() => void openHit(hit)}
         style={action}>
