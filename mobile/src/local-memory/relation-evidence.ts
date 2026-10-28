@@ -46,6 +46,28 @@ async function allowedEntity(db:SQL,id:string,version:number):Promise<EntityScop
   return row;
 }
 
+/** One scope/role/quote admission check shared by candidate staging and
+ * actual user confirmation. A pending match never creates graph proof. */
+export async function assertCurrentRelationCandidate(
+  db:SQL, req:Omit<ConfirmRelationInput,"userConfirmed">,
+):Promise<void>{
+  if(!validId(req.sourceId)||!validId(req.targetId)||!validId(req.evidenceId)||
+     req.sourceId===req.targetId||![req.sourceVersion,req.targetVersion,req.evidenceVersion].every(validVersion)||
+     !ROLES.includes(req.kind)||typeof req.evidenceQuote!=="string"||
+     !req.evidenceQuote.trim()||req.evidenceQuote.length>6000)
+    throw new Error("relational_confirmation_invalid");
+  const source=await allowedEntity(db,req.sourceId,req.sourceVersion);
+  const target=await allowedEntity(db,req.targetId,req.targetVersion);
+  const evidence=await allowedEntity(db,req.evidenceId,req.evidenceVersion);
+  if(req.kind==="participant_of"){
+    if(source.kind!=="note"||target.kind!=="person")throw new Error("relational_role_endpoints_invalid");
+  }else if(source.kind!=="person"||target.kind!=="person")
+    throw new Error("relational_role_endpoints_invalid");
+  if(evidence.domain!=="notes"||
+     !memoryText(JSON.parse(evidence.payload_json)).includes(req.evidenceQuote.trim()))
+    throw new Error("relational_evidence_quote_not_found");
+}
+
 export async function confirmUserRelationEvidence(
   db:SQL,req:ConfirmRelationInput,
 ):Promise<ConfirmRelationResult>{
@@ -58,22 +80,7 @@ export async function confirmUserRelationEvidence(
   }
   let result:ConfirmRelationResult|null=null;
   await withUnlockedTransaction(db,async tx=>{
-    const source=await allowedEntity(tx,req.sourceId,req.sourceVersion);
-    const target=await allowedEntity(tx,req.targetId,req.targetVersion);
-    const evidence=await allowedEntity(tx,req.evidenceId,req.evidenceVersion);
-    if(req.kind==="participant_of"){
-      if(source.kind!=="note"||target.kind!=="person"){
-        throw new Error("relational_role_endpoints_invalid");
-      }
-    }else if(source.kind!=="person"||target.kind!=="person"){
-      throw new Error("relational_role_endpoints_invalid");
-    }
-    // The witness is anchored to a real saved text; no invented citation from
-    // a model draft, filename, mere mention or unavailable ASR segment.
-    if(evidence.domain!=="notes"||
-       !memoryText(JSON.parse(evidence.payload_json)).includes(req.evidenceQuote.trim())){
-      throw new Error("relational_evidence_quote_not_found");
-    }
+    await assertCurrentRelationCandidate(tx,req);
     let relation=await tx.getFirstAsync<{id:string;source_kind:string|null}>(
       "SELECT id,source_kind FROM memory_relations "+
       "WHERE source_entity_id=? AND target_entity_id=? AND kind=?",
