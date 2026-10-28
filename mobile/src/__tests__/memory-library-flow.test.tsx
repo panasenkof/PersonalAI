@@ -3,7 +3,7 @@ import { BackHandler } from "react-native";
 import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 import { LocalMemoryScreen } from "../screens/LocalMemoryScreen";
 const mockNavigate = jest.fn();
-const sections = [{ id: "a", name: "Заметки", slug: "notes" }, { id: "b", name: "Люди", slug: "people" }];
+const sections = [{ id: "a", name: "Заметки", slug: "notes", sensitivity: "standard" }, { id: "b", name: "Люди", slug: "people", sensitivity: "unclassified" }];
 const notes = [
  { id: "one", collection_id: "a", title: "Первая", payload: { body: "Содержание" }, record_status: "active", updated_at: "2026-10-24", kind: "note" },
  { id: "two", collection_id: "b", title: "Вторая", payload: { body: "Содержание" }, record_status: "active", updated_at: "2026-10-24", kind: "note" },
@@ -130,4 +130,18 @@ test("trash confirmation replaces actions, cancel retains selection, confirm mut
  expect(mockDb.changeNotes).toHaveBeenCalledTimes(1);
  expect(mockDb.changeNotes).toHaveBeenCalledWith("trash", [notes[0]], undefined);
  expect(v.queryByTestId("memory-selection-toolbar")).toBeNull();
+});
+
+
+test("review entry only appears in an explicitly selected standard collection, not hidden sections",async()=>{
+  const ui=render(<LocalMemoryScreen />);
+  await waitFor(()=>ui.getByLabelText("Раздел Заметки"));
+  expect(ui.queryByLabelText("Открыть предложения по изменению памяти")).toBeNull();
+  fireEvent.press(ui.getByLabelText("Раздел Заметки"));
+  await waitFor(()=>ui.getByLabelText("Открыть предложения по изменению памяти"));
+  fireEvent.press(ui.getByLabelText("Открыть предложения по изменению памяти"));
+  expect(mockNavigate).toHaveBeenCalledWith("MemoryTemporalReview",{collectionId:"a"});
+  fireEvent.press(ui.getByLabelText("Ко всем записям"));
+  fireEvent.press(ui.getByLabelText("Раздел Люди"));
+  await waitFor(()=>expect(ui.queryByLabelText("Открыть предложения по изменению памяти")).toBeNull());
 });
