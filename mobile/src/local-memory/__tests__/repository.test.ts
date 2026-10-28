@@ -1146,8 +1146,24 @@ test("R2b2b: accept uses the ONLY canonical confirmed-relation writer and one au
  // Candidate confirmation must never link another namesake by its title.
  expect((await fake.getFirstAsync<{n:number}>(
    "SELECT count(*) AS n FROM memory_relations WHERE target_entity_id=?", [other.id]))?.n).toBe(0);
+ const undone=await repo.undoRelationCandidateDecision({proposalId:staged.proposalId,
+   expectedVersion:2,actionId:action.actionId,userConfirmed:true});
+ expect(undone).toMatchObject({status:"pending",nextVersion:3,
+   confirmedEvidenceId:action.confirmedEvidenceId});
+ expect((await fake.getFirstAsync<{state:string}>(
+   "SELECT state FROM memory_relation_evidence WHERE id=?",[action.confirmedEvidenceId]))?.state)
+   .toBe("retracted");
+ const redone=await repo.decideRelationCandidate({proposalId:staged.proposalId,
+   expectedVersion:3,choice:"accept",userConfirmed:true});
+ expect(redone).toMatchObject({status:"accepted",nextVersion:4,
+   confirmedEvidenceId:action.confirmedEvidenceId});
+ expect((await fake.getFirstAsync<{state:string;decision_version:number}>(
+   "SELECT state,decision_version FROM memory_relation_evidence WHERE id=?",[action.confirmedEvidenceId])))
+   .toMatchObject({state:"confirmed",decision_version:3});
+ expect((await fake.getFirstAsync<{n:number}>(
+   "SELECT count(*) AS n FROM memory_relation_evidence"))?.n).toBe(1);
  await expect(repo.undoRelationCandidateDecision({proposalId:staged.proposalId,
-   expectedVersion:2,actionId:action.actionId,userConfirmed:true}))
+   expectedVersion:4,actionId:action.actionId,userConfirmed:true}))
    .rejects.toThrow("relational_candidate_undo_stale");
  expect(await fake.getFirstAsync("PRAGMA foreign_key_check")).toBeNull();
 });
@@ -1170,4 +1186,55 @@ test("R2b2b: independent confirmation races candidate acceptance without a secon
    "SELECT count(*) AS n FROM memory_review_actions WHERE review_proposal_id=?",[p.proposalId]))?.n).toBe(0);
  expect((await fake.getFirstAsync<{n:number}>(
    "SELECT count(*) AS n FROM memory_relation_evidence WHERE id=?",[proof.evidenceId]))?.n).toBe(1);
+});
+
+test("R2b2c: accepted undo retracts ONLY selected witness, independent proof still confirms relation",async()=>{
+ const fake=new FakeSqlite(),repo=new SqliteMemoryRepository(fake as never);
+ await fake.execAsync("PRAGMA foreign_keys=ON");
+ const c=await repo.createCollection({name:"Семья",slug:"family",sensitivity:"standard"});
+ const a=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"person",payload:{}});
+ const b=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"person",payload:{}});
+ const n1=await repo.createEntity({collection_id:c.id,domain:"notes",payload:{body:"Мой брат Виктор"}});
+ const n2=await repo.createEntity({collection_id:c.id,domain:"notes",payload:{body:"Виктор мой брат"}});
+ const candidate={sourceId:a.id,sourceVersion:1,targetId:b.id,targetVersion:1,
+   evidenceId:n1.id,evidenceVersion:1,evidenceQuote:"Мой брат Виктор",kind:"has_brother" as const};
+ const staged=await repo.stageRelationCandidate(candidate);
+ const action=await repo.decideRelationCandidate({proposalId:staged.proposalId,
+   expectedVersion:1,choice:"accept",userConfirmed:true});
+ const independent=await repo.confirmUserRelationProof({...candidate,evidenceId:n2.id,
+   evidenceQuote:"Виктор мой брат",userConfirmed:true});
+ const undone=await repo.undoRelationCandidateDecision({proposalId:staged.proposalId,
+   expectedVersion:2,actionId:action.actionId,userConfirmed:true});
+ expect(undone.status).toBe("pending");
+ const proofs=await repo.currentConfirmedRelationProofs({sourceId:a.id,kind:"has_brother"});
+ expect(proofs.items.map(p=>p.id)).toContain(independent.evidenceId);
+ expect(proofs.items.map(p=>p.id)).not.toContain(action.confirmedEvidenceId);
+ expect((await fake.getFirstAsync<{n:number}>(
+   "SELECT count(*) AS n FROM memory_review_actions WHERE review_proposal_id=?",
+   [staged.proposalId]))?.n).toBe(2);
+ expect(await fake.getFirstAsync("PRAGMA foreign_key_check")).toBeNull();
+});
+
+test("R2b2c: source edit and later witness retraction block accepted undo safely",async()=>{
+ const fake=new FakeSqlite(),repo=new SqliteMemoryRepository(fake as never);
+ const c=await repo.createCollection({name:"Работа",slug:"work",sensitivity:"standard"});
+ const a=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"person",payload:{}});
+ const b=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"person",payload:{}});
+ const n=await repo.createEntity({collection_id:c.id,domain:"notes",payload:{body:"С Петром работаем вместе"}});
+ const input={sourceId:a.id,sourceVersion:1,targetId:b.id,targetVersion:1,
+   evidenceId:n.id,evidenceVersion:1,evidenceQuote:"С Петром работаем вместе",kind:"has_colleague" as const};
+ const proposed=await repo.stageRelationCandidate(input);
+ const accepted=await repo.decideRelationCandidate({proposalId:proposed.proposalId,
+   expectedVersion:1,choice:"accept",userConfirmed:true});
+ await repo.retractRelationWitness({evidenceId:accepted.confirmedEvidenceId!,
+   expectedVersion:1,userConfirmed:true});
+ await expect(repo.undoRelationCandidateDecision({proposalId:proposed.proposalId,
+   expectedVersion:2,actionId:accepted.actionId,userConfirmed:true}))
+   .rejects.toThrow("relational_candidate_undo_stale");
+ expect((await fake.getFirstAsync<{s:string}>(
+   "SELECT status AS s FROM memory_review_proposals WHERE id=?",[proposed.proposalId]))?.s)
+   .toBe("accepted");
+ await repo.reviseEntity(n.id,1,{body:"Удалено упоминание"}, "Исправление");
+ await expect(repo.relationCandidateHistory({proposalId:proposed.proposalId}))
+   .rejects.toThrow("relational_source_not_available_or_stale");
 });

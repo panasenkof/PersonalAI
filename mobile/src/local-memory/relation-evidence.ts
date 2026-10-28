@@ -24,7 +24,7 @@ export type ConfirmRelationInput = {
   /** Caller is a deliberate, explicit USER confirmation, never inference. */
   userConfirmed:true;
 };
-export type ConfirmRelationResult = {relationId:string;evidenceId:string;added:boolean};
+export type ConfirmRelationResult = {relationId:string;evidenceId:string;added:boolean;decisionVersion?:number};
 const uid=()=>Crypto.randomUUID();
 const validId=(id:unknown)=>typeof id==="string"&&id.trim().length>0&&id.length<=256&&!/[\u0000-\u001f]/.test(id);
 const validVersion=(n:unknown)=>typeof n==="number"&&Number.isSafeInteger(n)&&n>0;
@@ -50,7 +50,7 @@ async function allowedEntity(db:SQL,id:string,version:number):Promise<EntityScop
  * a candidate review inside its existing unlocked SQLCipher transaction.
  * Do NOT wrap this in a nested BEGIN IMMEDIATE.
  */
-async function writeConfirmedRelationProof(tx:SQL,req:ConfirmRelationInput):Promise<ConfirmRelationResult>{
+async function writeConfirmedRelationProof(tx:SQL,req:ConfirmRelationInput,reactivateEvidenceId?:string):Promise<ConfirmRelationResult>{
   if(!validId(req.sourceId)||!validId(req.targetId)||!validId(req.evidenceId)||
      req.sourceId===req.targetId||![req.sourceVersion,req.targetVersion,req.evidenceVersion].every(validVersion)||
      !ROLES.includes(req.kind)||req.userConfirmed!==true||
@@ -76,13 +76,25 @@ async function writeConfirmedRelationProof(tx:SQL,req:ConfirmRelationInput):Prom
       [id,req.sourceId,req.targetId,req.kind,new Date().toISOString()]);
     relation={id,source_kind:"user:confirmed"};
   }
-  const existing=await tx.getFirstAsync<{id:string;state:string}>(
-    "SELECT id,state FROM memory_relation_evidence "+
+  const existing=await tx.getFirstAsync<{id:string;state:string;decision_version:number}>(
+    "SELECT id,state,decision_version FROM memory_relation_evidence "+
     "WHERE relation_id=? AND evidence_entity_id=? AND evidence_record_version=? AND quote=?",
     [relation.id,req.evidenceId,req.evidenceVersion,req.evidenceQuote.trim()]);
   if(existing){
+    if(existing.state==="retracted"&&existing.id===reactivateEvidenceId){
+      // This can happen ONLY after the user undid this SAME candidate's
+      // earlier acceptance. Public R1b confirmation cannot reactivate it.
+      const changed=await tx.runAsync(
+        "UPDATE memory_relation_evidence SET state='confirmed',"+
+        "decision_version=decision_version+1 WHERE id=? AND state='retracted' "+
+        "AND decision_version=?",[existing.id,existing.decision_version]);
+      if(changed.changes!==1)throw new Error("relational_candidate_witness_stale");
+      return {relationId:relation.id,evidenceId:existing.id,added:true,
+        decisionVersion:existing.decision_version+1};
+    }
     if(existing.state!=="confirmed")throw new Error("relational_evidence_retracted");
-    return {relationId:relation.id,evidenceId:existing.id,added:false};
+    return {relationId:relation.id,evidenceId:existing.id,added:false,
+      decisionVersion:existing.decision_version};
   }
   const evidenceId=uid();
   await tx.runAsync(
@@ -92,7 +104,7 @@ async function writeConfirmedRelationProof(tx:SQL,req:ConfirmRelationInput):Prom
     "VALUES (?,?,?,?,?,?,?,'explicit_user','user','confirmed',?)",
     [evidenceId,relation.id,req.evidenceId,req.evidenceVersion,req.sourceVersion,
      req.targetVersion,req.evidenceQuote.trim(),new Date().toISOString()]);
-  return {relationId:relation.id,evidenceId,added:true};
+  return {relationId:relation.id,evidenceId,added:true,decisionVersion:1};
 }
 export async function confirmUserRelationEvidence(
   db:SQL,req:ConfirmRelationInput,
@@ -236,6 +248,19 @@ async function loadReviewWitness(db:SQL,id:string):Promise<ReviewWitness>{
   }
   return witness;
 }
+/** The ONLY low-level state/CAS transition for confirmed witnesses.
+ * R2a retract/undo and R2b2c undo accepted candidate call this same writer.
+ */
+async function changeWitnessState(
+  tx:SQL,id:string,expectedVersion:number,
+  from:"confirmed"|"retracted",to:"confirmed"|"retracted",stale:string,
+){
+  const changed=await tx.runAsync(
+    "UPDATE memory_relation_evidence SET state=?,decision_version=decision_version+1 "+
+    "WHERE id=? AND state=? AND decision_version=?",
+    [to,id,from,expectedVersion]);
+  if(changed.changes!==1)throw new Error(stale);
+}
 function validateReviewExpected(req:RelationReviewExpected){
   if(!validId(req?.evidenceId)||!validVersion(req?.expectedVersion)||req?.userConfirmed!==true)
     throw new Error("relational_review_invalid");
@@ -249,11 +274,8 @@ export async function retractUserRelationEvidence(
     const witness=await loadReviewWitness(tx,req.evidenceId);
     if(witness.decision_version!==req.expectedVersion||witness.state!=="confirmed")
       throw new Error("relational_review_stale");
-    const changed=await tx.runAsync(
-      "UPDATE memory_relation_evidence SET state='retracted',decision_version=decision_version+1 "+
-      "WHERE id=? AND state='confirmed' AND decision_version=?",
-      [req.evidenceId,req.expectedVersion]);
-    if(changed.changes!==1)throw new Error("relational_review_stale");
+    await changeWitnessState(tx,req.evidenceId,req.expectedVersion,
+      "confirmed","retracted","relational_review_stale");
     await tx.runAsync(
       "INSERT INTO memory_review_actions "+
       "(id,target_kind,relation_evidence_id,action,expected_version,before_state,after_state,actor_kind,created_at) "+
@@ -276,7 +298,7 @@ export async function undoUserRelationRetraction(
       id:string;action:string;expected_version:number;
     }>(
       "SELECT id,action,expected_version FROM memory_review_actions "+
-      "WHERE id=? AND target_kind='relation' AND relation_evidence_id=?",
+      "WHERE id=? AND target_kind='relation' AND relation_evidence_id=? AND review_proposal_id IS NULL",
       [req.actionId,req.evidenceId]);
     if(!previous||previous.action!=="retract"||
        witness.state!=="retracted"||
@@ -285,14 +307,11 @@ export async function undoUserRelationRetraction(
       throw new Error("relational_undo_stale");
     const newer=await tx.getFirstAsync<{id:string}>(
       "SELECT id FROM memory_review_actions WHERE relation_evidence_id=? "+
-      "AND (expected_version>? OR undoes_id=?) LIMIT 1",
+      "AND review_proposal_id IS NULL AND (expected_version>? OR undoes_id=?) LIMIT 1",
       [req.evidenceId,previous.expected_version,previous.id]);
     if(newer)throw new Error("relational_undo_stale");
-    const changed=await tx.runAsync(
-      "UPDATE memory_relation_evidence SET state='confirmed',decision_version=decision_version+1 "+
-      "WHERE id=? AND state='retracted' AND decision_version=?",
-      [req.evidenceId,req.expectedVersion]);
-    if(changed.changes!==1)throw new Error("relational_undo_stale");
+    await changeWitnessState(tx,req.evidenceId,req.expectedVersion,
+      "retracted","confirmed","relational_undo_stale");
     await tx.runAsync(
       "INSERT INTO memory_review_actions "+
       "(id,target_kind,relation_evidence_id,action,expected_version,before_state,after_state,undoes_id,actor_kind,created_at) "+
@@ -327,6 +346,7 @@ export async function listUserRelationReviewHistory(
   }>(
     "SELECT id,action,expected_version,before_state,after_state,undoes_id,created_at "+
     "FROM memory_review_actions WHERE target_kind='relation' AND relation_evidence_id=? "+
+    "AND review_proposal_id IS NULL "+
     "ORDER BY expected_version DESC,id DESC LIMIT ?",[query.evidenceId,limit+1],
   );
   outcome={
@@ -504,10 +524,8 @@ export async function listRelationReviewCandidates(
   return page;
 }
 
-/** R2b2a: user-only review choices on v14 unconfirmed suggestions.
- * This is the existing journal, not another relation store or decision log.
- * Accept/witness creation is a separate R2b2b step requiring the canonical
- * confirmation writer within this SAME SQLCipher transaction.
+/** R2b2: one user-only candidate review service with CAS and source ACL.
+ * Acceptance and its undo use the canonical witness writer and one shared journal.
  */
 export type RelationCandidateReviewChoice="accept"|"reject"|"defer";
 export type RelationCandidateExpected={
@@ -569,11 +587,25 @@ export async function decideRelationCandidate(
     // No model/hypothesis edge may become confirmed without userConfirmed.
     let confirmed:ConfirmRelationResult|null=null;
     if(req.choice==="accept"){
+      // A previous accepted action may have been explicitly undone. ONLY
+      // the exact latest undo-of-accept for this proposal can authorize
+      // reactivation of its own retracted witness; other retractions stay final.
+      const eligible=await tx.getFirstAsync<{
+        witness_id:string;action:string;expected_version:number;
+      }>(
+        "SELECT prior.relation_evidence_id AS witness_id,prior.action,"+
+        "undo.expected_version FROM memory_review_actions undo "+
+        "JOIN memory_review_actions prior ON prior.id=undo.undoes_id "+
+        "WHERE undo.review_proposal_id=? AND undo.action='undo' "+
+        "AND undo.expected_version=? AND prior.review_proposal_id=undo.review_proposal_id "+
+        "ORDER BY undo.expected_version DESC LIMIT 1",
+        [p.id,p.proposal_version-1]);
+      const reactivate=eligible?.action==="accept"?eligible.witness_id:undefined;
       confirmed=await writeConfirmedRelationProof(tx,{
         sourceId:p.source_entity_id,sourceVersion:p.source_record_version,
         targetId:p.target_entity_id,targetVersion:p.target_record_version,
         evidenceId:p.evidence_entity_id,evidenceVersion:p.evidence_record_version,
-        kind:p.relation_kind,evidenceQuote:p.quote,userConfirmed:true});
+        kind:p.relation_kind,evidenceQuote:p.quote,userConfirmed:true},reactivate);
       // If independently confirmed while this card was open, this is stale
       // work, not a second accepted action. Roll back status and audit.
       if(!confirmed.added)throw new Error("relational_candidate_already_confirmed");
@@ -581,10 +613,10 @@ export async function decideRelationCandidate(
     await tx.runAsync(
       "INSERT INTO memory_review_actions "+
       "(id,target_kind,review_proposal_id,relation_evidence_id,action,expected_version,"+
-      "before_state,after_state,actor_kind,created_at) "+
-      "VALUES (?,'relation',?,?,?,?,?,?,'user',?)",
+      "before_state,after_state,actor_kind,created_at,witness_decision_version) "+
+      "VALUES (?,'relation',?,?,?,?,?,?,'user',?,?)",
       [actionId,p.id,confirmed?.evidenceId??null,req.choice,req.expectedVersion,
-       p.status,status,at]);
+       p.status,status,at,confirmed?.decisionVersion??null]);
     result={actionId,nextVersion:req.expectedVersion+1,status,
       ...(confirmed?{confirmedEvidenceId:confirmed.evidenceId}:{})};
   });
@@ -593,6 +625,10 @@ export async function decideRelationCandidate(
 }
 /** Undo only the exact latest choice, not a stale choice after re-index,
  * a second action, privacy change or record revision.
+ */
+/** Undo the latest exact user decision. For accepted proofs, revert ONLY
+ * that proposal's witness by CAS. Another current proof stays confirmed.
+ * Restore the proposal's previous pending/deferred state and audit once.
  */
 export async function undoRelationCandidateDecision(
   db:SQL,req:RelationCandidateExpected&{actionId:string},
@@ -605,11 +641,13 @@ export async function undoRelationCandidateDecision(
     const previous=await tx.getFirstAsync<{
       id:string;action:string;expected_version:number;
       before_state:string;after_state:string;
+      relation_evidence_id:string|null;witness_decision_version:number|null;
     }>(
-      "SELECT id,action,expected_version,before_state,after_state FROM memory_review_actions "+
+      "SELECT id,action,expected_version,before_state,after_state,"+
+      "relation_evidence_id,witness_decision_version FROM memory_review_actions "+
       "WHERE id=? AND target_kind='relation' AND review_proposal_id=?",
       [req.actionId,req.proposalId]);
-    if(!previous||(previous.action!=="reject"&&previous.action!=="defer")||
+    if(!previous||!["accept","reject","defer"].includes(previous.action)||
        p.proposal_version!==req.expectedVersion||
        previous.expected_version+1!==req.expectedVersion||
        p.status!==previous.after_state||
@@ -620,6 +658,28 @@ export async function undoRelationCandidateDecision(
       "AND (expected_version>? OR undoes_id=?) LIMIT 1",
       [p.id,previous.expected_version,previous.id]);
     if(later)throw new Error("relational_candidate_undo_stale");
+    let witnessId:string|null=null;
+    let nextWitnessVersion:number|null=null;
+    if(previous.action==="accept"){
+      if(!validId(previous.relation_evidence_id)||
+         !validVersion(previous.witness_decision_version))
+        throw new Error("relational_candidate_undo_stale");
+      const witness=await loadReviewWitness(tx,previous.relation_evidence_id!);
+      if(witness.state!=="confirmed"||
+         witness.decision_version!==previous.witness_decision_version||
+         witness.source_entity_id!==p.source_entity_id||
+         witness.target_entity_id!==p.target_entity_id||
+         witness.evidence_entity_id!==p.evidence_entity_id||
+         witness.source_record_version!==p.source_record_version||
+         witness.target_record_version!==p.target_record_version||
+         witness.evidence_record_version!==p.evidence_record_version||
+         witness.quote!==p.quote)
+        throw new Error("relational_candidate_undo_stale");
+      await changeWitnessState(tx,witness.id,witness.decision_version,
+        "confirmed","retracted","relational_candidate_undo_stale");
+      witnessId=witness.id;
+      nextWitnessVersion=witness.decision_version+1;
+    }
     const at=new Date().toISOString();
     const changed=await tx.runAsync(
       "UPDATE memory_review_proposals SET status=?,proposal_version=proposal_version+1,"+
@@ -628,11 +688,14 @@ export async function undoRelationCandidateDecision(
     if(changed.changes!==1)throw new Error("relational_candidate_undo_stale");
     await tx.runAsync(
       "INSERT INTO memory_review_actions "+
-      "(id,target_kind,review_proposal_id,action,expected_version,before_state,after_state,undoes_id,actor_kind,created_at) "+
-      "VALUES (?,'relation',?,'undo',?,?,?,?, 'user',?)",
-      [undoId,p.id,req.expectedVersion,p.status,previous.before_state,previous.id,at]);
+      "(id,target_kind,review_proposal_id,relation_evidence_id,action,expected_version,"+
+      "before_state,after_state,undoes_id,actor_kind,created_at,witness_decision_version) "+
+      "VALUES (?,'relation',?,?,'undo',?,?,?,?,'user',?,?)",
+      [undoId,p.id,witnessId,req.expectedVersion,p.status,previous.before_state,
+       previous.id,at,nextWitnessVersion]);
     result={actionId:undoId,nextVersion:req.expectedVersion+1,
-      status:previous.before_state};
+      status:previous.before_state,
+      ...(witnessId?{confirmedEvidenceId:witnessId}:{})};
   });
   if(!result)throw new Error("relational_candidate_decision_not_committed");
   return result;
