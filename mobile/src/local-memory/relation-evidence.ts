@@ -473,7 +473,15 @@ export async function listRelationReviewCandidates(
       "AND ev.collection_id=? AND ev.domain='notes' "+
       "AND src.sensitivity IN ('standard','inherit') "+
       "AND tgt.sensitivity IN ('standard','inherit') "+
-      "AND ev.sensitivity IN ('standard','inherit')"+cursor+
+      "AND ev.sensitivity IN ('standard','inherit') "+
+      "AND NOT EXISTS (SELECT 1 FROM memory_relations r "+
+      "JOIN memory_relation_evidence w ON w.relation_id=r.id "+
+      "WHERE r.source_entity_id=p.source_entity_id AND r.target_entity_id=p.target_entity_id "+
+      "AND r.kind=p.relation_kind AND w.state='confirmed' "+
+      "AND w.evidence_entity_id=p.evidence_entity_id "+
+      "AND w.evidence_record_version=p.evidence_record_version "+
+      "AND w.source_record_version=p.source_record_version "+
+      "AND w.target_record_version=p.target_record_version AND w.quote=p.quote) "+cursor+
       " ORDER BY p.created_at DESC,p.id DESC LIMIT ?",args,
     );
     const shown=rows.slice(0,limit);
