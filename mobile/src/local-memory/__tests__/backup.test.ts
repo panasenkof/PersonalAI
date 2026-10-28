@@ -106,6 +106,8 @@ test("verified export accepts more than 100k records and writes an encrypted man
   const previous = mockDb.getFirstAsync.getMockImplementation()!;
   mockDb.getFirstAsync.mockImplementation(async sql =>
     sql === "SELECT count(*) AS n FROM memory_entities" ? { n: 100001 } :
+    sql.includes("(SELECT count(*) FROM ") && sql.includes("memory_review_actions") ?
+      {review_actions:0} :
     sql.includes("(SELECT count(*) FROM ") && sql.includes("memory_relation_evidence") ?
       { relation_links: 0, relation_evidence: 0 } :
     sql.includes("(SELECT count(*) FROM ") && sql.includes("memory_temporal_claims") ?
@@ -116,7 +118,7 @@ test("verified export accepts more than 100k records and writes an encrypted man
   expect(mockDb.execAsync).toHaveBeenCalledWith(expect.stringContaining("CREATE TABLE pia_export.persai_backup_manifest"));
   expect(mockDb.execAsync).toHaveBeenCalledWith(expect.stringContaining("CHECK(format_version=4)"));
   expect(mockDb.runAsync).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO pia_export.persai_backup_manifest"),
-    [3, 12, 100001, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    [4, 13, 100001, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
   expect(Sharing.shareAsync).toHaveBeenCalledTimes(1);
 });
 
@@ -564,7 +566,7 @@ test("v12 restores witness rows after their canonical relation and before commit
   await restoreEncryptedBackup("guest","file:///good-v12.db",code);
   const statements=mockDb.execAsync.mock.calls.map(([sql])=>String(sql));
   const relation=statements.indexOf("INSERT INTO memory_relations SELECT * FROM pia_import.memory_relations");
-  const evidence=statements.indexOf("INSERT INTO memory_relation_evidence SELECT * FROM pia_import.memory_relation_evidence");
+  const evidence=statements.findIndex(sql=>sql.startsWith("INSERT INTO memory_relation_evidence ")&&sql.includes("FROM pia_import.memory_relation_evidence"));
   expect(relation).toBeGreaterThanOrEqual(0);
   expect(evidence).toBeGreaterThan(relation);
   expect(statements.indexOf("COMMIT")).toBeGreaterThan(evidence);
