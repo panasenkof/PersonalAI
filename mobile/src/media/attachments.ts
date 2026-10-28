@@ -1,6 +1,7 @@
 import * as Crypto from 'expo-crypto';
 import { Directory, File, FileMode, Paths } from 'expo-file-system';
 import type { SQLiteDatabase } from 'expo-sqlite';
+import type { VerifiedOriginalLocator } from '../local-memory/types';
 import { localMemorySessionUnlocked, withLocalMemoryDatabase } from '../local-memory/storage';
 import { MemoryConflictError } from '../local-memory/types';
 import { SqliteMemoryRepository } from '../local-memory/repository';
@@ -204,11 +205,33 @@ export async function attachmentForEntity(profile: string, entityId: string) {
   return withLocalMemoryDatabase(profile, db => db.getFirstAsync<Attachment>('SELECT * FROM memory_attachments WHERE entity_id=?', [entityId]));
 }
 /** Only the currently opened attachment is materialised; no original bytes enter LLM payloads. */
-export async function materializeAttachment(profile: string, attachment: Attachment, signal?: AbortSignal): Promise<string> {
+/** Only one original materializer. A locator from confirmed relation search
+ * must be rechecked at USE time, not trusted because it appeared on an older
+ * search card. Local manual note views still honor their normal profile scope.
+ */
+export async function materializeAttachment(
+  profile: string, attachment: Attachment, signal?: AbortSignal,
+  verified?: VerifiedOriginalLocator,
+): Promise<string> {
   return withLocalMemoryDatabase(profile, async db => {
     check(signal);
-    const actual = await db.getFirstAsync<Attachment>('SELECT * FROM memory_attachments WHERE id=? AND entity_id=?', [attachment.id, attachment.entity_id]);
-    if (!actual) throw new Error('Оригинал не найден.');
+    if(verified && (attachment.id!==verified.attachmentId ||
+       attachment.entity_id!==verified.recordId ||
+       !Number.isSafeInteger(verified.recordVersion) || verified.recordVersion<1 ||
+       verified.metadataOnly!==true))
+      throw new Error('memory_source_not_available_or_stale');
+    const actual = await db.getFirstAsync<Attachment>(
+      'SELECT a.* FROM memory_attachments a JOIN memory_entities e ON e.id=a.entity_id '+
+      'JOIN memory_collections c ON c.id=e.collection_id '+
+      'WHERE a.id=? AND a.entity_id=?'+
+      (verified ? " AND e.record_status='active' AND e.record_version=? "+
+       "AND e.sensitivity IN ('standard','inherit') AND c.sensitivity='standard'" : ''),
+      verified ? [attachment.id,attachment.entity_id,verified.recordVersion] :
+        [attachment.id,attachment.entity_id]);
+    if(!actual || (verified && (
+      actual.name!==verified.name || actual.mime!==verified.mime ||
+      actual.size!==verified.size)))
+      throw new Error(verified?'memory_source_not_available_or_stale':'Оригинал не найден.');
     if (actual.size <= 0 || actual.size > MAX_ORIGINAL_BYTES) throw new Error('Некорректный размер оригинала.');
     const dir = previewDirectory(); dir.create({ intermediates: true, idempotent: true });
     const extension = actual.name.match(/\.[a-z0-9]{1,8}$/i)?.[0] || '';
@@ -223,6 +246,21 @@ export async function materializeAttachment(profile: string, attachment: Attachm
         handle.writeBytes(part.bytes); total += part.bytes.length;
       }
       if (total !== actual.size) throw new Error('Размер оригинала не совпадает.');
+      check(signal);
+      if(verified){
+        // A separate edit or sensitivity change made during decryption must
+        // discard the preview before control returns to the caller.
+        const current=await db.getFirstAsync<{id:string}>(
+          "SELECT a.id FROM memory_attachments a "+
+          "JOIN memory_entities e ON e.id=a.entity_id "+
+          "JOIN memory_collections c ON c.id=e.collection_id "+
+          "WHERE a.id=? AND e.id=? AND e.record_status='active' "+
+          "AND e.record_version=? AND e.sensitivity IN ('standard','inherit') "+
+          "AND c.sensitivity='standard' AND a.name=? AND a.mime=? AND a.size=?",
+          [verified.attachmentId,verified.recordId,verified.recordVersion,
+           verified.name,verified.mime,verified.size]);
+        if(!current)throw new Error('memory_source_not_available_or_stale');
+      }
       check(signal);
       return file.uri;
     } catch (e) { handle.close(); if (file.exists) file.delete(); throw e; }
