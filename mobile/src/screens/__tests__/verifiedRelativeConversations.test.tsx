@@ -17,8 +17,8 @@ const confirmed={
   proof:{relativeId:"vera-1",relationEvidenceId:"witness-sister",participantEvidenceId:"witness-call",truncated:false},
 };
 const mockRepo={
-  entity:jest.fn(async()=>({id:"self-1",kind:"person",record_status:"active",record_version:1})),
-  searchMemory:jest.fn(async()=>[confirmed]),
+  entity:jest.fn(async():Promise<any>=>({id:"self-1",kind:"person",record_status:"active",record_version:1})), 
+  searchMemory:jest.fn(async():Promise<any[]>=>[confirmed]),
 };
 jest.mock("@react-navigation/native",()=>({useNavigation:()=>({navigate:mockNavigate})}));
 jest.mock("../../local-memory/repository",()=>({localMemoryRepository:async()=>mockRepo}));
@@ -86,7 +86,7 @@ test("SEC-08/REL-08: retracted witness between display and tap refuses stale nav
 
 test("SEC-04/07: lock wipes proof titles and discards a pending stale search",async()=>{
   let resolveSearch!:(value:unknown[])=>void;
-  mockRepo.searchMemory.mockImplementationOnce(()=>new Promise(resolve=>{resolveSearch=resolve;}));
+  mockRepo.searchMemory.mockImplementationOnce(()=>new Promise<any[]>(resolve=>{resolveSearch=resolve;}));
   const ui=render(<VerifiedRelativeConversations profile="guest" personId="self-1" personTitle="Я"/>);
   start(ui);
   await waitFor(()=>expect(mockRepo.searchMemory).toHaveBeenCalledTimes(1));
