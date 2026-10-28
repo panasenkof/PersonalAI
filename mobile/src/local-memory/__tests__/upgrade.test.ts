@@ -100,7 +100,7 @@ test.each([false, true])("upgrading an installed v1 database (chats=%s) opens a 
   expect(await repo.revisions("entity", "note")).toHaveLength(1);
   expect(await repo.listCollections()).toMatchObject([{ id: "recipes", name: "Рецепты" }]);
   expect(mockVault.get(identity.keyName)).toBe("6".repeat(64));
-  expect(mockConnections[0].sqlite.prepare("PRAGMA user_version").get()).toMatchObject({ user_version: 13 });
+  expect(mockConnections[0].sqlite.prepare("PRAGMA user_version").get()).toMatchObject({ user_version: 14 });
   await closeLocalMemory();
   const reopened = conversationRepository("guest");
   expect((await reopened.load()).find(c => c.question === "Можно ввести сообщение")).toBeTruthy();
@@ -150,7 +150,7 @@ test("upgrading v2 to v3 types the records, splits long text into chunks and sea
   await installationV2();
   const repo = await localMemoryRepository("guest");
   const db = mockConnections[0].sqlite;
-  expect(db.prepare("PRAGMA user_version").get()).toMatchObject({ user_version: 13 });
+  expect(db.prepare("PRAGMA user_version").get()).toMatchObject({ user_version: 14 });
   expect(await repo.entity("masha")).toMatchObject({ kind: "person", title: "Маша", record_version: 1 });
   expect(await repo.entity("dacha")).toMatchObject({ kind: "note" });
   expect(db.prepare("SELECT count(*) AS n FROM memory_chunks WHERE entity_id='dacha'").get().n).toBeGreaterThan(1);
@@ -195,7 +195,7 @@ test("v4 attachments upgrade keeps every byte and allows merging two originals",
   expect(Array.from(db.prepare("SELECT bytes FROM memory_attachment_parts").get().bytes)).toEqual([1,2,3]);
   db.prepare("INSERT INTO memory_attachments VALUES (?,?,?,?,?,?)").run("b", "n", "b.png", "image/png", 3, "now");
   expect(db.prepare("SELECT count(*) AS n FROM memory_attachments").get().n).toBe(2);
-  expect(db.prepare("PRAGMA user_version").get().user_version).toBe(13);
+  expect(db.prepare("PRAGMA user_version").get().user_version).toBe(14);
   expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   const repo = await localMemoryRepository("guest");
   expect((await repo.searchMemory("гарантия"))[0].entity.id).toBe("n");
@@ -247,7 +247,7 @@ test("v6 to v8 adds isolated hygiene and derived job tables without changing ori
   mockVault.set(identity.keyName + ".initialized", "yes");
   const repo = await localMemoryRepository("guest");
   const db = mockConnections[0].sqlite;
-  expect(db.prepare("PRAGMA user_version").get().user_version).toBe(13);
+  expect(db.prepare("PRAGMA user_version").get().user_version).toBe(14);
   expect(db.prepare("SELECT count(*) AS n FROM memory_cleanup_preferences").get().n).toBe(0);
   expect((await repo.entity("e"))?.payload.body).toBe("Не терять");
   expect(mockVault.get(identity.keyName)).toBe("6".repeat(64));
@@ -277,7 +277,7 @@ test("installed v7 SQLCipher migrates to v8 without touching notes, index rows o
   mockVault.set(identity.keyName + ".initialized", "yes");
   const repo = await localMemoryRepository("guest");
   const db = mockConnections[0].sqlite;
-  expect(db.prepare("PRAGMA user_version").get().user_version).toBe(13);
+  expect(db.prepare("PRAGMA user_version").get().user_version).toBe(14);
   expect((await repo.entity("e"))?.payload.body).toBe("Сохранённый разговор");
   expect(db.prepare("SELECT count(*) AS n FROM memory_chunks").get().n).toBe(1);
   expect(db.prepare("SELECT count(*) AS n FROM memory_search_fts").get().n).toBe(1);
@@ -310,7 +310,7 @@ test("real installed v8 database adds v9 evidence without touching ciphertext ke
   mockVault.set(identity.keyName+".initialized","yes");
   const repo=await localMemoryRepository("guest");
   const db=mockConnections[0].sqlite;
-  expect(db.prepare("PRAGMA user_version").get().user_version).toBe(13);
+  expect(db.prepare("PRAGMA user_version").get().user_version).toBe(14);
   expect((await repo.entity("e"))?.payload.body).toBe("Мой текст");
   expect(Array.from(db.prepare("SELECT bytes FROM memory_attachment_parts").get().bytes)).toEqual([1,2,3]);
   expect(db.prepare("SELECT count(*) AS n FROM memory_extractions").get().n).toBe(0);
@@ -345,7 +345,7 @@ test("real installed v9 extraction evidence upgrades to v10 FTS without changing
   mockVault.set(identity.keyName,"6".repeat(64));
   mockVault.set(identity.keyName+".initialized","yes");
   const db=(await localMemoryRepository("guest"),mockConnections[0].sqlite);
-  expect(db.prepare("PRAGMA user_version").get().user_version).toBe(13);
+  expect(db.prepare("PRAGMA user_version").get().user_version).toBe(14);
   expect(db.prepare("SELECT count(*) AS n FROM memory_extraction_segments").get().n).toBe(1);
   expect(db.prepare("SELECT segment_id FROM memory_extraction_fts WHERE memory_extraction_fts MATCH ?").get('"фестиваль"').segment_id).toBe("s");
   expect(Array.from(db.prepare("SELECT bytes FROM memory_attachment_parts").get().bytes)).toEqual([1,2,3]);
@@ -377,7 +377,7 @@ test("v10 to v11 stores candidate, evidence, and non-applying state review trans
   await openLocalMemory("guest");
   const db = mockConnections[0].sqlite;
   const bridge = mockConnections[0];
-  expect(db.prepare("PRAGMA user_version").get().user_version).toBe(13);
+  expect(db.prepare("PRAGMA user_version").get().user_version).toBe(14);
   const make = (entityId: string, value: string, kind: "state" | "event" = "state"): import("../temporal-claims").TemporalClaimCandidate => ({
     recordedAt: "2026-10-27T12:00:00.000Z", subjectId: "person-1",
     predicate: "employment", context: "primary", value, kind,
@@ -434,7 +434,7 @@ test("v10 temporal schema disk-full failure rolls back and preserves every old b
   check.close();
   mockTemporalMigrationFailure = false;
   await openLocalMemory("guest");
-  expect(mockConnections.at(-1).sqlite.prepare("PRAGMA user_version").get().user_version).toBe(13);
+  expect(mockConnections.at(-1).sqlite.prepare("PRAGMA user_version").get().user_version).toBe(14);
 });
 
 
@@ -1121,7 +1121,7 @@ test("v11→v12 retains the canonical relation and adds independent user proof w
   mockVault.set(identity.keyName+".initialized","yes");
   await openLocalMemory("guest");
   const db=mockConnections[0].sqlite;
-  expect(db.prepare("PRAGMA user_version").get().user_version).toBe(13);
+  expect(db.prepare("PRAGMA user_version").get().user_version).toBe(14);
   expect(db.prepare("SELECT COUNT(*) AS n FROM memory_relations").get().n).toBe(1);
   expect(db.prepare("SELECT COUNT(*) AS n FROM memory_relation_evidence").get().n).toBe(0);
   // No legacy edge is silently reclassified as a proven relation.
@@ -1170,7 +1170,7 @@ test("installed v12 upgrades to v13 preserving old relation witnesses with CAS r
   mockVault.set(identity.keyName+".initialized","yes");
   await openLocalMemory("guest");
   const upgraded=mockConnections[0].sqlite;
-  expect(upgraded.prepare("PRAGMA user_version").get().user_version).toBe(13);
+  expect(upgraded.prepare("PRAGMA user_version").get().user_version).toBe(14);
   expect(upgraded.prepare("SELECT state,decision_version FROM memory_relation_evidence WHERE id='ev'").get())
     .toMatchObject({state:"confirmed",decision_version:1});
   expect(upgraded.prepare("SELECT count(*) AS n FROM memory_review_actions").get().n).toBe(0);
