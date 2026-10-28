@@ -1,4 +1,5 @@
 import type { MemoryKind } from "./search-index";
+import type { ChooseProfileSelfIdentity, ProfileSelfIdentity } from "./self-identity";
 import type { EnrichmentSnapshot } from "./enrichment-policy";
 import type { TemporalClaimCandidate } from "./temporal-claims";
 import type { TemporalHistoryQuery, TemporalHistoryPage, TemporalStagedReview, TemporalAtDateQuery, TemporalAtDatePage } from "./temporal-store";
@@ -78,6 +79,9 @@ export interface MemoryRepository {
   listCollections(): Promise<CollectionRecord[]>;
   createCollection(item: { name: string; slug: string; sensitivity?: MemorySensitivity }): Promise<CollectionRecord>;
   entity(id: string): Promise<EntityRecord | null>;
+  /** Exactly one source-verified, user-only profile-person binding (not an inferred relation). */
+  profileSelfIdentity(): Promise<ProfileSelfIdentity>;
+  chooseProfileSelfIdentity(choice:ChooseProfileSelfIdentity): Promise<ProfileSelfIdentity>;
   entities(options?: { collection_id?: string; domain?: string; kind?: MemoryKind; limit?: number; offset?: number }): Promise<MemoryPage<EntityRecord>>;
   createEntity(item: NewEntity): Promise<EntityRecord>;
   reviseEntity(id: string, expectedVersion: number, payload: Record<string, unknown>, reason: string, collectionId?: string): Promise<EntityRecord>;

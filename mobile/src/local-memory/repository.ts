@@ -1,5 +1,7 @@
 import { changeNotes, undoNotes, purgeNotes, type NoteAction, type NoteSelection } from "./note-actions";
 import { MemoryHygieneService } from "./hygiene";
+import { chooseProfileSelfIdentity, readProfileSelfIdentity } from "./self-identity";
+import type { ChooseProfileSelfIdentity } from "./self-identity";
 import { DurableVectorJobs, markEntityVectorsDirty, type ClaimedVectorJob, type CompletedVectorJob } from "./vector-jobs";
 import * as Crypto from "expo-crypto";
 import type * as SQLite from "expo-sqlite";
@@ -116,6 +118,10 @@ export class SqliteMemoryRepository implements MemoryRepository {
   temporalKnowledgeHistory(query: TemporalHistoryQuery) {
     return listTemporalKnowledgeHistory(this.db, query);
   }
+
+  /** R3c1: the only profile-owner pointer, explicitly chosen by the user. */
+  profileSelfIdentity() { return readProfileSelfIdentity(this.db); }
+  chooseProfileSelfIdentity(choice:ChooseProfileSelfIdentity) { return chooseProfileSelfIdentity(this.db,choice); }
 
   /** M1/№79а: read-only review and persistent user exceptions; no automatic deletes. */
   hygiene() { return new MemoryHygieneService(this.db); }

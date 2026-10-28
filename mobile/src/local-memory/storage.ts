@@ -42,7 +42,7 @@ export function onLocalMemorySessionChange(listener: (unlocked: boolean) => void
 }
 export const localMemorySessionUnlocked = () => applicationSessionUnlocked;
 const requireApplicationSession = () => { if (!applicationSessionUnlocked) throw new Error("application_locked"); };
-export const LOCAL_MEMORY_SCHEMA_VERSION = 16;
+export const LOCAL_MEMORY_SCHEMA_VERSION = 17;
 const KIND_CHECK = `CHECK(kind IN (${MEMORY_KINDS.map(k => `'${k}'`).join(",")}))`;
 
 /** All memory (including full-text indexes, revisions, and WAL) is in SQLCipher. */
@@ -66,6 +66,16 @@ CREATE TABLE IF NOT EXISTS memory_entities (
   kind TEXT NOT NULL DEFAULT 'note' ${KIND_CHECK}
 );
 CREATE INDEX IF NOT EXISTS ix_memory_entities_collection ON memory_entities(collection_id, created_at);
+-- v17: one profile-scoped, explicit user-selected pointer to an existing person.
+-- This is metadata, not a relation/fact/alias store. A deleted person unbinds
+-- without resetting the CAS counter; export/restore must preserve it.
+CREATE TABLE IF NOT EXISTS memory_profile_self (
+  slot INTEGER PRIMARY KEY CHECK(slot=1),
+  person_id TEXT REFERENCES memory_entities(id) ON DELETE SET NULL,
+  binding_version INTEGER NOT NULL CHECK(binding_version>0),
+  actor_kind TEXT NOT NULL CHECK(actor_kind='user'),
+  updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS memory_attachments (
   id TEXT PRIMARY KEY, entity_id TEXT NOT NULL REFERENCES memory_entities(id) ON DELETE CASCADE,
   name TEXT NOT NULL, mime TEXT NOT NULL, size INTEGER NOT NULL CHECK(size > 0),
