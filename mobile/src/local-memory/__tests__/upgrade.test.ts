@@ -1271,7 +1271,7 @@ test("installed v15 action journal receives v16 witness version without losing o
   sqlite.exec(old);
   sqlite.exec("PRAGMA user_version=15");
   sqlite.exec("INSERT INTO memory_collections(id,name,slug,sensitivity,created_at) VALUES ('c','Люди','people','standard','now')");
-  for(const id of ["a","b","w"])
+  for(const id of ["a","b","w","w2"])
     sqlite.prepare("INSERT INTO memory_entities(id,collection_id,domain,payload_json,created_at,updated_at) VALUES (?,'c','notes','{}','now','now')").run(id);
   sqlite.exec(`
     INSERT INTO memory_review_proposals(id,source_entity_id,target_entity_id,relation_kind,
@@ -1285,11 +1285,11 @@ test("installed v15 action journal receives v16 witness version without losing o
       VALUES ('rel','a','b','has_sister','user:confirmed','now');
     INSERT INTO memory_relation_evidence(id,relation_id,evidence_entity_id,evidence_record_version,
       source_record_version,target_record_version,quote,origin,actor_kind,state,decision_version,created_at)
-      VALUES ('ev','rel','w',1,1,1,'Моя сестра','explicit_user','user','confirmed',1,'now');
+      VALUES ('ev','rel','w2',1,1,1,'Ещё один источник','explicit_user','user','confirmed',1,'now');
     INSERT INTO memory_review_proposals(id,source_entity_id,target_entity_id,relation_kind,
       source_record_version,target_record_version,evidence_entity_id,evidence_record_version,
       quote,status,proposal_version,created_at,updated_at)
-      VALUES ('accepted-p','a','b','has_sister',1,1,'w',1,'Моя сестра','accepted',2,'now','now');
+      VALUES ('accepted-p','a','b','has_sister',1,1,'w2',1,'Ещё один источник','accepted',2,'now','now');
     INSERT INTO memory_review_actions(id,target_kind,review_proposal_id,relation_evidence_id,action,
       expected_version,before_state,after_state,actor_kind,created_at)
       VALUES ('accept','relation','accepted-p','ev','accept',1,'pending','accepted','user','now');
