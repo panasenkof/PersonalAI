@@ -1290,3 +1290,52 @@ test("R3b1: relation→participant returns an actual stored audio original locat
  expect(await repo.searchMemory("с сестрой",options)).toEqual([]);
  expect(await fake.getFirstAsync("PRAGMA foreign_key_check")).toBeNull();
 });
+
+
+test("R3c1/REL-03/SEC-06: a user-selected self person is stable, never inferred from two namesakes",async()=>{
+  const fake=new FakeSqlite(),repo=new SqliteMemoryRepository(fake as never);
+  const c=await repo.createCollection({name:"Люди",slug:"people",sensitivity:"standard"});
+  const me=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"person",title:"Мария",payload:{body:"Это я"}});
+  const other=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"person",title:"Мария",payload:{body:"Другая Мария"}});
+  expect(await repo.profileSelfIdentity()).toEqual({personId:null,bindingVersion:0});
+  await expect(repo.chooseProfileSelfIdentity({personId:me.id,expectedBindingVersion:0,expectedPersonVersion:1,userConfirmed:false as never}))
+    .rejects.toThrow("profile_self_confirmation_invalid");
+  expect(await repo.profileSelfIdentity()).toEqual({personId:null,bindingVersion:0});
+  const selected=await repo.chooseProfileSelfIdentity({personId:me.id,expectedBindingVersion:0,expectedPersonVersion:1,userConfirmed:true});
+  expect(selected).toEqual({personId:me.id,bindingVersion:1});
+  expect((await repo.entitiesByAlias("Мария","person")).length).toBe(2);
+  expect(await repo.profileSelfIdentity()).toEqual({personId:me.id,bindingVersion:1});
+  await expect(repo.chooseProfileSelfIdentity({personId:other.id,expectedBindingVersion:0,expectedPersonVersion:1,userConfirmed:true}))
+    .rejects.toBeInstanceOf(MemoryConflictError);
+  expect(await repo.profileSelfIdentity()).toEqual({personId:me.id,bindingVersion:1});
+  expect(await repo.chooseProfileSelfIdentity({personId:other.id,expectedBindingVersion:1,expectedPersonVersion:1,userConfirmed:true}))
+    .toEqual({personId:other.id,bindingVersion:2});
+  expect(await repo.chooseProfileSelfIdentity({personId:null,expectedBindingVersion:2,userConfirmed:true}))
+    .toEqual({personId:null,bindingVersion:3});
+  await expect(repo.chooseProfileSelfIdentity({personId:me.id,expectedBindingVersion:1,expectedPersonVersion:1,userConfirmed:true}))
+    .rejects.toBeInstanceOf(MemoryConflictError);
+  expect(await repo.profileSelfIdentity()).toEqual({personId:null,bindingVersion:3});
+});
+
+test("R3c1/SEC-06/BKP-07: confidential, archived or stale persons cannot be bound; deletion clears pointer with CAS",async()=>{
+  const fake=new FakeSqlite(),repo=new SqliteMemoryRepository(fake as never);
+  const open=await repo.createCollection({name:"Общие",slug:"people",sensitivity:"standard"});
+  const secret=await repo.createCollection({name:"Секрет",slug:"secret",sensitivity:"secret"});
+  const me=await repo.createEntity({collection_id:open.id,domain:"notes",kind:"person",title:"Данила",payload:{}});
+  const hidden=await repo.createEntity({collection_id:secret.id,domain:"notes",kind:"person",title:"Данила",payload:{}});
+  const note=await repo.createEntity({collection_id:open.id,domain:"notes",kind:"note",title:"Данила",payload:{}});
+  const choice=(id:string,version=1)=>({personId:id,expectedPersonVersion:version,expectedBindingVersion:0,userConfirmed:true as const});
+  await expect(repo.chooseProfileSelfIdentity(choice(hidden.id))).rejects.toBeInstanceOf(MemoryConflictError);
+  await expect(repo.chooseProfileSelfIdentity(choice(note.id))).rejects.toBeInstanceOf(MemoryConflictError);
+  await expect(repo.chooseProfileSelfIdentity(choice(me.id,2))).rejects.toBeInstanceOf(MemoryConflictError);
+  await repo.setEntityStatus(me.id,1,"archived");
+  await expect(repo.chooseProfileSelfIdentity(choice(me.id,2))).rejects.toBeInstanceOf(MemoryConflictError);
+  await repo.setEntityStatus(me.id,2,"active");
+  await repo.chooseProfileSelfIdentity({...choice(me.id,3)});
+  await fake.runAsync("UPDATE memory_entities SET sensitivity='secret' WHERE id=?",[me.id]);
+  expect(await repo.profileSelfIdentity()).toEqual({personId:null,bindingVersion:1});
+  await fake.runAsync("DELETE FROM memory_entities WHERE id=?",[me.id]);
+  expect(await repo.profileSelfIdentity()).toEqual({personId:null,bindingVersion:1});
+  expect(await repo.chooseProfileSelfIdentity({personId:null,expectedBindingVersion:1,userConfirmed:true}))
+    .toEqual({personId:null,bindingVersion:1});
+});
