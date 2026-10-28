@@ -12,7 +12,7 @@ import {
   compareTemporalCandidates, validateTemporalClaim,
   type TemporalBound,
 } from "./temporal-claims";
-import { readCurrentCandidate } from "./temporal-store";
+import { readCurrentCandidate, isStandardTemporalReviewPair } from "./temporal-store";
 import { withUnlockedTransaction } from "./transaction";
 
 type SQL = Pick<SQLite.SQLiteDatabase, "getFirstAsync" | "runAsync" | "execAsync">;
@@ -59,6 +59,9 @@ async function loadReview(db: SQL, id: string): Promise<ReviewRow> {
 }
 async function checkedReview(db: SQL, expected: TemporalDecisionExpected) {
   const review = await loadReview(db, expected.proposalId);
+  if (!await isStandardTemporalReviewPair(db,review.previous_claim_id,review.incoming_claim_id)) {
+    throw new Error("temporal_review_not_available");
+  }
   if (review.proposal_version !== expected.expectedProposalVersion ||
       review.previous_version !== expected.expectedPreviousClaimVersion ||
       review.incoming_version !== expected.expectedIncomingClaimVersion) {
@@ -174,6 +177,9 @@ export async function undoTemporalReview(
   let nextProposalVersion = req.expectedProposalVersion;
   await withUnlockedTransaction(db, async tx => {
     const review = await loadReview(tx,req.proposalId);
+    if (!await isStandardTemporalReviewPair(tx,review.previous_claim_id,review.incoming_claim_id)) {
+      throw new Error("temporal_review_not_available");
+    }
     const priorDecision = await tx.getFirstAsync<DecisionRow>(
       "SELECT id,proposal_id,action,expected_proposal_version,details_json " +
       "FROM memory_temporal_decisions WHERE id=? AND proposal_id=?",

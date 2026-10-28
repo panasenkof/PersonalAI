@@ -405,8 +405,7 @@ test("v10 to v11 stores candidate, evidence, and non-applying state review trans
   expect(await stageTemporalReviewProposal(bridge,event1,event2)).toBeNull();
   // No stale source revision can be trusted for a new suggestion.
   db.prepare("UPDATE memory_entities SET record_version=2 WHERE id='a'").run();
-  await expect(stageTemporalReviewProposal(bridge,firstId,secondId))
-    .rejects.toThrow("temporal_source_stale");
+  expect(await stageTemporalReviewProposal(bridge,firstId,secondId)).toBeNull();
   await expect(stageTemporalCandidate(bridge,make("a","А")))
     .rejects.toThrow("temporal_source_stale");
   expect(db.prepare("SELECT count(*) AS n FROM memory_temporal_claims").get().n).toBe(4);
@@ -444,7 +443,7 @@ test("T2a user confirms a state ended with unknown date and undoes without erasi
   const { decideTemporalReview, undoTemporalReview } = require("../temporal-decisions");
   await openLocalMemory("guest");
   const bridge = mockConnections[0], db = bridge.sqlite;
-  db.prepare("INSERT INTO memory_collections(id,name,slug,created_at) VALUES ('people','Люди','people','now')").run();
+  db.prepare("INSERT INTO memory_collections(id,name,slug,sensitivity,created_at) VALUES ('people','Люди','people','standard','now')").run();
   for (const id of ["a","b"]) {
     db.prepare("INSERT INTO memory_entities(id,collection_id,domain,payload_json,created_at,updated_at) VALUES (?,'people','notes','{}','now','now')").run(id);
   }
@@ -499,7 +498,7 @@ test("T2a keep both/dismissal does not close a state or repeatedly reopen the pr
   const { decideTemporalReview, undoTemporalReview } = require("../temporal-decisions");
   await openLocalMemory("guest");
   const bridge=mockConnections[0],db=bridge.sqlite;
-  db.prepare("INSERT INTO memory_collections(id,name,slug,created_at) VALUES ('c','Работа','work','now')").run();
+  db.prepare("INSERT INTO memory_collections(id,name,slug,sensitivity,created_at) VALUES ('c','Работа','work','standard','now')").run();
   for (const id of ["a","b"]) db.prepare("INSERT INTO memory_entities(id,collection_id,domain,payload_json,created_at,updated_at) VALUES (?,'c','notes','{}','now','now')").run(id);
   const make=(entityId:string,value:string):import("../temporal-claims").TemporalClaimCandidate=>({
     recordedAt:"2026-10-27T12:00:00.000Z",subjectId:"person-1",
@@ -526,7 +525,7 @@ test("T2a rollback on decision journal disk-full and reject stale/invalid source
   const { decideTemporalReview } = require("../temporal-decisions");
   await openLocalMemory("guest");
   const bridge=mockConnections[0],db=bridge.sqlite;
-  db.prepare("INSERT INTO memory_collections(id,name,slug,created_at) VALUES ('c','Работа','work','now')").run();
+  db.prepare("INSERT INTO memory_collections(id,name,slug,sensitivity,created_at) VALUES ('c','Работа','work','standard','now')").run();
   for (const id of ["a","b"]) db.prepare("INSERT INTO memory_entities(id,collection_id,domain,payload_json,created_at,updated_at) VALUES (?,'c','notes','{}','now','now')").run(id);
   const date={normalized:"2022-01-01",precision:"day" as const,raw:"1 января 2022",
     anchorDate:null,sourceTimeZone:null};
@@ -564,7 +563,7 @@ test("T2a rollback on decision journal disk-full and reject stale/invalid source
   expect(db.prepare("SELECT count(*) AS n FROM memory_temporal_decisions").get().n).toBe(0);
   db.prepare("UPDATE memory_entities SET record_version=2 WHERE id='a'").run();
   await expect(decideTemporalReview(bridge,{...expected,choice:"defer"}))
-    .rejects.toThrow("temporal_source_stale");
+    .rejects.toThrow("temporal_review_not_available");
 });
 
 
@@ -854,7 +853,8 @@ test("T2c inbox excludes stale, protected, and cross-collection proposals before
   for (const prefix of ["visible","hidden","unknown","other"]) {
     const a=await stageTemporalCandidate(bridge,make(prefix+"-a","А",20));
     const b=await stageTemporalCandidate(bridge,make(prefix+"-b","Б",21));
-    expect(await stageTemporalReviewProposal(bridge,a,b)).not.toBeNull();
+    const staged=await stageTemporalReviewProposal(bridge,a,b);
+    expect(staged === null).toBe(prefix === "hidden" || prefix === "unknown");
   }
   expect((await repo.temporalReviewInbox({collectionId:"visible"})).items).toHaveLength(1);
   expect((await repo.temporalReviewInbox({collectionId:"hidden"})).items).toHaveLength(0);
@@ -1040,4 +1040,60 @@ test("T3b1 SQL read excludes protected/stale records before a stable bounded key
   await expect(repo.temporalCandidatesAtDate({...q,before:{
     recordedAt:"2026-02-31T00:00:00.000Z",claimId:"bogus",
   }})).rejects.toThrow("temporal_query_cursor_invalid");
+});
+
+
+test("R1 review guard: manual low-level proposal cannot bridge two standard collections or protected evidence",async()=>{
+  const {stageTemporalCandidate,stageTemporalReviewProposal,isStandardTemporalReviewPair}=require("../temporal-store");
+  const {decideTemporalReview,undoTemporalReview}=require("../temporal-decisions");
+  await openLocalMemory("guest");
+  const bridge=mockConnections[0],db=bridge.sqlite;
+  for(const [id,level] of [["work","standard"],["home","standard"],["restricted","private"]] as const){
+    db.prepare("INSERT INTO memory_collections(id,name,slug,sensitivity,created_at) VALUES (?,?,?,?, 'now')").run(id,id,id,level);
+  }
+  for(const [id,col,level] of [
+    ["work-a","work","standard"],["work-b","work","standard"],
+    ["home-a","home","standard"],["restricted-a","restricted","standard"],
+    ["secret-work","work","secret"],
+  ] as const){
+    db.prepare("INSERT INTO memory_entities(id,collection_id,domain,sensitivity,payload_json,created_at,updated_at) VALUES (?,?, 'notes',?, '{}','now','now')").run(id,col,level);
+  }
+  const make=(entityId:string,value:string):import("../temporal-claims").TemporalClaimCandidate=>({
+    recordedAt:"2026-10-28T10:00:00.000Z",subjectId:"person-1",
+    predicate:"residence",context:"actual",value,
+    kind:"state",modality:"asserted",negated:false,cardinality:"single",
+    occurredOrStarted:null,ended:null,endConfirmed:false,
+    evidence:{entityId,recordVersion:1,quote:"Живу в "+value,origin:"direct"},
+  });
+  const workA=await stageTemporalCandidate(bridge,make("work-a","A"));
+  const workB=await stageTemporalCandidate(bridge,make("work-b","B"));
+  const homeA=await stageTemporalCandidate(bridge,make("home-a","C"));
+  const restricted=await stageTemporalCandidate(bridge,make("restricted-a","D"));
+  const secret=await stageTemporalCandidate(bridge,make("secret-work","E"));
+  for(const invalid of [homeA,restricted,secret]){
+    expect(await isStandardTemporalReviewPair(bridge,workA,invalid)).toBe(false);
+    expect(await stageTemporalReviewProposal(bridge,workA,invalid)).toBeNull();
+  }
+  expect(db.prepare("SELECT count(*) AS n FROM memory_temporal_proposals").get().n).toBe(0);
+  const p=(await stageTemporalReviewProposal(bridge,workA,workB))!;
+  expect(await isStandardTemporalReviewPair(bridge,workA,workB)).toBe(true);
+  const versions={
+    proposalId:p,expectedProposalVersion:1,
+    expectedPreviousClaimVersion:1,expectedIncomingClaimVersion:1,
+  };
+  // The source is no longer eligible even though the pending proposal row exists.
+  db.prepare("UPDATE memory_entities SET sensitivity='secret' WHERE id='work-b'").run();
+  expect(await isStandardTemporalReviewPair(bridge,workA,workB)).toBe(false);
+  await expect(decideTemporalReview(bridge,{...versions,choice:"keep_both"}))
+    .rejects.toThrow("temporal_review_not_available");
+  expect(db.prepare("SELECT count(*) AS n FROM memory_temporal_decisions").get().n).toBe(0);
+  db.prepare("UPDATE memory_entities SET sensitivity='standard' WHERE id='work-b'").run();
+  const result=await decideTemporalReview(bridge,{...versions,choice:"keep_both"});
+  db.prepare("UPDATE memory_entities SET sensitivity='secret' WHERE id='work-a'").run();
+  await expect(undoTemporalReview(bridge,{
+    ...versions,decisionId:result.decisionId,expectedProposalVersion:2,
+  })).rejects.toThrow("temporal_review_not_available");
+  expect(db.prepare("SELECT status FROM memory_temporal_proposals WHERE id=?").get(p).status).toBe("dismissed");
+  expect(db.prepare("SELECT count(*) AS n FROM memory_temporal_decisions").get().n).toBe(1);
+  expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
 });

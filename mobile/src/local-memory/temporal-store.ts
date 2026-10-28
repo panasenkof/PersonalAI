@@ -100,6 +100,46 @@ export async function readCurrentCandidate(
   return { claim: fromRow(row), version: row.claim_version };
 }
 
+/**
+ * One SQLCipher eligibility gate for manual proposal creation, user decisions
+ * and undo. Both claim sources AND both cited evidence revisions must still
+ * be active/readable in the same standard collection.
+ *
+ * A low-level review cannot bypass the normal typed staging or inbox privacy
+ * constraints merely by guessing two UUIDs. It never reveals which side of
+ * an inaccessible pair was hidden.
+ */
+export async function isStandardTemporalReviewPair(
+  db: SQL, previousId: string, incomingId: string,
+): Promise<boolean> {
+  if (typeof previousId !== "string" || typeof incomingId !== "string" ||
+      !previousId.trim() || !incomingId.trim() ||
+      previousId.length > 256 || incomingId.length > 256 ||
+      previousId === incomingId) return false;
+  const row = await db.getFirstAsync<{ valid: number }>(
+    "SELECT 1 AS valid FROM memory_temporal_claims previous " +
+    "JOIN memory_temporal_claims incoming ON incoming.id=? " +
+    "JOIN memory_entities ep ON ep.id=previous.entity_id " +
+    "  AND ep.record_version=previous.source_record_version AND ep.record_status='active' " +
+    "JOIN memory_entities ei ON ei.id=incoming.entity_id " +
+    "  AND ei.record_version=incoming.source_record_version AND ei.record_status='active' " +
+    "JOIN memory_collections cp ON cp.id=ep.collection_id " +
+    "JOIN memory_collections ci ON ci.id=ei.collection_id " +
+    "WHERE previous.id=? AND ep.collection_id=ei.collection_id " +
+    "AND cp.sensitivity='standard' AND ci.sensitivity='standard' " +
+    "AND ep.sensitivity IN ('standard','inherit') " +
+    "AND ei.sensitivity IN ('standard','inherit') " +
+    "AND EXISTS (SELECT 1 FROM memory_temporal_evidence witness " +
+    "  WHERE witness.claim_id=previous.id AND witness.entity_id=ep.id " +
+    "  AND witness.source_record_version=previous.source_record_version) " +
+    "AND EXISTS (SELECT 1 FROM memory_temporal_evidence witness " +
+    "  WHERE witness.claim_id=incoming.id AND witness.entity_id=ei.id " +
+    "  AND witness.source_record_version=incoming.source_record_version) LIMIT 1",
+    [incomingId,previousId],
+  );
+  return row?.valid === 1;
+}
+
 /** Proposed changes remain pending; no source, fact, or validity is altered. */
 export async function stageTemporalReviewProposal(
   db: SQL, previousId: string, incomingId: string,
@@ -109,6 +149,7 @@ export async function stageTemporalReviewProposal(
   }
   let result: string | null = null;
   await withUnlockedTransaction(db, async tx => {
+    if (!await isStandardTemporalReviewPair(tx, previousId, incomingId)) return;
     const previous = await readCurrentCandidate(tx, previousId);
     const incoming = await readCurrentCandidate(tx, incomingId);
     const kind = compareTemporalCandidates(previous.claim, incoming.claim);
