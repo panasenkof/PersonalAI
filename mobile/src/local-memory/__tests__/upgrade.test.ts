@@ -405,8 +405,7 @@ test("v10 to v11 stores candidate, evidence, and non-applying state review trans
   expect(await stageTemporalReviewProposal(bridge,event1,event2)).toBeNull();
   // No stale source revision can be trusted for a new suggestion.
   db.prepare("UPDATE memory_entities SET record_version=2 WHERE id='a'").run();
-  await expect(stageTemporalReviewProposal(bridge,firstId,secondId))
-    .rejects.toThrow("temporal_source_stale");
+  expect(await stageTemporalReviewProposal(bridge,firstId,secondId)).toBeNull();
   await expect(stageTemporalCandidate(bridge,make("a","А")))
     .rejects.toThrow("temporal_source_stale");
   expect(db.prepare("SELECT count(*) AS n FROM memory_temporal_claims").get().n).toBe(4);
@@ -444,7 +443,7 @@ test("T2a user confirms a state ended with unknown date and undoes without erasi
   const { decideTemporalReview, undoTemporalReview } = require("../temporal-decisions");
   await openLocalMemory("guest");
   const bridge = mockConnections[0], db = bridge.sqlite;
-  db.prepare("INSERT INTO memory_collections(id,name,slug,created_at) VALUES ('people','Люди','people','now')").run();
+  db.prepare("INSERT INTO memory_collections(id,name,slug,sensitivity,created_at) VALUES ('people','Люди','people','standard','now')").run();
   for (const id of ["a","b"]) {
     db.prepare("INSERT INTO memory_entities(id,collection_id,domain,payload_json,created_at,updated_at) VALUES (?,'people','notes','{}','now','now')").run(id);
   }
@@ -499,7 +498,7 @@ test("T2a keep both/dismissal does not close a state or repeatedly reopen the pr
   const { decideTemporalReview, undoTemporalReview } = require("../temporal-decisions");
   await openLocalMemory("guest");
   const bridge=mockConnections[0],db=bridge.sqlite;
-  db.prepare("INSERT INTO memory_collections(id,name,slug,created_at) VALUES ('c','Работа','work','now')").run();
+  db.prepare("INSERT INTO memory_collections(id,name,slug,sensitivity,created_at) VALUES ('c','Работа','work','standard','now')").run();
   for (const id of ["a","b"]) db.prepare("INSERT INTO memory_entities(id,collection_id,domain,payload_json,created_at,updated_at) VALUES (?,'c','notes','{}','now','now')").run(id);
   const make=(entityId:string,value:string):import("../temporal-claims").TemporalClaimCandidate=>({
     recordedAt:"2026-10-27T12:00:00.000Z",subjectId:"person-1",
@@ -526,7 +525,7 @@ test("T2a rollback on decision journal disk-full and reject stale/invalid source
   const { decideTemporalReview } = require("../temporal-decisions");
   await openLocalMemory("guest");
   const bridge=mockConnections[0],db=bridge.sqlite;
-  db.prepare("INSERT INTO memory_collections(id,name,slug,created_at) VALUES ('c','Работа','work','now')").run();
+  db.prepare("INSERT INTO memory_collections(id,name,slug,sensitivity,created_at) VALUES ('c','Работа','work','standard','now')").run();
   for (const id of ["a","b"]) db.prepare("INSERT INTO memory_entities(id,collection_id,domain,payload_json,created_at,updated_at) VALUES (?,'c','notes','{}','now','now')").run(id);
   const date={normalized:"2022-01-01",precision:"day" as const,raw:"1 января 2022",
     anchorDate:null,sourceTimeZone:null};
@@ -564,7 +563,7 @@ test("T2a rollback on decision journal disk-full and reject stale/invalid source
   expect(db.prepare("SELECT count(*) AS n FROM memory_temporal_decisions").get().n).toBe(0);
   db.prepare("UPDATE memory_entities SET record_version=2 WHERE id='a'").run();
   await expect(decideTemporalReview(bridge,{...expected,choice:"defer"}))
-    .rejects.toThrow("temporal_source_stale");
+    .rejects.toThrow("temporal_review_not_available");
 });
 
 
