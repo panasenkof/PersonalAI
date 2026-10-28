@@ -163,7 +163,7 @@ test("CLEAN-07/CLEAN-04/SAVE-04: one existing batch menu previews and excludes w
   await waitFor(()=>expect(mockHygienePreview).toHaveBeenCalledWith([
     {id:"one",recordVersion:1},{id:"two",recordVersion:1},
   ],[],"archive"));
-  expect(v.getByText("Предпросмотр групповой ревизии")).toBeTruthy();
+  expect(v.getByLabelText("Закрыть панель Предпросмотр групповой ревизии")).toBeTruthy();
   expect(v.getByText("Выбрано: 2 · Исключено: 0 · Можно предложить в архив: 2 · Требуют проверки: 0")).toBeTruthy();
   expect(mockDb.changeNotes).not.toHaveBeenCalled();
   await act(async()=>{fireEvent.press(v.getByLabelText("Исключить из ревизии Первая"));});
