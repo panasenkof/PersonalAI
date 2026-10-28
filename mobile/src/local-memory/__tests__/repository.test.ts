@@ -840,3 +840,58 @@ test("R2a review history returns bounded retraction and undo actions, never priv
  await expect(repo.relationReviewHistory({evidenceId:proof.evidenceId}))
    .rejects.toThrow("relational_source_not_available_or_stale");
 });
+
+
+test("F1: verified relative search and review history read proof/source/ACL under ONE unlocked SQLCipher transaction",async()=>{
+ const fake=new FakeSqlite(),repo=new SqliteMemoryRepository(fake as never);
+ const c=await repo.createCollection({name:"Люди",slug:"people",sensitivity:"standard"});
+ const a=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"person",payload:{}});
+ const b=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"person",payload:{}});
+ const witness=await repo.createEntity({collection_id:c.id,domain:"notes",payload:{body:"Моя мама Ирина"}});
+ const call=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"note",payload:{body:"Говорил с Ириной"}});
+ const p=await repo.confirmUserRelationProof({sourceId:a.id,sourceVersion:1,
+   targetId:b.id,targetVersion:1,evidenceId:witness.id,evidenceVersion:1,
+   kind:"has_mother",evidenceQuote:"Моя мама Ирина",userConfirmed:true});
+ await repo.confirmUserRelationProof({sourceId:call.id,sourceVersion:1,
+   targetId:b.id,targetVersion:1,evidenceId:call.id,evidenceVersion:1,
+   kind:"participant_of",evidenceQuote:"Говорил с Ириной",userConfirmed:true});
+ const events:string[]=[];
+ const originalExec=fake.execAsync.bind(fake);
+ const originalFirst=fake.getFirstAsync.bind(fake);
+ const originalAll=fake.getAllAsync.bind(fake);
+ (fake as any).execAsync=async(sql:string)=>{events.push(sql);return originalExec(sql)};
+ (fake as any).getFirstAsync=async(sql:string,params?:unknown[])=>{
+   events.push(sql);return originalFirst(sql,params as never);
+ };
+ (fake as any).getAllAsync=async(sql:string,params?:unknown[])=>{
+   events.push(sql);return originalAll(sql,params as never);
+ };
+ const hits=await repo.searchMemory("найти разговор с мамой",{
+   verifiedRelative:{ownerPersonId:a.id,relationKind:"has_mother"}});
+ expect(hits.map(x=>x.entity.id)).toEqual([call.id]);
+ const firstBegin=events.indexOf("BEGIN IMMEDIATE");
+ const firstProof=events.findIndex(x=>x.includes("FROM memory_relations r")&&x.includes("memory_relation_evidence"));
+ const noteRead=events.findIndex(x=>x.includes("SELECT e.* FROM memory_entities e"));
+ const chunkRead=events.findIndex(x=>x.includes("SELECT text FROM memory_chunks"));
+ const firstCommit=events.indexOf("COMMIT");
+ expect(firstBegin).toBeGreaterThanOrEqual(0);
+ expect(firstProof).toBeGreaterThan(firstBegin);
+ expect(noteRead).toBeGreaterThan(firstProof);
+ expect(chunkRead).toBeGreaterThan(noteRead);
+ expect(firstCommit).toBeGreaterThan(chunkRead);
+ events.length=0;
+ await repo.relationReviewHistory({evidenceId:p.evidenceId});
+ const before=events.indexOf("BEGIN IMMEDIATE");
+ const acl=events.findIndex(x=>x.includes("SELECT e.id,e.kind,e.domain,e.record_version"));
+ const journal=events.findIndex(x=>x.includes("FROM memory_review_actions WHERE target_kind='relation'"));
+ const after=events.indexOf("COMMIT");
+ expect(before).toBeGreaterThanOrEqual(0);
+ expect(acl).toBeGreaterThan(before);
+ expect(journal).toBeGreaterThan(acl);
+ expect(after).toBeGreaterThan(journal);
+ events.length=0;
+ await fake.runAsync("UPDATE memory_entities SET sensitivity='secret' WHERE id=?",[witness.id]);
+ await expect(repo.relationReviewHistory({evidenceId:p.evidenceId}))
+   .rejects.toThrow("relational_source_not_available_or_stale");
+ expect(events).toContain("ROLLBACK");
+});
