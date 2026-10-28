@@ -904,3 +904,140 @@ test("TM05 SQLCipher v11: a late-imported older employer document never closes t
   expect(db.prepare("SELECT COUNT(*) AS n FROM memory_temporal_claims WHERE end_confirmed=1").get().n).toBe(0);
   expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
 });
+
+
+test("T3b1 valid-date candidates keep historical and current possibilities separate without claiming truth",async()=>{
+  await openLocalMemory("guest");
+  const db=mockConnections[0].sqlite,repo=await localMemoryRepository("guest");
+  db.prepare("INSERT INTO memory_collections(id,name,slug,sensitivity,created_at) VALUES ('jobs','Работа','jobs','standard','now')").run();
+  for(const id of ["a","b","event","plan","wrong-person"]){
+    db.prepare("INSERT INTO memory_entities(id,collection_id,domain,payload_json,created_at,updated_at) VALUES (?,'jobs','notes','{}','now','now')").run(id);
+  }
+  const bound=(date:string,precision:"day"|"year"|"month"|"unknown"="day"):import("../temporal-claims").TemporalBound=>({
+    normalized:precision==="unknown"?null:date,precision,raw:date||"неизвестно",
+    anchorDate:null,sourceTimeZone:null,
+  });
+  const make=(entityId:string,value:string,started:import("../temporal-claims").TemporalBound|null,
+    changes:Partial<import("../temporal-claims").TemporalClaimCandidate>={}
+  ):import("../temporal-claims").TemporalClaimCandidate=>({
+    recordedAt:"2026-10-27T12:00:00.000Z",subjectId:"person-1",
+    predicate:"employment",context:"primary",value,kind:"state",
+    modality:"asserted",negated:false,cardinality:"single",
+    occurredOrStarted:started,ended:null,endConfirmed:false,
+    evidence:{entityId,recordVersion:1,quote:"Работаю в "+value,origin:"direct"},...changes,
+  });
+  const a=await repo.stageTypedTemporalFact(make("a","А",bound("2022-01-01"),{
+    ended:bound("2024-08-31"),endConfirmed:true,
+  }));
+  const b=await repo.stageTypedTemporalFact(make("b","Б",bound("2024-09-01")));
+  await repo.stageTypedTemporalFact(make("event","Ремонт",bound("2023-01-01"),{kind:"event"}));
+  await repo.stageTypedTemporalFact(make("plan","В",bound("2026-11-01"),{modality:"planned"}));
+  await repo.stageTypedTemporalFact(make("wrong-person","Другая компания",bound("2024-09-01"),{
+    subjectId:"person-2",
+  }));
+  const query={subjectId:"person-1",collectionId:"jobs",
+    predicate:"employment",context:"primary",validDate:"2023-07-01"};
+  const old=await repo.temporalCandidatesAtDate(query);
+  expect(old.items).toHaveLength(2);
+  const byValue=Object.fromEntries(old.items.map(x=>[x.claim.value,x]));
+  expect(byValue["А"]).toMatchObject({
+    claimId:a.claimId,timeFit:"potentially_applicable",verification:"candidate_unconfirmed",
+  });
+  expect(byValue["Б"]).toMatchObject({
+    claimId:b.claimId,timeFit:"outside_date",verification:"candidate_unconfirmed",
+  });
+  expect(byValue["А"].claim.evidence).toMatchObject({entityId:"a",recordVersion:1,
+    quote:"Работаю в А",origin:"direct"});
+  const newDate=await repo.temporalCandidatesAtDate({...query,validDate:"2025-06-01"});
+  expect(Object.fromEntries(newDate.items.map(x=>[x.claim.value,x.timeFit])))
+    .toMatchObject({"А":"outside_date","Б":"potentially_applicable"});
+  expect(newDate.partial).toBe(false);
+  expect(newDate.nextCursor).toBeNull();
+  expect((await repo.temporalCandidatesAtDate({...query,validDate:"2024-08-31"}))
+    .items.find(x=>x.claim.value==="А")?.timeFit).toBe("potentially_applicable");
+  expect(db.prepare("SELECT COUNT(*) AS n FROM memory_temporal_decisions").get().n).toBe(0);
+});
+
+test("T3b1 unknown/approximate dates and broad boundaries are never promoted to a precise current fact",async()=>{
+  const {temporalFitAtDate}=require("../temporal-store");
+  const bound=(normalized:string|null,precision:"day"|"year"|"month"|"unknown"|"approximate"
+  ):import("../temporal-claims").TemporalBound=>({
+    normalized,precision,raw:normalized??"около прошлого лета",
+    anchorDate:null,sourceTimeZone:null,
+  });
+  const base:import("../temporal-claims").TemporalClaimCandidate={
+    recordedAt:"2026-10-27T12:00:00.000Z",subjectId:"person-1",
+    predicate:"residence",context:"actual",value:"Город Б",kind:"state",
+    modality:"asserted",negated:false,cardinality:"single",
+    occurredOrStarted:bound("2024","year"),
+    ended:null,endConfirmed:false,
+    evidence:{entityId:"source",recordVersion:1,quote:"Переехал в 2024",origin:"direct"},
+  };
+  expect(temporalFitAtDate(base,"2023-12-31")).toBe("outside_date");
+  expect(temporalFitAtDate(base,"2024-02-15")).toBe("boundary_uncertain");
+  expect(temporalFitAtDate(base,"2025-06-01")).toBe("potentially_applicable");
+  expect(temporalFitAtDate({...base,occurredOrStarted:bound(null,"approximate")},"2025-06-01"))
+    .toBe("boundary_uncertain");
+  expect(temporalFitAtDate({...base,occurredOrStarted:null},"2025-06-01"))
+    .toBe("boundary_uncertain");
+  expect(temporalFitAtDate({...base,occurredOrStarted:bound("2022-01-01","day"),
+    ended:bound("2024","year"),endConfirmed:true},"2024-04-01")).toBe("boundary_uncertain");
+  expect(temporalFitAtDate({...base,occurredOrStarted:bound("2022-01-01","day"),
+    ended:bound(null,"unknown"),endConfirmed:true},"2027-01-01")).toBe("boundary_uncertain");
+  expect(temporalFitAtDate({...base,modality:"planned"},"2025-06-01")).toBe("outside_date");
+  expect(temporalFitAtDate({...base,negated:true},"2025-06-01")).toBe("outside_date");
+  await expect(Promise.resolve().then(()=>temporalFitAtDate(base,"2025-02-30")))
+    .rejects.toThrow("temporal_query_date_invalid");
+});
+
+test("T3b1 SQL read excludes protected/stale records before a stable bounded keyset",async()=>{
+  await openLocalMemory("guest");
+  const db=mockConnections[0].sqlite,repo=await localMemoryRepository("guest");
+  for(const [collection,level] of [["visible","standard"],["private","private"],
+      ["unknown","unclassified"]] as const){
+    db.prepare("INSERT INTO memory_collections(id,name,slug,sensitivity,created_at) VALUES (?,?,?,?, 'now')")
+      .run(collection,collection,collection,level);
+  }
+  const make=(entityId:string,i:number):import("../temporal-claims").TemporalClaimCandidate=>({
+    recordedAt:"2026-10-27T12:00:00.000Z",subjectId:"person-1",
+    predicate:"residence",context:"actual",value:"Address "+i,
+    kind:"state",modality:"asserted",negated:false,cardinality:"single",
+    occurredOrStarted:null,ended:null,endConfirmed:false,
+    evidence:{entityId,recordVersion:1,quote:"Source "+i,origin:"direct"},
+  });
+  const makeRow=(id:string,c:string,sensitivity:string)=>{
+    db.prepare("INSERT INTO memory_entities(id,collection_id,domain,sensitivity,payload_json,created_at,updated_at) VALUES (?,?, 'notes',?,'{}','now','now')").run(id,c,sensitivity);
+  };
+  for(let i=0;i<5;i++){
+    makeRow("v"+i,"visible","standard");
+    await repo.stageTypedTemporalFact(make("v"+i,i));
+  }
+  makeRow("secret","visible","secret");
+  makeRow("hidden","private","standard");
+  makeRow("unclassified","unknown","standard");
+  for(const [id,i] of [["secret",90],["hidden",91],["unclassified",92]] as const){
+    await repo.stageTypedTemporalFact(make(id,i));
+  }
+  const q={subjectId:"person-1",collectionId:"visible",
+    predicate:"residence",context:"actual",validDate:"2024-06-01",limit:2};
+  const p1=await repo.temporalCandidatesAtDate(q);
+  expect(p1.items).toHaveLength(2);expect(p1.partial).toBe(true);
+  const p2=await repo.temporalCandidatesAtDate({...q,before:p1.nextCursor!});
+  expect(p2.items).toHaveLength(2);expect(p2.partial).toBe(true);
+  const p3=await repo.temporalCandidatesAtDate({...q,before:p2.nextCursor!});
+  expect(p3.items).toHaveLength(1);expect(p3.partial).toBe(false);
+  expect(p3.nextCursor).toBeNull();
+  const all=[...p1.items,...p2.items,...p3.items];
+  expect(new Set(all.map(x=>x.claimId)).size).toBe(5);
+  expect(all.every(x=>x.claim.evidence.entityId.startsWith("v"))).toBe(true);
+  const hidden=await repo.temporalCandidatesAtDate({...q,collectionId:"private"});
+  expect(hidden.items).toEqual([]);expect(hidden.partial).toBe(false);
+  db.prepare("UPDATE memory_entities SET record_version=2 WHERE id='v1'").run();
+  const after=await repo.temporalCandidatesAtDate({...q,limit:20});
+  expect(after.items).toHaveLength(4);
+  await expect(repo.temporalCandidatesAtDate({...q,limit:51}))
+    .rejects.toThrow("temporal_query_limit_invalid");
+  await expect(repo.temporalCandidatesAtDate({...q,before:{
+    recordedAt:"2026-02-31T00:00:00.000Z",claimId:"bogus",
+  }})).rejects.toThrow("temporal_query_cursor_invalid");
+});
