@@ -9,7 +9,7 @@ jest.mock("expo-file-system/legacy", () => ({
 }));
 jest.mock("expo-sharing", () => ({ isAvailableAsync: jest.fn(), shareAsync: jest.fn() }));
 jest.mock("../storage", () => ({
-  LOCAL_MEMORY_SCHEMA_VERSION: 14,
+  LOCAL_MEMORY_SCHEMA_VERSION: 15,
   withLocalMemoryDatabase: jest.fn(async (_id: string, task: (db: unknown) => Promise<unknown>) => task(mockDb)),
 }));
 
@@ -95,7 +95,7 @@ test("export SQLCipher-encrypts a new independent file before sharing and erases
     "/cache/pia-encrypted-random-id.db", code,
   ]);
   expect(mockDb.getFirstAsync).toHaveBeenCalledWith("SELECT sqlcipher_export('pia_export')");
-  expect(mockDb.execAsync).toHaveBeenCalledWith("PRAGMA pia_export.user_version = 14");
+  expect(mockDb.execAsync).toHaveBeenCalledWith("PRAGMA pia_export.user_version = 15");
   expect(mockDb.execAsync).toHaveBeenCalledWith("DETACH DATABASE pia_export");
   expect(Sharing.shareAsync).toHaveBeenCalledTimes(1);
   expect(FS.deleteAsync).toHaveBeenCalledWith("file:///cache/pia-encrypted-random-id.db", {
@@ -632,7 +632,7 @@ test("v13 backup restores shared user review actions after their witness parents
   await restoreEncryptedBackup("guest","file:///valid-v13.db",code);
   const sql=mockDb.execAsync.mock.calls.map(([s])=>String(s));
   const relation=sql.indexOf("INSERT INTO memory_relation_evidence SELECT * FROM pia_import.memory_relation_evidence");
-  const journal=sql.indexOf("INSERT INTO memory_review_actions SELECT * FROM pia_import.memory_review_actions");
+  const journal=sql.indexOf("INSERT INTO memory_review_actions ");
   expect(relation).toBeGreaterThanOrEqual(0);
   expect(journal).toBeGreaterThan(relation);
   expect(sql.indexOf("COMMIT")).toBeGreaterThan(journal);
@@ -709,4 +709,35 @@ test("v14 restore copies review proposals after their source FK parents and reta
   const commit=statements.indexOf("COMMIT");
   expect(proposals).toBeGreaterThan(notes);
   expect(commit).toBeGreaterThan(proposals);
+});
+
+test("v15 backup manifest has current schema and one shared decision journal",async()=>{
+  await shareEncryptedBackup("guest",code);
+  const schema=mockDb.execAsync.mock.calls.map(c=>String(c[0])).join("\n");
+  expect(schema).toContain("CHECK(format_version=6)");
+  expect(schema).toContain("PRAGMA pia_export.user_version = 15");
+});
+test("v15 forged journal count fails preflight before any user memory write",async()=>{
+  const prev=mockDb.getFirstAsync.getMockImplementation()!;
+  mockDb.getFirstAsync.mockImplementation(async(sql:string)=>{
+    if(sql==="PRAGMA pia_import.user_version")return {user_version:15};
+    if(sql==="SELECT * FROM pia_import.persai_backup_manifest")return {
+      format_version:6,schema_version:15,entities:2,collections:1,observations:1,
+      attachments:0,attachment_parts:0,receipts:0,chats:0,
+      temporal_claims:0,temporal_evidence:0,temporal_proposals:0,temporal_decisions:0,
+      relation_links:0,relation_evidence:0,review_actions:2,review_proposals:0,
+    };
+    if(sql.includes("(SELECT count(*) FROM ")&&sql.includes("memory_review_actions"))
+      return {review_actions:1};
+    return prev(sql);
+  });
+  tablesOnce([...names,"memory_relation_evidence","memory_review_proposals",
+    "memory_review_actions","memory_attachments","memory_attachment_parts",
+    "memory_extractions","memory_extraction_segments","persai_backup_manifest",
+    "memory_temporal_claims","memory_temporal_evidence",
+    "memory_temporal_proposals","memory_temporal_decisions",
+    "memory_received_shares","memory_cleanup_preferences"]);
+  await expect(restoreEncryptedBackup("guest","file:///v15.db",code))
+    .rejects.toThrow("backup_manifest_mismatch");
+  expect(mockDb.execAsync.mock.calls.flat().join("\n")).not.toContain("INSERT INTO memory_entities");
 });
