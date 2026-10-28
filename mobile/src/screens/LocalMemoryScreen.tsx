@@ -21,6 +21,7 @@ import { MemoryNoteCard } from "../design/nebula/MemoryNoteCard";
 
 import { mergeText, noteUndoLabel, type NoteAction } from "../local-memory/note-actions";
 import { scheduleVectors } from "../media/vector-runner";
+import type { MemoryReviewBatchPreview } from "../local-memory/hygiene";
 
 export function LocalMemoryScreen() {
   const t = useTheme(); const navigation = useNavigation<NativeStackNavigationProp<RootStackParams>>();
@@ -46,6 +47,10 @@ export function LocalMemoryScreen() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [moveOpen, setMoveOpen] = useState(false);
   const [mergeOpen, setMergeOpen] = useState(false);
+  const [hygieneReviewOpen, setHygieneReviewOpen] = useState(false);
+  const [hygieneExcluded, setHygieneExcluded] = useState<string[]>([]);
+  const [hygienePreview, setHygienePreview] = useState<MemoryReviewBatchPreview | null>(null);
+  const hygieneGeneration = useRef(0);
   const [undo, setUndo] = useState("");
   const [search, setSearch] = useState(""); const [term, setTerm] = useState("");
   const [notes, setNotes] = useState<EntityRecord[]>([]); const [more, setMore] = useState(false);
@@ -73,6 +78,29 @@ export function LocalMemoryScreen() {
       .finally(() => { if (request === generation.current) setLoading(false); });
     return () => { generation.current++; repository.current = null; };
   }, [profile, term, collectionId, status, retry]));
+  /** Read-only review of current selected versions. There is no new action
+   * writer; normal note actions still require their own confirmation.
+   */
+  async function inspectHygiene(excluded: string[]) {
+    if (!repository.current || busy) return;
+    const token = ++hygieneGeneration.current, request = generation.current;
+    setBusy(true); setError(""); setHygienePreview(null);
+    try {
+      const data = await repository.current.hygiene().previewWithExclusions(
+        selectedNotes.map(note=>({id:note.id,recordVersion:note.record_version})),excluded,"archive");
+      if(token===hygieneGeneration.current && request===generation.current)
+        setHygienePreview(data);
+    } catch(e) {
+      if(token===hygieneGeneration.current && request===generation.current)
+        setError(memoryErrorMessage(e));
+    } finally {
+      if(token===hygieneGeneration.current && request===generation.current) setBusy(false);
+    }
+  }
+  function closeHygiene(){
+    hygieneGeneration.current++;
+    setHygieneReviewOpen(false);setHygieneExcluded([]);setHygienePreview(null);setBusy(false);
+  }
   async function act(action: NoteAction, target?: string) {
     if (!repository.current || busy) return;
     setBusy(true); setError("");
@@ -82,7 +110,7 @@ export function LocalMemoryScreen() {
       if (profile) scheduleVectors(profile);
     } catch (e) { setError(memoryErrorMessage(e)); } finally { setBusy(false); }
   }
-  useEffect(() => { setSelectedIds([]); setSelecting(false); setActionsOpen(false); setConfirmation(null); setNotes([]); setContextNote(null); setMoveOpen(false); setMergeOpen(false); }, [profile, collectionId, term, status]);
+  useEffect(() => { setSelectedIds([]); setSelecting(false); setActionsOpen(false); setConfirmation(null); setNotes([]); setContextNote(null); setMoveOpen(false); setMergeOpen(false); hygieneGeneration.current++; setHygieneReviewOpen(false); setHygieneExcluded([]); setHygienePreview(null); }, [profile, collectionId, term, status]);
   function openAll() { setStatus("active"); setCollectionId(undefined); setSearch(""); setTerm(""); setSelectedIds([]); setSelecting(false); }
   function openStatus(value: typeof status) { openAll(); setStatus(value); setMenuOpen(false); }
   const cancelSelection = useCallback(() => {
@@ -90,13 +118,13 @@ export function LocalMemoryScreen() {
   }, []);
   useFocusEffect(useCallback(() => {
     const sub = BackHandler.addEventListener("hardwareBackPress", () => {
-      if (actionsOpen || moveOpen || mergeOpen) return false;
+      if (actionsOpen || moveOpen || mergeOpen || hygieneReviewOpen) return false;
       if (!selecting) return false;
       if (!busy) cancelSelection();
       return true;
     });
     return () => sub.remove();
-  }, [selecting, busy, actionsOpen, moveOpen, mergeOpen, cancelSelection]));
+  }, [selecting, busy, actionsOpen, moveOpen, mergeOpen, hygieneReviewOpen, cancelSelection]));
   function toggleSelection(id: string) {
     if (busy || loading) return;
     if (!selectedIds.includes(id) && selectedIds.length >= 100) { setError("За один раз можно выбрать до 100 записей."); return; }
@@ -227,11 +255,70 @@ export function LocalMemoryScreen() {
           <Pressable disabled={busy} accessibilityRole="button" style={actionButton} onPress={() => void act(status === "archived" ? "unarchive" : "archive")}><Text style={{ color: t.secondary }}>{status === "archived" ? "Вернуть из архива" : "В архив"}</Text></Pressable>
           <Pressable disabled={busy} accessibilityRole="button" style={actionButton} onPress={() => { setActionsOpen(false); setMoveOpen(true); }}><Text style={{ color: t.secondary }}>Перенести</Text></Pressable>
           {selectedNotes.length >= 2 && status === "active" ? <Pressable disabled={busy} accessibilityRole="button" style={actionButton} onPress={() => { setActionsOpen(false); setMergeOpen(true); }}><Text style={{ color: t.secondary }}>Объединить записи</Text></Pressable> : null}
+          {selectedNotes.length >= 2 && status === "active" ? <Pressable
+            disabled={busy} accessibilityRole="button" accessibilityLabel="Проверить последствия групповой ревизии"
+            style={actionButton} onPress={() => {
+              setActionsOpen(false);setHygieneExcluded([]);setHygienePreview(null);
+              setHygieneReviewOpen(true);void inspectHygiene([]);
+            }}>
+            <Text style={{ color:t.secondary }}>Проверить группу и исключения</Text>
+          </Pressable> : null}
           <Pressable disabled={busy} accessibilityRole="button" style={actionButton} onPress={() => setConfirmation("trash")}><Text style={{ color: t.err }}>В корзину</Text></Pressable>
         </>}
       {contextNote ? <Pressable disabled={busy} accessibilityRole="button" style={actionButton} onPress={() => { setSelectedIds([contextNote.id]); setSelecting(true); setContextNote(null); setActionsOpen(false); }}><Text style={{ color: t.secondary }}>Выбрать несколько</Text></Pressable> : null}
       </>}
       </BottomSheet>
+
+    <BottomSheet visible={hygieneReviewOpen && selectedNotes.length>=2}
+      title="Предпросмотр групповой ревизии" onClose={closeHygiene}>
+      <Text style={{color:t.text}}>
+        Только предварительная проверка. Ничего не меняется и не удаляется.
+        Можно исключить любую запись.
+      </Text>
+      {busy?<ActivityIndicator accessibilityLabel="Проверяю последствия для памяти" color={t.secondary}/>:null}
+      <Text accessibilityLiveRegion="polite" style={{color:t.muted}}>
+        {hygienePreview?
+          "Выбрано: "+hygienePreview.selectedCount+
+          " · Исключено: "+hygienePreview.excludedIds.length+
+          " · Можно предложить в архив: "+hygienePreview.eligibleIds.length+
+          " · Требуют проверки: "+hygienePreview.blockedIds.length:"Проверка выбранных записей"}
+      </Text>
+      <Text style={{color:t.muted,fontSize:13}}>
+        Размер затрагиваемых оригиналов: {hygienePreview?
+          hygienePreview.originalBytesAtRisk+" байт":"—"}.
+        Это не обещание освобождения места.
+      </Text>
+      {selectedNotes.map(note=>{
+        const excluded=hygieneExcluded.includes(note.id);
+        const row=hygienePreview?.included.find(item=>item.id===note.id);
+        return <Pressable key={note.id} accessibilityRole="checkbox"
+          accessibilityLabel={"Исключить из ревизии "+memoryDisplayTitle(note)}
+          accessibilityState={{checked:excluded,disabled:busy}} disabled={busy}
+          style={{...actionButton,minHeight:nebulaTouch.minimum}}
+          onPress={()=>{
+            const next=excluded?hygieneExcluded.filter(id=>id!==note.id):[...hygieneExcluded,note.id];
+            setHygieneExcluded(next);void inspectHygiene(next);
+          }}>
+          <Text style={{color:t.text}}>
+            {excluded?"Исключено · ":"В группе · "}{memoryDisplayTitle(note)}
+          </Text>
+          <Text style={{color:t.muted,fontSize:13}}>
+            {excluded?"Не затрагивается":
+             row?.eligible?"Допустимо для предложения":
+             row?("Нельзя без проверки: "+row.reasons.join(", ")):"Проверка…"}
+          </Text>
+        </Pressable>;
+      })}
+      {error?<Text accessibilityRole="alert" style={{color:t.err}}>{error}</Text>:null}
+      <Text style={{color:t.muted}}>
+        Для архива, корзины или отмены используется отдельное явное действие.
+        Предпросмотр ничего не применяет автоматически.
+      </Text>
+      <Pressable accessibilityRole="button" accessibilityLabel="Закрыть предпросмотр без изменений"
+        style={button} onPress={closeHygiene}>
+        <Text style={{color:t.secondary}}>Закрыть без изменений</Text>
+      </Pressable>
+    </BottomSheet>
 
     <BottomSheet visible={addOpen} title="Добавить в память" onClose={() => setAddOpen(false)}>
       <Pressable accessibilityRole="button" accessibilityLabel="Новая заметка" style={{ ...button, alignItems: "flex-start" }} onPress={() => { setAddOpen(false); navigation.navigate("MemoryNote", { collectionId }); }}><Text style={{ color: t.text, fontSize: 16 }}>Текст или голос</Text><Text style={{ color: t.muted }}>Напишите или надиктуйте мысль</Text></Pressable>
