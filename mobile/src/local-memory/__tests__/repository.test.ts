@@ -644,3 +644,56 @@ test("R1b: explicit user action cannot infer participation from a mention or mal
     .items.map(x=>x.targetEntityId)).toEqual([person.id]);
   expect((await repo.currentConfirmedRelationProofs({sourceId:extra.id})).items).toEqual([]);
 });
+
+
+test("R1c: confirmed mother/participant paths find only the correct conversation and cite both witnesses",async()=>{
+  const fake=new FakeSqlite(),repo=new SqliteMemoryRepository(fake as never);
+  const c=await repo.createCollection({name:"Люди и записи",slug:"people",sensitivity:"standard"});
+  const owner=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"person",title:"Я",payload:{body:"Я"}});
+  const mother=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"person",title:"Ирина",payload:{body:"Ирина"}});
+  const namesake=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"person",title:"Ирина",payload:{body:"Другая Ирина"}});
+  const family=await repo.createEntity({collection_id:c.id,domain:"notes",payload:{body:"Ирина — моя мама"}});
+  const call=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"note",title:"Созвон",payload:{body:"Позвонил маме Ирине"}});
+  const mentioned=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"note",title:"Встреча",payload:{body:"Говорили с Петром об Ирине"}});
+  const kin=await repo.confirmUserRelationProof({
+    sourceId:owner.id,sourceVersion:1,targetId:mother.id,targetVersion:1,
+    kind:"has_mother",evidenceId:family.id,evidenceVersion:1,
+    evidenceQuote:"Ирина — моя мама",userConfirmed:true,
+  });
+  const participant=await repo.confirmUserRelationProof({
+    sourceId:call.id,sourceVersion:1,targetId:mother.id,targetVersion:1,
+    kind:"participant_of",evidenceId:call.id,evidenceVersion:1,
+    evidenceQuote:"Позвонил маме Ирине",userConfirmed:true,
+  });
+  // A mentioned person and a namesake are not participants by mere text.
+  const found=await repo.confirmedRelativeConversationPaths({ownerPersonId:owner.id,relationKind:"has_mother"});
+  expect(found).toEqual({paths:[{
+    conversationId:call.id,relativeId:mother.id,
+    relationEvidenceId:kin.evidenceId,participantEvidenceId:participant.evidenceId,
+  }],truncated:false});
+  expect(found.paths.map(p=>p.conversationId)).not.toContain(mentioned.id);
+  expect(found.paths.map(p=>p.relativeId)).not.toContain(namesake.id);
+  expect(await repo.confirmedRelativeConversationPaths({ownerPersonId:owner.id,relationKind:"has_sister"}))
+    .toEqual({paths:[],truncated:false});
+  // A separate standard section/record edit invalidates the chain on read.
+  await repo.reviseEntity(family.id,1,{body:"Исправление: не моя мама"},"Изменение источника");
+  expect((await repo.confirmedRelativeConversationPaths({ownerPersonId:owner.id,relationKind:"has_mother"})).paths).toEqual([]);
+});
+
+test("R1c: one private intermediate proof blocks entire relation path without leaking names",async()=>{
+  const fake=new FakeSqlite(),repo=new SqliteMemoryRepository(fake as never);
+  const c=await repo.createCollection({name:"Люди",slug:"people",sensitivity:"standard"});
+  const self=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"person",payload:{}});
+  const sister=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"person",payload:{}});
+  const kin=await repo.createEntity({collection_id:c.id,domain:"notes",payload:{body:"Моя сестра Вера"}});
+  const call=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"note",payload:{body:"Беседа с Верой"}});
+  await repo.confirmUserRelationProof({sourceId:self.id,sourceVersion:1,targetId:sister.id,targetVersion:1,
+    kind:"has_sister",evidenceId:kin.id,evidenceVersion:1,evidenceQuote:"Моя сестра Вера",userConfirmed:true});
+  await repo.confirmUserRelationProof({sourceId:call.id,sourceVersion:1,targetId:sister.id,targetVersion:1,
+    kind:"participant_of",evidenceId:call.id,evidenceVersion:1,evidenceQuote:"Беседа с Верой",userConfirmed:true});
+  expect((await repo.confirmedRelativeConversationPaths({ownerPersonId:self.id,relationKind:"has_sister"})).paths)
+    .toHaveLength(1);
+  await fake.runAsync("UPDATE memory_entities SET sensitivity='secret' WHERE id=?",[kin.id]);
+  expect(await repo.confirmedRelativeConversationPaths({ownerPersonId:self.id,relationKind:"has_sister"}))
+    .toEqual({paths:[],truncated:false});
+});
