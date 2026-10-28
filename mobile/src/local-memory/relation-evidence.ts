@@ -7,7 +7,11 @@ import * as Crypto from "expo-crypto";
 import type * as SQLite from "expo-sqlite";
 import { withUnlockedTransaction } from "./transaction";
 import { memoryText } from "./search-index";
-import type { DirectPersonRelation, RelationProof, RelationProofKind } from "./relational-proof";
+import {
+  resolveDirectRelationConversationPaths,
+  type DirectPersonRelation, type RelationProof,
+  type RelationProofKind, type RelativeConversationResult, type ProofAccess,
+} from "./relational-proof";
 
 type SQL = Pick<SQLite.SQLiteDatabase,"getFirstAsync"|"getAllAsync"|"runAsync"|"execAsync">;
 export type ConfirmRelationInput = {
@@ -125,6 +129,34 @@ type ProofRow={
   quote:string;
 };
 
+
+/** Same ACL and source-revision SELECT for both direct proof reads and the
+ * bounded relation→participant traversal. A projection, not a second graph. */
+const CURRENT_PROOF_SQL=
+  "SELECT r.id AS relation_id,r.kind,r.source_entity_id,r.target_entity_id, " +
+  "se.record_version AS source_record_version,te.record_version AS target_record_version, " +
+  "w.id AS evidence_id,w.evidence_entity_id,w.evidence_record_version,w.quote " +
+  "FROM memory_relations r " +
+  "JOIN memory_relation_evidence w ON w.relation_id=r.id AND w.state='confirmed' " +
+  "JOIN memory_entities se ON se.id=r.source_entity_id AND se.record_version=w.source_record_version AND se.record_status='active' " +
+  "JOIN memory_entities te ON te.id=r.target_entity_id AND te.record_version=w.target_record_version AND te.record_status='active' " +
+  "JOIN memory_entities ev ON ev.id=w.evidence_entity_id AND ev.record_version=w.evidence_record_version AND ev.record_status='active' " +
+  "JOIN memory_collections sc ON sc.id=se.collection_id AND sc.sensitivity='standard' " +
+  "JOIN memory_collections tc ON tc.id=te.collection_id AND tc.sensitivity='standard' " +
+  "JOIN memory_collections ec ON ec.id=ev.collection_id AND ec.sensitivity='standard' " +
+  "WHERE se.sensitivity IN ('standard','inherit') AND te.sensitivity IN ('standard','inherit') " +
+  "AND ev.sensitivity IN ('standard','inherit') ";
+
+function toProof(row:ProofRow):RelationProof {
+  return {
+    id:row.evidence_id,kind:row.kind,sourceEntityId:row.source_entity_id,
+    targetEntityId:row.target_entity_id,
+    sourceRecordVersion:row.source_record_version,targetRecordVersion:row.target_record_version,
+    evidenceEntityId:row.evidence_entity_id,evidenceRecordVersion:row.evidence_record_version,
+    evidenceQuote:row.quote,status:"confirmed",evidenceState:"current",
+    identityState:"resolved",
+  };
+}
 /** Only current readable source-backed proofs, never legacy or model:auto links. */
 export async function listCurrentConfirmedRelationProofs(
   db:SQL,query:{sourceId:string;kind?:DirectPersonRelation|"participant_of";limit?:number},
@@ -135,30 +167,55 @@ export async function listCurrentConfirmedRelationProofs(
   const limit=query.limit??30;
   if(!Number.isSafeInteger(limit)||limit<1||limit>100)throw new Error("relational_limit_invalid");
   const rows=await db.getAllAsync<ProofRow>(
-    "SELECT r.id AS relation_id,r.kind,r.source_entity_id,r.target_entity_id, "+
-    "se.record_version AS source_record_version,te.record_version AS target_record_version, "+
-    "w.id AS evidence_id,w.evidence_entity_id,w.evidence_record_version,w.quote "+
-    "FROM memory_relations r "+
-    "JOIN memory_relation_evidence w ON w.relation_id=r.id AND w.state='confirmed' "+
-    "JOIN memory_entities se ON se.id=r.source_entity_id AND se.record_version=w.source_record_version AND se.record_status='active' "+
-    "JOIN memory_entities te ON te.id=r.target_entity_id AND te.record_version=w.target_record_version AND te.record_status='active' "+
-    "JOIN memory_entities ev ON ev.id=w.evidence_entity_id AND ev.record_version=w.evidence_record_version "+
-    "AND ev.record_status='active' "+
-    "JOIN memory_collections sc ON sc.id=se.collection_id AND sc.sensitivity='standard' "+
-    "JOIN memory_collections tc ON tc.id=te.collection_id AND tc.sensitivity='standard' "+
-    "JOIN memory_collections ec ON ec.id=ev.collection_id AND ec.sensitivity='standard' "+
-    "WHERE r.source_entity_id=? AND (r.kind=? OR ? IS NULL) "+
-    "AND se.sensitivity IN ('standard','inherit') AND te.sensitivity IN ('standard','inherit') "+
-    "AND ev.sensitivity IN ('standard','inherit') "+
+    CURRENT_PROOF_SQL+
+    "AND r.source_entity_id=? AND (r.kind=? OR ? IS NULL) "+
     "ORDER BY w.created_at,w.id LIMIT ?",
     [query.sourceId,query.kind??null,query.kind??null,limit+1],
   );
-  return {items:rows.slice(0,limit).map(row=>({
-    id:row.evidence_id,kind:row.kind,sourceEntityId:row.source_entity_id,
-    targetEntityId:row.target_entity_id,
-    sourceRecordVersion:row.source_record_version,targetRecordVersion:row.target_record_version,
-    evidenceEntityId:row.evidence_entity_id,evidenceRecordVersion:row.evidence_record_version,
-    evidenceQuote:row.quote,status:"confirmed" as const,evidenceState:"current" as const,
-    identityState:"resolved" as const,
-  })),partial:rows.length>limit};
+  return {items:rows.slice(0,limit).map(toProof),partial:rows.length>limit};
+}
+
+/**
+ * A source-verified graph path in the existing SQLCipher memory engine:
+ * owner --confirmed social role--> person <--confirmed participant-- note.
+ * Returns note entity IDs + proof IDs only; caller MUST re-check/open the
+ * original via the existing source-read route. No audio timestamp is invented.
+ */
+export async function findCurrentRelativeConversationPaths(
+  db:SQL,query:{ownerPersonId:string;relationKind:DirectPersonRelation},
+):Promise<RelativeConversationResult>{
+  if(!validId(query.ownerPersonId)||!ROLES.includes(query.relationKind)||
+     query.relationKind==="participant_of"){
+    throw new Error("relational_query_invalid");
+  }
+  const first=await listCurrentConfirmedRelationProofs(db,{
+    sourceId:query.ownerPersonId,kind:query.relationKind,limit:100,
+  });
+  const ids=[...new Set(first.items.map(v=>v.targetEntityId))];
+  if(ids.length===0)return {paths:[],truncated:first.partial};
+  const placeholders=ids.map(()=>"?").join(",");
+  // Use target ID selection BEFORE the LIMIT. Otherwise unrelated recordings
+  // could starve a true participant, or a partial list could look exhaustive.
+  const rows=await db.getAllAsync<ProofRow>(
+    CURRENT_PROOF_SQL+
+    "AND r.kind='participant_of' AND se.kind='note' AND te.kind='person' "+
+    "AND r.target_entity_id IN ("+placeholders+") "+
+    "ORDER BY w.created_at,w.id LIMIT 257",
+    ids,
+  );
+  const participants=rows.slice(0,256).map(toProof);
+  const edges=[...first.items,...participants];
+  const versions=new Map<string,number>();
+  const readable=new Set<string>();
+  for(const e of edges){
+    versions.set(e.sourceEntityId,e.sourceRecordVersion);
+    versions.set(e.targetEntityId,e.targetRecordVersion);
+    versions.set(e.evidenceEntityId,e.evidenceRecordVersion);
+    readable.add(e.evidenceEntityId);
+  }
+  const access:ProofAccess={recordVersions:versions,readableEvidence:readable};
+  const proof=resolveDirectRelationConversationPaths(
+    query.ownerPersonId,query.relationKind,edges,access);
+  return {paths:proof.paths,
+    truncated:proof.truncated||first.partial||rows.length>256};
 }
