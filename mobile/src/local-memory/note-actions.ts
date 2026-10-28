@@ -101,6 +101,22 @@ export async function purgeNotes(db: SQL, selection: NoteSelection[]): Promise<v
       if (current.record_version !== selected.record_version || current.record_status !== 'trashed') throw new MemoryConflictError('stale_memory_version');
     }
     for (const selected of selection) {
+      // SQLCipher v13's immutable review history contains undo -> retract
+      // references with ON DELETE RESTRICT. Cascading entity -> relation ->
+      // witness -> review rows in an arbitrary order can fail FK validation.
+      // On EXPLICIT irreversible purge only, remove dependent undo actions
+      // before their predecessor actions, in the same rollback-safe transaction.
+      // Archiving/trashing/ordinary edits NEVER erase history or proof.
+      const affectedWitnesses = "SELECT w.id FROM memory_relation_evidence w " +
+        "JOIN memory_relations r ON r.id=w.relation_id " +
+        "WHERE r.source_entity_id=? OR r.target_entity_id=? OR w.evidence_entity_id=?";
+      const selectedIds = [selected.id,selected.id,selected.id];
+      await tx.runAsync(
+        "DELETE FROM memory_review_actions WHERE action='undo' AND relation_evidence_id IN (" +
+        affectedWitnesses + ")", selectedIds);
+      await tx.runAsync(
+        "DELETE FROM memory_review_actions WHERE relation_evidence_id IN (" +
+        affectedWitnesses + ")", selectedIds);
       await tx.runAsync('DELETE FROM memory_search_fts WHERE entity_id=?', [selected.id]);
       await tx.runAsync('DELETE FROM memory_entities WHERE id=?', [selected.id]);
     }
