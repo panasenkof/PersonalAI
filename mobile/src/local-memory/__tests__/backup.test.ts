@@ -119,9 +119,9 @@ test("verified export accepts more than 100k records and writes an encrypted man
       attachments: 0, attachment_parts: 0, receipts: 0, chats: 0 } : previous(sql));
   await shareEncryptedBackup("guest", code);
   expect(mockDb.execAsync).toHaveBeenCalledWith(expect.stringContaining("CREATE TABLE pia_export.persai_backup_manifest"));
-  expect(mockDb.execAsync).toHaveBeenCalledWith(expect.stringContaining("CHECK(format_version=5)"));
+  expect(mockDb.execAsync).toHaveBeenCalledWith(expect.stringContaining("CHECK(format_version=6)"));
   expect(mockDb.runAsync).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO pia_export.persai_backup_manifest"),
-    [5, 14, 100001, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    [6, 15, 100001, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
   expect(Sharing.shareAsync).toHaveBeenCalledTimes(1);
 });
 
@@ -271,7 +271,7 @@ test.each([1, 2, 3])("restores deployed schema v%s including chats into the upgr
   expect(mockDb.execAsync.mock.calls.map(([sql]) => sql)).toContainEqual(expect.stringContaining("INSERT INTO direct_conversations"));
 });
 
-test.each([0, 15])("rejects unsupported backup schema v%s before copying any memory", async version => {
+test.each([0, 16])("rejects unsupported backup schema v%s before copying any memory", async version => {
   const read = mockDb.getFirstAsync.getMockImplementation()!;
   mockDb.getFirstAsync.mockImplementation(async sql => sql === "PRAGMA pia_import.user_version" ? { user_version: version } : read(sql));
   await expect(restoreEncryptedBackup("guest", "file:///backup.db", code)).rejects.toThrow("incompatible_backup_version");
@@ -632,7 +632,7 @@ test("v13 backup restores shared user review actions after their witness parents
   await restoreEncryptedBackup("guest","file:///valid-v13.db",code);
   const sql=mockDb.execAsync.mock.calls.map(([s])=>String(s));
   const relation=sql.indexOf("INSERT INTO memory_relation_evidence SELECT * FROM pia_import.memory_relation_evidence");
-  const journal=sql.indexOf("INSERT INTO memory_review_actions ");
+  const journal=sql.findIndex(line=>line.startsWith("INSERT INTO memory_review_actions "));
   expect(relation).toBeGreaterThanOrEqual(0);
   expect(journal).toBeGreaterThan(relation);
   expect(sql.indexOf("COMMIT")).toBeGreaterThan(journal);
