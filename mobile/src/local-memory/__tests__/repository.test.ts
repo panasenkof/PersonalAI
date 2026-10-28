@@ -1238,3 +1238,55 @@ test("R2b2c: source edit and later witness retraction block accepted undo safely
  await expect(repo.relationCandidateHistory({proposalId:proposed.proposalId}))
    .rejects.toThrow("relational_source_not_available_or_stale");
 });
+
+test("R3b1: relation→participant returns an actual stored audio original locator, never invented timecode",async()=>{
+ const fake=new FakeSqlite(),repo=new SqliteMemoryRepository(fake as never);
+ await fake.execAsync("PRAGMA foreign_keys=ON");
+ const c=await repo.createCollection({name:"Люди",slug:"people",sensitivity:"standard"});
+ const owner=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"person",payload:{}});
+ const sister=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"person",title:"Лиза",payload:{}});
+ const namesake=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"person",title:"Лиза",payload:{}});
+ const kin=await repo.createEntity({collection_id:c.id,domain:"notes",payload:{body:"Лиза моя сестра"}});
+ const call=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"note",
+   title:"Запись разговора",payload:{body:"Мы разговаривали с Лизой"}});
+ const mereMention=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"note",
+   title:"Упоминание",payload:{body:"Говорили про Лизу"}});
+ await repo.confirmUserRelationProof({sourceId:owner.id,sourceVersion:1,
+   targetId:sister.id,targetVersion:1,kind:"has_sister",evidenceId:kin.id,
+   evidenceVersion:1,evidenceQuote:"Лиза моя сестра",userConfirmed:true});
+ await repo.confirmUserRelationProof({sourceId:call.id,sourceVersion:1,
+   targetId:sister.id,targetVersion:1,kind:"participant_of",evidenceId:call.id,
+   evidenceVersion:1,evidenceQuote:"Мы разговаривали с Лизой",userConfirmed:true});
+ const now="2026-10-28T12:00:00.000Z";
+ await fake.runAsync("INSERT INTO memory_attachments(id,entity_id,name,mime,size,created_at) VALUES (?,?,?,?,?,?)",
+   ["good-audio",call.id,"разговор.m4a","audio/mp4",6,now]);
+ await fake.runAsync("INSERT INTO memory_attachment_parts(attachment_id,ord,bytes,sha256) VALUES (?,?,?,?)",
+   ["good-audio",0,Uint8Array.from([1,2,3]),"abc"]);
+ await fake.runAsync("INSERT INTO memory_attachment_parts(attachment_id,ord,bytes,sha256) VALUES (?,?,?,?)",
+   ["good-audio",1,Uint8Array.from([4,5,6]),"def"]);
+ await fake.runAsync("INSERT INTO memory_attachments(id,entity_id,name,mime,size,created_at) VALUES (?,?,?,?,?,?)",
+   ["incomplete",call.id,"missing.m4a","audio/mp4",20,now]);
+ await fake.runAsync("INSERT INTO memory_attachment_parts(attachment_id,ord,bytes,sha256) VALUES (?,?,?,?)",
+   ["incomplete",0,Uint8Array.from([1,2,3]),"abc"]);
+ await fake.runAsync("INSERT INTO memory_attachments(id,entity_id,name,mime,size,created_at) VALUES (?,?,?,?,?,?)",
+   ["mention-audio",mereMention.id,"не та беседа.m4a","audio/mp4",1,now]);
+ await fake.runAsync("INSERT INTO memory_attachment_parts(attachment_id,ord,bytes,sha256) VALUES (?,?,?,?)",
+   ["mention-audio",0,Uint8Array.from([7]),"xyz"]);
+ const options={verifiedRelative:{ownerPersonId:owner.id,relationKind:"has_sister" as const}};
+ const hits=await repo.searchMemory("Найди разговор с моей сестрой",options);
+ expect(hits.map(h=>h.entity.id)).toEqual([call.id]);
+ expect(hits[0].originals).toEqual([{
+   attachmentId:"good-audio",recordId:call.id,recordVersion:1,
+   name:"разговор.m4a",mime:"audio/mp4",size:6,kind:"audio",
+   metadataOnly:true,originalPage:null,originalTime:null,
+ }]);
+ expect(hits[0].proof?.relativeId).toBe(sister.id);
+ expect(hits[0].proof?.relativeId).not.toBe(namesake.id);
+ const ordinary=await repo.searchMemory("Лизу");
+ expect(ordinary.every(hit=>hit.originals===undefined && hit.proof===undefined)).toBe(true);
+ await fake.runAsync("DELETE FROM memory_attachment_parts WHERE attachment_id='good-audio' AND ord=1");
+ expect((await repo.searchMemory("с сестрой",options))[0]?.originals).toEqual([]);
+ await fake.runAsync("UPDATE memory_entities SET sensitivity='secret' WHERE id=?",[kin.id]);
+ expect(await repo.searchMemory("с сестрой",options)).toEqual([]);
+ expect(await fake.getFirstAsync("PRAGMA foreign_key_check")).toBeNull();
+});
