@@ -507,3 +507,143 @@ export async function listRelationReviewCandidates(
   if(!page)throw new Error("relational_review_not_committed");
   return page;
 }
+
+/** R2b2a: user-only review choices on v14 unconfirmed suggestions.
+ * This is the existing journal, not another relation store or decision log.
+ * Accept/witness creation is a separate R2b2b step requiring the canonical
+ * confirmation writer within this SAME SQLCipher transaction.
+ */
+export type RelationCandidateReviewChoice="reject"|"defer";
+export type RelationCandidateExpected={
+  proposalId:string;expectedVersion:number;userConfirmed:true;
+};
+export type RelationCandidateActionResult={
+  actionId:string;nextVersion:number;status:"pending"|"deferred"|"rejected";
+};
+type CandidateRow={
+  id:string;source_entity_id:string;source_record_version:number;
+  target_entity_id:string;target_record_version:number;
+  relation_kind:DirectPersonRelation|"participant_of";
+  evidence_entity_id:string;evidence_record_version:number;quote:string;
+  status:"pending"|"deferred"|"rejected"|"accepted";proposal_version:number;
+};
+async function currentCandidate(db:SQL,id:string):Promise<CandidateRow>{
+  const row=await db.getFirstAsync<CandidateRow>(
+    "SELECT id,source_entity_id,source_record_version,target_entity_id,target_record_version,"+
+    "relation_kind,evidence_entity_id,evidence_record_version,quote,status,proposal_version "+
+    "FROM memory_review_proposals WHERE id=? AND target_kind='relation'",[id]);
+  if(!row)throw new Error("relational_candidate_missing");
+  // Check the same CURRENT source, endpoint, quote and standard ACL as the
+  // confirmed-witness writer; private/stale candidates are never actionable.
+  await validatedCandidate(db,{
+    sourceId:row.source_entity_id,sourceVersion:row.source_record_version,
+    targetId:row.target_entity_id,targetVersion:row.target_record_version,
+    kind:row.relation_kind,evidenceId:row.evidence_entity_id,
+    evidenceVersion:row.evidence_record_version,evidenceQuote:row.quote,
+  });
+  return row;
+}
+function checkedCandidateExpected(req:RelationCandidateExpected){
+  if(!validId(req?.proposalId)||!validVersion(req?.expectedVersion)||
+     req?.userConfirmed!==true)throw new Error("relational_candidate_decision_invalid");
+}
+export async function decideRelationCandidate(
+  db:SQL,req:RelationCandidateExpected&{choice:RelationCandidateReviewChoice},
+):Promise<RelationCandidateActionResult>{
+  checkedCandidateExpected(req);
+  if(req.choice!=="reject"&&req.choice!=="defer")
+    throw new Error("relational_candidate_choice_invalid");
+  const actionId=uid();let result:RelationCandidateActionResult|null=null;
+  await withUnlockedTransaction(db,async tx=>{
+    const p=await currentCandidate(tx,req.proposalId);
+    if(p.proposal_version!==req.expectedVersion||
+       (p.status!=="pending"&&p.status!=="deferred"))
+      throw new Error("relational_candidate_decision_stale");
+    const status=req.choice==="reject"?"rejected":"deferred";
+    const at=new Date().toISOString();
+    const changed=await tx.runAsync(
+      "UPDATE memory_review_proposals SET status=?,proposal_version=proposal_version+1,"+
+      "updated_at=? WHERE id=? AND proposal_version=? AND status IN ('pending','deferred')",
+      [status,at,p.id,req.expectedVersion]);
+    if(changed.changes!==1)throw new Error("relational_candidate_decision_stale");
+    await tx.runAsync(
+      "INSERT INTO memory_review_actions "+
+      "(id,target_kind,review_proposal_id,action,expected_version,before_state,after_state,actor_kind,created_at) "+
+      "VALUES (?,'relation',?,?,?,? ,?,'user',?)",
+      [actionId,p.id,req.choice,req.expectedVersion,p.status,status,at]);
+    result={actionId,nextVersion:req.expectedVersion+1,status};
+  });
+  if(!result)throw new Error("relational_candidate_decision_not_committed");
+  return result;
+}
+/** Undo only the exact latest choice, not a stale choice after re-index,
+ * a second action, privacy change or record revision.
+ */
+export async function undoRelationCandidateDecision(
+  db:SQL,req:RelationCandidateExpected&{actionId:string},
+):Promise<RelationCandidateActionResult>{
+  checkedCandidateExpected(req);
+  if(!validId(req.actionId))throw new Error("relational_candidate_decision_invalid");
+  const undoId=uid();let result:RelationCandidateActionResult|null=null;
+  await withUnlockedTransaction(db,async tx=>{
+    const p=await currentCandidate(tx,req.proposalId);
+    const previous=await tx.getFirstAsync<{
+      id:string;action:string;expected_version:number;
+      before_state:string;after_state:string;
+    }>(
+      "SELECT id,action,expected_version,before_state,after_state FROM memory_review_actions "+
+      "WHERE id=? AND target_kind='relation' AND review_proposal_id=?",
+      [req.actionId,req.proposalId]);
+    if(!previous||(previous.action!=="reject"&&previous.action!=="defer")||
+       p.proposal_version!==req.expectedVersion||
+       previous.expected_version+1!==req.expectedVersion||
+       p.status!==previous.after_state||
+       (previous.before_state!=="pending"&&previous.before_state!=="deferred"))
+      throw new Error("relational_candidate_undo_stale");
+    const later=await tx.getFirstAsync<{id:string}>(
+      "SELECT id FROM memory_review_actions WHERE review_proposal_id=? "+
+      "AND (expected_version>? OR undoes_id=?) LIMIT 1",
+      [p.id,previous.expected_version,previous.id]);
+    if(later)throw new Error("relational_candidate_undo_stale");
+    const at=new Date().toISOString();
+    const changed=await tx.runAsync(
+      "UPDATE memory_review_proposals SET status=?,proposal_version=proposal_version+1,"+
+      "updated_at=? WHERE id=? AND proposal_version=? AND status=?",
+      [previous.before_state,at,p.id,req.expectedVersion,p.status]);
+    if(changed.changes!==1)throw new Error("relational_candidate_undo_stale");
+    await tx.runAsync(
+      "INSERT INTO memory_review_actions "+
+      "(id,target_kind,review_proposal_id,action,expected_version,before_state,after_state,undoes_id,actor_kind,created_at) "+
+      "VALUES (?,'relation',?,'undo',?,?,?,?, 'user',?)",
+      [undoId,p.id,req.expectedVersion,p.status,previous.before_state,previous.id,at]);
+    result={actionId:undoId,nextVersion:req.expectedVersion+1,
+      status:previous.before_state};
+  });
+  if(!result)throw new Error("relational_candidate_decision_not_committed");
+  return result;
+}
+export async function relationCandidateDecisionHistory(
+  db:SQL,req:{proposalId:string;limit?:number},
+):Promise<{items:Array<{id:string;action:string;beforeState:string;
+  afterState:string;expectedVersion:number;undoesId:string|null}>;hasMore:boolean}>{
+  if(!validId(req?.proposalId)||!Number.isSafeInteger(req.limit??20)||
+      (req.limit??20)<1||(req.limit??20)>50)
+    throw new Error("relational_candidate_history_invalid");
+  let result:{items:Array<{id:string;action:string;beforeState:string;
+    afterState:string;expectedVersion:number;undoesId:string|null}>;hasMore:boolean}|null=null;
+  await withUnlockedTransaction(db,async tx=>{
+    await currentCandidate(tx,req.proposalId);
+    const limit=req.limit??20;
+    const rows=await tx.getAllAsync<{id:string;action:string;before_state:string;
+      after_state:string;expected_version:number;undoes_id:string|null}>(
+      "SELECT id,action,before_state,after_state,expected_version,undoes_id "+
+      "FROM memory_review_actions WHERE target_kind='relation' AND review_proposal_id=? "+
+      "ORDER BY expected_version DESC,id DESC LIMIT ?",[req.proposalId,limit+1]);
+    result={items:rows.slice(0,limit).map(x=>({id:x.id,action:x.action,
+      beforeState:x.before_state,afterState:x.after_state,
+      expectedVersion:x.expected_version,undoesId:x.undoes_id})),
+      hasMore:rows.length>limit};
+  });
+  if(!result)throw new Error("relational_candidate_history_not_committed");
+  return result;
+}
