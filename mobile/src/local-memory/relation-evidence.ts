@@ -413,8 +413,8 @@ export async function stageRelationReviewCandidate(
       "source_record_version,target_record_version,evidence_entity_id,evidence_record_version,"+
       "quote,status,proposal_version,created_at,updated_at) "+
       "VALUES (?,'relation',?,?,?,?,?,?,?,?,'pending',1,?,?) "+
-      "ON CONFLICT(source_entity_id,target_entity_id,relation_kind,evidence_entity_id,"+
-      "evidence_record_version,quote) DO NOTHING",
+      "ON CONFLICT(source_entity_id,source_record_version,target_entity_id,target_record_version,"+
+      "relation_kind,evidence_entity_id,evidence_record_version,quote) DO NOTHING",
       [id,req.sourceId,req.targetId,req.kind,req.sourceVersion,req.targetVersion,
        req.evidenceId,req.evidenceVersion,quote,now,now],
     );
