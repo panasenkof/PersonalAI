@@ -194,8 +194,6 @@ CREATE TABLE IF NOT EXISTS memory_review_actions (
 );
 CREATE INDEX IF NOT EXISTS ix_memory_review_actions_relation
   ON memory_review_actions(relation_evidence_id,created_at,id);
-CREATE INDEX IF NOT EXISTS ix_memory_review_actions_proposal
-  ON memory_review_actions(review_proposal_id,expected_version,id);
 -- v14: non-confirmed candidates for the ONE review UI. Never insert into
 -- memory_relations before a deliberate user confirmation; temporal proposals
 -- keep their existing authority during the migration.
@@ -561,6 +559,9 @@ async function initialize(profileId: string): Promise<SQLite.SQLiteDatabase> {
           const invalid=await tx.getFirstAsync("PRAGMA foreign_key_check");
           if(invalid!==null)throw new Error("memory_review_journal_migration_fk");
         }
+        // Old installed v13/v14 journal did not have review_proposal_id at CREATE time.
+        await tx.execAsync("CREATE INDEX IF NOT EXISTS ix_memory_review_actions_proposal " +
+          "ON memory_review_actions(review_proposal_id,expected_version,id)");
         await upgradeToV6(tx);
         if (version < 3) await upgradeToV3(tx);
         if (version === 4) await upgradeToV5(tx);
