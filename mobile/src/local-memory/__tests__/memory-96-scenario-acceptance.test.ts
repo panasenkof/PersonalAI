@@ -32,7 +32,9 @@ test("cross-domain gate: partial evidence exists, and neither synthetic CI nor m
     expect(row.name.length).toBeGreaterThan(3);
     expect(row.c2).toBe("NOT_RUN_PHYSICAL");
     if(row.c1==="PARTIAL_C1"){
-      expect(row.evidence).toMatch(/^\`mobile\/src\/.*\.test\.tsx?\`$/);
+      expect(row.evidence.startsWith("`mobile/src/")).toBe(true);
+      expect(row.evidence.endsWith("`")).toBe(true);
+      expect(/\.test\.tsx?$/.test(row.evidence.slice(1,-1))).toBe(true);
       const target=resolve(root,row.evidence.slice(1,-1));
       expect(existsSync(target)).toBe(true);
     }else{
