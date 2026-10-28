@@ -193,7 +193,7 @@ export async function saveApprovedNote(
   const saved = await db.createEntity({
     collection_id: col.id, domain: "notes", title,
     payload: { type: "note", title, body, ...(proposal.date ? { date: proposal.date } : {}) },
-    sensitivity: col.sensitivity, source_kind: "user", source_ref: "device-approved-agent",
+    sensitivity: plannedSensitivity, source_kind: "user", source_ref: "device-approved-agent",
     ...(kind ? { kind } : {}),
     ...(proposal.date ? { valid_from: proposal.date } : {}),
   });
