@@ -751,3 +751,64 @@ test("R3a: one searchMemory route returns only confirmed mother conversation plu
   expect(ordinary.some(h=>h.entity.id===other.id)).toBe(true);
   expect(ordinary.every(h=>h.proof===undefined)).toBe(true);
 });
+
+
+test("R2a: retracting one confirmed witness removes only its proof path; CAS undo restores same canonical link",async()=>{
+  const fake=new FakeSqlite(),repo=new SqliteMemoryRepository(fake as never);
+  const c=await repo.createCollection({name:"Семья",slug:"people",sensitivity:"standard"});
+  const owner=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"person",payload:{}});
+  const sister=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"person",payload:{}});
+  const note=await repo.createEntity({collection_id:c.id,domain:"notes",payload:{body:"У меня есть сестра Марина"}});
+  const call=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"note",payload:{body:"Говорил с Мариной по телефону"}});
+  const p=await repo.confirmUserRelationProof({sourceId:owner.id,sourceVersion:1,
+    targetId:sister.id,targetVersion:1,evidenceId:note.id,evidenceVersion:1,
+    kind:"has_sister",evidenceQuote:"У меня есть сестра Марина",userConfirmed:true});
+  await repo.confirmUserRelationProof({sourceId:call.id,sourceVersion:1,
+    targetId:sister.id,targetVersion:1,evidenceId:call.id,evidenceVersion:1,
+    kind:"participant_of",evidenceQuote:"Говорил с Мариной по телефону",userConfirmed:true});
+  const q={verifiedRelative:{ownerPersonId:owner.id,relationKind:"has_sister" as const}};
+  expect((await repo.searchMemory("с сестрой",q)).map(h=>h.entity.id)).toEqual([call.id]);
+  const revoked=await repo.retractRelationWitness({evidenceId:p.evidenceId,expectedVersion:1,userConfirmed:true});
+  expect(revoked).toMatchObject({state:"retracted",nextVersion:2});
+  expect(await repo.searchMemory("с сестрой",q)).toEqual([]);
+  await expect(repo.retractRelationWitness({evidenceId:p.evidenceId,expectedVersion:1,userConfirmed:true}))
+    .rejects.toThrow("relational_review_stale");
+  expect((await fake.getFirstAsync<{n:number}>("SELECT count(*) AS n FROM memory_relations"))!.n).toBe(2);
+  const undone=await repo.undoRelationRetraction({evidenceId:p.evidenceId,expectedVersion:2,
+    actionId:revoked.actionId,userConfirmed:true});
+  expect(undone).toMatchObject({state:"confirmed",nextVersion:3});
+  expect((await repo.searchMemory("с сестрой",q)).map(h=>h.entity.id)).toEqual([call.id]);
+  await expect(repo.undoRelationRetraction({evidenceId:p.evidenceId,expectedVersion:2,
+    actionId:revoked.actionId,userConfirmed:true})).rejects.toThrow("relational_undo_stale");
+  const history=await fake.getAllAsync<{action:string;undoes_id:string|null}>(
+    "SELECT action,undoes_id FROM memory_review_actions WHERE relation_evidence_id=? ORDER BY expected_version",
+    [p.evidenceId]);
+  expect(history.map(x=>x.action)).toEqual(["retract","undo"]);
+  expect(history[1].undoes_id).toBe(revoked.actionId);
+});
+
+test("R2a: after the source is edited/private, undo cannot revive stale or hidden relation evidence",async()=>{
+  const fake=new FakeSqlite(),repo=new SqliteMemoryRepository(fake as never);
+  const c=await repo.createCollection({name:"Семья",slug:"people",sensitivity:"standard"});
+  const owner=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"person",payload:{}});
+  const relative=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"person",payload:{}});
+  const note=await repo.createEntity({collection_id:c.id,domain:"notes",payload:{body:"Моя мама Елена"}});
+  const p=await repo.confirmUserRelationProof({sourceId:owner.id,sourceVersion:1,
+    targetId:relative.id,targetVersion:1,evidenceId:note.id,evidenceVersion:1,
+    kind:"has_mother",evidenceQuote:"Моя мама Елена",userConfirmed:true});
+  const first=await repo.retractRelationWitness({evidenceId:p.evidenceId,expectedVersion:1,userConfirmed:true});
+  await repo.reviseEntity(note.id,1,{body:"Уточнение: другая Елена"},"Исправлено");
+  await expect(repo.undoRelationRetraction({evidenceId:p.evidenceId,expectedVersion:2,
+    actionId:first.actionId,userConfirmed:true})).rejects.toThrow("relational_source_not_available_or_stale");
+  expect((await fake.getFirstAsync<{state:string}>(
+    "SELECT state FROM memory_relation_evidence WHERE id=?",[p.evidenceId]))?.state).toBe("retracted");
+  expect((await fake.getFirstAsync<{n:number}>(
+    "SELECT count(*) AS n FROM memory_review_actions WHERE relation_evidence_id=?",[p.evidenceId]))?.n).toBe(1);
+});
+
+test("R2a: relation review refuses non-user changes before any journal writes",async()=>{
+  const fake=new FakeSqlite(),repo=new SqliteMemoryRepository(fake as never);
+  await expect(repo.retractRelationWitness({evidenceId:"fictive",expectedVersion:1,userConfirmed:false as never}))
+    .rejects.toThrow("relational_review_invalid");
+  expect((await fake.getFirstAsync<{n:number}>("SELECT count(*) AS n FROM memory_review_actions"))?.n).toBe(0);
+});
