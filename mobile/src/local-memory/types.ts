@@ -1,7 +1,7 @@
 import type { MemoryKind } from "./search-index";
 import type { EnrichmentSnapshot } from "./enrichment-policy";
 import type { TemporalClaimCandidate } from "./temporal-claims";
-import type { TemporalHistoryQuery, TemporalHistoryPage, TemporalStagedReview } from "./temporal-store";
+import type { TemporalHistoryQuery, TemporalHistoryPage, TemporalStagedReview, TemporalAtDateQuery, TemporalAtDatePage } from "./temporal-store";
 import type { TemporalInboxQuery, TemporalInboxPage } from "./temporal-review-inbox";
 import type { TemporalDecisionRequest, TemporalDecisionExpected, TemporalDecisionResult } from "./temporal-decisions";
 export type { MemoryKind } from "./search-index";
@@ -77,6 +77,7 @@ export interface MemoryRepository {
   decideTemporalChange(request: TemporalDecisionRequest): Promise<TemporalDecisionResult>;
   undoTemporalChange(request: TemporalDecisionExpected & { decisionId: string }): Promise<TemporalDecisionResult>;
   temporalKnowledgeHistory(query: TemporalHistoryQuery): Promise<TemporalHistoryPage>;
+  temporalCandidatesAtDate(query: TemporalAtDateQuery): Promise<TemporalAtDatePage>;
   linkEntities(sourceId: string, targetId: string, kind: string): Promise<RelationRecord>;
   relationsForEntity(id: string): Promise<RelationRecord[]>;
   revisions(type: "entity" | "observation", id: string): Promise<RevisionRecord[]>;
