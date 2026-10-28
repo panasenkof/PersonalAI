@@ -812,3 +812,31 @@ test("R2a: relation review refuses non-user changes before any journal writes",a
     .rejects.toThrow("relational_review_invalid");
   expect((await fake.getFirstAsync<{n:number}>("SELECT count(*) AS n FROM memory_review_actions"))?.n).toBe(0);
 });
+
+
+test("R2a review history returns bounded retraction and undo actions, never private or edited source history",async()=>{
+ const fake=new FakeSqlite(),repo=new SqliteMemoryRepository(fake as never);
+ const c=await repo.createCollection({name:"Семья",slug:"people",sensitivity:"standard"});
+ const a=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"person",payload:{}});
+ const b=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"person",payload:{}});
+ const ev=await repo.createEntity({collection_id:c.id,domain:"notes",payload:{body:"Наташа моя сестра"}});
+ const proof=await repo.confirmUserRelationProof({sourceId:a.id,sourceVersion:1,
+   targetId:b.id,targetVersion:1,evidenceId:ev.id,evidenceVersion:1,
+   kind:"has_sister",evidenceQuote:"Наташа моя сестра",userConfirmed:true});
+ const empty=await repo.relationReviewHistory({evidenceId:proof.evidenceId});
+ expect(empty.items).toEqual([]);expect(empty.currentState).toBe("confirmed");
+ const retract=await repo.retractRelationWitness({evidenceId:proof.evidenceId,expectedVersion:1,userConfirmed:true});
+ await repo.undoRelationRetraction({evidenceId:proof.evidenceId,expectedVersion:2,
+   actionId:retract.actionId,userConfirmed:true});
+ const full=await repo.relationReviewHistory({evidenceId:proof.evidenceId});
+ expect(full.items.map(x=>x.action)).toEqual(["undo","retract"]);
+ expect(full.decisionVersion).toBe(3);expect(full.currentState).toBe("confirmed");
+ expect(full.items[0].undoesId).toBe(retract.actionId);
+ const page=await repo.relationReviewHistory({evidenceId:proof.evidenceId,limit:1});
+ expect(page.items).toHaveLength(1);expect(page.hasMore).toBe(true);
+ await expect(repo.relationReviewHistory({evidenceId:proof.evidenceId,limit:0}))
+   .rejects.toThrow("relational_review_limit_invalid");
+ await fake.runAsync("UPDATE memory_entities SET sensitivity='secret' WHERE id=?",[ev.id]);
+ await expect(repo.relationReviewHistory({evidenceId:proof.evidenceId}))
+   .rejects.toThrow("relational_source_not_available_or_stale");
+});

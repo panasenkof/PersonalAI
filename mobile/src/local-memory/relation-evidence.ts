@@ -320,3 +320,37 @@ export async function undoUserRelationRetraction(
   if(!result)throw new Error("relational_review_not_committed");
   return result;
 }
+
+
+export type RelationReviewActionItem = {
+  actionId:string;action:"retract"|"undo";expectedVersion:number;
+  beforeState:string;afterState:string;undoesId:string|null;createdAt:string;
+};
+export async function listUserRelationReviewHistory(
+  db:SQL,query:{evidenceId:string;limit?:number},
+):Promise<{items:RelationReviewActionItem[];hasMore:boolean;currentState:"confirmed"|"retracted";decisionVersion:number}>{
+  if(!validId(query.evidenceId))throw new Error("relational_review_invalid");
+  const limit=query.limit??20;
+  if(!Number.isSafeInteger(limit)||limit<1||limit>50)
+    throw new Error("relational_review_limit_invalid");
+  // The same SQLCipher source/endpoint/citation eligibility gate is used
+  // when displaying history; known IDs don't bypass private/secret scope.
+  const witness=await loadReviewWitness(db,query.evidenceId);
+  const rows=await db.getAllAsync<{
+    id:string;action:"retract"|"undo";expected_version:number;
+    before_state:string;after_state:string;undoes_id:string|null;created_at:string;
+  }>(
+    "SELECT id,action,expected_version,before_state,after_state,undoes_id,created_at "+
+    "FROM memory_review_actions WHERE target_kind='relation' AND relation_evidence_id=? "+
+    "ORDER BY expected_version DESC,id DESC LIMIT ?",[query.evidenceId,limit+1],
+  );
+  return {
+    items:rows.slice(0,limit).map(r=>({
+      actionId:r.id,action:r.action,expectedVersion:r.expected_version,
+      beforeState:r.before_state,afterState:r.after_state,
+      undoesId:r.undoes_id,createdAt:r.created_at,
+    })),
+    hasMore:rows.length>limit,
+    currentState:witness.state,decisionVersion:witness.decision_version,
+  };
+}

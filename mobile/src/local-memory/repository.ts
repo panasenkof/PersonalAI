@@ -9,7 +9,7 @@ import { withUnlockedTransaction } from "./transaction";
 import { stageTemporalCandidateWithReview, listTemporalKnowledgeHistory, listTemporalStateCandidatesAtDate } from "./temporal-store";
 import { listTemporalReviewInbox as readTemporalReviewInbox } from "./temporal-review-inbox";
 import { decideTemporalReview, undoTemporalReview } from "./temporal-decisions";
-import { confirmUserRelationEvidence, listCurrentConfirmedRelationProofs, findCurrentRelativeConversationPaths, retractUserRelationEvidence, undoUserRelationRetraction } from "./relation-evidence";
+import { confirmUserRelationEvidence, listCurrentConfirmedRelationProofs, findCurrentRelativeConversationPaths, retractUserRelationEvidence, undoUserRelationRetraction, listUserRelationReviewHistory } from "./relation-evidence";
 import type { ConfirmRelationInput, RelationReviewExpected } from "./relation-evidence";
 import type { DirectPersonRelation } from "./relational-proof";
 import type { TemporalClaimCandidate } from "./temporal-claims";
@@ -367,6 +367,9 @@ export class SqliteMemoryRepository implements MemoryRepository {
   }
 
   /** R2a one user-only review journal; never a model tool. */
+  relationReviewHistory(query:{evidenceId:string;limit?:number}){
+    return listUserRelationReviewHistory(this.db,query);
+  }
   retractRelationWitness(expected: RelationReviewExpected) {
     return retractUserRelationEvidence(this.db,expected);
   }
