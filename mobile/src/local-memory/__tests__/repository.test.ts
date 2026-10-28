@@ -594,7 +594,7 @@ test("R1b: two independent user witnesses support the one canonical mother relat
   const proofs=await repo.currentConfirmedRelationProofs({sourceId:source.id,kind:"has_mother"});
   expect(proofs.partial).toBe(false);expect(proofs.items).toHaveLength(2);
   expect(new Set(proofs.items.map(v=>v.evidenceEntityId))).toEqual(new Set([a.id,b.id]));
-  expect((await fake.getFirstAsync<{n:number}>("SELECT count(*) AS n FROM memory_relations")).n).toBe(1);
+  expect((await fake.getFirstAsync<{n:number}>("SELECT count(*) AS n FROM memory_relations"))!.n).toBe(1);
   await repo.reviseEntity(a.id,1,{body:"Исправлено: это другой человек"},"Исправил источник");
   const surviving=await repo.currentConfirmedRelationProofs({sourceId:source.id,kind:"has_mother"});
   expect(surviving.items).toHaveLength(1);expect(surviving.items[0].evidenceEntityId).toBe(b.id);
@@ -613,13 +613,13 @@ test("R1b: privacy and stale versions stop confirmation without creating even a 
     evidenceId:ev.id,evidenceVersion:1,evidenceQuote:"Мой врач — доктор",
     kind:"has_doctor" as const,userConfirmed:true as const};
   await expect(repo.confirmUserRelationProof(req)).rejects.toThrow("relational_source_not_available_or_stale");
-  expect((await fake.getFirstAsync<{n:number}>("SELECT count(*) AS n FROM memory_relations")).n).toBe(0);
+  expect((await fake.getFirstAsync<{n:number}>("SELECT count(*) AS n FROM memory_relations"))!.n).toBe(0);
   const visible=await repo.createEntity({collection_id:people.id,domain:"notes",kind:"person",payload:{}});
   await expect(repo.confirmUserRelationProof({...req,targetId:visible.id,evidenceVersion:2}))
     .rejects.toThrow("relational_source_not_available_or_stale");
   await expect(repo.confirmUserRelationProof({...req,targetId:visible.id,evidenceQuote:"выдуманная цитата"}))
     .rejects.toThrow("relational_evidence_quote_not_found");
-  expect((await fake.getFirstAsync<{n:number}>("SELECT count(*) AS n FROM memory_relations")).n).toBe(0);
+  expect((await fake.getFirstAsync<{n:number}>("SELECT count(*) AS n FROM memory_relations"))!.n).toBe(0);
 });
 
 test("R1b: explicit user action cannot infer participation from a mention or malformed endpoints",async()=>{
