@@ -58,22 +58,9 @@ export async function confirmUserRelationEvidence(
   }
   let result:ConfirmRelationResult|null=null;
   await withUnlockedTransaction(db,async tx=>{
-    const source=await allowedEntity(tx,req.sourceId,req.sourceVersion);
-    const target=await allowedEntity(tx,req.targetId,req.targetVersion);
-    const evidence=await allowedEntity(tx,req.evidenceId,req.evidenceVersion);
-    if(req.kind==="participant_of"){
-      if(source.kind!=="note"||target.kind!=="person"){
-        throw new Error("relational_role_endpoints_invalid");
-      }
-    }else if(source.kind!=="person"||target.kind!=="person"){
-      throw new Error("relational_role_endpoints_invalid");
-    }
-    // The witness is anchored to a real saved text; no invented citation from
-    // a model draft, filename, mere mention or unavailable ASR segment.
-    if(evidence.domain!=="notes"||
-       !memoryText(JSON.parse(evidence.payload_json)).includes(req.evidenceQuote.trim())){
-      throw new Error("relational_evidence_quote_not_found");
-    }
+    // One identical ACL, endpoint-kind and literal-source gate for both a
+    // nonconfirmed suggestion and the explicit user confirmation writer.
+    await validatedCandidate(tx,req);
     let relation=await tx.getFirstAsync<{id:string;source_kind:string|null}>(
       "SELECT id,source_kind FROM memory_relations "+
       "WHERE source_entity_id=? AND target_entity_id=? AND kind=?",
@@ -358,4 +345,165 @@ export async function listUserRelationReviewHistory(
   });
   if(!outcome)throw new Error("relational_review_read_not_committed");
   return outcome;
+}
+
+
+/** R2b1: only a non-confirmed, source-backed proposal in the ONE review inbox.
+ * It never inserts a canonical edge or confirmed relation witness.
+ */
+export type StageRelationReviewInput=Omit<ConfirmRelationInput,"userConfirmed">;
+export type RelationReviewCandidate={
+  targetKind:"relation";proposalId:string;status:"pending"|"deferred";
+  proposalVersion:number;sourceId:string;sourceVersion:number;
+  targetId:string;targetVersion:number;kind:DirectPersonRelation|"participant_of";
+  evidenceId:string;evidenceVersion:number;evidenceQuote:string;
+  sourceTitle:string|null;targetTitle:string|null;evidenceTitle:string|null;
+  createdAt:string;
+};
+export type RelationInboxCursor={createdAt:string;proposalId:string};
+export type RelationInboxPage={items:RelationReviewCandidate[];
+  nextCursor:RelationInboxCursor|null};
+const candidateValid=(v:StageRelationReviewInput)=>
+  !!v&&validId(v.sourceId)&&validId(v.targetId)&&validId(v.evidenceId)&&
+  v.sourceId!==v.targetId&&
+  [v.sourceVersion,v.targetVersion,v.evidenceVersion].every(validVersion)&&
+  ROLES.includes(v.kind)&&typeof v.evidenceQuote==="string"&&
+  v.evidenceQuote.trim().length>0&&v.evidenceQuote.length<=6000;
+async function validatedCandidate(db:SQL,req:StageRelationReviewInput){
+  if(!candidateValid(req))throw new Error("relational_candidate_invalid");
+  const source=await allowedEntity(db,req.sourceId,req.sourceVersion);
+  const target=await allowedEntity(db,req.targetId,req.targetVersion);
+  const evidence=await allowedEntity(db,req.evidenceId,req.evidenceVersion);
+  if(req.kind==="participant_of"){
+    if(source.kind!=="note"||target.kind!=="person")
+      throw new Error("relational_role_endpoints_invalid");
+  }else if(source.kind!=="person"||target.kind!=="person"){
+    throw new Error("relational_role_endpoints_invalid");
+  }
+  const quote=req.evidenceQuote.trim();
+  if(evidence.domain!=="notes"||
+     !memoryText(JSON.parse(evidence.payload_json)).includes(quote))
+    throw new Error("relational_evidence_quote_not_found");
+  return quote;
+}
+export async function stageRelationReviewCandidate(
+  db:SQL,req:StageRelationReviewInput,
+):Promise<{proposalId:string;added:boolean;status:"pending"|"deferred"|"rejected"|"accepted"}>{
+  if(!candidateValid(req))throw new Error("relational_candidate_invalid");
+  const id=uid();let result:{
+    proposalId:string;added:boolean;status:"pending"|"deferred"|"rejected"|"accepted";
+  }|null=null;
+  await withUnlockedTransaction(db,async tx=>{
+    const quote=await validatedCandidate(tx,req);
+    // A current confirmed witness must not cause a second question.
+    const approved=await tx.getFirstAsync<{id:string}>(
+      "SELECT w.id FROM memory_relation_evidence w JOIN memory_relations r ON r.id=w.relation_id "+
+      "WHERE r.source_entity_id=? AND r.target_entity_id=? AND r.kind=? "+
+      "AND w.evidence_entity_id=? AND w.evidence_record_version=? "+
+      "AND w.source_record_version=? AND w.target_record_version=? "+
+      "AND w.quote=? AND w.state='confirmed' LIMIT 1",
+      [req.sourceId,req.targetId,req.kind,req.evidenceId,req.evidenceVersion,
+       req.sourceVersion,req.targetVersion,quote],
+    );
+    if(approved)throw new Error("relational_candidate_already_confirmed");
+    const now=new Date().toISOString();
+    const inserted=await tx.runAsync(
+      "INSERT INTO memory_review_proposals "+
+      "(id,target_kind,source_entity_id,target_entity_id,relation_kind,"+
+      "source_record_version,target_record_version,evidence_entity_id,evidence_record_version,"+
+      "quote,status,proposal_version,created_at,updated_at) "+
+      "VALUES (?,'relation',?,?,?,?,?,?,?,?,'pending',1,?,?) "+
+      "ON CONFLICT(source_entity_id,source_record_version,target_entity_id,target_record_version,"+
+      "relation_kind,evidence_entity_id,evidence_record_version,quote) DO NOTHING",
+      [id,req.sourceId,req.targetId,req.kind,req.sourceVersion,req.targetVersion,
+       req.evidenceId,req.evidenceVersion,quote,now,now],
+    );
+    const row=await tx.getFirstAsync<{id:string;status:"pending"|"deferred"|"rejected"|"accepted"}>(
+      "SELECT id,status FROM memory_review_proposals WHERE "+
+      "source_entity_id=? AND source_record_version=? AND target_entity_id=? "+
+      "AND target_record_version=? AND relation_kind=? "+
+      "AND evidence_entity_id=? AND evidence_record_version=? AND quote=?",
+      [req.sourceId,req.sourceVersion,req.targetId,req.targetVersion,req.kind,
+       req.evidenceId,req.evidenceVersion,quote],
+    );
+    if(!row)throw new Error("relational_candidate_not_committed");
+    result={proposalId:row.id,added:inserted.changes===1,status:row.status};
+  });
+  if(!result)throw new Error("relational_candidate_not_committed");
+  return result;
+}
+export async function listRelationReviewCandidates(
+  db:SQL,query:{collectionId:string;limit?:number;before?:RelationInboxCursor},
+):Promise<RelationInboxPage>{
+  if(!validId(query?.collectionId))throw new Error("relational_review_scope_invalid");
+  const limit=query.limit??20;
+  if(!Number.isSafeInteger(limit)||limit<1||limit>25)
+    throw new Error("relational_review_limit_invalid");
+  const before=query.before;
+  if(before&&(!validId(before.proposalId)||!Number.isFinite(Date.parse(before.createdAt))||
+       new Date(before.createdAt).toISOString()!==before.createdAt))
+    throw new Error("relational_review_cursor_invalid");
+  let page:RelationInboxPage|null=null;
+  await withUnlockedTransaction(db,async tx=>{
+    const args:(string|number)[]=[query.collectionId];
+    const cursor=before?
+      " AND (p.created_at<? OR (p.created_at=? AND p.id<?))":"";
+    if(before)args.push(before.createdAt,before.createdAt,before.proposalId);
+    args.push(limit+1);
+    const rows=await tx.getAllAsync<{
+      id:string;created_at:string;status:"pending"|"deferred";proposal_version:number;
+      source_entity_id:string;target_entity_id:string;relation_kind:DirectPersonRelation|"participant_of";
+      source_record_version:number;target_record_version:number;
+      evidence_entity_id:string;evidence_record_version:number;quote:string;
+      source_title:string|null;target_title:string|null;evidence_title:string|null;
+      evidence_json:string;
+    }>(
+      "SELECT p.id,p.created_at,p.status,p.proposal_version,p.source_entity_id,p.target_entity_id,"+
+      "p.relation_kind,p.source_record_version,p.target_record_version,p.evidence_entity_id,"+
+      "p.evidence_record_version,p.quote,src.title AS source_title,tgt.title AS target_title,"+
+      "ev.title AS evidence_title,ev.payload_json AS evidence_json FROM memory_review_proposals p "+
+      "JOIN memory_entities src ON src.id=p.source_entity_id AND "+
+      "src.record_version=p.source_record_version AND src.record_status='active' "+
+      "JOIN memory_entities tgt ON tgt.id=p.target_entity_id AND "+
+      "tgt.record_version=p.target_record_version AND tgt.record_status='active' "+
+      "JOIN memory_entities ev ON ev.id=p.evidence_entity_id AND "+
+      "ev.record_version=p.evidence_record_version AND ev.record_status='active' "+
+      "JOIN memory_collections cs ON cs.id=src.collection_id AND cs.sensitivity='standard' "+
+      "JOIN memory_collections ct ON ct.id=tgt.collection_id AND ct.sensitivity='standard' "+
+      "JOIN memory_collections ce ON ce.id=ev.collection_id AND ce.sensitivity='standard' "+
+      "WHERE p.target_kind='relation' AND p.status IN ('pending','deferred') "+
+      "AND ev.collection_id=? AND ev.domain='notes' "+
+      "AND src.sensitivity IN ('standard','inherit') "+
+      "AND tgt.sensitivity IN ('standard','inherit') "+
+      "AND ev.sensitivity IN ('standard','inherit') "+
+      "AND NOT EXISTS (SELECT 1 FROM memory_relations r "+
+      "JOIN memory_relation_evidence w ON w.relation_id=r.id "+
+      "WHERE r.source_entity_id=p.source_entity_id AND r.target_entity_id=p.target_entity_id "+
+      "AND r.kind=p.relation_kind AND w.state='confirmed' "+
+      "AND w.evidence_entity_id=p.evidence_entity_id "+
+      "AND w.evidence_record_version=p.evidence_record_version "+
+      "AND w.source_record_version=p.source_record_version "+
+      "AND w.target_record_version=p.target_record_version AND w.quote=p.quote) "+cursor+
+      " ORDER BY p.created_at DESC,p.id DESC LIMIT ?",args,
+    );
+    const shown=rows.slice(0,limit);
+    const items:RelationReviewCandidate[]=[];
+    for(const r of shown){
+      // Exactly the originally quoted saved text, not a model paraphrase.
+      if(!memoryText(JSON.parse(r.evidence_json)).includes(r.quote))
+        throw new Error("relational_candidate_source_stale");
+      items.push({targetKind:"relation",proposalId:r.id,status:r.status,
+        proposalVersion:r.proposal_version,sourceId:r.source_entity_id,
+        sourceVersion:r.source_record_version,targetId:r.target_entity_id,
+        targetVersion:r.target_record_version,kind:r.relation_kind,
+        evidenceId:r.evidence_entity_id,evidenceVersion:r.evidence_record_version,
+        evidenceQuote:r.quote,sourceTitle:r.source_title,targetTitle:r.target_title,
+        evidenceTitle:r.evidence_title,createdAt:r.created_at});
+    }
+    const last=shown.at(-1);
+    page={items,nextCursor:rows.length>limit&&last?
+      {createdAt:last.created_at,proposalId:last.id}:null};
+  });
+  if(!page)throw new Error("relational_review_not_committed");
+  return page;
 }

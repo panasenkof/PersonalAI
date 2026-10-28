@@ -9,8 +9,8 @@ import { withUnlockedTransaction } from "./transaction";
 import { stageTemporalCandidateWithReview, listTemporalKnowledgeHistory, listTemporalStateCandidatesAtDate } from "./temporal-store";
 import { listTemporalReviewInbox as readTemporalReviewInbox } from "./temporal-review-inbox";
 import { decideTemporalReview, undoTemporalReview } from "./temporal-decisions";
-import { confirmUserRelationEvidence, listCurrentConfirmedRelationProofs, findCurrentRelativeConversationPaths, retractUserRelationEvidence, undoUserRelationRetraction, listUserRelationReviewHistory } from "./relation-evidence";
-import type { ConfirmRelationInput, RelationReviewExpected } from "./relation-evidence";
+import { confirmUserRelationEvidence, listCurrentConfirmedRelationProofs, findCurrentRelativeConversationPaths, retractUserRelationEvidence, undoUserRelationRetraction, listUserRelationReviewHistory, stageRelationReviewCandidate, listRelationReviewCandidates } from "./relation-evidence";
+import type { ConfirmRelationInput, RelationReviewExpected, StageRelationReviewInput, RelationInboxCursor } from "./relation-evidence";
 import type { DirectPersonRelation } from "./relational-proof";
 import type { TemporalClaimCandidate } from "./temporal-claims";
 import type { TemporalHistoryQuery, TemporalAtDateQuery } from "./temporal-store";
@@ -367,6 +367,13 @@ export class SqliteMemoryRepository implements MemoryRepository {
   }
 
   /** R2a one user-only review journal; never a model tool. */
+  /** R2b1: one reviewed relationship queue; never a confirmed edge. */
+  stageRelationCandidate(request:StageRelationReviewInput){
+    return stageRelationReviewCandidate(this.db,request);
+  }
+  relationCandidateInbox(query:{collectionId:string;limit?:number;before?:RelationInboxCursor}){
+    return listRelationReviewCandidates(this.db,query);
+  }
   relationReviewHistory(query:{evidenceId:string;limit?:number}){
     return listUserRelationReviewHistory(this.db,query);
   }
