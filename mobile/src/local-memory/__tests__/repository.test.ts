@@ -985,6 +985,11 @@ test("F7: permanent purge of a trashed evidence note with retract→undo journal
   const owner=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"person",payload:{}});
   const person=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"person",payload:{}});
   const source=await repo.createEntity({collection_id:c.id,domain:"notes",payload:{body:"Моя сестра Маша"}});
+  // Pending hypotheses must also cascade safely when this source is
+  // explicitly purged; they cannot cause a second undo FK obstruction.
+  await repo.stageRelationCandidate({sourceId:owner.id,sourceVersion:1,
+    targetId:person.id,targetVersion:1,evidenceId:source.id,evidenceVersion:1,
+    kind:"has_sister",evidenceQuote:"Моя сестра Маша"});
   const proof=await repo.confirmUserRelationProof({sourceId:owner.id,sourceVersion:1,
     targetId:person.id,targetVersion:1,evidenceId:source.id,evidenceVersion:1,
     kind:"has_sister",evidenceQuote:"Моя сестра Маша",userConfirmed:true});
@@ -1004,6 +1009,7 @@ test("F7: permanent purge of a trashed evidence note with retract→undo journal
   expect(await repo.entity(source.id)).toBeNull();
   expect((await fake.getFirstAsync<{n:number}>("SELECT count(*) AS n FROM memory_review_actions"))?.n).toBe(0);
   expect((await fake.getFirstAsync<{n:number}>("SELECT count(*) AS n FROM memory_relation_evidence"))?.n).toBe(0);
+  expect((await fake.getFirstAsync<{n:number}>("SELECT count(*) AS n FROM memory_review_proposals"))?.n).toBe(0);
   expect(await fake.getFirstAsync("PRAGMA foreign_key_check")).toBeNull();
   expect(await repo.entity(owner.id)).not.toBeNull();
   expect(await repo.entity(person.id)).not.toBeNull();
