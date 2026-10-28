@@ -21,7 +21,7 @@ import { MemoryNoteCard } from "../design/nebula/MemoryNoteCard";
 
 import { mergeText, noteUndoLabel, type NoteAction } from "../local-memory/note-actions";
 import { scheduleVectors } from "../media/vector-runner";
-import type { MemoryReviewBatchPreview } from "../local-memory/hygiene";
+import type { MemoryReviewBatchPreview, MemoryReviewAction } from "../local-memory/hygiene";
 
 export function LocalMemoryScreen() {
   const t = useTheme(); const navigation = useNavigation<NativeStackNavigationProp<RootStackParams>>();
@@ -50,6 +50,8 @@ export function LocalMemoryScreen() {
   const [hygieneReviewOpen, setHygieneReviewOpen] = useState(false);
   const [hygieneExcluded, setHygieneExcluded] = useState<string[]>([]);
   const [hygienePreview, setHygienePreview] = useState<MemoryReviewBatchPreview | null>(null);
+  const [hygieneAction, setHygieneAction] = useState<MemoryReviewAction>("archive");
+  const [hygieneConfirm, setHygieneConfirm] = useState(false);
   const hygieneGeneration = useRef(0);
   const [undo, setUndo] = useState("");
   const [search, setSearch] = useState(""); const [term, setTerm] = useState("");
@@ -81,13 +83,13 @@ export function LocalMemoryScreen() {
   /** Read-only review of current selected versions. There is no new action
    * writer; normal note actions still require their own confirmation.
    */
-  async function inspectHygiene(excluded: string[]) {
+  async function inspectHygiene(excluded: string[], action:MemoryReviewAction=hygieneAction) {
     if (!repository.current || busy) return;
     const token = ++hygieneGeneration.current, request = generation.current;
-    setBusy(true); setError(""); setHygienePreview(null);
+    setBusy(true); setError(""); setHygienePreview(null); setHygieneConfirm(false);
     try {
       const data = await repository.current.hygiene().previewWithExclusions(
-        selectedNotes.map(note=>({id:note.id,recordVersion:note.record_version})),excluded,"archive");
+        selectedNotes.map(note=>({id:note.id,recordVersion:note.record_version})),excluded,action);
       if(token===hygieneGeneration.current && request===generation.current)
         setHygienePreview(data);
     } catch(e) {
@@ -99,7 +101,36 @@ export function LocalMemoryScreen() {
   }
   function closeHygiene(){
     hygieneGeneration.current++;
-    setHygieneReviewOpen(false);setHygieneExcluded([]);setHygienePreview(null);setBusy(false);
+    setHygieneReviewOpen(false);setHygieneExcluded([]);setHygienePreview(null);setHygieneConfirm(false);setBusy(false);
+  }
+  /** Reuse changeNotes+undoNotes. No additional cleanup writer, no purge. */
+  async function applyHygiene(){
+    if(!repository.current||busy||!hygieneConfirm||!hygienePreview||
+       hygienePreview.action!==hygieneAction||!hygienePreview.eligibleIds.length)return;
+    const preview=hygienePreview, request=generation.current, token=++hygieneGeneration.current;
+    const included=preview.included.filter(x=>x.eligible);
+    // The selection must still match the preview. The DB transaction checks
+    // every record version, status, policy CAS and privacy before any write.
+    if(preview.selectedCount!==selectedNotes.length ||
+       included.some(x=>!selectedNotes.some(n=>n.id===x.id&&n.record_version===x.expectedRecordVersion))){
+      setError("Список изменился. Повторите проверку.");setHygieneConfirm(false);return;
+    }
+    setBusy(true);setError("");
+    try{
+      const operation=await repository.current.changeNotes(hygieneAction,
+        included.map(x=>({id:x.id,record_version:x.expectedRecordVersion})),undefined,
+        {expectedPreferences:included.map(x=>({id:x.id,preferenceVersion:x.expectedPreferenceVersion}))});
+      if(token===hygieneGeneration.current&&request===generation.current){
+        setUndo(operation);setHygieneReviewOpen(false);setHygieneExcluded([]);
+        setHygienePreview(null);setHygieneConfirm(false);
+        setSelectedIds([]);setSelecting(false);setRetry(n=>n+1);
+        if(profile)scheduleVectors(profile);
+      }
+    }catch(e){
+      if(token===hygieneGeneration.current&&request===generation.current){
+        setError(memoryErrorMessage(e));setHygieneConfirm(false);setHygienePreview(null);
+      }
+    }finally{if(token===hygieneGeneration.current)setBusy(false);}
   }
   async function act(action: NoteAction, target?: string) {
     if (!repository.current || busy) return;
@@ -110,7 +141,7 @@ export function LocalMemoryScreen() {
       if (profile) scheduleVectors(profile);
     } catch (e) { setError(memoryErrorMessage(e)); } finally { setBusy(false); }
   }
-  useEffect(() => { setSelectedIds([]); setSelecting(false); setActionsOpen(false); setConfirmation(null); setNotes([]); setContextNote(null); setMoveOpen(false); setMergeOpen(false); hygieneGeneration.current++; setHygieneReviewOpen(false); setHygieneExcluded([]); setHygienePreview(null); }, [profile, collectionId, term, status]);
+  useEffect(() => { setSelectedIds([]); setSelecting(false); setActionsOpen(false); setConfirmation(null); setNotes([]); setContextNote(null); setMoveOpen(false); setMergeOpen(false); hygieneGeneration.current++; setHygieneReviewOpen(false); setHygieneExcluded([]); setHygienePreview(null); setHygieneConfirm(false); setHygieneAction("archive"); }, [profile, collectionId, term, status]);
   function openAll() { setStatus("active"); setCollectionId(undefined); setSearch(""); setTerm(""); setSelectedIds([]); setSelecting(false); }
   function openStatus(value: typeof status) { openAll(); setStatus(value); setMenuOpen(false); }
   const cancelSelection = useCallback(() => {
@@ -258,7 +289,7 @@ export function LocalMemoryScreen() {
           {selectedNotes.length >= 2 && status === "active" ? <Pressable
             disabled={busy} accessibilityRole="button" accessibilityLabel="Проверить последствия групповой ревизии"
             style={actionButton} onPress={() => {
-              setActionsOpen(false);setHygieneExcluded([]);setHygienePreview(null);
+              setActionsOpen(false);setHygieneExcluded([]);setHygienePreview(null);setHygieneAction("archive");setHygieneConfirm(false);
               setHygieneReviewOpen(true);void inspectHygiene([]);
             }}>
             <Text style={{ color:t.secondary }}>Проверить группу и исключения</Text>
@@ -272,15 +303,24 @@ export function LocalMemoryScreen() {
     <BottomSheet visible={hygieneReviewOpen && selectedNotes.length>=2}
       title="Предпросмотр групповой ревизии" onClose={closeHygiene}>
       <Text style={{color:t.text}}>
-        Только предварительная проверка. Ничего не меняется и не удаляется.
-        Можно исключить любую запись.
+        Сначала проверьте последствия, затем подтвердите действие. Можно исключить любую запись.
+        Закреплённые, отложенные и закрытые материалы не меняются.
       </Text>
+      <View style={{flexDirection:"row",flexWrap:"wrap",gap:8}}>
+        {(["archive","trash"] as const).map(value=><Pressable key={value}
+          accessibilityRole="button" accessibilityLabel={value==="archive"?"Ревизия: в архив":"Ревизия: в корзину"}
+          accessibilityState={{selected:hygieneAction===value,disabled:busy}} disabled={busy}
+          style={{...actionButton,flexGrow:1,backgroundColor:hygieneAction===value?t.soft:t.panel}}
+          onPress={()=>{setHygieneAction(value);setHygieneConfirm(false);void inspectHygiene(hygieneExcluded,value);}}>
+          <Text style={{color:t.text}}>{value==="archive"?"В архив":"В корзину"}</Text>
+        </Pressable>)}
+      </View>
       {busy?<ActivityIndicator accessibilityLabel="Проверяю последствия для памяти" color={t.secondary}/>:null}
       <Text accessibilityLiveRegion="polite" style={{color:t.muted}}>
         {hygienePreview?
           "Выбрано: "+hygienePreview.selectedCount+
           " · Исключено: "+hygienePreview.excludedIds.length+
-          " · Можно предложить в архив: "+hygienePreview.eligibleIds.length+
+          " · Можно "+(hygieneAction==="archive"?"архивировать":"переместить в корзину")+": "+hygienePreview.eligibleIds.length+
           " · Требуют проверки: "+hygienePreview.blockedIds.length:"Проверка выбранных записей"}
       </Text>
       <Text style={{color:t.muted,fontSize:13}}>
@@ -311,9 +351,30 @@ export function LocalMemoryScreen() {
       })}
       {error?<Text accessibilityRole="alert" style={{color:t.err}}>{error}</Text>:null}
       <Text style={{color:t.muted}}>
-        Для архива, корзины или отмены используется отдельное явное действие.
-        Предпросмотр ничего не применяет автоматически.
+        Архив и корзина не удаляют оригиналы навсегда; обратимое действие можно отменить.
+        Ранее экспортированные резервные копии не изменятся. Заблокированные элементы не затрагиваются.
       </Text>
+      {hygienePreview?.eligibleIds.length && !busy ?
+        (hygieneConfirm ? <>
+          <Text accessibilityRole="alert" style={{color:t.text}}>
+            Подтвердите {hygieneAction==="archive"?"архивирование":"перемещение в корзину"}:
+            {hygienePreview.eligibleIds.length} записей. Исключённые и заблокированные останутся без изменений.
+          </Text>
+          <Pressable accessibilityRole="button" accessibilityLabel="Подтвердить групповое действие памяти"
+            style={actionButton} onPress={()=>void applyHygiene()}>
+            <Text style={{color:hygieneAction==="trash"?t.err:t.secondary}}>
+              {hygieneAction==="archive"?"Подтвердить архивирование":"Подтвердить перемещение в корзину"}
+            </Text>
+          </Pressable>
+          <Pressable accessibilityRole="button" accessibilityLabel="Отмена подтверждения группового действия"
+            style={actionButton} onPress={()=>setHygieneConfirm(false)}><Text style={{color:t.secondary}}>Назад к проверке</Text></Pressable>
+        </> : <Pressable accessibilityRole="button"
+          accessibilityLabel={hygieneAction==="archive"?"Продолжить архивирование группы":"Продолжить перемещение группы в корзину"}
+          style={actionButton} onPress={()=>setHygieneConfirm(true)}>
+          <Text style={{color:hygieneAction==="trash"?t.err:t.secondary}}>
+            {hygieneAction==="archive"?"Архивировать":"В корзину"} · {hygienePreview.eligibleIds.length}
+          </Text>
+        </Pressable>) : null}
       <Pressable accessibilityRole="button" accessibilityLabel="Закрыть предпросмотр без изменений"
         style={button} onPress={closeHygiene}>
         <Text style={{color:t.secondary}}>Закрыть без изменений</Text>
