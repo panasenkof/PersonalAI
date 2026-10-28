@@ -6,11 +6,11 @@ import type * as SQLite from "expo-sqlite";
 
 import { openLocalMemory, withLocalMemoryDatabase } from "./storage";
 import { withUnlockedTransaction } from "./transaction";
-import { stageTemporalCandidateWithReview, listTemporalKnowledgeHistory } from "./temporal-store";
+import { stageTemporalCandidateWithReview, listTemporalKnowledgeHistory, listTemporalStateCandidatesAtDate } from "./temporal-store";
 import { listTemporalReviewInbox as readTemporalReviewInbox } from "./temporal-review-inbox";
 import { decideTemporalReview, undoTemporalReview } from "./temporal-decisions";
 import type { TemporalClaimCandidate } from "./temporal-claims";
-import type { TemporalHistoryQuery } from "./temporal-store";
+import type { TemporalHistoryQuery, TemporalAtDateQuery } from "./temporal-store";
 import type { TemporalInboxQuery } from "./temporal-review-inbox";
 import type { TemporalDecisionRequest, TemporalDecisionExpected } from "./temporal-decisions";
 import { defaultKind, indexEntity, isMemoryKind, normalizeAlias } from "./search-index";
@@ -104,6 +104,10 @@ export class SqliteMemoryRepository implements MemoryRepository {
   }
   undoTemporalChange(request: TemporalDecisionExpected & { decisionId: string }) {
     return undoTemporalReview(this.db, request);
+  }
+  /** As-of VALID date is candidate-only; knowledge snapshot reconstruction is separate. */
+  temporalCandidatesAtDate(query: TemporalAtDateQuery) {
+    return listTemporalStateCandidatesAtDate(this.db, query);
   }
   /** History is explicitly labeled candidate/unconfirmed, not "current". */
   temporalKnowledgeHistory(query: TemporalHistoryQuery) {
