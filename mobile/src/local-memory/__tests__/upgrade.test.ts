@@ -958,6 +958,94 @@ test("T3b1 valid-date candidates keep historical and current possibilities separ
   expect(db.prepare("SELECT COUNT(*) AS n FROM memory_temporal_decisions").get().n).toBe(0);
 });
 
+
+test("TIME-02/TIME-08/SEARCH-03: knowledge cutoff and valid date are independent and evidence is not backdated",async()=>{
+  await openLocalMemory("guest");
+  const db=mockConnections[0].sqlite,repo=await localMemoryRepository("guest");
+  db.prepare("INSERT INTO memory_collections(id,name,slug,sensitivity,created_at) VALUES ('jobs','Работа','jobs','standard','now')").run();
+  for(const id of ["early","late","private"]){
+    db.prepare("INSERT INTO memory_entities(id,collection_id,domain,payload_json,created_at,updated_at) VALUES (?,'jobs','notes','{}','now','now')").run(id);
+  }
+  const date=(normalized:string):import("../temporal-claims").TemporalBound=>({
+    normalized,precision:"day",raw:normalized,anchorDate:null,sourceTimeZone:null,
+  });
+  const make=(id:string,value:string,recordedAt:string,validDate:string,
+    context="employment.primary"):import("../temporal-claims").TemporalClaimCandidate=>({
+    subjectId:"worker-1",predicate:"employment",context,value,
+    recordedAt,kind:"state",modality:"asserted",negated:false,cardinality:"single",
+    occurredOrStarted:date(validDate),ended:null,endConfirmed:false,
+    evidence:{entityId:id,recordVersion:1,quote:"Работаю в "+value,origin:"direct"},
+  });
+  const early=await repo.stageTypedTemporalFact(make("early","Завод А",
+    "2026-01-15T10:00:00.000Z","2020-01-01"));
+  const late=await repo.stageTypedTemporalFact(make("late","Компания Б",
+    "2026-10-27T10:00:00.000Z","2025-01-01"));
+  // Test uses synthetic evidence timestamps: the claim's asserted knowledge
+  // time is not sufficient until its source witness has actually been stored.
+  db.prepare("UPDATE memory_temporal_evidence SET created_at=? WHERE claim_id=?")
+    .run("2026-02-01T10:00:00.000Z",early.claimId);
+  db.prepare("UPDATE memory_temporal_evidence SET created_at=? WHERE claim_id=?")
+    .run("2026-10-28T11:00:00.000Z",late.claimId);
+  const q={subjectId:"worker-1",collectionId:"jobs",predicate:"employment",
+    context:"employment.primary",validDate:"2025-06-01"};
+  const june=await repo.temporalCandidatesAtDate({...q,knowledgeAt:"2026-06-01T10:00:00.000Z"});
+  expect(june.items.map(x=>x.claim.value)).toEqual(["Завод А"]);
+  expect(june).toMatchObject({knowledgeAt:"2026-06-01T10:00:00.000Z",
+    verificationScope:"current_source_candidates_only"});
+  expect(june.items[0]).toMatchObject({verification:"candidate_unconfirmed"});
+  const october=await repo.temporalCandidatesAtDate({...q,knowledgeAt:"2026-10-27T12:00:00.000Z"});
+  expect(october.items.map(x=>x.claim.value)).toEqual(["Завод А"]);
+  const november=await repo.temporalCandidatesAtDate({...q,knowledgeAt:"2026-11-01T00:00:00.000Z"});
+  expect(new Set(november.items.map(x=>x.claim.value)))
+    .toEqual(new Set(["Компания Б","Завод А"]));
+  expect(november.items.find(x=>x.claim.value==="Компания Б")?.timeFit).toBe("potentially_applicable");
+  expect(november.items.every(x=>x.verification==="candidate_unconfirmed")).toBe(true);
+  expect((await repo.temporalCandidatesAtDate({...q,validDate:"2019-01-01",
+    knowledgeAt:"2026-11-01T00:00:00.000Z"})).items.every(x=>x.timeFit==="outside_date")).toBe(true);
+  await expect(repo.temporalCandidatesAtDate({...q,knowledgeAt:"2026-02-30T12:00:00.000Z"}))
+    .rejects.toThrow("temporal_query_knowledge_time_invalid");
+  db.prepare("UPDATE memory_entities SET sensitivity='secret' WHERE id='early'").run();
+  expect((await repo.temporalCandidatesAtDate({...q,knowledgeAt:"2026-06-01T10:00:00.000Z"})).items)
+    .toEqual([]);
+  expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+});
+
+test("CAR-01/MED-02/DOC-03: events, measurements and archived content keep separate recorded histories",async()=>{
+  await openLocalMemory("guest");
+  const db=mockConnections[0].sqlite,repo=await localMemoryRepository("guest");
+  db.prepare("INSERT INTO memory_collections(id,name,slug,sensitivity,created_at) VALUES ('records','Источники','records','standard','now')").run();
+  const make=(id:string,subject:string,predicate:string,value:string,kind:"event"|"observation",
+    valid:string,recordedAt:string):import("../temporal-claims").TemporalClaimCandidate=>({
+    subjectId:subject,predicate,context:"history",value,kind,
+    recordedAt,modality:"asserted",negated:false,cardinality:"multiple",
+    occurredOrStarted:{normalized:valid,precision:"day",raw:valid,
+      anchorDate:null,sourceTimeZone:null},
+    ended:null,endConfirmed:false,
+    evidence:{entityId:id,recordVersion:1,quote:value,origin:"direct"},
+  });
+  const entries=[
+    ["car-2025","auto-1","sparkplug_replaced","Замена всех свечей","event","2025-04-01","2025-04-02T10:00:00.000Z"],
+    ["car-2023","auto-1","sparkplug_replaced","Замена одной свечи","event","2023-04-01","2026-10-27T10:00:00.000Z"],
+    ["med-2026","patient-1","blood_glucose","Глюкоза 5.2 ммоль/л","observation","2026-04-01","2026-04-03T10:00:00.000Z"],
+    ["med-2025","patient-1","blood_glucose","Глюкоза 87 мг/дл","observation","2025-04-01","2026-10-28T10:00:00.000Z"],
+  ] as const;
+  for(const [id,subject,predicate,value,kind,valid,recordedAt] of entries){
+    db.prepare("INSERT INTO memory_entities(id,collection_id,domain,payload_json,created_at,updated_at) VALUES (?,'records','notes','{}','now','now')").run(id);
+    await repo.stageTypedTemporalFact(make(id,subject,predicate,value,kind,valid,recordedAt));
+  }
+  const repairs=await repo.temporalKnowledgeHistory({subjectId:"auto-1",collectionId:"records",mode:"events"});
+  expect(repairs.items).toHaveLength(2);
+  expect(repairs.items.map(x=>x.claim.value)).toEqual(["Замена одной свечи","Замена всех свечей"]);
+  expect(repairs.items.map(x=>x.claim.occurredOrStarted?.normalized))
+    .toEqual(["2023-04-01","2025-04-01"]);
+  const labs=await repo.temporalKnowledgeHistory({subjectId:"patient-1",collectionId:"records",mode:"all"});
+  expect(labs.items.map(x=>x.claim.value))
+    .toEqual(["Глюкоза 87 мг/дл","Глюкоза 5.2 ммоль/л"]);
+  expect(labs.items.every(x=>x.verification==="candidate_unconfirmed")).toBe(true);
+  expect(labs.items[0].claim.value).not.toBe(labs.items[1].claim.value);
+  expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+});
+
 test("T3b1 unknown/approximate dates and broad boundaries are never promoted to a precise current fact",async()=>{
   const {temporalFitAtDate}=require("../temporal-store");
   const bound=(normalized:string|null,precision:"day"|"year"|"month"|"unknown"|"approximate"
