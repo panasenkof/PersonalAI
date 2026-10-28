@@ -135,3 +135,57 @@ test("rejects malformed batch, invalid policy/date, and closed application sessi
   await expect(review.setPreference({ id: n.id, recordVersion: 1 }, 0, "pinned", null))
     .rejects.toBeInstanceOf(MemoryAccessError);
 });
+
+test("CLEAN-05/CLEAN-07/SAVE-04: review 25 sources with exclusions, guards and read-only byte impact",async()=>{
+  const col=await repo.createCollection({name:"Архив для просмотра",slug:"archive-review",sensitivity:"standard"});
+  const notes=[];
+  for(let i=0;i<25;i++){
+    notes.push(await note(i<15?"Видео посмотреть позже "+i:"Сохранённая статья "+i,col.id));
+  }
+  // Medical and pinned documents remain untouched: the preview records
+  // blockers rather than converting age or MIME into an auto-delete decision.
+  await review.setPreference({id:notes[3].id,recordVersion:1},0,"pinned",null);
+  await review.setPreference({id:notes[4].id,recordVersion:1},0,"never_suggest",null);
+  const before=Number(native.sqlite.prepare("SELECT count(*) AS n FROM memory_entities").get().n);
+  const excluded=[notes[0].id,notes[1].id,notes[2].id];
+  const selection=notes.map(n=>({id:n.id,recordVersion:n.record_version}));
+  const preview=await review.previewWithExclusions(selection,excluded,"archive");
+  expect(preview.selectedCount).toBe(25);
+  expect(preview.excludedIds).toEqual(excluded);
+  expect(preview.included.map(x=>x.id)).not.toContain(notes[0].id);
+  expect(preview.included).toHaveLength(22);
+  expect(preview.blockedIds).toEqual([notes[3].id,notes[4].id]);
+  expect(preview.eligibleIds).toHaveLength(20);
+  expect(preview.canPurgeOriginals).toBe(false);
+  expect(preview.originalBytesAtRisk).toBe(0);
+  expect(native.sqlite.prepare("SELECT count(*) AS n FROM memory_entities").get().n).toBe(before);
+  expect(native.sqlite.prepare("SELECT count(*) AS n FROM memory_revisions").get().n).toBe(0);
+  expect((await repo.entity(notes[3].id))?.record_status).toBe("active");
+  expect(native.sqlite.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+});
+
+test("CLEAN-01/CLEAN-04/SEC-04: all excluded is a valid no-op; malformed exclusion fails closed",async()=>{
+  const col=await repo.createCollection({name:"Материалы",slug:"review-materials"});
+  const n1=await note("Медицинский документ 2018",col.id),n2=await note("Видео 2021",col.id);
+  const targets=[{id:n1.id,recordVersion:1},{id:n2.id,recordVersion:1}];
+  const preview=await review.previewWithExclusions(targets,[n2.id,n1.id],"trash");
+  expect(preview).toMatchObject({
+    action:"trash",selectedCount:2,excludedIds:[n1.id,n2.id],
+    included:[],eligibleIds:[],blockedIds:[],originalBytesAtRisk:0,
+    canPurgeOriginals:false,
+  });
+  await expect(review.previewWithExclusions(targets,["unknown"],"trash"))
+    .rejects.toThrow("invalid_review_exclusion");
+  await expect(review.previewWithExclusions(targets,[n1.id,n1.id],"trash"))
+    .rejects.toThrow("invalid_review_selection");
+  await expect(review.previewWithExclusions(targets.concat(targets),[],"archive"))
+    .rejects.toThrow("invalid_review_selection");
+  // A changed source is returned as blocked, never silently auto-accepted.
+  await repo.reviseEntity(n1.id,1,{body:"Исправленный медицинский документ"},"Исправление");
+  const stale=await review.previewWithExclusions(targets,[],"archive");
+  expect(stale.blockedIds).toContain(n1.id);
+  expect(stale.included.find(x=>x.id===n1.id)?.reasons).toContain("stale_record_version");
+  revokeLocalMemorySession();
+  await expect(review.previewWithExclusions(targets,[],"trash"))
+    .rejects.toBeInstanceOf(MemoryAccessError);
+});

@@ -39,6 +39,21 @@ export type MemoryReviewImpact = {
   canPurgeOriginals: false;
 };
 
+/** Preview-only user selection. Never a background cleanup action or purge. */
+export type MemoryReviewBatchPreview={
+  action:MemoryReviewAction;
+  selectedCount:number;
+  excludedIds:string[];
+  included:MemoryReviewImpact[];
+  /** Only currently eligible source versions; caller MUST redo CAS before apply. */
+  eligibleIds:string[];
+  blockedIds:string[];
+  /** Estimated attached original bytes AFFECTED, not reclaimable disk bytes. */
+  originalBytesAtRisk:number;
+  /** This method cannot authorize permanent deletion. */
+  canPurgeOriginals:false;
+};
+
 const EMPTY_DEPENDENCIES = {
   attachments: 0, attachmentBytes: 0, observations: 0,
   inboundRelations: 0, outboundRelations: 0, revisions: 0,
@@ -130,6 +145,42 @@ export class MemoryHygieneService {
     });
     if (!result) throw new Error("review_preference_not_committed");
     return result;
+  }
+
+  /**
+   * CLEAN-07: one bounded preview with explicit per-item exclusions.
+   * Reuses the one dryRun eligibility/impact reader, and does NOT introduce
+   * another decision path, deletion engine or durable proposal table.
+   * C1 is not an apply permission: record versions must be rechecked there.
+   */
+  async previewWithExclusions(
+    targets: MemoryReviewTarget[], excludedIds:string[], action:MemoryReviewAction,
+  ):Promise<MemoryReviewBatchPreview>{
+    ensureUnlocked();
+    if(!Array.isArray(targets)||!Array.isArray(excludedIds)||
+       targets.length<1||targets.length>100||
+       targets.some(t=>!t||typeof t.id!=="string"||!t.id.trim()||
+         !Number.isSafeInteger(t.recordVersion)||t.recordVersion<1)||
+       new Set(targets.map(t=>t.id)).size!==targets.length||
+       excludedIds.some(id=>typeof id!=="string"||!id.trim())||
+       new Set(excludedIds).size!==excludedIds.length)
+      throw new Error("invalid_review_selection");
+    if(action!=="archive"&&action!=="trash")throw new Error("invalid_review_action");
+    const all=new Set(targets.map(x=>x.id));
+    if(excludedIds.some(id=>!all.has(id)))throw new Error("invalid_review_exclusion");
+    const excluded=new Set(excludedIds);
+    const chosen=targets.filter(t=>!excluded.has(t.id));
+    // All excluded is a legitimate preview: no reads/writes and no proposal.
+    const included=chosen.length?await this.dryRun(chosen,action):[];
+    ensureUnlocked();
+    return {
+      action,selectedCount:targets.length,
+      excludedIds:targets.filter(t=>excluded.has(t.id)).map(t=>t.id),
+      included,eligibleIds:included.filter(x=>x.eligible).map(x=>x.id),
+      blockedIds:included.filter(x=>!x.eligible).map(x=>x.id),
+      originalBytesAtRisk:included.reduce((n,x)=>n+x.dependencies.attachmentBytes,0),
+      canPurgeOriginals:false,
+    };
   }
 
   /** Bounded, read-only impact. Never used as permission to hard-delete. */
