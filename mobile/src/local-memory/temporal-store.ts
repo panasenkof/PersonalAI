@@ -309,3 +309,143 @@ export async function listTemporalKnowledgeHistory(
       ? { recordedAt:last.knowledge_recorded_at,claimId:last.id } : null,
   };
 }
+
+
+/**
+ * №72.3/T3b1: query typed source-backed state *candidates* for a VALID date.
+ * This does not reconstruct "what PersAI knew on that date": knowledge time
+ * remains recordedAt, and decision history needs its own snapshot read.
+ * Neither an open state nor an accepted end makes the incoming claim true.
+ */
+export type TemporalAtDateFit = "potentially_applicable" | "boundary_uncertain" | "outside_date";
+export type TemporalAtDateQuery = {
+  subjectId: string;
+  collectionId: string;
+  predicate: string;
+  context: string;
+  validDate: string;
+  limit?: number;
+  before?: TemporalHistoryCursor;
+};
+export type TemporalAtDateItem = TemporalHistoryItem & { timeFit: TemporalAtDateFit };
+export type TemporalAtDatePage = {
+  items: TemporalAtDateItem[];
+  nextCursor: TemporalHistoryCursor | null;
+  /** More source-current candidates may exist beyond the requested page. */
+  partial: boolean;
+};
+
+function temporalValidDate(value: string): boolean {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year,month,day]=value.split("-").map(Number);
+  if (year<1000 || year>9999) return false;
+  const result=new Date(Date.UTC(year,month-1,day));
+  return result.toISOString().slice(0,10)===value;
+}
+function temporalUtcInstant(value: string): boolean {
+  if (typeof value !== "string" ||
+      !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) return false;
+  const parsed=Date.parse(value);
+  return Number.isFinite(parsed) && new Date(parsed).toISOString()===value;
+}
+function dateExtent(bound: TemporalBound | null): { first: string; last: string } | null {
+  if (!bound?.normalized) return null;
+  const raw=bound.normalized;
+  if (bound.precision==="day") return {first:raw,last:raw};
+  if (bound.precision==="year") return {first:raw+"-01-01",last:raw+"-12-31"};
+  if (bound.precision==="month") {
+    const [year,month]=raw.split("-").map(Number);
+    return {first:raw+"-01",last:raw+"-"+String(new Date(Date.UTC(year,month,0)).getUTCDate()).padStart(2,"0")};
+  }
+  return null;
+}
+
+/** Compare ranges without inventing a day for imprecise starts or ends. */
+export function temporalFitAtDate(
+  claim: TemporalClaimCandidate, validDate: string,
+): TemporalAtDateFit {
+  validateTemporalClaim(claim);
+  if (!temporalValidDate(validDate)) throw new Error("temporal_query_date_invalid");
+  if (claim.kind!=="state" || claim.modality!=="asserted" || claim.negated) {
+    return "outside_date";
+  }
+  const start=dateExtent(claim.occurredOrStarted);
+  const end=claim.endConfirmed ? dateExtent(claim.ended) : null;
+  if (start && validDate<start.first) return "outside_date";
+  if (end && validDate>end.last) return "outside_date";
+  // Unknown starts/ends and a year/month boundary may overlap or not.
+  if (!start || (start.first!==start.last && validDate<=start.last) ||
+      (claim.endConfirmed && (!end || (end.first!==end.last && validDate>=end.first)))) {
+    return "boundary_uncertain";
+  }
+  // Source is still a candidate. This means only "time bounds allow it",
+  // never that it is a user-approved current state.
+  return "potentially_applicable";
+}
+
+/** Source-revision/ACL-filtered, keyset-paged valid-time evidence.
+ *
+ * A SQL bound on predicate/context avoids silently missing relevant states
+ * due to a global top-N truncation. Caller must paginate for complete results.
+ */
+export async function listTemporalStateCandidatesAtDate(
+  db: ScanSQL, query: TemporalAtDateQuery,
+): Promise<TemporalAtDatePage> {
+  if (!query.subjectId?.trim() || !query.collectionId?.trim() ||
+      !query.predicate?.trim() || !query.context?.trim() ||
+      query.subjectId.length>256 || query.collectionId.length>256 ||
+      query.predicate.length>120 || query.context.length>120) {
+    throw new Error("temporal_query_scope_invalid");
+  }
+  if (!temporalValidDate(query.validDate)) throw new Error("temporal_query_date_invalid");
+  const limit=query.limit??20;
+  if (!Number.isSafeInteger(limit) || limit<1 || limit>50) {
+    throw new Error("temporal_query_limit_invalid");
+  }
+  if (query.before && (!query.before.claimId?.trim() ||
+      query.before.claimId.length>256 || !temporalUtcInstant(query.before.recordedAt))) {
+    throw new Error("temporal_query_cursor_invalid");
+  }
+  const where=[
+    "c.subject_id=?","c.predicate=?","c.context=?","c.temporal_kind='state'",
+    "c.modality='asserted'","c.negated=0",
+    "e.collection_id=?","col.sensitivity='standard'",
+    "e.sensitivity IN ('standard','inherit')","e.record_status='active'",
+    "e.record_version=c.source_record_version",
+  ];
+  const args:(string|number)[]=[
+    query.subjectId,query.predicate,query.context,query.collectionId,
+  ];
+  if (query.before) {
+    where.push("(c.knowledge_recorded_at<? OR (c.knowledge_recorded_at=? AND c.id<?))");
+    args.push(query.before.recordedAt,query.before.recordedAt,query.before.claimId);
+  }
+  args.push(limit+1);
+  const rows=await db.getAllAsync<ClaimRow>(
+    "SELECT c.*, ev.quote, ev.origin FROM memory_temporal_claims c "+
+    "JOIN memory_entities e ON e.id=c.entity_id "+
+    "JOIN memory_collections col ON col.id=e.collection_id "+
+    "JOIN memory_temporal_evidence ev ON ev.id=("+
+    "SELECT witness.id FROM memory_temporal_evidence witness "+
+    "WHERE witness.claim_id=c.id AND witness.entity_id=c.entity_id "+
+    "AND witness.source_record_version=c.source_record_version "+
+    "ORDER BY witness.created_at,witness.id LIMIT 1) "+
+    "WHERE "+where.join(" AND ")+" "+
+    "ORDER BY c.knowledge_recorded_at DESC,c.id DESC LIMIT ?",
+    args,
+  );
+  const visible=rows.slice(0,limit);
+  const items=visible.map(row=>{
+    const claim=fromRow(row);
+    return {claimId:row.id,claimVersion:row.claim_version,claim,
+      verification:"candidate_unconfirmed" as const,
+      timeFit:temporalFitAtDate(claim,query.validDate)};
+  });
+  const last=visible.at(-1);
+  return {
+    items,
+    nextCursor:rows.length>limit && last
+      ? {recordedAt:last.knowledge_recorded_at,claimId:last.id} : null,
+    partial:rows.length>limit,
+  };
+}
