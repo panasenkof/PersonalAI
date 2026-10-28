@@ -8,8 +8,19 @@ const mockReview={
   previous:{value:"Организация А",evidence:{entityId:"note-a",quote:"Работаю в А",recordVersion:1,origin:"direct"}},
   incoming:{value:"Организация Б",evidence:{entityId:"note-b",quote:"Работаю в Б",recordVersion:1,origin:"direct"}},
 };
+const mockRelation={
+  targetKind:"relation" as const,proposalId:"relation-1",
+  status:"pending" as const,proposalVersion:1,
+  sourceId:"me",sourceVersion:1,targetId:"maria",targetVersion:1,
+  kind:"has_colleague" as const,evidenceId:"note-rel",evidenceVersion:1,
+  evidenceQuote:"Мария — моя коллега",sourceTitle:"Я",targetTitle:"Мария",
+  evidenceTitle:"Запись о проекте",createdAt:"2026-10-28T12:00:00.000Z",
+};
 const mockRepo={
   temporalReviewInbox:jest.fn(async()=>({items:[mockReview],nextCursor:null})),
+  relationCandidateInbox:jest.fn(async()=>({items:[] as Array<typeof mockRelation>,nextCursor:null})),
+  decideRelationCandidate:jest.fn(async()=>({actionId:"relation-action",nextVersion:2,status:"accepted"})),
+  undoRelationCandidateDecision:jest.fn(async()=>({actionId:"undo-relation",nextVersion:3,status:"pending"})),
   decideTemporalChange:jest.fn(async()=>({decisionId:"decision-1",nextProposalVersion:2})),
   undoTemporalChange:jest.fn(async()=>({decisionId:"undo-1",nextProposalVersion:3})),
 };
@@ -38,6 +49,9 @@ jest.mock("../../theme",()=>({useTheme:()=>({
 beforeEach(()=>{
   jest.clearAllMocks();
   mockRepo.temporalReviewInbox.mockResolvedValue({items:[mockReview],nextCursor:null});
+  mockRepo.relationCandidateInbox.mockResolvedValue({items:[],nextCursor:null});
+  mockRepo.decideRelationCandidate.mockResolvedValue({actionId:"relation-action",nextVersion:2,status:"accepted"});
+  mockRepo.undoRelationCandidateDecision.mockResolvedValue({actionId:"undo-relation",nextVersion:3,status:"pending"});
   mockRepo.decideTemporalChange.mockResolvedValue({decisionId:"decision-1",nextProposalVersion:2});
   mockRepo.undoTemporalChange.mockResolvedValue({decisionId:"undo-1",nextProposalVersion:3});
   sessionListener=()=>{};
@@ -111,4 +125,34 @@ test("lock clears evidence immediately; no private text remains visible",async()
   act(()=>sessionListener(false));
   expect(ui.queryByText("Источник: «Работаю в А»")).toBeNull();
   expect(ui.getByText(/Память заблокирована/)).toBeTruthy();
+});
+
+test("one review screen shows the exact source-backed relation and user-only accept with undo",async()=>{
+  mockRepo.relationCandidateInbox.mockResolvedValue({items:[mockRelation],nextCursor:null});
+  const ui=render(<MemoryTemporalReviewScreen/>);
+  await waitFor(()=>ui.getByText("Источник: «Мария — моя коллега»"));
+  expect(ui.getByText("Возможные изменения состояния")).toBeTruthy();
+  expect(ui.getByText("Возможные связи")).toBeTruthy();
+  expect(ui.getByText("Возможная связь: коллега")).toBeTruthy();
+  fireEvent.press(ui.getByLabelText("Подтвердить связь relation-1"));
+  await waitFor(()=>expect(mockRepo.decideRelationCandidate).toHaveBeenCalledWith({
+    proposalId:"relation-1",expectedVersion:1,choice:"accept",userConfirmed:true,
+  }));
+  fireEvent.press(ui.getByLabelText("Отменить последнее решение памяти"));
+  await waitFor(()=>expect(mockRepo.undoRelationCandidateDecision).toHaveBeenCalledWith({
+    proposalId:"relation-1",expectedVersion:2,actionId:"relation-action",userConfirmed:true,
+  }));
+  expect(mockRepo.undoTemporalChange).not.toHaveBeenCalled();
+});
+test("unconfirmed relation reject persists as an explicit decision; lock clears all relation evidence",async()=>{
+  mockRepo.relationCandidateInbox.mockResolvedValue({items:[mockRelation],nextCursor:null});
+  const ui=render(<MemoryTemporalReviewScreen/>);
+  await waitFor(()=>ui.getByText("Источник: «Мария — моя коллега»"));
+  fireEvent.press(ui.getByLabelText("Не связывать relation-1"));
+  await waitFor(()=>expect(mockRepo.decideRelationCandidate).toHaveBeenCalledWith({
+    proposalId:"relation-1",expectedVersion:1,choice:"reject",userConfirmed:true,
+  }));
+  act(()=>sessionListener(false));
+  expect(ui.queryByText("Источник: «Мария — моя коллега»")).toBeNull();
+  expect(ui.queryByText("Человек: Я")).toBeNull();
 });

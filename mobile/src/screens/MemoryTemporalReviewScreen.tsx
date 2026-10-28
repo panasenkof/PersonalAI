@@ -6,6 +6,8 @@ import { useProfile } from "../profile/ProfileContext";
 import { localMemoryRepository } from "../local-memory/repository";
 import type { RootStackParams } from "../navigation";
 import type { TemporalInboxCursor, TemporalInboxItem } from "../local-memory/temporal-review-inbox";
+import type { RelationInboxCursor, RelationReviewCandidate, RelationCandidateExpected,
+  RelationCandidateReviewChoice } from "../local-memory/relation-evidence";
 import type { TemporalUserChoice, TemporalDecisionExpected } from "../local-memory/temporal-decisions";
 import type { TemporalBound } from "../local-memory/temporal-claims";
 import { onLocalMemorySessionChange } from "../local-memory/storage";
@@ -13,7 +15,9 @@ import { memoryErrorMessage } from "../local-memory/errors";
 import { useTheme } from "../theme";
 import { nebulaRadii, nebulaSpacing, nebulaTouch } from "../design/nebula/tokens";
 
-type UndoAction = TemporalDecisionExpected & { decisionId: string };
+type UndoAction =
+  | (TemporalDecisionExpected & { kind: "temporal"; decisionId: string })
+  | (RelationCandidateExpected & { kind: "relation"; actionId: string });
 /** Keep date-only semantics. This is a user-entered local date, not midnight UTC. */
 export function exactUserEndDate(value: string): TemporalBound | null {
   const input=value.trim();
@@ -30,12 +34,23 @@ const unknownUserEnd:TemporalBound={
   anchorDate:null,sourceTimeZone:null,
 };
 
+const RELATION_NAMES:Record<RelationReviewCandidate["kind"],string>={
+  has_sister:"сестра",has_brother:"брат",has_mother:"мать",has_father:"отец",
+  has_spouse:"супруг или супруга",has_child:"ребёнок",has_friend:"друг",
+  has_colleague:"коллега",has_doctor:"врач",has_teacher:"учитель",
+  participant_of:"участник разговора",
+};
+
 export function MemoryTemporalReviewScreen() {
   const t=useTheme(),profile=useProfile();
   const route=useRoute<RouteProp<RootStackParams,"MemoryTemporalReview">>();
   const collectionId=route.params.collectionId;
   const [items,setItems]=useState<TemporalInboxItem[]>([]);
   const [cursor,setCursor]=useState<TemporalInboxCursor|null>(null);
+  // One existing screen for both review domains; NO additional source of
+  // truth. Each original repository inbox owns its own stable cursor.
+  const [relations,setRelations]=useState<RelationReviewCandidate[]>([]);
+  const [relationCursor,setRelationCursor]=useState<RelationInboxCursor|null>(null);
   const [loading,setLoading]=useState(true),[busy,setBusy]=useState(false);
   const [error,setError]=useState(""),[notice,setNotice]=useState("");
   const [revision,setRevision]=useState(0);
@@ -46,7 +61,7 @@ export function MemoryTemporalReviewScreen() {
 
   useEffect(()=>onLocalMemorySessionChange(unlocked=>{
     if(!unlocked) {
-      generation.current++;setItems([]);setCursor(null);setUndo(null);
+      generation.current++;setItems([]);setCursor(null);setRelations([]);setRelationCursor(null);setUndo(null);
       setConfirming(null);setDateText("");setNotice("");
       setError("Память заблокирована. Разблокируйте приложение, чтобы увидеть предложения.");
     } else { setRevision(n=>n+1); }
@@ -54,10 +69,16 @@ export function MemoryTemporalReviewScreen() {
 
   useFocusEffect(useCallback(()=>{
     const request=++generation.current;
-    setLoading(true);setError("");setItems([]);setCursor(null);
+    setLoading(true);setError("");setItems([]);setCursor(null);setRelations([]);setRelationCursor(null);
     if(profile) void localMemoryRepository(profile)
-      .then(db=>db.temporalReviewInbox({collectionId,limit:20}))
-      .then(page=>{if(request===generation.current){setItems(page.items);setCursor(page.nextCursor);}})
+      .then(db=>Promise.all([
+        db.temporalReviewInbox({collectionId,limit:20}),
+        db.relationCandidateInbox({collectionId,limit:20}),
+      ]))
+      .then(([temporal,relation])=>{if(request===generation.current){
+        setItems(temporal.items);setCursor(temporal.nextCursor);
+        setRelations(relation.items);setRelationCursor(relation.nextCursor);
+      }})
       .catch(e=>{if(request===generation.current)setError(memoryErrorMessage(e));})
       .finally(()=>{if(request===generation.current)setLoading(false);});
     else {setLoading(false);setError("Память недоступна без профиля.");}
@@ -78,6 +99,41 @@ export function MemoryTemporalReviewScreen() {
     finally{if(request===generation.current)setBusy(false);}
   }
 
+  async function moreRelations() {
+    if(!profile||!relationCursor||busy||loading)return;
+    const request=generation.current,before=relationCursor;
+    setBusy(true);setError("");
+    try {
+      const db=await localMemoryRepository(profile);
+      const page=await db.relationCandidateInbox({collectionId,limit:20,before});
+      if(request!==generation.current)return;
+      setRelations(rows=>[...rows,...page.items.filter(x=>!rows.some(y=>y.proposalId===x.proposalId))]);
+      setRelationCursor(page.nextCursor);
+    }catch(e){if(request===generation.current)setError(memoryErrorMessage(e));}
+    finally{if(request===generation.current)setBusy(false);}
+  }
+
+  async function chooseRelation(item:RelationReviewCandidate,choice:RelationCandidateReviewChoice) {
+    if(!profile||busy)return;
+    const request=generation.current;setBusy(true);setError("");setNotice("");
+    try {
+      const db=await localMemoryRepository(profile);
+      const result=await db.decideRelationCandidate({
+        proposalId:item.proposalId,expectedVersion:item.proposalVersion,
+        choice,userConfirmed:true,
+      });
+      if(request!==generation.current)return;
+      setUndo({kind:"relation",proposalId:item.proposalId,
+        expectedVersion:result.nextVersion,actionId:result.actionId,userConfirmed:true});
+      setNotice(choice==="accept"?"Связь подтверждена с указанным источником. Можно отменить.": 
+        choice==="reject"?"Предложение отклонено и сохранено в истории.":"Рассмотрение связи отложено.");
+      setRevision(v=>v+1);
+    }catch(e){if(request===generation.current){
+      setNotice("Решение по связи не применено: "+memoryErrorMessage(e));
+      setRevision(v=>v+1);
+    }}finally{if(request===generation.current)setBusy(false);}
+  }
+
   async function choose(item:TemporalInboxItem,choice:TemporalUserChoice,end?:TemporalBound) {
     if(!profile||busy)return;
     const request=generation.current;setBusy(true);setError("");setNotice("");
@@ -91,7 +147,7 @@ export function MemoryTemporalReviewScreen() {
       });
       if(request!==generation.current)return;
       setUndo({
-        proposalId:item.proposalId,decisionId:result.decisionId,
+        kind:"temporal",proposalId:item.proposalId,decisionId:result.decisionId,
         expectedProposalVersion:result.nextProposalVersion,
         expectedPreviousClaimVersion:item.expectedPreviousClaimVersion+(choice==="accept"?1:0),
         expectedIncomingClaimVersion:item.expectedIncomingClaimVersion,
@@ -113,7 +169,16 @@ export function MemoryTemporalReviewScreen() {
     const request=generation.current;setBusy(true);setError("");
     try{
       const db=await localMemoryRepository(profile);
-      await db.undoTemporalChange(undo);
+      if(undo.kind==="temporal")await db.undoTemporalChange({
+        proposalId:undo.proposalId,decisionId:undo.decisionId,
+        expectedProposalVersion:undo.expectedProposalVersion,
+        expectedPreviousClaimVersion:undo.expectedPreviousClaimVersion,
+        expectedIncomingClaimVersion:undo.expectedIncomingClaimVersion,
+      });
+      else await db.undoRelationCandidateDecision({
+        proposalId:undo.proposalId,expectedVersion:undo.expectedVersion,
+        actionId:undo.actionId,userConfirmed:true,
+      });
       if(request!==generation.current)return;
       setUndo(null);setNotice("Последнее решение отменено; история изменений сохранена.");
       setRevision(n=>n+1);
@@ -130,7 +195,7 @@ export function MemoryTemporalReviewScreen() {
   return <ScrollView style={{flex:1,backgroundColor:t.bg}} keyboardShouldPersistTaps="handled"
     contentContainerStyle={{padding:nebulaSpacing.md,paddingBottom:32,gap:nebulaSpacing.md}}>
     <Text accessibilityRole="header" style={{color:t.text,fontSize:22,fontWeight:"800"}}>На проверке</Text>
-    <Text style={{color:t.muted,lineHeight:21}}>Здесь только возможные изменения в выбранной коллекции.
+    <Text style={{color:t.muted,lineHeight:21}}>Здесь возможные изменения состояния и новые связи в выбранной коллекции.
       Слова и даты взяты из источников. Ничего не изменяется без вашего действия.
       Закрытые и неподтверждённые источники не показываются.</Text>
     {notice?<Text accessibilityLiveRegion="polite" style={{color:t.secondary}}>{notice}</Text>:null}
@@ -140,8 +205,49 @@ export function MemoryTemporalReviewScreen() {
     </Pressable>:null}
     {error?<Text accessibilityRole="alert" style={{color:t.err}}>{error}</Text>:null}
     {loading?<ActivityIndicator accessibilityLabel="Загрузка предложений памяти" />:null}
-    {!loading&&!error&&items.length===0?<Text style={{color:t.muted}}>
+    {!loading&&!error&&items.length===0&&relations.length===0?<Text style={{color:t.muted}}>
       Предложений для этой коллекции пока нет.
+    </Text>:null}
+    {relations.length>0?<Text accessibilityRole="header" style={{color:t.text,fontSize:18,fontWeight:"700"}}>
+      Возможные связи
+    </Text>:null}
+    {relations.map(item=><View key={"relation:"+item.proposalId} style={{
+      borderRadius:nebulaRadii.card,borderWidth:1,borderColor:t.line,
+      backgroundColor:t.panel,padding:nebulaSpacing.md,gap:nebulaSpacing.sm,
+    }}>
+      <Text accessibilityRole="header" style={{fontSize:16,fontWeight:"700",color:t.text}}>
+        Возможная связь: {RELATION_NAMES[item.kind]}
+      </Text>
+      {item.status==="deferred"?<Text style={{color:t.muted}}>Отложено</Text>:null}
+      <Text style={{color:t.text,fontWeight:"600"}}>{item.kind==="participant_of"?"Разговор":"Человек"}: {item.sourceTitle||"Без названия"}</Text>
+      <Text style={{color:t.text,fontWeight:"600"}}>{item.kind==="participant_of"?"Участник":"Связан с"}: {item.targetTitle||"Без названия"}</Text>
+      <Text style={{color:t.muted}} numberOfLines={5}>Источник: «{item.evidenceQuote}»</Text>
+      <Text style={{color:t.muted,fontSize:12}}>
+        Предполагаемая связь не считается доказанной до вашего подтверждения.
+        Учитываются конкретные записи, а не совпадение имён.
+      </Text>
+      <View style={{flexDirection:"row",flexWrap:"wrap",gap:8}}>
+        <Pressable accessibilityRole="button" accessibilityLabel={"Подтвердить связь "+item.proposalId}
+          disabled={busy} style={action(busy)} onPress={()=>void chooseRelation(item,"accept")}>
+          <Text style={{color:t.secondary,fontWeight:"700"}}>Подтвердить связь</Text>
+        </Pressable>
+        {item.status!=="deferred"?<Pressable accessibilityRole="button"
+          accessibilityLabel={"Отложить связь "+item.proposalId}
+          disabled={busy} style={action(busy)} onPress={()=>void chooseRelation(item,"defer")}>
+          <Text style={{color:t.text}}>Позже</Text>
+        </Pressable>:null}
+        <Pressable accessibilityRole="button" accessibilityLabel={"Не связывать "+item.proposalId}
+          disabled={busy} style={action(busy)} onPress={()=>void chooseRelation(item,"reject")}>
+          <Text style={{color:t.text}}>Не связывать</Text>
+        </Pressable>
+      </View>
+    </View>)}
+    {relationCursor?<Pressable accessibilityRole="button" accessibilityLabel="Показать ещё связи памяти"
+      disabled={busy||loading} style={action(busy||loading)} onPress={()=>void moreRelations()}>
+      <Text style={{color:t.secondary}}>Показать ещё связи</Text>
+    </Pressable>:null}
+    {items.length>0?<Text accessibilityRole="header" style={{color:t.text,fontSize:18,fontWeight:"700"}}>
+      Возможные изменения состояния
     </Text>:null}
     {items.map(item=><View key={item.proposalId} style={{
       borderRadius:nebulaRadii.card,borderWidth:1,borderColor:t.line,
