@@ -573,3 +573,74 @@ test("real SHA-256 model/tokenizer bytes identify incompatible vector spaces", a
   expect(await repo.saveVectors(spaceB, [{ ...item, vector }])).toBe(1);
   expect((await repo.vectorMatches(spaceB, vector)).length).toBe(1);
 });
+
+
+test("R1b: two independent user witnesses support the one canonical mother relationship",async()=>{
+  const fake=new FakeSqlite(),repo=new SqliteMemoryRepository(fake as never);
+  const c=await repo.createCollection({name:"Люди",slug:"people",sensitivity:"standard"});
+  const source=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"person",title:"Я",payload:{body:"Я"}});
+  const target=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"person",title:"Ирина",payload:{body:"Ирина"}});
+  const a=await repo.createEntity({collection_id:c.id,domain:"notes",payload:{body:"Ирина — моя мама"}});
+  const b=await repo.createEntity({collection_id:c.id,domain:"notes",payload:{body:"Мою маму зовут Ирина"}});
+  const req={sourceId:source.id,sourceVersion:1,targetId:target.id,targetVersion:1,
+    kind:"has_mother" as const,evidenceId:a.id,evidenceVersion:1,
+    evidenceQuote:"Ирина — моя мама",userConfirmed:true as const};
+  const first=await repo.confirmUserRelationProof(req);
+  const repeat=await repo.confirmUserRelationProof(req);
+  const second=await repo.confirmUserRelationProof({...req,evidenceId:b.id,
+    evidenceQuote:"Мою маму зовут Ирина"});
+  expect(first.added).toBe(true);expect(repeat).toEqual({...first,added:false});
+  expect(second.added).toBe(true);expect(second.relationId).toBe(first.relationId);
+  const proofs=await repo.currentConfirmedRelationProofs({sourceId:source.id,kind:"has_mother"});
+  expect(proofs.partial).toBe(false);expect(proofs.items).toHaveLength(2);
+  expect(new Set(proofs.items.map(v=>v.evidenceEntityId))).toEqual(new Set([a.id,b.id]));
+  expect((await fake.getFirstAsync<{n:number}>("SELECT count(*) AS n FROM memory_relations")).n).toBe(1);
+  await repo.reviseEntity(a.id,1,{body:"Исправлено: это другой человек"},"Исправил источник");
+  const surviving=await repo.currentConfirmedRelationProofs({sourceId:source.id,kind:"has_mother"});
+  expect(surviving.items).toHaveLength(1);expect(surviving.items[0].evidenceEntityId).toBe(b.id);
+  await repo.setEntityStatus(b.id,1,"archived");
+  expect((await repo.currentConfirmedRelationProofs({sourceId:source.id})).items).toEqual([]);
+});
+
+test("R1b: privacy and stale versions stop confirmation without creating even a legacy relation",async()=>{
+  const fake=new FakeSqlite(),repo=new SqliteMemoryRepository(fake as never);
+  const people=await repo.createCollection({name:"Люди",slug:"people",sensitivity:"standard"});
+  const hidden=await repo.createCollection({name:"Закрыто",slug:"hidden",sensitivity:"secret"});
+  const src=await repo.createEntity({collection_id:people.id,domain:"notes",kind:"person",title:"Пользователь",payload:{}});
+  const person=await repo.createEntity({collection_id:hidden.id,domain:"notes",kind:"person",title:"Доктор",payload:{}});
+  const ev=await repo.createEntity({collection_id:people.id,domain:"notes",payload:{body:"Мой врач — доктор"}});
+  const req={sourceId:src.id,sourceVersion:1,targetId:person.id,targetVersion:1,
+    evidenceId:ev.id,evidenceVersion:1,evidenceQuote:"Мой врач — доктор",
+    kind:"has_doctor" as const,userConfirmed:true as const};
+  await expect(repo.confirmUserRelationProof(req)).rejects.toThrow("relational_source_not_available_or_stale");
+  expect((await fake.getFirstAsync<{n:number}>("SELECT count(*) AS n FROM memory_relations")).n).toBe(0);
+  const visible=await repo.createEntity({collection_id:people.id,domain:"notes",kind:"person",payload:{}});
+  await expect(repo.confirmUserRelationProof({...req,targetId:visible.id,evidenceVersion:2}))
+    .rejects.toThrow("relational_source_not_available_or_stale");
+  await expect(repo.confirmUserRelationProof({...req,targetId:visible.id,evidenceQuote:"выдуманная цитата"}))
+    .rejects.toThrow("relational_evidence_quote_not_found");
+  expect((await fake.getFirstAsync<{n:number}>("SELECT count(*) AS n FROM memory_relations")).n).toBe(0);
+});
+
+test("R1b: explicit user action cannot infer participation from a mention or malformed endpoints",async()=>{
+  const fake=new FakeSqlite(),repo=new SqliteMemoryRepository(fake as never);
+  const col=await repo.createCollection({name:"Заметки",slug:"notes",sensitivity:"standard"});
+  const person=await repo.createEntity({collection_id:col.id,domain:"notes",kind:"person",payload:{body:"Артём"}});
+  const extra=await repo.createEntity({collection_id:col.id,domain:"notes",kind:"person",payload:{body:"Сергей"}});
+  const conversation=await repo.createEntity({collection_id:col.id,domain:"notes",kind:"note",payload:{body:"Мы с Артёмом говорили о Сергее"}});
+  const req={sourceId:conversation.id,sourceVersion:1,targetId:person.id,targetVersion:1,
+    evidenceId:conversation.id,evidenceVersion:1,evidenceQuote:"Мы с Артёмом говорили о Сергее",
+    kind:"participant_of" as const,userConfirmed:true as const};
+  await expect(repo.confirmUserRelationProof({...req,userConfirmed:false as never}))
+    .rejects.toThrow("relational_confirmation_invalid");
+  await expect(repo.confirmUserRelationProof({...req,targetId:conversation.id}))
+    .rejects.toThrow("relational_confirmation_invalid");
+  await expect(repo.confirmUserRelationProof({...req,kind:"has_sister" as never}))
+    .rejects.toThrow("relational_role_endpoints_invalid");
+  const confirmed=await repo.confirmUserRelationProof(req);
+  expect(confirmed.added).toBe(true);
+  // The other person mentioned in the same quote is NOT a participant.
+  expect((await repo.currentConfirmedRelationProofs({sourceId:conversation.id,kind:"participant_of"}))
+    .items.map(x=>x.targetEntityId)).toEqual([person.id]);
+  expect((await repo.currentConfirmedRelationProofs({sourceId:extra.id})).items).toEqual([]);
+});
