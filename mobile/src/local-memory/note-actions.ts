@@ -26,10 +26,18 @@ async function write(db: SQL, before: Row, after: Row, reason: string) {
   await indexEntity(db, before.id, timestamp);
 }
 /** One atomic operation; metadata and originals remain recoverable. */
-export async function changeNotes(db: SQL, action: NoteAction, selection: NoteSelection[], collectionId?: string): Promise<string> {
-  if (!selection.length || selection.length > 100 || new Set(selection.map(n => n.id)).size !== selection.length) throw new Error('Выберите от 1 до 100 разных записей.');
-  const batch = 'notes:' + action + ':' + Crypto.randomUUID();
-  await withUnlockedTransaction(db, async tx => {
+/** Sole note action mutation body for local direct changes and user-reviewed
+ * hygiene. Transaction ownership stays OUTSIDE; do not nest BEGIN IMMEDIATE.
+ * Callers must hold the existing unlocked SQLCipher transaction.
+ */
+export async function applyNoteActionInTransaction(
+  tx:SQL,action:NoteAction,selection:NoteSelection[],batch:string,collectionId?:string,
+):Promise<void>{
+  if (!selection.length || selection.length > 100 ||
+      new Set(selection.map(n=>n.id)).size!==selection.length ||
+      !batch.startsWith("notes:"+action+":"))
+    throw new Error("invalid_note_action_selection");
+
     const rows: Row[] = [];
     for (const selected of selection) {
       const row = await snapshot(tx, selected.id);
@@ -68,7 +76,17 @@ export async function changeNotes(db: SQL, action: NoteAction, selection: NoteSe
       after.payload_json = JSON.stringify(payload);
       await write(tx, before, after, batch);
     }
-  });
+
+}
+export async function changeNotes(
+  db: SQL,action:NoteAction,selection:NoteSelection[],collectionId?:string,
+):Promise<string>{
+  if (!selection.length || selection.length>100 ||
+      new Set(selection.map(n=>n.id)).size!==selection.length)
+    throw new Error("Выберите от 1 до 100 разных записей.");
+  const batch="notes:"+action+":"+Crypto.randomUUID();
+  await withUnlockedTransaction(db,tx=>applyNoteActionInTransaction(
+    tx,action,selection,batch,collectionId));
   return batch;
 }
 export async function undoNotes(db: SQL, batch: string): Promise<void> {
