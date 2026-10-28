@@ -45,6 +45,41 @@ jobs:
           # The Android SDK removed the obsolete "tools" package, which this
           # action still requests by default. Only install supported packages.
           packages: platform-tools
+      # AGP may try to download r27 during :expo-sqlite configuration.
+      # A transient truncated/invalid ZIP then fails the entire native build
+      # before any product code compiles. Install and verify independently.
+      - name: Install and verify required NDK (retry SDK transport only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          ndk_version="27.0.12077973"
+          test -n "$sdk_root"
+          sdkmanager="$(find "$sdk_root/cmdline-tools" -type f -path '*/bin/sdkmanager' | sort -V | tail -n 1)"
+          test -x "$sdkmanager"
+          ndk_path="$sdk_root/ndk/$ndk_version"
+          for attempt in 1 2 3; do
+            if test -s "$ndk_path/source.properties" &&
+               grep -q "^Pkg.Revision *= *$ndk_version" "$ndk_path/source.properties"; then
+              echo "Verified Android NDK $ndk_version"
+              break
+            fi
+            echo "Installing Android NDK $ndk_version, transport attempt $attempt/3"
+            rm -rf "$ndk_path"
+            if "$sdkmanager" --sdk_root="$sdk_root" "ndk;$ndk_version"; then
+              if test -s "$ndk_path/source.properties" &&
+                 grep -q "^Pkg.Revision *= *$ndk_version" "$ndk_path/source.properties"; then
+                echo "NDK verified after installation"
+                break
+              fi
+            fi
+            if test "$attempt" -eq 3; then
+              echo "::error::Unable to install verified NDK $ndk_version after three SDK transport attempts"
+              exit 1
+            fi
+            sleep $((attempt * 3))
+          done
+          test -s "$ndk_path/source.properties"
       - name: Cache verified ExecuTorch release downloads
         uses: actions/cache@v4
         with:
