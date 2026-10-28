@@ -3,7 +3,7 @@ import type { EnrichmentSnapshot } from "./enrichment-policy";
 import type { TemporalClaimCandidate } from "./temporal-claims";
 import type { TemporalHistoryQuery, TemporalHistoryPage, TemporalStagedReview, TemporalAtDateQuery, TemporalAtDatePage } from "./temporal-store";
 import type { ConfirmRelationInput, ConfirmRelationResult } from "./relation-evidence";
-import type { DirectPersonRelation, RelationProof } from "./relational-proof";
+import type { DirectPersonRelation, RelationProof, RelativeConversationResult } from "./relational-proof";
 import type { TemporalInboxQuery, TemporalInboxPage } from "./temporal-review-inbox";
 import type { TemporalDecisionRequest, TemporalDecisionExpected, TemporalDecisionResult } from "./temporal-decisions";
 export type { MemoryKind } from "./search-index";
@@ -84,6 +84,9 @@ export interface MemoryRepository {
   currentConfirmedRelationProofs(query: {
     sourceId: string; kind?: DirectPersonRelation | "participant_of"; limit?: number;
   }): Promise<{items: RelationProof[];partial: boolean}>;
+  confirmedRelativeConversationPaths(query: {
+    ownerPersonId: string; relationKind: DirectPersonRelation;
+  }): Promise<RelativeConversationResult>;
   linkEntities(sourceId: string, targetId: string, kind: string): Promise<RelationRecord>;
   relationsForEntity(id: string): Promise<RelationRecord[]>;
   revisions(type: "entity" | "observation", id: string): Promise<RevisionRecord[]>;

@@ -9,7 +9,7 @@ import { withUnlockedTransaction } from "./transaction";
 import { stageTemporalCandidateWithReview, listTemporalKnowledgeHistory, listTemporalStateCandidatesAtDate } from "./temporal-store";
 import { listTemporalReviewInbox as readTemporalReviewInbox } from "./temporal-review-inbox";
 import { decideTemporalReview, undoTemporalReview } from "./temporal-decisions";
-import { confirmUserRelationEvidence, listCurrentConfirmedRelationProofs } from "./relation-evidence";
+import { confirmUserRelationEvidence, listCurrentConfirmedRelationProofs, findCurrentRelativeConversationPaths } from "./relation-evidence";
 import type { ConfirmRelationInput } from "./relation-evidence";
 import type { DirectPersonRelation } from "./relational-proof";
 import type { TemporalClaimCandidate } from "./temporal-claims";
@@ -366,6 +366,11 @@ export class SqliteMemoryRepository implements MemoryRepository {
     return listCurrentConfirmedRelationProofs(this.db,query);
   }
 
+  confirmedRelativeConversationPaths(query: {
+    ownerPersonId: string; relationKind: DirectPersonRelation;
+  }) {
+    return findCurrentRelativeConversationPaths(this.db,query);
+  }
   async linkEntities(sourceId: string, targetId: string, kind: string): Promise<RelationRecord> {
     if (sourceId === targetId) throw new Error("self_relation_not_allowed");
     kindAllowed(kind);
