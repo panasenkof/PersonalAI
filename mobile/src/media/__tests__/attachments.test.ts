@@ -408,3 +408,69 @@ test("a forged page number on audio or non-monotonic PDF pages are rejected befo
   })).rejects.toThrow("invalid_recognition_segments");
   expect(sqlite.prepare("SELECT COUNT(*) AS n FROM memory_entities").get().n).toBe(0);
 });
+
+test("SEC-08/SEARCH-06/MEDIA-05: verified search original must recheck record revision and ACL at open",async()=>{
+  const id=await saveMediaNote("guest",{...input,sensitivity:"standard"});
+  const source=sqlite.prepare("SELECT id,record_version,collection_id FROM memory_entities WHERE id=?").get(id);
+  const attachment=sqlite.prepare("SELECT * FROM memory_attachments WHERE entity_id=?").get(id);
+  const locator:import("../../local-memory/types").VerifiedOriginalLocator={
+    attachmentId:attachment.id,recordId:id,recordVersion:source.record_version,
+    name:attachment.name,mime:attachment.mime,size:attachment.size,
+    kind:"image",metadataOnly:true,originalTime:null,originalPage:null,
+  };
+  const uri=await materializeAttachment("guest",attachment,undefined,locator);
+  expect(mockFiles.get(uri)?.length).toBe(attachment.size);
+  // A forged locator cannot bind another source or silently change MIME.
+  await expect(materializeAttachment("guest",attachment,undefined,
+    {...locator,recordId:"other-note"})).rejects.toThrow("memory_source_not_available_or_stale");
+  await expect(materializeAttachment("guest",attachment,undefined,
+    {...locator,mime:"audio/mpeg"})).rejects.toThrow("memory_source_not_available_or_stale");
+  sqlite.prepare("UPDATE memory_entities SET record_version=record_version+1 WHERE id=?").run(id);
+  await expect(materializeAttachment("guest",attachment,undefined,locator))
+    .rejects.toThrow("memory_source_not_available_or_stale");
+  sqlite.prepare("UPDATE memory_entities SET record_version=? WHERE id=?").run(source.record_version,id);
+  sqlite.prepare("UPDATE memory_entities SET sensitivity='secret' WHERE id=?").run(id);
+  await expect(materializeAttachment("guest",attachment,undefined,locator))
+    .rejects.toThrow("memory_source_not_available_or_stale");
+  sqlite.prepare("UPDATE memory_entities SET sensitivity='standard' WHERE id=?").run(id);
+  sqlite.prepare("UPDATE memory_collections SET sensitivity='secret' WHERE id=?").run(source.collection_id);
+  await expect(materializeAttachment("guest",attachment,undefined,locator))
+    .rejects.toThrow("memory_source_not_available_or_stale");
+  sqlite.prepare("UPDATE memory_collections SET sensitivity='standard' WHERE id=?").run(source.collection_id);
+  sqlite.prepare("UPDATE memory_entities SET record_status='trashed' WHERE id=?").run(id);
+  await expect(materializeAttachment("guest",attachment,undefined,locator))
+    .rejects.toThrow("memory_source_not_available_or_stale");
+  sqlite.prepare("UPDATE memory_entities SET record_status='active' WHERE id=?").run(id);
+  mockUnlocked=false;
+  await expect(materializeAttachment("guest",attachment,undefined,locator))
+    .rejects.toThrow("application_locked");
+  expect(sqlite.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+});
+
+test("SEC-08: verified original rejects an ACL change during decryption and discards plaintext preview",async()=>{
+  const id=await saveMediaNote("guest",{...input,sensitivity:"standard"});
+  const note=sqlite.prepare("SELECT id,record_version FROM memory_entities WHERE id=?").get(id);
+  const attachment=sqlite.prepare("SELECT * FROM memory_attachments WHERE entity_id=?").get(id);
+  const locator:import("../../local-memory/types").VerifiedOriginalLocator={
+    attachmentId:attachment.id,recordId:id,recordVersion:note.record_version,
+    name:attachment.name,mime:attachment.mime,size:attachment.size,
+    kind:"image",metadataOnly:true,originalTime:null,originalPage:null,
+  };
+  const before=[...mockFiles.keys()].filter(uri=>uri.includes("persai-previews")).length;
+  const old=mockDb.getFirstAsync;
+  let mutated=false;
+  mockDb.getFirstAsync=async(sql:string,args:any[])=>{
+    if(!mutated&&sql.includes("memory_attachment_parts")){
+      mutated=true;
+      sqlite.prepare("UPDATE memory_entities SET sensitivity='secret' WHERE id=?").run(id);
+    }
+    return old(sql,args);
+  };
+  try{
+    await expect(materializeAttachment("guest",attachment,undefined,locator))
+      .rejects.toThrow("memory_source_not_available_or_stale");
+  }finally{mockDb.getFirstAsync=old;}
+  expect(mutated).toBe(true);
+  const after=[...mockFiles.keys()].filter(uri=>uri.includes("persai-previews")).length;
+  expect(after).toBe(before);
+});
