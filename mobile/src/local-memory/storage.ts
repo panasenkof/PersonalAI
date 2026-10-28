@@ -211,8 +211,8 @@ CREATE TABLE IF NOT EXISTS memory_review_proposals (
   proposal_version INTEGER NOT NULL DEFAULT 1 CHECK(proposal_version>0),
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
   CHECK(source_entity_id<>target_entity_id),
-  UNIQUE(source_entity_id,target_entity_id,relation_kind,evidence_entity_id,
-         evidence_record_version,quote)
+  UNIQUE(source_entity_id,source_record_version,target_entity_id,target_record_version,
+         relation_kind,evidence_entity_id,evidence_record_version,quote)
 );
 CREATE INDEX IF NOT EXISTS ix_memory_review_proposals_inbox
   ON memory_review_proposals(status,created_at,id);
