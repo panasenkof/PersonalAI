@@ -895,3 +895,58 @@ test("F1: verified relative search and review history read proof/source/ACL unde
    .rejects.toThrow("relational_source_not_available_or_stale");
  expect(events).toContain("ROLLBACK");
 });
+
+
+test("R2b1: stages exactly one source-quoted pending relation without writing canonical edges",async()=>{
+  const fake=new FakeSqlite(),repo=new SqliteMemoryRepository(fake as never);
+  const people=await repo.createCollection({name:"Люди",slug:"people",sensitivity:"standard"});
+  const notes=await repo.createCollection({name:"Разговоры",slug:"talks",sensitivity:"standard"});
+  const owner=await repo.createEntity({collection_id:people.id,domain:"notes",kind:"person",title:"Я",payload:{}});
+  const irina=await repo.createEntity({collection_id:people.id,domain:"notes",kind:"person",title:"Ирина",payload:{}});
+  const namesake=await repo.createEntity({collection_id:people.id,domain:"notes",kind:"person",title:"Ирина",payload:{}});
+  const proof=await repo.createEntity({collection_id:notes.id,domain:"notes",payload:{body:"Моя мама Ирина"}});
+  const request={sourceId:owner.id,sourceVersion:1,targetId:irina.id,targetVersion:1,
+    kind:"has_mother" as const,evidenceId:proof.id,evidenceVersion:1,evidenceQuote:"Моя мама Ирина"};
+  const once=await repo.stageRelationCandidate(request);
+  expect(once).toMatchObject({added:true,status:"pending"});
+  expect(await repo.stageRelationCandidate(request)).toMatchObject({
+    proposalId:once.proposalId,added:false,status:"pending",
+  });
+  expect((await fake.getFirstAsync<{n:number}>("SELECT count(*) AS n FROM memory_relations"))?.n).toBe(0);
+  expect((await fake.getFirstAsync<{n:number}>("SELECT count(*) AS n FROM memory_relation_evidence"))?.n).toBe(0);
+  const page=await repo.relationCandidateInbox({collectionId:notes.id});
+  expect(page.items).toHaveLength(1);
+  expect(page.items[0]).toMatchObject({targetKind:"relation",proposalId:once.proposalId,
+    sourceId:owner.id,targetId:irina.id,kind:"has_mother",evidenceQuote:"Моя мама Ирина"});
+  expect(page.items[0].targetId).not.toBe(namesake.id);
+  expect((await repo.relationCandidateInbox({collectionId:people.id})).items).toEqual([]);
+  await expect(repo.stageRelationCandidate({...request,evidenceQuote:"Придуманная цитата"}))
+    .rejects.toThrow("relational_evidence_quote_not_found");
+  await repo.reviseEntity(proof.id,1,{body:"Другое утверждение"},"Исправление");
+  expect((await repo.relationCandidateInbox({collectionId:notes.id})).items).toEqual([]);
+  await expect(repo.stageRelationCandidate(request)).rejects.toThrow(
+    "relational_source_not_available_or_stale");
+  expect((await fake.getFirstAsync<{n:number}>(
+    "SELECT count(*) AS n FROM memory_review_proposals"))?.n).toBe(1);
+});
+
+test("R2b1: candidate inbox excludes private evidence and cannot reopen a rejected candidate",async()=>{
+  const fake=new FakeSqlite(),repo=new SqliteMemoryRepository(fake as never);
+  const c=await repo.createCollection({name:"Люди",slug:"people",sensitivity:"standard"});
+  const secret=await repo.createCollection({name:"Приватное",slug:"private",sensitivity:"secret"});
+  const a=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"person",payload:{}});
+  const b=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"person",payload:{}});
+  const note=await repo.createEntity({collection_id:c.id,domain:"notes",payload:{body:"Моя сестра Света"}});
+  const candidate={sourceId:a.id,sourceVersion:1,targetId:b.id,targetVersion:1,
+    kind:"has_sister" as const,evidenceId:note.id,evidenceVersion:1,evidenceQuote:"Моя сестра Света"};
+  const staged=await repo.stageRelationCandidate(candidate);
+  await fake.runAsync("UPDATE memory_review_proposals SET status='rejected' WHERE id=?",[staged.proposalId]);
+  expect(await repo.stageRelationCandidate(candidate)).toMatchObject({
+    proposalId:staged.proposalId,added:false,status:"rejected",
+  });
+  expect((await repo.relationCandidateInbox({collectionId:c.id})).items).toEqual([]);
+  const hidden=await repo.createEntity({collection_id:secret.id,domain:"notes",payload:{body:"Моя сестра Света"}});
+  await expect(repo.stageRelationCandidate({...candidate,evidenceId:hidden.id}))
+    .rejects.toThrow("relational_source_not_available_or_stale");
+  await expect(repo.relationCandidateInbox({collectionId:secret.id})).resolves.toMatchObject({items:[]});
+});
