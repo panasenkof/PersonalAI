@@ -161,6 +161,28 @@ export async function saveApprovedNote(
   // secret or unclassified one: those are only filled by the user directly.
   if (col.sensitivity !== "standard" && col.sensitivity !== "sensitive") throw new Error("Раздел «" + col.name + "» ограничен по доступу");
   const kind = proposal.kind && (PROPOSABLE_KINDS as readonly string[]).includes(proposal.kind) ? proposal.kind : undefined;
+  const person = proposal.person?.trim();
+  // Resolve identity BEFORE writing any note. A name match is not a stable ID.
+  // Never infer a person from a private collection in a standard LLM flow.
+  let target: Awaited<ReturnType<MemoryRepository["entitiesByAlias"]>>[number] | undefined;
+  if (person && kind !== "person") {
+    if (col.sensitivity !== "standard") {
+      throw new Error("Связь с человеком в закрытом разделе требует отдельного подтверждения. Сохраните без связи.");
+    }
+    const matches = await db.entitiesByAlias(person, "person");
+    if (matches.length > 1) {
+      throw new Error("Личность неоднозначна. Уточните человека или сохраните запись без связи.");
+    }
+    target = matches[0];
+    if (target) {
+      const currentSection = all.find(c => c.id === target!.collection_id);
+      if (target.record_status !== "active" ||
+          currentSection?.sensitivity !== "standard" ||
+          !["standard","inherit"].includes(target.sensitivity)) {
+        throw new Error("Автоматическая связь с этим человеком недоступна. Сохраните запись без связи.");
+      }
+    }
+  }
   const saved = await db.createEntity({
     collection_id: col.id, domain: "notes", title,
     payload: { type: "note", title, body, ...(proposal.date ? { date: proposal.date } : {}) },
@@ -168,11 +190,9 @@ export async function saveApprovedNote(
     ...(kind ? { kind } : {}),
     ...(proposal.date ? { valid_from: proposal.date } : {}),
   });
-  const person = proposal.person?.trim();
   // A fact about someone is linked to that person's record; a person seen for
   // the first time gets a record in «Люди», saved with the same confirmation.
   if (person && kind !== "person") {
-    let target = (await db.entitiesByAlias(person, "person"))[0];
     if (!target) {
       const people = all.find(c => c.slug === "people");
       if (people) target = await db.createEntity({ collection_id: people.id, domain: "notes", title: person.slice(0, 160),
