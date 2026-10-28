@@ -14,7 +14,7 @@ const mockRepo={
   undoTemporalChange:jest.fn(async()=>({decisionId:"undo-1",nextProposalVersion:3})),
 };
 let sessionListener:(unlocked:boolean)=>void=()=>{};
-jest.mock("../..//local-memory/repository",()=>({
+jest.mock("../../local-memory/repository",()=>({
   localMemoryRepository:async()=>mockRepo,
 }));
 jest.mock("../../profile/ProfileContext",()=>({useProfile:()=> "profile-test"}));
