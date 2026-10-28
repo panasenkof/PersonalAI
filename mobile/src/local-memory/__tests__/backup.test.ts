@@ -760,6 +760,6 @@ test("v17 SQLCipher export carries one self-person slot and its count in the enc
   await shareEncryptedBackup("guest",code);
   expect(mockDb.runAsync).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO pia_export.persai_backup_manifest"),
     expect.arrayContaining([8,17]));
-  const call=mockDb.runAsync.mock.calls.find(([sql]:[string])=>sql.startsWith("INSERT INTO pia_export.persai_backup_manifest"));
+  const call=mockDb.runAsync.mock.calls.find(([sql])=>sql.startsWith("INSERT INTO pia_export.persai_backup_manifest"));
   expect(call?.[1]?.at(-1)).toBe(1);
 });
