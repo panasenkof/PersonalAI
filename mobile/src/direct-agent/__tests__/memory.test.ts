@@ -6,7 +6,7 @@ function fake() {
     listCollections: jest.fn().mockResolvedValue([
       { id: "standard", slug: "notes", name: "Заметки", sensitivity: "standard" },
       { id: "secret", slug: "private", name: "Личное", sensitivity: "secret" },
-      { id: "unclassified", slug: "unknown", sensitivity: "unclassified" },
+      { id: "unclassified", slug: "unknown", name: "Неразобранное", sensitivity: "unclassified" },
     ]),
     // The repository already filters; the caller checks again, so a fake that
     // returns everything proves no private record can slip through.
