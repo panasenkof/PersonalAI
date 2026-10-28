@@ -84,8 +84,79 @@ function preferenceFrom(row: {
 }
 
 /** Use one already-unlocked SQLCipher connection. No new native handle. */
+export type MemoryHygieneSuggestedGroup={
+  reason:"same_saved_url"|"marked_read_later";
+  title:string;
+  /** Exact IDs and record versions; never a decision or authorization to apply. */
+  targets:MemoryReviewTarget[];
+  /** A reviewed action is still required; no automatic purge or source merge. */
+  proposedAction:"archive";
+};
+export type MemoryHygieneSuggestions={
+  groups:MemoryHygieneSuggestedGroup[];
+  scanned:number;
+  /** A later page may contain further matches; a missing group != no matches. */
+  partial:boolean;
+};
+
+/** Bounded read-only discovery of two *explicit* metadata patterns.
+ * This is NOT a semantic duplicate recognizer: sharing a URL doesn't make
+ * note annotations equal, and read-later doesn't mean that a video is useless.
+ */
+export async function discoverHygieneGroups(
+  db: SQL, limit=100,
+):Promise<MemoryHygieneSuggestions>{
+  ensureUnlocked();
+  if(!Number.isSafeInteger(limit)||limit<2||limit>100)
+    throw new Error("invalid_hygiene_discovery_limit");
+  const rows=await db.getAllAsync<{
+    id:string; record_version:number; payload_json:string;
+  }>(`SELECT e.id,e.record_version,e.payload_json FROM memory_entities e
+      JOIN memory_collections c ON c.id=e.collection_id
+      WHERE e.record_status='active' AND c.sensitivity='standard'
+        AND e.sensitivity IN ('standard','inherit')
+      ORDER BY e.updated_at DESC,e.id DESC LIMIT ?`,[limit+1]);
+  ensureUnlocked();
+  // No FTS, model inference or global JSON indexing. This small bounded
+  // scan only recognizes exact URL strings and explicit read-later metadata.
+  const all=rows.slice(0,limit);
+  const urlBuckets=new Map<string,MemoryReviewTarget[]>();
+  const readLater:MemoryReviewTarget[]=[];
+  for(const item of all){
+    let payload:unknown;
+    try{payload=JSON.parse(item.payload_json);}catch{continue;}
+    if(!payload||typeof payload!=="object"||Array.isArray(payload))continue;
+    const data=payload as Record<string,unknown>;
+    const target={id:item.id,recordVersion:item.record_version};
+    if(data.read_later===true)readLater.push(target);
+    const raw=data.source_url;
+    if(typeof raw!=="string"||raw.length<8||raw.length>2048||
+       !/^https:\/\/[^\s]+$/i.test(raw))continue;
+    // Exact-match only. Never strip URL query/fragment or pretend canonical
+    // identity across variants/redirects; keep original provenance separate.
+    const group=urlBuckets.get(raw)||[];
+    group.push(target);urlBuckets.set(raw,group);
+  }
+  const groups:MemoryHygieneSuggestedGroup[]=[];
+  for(const targets of urlBuckets.values()){
+    if(targets.length<2)continue;
+    groups.push({reason:"same_saved_url",title:"Одна сохранённая ссылка — разные записи",
+      targets,proposedAction:"archive"});
+  }
+  if(readLater.length>=2)groups.push({
+    reason:"marked_read_later",title:"Отмечено «Посмотреть/прочитать позже»",
+    targets:readLater,proposedAction:"archive",
+  });
+  ensureUnlocked();
+  return {groups:groups.slice(0,20),scanned:all.length,
+    partial:rows.length>limit||groups.length>20};
+}
+
 export class MemoryHygieneService {
   constructor(private readonly db: SQL) {}
+
+  /** Existing review service is the only place for bounded group suggestions. */
+  discoverGroups(limit?:number){return discoverHygieneGroups(this.db,limit); }
 
   async preference(entityId: string): Promise<MemoryReviewPreference> {
     ensureUnlocked();

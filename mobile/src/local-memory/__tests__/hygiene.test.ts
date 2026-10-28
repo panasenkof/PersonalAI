@@ -274,3 +274,45 @@ test("SEC-04/CLEAN-08: locked profile cannot apply a reviewed batch or alter an 
   expect((await repo.entity(n.id))?.record_status).toBe("active");
   expect((await repo.entity(n.id))?.record_version).toBe(1);
 });
+
+test("CLEAN-01/02/DOC-05: bounded read-only review groups exact links but never merges annotations",async()=>{
+  const col=await repo.createCollection({name:"Статьи",slug:"articles-candidates",sensitivity:"standard"});
+  const secret=await repo.createCollection({name:"Медицина",slug:"medical",sensitivity:"secret"});
+  const create=(title:string,payload:Record<string,unknown>,collection_id=col.id)=>
+    repo.createEntity({collection_id,domain:"notes",kind:"document",title,payload,
+      sensitivity:"inherit",source_kind:"user",source_ref:"device"});
+  const a=await create("Лазанья с соусом А",{body:"Первый рецепт",source_url:"https://example.org/lasagna?version=1"});
+  const b=await create("Лазанья с соусом Б",{body:"Ручные дополнения",source_url:"https://example.org/lasagna?version=1"});
+  await create("Иная версия",{body:"Иной рецепт",source_url:"https://example.org/lasagna?version=2"});
+  const video=await create("Видео об экологии",{body:"Просмотреть позже",read_later:true});
+  const article=await create("Статья о климате",{body:"Прочитать позже",read_later:true});
+  await create("Анализы крови",{body:"Заключение",read_later:true,
+    source_url:"https://example.org/lasagna?version=1"},secret.id);
+  const result=await review.discoverGroups();
+  expect(result).toMatchObject({scanned:5,partial:false});
+  expect(result.groups).toHaveLength(2);
+  const duplicate=result.groups.find(g=>g.reason==="same_saved_url")!;
+  expect(duplicate.targets.map(t=>t.id)).toEqual(expect.arrayContaining([a.id,b.id]));
+  expect(duplicate.targets).toHaveLength(2);
+  expect(duplicate.proposedAction).toBe("archive");
+  expect(result.groups.find(g=>g.reason==="marked_read_later")?.targets.map(t=>t.id))
+    .toEqual(expect.arrayContaining([video.id,article.id]));
+  expect(native.sqlite.prepare("SELECT count(*) AS n FROM memory_revisions").get().n).toBe(0);
+  expect((await repo.entity(b.id))?.payload.body).toBe("Ручные дополнения");
+  expect((await repo.entity(a.id))?.record_status).toBe("active");
+});
+
+test("SEC-04/CLEAN-04: suggestions are bounded, private excluded and AppLock refuses even metadata",async()=>{
+  const col=await repo.createCollection({name:"Статьи",slug:"limited",sensitivity:"standard"});
+  for(let i=0;i<5;i++)await repo.createEntity({
+    collection_id:col.id,domain:"notes",kind:"document",title:"Ссылка "+i,
+    payload:{body:"Ссылка",source_url:"https://example.org/same",read_later:true},
+  });
+  const small=await review.discoverGroups(2);
+  expect(small.scanned).toBe(2);
+  expect(small.partial).toBe(true);
+  await expect(review.discoverGroups(0)).rejects.toThrow("invalid_hygiene_discovery_limit");
+  await expect(review.discoverGroups(101)).rejects.toThrow("invalid_hygiene_discovery_limit");
+  revokeLocalMemorySession();
+  await expect(review.discoverGroups()).rejects.toBeInstanceOf(MemoryAccessError);
+});
