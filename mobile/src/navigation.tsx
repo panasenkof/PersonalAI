@@ -18,6 +18,7 @@ import { DirectAgentSettingsScreen } from "./screens/DirectAgentSettingsScreen";
 import { MemoryImportScreen } from "./screens/MemoryImportScreen";
 import { LocalMemoryScreen } from "./screens/LocalMemoryScreen";
 import { MemoryNoteScreen } from "./screens/MemoryNoteScreen";
+import { MemoryTemporalReviewScreen } from "./screens/MemoryTemporalReviewScreen";
 import { MemoryBackupScreen } from "./screens/MemoryBackupScreen";
 import { DeviceSettingsScreen } from "./screens/DeviceSettingsScreen";
 import { DiagnosticLogsScreen } from "./screens/DiagnosticLogsScreen";
@@ -30,6 +31,7 @@ export type RootStackParams = {
   ModelConnections: { presetId?: string } | undefined;
   MemoryNote: { entityId?: string; collectionId?: string };
   MemoryBackup: undefined;
+  MemoryTemporalReview: { collectionId: string };
   MemoryImport: { incoming?: SharePayload[]; camera?: boolean; source?: "photo" | "file" | "link"; collectionId?: string } | undefined;
   ShareDestination: { incoming: SharePayload[] };
   DiagnosticLogs: undefined;
@@ -90,6 +92,7 @@ function ThemedRootNavigator() {
         <Stack.Screen name="MemoryImport" component={MemoryImportScreen} options={{ title: "Добавить в память" }} />
         <Stack.Screen name="MemoryNote" component={MemoryNoteScreen} options={{ title: "Запись" }} />
         <Stack.Screen name="MemoryBackup" component={MemoryBackupScreen} options={{ title: "Резервные копии" }} />
+        <Stack.Screen name="MemoryTemporalReview" component={MemoryTemporalReviewScreen} options={{ title: "На проверке" }} />
         <Stack.Screen name="ModelConnections" component={DirectAgentSettingsScreen} options={{ title: "Модели и подключения" }} />
         <Stack.Screen name="DiagnosticLogs" component={DiagnosticLogsScreen} options={{ title: "Диагностика" }} />
         {/* Lazily require the experimental native shader only when the lab is opened.
