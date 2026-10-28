@@ -148,25 +148,27 @@ export async function saveApprovedNote(
   const all = await ensureSections(db);
   let col = proposal.section ? all.find(c => c.slug === proposal.section) : undefined;
   const requested = proposal.newSection?.trim().slice(0, 60);
+  let newSection: string | undefined;
   if (!col && requested) {
-    // The user confirmed a section that did not exist when it was proposed;
-    // it may have been created since, so look it up by name first.
+    // Validate the complete approval first. A rejected identity must not
+    // leave an unused custom section behind.
     const existing = findSection(requested, all.map(c => ({ slug: c.slug, name: c.name })));
-    col = existing ? all.find(c => c.slug === existing.slug) :
-      await db.createCollection({ name: requested, slug: "section-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8), sensitivity: "standard" });
+    if (existing) col = all.find(c => c.slug === existing.slug);
+    else newSection = requested;
   }
   col ||= all.find(c => c.slug === "notes");
   if (!col) throw new Error("Раздел для заметки не найден");
+  const plannedSensitivity = newSection ? "standard" : col.sensitivity;
   // A proposal may land in a personal section (e.g. documents) but never in a
   // secret or unclassified one: those are only filled by the user directly.
-  if (col.sensitivity !== "standard" && col.sensitivity !== "sensitive") throw new Error("Раздел «" + col.name + "» ограничен по доступу");
+  if (plannedSensitivity !== "standard" && plannedSensitivity !== "sensitive") throw new Error("Раздел «" + col.name + "» ограничен по доступу");
   const kind = proposal.kind && (PROPOSABLE_KINDS as readonly string[]).includes(proposal.kind) ? proposal.kind : undefined;
   const person = proposal.person?.trim();
   // Resolve identity BEFORE writing any note. A name match is not a stable ID.
   // Never infer a person from a private collection in a standard LLM flow.
   let target: Awaited<ReturnType<MemoryRepository["entitiesByAlias"]>>[number] | undefined;
   if (person && kind !== "person") {
-    if (col.sensitivity !== "standard") {
+    if (plannedSensitivity !== "standard") {
       throw new Error("Связь с человеком в закрытом разделе требует отдельного подтверждения. Сохраните без связи.");
     }
     const matches = await db.entitiesByAlias(person, "person");
@@ -182,6 +184,11 @@ export async function saveApprovedNote(
         throw new Error("Автоматическая связь с этим человеком недоступна. Сохраните запись без связи.");
       }
     }
+  }
+  if (newSection) {
+    col = await db.createCollection({ name: newSection,
+      slug: "section-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+      sensitivity: "standard" });
   }
   const saved = await db.createEntity({
     collection_id: col.id, domain: "notes", title,
