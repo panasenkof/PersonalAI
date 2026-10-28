@@ -218,3 +218,105 @@ export async function findCurrentRelativeConversationPaths(
   return {paths:proof.paths,
     truncated:proof.truncated||first.partial||rows.length>256};
 }
+
+
+/** R2a: explicit, durable user decision on an existing confirmed witness.
+ * This does not add a second relation or a competing proposal queue:
+ * memory_relation_evidence stays the single witness, memory_review_actions
+ * is the shared user-action journal (temporal review will migrate to it).
+ */
+export type RelationReviewExpected = {
+  evidenceId: string; expectedVersion: number; userConfirmed: true;
+};
+export type RelationReviewDecision = {
+  actionId: string; nextVersion: number; state: "confirmed"|"retracted";
+};
+type ReviewWitness = {
+  id:string;state:"confirmed"|"retracted";decision_version:number;
+  evidence_entity_id:string;evidence_record_version:number;
+  source_record_version:number;target_record_version:number;quote:string;
+  source_entity_id:string;target_entity_id:string;
+};
+async function loadReviewWitness(db:SQL,id:string):Promise<ReviewWitness>{
+  const witness=await db.getFirstAsync<ReviewWitness>(
+    "SELECT w.id,w.state,w.decision_version,w.evidence_entity_id,"+
+    "w.evidence_record_version,w.source_record_version,w.target_record_version,w.quote,"+
+    "r.source_entity_id,r.target_entity_id FROM memory_relation_evidence w "+
+    "JOIN memory_relations r ON r.id=w.relation_id WHERE w.id=?", [id]);
+  if(!witness)throw new Error("relational_witness_missing");
+  const source=await allowedEntity(db,witness.source_entity_id,witness.source_record_version);
+  const target=await allowedEntity(db,witness.target_entity_id,witness.target_record_version);
+  const evidence=await allowedEntity(db,witness.evidence_entity_id,witness.evidence_record_version);
+  if(!source||!target||evidence.domain!=="notes"||
+     !memoryText(JSON.parse(evidence.payload_json)).includes(witness.quote)){
+    throw new Error("relational_witness_stale");
+  }
+  return witness;
+}
+function validateReviewExpected(req:RelationReviewExpected){
+  if(!validId(req?.evidenceId)||!validVersion(req?.expectedVersion)||req?.userConfirmed!==true)
+    throw new Error("relational_review_invalid");
+}
+export async function retractUserRelationEvidence(
+  db:SQL,req:RelationReviewExpected,
+):Promise<RelationReviewDecision>{
+  validateReviewExpected(req);
+  const id=uid();let result:RelationReviewDecision|null=null;
+  await withUnlockedTransaction(db,async tx=>{
+    const witness=await loadReviewWitness(tx,req.evidenceId);
+    if(witness.decision_version!==req.expectedVersion||witness.state!=="confirmed")
+      throw new Error("relational_review_stale");
+    const changed=await tx.runAsync(
+      "UPDATE memory_relation_evidence SET state='retracted',decision_version=decision_version+1 "+
+      "WHERE id=? AND state='confirmed' AND decision_version=?",
+      [req.evidenceId,req.expectedVersion]);
+    if(changed.changes!==1)throw new Error("relational_review_stale");
+    await tx.runAsync(
+      "INSERT INTO memory_review_actions "+
+      "(id,target_kind,relation_evidence_id,action,expected_version,before_state,after_state,actor_kind,created_at) "+
+      "VALUES (?,'relation',?,'retract',?,'confirmed','retracted','user',?)",
+      [id,req.evidenceId,req.expectedVersion,new Date().toISOString()]);
+    result={actionId:id,nextVersion:req.expectedVersion+1,state:"retracted"};
+  });
+  if(!result)throw new Error("relational_review_not_committed");
+  return result;
+}
+export async function undoUserRelationRetraction(
+  db:SQL,req:RelationReviewExpected&{actionId:string},
+):Promise<RelationReviewDecision>{
+  validateReviewExpected(req);
+  if(!validId(req.actionId))throw new Error("relational_review_invalid");
+  const id=uid();let result:RelationReviewDecision|null=null;
+  await withUnlockedTransaction(db,async tx=>{
+    const witness=await loadReviewWitness(tx,req.evidenceId);
+    const previous=await tx.getFirstAsync<{
+      id:string;action:string;expected_version:number;
+    }>(
+      "SELECT id,action,expected_version FROM memory_review_actions "+
+      "WHERE id=? AND target_kind='relation' AND relation_evidence_id=?",
+      [req.actionId,req.evidenceId]);
+    if(!previous||previous.action!=="retract"||
+       witness.state!=="retracted"||
+       witness.decision_version!==req.expectedVersion||
+       previous.expected_version+1!==req.expectedVersion)
+      throw new Error("relational_undo_stale");
+    const newer=await tx.getFirstAsync<{id:string}>(
+      "SELECT id FROM memory_review_actions WHERE relation_evidence_id=? "+
+      "AND (expected_version>? OR undoes_id=?) LIMIT 1",
+      [req.evidenceId,previous.expected_version,previous.id]);
+    if(newer)throw new Error("relational_undo_stale");
+    const changed=await tx.runAsync(
+      "UPDATE memory_relation_evidence SET state='confirmed',decision_version=decision_version+1 "+
+      "WHERE id=? AND state='retracted' AND decision_version=?",
+      [req.evidenceId,req.expectedVersion]);
+    if(changed.changes!==1)throw new Error("relational_undo_stale");
+    await tx.runAsync(
+      "INSERT INTO memory_review_actions "+
+      "(id,target_kind,relation_evidence_id,action,expected_version,before_state,after_state,undoes_id,actor_kind,created_at) "+
+      "VALUES (?,'relation',?,'undo',?,'retracted','confirmed',?,'user',?)",
+      [id,req.evidenceId,req.expectedVersion,req.actionId,new Date().toISOString()]);
+    result={actionId:id,nextVersion:req.expectedVersion+1,state:"confirmed"};
+  });
+  if(!result)throw new Error("relational_review_not_committed");
+  return result;
+}

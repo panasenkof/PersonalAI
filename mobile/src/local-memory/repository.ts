@@ -9,8 +9,8 @@ import { withUnlockedTransaction } from "./transaction";
 import { stageTemporalCandidateWithReview, listTemporalKnowledgeHistory, listTemporalStateCandidatesAtDate } from "./temporal-store";
 import { listTemporalReviewInbox as readTemporalReviewInbox } from "./temporal-review-inbox";
 import { decideTemporalReview, undoTemporalReview } from "./temporal-decisions";
-import { confirmUserRelationEvidence, listCurrentConfirmedRelationProofs, findCurrentRelativeConversationPaths } from "./relation-evidence";
-import type { ConfirmRelationInput } from "./relation-evidence";
+import { confirmUserRelationEvidence, listCurrentConfirmedRelationProofs, findCurrentRelativeConversationPaths, retractUserRelationEvidence, undoUserRelationRetraction } from "./relation-evidence";
+import type { ConfirmRelationInput, RelationReviewExpected } from "./relation-evidence";
 import type { DirectPersonRelation } from "./relational-proof";
 import type { TemporalClaimCandidate } from "./temporal-claims";
 import type { TemporalHistoryQuery, TemporalAtDateQuery } from "./temporal-store";
@@ -366,6 +366,13 @@ export class SqliteMemoryRepository implements MemoryRepository {
     return listCurrentConfirmedRelationProofs(this.db,query);
   }
 
+  /** R2a one user-only review journal; never a model tool. */
+  retractRelationWitness(expected: RelationReviewExpected) {
+    return retractUserRelationEvidence(this.db,expected);
+  }
+  undoRelationRetraction(expected: RelationReviewExpected & { actionId:string }) {
+    return undoUserRelationRetraction(this.db,expected);
+  }
   confirmedRelativeConversationPaths(query: {
     ownerPersonId: string; relationKind: DirectPersonRelation;
   }) {

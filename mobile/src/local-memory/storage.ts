@@ -42,7 +42,7 @@ export function onLocalMemorySessionChange(listener: (unlocked: boolean) => void
 }
 export const localMemorySessionUnlocked = () => applicationSessionUnlocked;
 const requireApplicationSession = () => { if (!applicationSessionUnlocked) throw new Error("application_locked"); };
-export const LOCAL_MEMORY_SCHEMA_VERSION = 12;
+export const LOCAL_MEMORY_SCHEMA_VERSION = 13;
 const KIND_CHECK = `CHECK(kind IN (${MEMORY_KINDS.map(k => `'${k}'`).join(",")}))`;
 
 /** All memory (including full-text indexes, revisions, and WAL) is in SQLCipher. */
@@ -165,11 +165,32 @@ CREATE TABLE IF NOT EXISTS memory_relation_evidence (
   origin TEXT NOT NULL CHECK(origin IN ('explicit_user','direct','derived')),
   actor_kind TEXT NOT NULL CHECK(actor_kind='user'),
   state TEXT NOT NULL DEFAULT 'confirmed' CHECK(state IN ('confirmed','retracted')),
+  decision_version INTEGER NOT NULL DEFAULT 1 CHECK(decision_version>0),
   created_at TEXT NOT NULL,
   UNIQUE(relation_id,evidence_entity_id,evidence_record_version,quote)
 );
 CREATE INDEX IF NOT EXISTS ix_memory_relation_evidence_relation
   ON memory_relation_evidence(relation_id,state,evidence_entity_id);
+-- One domain-neutral review action journal for future common temporal and
+-- relational review UI. NOT a second proposal queue or graph.
+CREATE TABLE IF NOT EXISTS memory_review_actions (
+  id TEXT PRIMARY KEY,
+  target_kind TEXT NOT NULL CHECK(target_kind IN ('relation','temporal')),
+  relation_evidence_id TEXT REFERENCES memory_relation_evidence(id) ON DELETE CASCADE,
+  temporal_proposal_id TEXT REFERENCES memory_temporal_proposals(id) ON DELETE CASCADE,
+  action TEXT NOT NULL CHECK(action IN ('retract','undo','accept','keep_both','defer','dismiss')),
+  expected_version INTEGER NOT NULL CHECK(expected_version>0),
+  before_state TEXT NOT NULL,
+  after_state TEXT NOT NULL,
+  undoes_id TEXT REFERENCES memory_review_actions(id) ON DELETE RESTRICT,
+  actor_kind TEXT NOT NULL CHECK(actor_kind='user'),
+  created_at TEXT NOT NULL,
+  CHECK ((target_kind='relation' AND relation_evidence_id IS NOT NULL AND temporal_proposal_id IS NULL)
+      OR (target_kind='temporal' AND temporal_proposal_id IS NOT NULL AND relation_evidence_id IS NULL))
+);
+CREATE INDEX IF NOT EXISTS ix_memory_review_actions_relation
+  ON memory_review_actions(relation_evidence_id,created_at,id);
+
 
 CREATE TABLE IF NOT EXISTS memory_revisions (
   id TEXT PRIMARY KEY, record_type TEXT NOT NULL CHECK(record_type IN ('entity','observation')),
@@ -453,6 +474,12 @@ async function initialize(profileId: string): Promise<SQLite.SQLiteDatabase> {
     if (version < LOCAL_MEMORY_SCHEMA_VERSION) {
       await withUnlockedTransaction(db, async tx => {
         await tx.execAsync(SCHEMA_SQL);
+        if (version >= 12 && version < 13) {
+          const fields = await tx.getAllAsync<{name:string}>("PRAGMA table_info(memory_relation_evidence)");
+          if (!fields.some(field => field.name === "decision_version")) {
+            await tx.execAsync("ALTER TABLE memory_relation_evidence ADD COLUMN decision_version INTEGER NOT NULL DEFAULT 1 CHECK(decision_version>0)");
+          }
+        }
         await upgradeToV6(tx);
         if (version < 3) await upgradeToV3(tx);
         if (version === 4) await upgradeToV5(tx);
