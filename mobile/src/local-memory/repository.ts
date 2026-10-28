@@ -860,7 +860,35 @@ export class SqliteMemoryRepository implements MemoryRepository {
           "SELECT text FROM memory_chunks WHERE entity_id=? ORDER BY ord LIMIT 1",
           [proof.conversationId],
         );
+        // Local original locators belong to the SAME SQLCipher snapshot as
+        // the confirmed relation, participant witness and readable note.
+        // No guessed ASR timestamps, filenames posing as proof or decrypted
+        // bytes; actual file opening must reauthorize in the media UI.
+        const originals=await tx.getAllAsync<{
+          id:string;name:string;mime:string;size:number;
+        }>(
+          "SELECT a.id,a.name,a.mime,a.size FROM memory_attachments a "+
+          "WHERE a.entity_id=? AND "+
+          "(SELECT count(*) FROM memory_attachment_parts p WHERE p.attachment_id=a.id)>0 AND "+
+          "(SELECT min(p.ord) FROM memory_attachment_parts p WHERE p.attachment_id=a.id)=0 AND "+
+          "(SELECT max(p.ord)+1 FROM memory_attachment_parts p WHERE p.attachment_id=a.id)="+
+          "(SELECT count(*) FROM memory_attachment_parts p WHERE p.attachment_id=a.id) AND "+
+          "a.size=(SELECT sum(length(p.bytes)) FROM memory_attachment_parts p WHERE p.attachment_id=a.id) "+
+          "ORDER BY a.created_at,a.id LIMIT 10",
+          [proof.conversationId],
+        );
+        const locators=originals.map(item=>({
+          attachmentId:item.id,recordId:proof.conversationId,
+          recordVersion:Number(row.record_version),name:item.name,mime:item.mime,size:item.size,
+          kind:(item.mime.startsWith("audio/")?"audio":
+            item.mime.startsWith("video/")?"video":
+            item.mime==="application/pdf"?"document":
+            item.mime.startsWith("image/")?"image":"other") as
+              "audio"|"video"|"document"|"image"|"other",
+          metadataOnly:true as const,originalTime:null,originalPage:null,
+        }));
         hits.push({entity:entityFrom(row),chunk:TEXT(chunk?.text) ?? "",score:100,
+          originals:locators,
           proof:{relativeId:proof.relativeId,
             relationEvidenceId:proof.relationEvidenceId,
             participantEvidenceId:proof.participantEvidenceId,
