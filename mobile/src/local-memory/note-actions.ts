@@ -1,6 +1,7 @@
 import * as Crypto from 'expo-crypto';
 import type { SQLiteDatabase } from 'expo-sqlite';
 import { withUnlockedTransaction } from './transaction';
+import { localMemorySessionUnlocked } from './storage';
 import { indexEntity, memoryText } from './search-index';
 import { MemoryConflictError } from './types';
 
@@ -8,6 +9,8 @@ type SQL = Pick<SQLiteDatabase, 'getFirstAsync' | 'getAllAsync' | 'runAsync' | '
 type Row = Record<string, any>;
 export type NoteSelection = { id: string; record_version: number };
 export type NoteAction = 'move' | 'trash' | 'restore' | 'merge' | 'archive' | 'unarchive';
+/** Optional reviewed-cleanup guard, executed by this SAME canonical writer. */
+export type NoteHygieneGuard = { expectedPreferences: Array<{ id:string; preferenceVersion:number }> };
 export function mergeText(notes: { title: string | null; payload: Record<string, unknown> }[]): string {
   return notes.map(n => `── ${n.title || 'Без названия'} ──\n${memoryText(n.payload)}`).join('\n\n');
 }
@@ -26,16 +29,45 @@ async function write(db: SQL, before: Row, after: Row, reason: string) {
   await indexEntity(db, before.id, timestamp);
 }
 /** One atomic operation; metadata and originals remain recoverable. */
-export async function changeNotes(db: SQL, action: NoteAction, selection: NoteSelection[], collectionId?: string): Promise<string> {
+export async function changeNotes(db: SQL, action: NoteAction, selection: NoteSelection[], collectionId?: string, hygiene?: NoteHygieneGuard): Promise<string> {
+  if(hygiene){
+    if(!['archive','trash'].includes(action) || !Array.isArray(hygiene.expectedPreferences) ||
+       hygiene.expectedPreferences.length!==selection.length ||
+       new Set(hygiene.expectedPreferences.map(p=>p.id)).size!==selection.length ||
+       hygiene.expectedPreferences.some(p=>!selection.some(s=>s.id===p.id) ||
+         !Number.isSafeInteger(p.preferenceVersion)||p.preferenceVersion<0))
+      throw new Error('invalid_hygiene_apply_selection');
+  }
   if (!selection.length || selection.length > 100 || new Set(selection.map(n => n.id)).size !== selection.length) throw new Error('Выберите от 1 до 100 разных записей.');
   const batch = 'notes:' + action + ':' + Crypto.randomUUID();
   await withUnlockedTransaction(db, async tx => {
+    if(hygiene && !localMemorySessionUnlocked()) throw new MemoryConflictError('application_locked');
     const rows: Row[] = [];
     for (const selected of selection) {
       const row = await snapshot(tx, selected.id);
       if (row.record_version !== selected.record_version) throw new MemoryConflictError('stale_memory_version');
       if (action === 'restore' ? row.record_status !== 'trashed' : action === 'unarchive' ? row.record_status !== 'archived' : ['merge', 'archive'].includes(action) ? row.record_status !== 'active' : !['active', 'archived'].includes(row.record_status)) throw new Error('Статус записи изменился. Обновите список.');
       rows.push(row);
+    }
+    if(hygiene){
+      // Same BEGIN IMMEDIATE as source writes: a late pin, defer, collection
+      // privacy change or record revision invalidates the WHOLE batch.
+      for(const row of rows){
+        const expected=hygiene.expectedPreferences.find(p=>p.id===row.id)!;
+        const guard=await tx.getFirstAsync<{
+          version:number|null;guard:string|null;skip_until:string|null;
+          record_sensitivity:string;collection_sensitivity:string;
+        }>(`SELECT p.version,p.guard,p.skip_until,
+              e.sensitivity AS record_sensitivity,c.sensitivity AS collection_sensitivity
+            FROM memory_entities e JOIN memory_collections c ON c.id=e.collection_id
+            LEFT JOIN memory_cleanup_preferences p ON p.entity_id=e.id WHERE e.id=?`,[row.id]);
+        if(!guard || (guard.version??0)!==expected.preferenceVersion ||
+           guard.guard==='pinned'||guard.guard==='never_suggest' ||
+           (guard.skip_until && Date.parse(guard.skip_until)>Date.now()) ||
+           guard.collection_sensitivity!=='standard' ||
+           !['standard','inherit'].includes(guard.record_sensitivity))
+          throw new MemoryConflictError('hygiene_review_changed_repeat_preview');
+      }
     }
     if (action === 'move' && (!collectionId || !await tx.getFirstAsync('SELECT id FROM memory_collections WHERE id=?', [collectionId]))) throw new Error('Выберите раздел.');
     const levels = await Promise.all(rows.map(r => tx.getFirstAsync<Row>('SELECT sensitivity FROM memory_collections WHERE id=?', [r.collection_id])));
@@ -66,6 +98,7 @@ export async function changeNotes(db: SQL, action: NoteAction, selection: NoteSe
         }
       }
       after.payload_json = JSON.stringify(payload);
+      if(hygiene && !localMemorySessionUnlocked()) throw new MemoryConflictError('application_locked');
       await write(tx, before, after, batch);
     }
   });

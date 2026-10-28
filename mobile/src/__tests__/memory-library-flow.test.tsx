@@ -5,7 +5,7 @@ import { LocalMemoryScreen } from "../screens/LocalMemoryScreen";
 const mockNavigate = jest.fn();
 const mockHygienePreview = jest.fn(async(targets: Array<{id:string;recordVersion:number}>,excluded:string[],action:string)=>({
  action,selectedCount:targets.length,excludedIds:targets.filter(t=>excluded.includes(t.id)).map(t=>t.id),
- included:targets.filter(t=>!excluded.includes(t.id)).map(t=>({id:t.id,eligible:true,reasons:[]})),
+ included:targets.filter(t=>!excluded.includes(t.id)).map(t=>({id:t.id,eligible:true,reasons:[],expectedRecordVersion:t.recordVersion,expectedPreferenceVersion:0})),
  eligibleIds:targets.filter(t=>!excluded.includes(t.id)).map(t=>t.id),blockedIds:[],
  originalBytesAtRisk:0,canPurgeOriginals:false,
 }));
@@ -164,16 +164,61 @@ test("CLEAN-07/CLEAN-04/SAVE-04: one existing batch menu previews and excludes w
     {id:"one",recordVersion:1},{id:"two",recordVersion:1},
   ],[],"archive"));
   expect(v.getByLabelText("Закрыть панель Предпросмотр групповой ревизии")).toBeTruthy();
-  expect(v.getByText("Выбрано: 2 · Исключено: 0 · Можно предложить в архив: 2 · Требуют проверки: 0")).toBeTruthy();
+  expect(v.getByText("Выбрано: 2 · Исключено: 0 · Можно архивировать: 2 · Требуют проверки: 0")).toBeTruthy();
   expect(mockDb.changeNotes).not.toHaveBeenCalled();
   await act(async()=>{fireEvent.press(v.getByLabelText("Исключить из ревизии Первая"));});
   await waitFor(()=>expect(mockHygienePreview).toHaveBeenLastCalledWith([
     {id:"one",recordVersion:1},{id:"two",recordVersion:1},
   ],["one"],"archive"));
-  expect(v.getByText("Выбрано: 2 · Исключено: 1 · Можно предложить в архив: 1 · Требуют проверки: 0")).toBeTruthy();
+  expect(v.getByText("Выбрано: 2 · Исключено: 1 · Можно архивировать: 1 · Требуют проверки: 0")).toBeTruthy();
   expect(v.getByText("Исключено · Первая")).toBeTruthy();
   expect(mockDb.changeNotes).not.toHaveBeenCalled();
   fireEvent.press(v.getByLabelText("Закрыть предпросмотр без изменений"));
   expect(v.getByText("Выбрано: 2")).toBeTruthy();
   expect(mockDb.changeNotes).not.toHaveBeenCalled();
+});
+
+test("CLEAN-04/07: archive requires explicit second confirmation and reuses note-action CAS+undo",async()=>{
+  const v=render(<LocalMemoryScreen/>);
+  await waitFor(()=>v.getByLabelText("Открыть заметку Первая"));
+  fireEvent(v.getByLabelText("Открыть заметку Первая"),"longPress");
+  fireEvent.press(v.getByLabelText("Выбрать заметку Вторая"));
+  fireEvent.press(v.getByLabelText("Действия с выбранными записями"));
+  await act(async()=>fireEvent.press(v.getByLabelText("Проверить последствия групповой ревизии")));
+  await waitFor(()=>v.getByLabelText("Продолжить архивирование группы"));
+  expect(mockDb.changeNotes).not.toHaveBeenCalled();
+  fireEvent.press(v.getByLabelText("Продолжить архивирование группы"));
+  expect(mockDb.changeNotes).not.toHaveBeenCalled();
+  fireEvent.press(v.getByLabelText("Отмена подтверждения группового действия"));
+  expect(mockDb.changeNotes).not.toHaveBeenCalled();
+  fireEvent.press(v.getByLabelText("Продолжить архивирование группы"));
+  await act(async()=>fireEvent.press(v.getByLabelText("Подтвердить групповое действие памяти")));
+  expect(mockDb.changeNotes).toHaveBeenCalledWith("archive",[
+    {id:"one",record_version:1},{id:"two",record_version:1},
+  ],undefined,{expectedPreferences:[
+    {id:"one",preferenceVersion:0},{id:"two",preferenceVersion:0},
+  ]});
+  await waitFor(()=>expect(v.queryByTestId("memory-selection-toolbar")).toBeNull());
+});
+
+test("CLEAN-08/SEC-08: trash confirmation respects exclusion and failed CAS never loses selection",async()=>{
+  mockDb.changeNotes.mockRejectedValueOnce(new Error("hygiene_review_changed_repeat_preview"));
+  const v=render(<LocalMemoryScreen/>);
+  await waitFor(()=>v.getByLabelText("Открыть заметку Первая"));
+  fireEvent(v.getByLabelText("Открыть заметку Первая"),"longPress");
+  fireEvent.press(v.getByLabelText("Выбрать заметку Вторая"));
+  fireEvent.press(v.getByLabelText("Действия с выбранными записями"));
+  await act(async()=>fireEvent.press(v.getByLabelText("Проверить последствия групповой ревизии")));
+  await act(async()=>fireEvent.press(v.getByLabelText("Ревизия: в корзину")));
+  await waitFor(()=>expect(mockHygienePreview).toHaveBeenLastCalledWith(expect.anything(),[],"trash"));
+  await act(async()=>fireEvent.press(v.getByLabelText("Исключить из ревизии Первая")));
+  await waitFor(()=>expect(mockHygienePreview).toHaveBeenLastCalledWith(expect.anything(),["one"],"trash"));
+  fireEvent.press(v.getByLabelText("Продолжить перемещение группы в корзину"));
+  await act(async()=>fireEvent.press(v.getByLabelText("Подтвердить групповое действие памяти")));
+  expect(mockDb.changeNotes).toHaveBeenCalledWith("trash",[
+    {id:"two",record_version:1},
+  ],undefined,{expectedPreferences:[{id:"two",preferenceVersion:0}]});
+  expect(v.getByText("hygiene_review_changed_repeat_preview")).toBeTruthy();
+  expect(v.getByText("Выбрано: 2")).toBeTruthy();
+  expect(v.queryByLabelText("Подтвердить групповое действие памяти")).toBeNull();
 });

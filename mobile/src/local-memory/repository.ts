@@ -1,4 +1,4 @@
-import { changeNotes, undoNotes, purgeNotes, type NoteAction, type NoteSelection } from "./note-actions";
+import { changeNotes, undoNotes, purgeNotes, type NoteAction, type NoteSelection, type NoteHygieneGuard } from "./note-actions";
 import { MemoryHygieneService } from "./hygiene";
 import { chooseProfileSelfIdentity, readProfileSelfIdentity } from "./self-identity";
 import type { ChooseProfileSelfIdentity } from "./self-identity";
@@ -125,7 +125,7 @@ export class SqliteMemoryRepository implements MemoryRepository {
 
   /** M1/№79а: read-only review and persistent user exceptions; no automatic deletes. */
   hygiene() { return new MemoryHygieneService(this.db); }
-  changeNotes(action: NoteAction, selection: NoteSelection[], collectionId?: string) { return changeNotes(this.db, action, selection, collectionId); }
+  changeNotes(action: NoteAction, selection: NoteSelection[], collectionId?: string, hygiene?: NoteHygieneGuard) { return changeNotes(this.db, action, selection, collectionId, hygiene); }
   purgeNotes(selection: NoteSelection[]) { return purgeNotes(this.db, selection); }
   async lastNoteOperation(): Promise<string> {
     const row = await this.db.getFirstAsync<{ reason: string }>("SELECT reason FROM memory_revisions WHERE reason LIKE 'notes:%' OR reason LIKE 'Отмена notes:%' ORDER BY created_at DESC,rowid DESC LIMIT 1");

@@ -44,7 +44,7 @@ beforeEach(() => {
 afterEach(() => { revokeLocalMemorySession(); native.close(); });
 
 async function note(body: string, collectionId?: string) {
-  const col = collectionId ?? (await repo.createCollection({ name: "Заметки", slug: "notes" })).id;
+  const col = collectionId ?? (await repo.createCollection({ name: "Заметки", slug: "notes", sensitivity:"standard" })).id;
   return repo.createEntity({ collection_id: col, domain: "notes", title: body, payload: { body } });
 }
 
@@ -73,7 +73,7 @@ test("persistent keep/pin and defer policies use CAS, do not rewrite source cont
 });
 
 test("dry-run reports incoming/outgoing graph links, attached bytes, and does not delete any evidence", async () => {
-  const col = await repo.createCollection({ name: "Архив", slug: "notes" });
+  const col = await repo.createCollection({ name: "Архив", slug: "notes",sensitivity:"standard" });
   const original = await note("Статья", col.id);
   const other = await note("Цитата", col.id);
   await repo.linkEntities(other.id, original.id, "cites");
@@ -108,7 +108,7 @@ test("changing a record invalidates both policy updates and any stale review", a
 });
 
 test("deletion cascades preference only for deleted owner and pin does not affect other notes", async () => {
-  const col = await repo.createCollection({ name: "Заметки", slug: "notes" });
+  const col = await repo.createCollection({ name: "Заметки", slug: "notes",sensitivity:"standard" });
   const n1 = await note("А", col.id), n2 = await note("Б", col.id);
   await review.setPreference({ id: n1.id, recordVersion: 1 }, 0, "never_suggest", null);
   expect((await review.dryRun([
@@ -165,7 +165,7 @@ test("CLEAN-05/CLEAN-07/SAVE-04: review 25 sources with exclusions, guards and r
 });
 
 test("CLEAN-01/CLEAN-04/SEC-04: all excluded is a valid no-op; malformed exclusion fails closed",async()=>{
-  const col=await repo.createCollection({name:"Материалы",slug:"review-materials"});
+  const col=await repo.createCollection({name:"Материалы",slug:"review-materials",sensitivity:"standard"});
   const n1=await note("Медицинский документ 2018",col.id),n2=await note("Видео 2021",col.id);
   const targets=[{id:n1.id,recordVersion:1},{id:n2.id,recordVersion:1}];
   const preview=await review.previewWithExclusions(targets,[n2.id,n1.id],"trash");
@@ -188,4 +188,89 @@ test("CLEAN-01/CLEAN-04/SEC-04: all excluded is a valid no-op; malformed exclusi
   revokeLocalMemorySession();
   await expect(review.previewWithExclusions(targets,[],"trash"))
     .rejects.toBeInstanceOf(MemoryAccessError);
+});
+
+test("CLEAN-04/05/07: confirmed preview applies via existing note writer with exclusions and undo",async()=>{
+  const col=await repo.createCollection({name:"Статьи и видео",slug:"read-later",sensitivity:"standard"});
+  const keep=await note("Медицинский анализ: сохранить",col.id);
+  const pin=await note("Документы о машине",col.id);
+  const article=await note("Статья об экологии",col.id);
+  const video=await note("Непросмотренное видео",col.id);
+  await review.setPreference({id:pin.id,recordVersion:1},0,"pinned",null);
+  const all=[keep,pin,article,video].map(n=>({id:n.id,recordVersion:n.record_version}));
+  const preview=await review.previewWithExclusions(all,[keep.id],"archive");
+  expect(preview.excludedIds).toEqual([keep.id]);
+  expect(preview.blockedIds).toEqual([pin.id]);
+  expect(preview.eligibleIds).toEqual([article.id,video.id]);
+  const allowed=preview.included.filter(row=>row.eligible);
+  const token=await repo.changeNotes("archive",allowed.map(row=>({
+    id:row.id,record_version:row.expectedRecordVersion,
+  })),undefined,{expectedPreferences:allowed.map(row=>({
+    id:row.id,preferenceVersion:row.expectedPreferenceVersion,
+  }))});
+  expect((await repo.entity(keep.id))?.record_status).toBe("active");
+  expect((await repo.entity(pin.id))?.record_status).toBe("active");
+  expect((await repo.entity(article.id))?.record_status).toBe("archived");
+  expect((await repo.entity(video.id))?.record_status).toBe("archived");
+  await repo.undoNotes(token);
+  expect((await repo.entity(article.id))?.record_status).toBe("active");
+  expect((await repo.entity(video.id))?.record_status).toBe("active");
+  expect(native.sqlite.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+});
+
+test("CLEAN-08/SEC-06: pinned/deferred/changed/secret after preview rolls back whole batch",async()=>{
+  const col=await repo.createCollection({name:"Архив",slug:"safe-review",sensitivity:"standard"});
+  const a=await note("Масло автомобиля",col.id),b=await note("Рецепт лазаньи",col.id);
+  const targets=[a,b].map(n=>({id:n.id,recordVersion:n.record_version}));
+  const getGuard=(p:Awaited<ReturnType<MemoryHygieneService["previewWithExclusions"]>>)=>({
+    expectedPreferences:p.included.map(row=>({id:row.id,preferenceVersion:row.expectedPreferenceVersion})),
+  });
+  const p=await review.previewWithExclusions(targets,[],"trash");
+  await review.setPreference({id:b.id,recordVersion:1},0,"pinned",null);
+  await expect(repo.changeNotes("trash",[a,b].map(n=>({id:n.id,record_version:1})),undefined,getGuard(p)))
+    .rejects.toBeInstanceOf(MemoryConflictError);
+  expect((await repo.entity(a.id))?.record_status).toBe("active");
+  expect((await repo.entity(b.id))?.record_status).toBe("active");
+  await review.setPreference({id:b.id,recordVersion:1},1,"normal",null);
+  const newPreview=await review.previewWithExclusions(targets,[],"archive");
+  native.sqlite.prepare("UPDATE memory_collections SET sensitivity='secret' WHERE id=?").run(col.id);
+  await expect(repo.changeNotes("archive",[a,b].map(n=>({id:n.id,record_version:1})),undefined,getGuard(newPreview)))
+    .rejects.toBeInstanceOf(MemoryConflictError);
+  expect((await repo.entity(a.id))?.record_version).toBe(1);
+  native.sqlite.prepare("UPDATE memory_collections SET sensitivity='standard' WHERE id=?").run(col.id);
+  const now=await review.previewWithExclusions(targets,[],"archive");
+  await repo.reviseEntity(b.id,1,{body:"Новая версия рецепта"},"Правка");
+  await expect(repo.changeNotes("archive",[a,b].map(n=>({id:n.id,record_version:1})),undefined,getGuard(now)))
+    .rejects.toBeInstanceOf(MemoryConflictError);
+  expect((await repo.entity(a.id))?.record_status).toBe("active");
+  expect((await repo.entity(b.id))?.record_status).toBe("active");
+  expect(native.sqlite.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+});
+
+test("CLEAN-04/SEC-08: excludes private/unclassified documents and refuses forged reviewed action",async()=>{
+  const open=await repo.createCollection({name:"Статьи",slug:"open-articles",sensitivity:"standard"});
+  const secret=await repo.createCollection({name:"Личные",slug:"secret-articles",sensitivity:"secret"});
+  const a=await note("Старая статья",open.id),b=await note("Заключение врача",secret.id);
+  const preview=await review.previewWithExclusions([a,b].map(n=>({id:n.id,recordVersion:1})),[],"trash");
+  expect(preview.eligibleIds).toEqual([a.id]);
+  expect(preview.included.find(row=>row.id===b.id)?.reasons).toContain("private_or_unclassified");
+  await expect(repo.changeNotes("trash",[{id:b.id,record_version:1}],undefined,{
+    expectedPreferences:[{id:b.id,preferenceVersion:0}],
+  })).rejects.toBeInstanceOf(MemoryConflictError);
+  await expect(repo.changeNotes("trash",[{id:a.id,record_version:1}],undefined,{
+    expectedPreferences:[],
+  })).rejects.toThrow("invalid_hygiene_apply_selection");
+  expect((await repo.entity(b.id))?.record_status).toBe("active");
+});
+
+test("SEC-04/CLEAN-08: locked profile cannot apply a reviewed batch or alter an original",async()=>{
+  const col=await repo.createCollection({name:"Рабочие записи",slug:"lock-review",sensitivity:"standard"});
+  const n=await note("Техосмотр автомобиля",col.id);
+  const preview=await review.previewWithExclusions([{id:n.id,recordVersion:1}],[],"archive");
+  revokeLocalMemorySession();
+  await expect(repo.changeNotes("archive",[{id:n.id,record_version:1}],undefined,{
+    expectedPreferences:preview.included.map(row=>({id:row.id,preferenceVersion:row.expectedPreferenceVersion})),
+  })).rejects.toThrow("application_locked");
+  expect((await repo.entity(n.id))?.record_status).toBe("active");
+  expect((await repo.entity(n.id))?.record_version).toBe(1);
 });
