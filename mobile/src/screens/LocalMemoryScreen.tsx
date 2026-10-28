@@ -354,7 +354,7 @@ export function LocalMemoryScreen() {
         Архив и корзина не удаляют оригиналы навсегда; обратимое действие можно отменить.
         Ранее экспортированные резервные копии не изменятся. Заблокированные элементы не затрагиваются.
       </Text>
-      {hygienePreview?.eligibleIds.length && !busy ?
+      {Boolean(hygienePreview?.eligibleIds.length) && !busy ?
         (hygieneConfirm ? <>
           <Text accessibilityRole="alert" style={{color:t.text}}>
             Подтвердите {hygieneAction==="archive"?"архивирование":"перемещение в корзину"}:
