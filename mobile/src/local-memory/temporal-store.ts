@@ -365,6 +365,11 @@ export type TemporalAtDateQuery = {
   predicate: string;
   context: string;
   validDate: string;
+  /** ISO UTC instant: what source-backed candidates were RECORDED by this
+   * knowledge cutoff, independent of when their valid interval began.
+   * Not a replay of historical permissions or proof of user confirmation.
+   */
+  knowledgeAt?: string;
   limit?: number;
   before?: TemporalHistoryCursor;
 };
@@ -374,6 +379,9 @@ export type TemporalAtDatePage = {
   nextCursor: TemporalHistoryCursor | null;
   /** More source-current candidates may exist beyond the requested page. */
   partial: boolean;
+  /** A bounded provenance view, not a historical claim-approval snapshot. */
+  knowledgeAt: string | null;
+  verificationScope: "current_source_candidates_only";
 };
 
 function temporalValidDate(value: string): boolean {
@@ -439,6 +447,8 @@ export async function listTemporalStateCandidatesAtDate(
     throw new Error("temporal_query_scope_invalid");
   }
   if (!temporalValidDate(query.validDate)) throw new Error("temporal_query_date_invalid");
+  if(query.knowledgeAt!==undefined && !temporalUtcInstant(query.knowledgeAt))
+    throw new Error("temporal_query_knowledge_time_invalid");
   const limit=query.limit??20;
   if (!Number.isSafeInteger(limit) || limit<1 || limit>50) {
     throw new Error("temporal_query_limit_invalid");
@@ -457,10 +467,19 @@ export async function listTemporalStateCandidatesAtDate(
   const args:(string|number)[]=[
     query.subjectId,query.predicate,query.context,query.collectionId,
   ];
+  if(query.knowledgeAt){
+    // A backdated valid-time claim cannot be visible before it was recorded.
+    where.push("c.knowledge_recorded_at<=?");
+    args.push(query.knowledgeAt);
+  }
   if (query.before) {
     where.push("(c.knowledge_recorded_at<? OR (c.knowledge_recorded_at=? AND c.id<?))");
     args.push(query.before.recordedAt,query.before.recordedAt,query.before.claimId);
   }
+  // Placeholder order follows the SELECT's first correlated subquery (ev),
+  // then its WHERE filters. An evidence entered later cannot retroactively
+  // become information available on an earlier knowledge date.
+  if(query.knowledgeAt)args.unshift(query.knowledgeAt);
   args.push(limit+1);
   const rows=await db.getAllAsync<ClaimRow>(
     "SELECT c.*, ev.quote, ev.origin FROM memory_temporal_claims c "+
@@ -470,6 +489,7 @@ export async function listTemporalStateCandidatesAtDate(
     "SELECT witness.id FROM memory_temporal_evidence witness "+
     "WHERE witness.claim_id=c.id AND witness.entity_id=c.entity_id "+
     "AND witness.source_record_version=c.source_record_version "+
+    (query.knowledgeAt?"AND witness.created_at<=? ":"")+
     "ORDER BY witness.created_at,witness.id LIMIT 1) "+
     "WHERE "+where.join(" AND ")+" "+
     "ORDER BY c.knowledge_recorded_at DESC,c.id DESC LIMIT ?",
@@ -488,5 +508,7 @@ export async function listTemporalStateCandidatesAtDate(
     nextCursor:rows.length>limit && last
       ? {recordedAt:last.knowledge_recorded_at,claimId:last.id} : null,
     partial:rows.length>limit,
+    knowledgeAt:query.knowledgeAt??null,
+    verificationScope:"current_source_candidates_only" as const,
   };
 }
