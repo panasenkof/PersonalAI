@@ -420,9 +420,11 @@ export async function stageRelationReviewCandidate(
     );
     const row=await tx.getFirstAsync<{id:string;status:"pending"|"deferred"|"rejected"|"accepted"}>(
       "SELECT id,status FROM memory_review_proposals WHERE "+
-      "source_entity_id=? AND target_entity_id=? AND relation_kind=? "+
+      "source_entity_id=? AND source_record_version=? AND target_entity_id=? "+
+      "AND target_record_version=? AND relation_kind=? "+
       "AND evidence_entity_id=? AND evidence_record_version=? AND quote=?",
-      [req.sourceId,req.targetId,req.kind,req.evidenceId,req.evidenceVersion,quote],
+      [req.sourceId,req.sourceVersion,req.targetId,req.targetVersion,req.kind,
+       req.evidenceId,req.evidenceVersion,quote],
     );
     if(!row)throw new Error("relational_candidate_not_committed");
     result={proposalId:row.id,added:inserted.changes===1,status:row.status};
