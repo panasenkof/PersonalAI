@@ -9,6 +9,9 @@ import { withUnlockedTransaction } from "./transaction";
 import { stageTemporalCandidateWithReview, listTemporalKnowledgeHistory, listTemporalStateCandidatesAtDate } from "./temporal-store";
 import { listTemporalReviewInbox as readTemporalReviewInbox } from "./temporal-review-inbox";
 import { decideTemporalReview, undoTemporalReview } from "./temporal-decisions";
+import { confirmUserRelationEvidence, listCurrentConfirmedRelationProofs } from "./relation-evidence";
+import type { ConfirmRelationInput } from "./relation-evidence";
+import type { DirectPersonRelation } from "./relational-proof";
 import type { TemporalClaimCandidate } from "./temporal-claims";
 import type { TemporalHistoryQuery, TemporalAtDateQuery } from "./temporal-store";
 import type { TemporalInboxQuery } from "./temporal-review-inbox";
@@ -351,6 +354,16 @@ export class SqliteMemoryRepository implements MemoryRepository {
     });
     if (!updated) throw new Error("revision_not_committed");
     return updated;
+  }
+
+  /** Explicit user-only proof; existing canonical relation ID. */
+  confirmUserRelationProof(request: ConfirmRelationInput) {
+    return confirmUserRelationEvidence(this.db,request);
+  }
+  currentConfirmedRelationProofs(query: {
+    sourceId: string;kind?: DirectPersonRelation | "participant_of";limit?: number;
+  }) {
+    return listCurrentConfirmedRelationProofs(this.db,query);
   }
 
   async linkEntities(sourceId: string, targetId: string, kind: string): Promise<RelationRecord> {
