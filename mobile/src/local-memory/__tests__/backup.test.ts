@@ -9,7 +9,7 @@ jest.mock("expo-file-system/legacy", () => ({
 }));
 jest.mock("expo-sharing", () => ({ isAvailableAsync: jest.fn(), shareAsync: jest.fn() }));
 jest.mock("../storage", () => ({
-  LOCAL_MEMORY_SCHEMA_VERSION: 16,
+  LOCAL_MEMORY_SCHEMA_VERSION: 17,
   withLocalMemoryDatabase: jest.fn(async (_id: string, task: (db: unknown) => Promise<unknown>) => task(mockDb)),
 }));
 
@@ -52,6 +52,7 @@ beforeEach(() => {
     if (sql === "PRAGMA page_count") return { page_count: 20 };
     if (sql === "PRAGMA page_size") return { page_size: 4096 };
     if (sql === "PRAGMA pia_export.integrity_check") return { integrity_check: "ok" };
+    if (sql.includes("(SELECT count(*) FROM ") && sql.includes("memory_profile_self")) return {profile_self_binding:0};
     if (sql.includes("(SELECT count(*) FROM ") && sql.includes("memory_review_proposals")) return {review_proposals:0};
     if (sql.includes("(SELECT count(*) FROM ") && sql.includes("memory_review_actions")) return {review_actions:0};
     if (sql.includes("(SELECT count(*) FROM ") && sql.includes("memory_relation_evidence")) return {relation_links:0,relation_evidence:0};
@@ -95,7 +96,7 @@ test("export SQLCipher-encrypts a new independent file before sharing and erases
     "/cache/pia-encrypted-random-id.db", code,
   ]);
   expect(mockDb.getFirstAsync).toHaveBeenCalledWith("SELECT sqlcipher_export('pia_export')");
-  expect(mockDb.execAsync).toHaveBeenCalledWith("PRAGMA pia_export.user_version = 16");
+  expect(mockDb.execAsync).toHaveBeenCalledWith("PRAGMA pia_export.user_version = 17");
   expect(mockDb.execAsync).toHaveBeenCalledWith("DETACH DATABASE pia_export");
   expect(Sharing.shareAsync).toHaveBeenCalledTimes(1);
   expect(FS.deleteAsync).toHaveBeenCalledWith("file:///cache/pia-encrypted-random-id.db", {
@@ -107,6 +108,8 @@ test("verified export accepts more than 100k records and writes an encrypted man
   const previous = mockDb.getFirstAsync.getMockImplementation()!;
   mockDb.getFirstAsync.mockImplementation(async sql =>
     sql === "SELECT count(*) AS n FROM memory_entities" ? { n: 100001 } :
+    sql.includes("(SELECT count(*) FROM ") && sql.includes("memory_profile_self") ?
+      {profile_self_binding:0} :
     sql.includes("(SELECT count(*) FROM ") && sql.includes("memory_review_proposals") ?
       {review_proposals:0} :
     sql.includes("(SELECT count(*) FROM ") && sql.includes("memory_review_actions") ?
@@ -119,9 +122,9 @@ test("verified export accepts more than 100k records and writes an encrypted man
       attachments: 0, attachment_parts: 0, receipts: 0, chats: 0 } : previous(sql));
   await shareEncryptedBackup("guest", code);
   expect(mockDb.execAsync).toHaveBeenCalledWith(expect.stringContaining("CREATE TABLE pia_export.persai_backup_manifest"));
-  expect(mockDb.execAsync).toHaveBeenCalledWith(expect.stringContaining("CHECK(format_version=7)"));
+  expect(mockDb.execAsync).toHaveBeenCalledWith(expect.stringContaining("CHECK(format_version=8)"));
   expect(mockDb.runAsync).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO pia_export.persai_backup_manifest"),
-    [7, 16, 100001, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    [8, 17, 100001, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
   expect(Sharing.shareAsync).toHaveBeenCalledTimes(1);
 });
 
@@ -714,8 +717,8 @@ test("v14 restore copies review proposals after their source FK parents and reta
 test("v15 backup manifest has current schema and one shared decision journal",async()=>{
   await shareEncryptedBackup("guest",code);
   const schema=mockDb.execAsync.mock.calls.map(c=>String(c[0])).join("\n");
-  expect(schema).toContain("CHECK(format_version=7)");
-  expect(schema).toContain("PRAGMA pia_export.user_version = 16");
+  expect(schema).toContain("CHECK(format_version=8)");
+  expect(schema).toContain("PRAGMA pia_export.user_version = 17");
 });
 test("v15 forged journal count fails preflight before any user memory write",async()=>{
   const prev=mockDb.getFirstAsync.getMockImplementation()!;
@@ -745,6 +748,18 @@ test("v15 forged journal count fails preflight before any user memory write",asy
 test("v16 encrypted backup export has exactly one v7 manifest with confirmed review history",async()=>{
   await shareEncryptedBackup("guest",code);
   const exported=mockDb.execAsync.mock.calls.map(([sql])=>String(sql)).join("\n");
-  expect(exported).toContain("PRAGMA pia_export.user_version = 16");
-  expect(exported).toContain("CHECK(format_version=7)");
+  expect(exported).toContain("PRAGMA pia_export.user_version = 17");
+  expect(exported).toContain("CHECK(format_version=8)");
+});
+
+
+test("v17 SQLCipher export carries one self-person slot and its count in the encrypted manifest",async()=>{
+  const original=mockDb.getFirstAsync.getMockImplementation()!;
+  mockDb.getFirstAsync.mockImplementation(async sql=>sql.includes("(SELECT count(*) FROM pia_export.memory_profile_self)")
+    ? {profile_self_binding:1} : original(sql));
+  await shareEncryptedBackup("guest",code);
+  expect(mockDb.runAsync).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO pia_export.persai_backup_manifest"),
+    expect.arrayContaining([8,17]));
+  const call=mockDb.runAsync.mock.calls.find(([sql]:[string])=>sql.startsWith("INSERT INTO pia_export.persai_backup_manifest"));
+  expect(call?.[1]?.at(-1)).toBe(1);
 });
