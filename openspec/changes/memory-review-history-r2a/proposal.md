@@ -1,0 +1,5 @@
+# №66.4 R2a follow-up — read user review decisions via canonical repository
+
+Stacked on #184 (SQLCipher v13 generic `memory_review_actions`, witness CAS retract/undo + backup v4). `relationReviewHistory({evidenceId,limit})` offers the same local `MemoryRepository` API used to confirm/retract, **not** a parallel search or history DB. Validates witness and quoted original, both endpoint versions and current standard-scope collection/record ACL before reading the immutable action journal. Returns bounded newest-first actions with actionId, preceding version, before/after state, exact `undoesId`, `hasMore` and current witness version/state. No model access, no retrieval of deleted/secret source metadata, no identity guesses.
+
+C1: no history before first action, retract+undo ordering and reference, honest limit overflow, reject private evidence and invalid page size. No Android UI yet. R2b candidate acceptance/reject/defer and R2c unified user review screen remain OPEN. Histories of old temporal decisions remain available through their existing journal until deliberate C3 migration; do not double-write them.
