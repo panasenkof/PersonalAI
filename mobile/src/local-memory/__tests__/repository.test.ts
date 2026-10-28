@@ -922,6 +922,11 @@ test("R2b1: stages exactly one source-quoted pending relation without writing ca
   expect((await repo.relationCandidateInbox({collectionId:people.id})).items).toEqual([]);
   await expect(repo.stageRelationCandidate({...request,evidenceQuote:"Придуманная цитата"}))
     .rejects.toThrow("relational_evidence_quote_not_found");
+  // The single existing confirmation writer supersedes an unresolved candidate.
+  await repo.confirmUserRelationProof({...request,userConfirmed:true});
+  expect((await repo.relationCandidateInbox({collectionId:notes.id})).items).toEqual([]);
+  await expect(repo.stageRelationCandidate(request))
+    .rejects.toThrow("relational_candidate_already_confirmed");
   await repo.reviseEntity(proof.id,1,{body:"Другое утверждение"},"Исправление");
   expect((await repo.relationCandidateInbox({collectionId:notes.id})).items).toEqual([]);
   await expect(repo.stageRelationCandidate(request)).rejects.toThrow(
