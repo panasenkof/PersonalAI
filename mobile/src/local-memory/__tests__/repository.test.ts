@@ -976,3 +976,35 @@ test("R2b1: a new endpoint revision is a new proposal even if quoted source text
  expect((await fake.getFirstAsync<{n:number}>(
    "SELECT count(*) AS n FROM memory_review_proposals"))?.n).toBe(2);
 });
+
+test("F7: permanent purge of a trashed evidence note with retract→undo journal succeeds under real SQLite FKs",async()=>{
+  const {purgeNotes}=require("../note-actions");
+  const fake=new FakeSqlite(),repo=new SqliteMemoryRepository(fake as never);
+  await fake.execAsync("PRAGMA foreign_keys=ON");
+  const c=await repo.createCollection({name:"Люди",slug:"people",sensitivity:"standard"});
+  const owner=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"person",payload:{}});
+  const person=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"person",payload:{}});
+  const source=await repo.createEntity({collection_id:c.id,domain:"notes",payload:{body:"Моя сестра Маша"}});
+  const proof=await repo.confirmUserRelationProof({sourceId:owner.id,sourceVersion:1,
+    targetId:person.id,targetVersion:1,evidenceId:source.id,evidenceVersion:1,
+    kind:"has_sister",evidenceQuote:"Моя сестра Маша",userConfirmed:true});
+  const first=await repo.retractRelationWitness({evidenceId:proof.evidenceId,
+    expectedVersion:1,userConfirmed:true});
+  await repo.undoRelationRetraction({evidenceId:proof.evidenceId,
+    expectedVersion:2,actionId:first.actionId,userConfirmed:true});
+  expect((await fake.getFirstAsync<{n:number}>("SELECT count(*) AS n FROM memory_review_actions"))?.n).toBe(2);
+  await fake.runAsync("UPDATE memory_entities SET record_status='trashed' WHERE id=?",[source.id]);
+  await expect(fake.runAsync("DELETE FROM memory_entities WHERE id=?",[source.id]))
+    .rejects.toThrow(/FOREIGN KEY constraint failed/);
+  const another=await repo.createEntity({collection_id:c.id,domain:"notes",payload:{body:"Another"}});
+  await expect(purgeNotes(fake as never,[{id:source.id,record_version:1},
+    {id:another.id,record_version:999}])).rejects.toThrow("stale_memory_version");
+  expect((await fake.getFirstAsync<{n:number}>("SELECT count(*) AS n FROM memory_review_actions"))?.n).toBe(2);
+  await purgeNotes(fake as never,[{id:source.id,record_version:1}]);
+  expect(await repo.entity(source.id)).toBeNull();
+  expect((await fake.getFirstAsync<{n:number}>("SELECT count(*) AS n FROM memory_review_actions"))?.n).toBe(0);
+  expect((await fake.getFirstAsync<{n:number}>("SELECT count(*) AS n FROM memory_relation_evidence"))?.n).toBe(0);
+  expect(await fake.getFirstAsync("PRAGMA foreign_key_check")).toBeNull();
+  expect(await repo.entity(owner.id)).not.toBeNull();
+  expect(await repo.entity(person.id)).not.toBeNull();
+});
