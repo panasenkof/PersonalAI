@@ -46,64 +46,60 @@ async function allowedEntity(db:SQL,id:string,version:number):Promise<EntityScop
   return row;
 }
 
-export async function confirmUserRelationEvidence(
-  db:SQL,req:ConfirmRelationInput,
-):Promise<ConfirmRelationResult>{
+/** Sole canonical relation+witness writer. Can be called by public R1b or by
+ * a candidate review inside its existing unlocked SQLCipher transaction.
+ * Do NOT wrap this in a nested BEGIN IMMEDIATE.
+ */
+async function writeConfirmedRelationProof(tx:SQL,req:ConfirmRelationInput):Promise<ConfirmRelationResult>{
   if(!validId(req.sourceId)||!validId(req.targetId)||!validId(req.evidenceId)||
      req.sourceId===req.targetId||![req.sourceVersion,req.targetVersion,req.evidenceVersion].every(validVersion)||
      !ROLES.includes(req.kind)||req.userConfirmed!==true||
      typeof req.evidenceQuote!=="string"||!req.evidenceQuote.trim()||
-     req.evidenceQuote.length>6000){
+     req.evidenceQuote.length>6000)
     throw new Error("relational_confirmation_invalid");
+  await validatedCandidate(tx,req);
+  let relation=await tx.getFirstAsync<{id:string;source_kind:string|null}>(
+    "SELECT id,source_kind FROM memory_relations "+
+    "WHERE source_entity_id=? AND target_entity_id=? AND kind=?",
+    [req.sourceId,req.targetId,req.kind]);
+  if(relation?.source_kind==="model:auto"){
+    await tx.runAsync(
+      "UPDATE memory_relations SET source_kind='user:confirmed',source_ref=NULL WHERE id=?",
+      [relation.id]);
   }
-  let result:ConfirmRelationResult|null=null;
-  await withUnlockedTransaction(db,async tx=>{
-    // One identical ACL, endpoint-kind and literal-source gate for both a
-    // nonconfirmed suggestion and the explicit user confirmation writer.
-    await validatedCandidate(tx,req);
-    let relation=await tx.getFirstAsync<{id:string;source_kind:string|null}>(
-      "SELECT id,source_kind FROM memory_relations "+
-      "WHERE source_entity_id=? AND target_entity_id=? AND kind=?",
-      [req.sourceId,req.targetId,req.kind],
-    );
-    if(relation?.source_kind==="model:auto"){
-      // An explicit user-confirmed witness takes ownership of an existing
-      // canonical edge so the enrichment re-index cannot delete it.
-      await tx.runAsync(
-        "UPDATE memory_relations SET source_kind='user:confirmed',source_ref=NULL WHERE id=?",
-        [relation.id],
-      );
-    }
-    if(!relation){
-      const id=uid();
-      await tx.runAsync(
-        "INSERT INTO memory_relations "+
-        "(id,source_entity_id,target_entity_id,kind,source_kind,source_ref,created_at) "+
-        "VALUES (?,?,?,?,'user:confirmed',NULL,?)",
-        [id,req.sourceId,req.targetId,req.kind,new Date().toISOString()],
-      );
-      relation={id,source_kind:"user:confirmed"};
-    }
-    const existing=await tx.getFirstAsync<{id:string;state:string}>(
-      "SELECT id,state FROM memory_relation_evidence "+
-      "WHERE relation_id=? AND evidence_entity_id=? AND evidence_record_version=? AND quote=?",
-      [relation.id,req.evidenceId,req.evidenceVersion,req.evidenceQuote.trim()],
-    );
-    if(existing){
-      if(existing.state!=="confirmed")throw new Error("relational_evidence_retracted");
-      result={relationId:relation.id,evidenceId:existing.id,added:false};
-      return;
-    }
+  if(!relation){
     const id=uid();
     await tx.runAsync(
-      "INSERT INTO memory_relation_evidence "+
-      "(id,relation_id,evidence_entity_id,evidence_record_version,source_record_version,"+
-      "target_record_version,quote,origin,actor_kind,state,created_at) "+
-      "VALUES (?,?,?,?,?,?,?,'explicit_user','user','confirmed',?)",
-      [id,relation.id,req.evidenceId,req.evidenceVersion,req.sourceVersion,
-       req.targetVersion,req.evidenceQuote.trim(),new Date().toISOString()],
-    );
-    result={relationId:relation.id,evidenceId:id,added:true};
+      "INSERT INTO memory_relations "+
+      "(id,source_entity_id,target_entity_id,kind,source_kind,source_ref,created_at) "+
+      "VALUES (?,?,?,?,'user:confirmed',NULL,?)",
+      [id,req.sourceId,req.targetId,req.kind,new Date().toISOString()]);
+    relation={id,source_kind:"user:confirmed"};
+  }
+  const existing=await tx.getFirstAsync<{id:string;state:string}>(
+    "SELECT id,state FROM memory_relation_evidence "+
+    "WHERE relation_id=? AND evidence_entity_id=? AND evidence_record_version=? AND quote=?",
+    [relation.id,req.evidenceId,req.evidenceVersion,req.evidenceQuote.trim()]);
+  if(existing){
+    if(existing.state!=="confirmed")throw new Error("relational_evidence_retracted");
+    return {relationId:relation.id,evidenceId:existing.id,added:false};
+  }
+  const evidenceId=uid();
+  await tx.runAsync(
+    "INSERT INTO memory_relation_evidence "+
+    "(id,relation_id,evidence_entity_id,evidence_record_version,source_record_version,"+
+    "target_record_version,quote,origin,actor_kind,state,created_at) "+
+    "VALUES (?,?,?,?,?,?,?,'explicit_user','user','confirmed',?)",
+    [evidenceId,relation.id,req.evidenceId,req.evidenceVersion,req.sourceVersion,
+     req.targetVersion,req.evidenceQuote.trim(),new Date().toISOString()]);
+  return {relationId:relation.id,evidenceId,added:true};
+}
+export async function confirmUserRelationEvidence(
+  db:SQL,req:ConfirmRelationInput,
+):Promise<ConfirmRelationResult>{
+  let result:ConfirmRelationResult|null=null;
+  await withUnlockedTransaction(db,async tx=>{
+    result=await writeConfirmedRelationProof(tx,req);
   });
   if(!result)throw new Error("relational_confirm_not_committed");
   return result;
@@ -513,12 +509,13 @@ export async function listRelationReviewCandidates(
  * Accept/witness creation is a separate R2b2b step requiring the canonical
  * confirmation writer within this SAME SQLCipher transaction.
  */
-export type RelationCandidateReviewChoice="reject"|"defer";
+export type RelationCandidateReviewChoice="accept"|"reject"|"defer";
 export type RelationCandidateExpected={
   proposalId:string;expectedVersion:number;userConfirmed:true;
 };
 export type RelationCandidateActionResult={
-  actionId:string;nextVersion:number;status:"pending"|"deferred"|"rejected";
+  actionId:string;nextVersion:number;status:"pending"|"deferred"|"rejected"|"accepted";
+  confirmedEvidenceId?:string;
 };
 type CandidateRow={
   id:string;source_entity_id:string;source_record_version:number;
@@ -551,7 +548,7 @@ export async function decideRelationCandidate(
   db:SQL,req:RelationCandidateExpected&{choice:RelationCandidateReviewChoice},
 ):Promise<RelationCandidateActionResult>{
   checkedCandidateExpected(req);
-  if(req.choice!=="reject"&&req.choice!=="defer")
+  if(req.choice!=="accept"&&req.choice!=="reject"&&req.choice!=="defer")
     throw new Error("relational_candidate_choice_invalid");
   const actionId=uid();let result:RelationCandidateActionResult|null=null;
   await withUnlockedTransaction(db,async tx=>{
@@ -559,19 +556,37 @@ export async function decideRelationCandidate(
     if(p.proposal_version!==req.expectedVersion||
        (p.status!=="pending"&&p.status!=="deferred"))
       throw new Error("relational_candidate_decision_stale");
-    const status=req.choice==="reject"?"rejected":"deferred";
+    const status=req.choice==="accept"?"accepted":
+      req.choice==="reject"?"rejected":"deferred";
     const at=new Date().toISOString();
     const changed=await tx.runAsync(
       "UPDATE memory_review_proposals SET status=?,proposal_version=proposal_version+1,"+
       "updated_at=? WHERE id=? AND proposal_version=? AND status IN ('pending','deferred')",
       [status,at,p.id,req.expectedVersion]);
     if(changed.changes!==1)throw new Error("relational_candidate_decision_stale");
+    // Exactly one source-backed confirmed witness, through the existing
+    // canonical relation writer, inside the SAME CAS review transaction.
+    // No model/hypothesis edge may become confirmed without userConfirmed.
+    let confirmed:ConfirmRelationResult|null=null;
+    if(req.choice==="accept"){
+      confirmed=await writeConfirmedRelationProof(tx,{
+        sourceId:p.source_entity_id,sourceVersion:p.source_record_version,
+        targetId:p.target_entity_id,targetVersion:p.target_record_version,
+        evidenceId:p.evidence_entity_id,evidenceVersion:p.evidence_record_version,
+        kind:p.relation_kind,evidenceQuote:p.quote,userConfirmed:true});
+      // If independently confirmed while this card was open, this is stale
+      // work, not a second accepted action. Roll back status and audit.
+      if(!confirmed.added)throw new Error("relational_candidate_already_confirmed");
+    }
     await tx.runAsync(
       "INSERT INTO memory_review_actions "+
-      "(id,target_kind,review_proposal_id,action,expected_version,before_state,after_state,actor_kind,created_at) "+
-      "VALUES (?,'relation',?,?,?,? ,?,'user',?)",
-      [actionId,p.id,req.choice,req.expectedVersion,p.status,status,at]);
-    result={actionId,nextVersion:req.expectedVersion+1,status};
+      "(id,target_kind,review_proposal_id,relation_evidence_id,action,expected_version,"+
+      "before_state,after_state,actor_kind,created_at) "+
+      "VALUES (?,'relation',?,?,?,?,?,?,'user',?)",
+      [actionId,p.id,confirmed?.evidenceId??null,req.choice,req.expectedVersion,
+       p.status,status,at]);
+    result={actionId,nextVersion:req.expectedVersion+1,status,
+      ...(confirmed?{confirmedEvidenceId:confirmed.evidenceId}:{})};
   });
   if(!result)throw new Error("relational_candidate_decision_not_committed");
   return result;

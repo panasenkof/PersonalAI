@@ -1116,3 +1116,58 @@ test("R2b2a: hard purge removes candidate undo dependencies, but ordinary trash 
   expect((await fake.getFirstAsync<{n:number}>("SELECT count(*) AS n FROM memory_review_proposals"))?.n).toBe(0);
   expect(await fake.getFirstAsync("PRAGMA foreign_key_check")).toBeNull();
 });
+
+test("R2b2b: accept uses the ONLY canonical confirmed-relation writer and one audit transaction",async()=>{
+ const fake=new FakeSqlite(),repo=new SqliteMemoryRepository(fake as never);
+ await fake.execAsync("PRAGMA foreign_keys=ON");
+ const c=await repo.createCollection({name:"Люди",slug:"people",sensitivity:"standard"});
+ const me=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"person",title:"Я",payload:{}});
+ const lana=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"person",title:"Лана",payload:{}});
+ const other=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"person",title:"Лана",payload:{}});
+ const note=await repo.createEntity({collection_id:c.id,domain:"notes",
+   payload:{body:"Лана моя коллега по проекту"}});
+ const request={sourceId:me.id,sourceVersion:1,targetId:lana.id,targetVersion:1,
+   evidenceId:note.id,evidenceVersion:1,evidenceQuote:"Лана моя коллега по проекту",
+   kind:"has_colleague" as const};
+ const staged=await repo.stageRelationCandidate(request);
+ const action=await repo.decideRelationCandidate({proposalId:staged.proposalId,
+   expectedVersion:1,choice:"accept",userConfirmed:true});
+ expect(action).toMatchObject({status:"accepted",nextVersion:2});
+ expect(action.confirmedEvidenceId).toBeTruthy();
+ expect((await fake.getFirstAsync<{n:number}>("SELECT count(*) AS n FROM memory_relations"))?.n).toBe(1);
+ expect((await fake.getFirstAsync<{n:number}>("SELECT count(*) AS n FROM memory_relation_evidence"))?.n).toBe(1);
+ const journal=await fake.getFirstAsync<{review_proposal_id:string;relation_evidence_id:string;action:string}>(
+   "SELECT review_proposal_id,relation_evidence_id,action FROM memory_review_actions WHERE id=?",
+   [action.actionId]);
+ expect(journal).toMatchObject({review_proposal_id:staged.proposalId,
+   relation_evidence_id:action.confirmedEvidenceId,action:"accept"});
+ expect((await repo.relationCandidateInbox({collectionId:c.id})).items).toEqual([]);
+ await expect(repo.stageRelationCandidate(request)).rejects.toThrow("relational_candidate_already_confirmed");
+ // Candidate confirmation must never link another namesake by its title.
+ expect((await fake.getFirstAsync<{n:number}>(
+   "SELECT count(*) AS n FROM memory_relations WHERE target_entity_id=?", [other.id]))?.n).toBe(0);
+ await expect(repo.undoRelationCandidateDecision({proposalId:staged.proposalId,
+   expectedVersion:2,actionId:action.actionId,userConfirmed:true}))
+   .rejects.toThrow("relational_candidate_undo_stale");
+ expect(await fake.getFirstAsync("PRAGMA foreign_key_check")).toBeNull();
+});
+
+test("R2b2b: independent confirmation races candidate acceptance without a second proof or accepted journal",async()=>{
+ const fake=new FakeSqlite(),repo=new SqliteMemoryRepository(fake as never);
+ const c=await repo.createCollection({name:"Контакты",slug:"contacts",sensitivity:"standard"});
+ const a=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"person",payload:{}});
+ const b=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"person",payload:{}});
+ const note=await repo.createEntity({collection_id:c.id,domain:"notes",payload:{body:"Наш учитель Марина"}});
+ const request={sourceId:a.id,sourceVersion:1,targetId:b.id,targetVersion:1,
+   evidenceId:note.id,evidenceVersion:1,evidenceQuote:"Наш учитель Марина",kind:"has_teacher" as const};
+ const p=await repo.stageRelationCandidate(request);
+ const proof=await repo.confirmUserRelationProof({...request,userConfirmed:true});
+ await expect(repo.decideRelationCandidate({proposalId:p.proposalId,expectedVersion:1,
+   choice:"accept",userConfirmed:true})).rejects.toThrow("relational_candidate_already_confirmed");
+ expect((await fake.getFirstAsync<{s:string}>(
+   "SELECT status AS s FROM memory_review_proposals WHERE id=?", [p.proposalId]))?.s).toBe("pending");
+ expect((await fake.getFirstAsync<{n:number}>(
+   "SELECT count(*) AS n FROM memory_review_actions WHERE review_proposal_id=?",[p.proposalId]))?.n).toBe(0);
+ expect((await fake.getFirstAsync<{n:number}>(
+   "SELECT count(*) AS n FROM memory_relation_evidence WHERE id=?",[proof.evidenceId]))?.n).toBe(1);
+});
