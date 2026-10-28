@@ -955,3 +955,24 @@ test("R2b1: candidate inbox excludes private evidence and cannot reopen a reject
     .rejects.toThrow("relational_source_not_available_or_stale");
   await expect(repo.relationCandidateInbox({collectionId:secret.id})).resolves.toMatchObject({items:[]});
 });
+
+
+test("R2b1: a new endpoint revision is a new proposal even if quoted source text is unchanged",async()=>{
+ const fake=new FakeSqlite(),repo=new SqliteMemoryRepository(fake as never);
+ const c=await repo.createCollection({name:"Люди",slug:"people",sensitivity:"standard"});
+ const owner=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"person",payload:{}});
+ const person=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"person",payload:{}});
+ const source=await repo.createEntity({collection_id:c.id,domain:"notes",payload:{body:"Моя коллега Мария"}});
+ const input={sourceId:owner.id,sourceVersion:1,targetId:person.id,targetVersion:1,
+   kind:"has_colleague" as const,evidenceId:source.id,evidenceVersion:1,
+   evidenceQuote:"Моя коллега Мария"};
+ const previous=await repo.stageRelationCandidate(input);
+ await repo.reviseEntity(person.id,1,{title:"Мария Петрова"},"Уточнили личность");
+ const changed=await repo.stageRelationCandidate({...input,targetVersion:2});
+ expect(changed.added).toBe(true);
+ expect(changed.proposalId).not.toBe(previous.proposalId);
+ const inbox=await repo.relationCandidateInbox({collectionId:c.id});
+ expect(inbox.items.map(x=>x.proposalId)).toEqual([changed.proposalId]);
+ expect((await fake.getFirstAsync<{n:number}>(
+   "SELECT count(*) AS n FROM memory_review_proposals"))?.n).toBe(2);
+});
