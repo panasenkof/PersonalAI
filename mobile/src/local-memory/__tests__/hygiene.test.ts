@@ -177,7 +177,7 @@ test("CLEAN-01/CLEAN-04/SEC-04: all excluded is a valid no-op; malformed exclusi
     .rejects.toThrow("invalid_review_exclusion");
   await expect(review.previewWithExclusions(targets,[n1.id,n1.id],"trash"))
     .rejects.toThrow("invalid_review_selection");
-  await expect(review.previewWithExclusions(targets.concat(targets),"archive"))
+  await expect(review.previewWithExclusions(targets.concat(targets),[],"archive"))
     .rejects.toThrow("invalid_review_selection");
   // A changed source is returned as blocked, never silently auto-accepted.
   await repo.reviseEntity(n1.id,1,{body:"Исправленный медицинский документ"},"Исправление");
