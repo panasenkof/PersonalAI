@@ -3,6 +3,8 @@ import { BackHandler } from "react-native";
 import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 import { LocalMemoryScreen } from "../screens/LocalMemoryScreen";
 const mockNavigate = jest.fn();
+const mockHygienePreference=jest.fn(async(id:string)=>({entityId:id,guard:"normal",skipUntil:null,preferenceVersion:2}));
+const mockHygieneSetPreference=jest.fn(async()=>({entityId:"one",guard:"pinned",skipUntil:null,preferenceVersion:3}));
 const mockHygienePreview = jest.fn(async(targets: Array<{id:string;recordVersion:number}>,excluded:string[],action:string)=>({
  action,selectedCount:targets.length,excludedIds:targets.filter(t=>excluded.includes(t.id)).map(t=>t.id),
  included:targets.filter(t=>!excluded.includes(t.id)).map(t=>({id:t.id,eligible:true,reasons:[],expectedRecordVersion:t.recordVersion,expectedPreferenceVersion:0})),
@@ -11,12 +13,12 @@ const mockHygienePreview = jest.fn(async(targets: Array<{id:string;recordVersion
 }));
 const sections = [{ id: "a", name: "Заметки", slug: "notes", sensitivity: "standard" }, { id: "b", name: "Люди", slug: "people", sensitivity: "unclassified" }];
 const notes = [
- { id: "one", collection_id: "a", title: "Первая", payload: { body: "Содержание" }, record_status: "active", record_version: 1, updated_at: "2026-10-24", kind: "note" },
+ { id: "one", collection_id: "a", sensitivity: "inherit", title: "Первая", payload: { body: "Содержание" }, record_status: "active", record_version: 1, updated_at: "2026-10-24", kind: "note" },
  { id: "two", collection_id: "b", title: "Вторая", payload: { body: "Содержание" }, record_status: "active", record_version: 1, updated_at: "2026-10-24", kind: "note" },
  { id: "old", collection_id: "b", title: "Архивная", payload: {}, record_status: "archived", updated_at: "2026-10-24", kind: "note" },
 ];
 const mockDb = {
- hygiene: () => ({ previewWithExclusions: mockHygienePreview }),
+ hygiene: () => ({ previewWithExclusions: mockHygienePreview, preference:mockHygienePreference,setPreference:mockHygieneSetPreference }),
  changeNotes: jest.fn(async () => "notes:archive:test"),
  lastNoteOperation: async () => "", collectionNoteCounts: async () => ({ a: 1, b: 1 }),
  searchNotes: jest.fn(async (term, _limit, _offset, filter) => notes.filter(n => n.record_status === filter.status && (!filter.collectionId || n.collection_id === filter.collectionId) && n.title.includes(term))),
@@ -34,7 +36,7 @@ jest.mock("../theme", () => ({ useTheme: () => ({}) }));
 jest.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ top: 24, bottom: 24 }) }));
 jest.mock("../components/BottomSheet", () => ({ BottomSheet: ({ visible, children, title, onClose }: any) => { const { Pressable, Text } = require("react-native"); return visible ? <><Pressable accessibilityLabel={"Закрыть панель " + title} onPress={onClose}><Text>Закрыть</Text></Pressable>{children}</> : null; } }));
 jest.mock("@react-navigation/native", () => ({ useNavigation: () => ({ navigate: mockNavigate }), useFocusEffect: (fn: any) => require("react").useEffect(fn, [fn]) }));
-beforeEach(() => { jest.clearAllMocks(); mockDb.changeNotes.mockResolvedValue("notes:archive:test"); });
+beforeEach(() => { jest.clearAllMocks(); mockDb.changeNotes.mockResolvedValue("notes:archive:test"); mockHygienePreference.mockResolvedValue({entityId:"one",guard:"normal",skipUntil:null,preferenceVersion:2}); });
 test("all-records clears collection, archive and search from either entry", async () => {
  const v = render(<LocalMemoryScreen />); await waitFor(() => v.getByLabelText("Открыть заметку Первая"));
  fireEvent.press(v.getByLabelText("Раздел Заметки")); await waitFor(() => expect(v.queryByLabelText("Открыть заметку Вторая")).toBeNull());
@@ -221,4 +223,38 @@ test("CLEAN-08/SEC-08: trash confirmation respects exclusion and failed CAS neve
   expect(v.getByText("hygiene_review_changed_repeat_preview")).toBeTruthy();
   expect(v.getByText("Выбрано: 2")).toBeTruthy();
   expect(v.queryByLabelText("Подтвердить групповое действие памяти")).toBeNull();
+});
+
+test("CLEAN-04/07: user pins a chosen source via one existing CAS policy writer and refreshes preview",async()=>{
+  const v=render(<LocalMemoryScreen/>);
+  await waitFor(()=>v.getByLabelText("Открыть заметку Первая"));
+  fireEvent(v.getByLabelText("Открыть заметку Первая"),"longPress");
+  fireEvent.press(v.getByLabelText("Выбрать заметку Вторая"));
+  fireEvent.press(v.getByLabelText("Действия с выбранными записями"));
+  await act(async()=>fireEvent.press(v.getByLabelText("Проверить последствия групповой ревизии")));
+  await waitFor(()=>v.getByLabelText("Правила сохранения Первая"));
+  expect(v.queryByLabelText("Правила сохранения Вторая")).toBeNull(); // unclassified collection
+  fireEvent.press(v.getByLabelText("Правила сохранения Первая"));
+  await act(async()=>fireEvent.press(v.getByLabelText("Всегда сохранять · Первая")));
+  expect(mockHygienePreference).toHaveBeenCalledWith("one");
+  expect(mockHygieneSetPreference).toHaveBeenCalledWith(
+    {id:"one",recordVersion:1},2,"pinned",null);
+  await waitFor(()=>expect(mockHygienePreview).toHaveBeenCalledTimes(2));
+  expect(mockDb.changeNotes).not.toHaveBeenCalled();
+});
+
+test("CLEAN-08: policy CAS conflict never implicitly approves a group action",async()=>{
+  mockHygieneSetPreference.mockRejectedValueOnce(new Error("stale_review_preference"));
+  const v=render(<LocalMemoryScreen/>);
+  await waitFor(()=>v.getByLabelText("Открыть заметку Первая"));
+  fireEvent(v.getByLabelText("Открыть заметку Первая"),"longPress");
+  fireEvent.press(v.getByLabelText("Выбрать заметку Вторая"));
+  fireEvent.press(v.getByLabelText("Действия с выбранными записями"));
+  await act(async()=>fireEvent.press(v.getByLabelText("Проверить последствия групповой ревизии")));
+  await waitFor(()=>v.getByLabelText("Правила сохранения Первая"));
+  fireEvent.press(v.getByLabelText("Правила сохранения Первая"));
+  await act(async()=>fireEvent.press(v.getByLabelText("Не предлагать к очистке · Первая")));
+  expect(v.getByText("stale_review_preference")).toBeTruthy();
+  expect(mockDb.changeNotes).not.toHaveBeenCalled();
+  expect(v.getByText("Выбрано: 2")).toBeTruthy();
 });
