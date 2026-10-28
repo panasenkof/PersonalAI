@@ -697,3 +697,57 @@ test("R1c: one private intermediate proof blocks entire relation path without le
   expect(await repo.confirmedRelativeConversationPaths({ownerPersonId:self.id,relationKind:"has_sister"}))
     .toEqual({paths:[],truncated:false});
 });
+
+
+test("R3a: one searchMemory route returns only confirmed mother conversation plus proof IDs",async()=>{
+  const fake=new FakeSqlite(),repo=new SqliteMemoryRepository(fake as never);
+  const c=await repo.createCollection({name:"Люди",slug:"people",sensitivity:"standard"});
+  const privateC=await repo.createCollection({name:"Личное",slug:"private",sensitivity:"secret"});
+  const owner=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"person",title:"Я",payload:{}});
+  const mother=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"person",title:"Ирина",payload:{}});
+  const namesake=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"person",title:"Ирина",payload:{}});
+  const family=await repo.createEntity({collection_id:c.id,domain:"notes",payload:{body:"Моя мама Ирина"}});
+  const call=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"note",
+    title:"Разговор с Ириной",payload:{body:"Мы созвонились с Ириной вчера"}});
+  const other=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"note",
+    title:"Встреча",payload:{body:"Поговорили об Ирине с Сергеем"}});
+  const secret=await repo.createEntity({collection_id:privateC.id,domain:"notes",kind:"note",
+    title:"Секретная запись",payload:{body:"Личные данные"}});
+  const motherProof=await repo.confirmUserRelationProof({
+    sourceId:owner.id,sourceVersion:1,targetId:mother.id,targetVersion:1,
+    kind:"has_mother",evidenceId:family.id,evidenceVersion:1,
+    evidenceQuote:"Моя мама Ирина",userConfirmed:true,
+  });
+  const talkProof=await repo.confirmUserRelationProof({
+    sourceId:call.id,sourceVersion:1,targetId:mother.id,targetVersion:1,
+    kind:"participant_of",evidenceId:call.id,evidenceVersion:1,
+    evidenceQuote:"Мы созвонились с Ириной вчера",userConfirmed:true,
+  });
+  const q={ownerPersonId:owner.id,relationKind:"has_mother" as const};
+  const hits=await repo.searchMemory("Найди разговор с моей мамой",{
+    collectionIds:[c.id,privateC.id],sensitivities:["standard","inherit"],verifiedRelative:q,
+  });
+  expect(hits.map(h=>h.entity.id)).toEqual([call.id]);
+  expect(hits[0].chunk).toContain("созвонились");
+  expect(hits[0].proof).toEqual({relativeId:mother.id,
+    relationEvidenceId:motherProof.evidenceId,
+    participantEvidenceId:talkProof.evidenceId,truncated:false});
+  expect(hits.map(h=>h.entity.id)).not.toContain(other.id);
+  expect(hits.map(h=>h.entity.id)).not.toContain(secret.id);
+  expect(hits.map(h=>h.entity.id)).not.toContain(namesake.id);
+  expect(await repo.searchMemory("мама",{
+    collectionIds:[privateC.id],verifiedRelative:q,
+  })).toEqual([]);
+  expect(await repo.searchMemory("мама",{
+    collectionIds:[],verifiedRelative:q,
+  })).toEqual([]);
+  await repo.reviseEntity(family.id,1,{body:"Исправлено"}, "Редакция источника");
+  expect(await repo.searchMemory("Найди разговор",{
+    verifiedRelative:q,
+  })).toEqual([]);
+  // Without the strict typed graph filter, the ordinary text search remains
+  // independent and may find mere mentions (which it must NOT call proof).
+  const ordinary=await repo.searchMemory("Ирина");
+  expect(ordinary.some(h=>h.entity.id===other.id)).toBe(true);
+  expect(ordinary.every(h=>h.proof===undefined)).toBe(true);
+});

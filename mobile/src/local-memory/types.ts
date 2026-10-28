@@ -28,7 +28,10 @@ export type EntityRecord = {
   kind: MemoryKind;
 };
 /** A search result: the record and its chunk that matched best. */
-export type MemoryHit = { entity: EntityRecord; chunk: string; score: number };
+export type MemoryHit = { entity: EntityRecord; chunk: string; score: number;
+  /** Only verified relation→participant results carry a proof; plain FTS never does. */
+  proof?: { relativeId: string; relationEvidenceId: string; participantEvidenceId: string; truncated: boolean };
+};
 export type ObservationRecord = {
   id: string; entity_id: string; kind: string; payload: Record<string, unknown>;
   occurred_at: string; created_at: string; sensitivity: RecordSensitivity;
@@ -99,7 +102,7 @@ export interface MemoryRepository {
   applyIndexEnrichment(snapshot: EnrichmentSnapshot, terms: string[], people: string[], signal?: AbortSignal): Promise<boolean>;
   staleIndexTerms(source: string, limit?: number): Promise<string[]>;
   indexTermsStatus(source: string): Promise<{ done: number; pending: number }>;
-  searchMemory(query: string, options?: { collectionIds?: string[]; sensitivities?: string[]; limit?: number; vector?: { model: string; values: Float32Array } }): Promise<MemoryHit[]>;
+  searchMemory(query: string, options?: { collectionIds?: string[]; sensitivities?: string[]; limit?: number; vector?: { model: string; values: Float32Array }; verifiedRelative?: { ownerPersonId: string; relationKind: DirectPersonRelation } }): Promise<MemoryHit[]>;
   pendingVectorChunks(model: string, limit?: number): Promise<Array<{ chunkId: string; text: string; hash: string }>>;
   saveVectors(model: string, items: Array<{ chunkId: string; vector: Float32Array; hash: string }>): Promise<number>;
   vectorStatus(model: string): Promise<{ done: number; total: number }>;
