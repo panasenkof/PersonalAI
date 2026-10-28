@@ -58,22 +58,9 @@ export async function confirmUserRelationEvidence(
   }
   let result:ConfirmRelationResult|null=null;
   await withUnlockedTransaction(db,async tx=>{
-    const source=await allowedEntity(tx,req.sourceId,req.sourceVersion);
-    const target=await allowedEntity(tx,req.targetId,req.targetVersion);
-    const evidence=await allowedEntity(tx,req.evidenceId,req.evidenceVersion);
-    if(req.kind==="participant_of"){
-      if(source.kind!=="note"||target.kind!=="person"){
-        throw new Error("relational_role_endpoints_invalid");
-      }
-    }else if(source.kind!=="person"||target.kind!=="person"){
-      throw new Error("relational_role_endpoints_invalid");
-    }
-    // The witness is anchored to a real saved text; no invented citation from
-    // a model draft, filename, mere mention or unavailable ASR segment.
-    if(evidence.domain!=="notes"||
-       !memoryText(JSON.parse(evidence.payload_json)).includes(req.evidenceQuote.trim())){
-      throw new Error("relational_evidence_quote_not_found");
-    }
+    // One identical ACL, endpoint-kind and literal-source gate for both a
+    // nonconfirmed suggestion and the explicit user confirmation writer.
+    await validatedCandidate(tx,req);
     let relation=await tx.getFirstAsync<{id:string;source_kind:string|null}>(
       "SELECT id,source_kind FROM memory_relations "+
       "WHERE source_entity_id=? AND target_entity_id=? AND kind=?",
