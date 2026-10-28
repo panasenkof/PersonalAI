@@ -21,7 +21,8 @@ import { MemoryNoteCard } from "../design/nebula/MemoryNoteCard";
 
 import { mergeText, noteUndoLabel, type NoteAction } from "../local-memory/note-actions";
 import { scheduleVectors } from "../media/vector-runner";
-import type { MemoryReviewBatchPreview, MemoryReviewAction, MemoryReviewGuard } from "../local-memory/hygiene";
+import type { MemoryReviewBatchPreview, MemoryReviewAction, MemoryReviewGuard, MemoryHygieneSuggestions, MemoryHygieneSuggestedGroup } from "../local-memory/hygiene";
+import { localMemorySessionUnlocked, onLocalMemorySessionChange } from "../local-memory/storage";
 
 export function LocalMemoryScreen() {
   const t = useTheme(); const navigation = useNavigation<NativeStackNavigationProp<RootStackParams>>();
@@ -48,6 +49,9 @@ export function LocalMemoryScreen() {
   const [moveOpen, setMoveOpen] = useState(false);
   const [mergeOpen, setMergeOpen] = useState(false);
   const [hygieneReviewOpen, setHygieneReviewOpen] = useState(false);
+  const [hygieneSuggestionsOpen, setHygieneSuggestionsOpen] = useState(false);
+  const [hygieneSuggestions, setHygieneSuggestions] = useState<MemoryHygieneSuggestions | null>(null);
+  const [suggestedReviewNotes, setSuggestedReviewNotes] = useState<EntityRecord[] | null>(null);
   const [hygieneExcluded, setHygieneExcluded] = useState<string[]>([]);
   const [hygienePreview, setHygienePreview] = useState<MemoryReviewBatchPreview | null>(null);
   const [hygieneAction, setHygieneAction] = useState<MemoryReviewAction>("archive");
@@ -58,6 +62,7 @@ export function LocalMemoryScreen() {
   const [search, setSearch] = useState(""); const [term, setTerm] = useState("");
   const [notes, setNotes] = useState<EntityRecord[]>([]); const [more, setMore] = useState(false);
   const selectedNotes = contextNote ? [contextNote] : selectedIds.map(id => notes.find(n => n.id === id)).filter((note): note is EntityRecord => Boolean(note));
+  const reviewNotes = suggestedReviewNotes ?? selectedNotes;
   const [loading, setLoading] = useState(true); const [busy, setBusy] = useState(false);
   const [error, setError] = useState(""); const [retry, setRetry] = useState(0);
   const [sectionOpen, setSectionOpen] = useState(false); const [sectionName, setSectionName] = useState("");
@@ -81,16 +86,24 @@ export function LocalMemoryScreen() {
       .finally(() => { if (request === generation.current) setLoading(false); });
     return () => { generation.current++; repository.current = null; };
   }, [profile, term, collectionId, status, retry]));
+  useEffect(() => onLocalMemorySessionChange(unlocked => {
+    if (!unlocked) {
+      hygieneGeneration.current++;
+      setHygieneSuggestionsOpen(false); setHygieneSuggestions(null);
+      setSuggestedReviewNotes(null); setHygieneReviewOpen(false);
+      setHygienePreview(null); setHygieneConfirm(false); setHygienePolicyItem(null); setBusy(false);
+    }
+  }), []);
   /** Read-only review of current selected versions. There is no new action
    * writer; normal note actions still require their own confirmation.
    */
-  async function inspectHygiene(excluded: string[], action:MemoryReviewAction=hygieneAction) {
+  async function inspectHygiene(excluded: string[], action:MemoryReviewAction=hygieneAction, selection:EntityRecord[]=reviewNotes) {
     if (!repository.current || busy) return;
     const token = ++hygieneGeneration.current, request = generation.current;
     setBusy(true); setError(""); setHygienePreview(null); setHygieneConfirm(false);
     try {
       const data = await repository.current.hygiene().previewWithExclusions(
-        selectedNotes.map(note=>({id:note.id,recordVersion:note.record_version})),excluded,action);
+        selection.map(note=>({id:note.id,recordVersion:note.record_version})),excluded,action);
       if(token===hygieneGeneration.current && request===generation.current)
         setHygienePreview(data);
     } catch(e) {
@@ -102,6 +115,7 @@ export function LocalMemoryScreen() {
   }
   function closeHygiene(){
     hygieneGeneration.current++;
+    setSuggestedReviewNotes(null);
     setHygieneReviewOpen(false);setHygieneExcluded([]);setHygienePreview(null);setHygieneConfirm(false);setHygienePolicyItem(null);setBusy(false);
   }
   /** The one existing user-owned retention preference writer (SQLCipher CAS).
@@ -112,7 +126,7 @@ export function LocalMemoryScreen() {
        !["standard","inherit"].includes(note.sensitivity)||
        !collections.some(c=>c.id===note.collection_id&&c.sensitivity==="standard"))return;
     const token=++hygieneGeneration.current,request=generation.current;
-    const targets=selectedNotes.map(n=>({id:n.id,recordVersion:n.record_version}));
+    const targets=reviewNotes.map(n=>({id:n.id,recordVersion:n.record_version}));
     const skipped=[...hygieneExcluded],mode=hygieneAction;
     setBusy(true);setError("");setHygienePreview(null);setHygieneConfirm(false);
     try{
@@ -132,6 +146,61 @@ export function LocalMemoryScreen() {
       if(token===hygieneGeneration.current)setBusy(false);
     }
   }
+  /** Optional read-only suggestions. Discovery never selects an item for deletion. */
+  async function openHygieneSuggestions() {
+    if (!repository.current || busy || !localMemorySessionUnlocked()) return;
+    const token = ++hygieneGeneration.current, request = generation.current;
+    setHygieneSuggestionsOpen(true);setHygieneSuggestions(null);setError("");setBusy(true);
+    try {
+      const result = await repository.current.hygiene().discoverGroups(100);
+      if (token === hygieneGeneration.current && request === generation.current &&
+          localMemorySessionUnlocked()) setHygieneSuggestions(result);
+    } catch (e) {
+      if (token === hygieneGeneration.current && request === generation.current)
+        setError(memoryErrorMessage(e));
+    } finally {
+      if (token === hygieneGeneration.current) setBusy(false);
+    }
+  }
+  function closeHygieneSuggestions() {
+    hygieneGeneration.current++;
+    setHygieneSuggestionsOpen(false);setHygieneSuggestions(null);setBusy(false);
+  }
+  /** Only source-versioned, currently permitted notes can enter the canonical review.
+   * The review CAS writer repeats all source, policy and ACL checks atomically.
+   */
+  async function inspectSuggestedGroup(group: MemoryHygieneSuggestedGroup) {
+    if (!repository.current || busy || !localMemorySessionUnlocked()) return;
+    const db = repository.current, token = ++hygieneGeneration.current, request = generation.current;
+    setBusy(true);setError("");
+    try {
+      const preview = await db.hygiene().previewWithExclusions(group.targets, [], "archive");
+      // A changed/private item cannot have its title read for the current review.
+      if (preview.included.some(item => item.reasons.some(reason =>
+          ["missing", "stale_record_version", "not_active", "private_or_unclassified"].includes(reason))))
+        throw new Error("Группа изменилась. Повторите поиск предложений.");
+      const fetched = await Promise.all(group.targets.map(item => db.entity(item.id)));
+      const valid = fetched.every((note, index) => note &&
+        note.id === group.targets[index].id &&
+        note.record_version === group.targets[index].recordVersion &&
+        note.record_status === "active" &&
+        ["standard", "inherit"].includes(note.sensitivity) &&
+        collections.some(c => c.id === note.collection_id && c.sensitivity === "standard"));
+      if (!valid || !localMemorySessionUnlocked())
+        throw new Error("Источники или права изменились. Повторите поиск предложений.");
+      if (token !== hygieneGeneration.current || request !== generation.current) return;
+      setSuggestedReviewNotes(fetched as EntityRecord[]);
+      setHygieneExcluded([]);setHygieneAction("archive");setHygieneConfirm(false);setHygienePolicyItem(null);
+      setHygienePreview(preview);
+      setHygieneSuggestionsOpen(false);setHygieneSuggestions(null);
+      setHygieneReviewOpen(true);
+    } catch (e) {
+      if (token === hygieneGeneration.current && request === generation.current)
+        setError(memoryErrorMessage(e));
+    } finally {
+      if (token === hygieneGeneration.current) setBusy(false);
+    }
+  }
   /** Reuse changeNotes+undoNotes. No additional cleanup writer, no purge. */
   async function applyHygiene(){
     if(!repository.current||busy||!hygieneConfirm||!hygienePreview||
@@ -140,8 +209,8 @@ export function LocalMemoryScreen() {
     const included=preview.included.filter(x=>x.eligible);
     // The selection must still match the preview. The DB transaction checks
     // every record version, status, policy CAS and privacy before any write.
-    if(preview.selectedCount!==selectedNotes.length ||
-       included.some(x=>!selectedNotes.some(n=>n.id===x.id&&n.record_version===x.expectedRecordVersion))){
+    if(preview.selectedCount!==reviewNotes.length ||
+       included.some(x=>!reviewNotes.some(n=>n.id===x.id&&n.record_version===x.expectedRecordVersion))){
       setError("Список изменился. Повторите проверку.");setHygieneConfirm(false);return;
     }
     setBusy(true);setError("");
@@ -150,7 +219,7 @@ export function LocalMemoryScreen() {
         included.map(x=>({id:x.id,record_version:x.expectedRecordVersion})),undefined,
         {expectedPreferences:included.map(x=>({id:x.id,preferenceVersion:x.expectedPreferenceVersion}))});
       if(token===hygieneGeneration.current&&request===generation.current){
-        setUndo(operation);setHygieneReviewOpen(false);setHygieneExcluded([]);
+        setUndo(operation);setHygieneReviewOpen(false);setSuggestedReviewNotes(null);setHygieneExcluded([]);
         setHygienePreview(null);setHygieneConfirm(false);
         setSelectedIds([]);setSelecting(false);setRetry(n=>n+1);
         if(profile)scheduleVectors(profile);
@@ -170,7 +239,7 @@ export function LocalMemoryScreen() {
       if (profile) scheduleVectors(profile);
     } catch (e) { setError(memoryErrorMessage(e)); } finally { setBusy(false); }
   }
-  useEffect(() => { setSelectedIds([]); setSelecting(false); setActionsOpen(false); setConfirmation(null); setNotes([]); setContextNote(null); setMoveOpen(false); setMergeOpen(false); hygieneGeneration.current++; setHygieneReviewOpen(false); setHygieneExcluded([]); setHygienePreview(null); setHygieneConfirm(false); setHygienePolicyItem(null); setHygieneAction("archive"); }, [profile, collectionId, term, status]);
+  useEffect(() => { setSelectedIds([]); setSelecting(false); setActionsOpen(false); setConfirmation(null); setNotes([]); setContextNote(null); setMoveOpen(false); setMergeOpen(false); hygieneGeneration.current++; setHygieneReviewOpen(false); setHygieneSuggestionsOpen(false); setHygieneSuggestions(null); setSuggestedReviewNotes(null); setHygieneExcluded([]); setHygienePreview(null); setHygieneConfirm(false); setHygienePolicyItem(null); setHygieneAction("archive"); }, [profile, collectionId, term, status]);
   function openAll() { setStatus("active"); setCollectionId(undefined); setSearch(""); setTerm(""); setSelectedIds([]); setSelecting(false); }
   function openStatus(value: typeof status) { openAll(); setStatus(value); setMenuOpen(false); }
   const cancelSelection = useCallback(() => {
@@ -178,13 +247,13 @@ export function LocalMemoryScreen() {
   }, []);
   useFocusEffect(useCallback(() => {
     const sub = BackHandler.addEventListener("hardwareBackPress", () => {
-      if (actionsOpen || moveOpen || mergeOpen || hygieneReviewOpen) return false;
+      if (actionsOpen || moveOpen || mergeOpen || hygieneReviewOpen || hygieneSuggestionsOpen) return false;
       if (!selecting) return false;
       if (!busy) cancelSelection();
       return true;
     });
     return () => sub.remove();
-  }, [selecting, busy, actionsOpen, moveOpen, mergeOpen, hygieneReviewOpen, cancelSelection]));
+  }, [selecting, busy, actionsOpen, moveOpen, mergeOpen, hygieneReviewOpen, hygieneSuggestionsOpen, cancelSelection]));
   function toggleSelection(id: string) {
     if (busy || loading) return;
     if (!selectedIds.includes(id) && selectedIds.length >= 100) { setError("За один раз можно выбрать до 100 записей."); return; }
@@ -280,7 +349,7 @@ export function LocalMemoryScreen() {
           Удалённые записи исключены из поиска агента. Их можно восстановить или удалить окончательно.
         </Text> : null}
       {undo ? <Pressable disabled={busy || selecting} style={button} onPress={() => { if (!repository.current) return; setBusy(true); void repository.current.undoNotes(undo).then(() => { setUndo(""); setRetry(n => n + 1); if (profile) scheduleVectors(profile); }).catch(e => setError(memoryErrorMessage(e))).finally(() => setBusy(false)); }}><Text style={{ color: t.secondary }}>{noteUndoLabel(undo)}</Text></Pressable> : null}
-    {error && !hygieneReviewOpen ? <View style={{ paddingHorizontal: 18, gap: 8 }}><Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text><Pressable accessibilityRole="button" onPress={() => setRetry(n => n + 1)} style={button}><Text style={{ color: t.secondary }}>Повторить загрузку</Text></Pressable></View> : null}
+    {error && !hygieneReviewOpen && !hygieneSuggestionsOpen ? <View style={{ paddingHorizontal: 18, gap: 8 }}><Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text><Pressable accessibilityRole="button" onPress={() => setRetry(n => n + 1)} style={button}><Text style={{ color: t.secondary }}>Повторить загрузку</Text></Pressable></View> : null}
     {loading ? <ActivityIndicator accessibilityLabel="Загрузка записей" /> : null}
 </View>} data={notes} keyExtractor={item => item.id} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag"
       contentContainerStyle={{ paddingHorizontal: nebulaSpacing.md, paddingBottom: nebulaSpacing.xl, gap: nebulaSpacing.sm, flexGrow: 1 }}
@@ -329,7 +398,31 @@ export function LocalMemoryScreen() {
       </>}
       </BottomSheet>
 
-    <BottomSheet visible={hygieneReviewOpen && selectedNotes.length>=2}
+    <BottomSheet visible={hygieneSuggestionsOpen} title="Предложения для ревизии" onClose={closeHygieneSuggestions}>
+      <Text style={{color:t.text}}>
+        Совпадение ссылки не означает одинаковое содержимое. Пометка «позже» не означает ненужность.
+        Выберите группу, проверьте каждую запись и подтвердите действие отдельно.
+      </Text>
+      {busy?<ActivityIndicator accessibilityLabel="Ищу группы для ревизии" color={t.secondary}/>:null}
+      {hygieneSuggestions?.groups.length===0?
+        <Text style={{color:t.muted}}>В проверенной части памяти групп не обнаружено.</Text>:null}
+      {hygieneSuggestions?.partial?
+        <Text style={{color:t.muted}}>Просмотрено: {hygieneSuggestions.scanned} записей. Анализ ограничен; другие группы могут находиться за пределами выборки.</Text>:null}
+      {hygieneSuggestions?.groups.map((group,index)=>
+        <Pressable key={group.reason+":"+index} accessibilityRole="button" disabled={busy}
+          accessibilityLabel={"Проверить группу: "+group.title+", записей "+group.targets.length}
+          style={actionButton} onPress={()=>void inspectSuggestedGroup(group)}>
+          <Text style={{color:t.text,fontWeight:"700"}}>{group.title}</Text>
+          <Text style={{color:t.muted,fontSize:13}}>Записей: {group.targets.length}. Только предложение, изменения не применены.</Text>
+        </Pressable>)}
+      {error?<Text accessibilityRole="alert" style={{color:t.err}}>{error}</Text>:null}
+      <Pressable accessibilityRole="button" accessibilityLabel="Закрыть предложения для ревизии"
+        style={button} onPress={closeHygieneSuggestions}>
+        <Text style={{color:t.secondary}}>Закрыть без изменений</Text>
+      </Pressable>
+    </BottomSheet>
+
+    <BottomSheet visible={hygieneReviewOpen && reviewNotes.length>=2}
       title="Предпросмотр групповой ревизии" onClose={closeHygiene}>
       <Text style={{color:t.text}}>
         Сначала проверьте последствия, затем подтвердите действие. Можно исключить любую запись.
@@ -357,7 +450,7 @@ export function LocalMemoryScreen() {
           hygienePreview.originalBytesAtRisk+" байт":"—"}.
         Это не обещание освобождения места.
       </Text>
-      {selectedNotes.map(note=>{
+      {reviewNotes.map(note=>{
         const excluded=hygieneExcluded.includes(note.id);
         const row=hygienePreview?.included.find(item=>item.id===note.id);
         return <Pressable key={note.id} accessibilityRole="checkbox"
@@ -378,9 +471,9 @@ export function LocalMemoryScreen() {
           </Text>
         </Pressable>;
       })}
-      {hygienePolicyItem && selectedNotes.some(n=>n.id===hygienePolicyItem) ?
+      {hygienePolicyItem && reviewNotes.some(n=>n.id===hygienePolicyItem) ?
         <Text style={{color:t.muted}}>Правила хранения сохраняются отдельно от архивации. Они действуют и при следующей ревизии.</Text>:null}
-      {selectedNotes.map(note=>{
+      {reviewNotes.map(note=>{
         const available=note.record_status==="active" &&
           ["standard","inherit"].includes(note.sensitivity) &&
           collections.some(c=>c.id===note.collection_id&&c.sensitivity==="standard");
@@ -451,6 +544,13 @@ export function LocalMemoryScreen() {
       {(["active", "archived", "trashed"] as const).map((value, i) => <Pressable key={value} accessibilityRole="button" accessibilityState={{ selected: status === value }}
         accessibilityLabel={["Открыть текущие записи", "Открыть архив", "Открыть корзину"][i]} style={{ ...button, alignItems: "center", flexDirection: "row", justifyContent: "space-between" }}
         onPress={() => openStatus(value)}><Text style={{ color: t.text }}>{["Все записи", "Архив", "Корзина"][i]}</Text>{status === value ? <Feather name="check" size={20} color={t.secondary} /> : null}</Pressable>)}
+      <Text style={{ color: t.muted }}>Ревизия</Text>
+      <Pressable accessibilityRole="button" accessibilityLabel="Найти группы для проверки памяти"
+        disabled={busy} style={{ ...button, alignItems: "flex-start" }}
+        onPress={() => {setMenuOpen(false);void openHygieneSuggestions();}}>
+        <Text style={{ color: t.text }}>Предложения для ревизии</Text>
+        <Text style={{ color: t.muted, fontSize: 13 }}>Только ручная проверка · без автоматического удаления</Text>
+      </Pressable>
       <Text style={{ color: t.muted }}>Данные</Text>
       <Pressable accessibilityRole="button" accessibilityLabel="Резервные копии" style={{ ...button, alignItems: "flex-start" }} onPress={() => { setMenuOpen(false); navigation.navigate("MemoryBackup"); }}><Text style={{ color: t.text }}>Резервные копии</Text></Pressable>
     </BottomSheet>
