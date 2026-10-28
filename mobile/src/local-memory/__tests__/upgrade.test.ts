@@ -1177,3 +1177,27 @@ test("installed v12 upgrades to v13 preserving old relation witnesses with CAS r
   expect(upgraded.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   expect(mockVault.get(identity.keyName)).toBe("7".repeat(64));
 });
+
+
+test("v13 to v14 keeps existing review decisions and only adds pending-candidate staging",async()=>{
+  const {SCHEMA_SQL}=require("../storage");
+  const identity=await localMemoryIdentity("guest");
+  const sqlite=new DatabaseSync(path.join(mockDirectory,identity.databaseName));
+  const v13=SCHEMA_SQL.replace(/-- v14: non-confirmed candidates[\s\S]*?CREATE INDEX IF NOT EXISTS ix_memory_review_proposals_inbox[\s\S]*?;\n/,"");
+  expect(v13).not.toContain("CREATE TABLE IF NOT EXISTS memory_review_proposals");
+  sqlite.exec(v13);
+  sqlite.exec("PRAGMA user_version=13");
+  sqlite.prepare("INSERT INTO memory_collections(id,name,slug,sensitivity,created_at) VALUES ('c','Тест','people','standard','now')").run();
+  sqlite.prepare("INSERT INTO memory_entities(id,collection_id,domain,payload_json,created_at,updated_at) VALUES ('p','c','notes','{}','now','now')").run();
+  sqlite.close();
+  mockVault.set(identity.keyName,"8".repeat(64));
+  mockVault.set(identity.keyName+".initialized","yes");
+  await openLocalMemory("guest");
+  const upgraded=mockConnections[0].sqlite;
+  expect(upgraded.prepare("PRAGMA user_version").get().user_version).toBe(14);
+  expect(upgraded.prepare("SELECT id FROM memory_entities WHERE id='p'").get()).toMatchObject({id:"p"});
+  expect(upgraded.prepare("SELECT count(*) AS n FROM memory_review_proposals").get().n).toBe(0);
+  expect(upgraded.prepare("SELECT count(*) AS n FROM memory_review_actions").get().n).toBe(0);
+  expect(upgraded.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+  expect(mockVault.get(identity.keyName)).toBe("8".repeat(64));
+});
