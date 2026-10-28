@@ -12,7 +12,7 @@ const mockHygienePreview = jest.fn(async(targets: Array<{id:string;recordVersion
 const sections = [{ id: "a", name: "Заметки", slug: "notes", sensitivity: "standard" }, { id: "b", name: "Люди", slug: "people", sensitivity: "unclassified" }];
 const notes = [
  { id: "one", collection_id: "a", title: "Первая", payload: { body: "Содержание" }, record_status: "active", record_version: 1, updated_at: "2026-10-24", kind: "note" },
- { id: "two", collection_id: "b", title: "Вторая", payload: { body: "Содержание" }, record_status: "active", updated_at: "2026-10-24", kind: "note" },
+ { id: "two", collection_id: "b", title: "Вторая", payload: { body: "Содержание" }, record_status: "active", record_version: 1, updated_at: "2026-10-24", kind: "note" },
  { id: "old", collection_id: "b", title: "Архивная", payload: {}, record_status: "archived", updated_at: "2026-10-24", kind: "note" },
 ];
 const mockDb = {
