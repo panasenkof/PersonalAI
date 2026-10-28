@@ -3,13 +3,20 @@ import { BackHandler } from "react-native";
 import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 import { LocalMemoryScreen } from "../screens/LocalMemoryScreen";
 const mockNavigate = jest.fn();
+const mockHygienePreview = jest.fn(async(targets: Array<{id:string;recordVersion:number}>,excluded:string[],action:string)=>({
+ action,selectedCount:targets.length,excludedIds:targets.filter(t=>excluded.includes(t.id)).map(t=>t.id),
+ included:targets.filter(t=>!excluded.includes(t.id)).map(t=>({id:t.id,eligible:true,reasons:[]})),
+ eligibleIds:targets.filter(t=>!excluded.includes(t.id)).map(t=>t.id),blockedIds:[],
+ originalBytesAtRisk:0,canPurgeOriginals:false,
+}));
 const sections = [{ id: "a", name: "Заметки", slug: "notes", sensitivity: "standard" }, { id: "b", name: "Люди", slug: "people", sensitivity: "unclassified" }];
 const notes = [
- { id: "one", collection_id: "a", title: "Первая", payload: { body: "Содержание" }, record_status: "active", updated_at: "2026-10-24", kind: "note" },
- { id: "two", collection_id: "b", title: "Вторая", payload: { body: "Содержание" }, record_status: "active", updated_at: "2026-10-24", kind: "note" },
+ { id: "one", collection_id: "a", title: "Первая", payload: { body: "Содержание" }, record_status: "active", record_version: 1, updated_at: "2026-10-24", kind: "note" },
+ { id: "two", collection_id: "b", title: "Вторая", payload: { body: "Содержание" }, record_status: "active", record_version: 1, updated_at: "2026-10-24", kind: "note" },
  { id: "old", collection_id: "b", title: "Архивная", payload: {}, record_status: "archived", updated_at: "2026-10-24", kind: "note" },
 ];
 const mockDb = {
+ hygiene: () => ({ previewWithExclusions: mockHygienePreview }),
  changeNotes: jest.fn(async () => "notes:archive:test"),
  lastNoteOperation: async () => "", collectionNoteCounts: async () => ({ a: 1, b: 1 }),
  searchNotes: jest.fn(async (term, _limit, _offset, filter) => notes.filter(n => n.record_status === filter.status && (!filter.collectionId || n.collection_id === filter.collectionId) && n.title.includes(term))),
@@ -144,4 +151,29 @@ test("review entry only appears in an explicitly selected standard collection, n
   fireEvent.press(ui.getByLabelText("Ко всем записям"));
   fireEvent.press(ui.getByLabelText("Раздел Люди"));
   await waitFor(()=>expect(ui.queryByLabelText("Открыть предложения по изменению памяти")).toBeNull());
+});
+
+test("CLEAN-07/CLEAN-04/SAVE-04: one existing batch menu previews and excludes without writing",async()=>{
+  const v=render(<LocalMemoryScreen/>);
+  await waitFor(()=>v.getByLabelText("Открыть заметку Первая"));
+  fireEvent(v.getByLabelText("Открыть заметку Первая"),"longPress");
+  fireEvent.press(v.getByLabelText("Выбрать заметку Вторая"));
+  fireEvent.press(v.getByLabelText("Действия с выбранными записями"));
+  await act(async()=>{fireEvent.press(v.getByLabelText("Проверить последствия групповой ревизии"));});
+  await waitFor(()=>expect(mockHygienePreview).toHaveBeenCalledWith([
+    {id:"one",recordVersion:1},{id:"two",recordVersion:1},
+  ],[],"archive"));
+  expect(v.getByLabelText("Закрыть панель Предпросмотр групповой ревизии")).toBeTruthy();
+  expect(v.getByText("Выбрано: 2 · Исключено: 0 · Можно предложить в архив: 2 · Требуют проверки: 0")).toBeTruthy();
+  expect(mockDb.changeNotes).not.toHaveBeenCalled();
+  await act(async()=>{fireEvent.press(v.getByLabelText("Исключить из ревизии Первая"));});
+  await waitFor(()=>expect(mockHygienePreview).toHaveBeenLastCalledWith([
+    {id:"one",recordVersion:1},{id:"two",recordVersion:1},
+  ],["one"],"archive"));
+  expect(v.getByText("Выбрано: 2 · Исключено: 1 · Можно предложить в архив: 1 · Требуют проверки: 0")).toBeTruthy();
+  expect(v.getByText("Исключено · Первая")).toBeTruthy();
+  expect(mockDb.changeNotes).not.toHaveBeenCalled();
+  fireEvent.press(v.getByLabelText("Закрыть предпросмотр без изменений"));
+  expect(v.getByText("Выбрано: 2")).toBeTruthy();
+  expect(mockDb.changeNotes).not.toHaveBeenCalled();
 });
