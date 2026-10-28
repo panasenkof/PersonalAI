@@ -179,6 +179,14 @@ export function LocalMemoryScreen() {
             <Feather name={grid ? "list" : "grid"} size={20} color={t.secondary} />
           </Pressable>
         </View>
+        {collectionId && status === "active" && !term && !selecting &&
+            collections.some(c => c.id === collectionId && c.sensitivity === "standard") ?
+          <Pressable accessibilityRole="button" accessibilityLabel="Открыть предложения по изменению памяти"
+            style={{ ...button, alignItems: "flex-start", borderWidth: 1, borderColor: t.line, backgroundColor: t.panel }}
+            onPress={() => navigation.navigate("MemoryTemporalReview", { collectionId })}>
+            <Text style={{ color: t.secondary, fontWeight: "700" }}>На проверке · возможные изменения</Text>
+            <Text style={{ color: t.muted, fontSize: 13 }}>Сравнить источники и решить, что делать с прежними фактами</Text>
+          </Pressable> : null}
         {notes.length ? <Pressable disabled={selecting || loading} accessibilityElementsHidden={selecting} importantForAccessibility={selecting ? "no-hide-descendants" : "auto"} accessibilityRole="button" accessibilityLabel="Выбрать записи" onPress={() => { setContextNote(null); setSelecting(true); }} style={{ ...button, opacity: selecting ? 0 : 1, alignItems: "flex-start" }}><Text style={{ color: t.secondary }}>Выбрать записи</Text></Pressable> : null}
         {status === "trashed" ? <Text style={{ color: t.muted, fontSize: 13, lineHeight: 19 }}>
           Удалённые записи исключены из поиска агента. Их можно восстановить или удалить окончательно.
