@@ -571,3 +571,66 @@ test("v12 restores witness rows after their canonical relation and before commit
   expect(evidence).toBeGreaterThan(relation);
   expect(statements.indexOf("COMMIT")).toBeGreaterThan(evidence);
 });
+
+
+test("v13 review journal is mandatory and its manifest count is authenticated before any restore write",async()=>{
+  const before=mockDb.getFirstAsync.getMockImplementation()!;
+  mockDb.getFirstAsync.mockImplementation(async sql=>{
+    if(sql==="PRAGMA pia_import.user_version")return {user_version:13};
+    if(sql==="SELECT * FROM pia_import.persai_backup_manifest")return {
+      format_version:4,schema_version:13,entities:2,collections:1,observations:1,
+      attachments:0,attachment_parts:0,receipts:0,chats:0,
+      temporal_claims:0,temporal_evidence:0,temporal_proposals:0,temporal_decisions:0,
+      relation_links:0,relation_evidence:0,review_actions:3,
+    };
+    if(sql.includes("(SELECT count(*) FROM ")&&sql.includes("memory_review_actions"))
+      return {review_actions:2};
+    return before(sql);
+  });
+  const tables=[...names,"memory_relation_evidence","memory_attachments","memory_attachment_parts",
+    "memory_received_shares","memory_cleanup_preferences",
+    "memory_extractions","memory_extraction_segments","persai_backup_manifest",
+    "memory_temporal_claims","memory_temporal_evidence","memory_temporal_proposals",
+    "memory_temporal_decisions","memory_review_actions"];
+  tablesOnce(tables.filter(t=>t!=="memory_review_actions"));
+  await expect(restoreEncryptedBackup("guest","file:///missing-v13.db",code))
+    .rejects.toThrow("incompatible_backup_schema");
+  expect(mockDb.execAsync.mock.calls.some(([s])=>String(s).includes("INSERT INTO memory_entities"))).toBe(false);
+  jest.clearAllMocks();
+  tablesOnce(tables);
+  await expect(restoreEncryptedBackup("guest","file:///forged-v13.db",code))
+    .rejects.toThrow("backup_manifest_mismatch");
+  expect(mockDb.execAsync.mock.calls.some(([s])=>String(s).includes("INSERT INTO memory_entities"))).toBe(false);
+});
+
+test("v13 backup restores shared user review actions after their witness parents and before commit",async()=>{
+  const before=mockDb.getFirstAsync.getMockImplementation()!;
+  mockDb.getFirstAsync.mockImplementation(async sql=>{
+    if(sql==="PRAGMA pia_import.user_version")return {user_version:13};
+    if(sql==="SELECT * FROM pia_import.persai_backup_manifest")return {
+      format_version:4,schema_version:13,entities:2,collections:1,observations:1,
+      attachments:0,attachment_parts:0,receipts:0,chats:0,
+      temporal_claims:0,temporal_evidence:0,temporal_proposals:0,temporal_decisions:0,
+      relation_links:0,relation_evidence:0,review_actions:0,
+    };
+    if(sql.includes("(SELECT count(*) FROM ")&&sql.includes("memory_review_actions"))
+      return {review_actions:0};
+    if(sql==="SELECT count(*) AS n FROM pia_import.memory_review_actions"||
+       sql==="SELECT count(*) AS n FROM memory_review_actions"||
+       sql==="SELECT count(*) AS n FROM pia_import.memory_relation_evidence"||
+       sql==="SELECT count(*) AS n FROM memory_relation_evidence")return {n:0};
+    return before(sql);
+  });
+  tablesOnce([...names,"memory_relation_evidence","memory_attachments","memory_attachment_parts",
+    "memory_received_shares","memory_cleanup_preferences",
+    "memory_extractions","memory_extraction_segments","persai_backup_manifest",
+    "memory_temporal_claims","memory_temporal_evidence","memory_temporal_proposals",
+    "memory_temporal_decisions","memory_review_actions"]);
+  await restoreEncryptedBackup("guest","file:///valid-v13.db",code);
+  const sql=mockDb.execAsync.mock.calls.map(([s])=>String(s));
+  const relation=sql.indexOf("INSERT INTO memory_relation_evidence SELECT * FROM pia_import.memory_relation_evidence");
+  const journal=sql.indexOf("INSERT INTO memory_review_actions SELECT * FROM pia_import.memory_review_actions");
+  expect(relation).toBeGreaterThanOrEqual(0);
+  expect(journal).toBeGreaterThan(relation);
+  expect(sql.indexOf("COMMIT")).toBeGreaterThan(journal);
+});
