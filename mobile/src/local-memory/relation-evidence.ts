@@ -184,8 +184,7 @@ export async function listCurrentConfirmedRelationProofs(
 export async function findCurrentRelativeConversationPaths(
   db:SQL,query:{ownerPersonId:string;relationKind:DirectPersonRelation},
 ):Promise<RelativeConversationResult>{
-  if(!validId(query.ownerPersonId)||!ROLES.includes(query.relationKind)||
-     query.relationKind==="participant_of"){
+  if(!validId(query.ownerPersonId)||!ROLES.includes(query.relationKind)){
     throw new Error("relational_query_invalid");
   }
   const first=await listCurrentConfirmedRelationProofs(db,{
