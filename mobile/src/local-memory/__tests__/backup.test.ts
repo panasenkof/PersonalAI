@@ -9,7 +9,7 @@ jest.mock("expo-file-system/legacy", () => ({
 }));
 jest.mock("expo-sharing", () => ({ isAvailableAsync: jest.fn(), shareAsync: jest.fn() }));
 jest.mock("../storage", () => ({
-  LOCAL_MEMORY_SCHEMA_VERSION: 15,
+  LOCAL_MEMORY_SCHEMA_VERSION: 16,
   withLocalMemoryDatabase: jest.fn(async (_id: string, task: (db: unknown) => Promise<unknown>) => task(mockDb)),
 }));
 
@@ -95,7 +95,7 @@ test("export SQLCipher-encrypts a new independent file before sharing and erases
     "/cache/pia-encrypted-random-id.db", code,
   ]);
   expect(mockDb.getFirstAsync).toHaveBeenCalledWith("SELECT sqlcipher_export('pia_export')");
-  expect(mockDb.execAsync).toHaveBeenCalledWith("PRAGMA pia_export.user_version = 15");
+  expect(mockDb.execAsync).toHaveBeenCalledWith("PRAGMA pia_export.user_version = 16");
   expect(mockDb.execAsync).toHaveBeenCalledWith("DETACH DATABASE pia_export");
   expect(Sharing.shareAsync).toHaveBeenCalledTimes(1);
   expect(FS.deleteAsync).toHaveBeenCalledWith("file:///cache/pia-encrypted-random-id.db", {
@@ -119,9 +119,9 @@ test("verified export accepts more than 100k records and writes an encrypted man
       attachments: 0, attachment_parts: 0, receipts: 0, chats: 0 } : previous(sql));
   await shareEncryptedBackup("guest", code);
   expect(mockDb.execAsync).toHaveBeenCalledWith(expect.stringContaining("CREATE TABLE pia_export.persai_backup_manifest"));
-  expect(mockDb.execAsync).toHaveBeenCalledWith(expect.stringContaining("CHECK(format_version=6)"));
+  expect(mockDb.execAsync).toHaveBeenCalledWith(expect.stringContaining("CHECK(format_version=7)"));
   expect(mockDb.runAsync).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO pia_export.persai_backup_manifest"),
-    [6, 15, 100001, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    [7, 16, 100001, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
   expect(Sharing.shareAsync).toHaveBeenCalledTimes(1);
 });
 
@@ -271,7 +271,7 @@ test.each([1, 2, 3])("restores deployed schema v%s including chats into the upgr
   expect(mockDb.execAsync.mock.calls.map(([sql]) => sql)).toContainEqual(expect.stringContaining("INSERT INTO direct_conversations"));
 });
 
-test.each([0, 16])("rejects unsupported backup schema v%s before copying any memory", async version => {
+test.each([0, 17])("rejects unsupported backup schema v%s before copying any memory", async version => {
   const read = mockDb.getFirstAsync.getMockImplementation()!;
   mockDb.getFirstAsync.mockImplementation(async sql => sql === "PRAGMA pia_import.user_version" ? { user_version: version } : read(sql));
   await expect(restoreEncryptedBackup("guest", "file:///backup.db", code)).rejects.toThrow("incompatible_backup_version");
@@ -714,8 +714,8 @@ test("v14 restore copies review proposals after their source FK parents and reta
 test("v15 backup manifest has current schema and one shared decision journal",async()=>{
   await shareEncryptedBackup("guest",code);
   const schema=mockDb.execAsync.mock.calls.map(c=>String(c[0])).join("\n");
-  expect(schema).toContain("CHECK(format_version=6)");
-  expect(schema).toContain("PRAGMA pia_export.user_version = 15");
+  expect(schema).toContain("CHECK(format_version=7)");
+  expect(schema).toContain("PRAGMA pia_export.user_version = 16");
 });
 test("v15 forged journal count fails preflight before any user memory write",async()=>{
   const prev=mockDb.getFirstAsync.getMockImplementation()!;
@@ -740,4 +740,11 @@ test("v15 forged journal count fails preflight before any user memory write",asy
   await expect(restoreEncryptedBackup("guest","file:///v15.db",code))
     .rejects.toThrow("backup_manifest_mismatch");
   expect(mockDb.execAsync.mock.calls.flat().join("\n")).not.toContain("INSERT INTO memory_entities");
+});
+
+test("v16 encrypted backup export has exactly one v7 manifest with confirmed review history",async()=>{
+  await shareEncryptedBackup("guest",code);
+  const exported=mockDb.execAsync.mock.calls.map(([sql])=>String(sql)).join("\n");
+  expect(exported).toContain("PRAGMA pia_export.user_version = 16");
+  expect(exported).toContain("CHECK(format_version=7)");
 });

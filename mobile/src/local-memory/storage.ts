@@ -42,7 +42,7 @@ export function onLocalMemorySessionChange(listener: (unlocked: boolean) => void
 }
 export const localMemorySessionUnlocked = () => applicationSessionUnlocked;
 const requireApplicationSession = () => { if (!applicationSessionUnlocked) throw new Error("application_locked"); };
-export const LOCAL_MEMORY_SCHEMA_VERSION = 15;
+export const LOCAL_MEMORY_SCHEMA_VERSION = 16;
 const KIND_CHECK = `CHECK(kind IN (${MEMORY_KINDS.map(k => `'${k}'`).join(",")}))`;
 
 /** All memory (including full-text indexes, revisions, and WAL) is in SQLCipher. */
@@ -187,6 +187,7 @@ CREATE TABLE IF NOT EXISTS memory_review_actions (
   created_at TEXT NOT NULL,
   -- New v15 FK is an ADDITION to the canonical journal, not a second journal.
   review_proposal_id TEXT REFERENCES memory_review_proposals(id) ON DELETE CASCADE,
+  witness_decision_version INTEGER CHECK(witness_decision_version>0),
   CHECK ((target_kind='relation' AND temporal_proposal_id IS NULL
           AND (relation_evidence_id IS NOT NULL OR review_proposal_id IS NOT NULL))
       OR (target_kind='temporal' AND temporal_proposal_id IS NOT NULL
@@ -529,6 +530,7 @@ async function initialize(profileId: string): Promise<SQLite.SQLiteDatabase> {
               actor_kind TEXT NOT NULL CHECK(actor_kind='user'),
               created_at TEXT NOT NULL,
               review_proposal_id TEXT REFERENCES memory_review_proposals(id) ON DELETE CASCADE,
+  witness_decision_version INTEGER CHECK(witness_decision_version>0),
               CHECK ((target_kind='relation' AND temporal_proposal_id IS NULL
                       AND (relation_evidence_id IS NOT NULL OR review_proposal_id IS NOT NULL))
                   OR (target_kind='temporal' AND temporal_proposal_id IS NOT NULL
@@ -572,6 +574,30 @@ async function initialize(profileId: string): Promise<SQLite.SQLiteDatabase> {
           `);
           const invalid=await tx.getFirstAsync("PRAGMA foreign_key_check");
           if(invalid!==null)throw new Error("memory_review_journal_migration_fk");
+        }
+        // v16 is a nullable version snapshot on the SAME action journal.
+        // For installed v15 we ADD it without rebuilding or touching user history.
+        // For v13/v14 the safe v15 journal rebuild above already includes it.
+        if(version>=13&&version<16){
+          const columns=await tx.getAllAsync<{name:string}>(
+            "PRAGMA table_info(memory_review_actions)");
+          if(!columns.some(v=>v.name==="witness_decision_version")){
+            await tx.execAsync(
+              "ALTER TABLE memory_review_actions ADD COLUMN witness_decision_version "+
+              "INTEGER CHECK(witness_decision_version>0)");
+          }
+        }
+        // R2b2b v15 always created a NEW witness at decision_version=1
+        // for each accepted candidate. Backfill its historical snapshot when
+        // upgrading so already accepted v15 user decisions remain undoable.
+        // Later independent witness retractions advance the current CAS,
+        // causing an old accept undo to fail safely.
+        if(version===15){
+          await tx.execAsync(
+            "UPDATE memory_review_actions SET witness_decision_version=1 "+
+            "WHERE action='accept' AND target_kind='relation' "+
+            "AND review_proposal_id IS NOT NULL AND relation_evidence_id IS NOT NULL "+
+            "AND witness_decision_version IS NULL");
         }
         // Old installed v13/v14 journal did not have review_proposal_id at CREATE time.
         await tx.execAsync("CREATE INDEX IF NOT EXISTS ix_memory_review_actions_proposal " +
