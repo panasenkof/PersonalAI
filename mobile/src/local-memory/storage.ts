@@ -42,7 +42,7 @@ export function onLocalMemorySessionChange(listener: (unlocked: boolean) => void
 }
 export const localMemorySessionUnlocked = () => applicationSessionUnlocked;
 const requireApplicationSession = () => { if (!applicationSessionUnlocked) throw new Error("application_locked"); };
-export const LOCAL_MEMORY_SCHEMA_VERSION = 11;
+export const LOCAL_MEMORY_SCHEMA_VERSION = 12;
 const KIND_CHECK = `CHECK(kind IN (${MEMORY_KINDS.map(k => `'${k}'`).join(",")}))`;
 
 /** All memory (including full-text indexes, revisions, and WAL) is in SQLCipher. */
@@ -150,6 +150,27 @@ CREATE TABLE IF NOT EXISTS memory_relations (
   CHECK (source_entity_id <> target_entity_id)
 );
 CREATE INDEX IF NOT EXISTS ix_memory_relations_target ON memory_relations(target_entity_id);
+
+-- v12: source-backed user-confirmed evidence for the EXISTING canonical
+-- memory_relations edge. No competing relation graph or proposed edge table.
+-- Legacy and model:auto edges have no proof rows and MUST NOT be promoted.
+CREATE TABLE IF NOT EXISTS memory_relation_evidence (
+  id TEXT PRIMARY KEY,
+  relation_id TEXT NOT NULL REFERENCES memory_relations(id) ON DELETE CASCADE,
+  evidence_entity_id TEXT NOT NULL REFERENCES memory_entities(id) ON DELETE CASCADE,
+  evidence_record_version INTEGER NOT NULL CHECK(evidence_record_version>0),
+  source_record_version INTEGER NOT NULL CHECK(source_record_version>0),
+  target_record_version INTEGER NOT NULL CHECK(target_record_version>0),
+  quote TEXT NOT NULL CHECK(length(quote)>0 AND length(quote)<=6000),
+  origin TEXT NOT NULL CHECK(origin IN ('explicit_user','direct','derived')),
+  actor_kind TEXT NOT NULL CHECK(actor_kind='user'),
+  state TEXT NOT NULL DEFAULT 'confirmed' CHECK(state IN ('confirmed','retracted')),
+  created_at TEXT NOT NULL,
+  UNIQUE(relation_id,evidence_entity_id,evidence_record_version,quote)
+);
+CREATE INDEX IF NOT EXISTS ix_memory_relation_evidence_relation
+  ON memory_relation_evidence(relation_id,state,evidence_entity_id);
+
 CREATE TABLE IF NOT EXISTS memory_revisions (
   id TEXT PRIMARY KEY, record_type TEXT NOT NULL CHECK(record_type IN ('entity','observation')),
   entity_id TEXT REFERENCES memory_entities(id) ON DELETE CASCADE,
