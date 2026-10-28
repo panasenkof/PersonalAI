@@ -1,0 +1,11 @@
+# №66.4 R3a / R2a security gate F1 — consistent proof, ACL and source reads
+
+**Pre-C0 architecture:** Existing authoritative relation edge `memory_relations`, user-owned witness `memory_relation_evidence`, shared `CURRENT_PROOF_SQL`, existing `SqliteMemoryRepository.searchMemory` and `memory_review_actions`. Original source rows/FTS remain unchanged. Retrospective [F1](../../../docs/architecture/MEMORY_PR_RETROSPECTIVE_2026-10-28.md) identified TOCTOU between verified graph read and returned note/chunk or action-history read.
+
+**Choice:** REUSE the existing `withUnlockedTransaction` on the same keyed SQLCipher connection and existing repository entrypoints, no new table/index/service/lock or second search. Narrowly wrap **only** the proved-relation branch of `searchMemory` (not general FTS/vector search), and the reviewed-witness history reader. Within the same BEGIN IMMEDIATE → proof/source+ACL → note/current content or journal → COMMIT boundary. Both source versions and collection sensitivity are validated on the current graph, final note is standard/active. Private/source edit => no misleading verified result.
+
+**Negative C1:** trace BEGIN before evidence, final note & chunk before COMMIT; review source/ACL before journal and before COMMIT; revoking private access makes reader fail closed and ROLLBACK. Existing plain FTS/vector path remains the original route; role filter still explicit and source opening later R3b.
+
+**Limits:** This is an in-DB consistent operation, NOT a guarantee that a source can never be changed **after** query returns and **before** a cloud model sends/uses the result. Agent export must recheck access at the actual external boundary as a separate R3b gate. Direct read-only `confirmedRelativeConversationPaths` only returns IDs/evidence and downstream consumers must revalidate at use. Does not solve R2b candidate inbox, role resolution, R3b original audio, legacy decision unification or physical Android C2.
+
+**Post-C3:** same one writer, graph, proof query and search API. No new state or migration; only existing transaction primitive reused in two places. Safety before speed; 1k/10k p95 still unverified. Gate result depends on exact-SHA required CI.

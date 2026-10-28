@@ -805,34 +805,41 @@ export class SqliteMemoryRepository implements MemoryRepository {
     verifiedRelative?: { ownerPersonId: string; relationKind: DirectPersonRelation };
   } = {}): Promise<MemoryHit[]> {
     const limit = Math.min(20, Math.max(1, Math.trunc(options.limit ?? 5)));
-    if (options.verifiedRelative) {
+    const verifiedRelative=options.verifiedRelative;
+    if (verifiedRelative) {
+      // The relation evidence, all source/endpoint ACL checks and the final
+      // conversation row/chunk must share ONE SQLCipher snapshot. Otherwise a
+      // concurrent source edit or privacy change could invalidate a proof
+      // after graph traversal but before returning the old result.
+      let verifiedHits:MemoryHit[]=[];
+      await withUnlockedTransaction(this.db,async tx=>{
       // One search entrypoint; the graph projection already validates all
       // evidence/endpoint current versions, ACL and user confirmations.
       // This is a STRICT proven-relation filter, not a loose name fallback.
-      const paths = await this.confirmedRelativeConversationPaths(options.verifiedRelative);
+      const paths = await findCurrentRelativeConversationPaths(tx,verifiedRelative);
       const hits: MemoryHit[] = [];
       for (const proof of paths.paths) {
         if (hits.length >= limit) break;
         const values: SQLite.SQLiteBindValue[] = [proof.conversationId];
         let scope = "";
         if (options.collectionIds) {
-          if (!options.collectionIds.length) return [];
+          if (!options.collectionIds.length) return;
           scope += " AND e.collection_id IN (" + options.collectionIds.map(() => "?").join(",") + ")";
           values.push(...options.collectionIds);
         }
         if (options.sensitivities) {
-          if (!options.sensitivities.length) return [];
+          if (!options.sensitivities.length) return;
           scope += " AND e.sensitivity IN (" + options.sensitivities.map(() => "?").join(",") + ")";
           values.push(...options.sensitivities);
         }
-        const row = await this.db.getFirstAsync<Row>(
+        const row = await tx.getFirstAsync<Row>(
           "SELECT e.* FROM memory_entities e JOIN memory_collections c ON c.id=e.collection_id " +
           "WHERE e.id=? AND e.record_status='active' AND e.kind='note' " +
           "AND e.sensitivity IN ('standard','inherit') AND c.sensitivity='standard'" + scope,
           values,
         );
         if (!row) continue;
-        const chunk = await this.db.getFirstAsync<Row>(
+        const chunk = await tx.getFirstAsync<Row>(
           "SELECT text FROM memory_chunks WHERE entity_id=? ORDER BY ord LIMIT 1",
           [proof.conversationId],
         );
@@ -843,7 +850,9 @@ export class SqliteMemoryRepository implements MemoryRepository {
             truncated:paths.truncated || paths.paths.length>limit},
         });
       }
-      return hits;
+      verifiedHits=hits;
+      });
+      return verifiedHits;
     }
     const scored = new Map<string, { row: Row; score: number; order: number; chunk: string | null; weight: number }>();
     for (const step of searchSteps(query)) {
