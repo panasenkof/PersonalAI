@@ -33,9 +33,9 @@ const V3_TABLES = {
 } as const;
 const ENTITY_COLUMNS = "id,collection_id,domain,schema_version,title,payload_json,record_status,sensitivity," +
   "source_kind,source_ref,valid_from,valid_until,created_at,updated_at,record_version";
-export const RESTORABLE_VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13];
+export const RESTORABLE_VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14];
 const LEGACY_MAX_BACKUP_BYTES = 2 * 1024 * 1024 * 1024;
-const MANIFEST_FORMAT_VERSION = 4;
+const MANIFEST_FORMAT_VERSION = 5;
 const MANIFEST_TABLE = 'persai_backup_manifest' as const;
 const LEGACY_MAX_RESTORABLE_ENTITIES = 100000;
 const TEMP_STORAGE_RESERVE_BYTES = 64 * 1024 * 1024;
@@ -45,7 +45,7 @@ type BackupCounts = { entities: number; collections: number; observations: numbe
 type TemporalCounts = { temporal_claims: number; temporal_evidence: number;
   temporal_proposals: number; temporal_decisions: number };
 type RelationCounts = { relation_links: number; relation_evidence: number };
-type ReviewCounts = { review_actions: number };
+type ReviewCounts = { review_actions: number; review_items?:number };
 type BackupManifest = BackupCounts & Partial<TemporalCounts> & Partial<RelationCounts> & Partial<ReviewCounts> &
   { format_version: number; schema_version: number };
 const COUNT_TABLES = {
@@ -64,9 +64,12 @@ const RELATION_COUNT_TABLES = {
   relation_links: "memory_relations", relation_evidence: "memory_relation_evidence",
 } as const;
 const RELATION_COUNT_KEYS = Object.keys(RELATION_COUNT_TABLES) as Array<keyof RelationCounts>;
-const reviewCountsQuery=(prefix:""|"pia_import."|"pia_export.")=>
-  "SELECT (SELECT count(*) FROM "+prefix+"memory_review_actions) AS review_actions";
-const validReviewCounts=(v:ReviewCounts)=>Number.isSafeInteger(v.review_actions)&&v.review_actions>=0;
+const reviewCountsQuery=(prefix:""|"pia_import."|"pia_export.",hasInbox=false)=>
+  "SELECT (SELECT count(*) FROM "+prefix+"memory_review_actions) AS review_actions"+
+  (hasInbox?", (SELECT count(*) FROM "+prefix+"memory_review_items) AS review_items":"");
+const validReviewCounts=(v:ReviewCounts,hasInbox=false)=>
+  Number.isSafeInteger(v.review_actions)&&v.review_actions>=0&&
+  (!hasInbox||(Number.isSafeInteger(v.review_items)&&v.review_items!>=0));
 function relationCountsQuery(prefix: "" | "pia_import." | "pia_export."): string {
   return "SELECT " + RELATION_COUNT_KEYS.map(k =>
     "(SELECT count(*) FROM " + prefix + RELATION_COUNT_TABLES[k] + ") AS " + k).join(", ");
@@ -204,30 +207,30 @@ export async function shareEncryptedBackup(profileId: string, recoveryCode: stri
         await db.execAsync(`PRAGMA pia_export.user_version = ${LOCAL_MEMORY_SCHEMA_VERSION}`);
         // The manifest lives INSIDE SQLCipher ciphertext. No plaintext sidecar.
         await db.execAsync("CREATE TABLE pia_export.persai_backup_manifest (" +
-          "format_version INTEGER PRIMARY KEY CHECK(format_version=4), schema_version INTEGER NOT NULL," +
+          "format_version INTEGER PRIMARY KEY CHECK(format_version=5), schema_version INTEGER NOT NULL," +
           "entities INTEGER NOT NULL, collections INTEGER NOT NULL, observations INTEGER NOT NULL," +
           "attachments INTEGER NOT NULL, attachment_parts INTEGER NOT NULL," +
           "receipts INTEGER NOT NULL, chats INTEGER NOT NULL," +
           "temporal_claims INTEGER NOT NULL, temporal_evidence INTEGER NOT NULL," +
           "temporal_proposals INTEGER NOT NULL, temporal_decisions INTEGER NOT NULL," +
           "relation_links INTEGER NOT NULL, relation_evidence INTEGER NOT NULL," +
-          "review_actions INTEGER NOT NULL)");
+          "review_actions INTEGER NOT NULL,review_items INTEGER NOT NULL)");
         const counts = await db.getFirstAsync<BackupCounts>(backupCountsQuery("pia_export."));
         if (!counts || !validBackupCounts(counts)) throw new Error("backup_manifest_unavailable");
         const temporalCounts = await db.getFirstAsync<TemporalCounts>(temporalCountsQuery("pia_export."));
         if (!temporalCounts || !validTemporalCounts(temporalCounts)) throw new Error("backup_manifest_unavailable");
         const relationCounts = await db.getFirstAsync<RelationCounts>(relationCountsQuery("pia_export."));
         if (!relationCounts || !validRelationCounts(relationCounts)) throw new Error("backup_manifest_unavailable");
-        const reviewCounts = await db.getFirstAsync<ReviewCounts>(reviewCountsQuery("pia_export."));
-        if (!reviewCounts || !validReviewCounts(reviewCounts)) throw new Error("backup_manifest_unavailable");
+        const reviewCounts = await db.getFirstAsync<ReviewCounts>(reviewCountsQuery("pia_export.",true));
+        if (!reviewCounts || !validReviewCounts(reviewCounts,true)) throw new Error("backup_manifest_unavailable");
         await db.runAsync(
           "INSERT INTO pia_export.persai_backup_manifest " +
             "(format_version,schema_version,entities,collections,observations,attachments,attachment_parts,receipts,chats," +
             "temporal_claims,temporal_evidence,temporal_proposals,temporal_decisions," +
-            "relation_links,relation_evidence,review_actions) " +
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "relation_links,relation_evidence,review_actions,review_items) " +
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
           [MANIFEST_FORMAT_VERSION, LOCAL_MEMORY_SCHEMA_VERSION, ...backupCountValues(counts),
-            ...temporalCountValues(temporalCounts), ...relationCountValues(relationCounts), reviewCounts.review_actions],
+            ...temporalCountValues(temporalCounts), ...relationCountValues(relationCounts), reviewCounts.review_actions, reviewCounts.review_items],
         );
         const cipherIntegrity = await db.getFirstAsync<{ integrity_check: string }>(
           "PRAGMA pia_export.integrity_check",
@@ -322,6 +325,9 @@ export async function restoreEncryptedBackup(
         if (version.user_version >= 12 && !available.has("memory_relation_evidence")) {
           throw new Error("incompatible_backup_schema");
         }
+        if (version.user_version >= 14 && !available.has("memory_review_items")) {
+          throw new Error("incompatible_backup_schema");
+        }
         if (version.user_version >= 13 && !available.has("memory_review_actions")) {
           throw new Error("incompatible_backup_schema");
         }
@@ -352,7 +358,7 @@ export async function restoreEncryptedBackup(
           );
           if (manifestRows?.n !== 1 || !manifest ||
               manifest.schema_version !== version.user_version || !validBackupCounts(manifest) ||
-              manifest.format_version !== (version.user_version >= 13 ? 4 : version.user_version >= 12 ? 3 : version.user_version >= 11 ? 2 : 1)) {
+              manifest.format_version !== (version.user_version >= 14 ? 5 : version.user_version >= 13 ? 4 : version.user_version >= 12 ? 3 : version.user_version >= 11 ? 2 : 1)) {
             throw new Error("backup_manifest_invalid");
           }
           const actual = await db.getFirstAsync<BackupCounts>(backupCountsQuery("pia_import."));
@@ -378,8 +384,9 @@ export async function restoreEncryptedBackup(
             verifiedRelations = actualRelations;
           }
           if(version.user_version>=13){
-            const actualReview=await db.getFirstAsync<ReviewCounts>(reviewCountsQuery("pia_import."));
-            if(!actualReview||!validReviewCounts(actualReview)||manifest.review_actions!==actualReview.review_actions)
+            const actualReview=await db.getFirstAsync<ReviewCounts>(reviewCountsQuery("pia_import.",version.user_version>=14));
+            if(!actualReview||!validReviewCounts(actualReview,version.user_version>=14)||manifest.review_actions!==actualReview.review_actions||
+                (version.user_version>=14&&manifest.review_items!==actualReview.review_items))
               throw new Error("backup_manifest_mismatch");
             verifiedReview=actualReview;
           }
@@ -490,6 +497,14 @@ export async function restoreEncryptedBackup(
             if(!expected||!actual||expected.n!==actual.n)
               throw new Error("backup_review_count_mismatch");
           }
+          if(version.user_version>=14){
+            // Future shared inbox pointers depend on temporal proposal and
+            // entity FK parents; restore after both, never synthesize drafts.
+            await tx.execAsync("INSERT INTO memory_review_items SELECT * FROM pia_import.memory_review_items");
+            const expected=await tx.getFirstAsync<{n:number}>("SELECT count(*) AS n FROM pia_import.memory_review_items");
+            const actual=await tx.getFirstAsync<{n:number}>("SELECT count(*) AS n FROM memory_review_items");
+            if(!expected||!actual||expected.n!==actual.n)throw new Error("backup_review_count_mismatch");
+          }
           // Keep imported Android Share deduplication fingerprints: a source
           // is never re-imported merely because it was restored on another phone.
           // The earlier v1-v6 deployed formats may omit this optional table.
@@ -538,8 +553,10 @@ export async function restoreEncryptedBackup(
             }
           }
           if(verifiedReview){
-            const actual=await tx.getFirstAsync<ReviewCounts>(reviewCountsQuery(""));
-            if(!actual||!validReviewCounts(actual)||actual.review_actions!==verifiedReview.review_actions)
+            const actual=await tx.getFirstAsync<ReviewCounts>(reviewCountsQuery("",version.user_version>=14));
+            if(!actual||!validReviewCounts(actual,version.user_version>=14)||
+                actual.review_actions!==verifiedReview.review_actions||
+                (version.user_version>=14&&actual.review_items!==verifiedReview.review_items))
               throw new Error("backup_review_count_mismatch");
           }
           const violation = await tx.getFirstAsync("PRAGMA foreign_key_check");
