@@ -24,6 +24,8 @@ export type MemoryReviewImpact = {
   id: string;
   action: MemoryReviewAction;
   expectedRecordVersion: number;
+  /** CAS snapshot for the SAME canonical note-action transaction. */
+  expectedPreferenceVersion: number;
   currentRecordVersion: number | null;
   recordStatus: string | null;
   eligible: boolean;
@@ -199,16 +201,19 @@ export class MemoryHygieneService {
       ensureUnlocked();
       const row = await this.db.getFirstAsync<{
         record_version: number; record_status: string; guard: MemoryReviewGuard | null; skip_until: string | null;
+        preference_version: number | null; record_sensitivity: string; collection_sensitivity: string;
       }>(
-        `SELECT e.record_version,e.record_status,p.guard,p.skip_until
-         FROM memory_entities e LEFT JOIN memory_cleanup_preferences p ON p.entity_id=e.id
-         WHERE e.id=?`, [target.id],
+        `SELECT e.record_version,e.record_status,p.guard,p.skip_until,p.version AS preference_version,
+                e.sensitivity AS record_sensitivity,c.sensitivity AS collection_sensitivity
+         FROM memory_entities e JOIN memory_collections c ON c.id=e.collection_id
+         LEFT JOIN memory_cleanup_preferences p ON p.entity_id=e.id WHERE e.id=?`, [target.id],
       );
       const reasons: string[] = [];
       if (!row) reasons.push("missing");
       else {
         if (row.record_version !== target.recordVersion) reasons.push("stale_record_version");
         if (row.record_status !== "active") reasons.push("not_active");
+        if (row.collection_sensitivity !== "standard" || !["standard","inherit"].includes(row.record_sensitivity)) reasons.push("private_or_unclassified");
         if (row.guard === "pinned" || row.guard === "never_suggest") reasons.push(row.guard);
         if (row.skip_until && Date.parse(row.skip_until) > Date.now()) reasons.push("deferred");
       }
@@ -237,6 +242,7 @@ export class MemoryHygieneService {
       }
       results.push({
         id: target.id, action, expectedRecordVersion: target.recordVersion,
+        expectedPreferenceVersion: row?.preference_version ?? 0,
         currentRecordVersion: row?.record_version ?? null,
         recordStatus: row?.record_status ?? null, eligible: reasons.length === 0, reasons,
         dependencies: dep, unverifiedDependencies: [...UNVERIFIED],
