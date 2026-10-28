@@ -1,6 +1,7 @@
 import * as Crypto from 'expo-crypto';
 import type { SQLiteDatabase } from 'expo-sqlite';
 import { withUnlockedTransaction } from './transaction';
+import { localMemorySessionUnlocked } from './storage';
 import { indexEntity, memoryText } from './search-index';
 import { MemoryConflictError } from './types';
 
@@ -40,6 +41,7 @@ export async function changeNotes(db: SQL, action: NoteAction, selection: NoteSe
   if (!selection.length || selection.length > 100 || new Set(selection.map(n => n.id)).size !== selection.length) throw new Error('Выберите от 1 до 100 разных записей.');
   const batch = 'notes:' + action + ':' + Crypto.randomUUID();
   await withUnlockedTransaction(db, async tx => {
+    if(hygiene && !localMemorySessionUnlocked()) throw new MemoryConflictError('application_locked');
     const rows: Row[] = [];
     for (const selected of selection) {
       const row = await snapshot(tx, selected.id);
@@ -96,6 +98,7 @@ export async function changeNotes(db: SQL, action: NoteAction, selection: NoteSe
         }
       }
       after.payload_json = JSON.stringify(payload);
+      if(hygiene && !localMemorySessionUnlocked()) throw new MemoryConflictError('application_locked');
       await write(tx, before, after, batch);
     }
   });
