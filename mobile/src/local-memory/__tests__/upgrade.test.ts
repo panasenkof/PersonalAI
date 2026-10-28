@@ -1146,3 +1146,34 @@ test("v12 rejects invalid untrusted relation witnesses at SQLCipher constraint b
   expect(db.prepare("SELECT COUNT(*) AS n FROM memory_relation_evidence").get().n).toBe(1);
   expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
 });
+
+
+test("installed v12 upgrades to v13 preserving old relation witnesses with CAS review version",async()=>{
+  const {SCHEMA_SQL}=require("../storage");
+  const identity=await localMemoryIdentity("guest");
+  const dbPath=path.join(mockDirectory,identity.databaseName);
+  const sqlite=new DatabaseSync(dbPath);
+  const v12=SCHEMA_SQL
+    .replace("  decision_version INTEGER NOT NULL DEFAULT 1 CHECK(decision_version>0),\n","")
+    .replace(/-- One domain-neutral review action journal[\s\S]*?CREATE INDEX IF NOT EXISTS ix_memory_review_actions_relation[\s\S]*?;\n/,"");
+  expect(v12).not.toContain("CREATE TABLE IF NOT EXISTS memory_review_actions");
+  sqlite.exec(v12);
+  sqlite.exec("PRAGMA user_version=12;");
+  sqlite.prepare("INSERT INTO memory_collections(id,name,slug,sensitivity,created_at) VALUES ('c','Люди','people','standard','now')").run();
+  for(const id of ["a","b","w"]){
+    sqlite.prepare("INSERT INTO memory_entities(id,collection_id,domain,payload_json,created_at,updated_at) VALUES (?,'c','notes','{}','now','now')").run(id);
+  }
+  sqlite.prepare("INSERT INTO memory_relations(id,source_entity_id,target_entity_id,kind,created_at) VALUES ('r','a','b','has_sister','now')").run();
+  sqlite.prepare("INSERT INTO memory_relation_evidence(id,relation_id,evidence_entity_id,evidence_record_version,source_record_version,target_record_version,quote,origin,actor_kind,state,created_at) VALUES ('ev','r','w',1,1,1,'Моя сестра','explicit_user','user','confirmed','now')").run();
+  sqlite.close();
+  mockVault.set(identity.keyName,"7".repeat(64));
+  mockVault.set(identity.keyName+".initialized","yes");
+  await openLocalMemory("guest");
+  const upgraded=mockConnections[0].sqlite;
+  expect(upgraded.prepare("PRAGMA user_version").get().user_version).toBe(13);
+  expect(upgraded.prepare("SELECT state,decision_version FROM memory_relation_evidence WHERE id='ev'").get())
+    .toMatchObject({state:"confirmed",decision_version:1});
+  expect(upgraded.prepare("SELECT count(*) AS n FROM memory_review_actions").get().n).toBe(0);
+  expect(upgraded.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+  expect(mockVault.get(identity.keyName)).toBe("7".repeat(64));
+});
