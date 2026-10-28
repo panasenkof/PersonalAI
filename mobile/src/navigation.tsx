@@ -10,6 +10,7 @@ import React, { useEffect } from "react";
 import { createNavigationContainerRef } from "@react-navigation/native";
 import { IncomingShares } from "./media/IncomingShares";
 import { clearAttachmentPreviews } from "./media/attachments";
+import type { VerifiedOriginalLocator } from "./local-memory/types";
 
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -29,7 +30,7 @@ export type RootStackParams = {
   Tabs: NavigatorScreenParams<TabParams> | undefined;
   /** `presetId` adds and selects a ready-made provider (first-run setup). */
   ModelConnections: { presetId?: string } | undefined;
-  MemoryNote: { entityId?: string; collectionId?: string };
+  MemoryNote: { entityId?: string; collectionId?: string; verifiedOriginal?: VerifiedOriginalLocator };
   MemoryBackup: undefined;
   MemoryTemporalReview: { collectionId: string };
   MemoryImport: { incoming?: SharePayload[]; camera?: boolean; source?: "photo" | "file" | "link"; collectionId?: string } | undefined;
