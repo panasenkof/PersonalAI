@@ -24,6 +24,8 @@ function fake() {
     ].map(entity => ({ entity, chunk: "", score: 1 }))),
     entity: jest.fn().mockResolvedValue(null),
     createEntity: jest.fn().mockResolvedValue({ id: "new-note" }),
+    entitiesByAlias: jest.fn().mockResolvedValue([]),
+    linkEntities: jest.fn().mockResolvedValue({ id: "relation-1" }),
     createCollection: jest.fn(async (c: any) => ({ id: c.slug, description: null, created_at: "2026-10-14", ...c })),
   };
   return repo;
@@ -204,4 +206,72 @@ test("read evidence rechecks privacy, status and bound before exposing text", as
     .rejects.toThrow("memory_read_not_available");
   await expect(readApprovedNote("guest", "hidden", 0, 0, 900, repo as unknown as MemoryRepository))
     .rejects.toThrow("invalid_memory_read_request");
+});
+
+
+test.each([
+  ["Мария", "Мария", "мария"],["Елена", "Лена", "Лена"],
+  ["Максим", "Максим", "Максим"],
+])("R4: two namesakes (%s) must never choose a random identity before save", async (_label, first, second) => {
+  const repo=fake();
+  repo.entitiesByAlias.mockResolvedValue([
+    {id:"person-1",collection_id:"standard",sensitivity:"standard",record_status:"active",title:first},
+    {id:"person-2",collection_id:"standard",sensitivity:"standard",record_status:"active",title:second},
+  ]);
+  await expect(saveApprovedNote("guest",{
+    title:"Обсуждение поездки",body:"Разговор о дороге",person:first,
+  },repo as unknown as MemoryRepository)).rejects.toThrow("Личность неоднозначна");
+  expect(repo.createEntity).not.toHaveBeenCalled();
+  expect(repo.linkEntities).not.toHaveBeenCalled();
+});
+
+test.each([
+  ["secret","secret","standard"],
+  ["standard","standard","secret"],
+  ["unclassified","unclassified","inherit"],
+])("R8: %s person cannot be silently linked into a public user-approved note",async (_name,collectionId,sensitivity)=>{
+  const repo=fake();
+  repo.entitiesByAlias.mockResolvedValue([
+    {id:"person-private",collection_id:collectionId,sensitivity,record_status:"active",title:"Доктор Ирина"},
+  ]);
+  await expect(saveApprovedNote("guest",{
+    title:"Визит",body:"Поговорил с врачом",person:"Доктор Ирина",
+  },repo as unknown as MemoryRepository)).rejects.toThrow("Автоматическая связь");
+  expect(repo.createEntity).not.toHaveBeenCalled();
+  expect(repo.linkEntities).not.toHaveBeenCalled();
+});
+
+test("a unique standard person is linked by stable ID, not guessed name search",async()=>{
+  const repo=fake();
+  repo.entitiesByAlias.mockResolvedValue([
+    {id:"person-1",collection_id:"standard",sensitivity:"standard",record_status:"active",title:"Коллега Мария"},
+  ]);
+  const saved=await saveApprovedNote("guest",{
+    title:"Совещание",body:"Проект и сроки",person:"Мария",
+  },repo as unknown as MemoryRepository);
+  expect(saved).toBe("new-note");
+  expect(repo.linkEntities).toHaveBeenCalledWith("new-note","person-1","about");
+  expect(repo.createEntity).toHaveBeenCalledTimes(1);
+});
+
+test("person in a sensitive section requires explicit resolution; no half-saved note",async()=>{
+  const repo=fake();
+  await expect(saveApprovedNote("guest",{
+    title:"Медицинский документ",body:"Обсуждение обследования",
+    section:"documents",person:"Врач",
+  },repo as unknown as MemoryRepository)).rejects.toThrow("закрытом разделе");
+  expect(repo.createEntity).not.toHaveBeenCalled();
+  expect(repo.entitiesByAlias).not.toHaveBeenCalled();
+  expect(repo.linkEntities).not.toHaveBeenCalled();
+});
+
+test("new name with no candidates creates a separate person and links through legacy canonical relation",async()=>{
+  const repo=fake();
+  repo.createEntity.mockResolvedValueOnce({id:"fact-1"}).mockResolvedValueOnce({id:"new-person-1"});
+  const id=await saveApprovedNote("guest",{
+    title:"День рождения",body:"Пётр родился в апреле",person:"Пётр",
+  },repo as unknown as MemoryRepository);
+  expect(id).toBe("fact-1");
+  expect(repo.entitiesByAlias).toHaveBeenCalledWith("Пётр","person");
+  expect(repo.linkEntities).toHaveBeenCalledWith("fact-1","new-person-1","about");
 });
