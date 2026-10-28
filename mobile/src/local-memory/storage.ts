@@ -548,6 +548,20 @@ async function initialize(profileId: string): Promise<SQLite.SQLiteDatabase> {
             "SELECT count(*) AS n FROM memory_review_actions_v15");
           if(!oldCount||!copied||oldCount.n!==copied.n)
             throw new Error("memory_review_journal_migration_incomplete");
+          // SQLCipher/SQLite may enforce ON DELETE RESTRICT against an old
+          // retract->undo self-FK when DROP TABLE implicitly deletes rows.
+          // Copy was count-checked above; delete the OLD rows from leaves to
+          // roots while still inside this rollback-safe transaction.
+          // This does not alter the new immutable history or its stable IDs.
+          let remaining=oldCount.n;
+          while(remaining>0){
+            const deleted=await tx.runAsync(
+              "DELETE FROM memory_review_actions WHERE NOT EXISTS ("+
+              "SELECT 1 FROM memory_review_actions child "+
+              "WHERE child.undoes_id=memory_review_actions.id)");
+            if(deleted.changes<1)throw new Error("memory_review_journal_migration_cycle");
+            remaining-=deleted.changes;
+          }
           await tx.execAsync(`
             DROP TABLE memory_review_actions;
             ALTER TABLE memory_review_actions_v15 RENAME TO memory_review_actions;
