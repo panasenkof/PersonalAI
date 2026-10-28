@@ -8,6 +8,7 @@ import { MAX_USER_PROMPT_CHARS } from "./limits";
 import { loadModelCallLimit } from "./agent-preferences";
 import { hostOf } from "./net";
 import { proposableMemorySections, saveApprovedNote, searchApprovedNotes, readApprovedNote } from "./memory";
+import { memoryErrorMessage } from "../local-memory/errors";
 import { searchLocalApprovedSourceSegments, listLocalApprovedSourceSegments, readLocalApprovedSourceSegment } from "../local-memory/source-retrieval";
 import { listAllowedNotes, countAllowedNotes } from "../local-memory/agent-catalog";
 import { withLocalMemoryDatabase } from "../local-memory/storage";
@@ -331,7 +332,7 @@ export class DirectChatStore {
         drafts: latest.drafts.filter(d => d.id !== draft.id), rows: [...latest.rows,
         { id: Crypto.randomUUID(), role: "info", text: "Сохранено в разделе «" + draftSectionName(draft, this.snapshot.sections) + "»" +
           (draft.person && draft.kind !== "person" ? " и связано с записью «" + draft.person + "» в «Люди»." : ".") }] }, true);
-    } catch { this.publish({ error: "Не удалось сохранить заметку. Повторите попытку." }); }
+    } catch (error) { this.publish({ error: memoryErrorMessage(error) }); }
     finally { this.update(c.id, { savingDraft: undefined }); }
   }
   dispose() {
