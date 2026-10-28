@@ -49,7 +49,7 @@ export function MemoryTemporalReviewScreen() {
       generation.current++;setItems([]);setCursor(null);setUndo(null);
       setConfirming(null);setDateText("");setNotice("");
       setError("Память заблокирована. Разблокируйте приложение, чтобы увидеть предложения.");
-    }
+    } else { setRevision(n=>n+1); }
   }),[]);
 
   useFocusEffect(useCallback(()=>{
@@ -102,7 +102,7 @@ export function MemoryTemporalReviewScreen() {
       setConfirming(null);setDateText("");setRevision(n=>n+1);
     } catch(e){
       if(request===generation.current){
-        setError("Решение не применено: "+memoryErrorMessage(e)+". Обновите предложения перед повтором.");
+        setNotice("Решение не применено: "+memoryErrorMessage(e)+". Предложения обновлены; проверьте актуальные данные.");
         setRevision(n=>n+1);
       }
     }finally{if(request===generation.current)setBusy(false);}
@@ -124,7 +124,7 @@ export function MemoryTemporalReviewScreen() {
   const action=(disabled:boolean)=>({
     minHeight:nebulaTouch.minimum,paddingHorizontal:nebulaSpacing.md,paddingVertical:10,
     borderRadius:nebulaRadii.field,backgroundColor:t.panel,
-    justifyContent:"center" as const,opacity:disabled?.5:1,
+    justifyContent:"center" as const,opacity:disabled ? 0.5 : 1,
     borderWidth:1,borderColor:t.line,
   });
   return <ScrollView style={{flex:1,backgroundColor:t.bg}} keyboardShouldPersistTaps="handled"
@@ -158,7 +158,7 @@ export function MemoryTemporalReviewScreen() {
       <Text style={{color:t.muted,fontSize:12}}>Новая запись не доказывает, что прежнее состояние завершилось.
         Дата и обстоятельства требуют вашего подтверждения.</Text>
       <View style={{flexDirection:"row",flexWrap:"wrap",gap:8}}>
-        {item.reviewKind==="possible_change"&&item.status==="pending"?
+        {item.reviewKind==="possible_change"?
           <Pressable accessibilityRole="button" accessibilityLabel={"Рассмотреть завершение "+item.previous.value}
             disabled={busy} style={action(busy)} onPress={()=>{setConfirming(item.proposalId);setDateText("");}}>
             <Text style={{color:t.secondary,fontWeight:"700"}}>Подтвердить изменение</Text>
