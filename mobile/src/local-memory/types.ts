@@ -2,7 +2,7 @@ import type { MemoryKind } from "./search-index";
 import type { EnrichmentSnapshot } from "./enrichment-policy";
 import type { TemporalClaimCandidate } from "./temporal-claims";
 import type { TemporalHistoryQuery, TemporalHistoryPage, TemporalStagedReview, TemporalAtDateQuery, TemporalAtDatePage } from "./temporal-store";
-import type { ConfirmRelationInput, ConfirmRelationResult, RelationReviewExpected, RelationReviewDecision, RelationReviewActionItem, StageRelationReviewInput, RelationInboxCursor, RelationInboxPage } from "./relation-evidence";
+import type { ConfirmRelationInput, ConfirmRelationResult, RelationReviewExpected, RelationReviewDecision, RelationReviewActionItem, StageRelationReviewInput, RelationInboxCursor, RelationInboxPage, RelationCandidateExpected, RelationCandidateReviewChoice, RelationCandidateActionResult } from "./relation-evidence";
 import type { DirectPersonRelation, RelationProof, RelativeConversationResult } from "./relational-proof";
 import type { TemporalInboxQuery, TemporalInboxPage } from "./temporal-review-inbox";
 import type { TemporalDecisionRequest, TemporalDecisionExpected, TemporalDecisionResult } from "./temporal-decisions";
@@ -91,6 +91,11 @@ export interface MemoryRepository {
     proposalId:string;added:boolean;status:"pending"|"deferred"|"rejected"|"accepted";
   }>;
   relationCandidateInbox(query:{collectionId:string;limit?:number;before?:RelationInboxCursor}):Promise<RelationInboxPage>;
+  decideRelationCandidate(request:RelationCandidateExpected&{choice:RelationCandidateReviewChoice}):Promise<RelationCandidateActionResult>;
+  undoRelationCandidateDecision(request:RelationCandidateExpected&{actionId:string}):Promise<RelationCandidateActionResult>;
+  relationCandidateHistory(query:{proposalId:string;limit?:number}):Promise<{items:Array<{
+    id:string;action:string;beforeState:string;afterState:string;
+    expectedVersion:number;undoesId:string|null}>;hasMore:boolean}>;
   relationReviewHistory(query:{evidenceId:string;limit?:number}): Promise<{
     items:RelationReviewActionItem[];hasMore:boolean;
     currentState:"confirmed"|"retracted";decisionVersion:number;
