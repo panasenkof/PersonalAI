@@ -100,7 +100,7 @@ test.each([false, true])("upgrading an installed v1 database (chats=%s) opens a 
   expect(await repo.revisions("entity", "note")).toHaveLength(1);
   expect(await repo.listCollections()).toMatchObject([{ id: "recipes", name: "Рецепты" }]);
   expect(mockVault.get(identity.keyName)).toBe("6".repeat(64));
-  expect(mockConnections[0].sqlite.prepare("PRAGMA user_version").get()).toMatchObject({ user_version: 14 });
+  expect(mockConnections[0].sqlite.prepare("PRAGMA user_version").get()).toMatchObject({ user_version: 15 });
   await closeLocalMemory();
   const reopened = conversationRepository("guest");
   expect((await reopened.load()).find(c => c.question === "Можно ввести сообщение")).toBeTruthy();
@@ -150,7 +150,7 @@ test("upgrading v2 to v3 types the records, splits long text into chunks and sea
   await installationV2();
   const repo = await localMemoryRepository("guest");
   const db = mockConnections[0].sqlite;
-  expect(db.prepare("PRAGMA user_version").get()).toMatchObject({ user_version: 14 });
+  expect(db.prepare("PRAGMA user_version").get()).toMatchObject({ user_version: 15 });
   expect(await repo.entity("masha")).toMatchObject({ kind: "person", title: "Маша", record_version: 1 });
   expect(await repo.entity("dacha")).toMatchObject({ kind: "note" });
   expect(db.prepare("SELECT count(*) AS n FROM memory_chunks WHERE entity_id='dacha'").get().n).toBeGreaterThan(1);
@@ -195,7 +195,7 @@ test("v4 attachments upgrade keeps every byte and allows merging two originals",
   expect(Array.from(db.prepare("SELECT bytes FROM memory_attachment_parts").get().bytes)).toEqual([1,2,3]);
   db.prepare("INSERT INTO memory_attachments VALUES (?,?,?,?,?,?)").run("b", "n", "b.png", "image/png", 3, "now");
   expect(db.prepare("SELECT count(*) AS n FROM memory_attachments").get().n).toBe(2);
-  expect(db.prepare("PRAGMA user_version").get().user_version).toBe(14);
+  expect(db.prepare("PRAGMA user_version").get().user_version).toBe(15);
   expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   const repo = await localMemoryRepository("guest");
   expect((await repo.searchMemory("гарантия"))[0].entity.id).toBe("n");
@@ -247,7 +247,7 @@ test("v6 to v8 adds isolated hygiene and derived job tables without changing ori
   mockVault.set(identity.keyName + ".initialized", "yes");
   const repo = await localMemoryRepository("guest");
   const db = mockConnections[0].sqlite;
-  expect(db.prepare("PRAGMA user_version").get().user_version).toBe(14);
+  expect(db.prepare("PRAGMA user_version").get().user_version).toBe(15);
   expect(db.prepare("SELECT count(*) AS n FROM memory_cleanup_preferences").get().n).toBe(0);
   expect((await repo.entity("e"))?.payload.body).toBe("Не терять");
   expect(mockVault.get(identity.keyName)).toBe("6".repeat(64));
@@ -277,7 +277,7 @@ test("installed v7 SQLCipher migrates to v8 without touching notes, index rows o
   mockVault.set(identity.keyName + ".initialized", "yes");
   const repo = await localMemoryRepository("guest");
   const db = mockConnections[0].sqlite;
-  expect(db.prepare("PRAGMA user_version").get().user_version).toBe(14);
+  expect(db.prepare("PRAGMA user_version").get().user_version).toBe(15);
   expect((await repo.entity("e"))?.payload.body).toBe("Сохранённый разговор");
   expect(db.prepare("SELECT count(*) AS n FROM memory_chunks").get().n).toBe(1);
   expect(db.prepare("SELECT count(*) AS n FROM memory_search_fts").get().n).toBe(1);
@@ -310,7 +310,7 @@ test("real installed v8 database adds v9 evidence without touching ciphertext ke
   mockVault.set(identity.keyName+".initialized","yes");
   const repo=await localMemoryRepository("guest");
   const db=mockConnections[0].sqlite;
-  expect(db.prepare("PRAGMA user_version").get().user_version).toBe(14);
+  expect(db.prepare("PRAGMA user_version").get().user_version).toBe(15);
   expect((await repo.entity("e"))?.payload.body).toBe("Мой текст");
   expect(Array.from(db.prepare("SELECT bytes FROM memory_attachment_parts").get().bytes)).toEqual([1,2,3]);
   expect(db.prepare("SELECT count(*) AS n FROM memory_extractions").get().n).toBe(0);
@@ -345,7 +345,7 @@ test("real installed v9 extraction evidence upgrades to v10 FTS without changing
   mockVault.set(identity.keyName,"6".repeat(64));
   mockVault.set(identity.keyName+".initialized","yes");
   const db=(await localMemoryRepository("guest"),mockConnections[0].sqlite);
-  expect(db.prepare("PRAGMA user_version").get().user_version).toBe(14);
+  expect(db.prepare("PRAGMA user_version").get().user_version).toBe(15);
   expect(db.prepare("SELECT count(*) AS n FROM memory_extraction_segments").get().n).toBe(1);
   expect(db.prepare("SELECT segment_id FROM memory_extraction_fts WHERE memory_extraction_fts MATCH ?").get('"фестиваль"').segment_id).toBe("s");
   expect(Array.from(db.prepare("SELECT bytes FROM memory_attachment_parts").get().bytes)).toEqual([1,2,3]);
@@ -377,7 +377,7 @@ test("v10 to v11 stores candidate, evidence, and non-applying state review trans
   await openLocalMemory("guest");
   const db = mockConnections[0].sqlite;
   const bridge = mockConnections[0];
-  expect(db.prepare("PRAGMA user_version").get().user_version).toBe(14);
+  expect(db.prepare("PRAGMA user_version").get().user_version).toBe(15);
   const make = (entityId: string, value: string, kind: "state" | "event" = "state"): import("../temporal-claims").TemporalClaimCandidate => ({
     recordedAt: "2026-10-27T12:00:00.000Z", subjectId: "person-1",
     predicate: "employment", context: "primary", value, kind,
@@ -434,7 +434,7 @@ test("v10 temporal schema disk-full failure rolls back and preserves every old b
   check.close();
   mockTemporalMigrationFailure = false;
   await openLocalMemory("guest");
-  expect(mockConnections.at(-1).sqlite.prepare("PRAGMA user_version").get().user_version).toBe(14);
+  expect(mockConnections.at(-1).sqlite.prepare("PRAGMA user_version").get().user_version).toBe(15);
 });
 
 
@@ -1121,7 +1121,7 @@ test("v11→v12 retains the canonical relation and adds independent user proof w
   mockVault.set(identity.keyName+".initialized","yes");
   await openLocalMemory("guest");
   const db=mockConnections[0].sqlite;
-  expect(db.prepare("PRAGMA user_version").get().user_version).toBe(14);
+  expect(db.prepare("PRAGMA user_version").get().user_version).toBe(15);
   expect(db.prepare("SELECT COUNT(*) AS n FROM memory_relations").get().n).toBe(1);
   expect(db.prepare("SELECT COUNT(*) AS n FROM memory_relation_evidence").get().n).toBe(0);
   // No legacy edge is silently reclassified as a proven relation.
@@ -1170,7 +1170,7 @@ test("installed v12 upgrades to v13 preserving old relation witnesses with CAS r
   mockVault.set(identity.keyName+".initialized","yes");
   await openLocalMemory("guest");
   const upgraded=mockConnections[0].sqlite;
-  expect(upgraded.prepare("PRAGMA user_version").get().user_version).toBe(14);
+  expect(upgraded.prepare("PRAGMA user_version").get().user_version).toBe(15);
   expect(upgraded.prepare("SELECT state,decision_version FROM memory_relation_evidence WHERE id='ev'").get())
     .toMatchObject({state:"confirmed",decision_version:1});
   expect(upgraded.prepare("SELECT count(*) AS n FROM memory_review_actions").get().n).toBe(0);
@@ -1194,10 +1194,69 @@ test("v13 to v14 keeps existing review decisions and only adds pending-candidate
   mockVault.set(identity.keyName+".initialized","yes");
   await openLocalMemory("guest");
   const upgraded=mockConnections[0].sqlite;
-  expect(upgraded.prepare("PRAGMA user_version").get().user_version).toBe(14);
+  expect(upgraded.prepare("PRAGMA user_version").get().user_version).toBe(15);
   expect(upgraded.prepare("SELECT id FROM memory_entities WHERE id='p'").get()).toMatchObject({id:"p"});
   expect(upgraded.prepare("SELECT count(*) AS n FROM memory_review_proposals").get().n).toBe(0);
   expect(upgraded.prepare("SELECT count(*) AS n FROM memory_review_actions").get().n).toBe(0);
   expect(upgraded.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   expect(mockVault.get(identity.keyName)).toBe("8".repeat(64));
+});
+
+test("installed v14 journal retract+undo migrates to v15 without changing evidence or undo IDs",async()=>{
+  const {SCHEMA_SQL}=require("../storage");
+  const identity=await localMemoryIdentity("guest");
+  const dbPath=path.join(mockDirectory,identity.databaseName);
+  const db=new DatabaseSync(dbPath);
+  const v14Journal=`CREATE TABLE IF NOT EXISTS memory_review_actions (
+    id TEXT PRIMARY KEY,
+    target_kind TEXT NOT NULL CHECK(target_kind IN ('relation','temporal')),
+    relation_evidence_id TEXT REFERENCES memory_relation_evidence(id) ON DELETE CASCADE,
+    temporal_proposal_id TEXT REFERENCES memory_temporal_proposals(id) ON DELETE CASCADE,
+    action TEXT NOT NULL CHECK(action IN ('retract','undo','accept','keep_both','defer','dismiss')),
+    expected_version INTEGER NOT NULL CHECK(expected_version>0),
+    before_state TEXT NOT NULL, after_state TEXT NOT NULL,
+    undoes_id TEXT REFERENCES memory_review_actions(id) ON DELETE RESTRICT,
+    actor_kind TEXT NOT NULL CHECK(actor_kind='user'),
+    created_at TEXT NOT NULL,
+    CHECK ((target_kind='relation' AND relation_evidence_id IS NOT NULL AND temporal_proposal_id IS NULL)
+        OR (target_kind='temporal' AND temporal_proposal_id IS NOT NULL AND relation_evidence_id IS NULL))
+  );
+  CREATE INDEX IF NOT EXISTS ix_memory_review_actions_relation
+    ON memory_review_actions(relation_evidence_id,created_at,id);
+  `;
+  const oldSchema=SCHEMA_SQL.replace(
+    /CREATE TABLE IF NOT EXISTS memory_review_actions \([\s\S]*?CREATE INDEX IF NOT EXISTS ix_memory_review_actions_relation[\s\S]*?;\n/,
+    v14Journal);
+  expect(oldSchema).not.toContain("review_proposal_id TEXT REFERENCES");
+  db.exec("PRAGMA foreign_keys=ON");
+  db.exec(oldSchema);
+  db.exec("PRAGMA user_version=14");
+  db.exec(`
+    INSERT INTO memory_collections(id,name,slug,sensitivity,created_at) VALUES ('c','Тест','test','standard','now');
+    INSERT INTO memory_entities(id,collection_id,domain,payload_json,created_at,updated_at)
+      VALUES ('a','c','notes','{}','now','now'),('b','c','notes','{}','now','now'),
+             ('w','c','notes','{}','now','now');
+    INSERT INTO memory_relations(id,source_entity_id,target_entity_id,kind,created_at)
+      VALUES ('r','a','b','has_sister','now');
+    INSERT INTO memory_relation_evidence(id,relation_id,evidence_entity_id,evidence_record_version,
+      source_record_version,target_record_version,quote,origin,actor_kind,state,decision_version,created_at)
+      VALUES ('ev','r','w',1,1,1,'Моя сестра','explicit_user','user','confirmed',3,'now');
+    INSERT INTO memory_review_actions(id,target_kind,relation_evidence_id,action,expected_version,
+      before_state,after_state,actor_kind,created_at)
+      VALUES ('act-1','relation','ev','retract',1,'confirmed','retracted','user','2026-10-27');
+    INSERT INTO memory_review_actions(id,target_kind,relation_evidence_id,action,expected_version,
+      before_state,after_state,undoes_id,actor_kind,created_at)
+      VALUES ('act-2','relation','ev','undo',2,'retracted','confirmed','act-1','user','2026-10-28');
+  `);
+  db.close();
+  mockVault.set(identity.keyName,"9".repeat(64));
+  mockVault.set(identity.keyName+".initialized","yes");
+  await openLocalMemory("guest");
+  const sqlite=mockConnections[0].sqlite;
+  expect(sqlite.prepare("PRAGMA user_version").get().user_version).toBe(15);
+  expect(sqlite.prepare("SELECT id,undoes_id,review_proposal_id FROM memory_review_actions ORDER BY id").all())
+    .toEqual([{id:"act-1",undoes_id:null,review_proposal_id:null},
+              {id:"act-2",undoes_id:"act-1",review_proposal_id:null}]);
+  expect(sqlite.prepare("SELECT decision_version FROM memory_relation_evidence WHERE id='ev'").get().decision_version).toBe(3);
+  expect(sqlite.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
 });

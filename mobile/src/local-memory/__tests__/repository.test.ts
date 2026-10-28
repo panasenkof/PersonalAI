@@ -1014,3 +1014,105 @@ test("F7: permanent purge of a trashed evidence note with retract→undo journal
   expect(await repo.entity(owner.id)).not.toBeNull();
   expect(await repo.entity(person.id)).not.toBeNull();
 });
+
+test("R2b2a: rejection and undo are one CAS decision history, not a confirmed relation",async()=>{
+  const fake=new FakeSqlite(),repo=new SqliteMemoryRepository(fake as never);
+  await fake.execAsync("PRAGMA foreign_keys=ON");
+  const c=await repo.createCollection({name:"Люди",slug:"people",sensitivity:"standard"});
+  const a=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"person",title:"Я",payload:{}});
+  const one=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"person",title:"Мария",payload:{}});
+  const sameName=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"person",title:"Мария",payload:{}});
+  const evidence=await repo.createEntity({collection_id:c.id,domain:"notes",payload:{body:"Моя коллега Мария"}});
+  const input={sourceId:a.id,sourceVersion:1,targetId:one.id,targetVersion:1,
+    kind:"has_colleague" as const,evidenceId:evidence.id,evidenceVersion:1,
+    evidenceQuote:"Моя коллега Мария"};
+  const p=await repo.stageRelationCandidate(input);
+  await expect(repo.decideRelationCandidate({proposalId:p.proposalId,expectedVersion:1,
+    choice:"reject",userConfirmed:false as never})).rejects.toThrow("relational_candidate_decision_invalid");
+  const rejected=await repo.decideRelationCandidate({proposalId:p.proposalId,expectedVersion:1,
+    choice:"reject",userConfirmed:true});
+  expect(rejected).toMatchObject({status:"rejected",nextVersion:2});
+  expect((await repo.relationCandidateInbox({collectionId:c.id})).items).toEqual([]);
+  expect((await repo.stageRelationCandidate(input)).status).toBe("rejected");
+  expect((await fake.getFirstAsync<{n:number}>("SELECT count(*) AS n FROM memory_relations"))?.n).toBe(0);
+  expect((await fake.getFirstAsync<{n:number}>("SELECT count(*) AS n FROM memory_relation_evidence"))?.n).toBe(0);
+  const history=await repo.relationCandidateHistory({proposalId:p.proposalId});
+  expect(history.items).toMatchObject([{action:"reject",beforeState:"pending",afterState:"rejected"}]);
+  await expect(repo.undoRelationCandidateDecision({proposalId:p.proposalId,
+    expectedVersion:1,actionId:rejected.actionId,userConfirmed:true}))
+    .rejects.toThrow("relational_candidate_undo_stale");
+  const undone=await repo.undoRelationCandidateDecision({proposalId:p.proposalId,
+    expectedVersion:2,actionId:rejected.actionId,userConfirmed:true});
+  expect(undone).toMatchObject({status:"pending",nextVersion:3});
+  expect((await repo.relationCandidateInbox({collectionId:c.id})).items).toHaveLength(1);
+  await expect(repo.undoRelationCandidateDecision({proposalId:p.proposalId,
+    expectedVersion:3,actionId:rejected.actionId,userConfirmed:true}))
+    .rejects.toThrow("relational_candidate_undo_stale");
+  const after=await repo.relationCandidateHistory({proposalId:p.proposalId});
+  expect(after.items.map(a=>a.action)).toEqual(["undo","reject"]);
+  expect((after.items[0]).undoesId).toBe(rejected.actionId);
+  expect((await fake.getFirstAsync<{n:number}>("SELECT count(*) AS n FROM memory_review_actions"))?.n).toBe(2);
+  const namesake=await repo.stageRelationCandidate({...input,targetId:sameName.id});
+  expect(namesake.proposalId).not.toBe(p.proposalId);
+  expect(await fake.getFirstAsync("PRAGMA foreign_key_check")).toBeNull();
+});
+
+test("R2b2a: defer survives staging, stale source/private scope blocks decisions and undo",async()=>{
+  const fake=new FakeSqlite(),repo=new SqliteMemoryRepository(fake as never);
+  const c=await repo.createCollection({name:"Люди",slug:"people",sensitivity:"standard"});
+  const a=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"person",payload:{}});
+  const b=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"person",payload:{}});
+  const src=await repo.createEntity({collection_id:c.id,domain:"notes",payload:{body:"Моя сестра Юля"}});
+  const input={sourceId:a.id,sourceVersion:1,targetId:b.id,targetVersion:1,
+    kind:"has_sister" as const,evidenceId:src.id,evidenceVersion:1,
+    evidenceQuote:"Моя сестра Юля"};
+  const p=await repo.stageRelationCandidate(input);
+  const deferred=await repo.decideRelationCandidate({proposalId:p.proposalId,
+    expectedVersion:1,choice:"defer",userConfirmed:true});
+  expect((await repo.stageRelationCandidate(input)).status).toBe("deferred");
+  expect((await repo.relationCandidateInbox({collectionId:c.id})).items[0]).toMatchObject({status:"deferred"});
+  await expect(repo.decideRelationCandidate({proposalId:p.proposalId,
+    expectedVersion:1,choice:"reject",userConfirmed:true}))
+    .rejects.toThrow("relational_candidate_decision_stale");
+  await fake.runAsync("UPDATE memory_entities SET sensitivity='secret' WHERE id=?",[src.id]);
+  await expect(repo.undoRelationCandidateDecision({proposalId:p.proposalId,
+    expectedVersion:2,actionId:deferred.actionId,userConfirmed:true}))
+    .rejects.toThrow("relational_source_not_available_or_stale");
+  await expect(repo.relationCandidateHistory({proposalId:p.proposalId}))
+    .rejects.toThrow("relational_source_not_available_or_stale");
+  expect((await repo.relationCandidateInbox({collectionId:c.id})).items).toEqual([]);
+  expect((await fake.getFirstAsync<{r:string}>("SELECT status AS r FROM memory_review_proposals WHERE id=?", [p.proposalId]))?.r)
+    .toBe("deferred");
+  expect((await fake.getFirstAsync<{n:number}>("SELECT count(*) AS n FROM memory_review_actions"))?.n).toBe(1);
+  await fake.runAsync("UPDATE memory_entities SET sensitivity='standard' WHERE id=?",[src.id]);
+  const next=await repo.decideRelationCandidate({proposalId:p.proposalId,
+    expectedVersion:2,choice:"reject",userConfirmed:true});
+  await expect(repo.undoRelationCandidateDecision({proposalId:p.proposalId,
+    expectedVersion:3,actionId:deferred.actionId,userConfirmed:true}))
+    .rejects.toThrow("relational_candidate_undo_stale");
+  expect(next.status).toBe("rejected");
+});
+
+test("R2b2a: hard purge removes candidate undo dependencies, but ordinary trash keeps them",async()=>{
+  const {purgeNotes,changeNotes}=require("../note-actions");
+  const fake=new FakeSqlite(),repo=new SqliteMemoryRepository(fake as never);
+  await fake.execAsync("PRAGMA foreign_keys=ON");
+  const c=await repo.createCollection({name:"Люди",slug:"people",sensitivity:"standard"});
+  const a=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"person",payload:{}});
+  const b=await repo.createEntity({collection_id:c.id,domain:"notes",kind:"person",payload:{}});
+  const proof=await repo.createEntity({collection_id:c.id,domain:"notes",payload:{body:"Мой друг Артём"}});
+  const p=await repo.stageRelationCandidate({sourceId:a.id,sourceVersion:1,
+    targetId:b.id,targetVersion:1,evidenceId:proof.id,evidenceVersion:1,
+    kind:"has_friend",evidenceQuote:"Мой друг Артём"});
+  const choice=await repo.decideRelationCandidate({proposalId:p.proposalId,
+    expectedVersion:1,choice:"reject",userConfirmed:true});
+  await repo.undoRelationCandidateDecision({proposalId:p.proposalId,
+    expectedVersion:2,actionId:choice.actionId,userConfirmed:true});
+  await changeNotes(fake as never,"trash",[{id:proof.id,record_version:1}]);
+  expect((await fake.getFirstAsync<{n:number}>("SELECT count(*) AS n FROM memory_review_actions"))?.n).toBe(2);
+  expect((await fake.getFirstAsync<{n:number}>("SELECT count(*) AS n FROM memory_review_proposals"))?.n).toBe(1);
+  await purgeNotes(fake as never,[{id:proof.id,record_version:2}]);
+  expect((await fake.getFirstAsync<{n:number}>("SELECT count(*) AS n FROM memory_review_actions"))?.n).toBe(0);
+  expect((await fake.getFirstAsync<{n:number}>("SELECT count(*) AS n FROM memory_review_proposals"))?.n).toBe(0);
+  expect(await fake.getFirstAsync("PRAGMA foreign_key_check")).toBeNull();
+});

@@ -42,7 +42,7 @@ export function onLocalMemorySessionChange(listener: (unlocked: boolean) => void
 }
 export const localMemorySessionUnlocked = () => applicationSessionUnlocked;
 const requireApplicationSession = () => { if (!applicationSessionUnlocked) throw new Error("application_locked"); };
-export const LOCAL_MEMORY_SCHEMA_VERSION = 14;
+export const LOCAL_MEMORY_SCHEMA_VERSION = 15;
 const KIND_CHECK = `CHECK(kind IN (${MEMORY_KINDS.map(k => `'${k}'`).join(",")}))`;
 
 /** All memory (including full-text indexes, revisions, and WAL) is in SQLCipher. */
@@ -178,15 +178,19 @@ CREATE TABLE IF NOT EXISTS memory_review_actions (
   target_kind TEXT NOT NULL CHECK(target_kind IN ('relation','temporal')),
   relation_evidence_id TEXT REFERENCES memory_relation_evidence(id) ON DELETE CASCADE,
   temporal_proposal_id TEXT REFERENCES memory_temporal_proposals(id) ON DELETE CASCADE,
-  action TEXT NOT NULL CHECK(action IN ('retract','undo','accept','keep_both','defer','dismiss')),
+  action TEXT NOT NULL CHECK(action IN ('retract','undo','accept','keep_both','defer','dismiss','reject')),
   expected_version INTEGER NOT NULL CHECK(expected_version>0),
   before_state TEXT NOT NULL,
   after_state TEXT NOT NULL,
   undoes_id TEXT REFERENCES memory_review_actions(id) ON DELETE RESTRICT,
   actor_kind TEXT NOT NULL CHECK(actor_kind='user'),
   created_at TEXT NOT NULL,
-  CHECK ((target_kind='relation' AND relation_evidence_id IS NOT NULL AND temporal_proposal_id IS NULL)
-      OR (target_kind='temporal' AND temporal_proposal_id IS NOT NULL AND relation_evidence_id IS NULL))
+  -- New v15 FK is an ADDITION to the canonical journal, not a second journal.
+  review_proposal_id TEXT REFERENCES memory_review_proposals(id) ON DELETE CASCADE,
+  CHECK ((target_kind='relation' AND temporal_proposal_id IS NULL
+          AND (relation_evidence_id IS NOT NULL OR review_proposal_id IS NOT NULL))
+      OR (target_kind='temporal' AND temporal_proposal_id IS NOT NULL
+          AND relation_evidence_id IS NULL AND review_proposal_id IS NULL))
 );
 CREATE INDEX IF NOT EXISTS ix_memory_review_actions_relation
   ON memory_review_actions(relation_evidence_id,created_at,id);
@@ -507,6 +511,71 @@ async function initialize(profileId: string): Promise<SQLite.SQLiteDatabase> {
             await tx.execAsync("ALTER TABLE memory_relation_evidence ADD COLUMN decision_version INTEGER NOT NULL DEFAULT 1 CHECK(decision_version>0)");
           }
         }
+        // v13/v14 review actions had no candidate FK and a narrower CHECK.
+        // Rebuild ONLY this immutable journal in the SAME SQLCipher transaction.
+        // Existing retract->undo IDs, actor history and self-FKs are retained.
+        if (version >= 13 && version < 15) {
+          await tx.execAsync(`
+            CREATE TABLE memory_review_actions_v15 (
+              id TEXT PRIMARY KEY,
+              target_kind TEXT NOT NULL CHECK(target_kind IN ('relation','temporal')),
+              relation_evidence_id TEXT REFERENCES memory_relation_evidence(id) ON DELETE CASCADE,
+              temporal_proposal_id TEXT REFERENCES memory_temporal_proposals(id) ON DELETE CASCADE,
+              action TEXT NOT NULL CHECK(action IN ('retract','undo','accept','keep_both','defer','dismiss','reject')),
+              expected_version INTEGER NOT NULL CHECK(expected_version>0),
+              before_state TEXT NOT NULL,
+              after_state TEXT NOT NULL,
+              undoes_id TEXT REFERENCES memory_review_actions_v15(id) ON DELETE RESTRICT,
+              actor_kind TEXT NOT NULL CHECK(actor_kind='user'),
+              created_at TEXT NOT NULL,
+              review_proposal_id TEXT REFERENCES memory_review_proposals(id) ON DELETE CASCADE,
+              CHECK ((target_kind='relation' AND temporal_proposal_id IS NULL
+                      AND (relation_evidence_id IS NOT NULL OR review_proposal_id IS NOT NULL))
+                  OR (target_kind='temporal' AND temporal_proposal_id IS NOT NULL
+                      AND relation_evidence_id IS NULL AND review_proposal_id IS NULL))
+            );
+            INSERT INTO memory_review_actions_v15
+              (id,target_kind,relation_evidence_id,temporal_proposal_id,action,
+               expected_version,before_state,after_state,undoes_id,actor_kind,created_at)
+              SELECT id,target_kind,relation_evidence_id,temporal_proposal_id,action,
+                     expected_version,before_state,after_state,undoes_id,actor_kind,created_at
+              FROM memory_review_actions
+              ORDER BY CASE WHEN undoes_id IS NULL THEN 0 ELSE 1 END,created_at,id;
+          `);
+          const oldCount=await tx.getFirstAsync<{n:number}>(
+            "SELECT count(*) AS n FROM memory_review_actions");
+          const copied=await tx.getFirstAsync<{n:number}>(
+            "SELECT count(*) AS n FROM memory_review_actions_v15");
+          if(!oldCount||!copied||oldCount.n!==copied.n)
+            throw new Error("memory_review_journal_migration_incomplete");
+          // SQLCipher/SQLite may enforce ON DELETE RESTRICT against an old
+          // retract->undo self-FK when DROP TABLE implicitly deletes rows.
+          // Copy was count-checked above; delete the OLD rows from leaves to
+          // roots while still inside this rollback-safe transaction.
+          // This does not alter the new immutable history or its stable IDs.
+          let remaining=oldCount.n;
+          while(remaining>0){
+            const deleted=await tx.runAsync(
+              "DELETE FROM memory_review_actions WHERE NOT EXISTS ("+
+              "SELECT 1 FROM memory_review_actions child "+
+              "WHERE child.undoes_id=memory_review_actions.id)");
+            if(deleted.changes<1)throw new Error("memory_review_journal_migration_cycle");
+            remaining-=deleted.changes;
+          }
+          await tx.execAsync(`
+            DROP TABLE memory_review_actions;
+            ALTER TABLE memory_review_actions_v15 RENAME TO memory_review_actions;
+            CREATE INDEX ix_memory_review_actions_relation
+              ON memory_review_actions(relation_evidence_id,created_at,id);
+            CREATE INDEX ix_memory_review_actions_proposal
+              ON memory_review_actions(review_proposal_id,expected_version,id);
+          `);
+          const invalid=await tx.getFirstAsync("PRAGMA foreign_key_check");
+          if(invalid!==null)throw new Error("memory_review_journal_migration_fk");
+        }
+        // Old installed v13/v14 journal did not have review_proposal_id at CREATE time.
+        await tx.execAsync("CREATE INDEX IF NOT EXISTS ix_memory_review_actions_proposal " +
+          "ON memory_review_actions(review_proposal_id,expected_version,id)");
         await upgradeToV6(tx);
         if (version < 3) await upgradeToV3(tx);
         if (version === 4) await upgradeToV5(tx);

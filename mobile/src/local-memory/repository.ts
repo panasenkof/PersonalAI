@@ -9,8 +9,8 @@ import { withUnlockedTransaction } from "./transaction";
 import { stageTemporalCandidateWithReview, listTemporalKnowledgeHistory, listTemporalStateCandidatesAtDate } from "./temporal-store";
 import { listTemporalReviewInbox as readTemporalReviewInbox } from "./temporal-review-inbox";
 import { decideTemporalReview, undoTemporalReview } from "./temporal-decisions";
-import { confirmUserRelationEvidence, listCurrentConfirmedRelationProofs, findCurrentRelativeConversationPaths, retractUserRelationEvidence, undoUserRelationRetraction, listUserRelationReviewHistory, stageRelationReviewCandidate, listRelationReviewCandidates } from "./relation-evidence";
-import type { ConfirmRelationInput, RelationReviewExpected, StageRelationReviewInput, RelationInboxCursor } from "./relation-evidence";
+import { confirmUserRelationEvidence, listCurrentConfirmedRelationProofs, findCurrentRelativeConversationPaths, retractUserRelationEvidence, undoUserRelationRetraction, listUserRelationReviewHistory, stageRelationReviewCandidate, listRelationReviewCandidates, decideRelationCandidate, undoRelationCandidateDecision, relationCandidateDecisionHistory } from "./relation-evidence";
+import type { ConfirmRelationInput, RelationReviewExpected, StageRelationReviewInput, RelationInboxCursor, RelationCandidateExpected, RelationCandidateReviewChoice } from "./relation-evidence";
 import type { DirectPersonRelation } from "./relational-proof";
 import type { TemporalClaimCandidate } from "./temporal-claims";
 import type { TemporalHistoryQuery, TemporalAtDateQuery } from "./temporal-store";
@@ -373,6 +373,16 @@ export class SqliteMemoryRepository implements MemoryRepository {
   }
   relationCandidateInbox(query:{collectionId:string;limit?:number;before?:RelationInboxCursor}){
     return listRelationReviewCandidates(this.db,query);
+  }
+  /** User-only decisions on pending relation candidates; no agent tool. */
+  decideRelationCandidate(request:RelationCandidateExpected&{choice:RelationCandidateReviewChoice}){
+    return decideRelationCandidate(this.db,request);
+  }
+  undoRelationCandidateDecision(request:RelationCandidateExpected&{actionId:string}){
+    return undoRelationCandidateDecision(this.db,request);
+  }
+  relationCandidateHistory(query:{proposalId:string;limit?:number}){
+    return relationCandidateDecisionHistory(this.db,query);
   }
   relationReviewHistory(query:{evidenceId:string;limit?:number}){
     return listUserRelationReviewHistory(this.db,query);
