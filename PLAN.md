@@ -189,3 +189,5 @@
 ### Предыдущая редакция 75
 
 По поручению владельца пересмотрены все №1–91 и подпланы; включены аудит M01–M19, temporal и relational design, в том числе изменения соседнего диалога из PR #129 на `a8d49cc`. Исправлены статусы #125–128, удалены повторные очереди, добавлены зависимости и критерии небольших пакетов. История вынесена без потери требований. Полный разбор решений и фактические проверки: [ROADMAP_REVIEW_2026-10-26.md](docs/architecture/ROADMAP_REVIEW_2026-10-26.md).
+
+**28.10.2026 · №66.4 R3c1 in progress:** #203 and #204 merged; explicit selected-person proof search and guarded original viewer are in main. The next small PR adds a single user-only per-profile `memory_profile_self` FK binding with SQLCipher v17 CAS, encryption backup manifest 8 and legacy restore regression tests; this is an identity pointer, not a duplicate memory graph. The dedicated manual UI and natural-language chat resolver remain next work, followed by T3b2, M4-UX, full 96 scenario acceptance and finally C3 architecture consolidation. Never infer current owner from title/name. C0-A before and C3-B after each memory PR.
