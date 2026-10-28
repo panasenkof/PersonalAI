@@ -111,12 +111,20 @@ export async function purgeNotes(db: SQL, selection: NoteSelection[]): Promise<v
         "JOIN memory_relations r ON r.id=w.relation_id " +
         "WHERE r.source_entity_id=? OR r.target_entity_id=? OR w.evidence_entity_id=?";
       const selectedIds = [selected.id,selected.id,selected.id];
+      const affectedProposals = "SELECT id FROM memory_review_proposals " +
+        "WHERE source_entity_id=? OR target_entity_id=? OR evidence_entity_id=?";
+      // v15 keeps the SAME immutable journal for all relation-candidate
+      // actions. Its undo FK must be released before an entity cascade.
       await tx.runAsync(
-        "DELETE FROM memory_review_actions WHERE action='undo' AND relation_evidence_id IN (" +
-        affectedWitnesses + ")", selectedIds);
+        "DELETE FROM memory_review_actions WHERE action='undo' AND (" +
+        "relation_evidence_id IN (" + affectedWitnesses + ") OR " +
+        "review_proposal_id IN (" + affectedProposals + "))",
+        [...selectedIds,...selectedIds]);
       await tx.runAsync(
-        "DELETE FROM memory_review_actions WHERE relation_evidence_id IN (" +
-        affectedWitnesses + ")", selectedIds);
+        "DELETE FROM memory_review_actions WHERE " +
+        "relation_evidence_id IN (" + affectedWitnesses + ") OR " +
+        "review_proposal_id IN (" + affectedProposals + ")",
+        [...selectedIds,...selectedIds]);
       await tx.runAsync('DELETE FROM memory_search_fts WHERE entity_id=?', [selected.id]);
       await tx.runAsync('DELETE FROM memory_entities WHERE id=?', [selected.id]);
     }
