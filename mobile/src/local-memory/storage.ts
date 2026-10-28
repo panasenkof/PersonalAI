@@ -42,7 +42,7 @@ export function onLocalMemorySessionChange(listener: (unlocked: boolean) => void
 }
 export const localMemorySessionUnlocked = () => applicationSessionUnlocked;
 const requireApplicationSession = () => { if (!applicationSessionUnlocked) throw new Error("application_locked"); };
-export const LOCAL_MEMORY_SCHEMA_VERSION = 13;
+export const LOCAL_MEMORY_SCHEMA_VERSION = 14;
 const KIND_CHECK = `CHECK(kind IN (${MEMORY_KINDS.map(k => `'${k}'`).join(",")}))`;
 
 /** All memory (including full-text indexes, revisions, and WAL) is in SQLCipher. */
@@ -300,6 +300,50 @@ CREATE TABLE IF NOT EXISTS memory_temporal_decisions (
 );
 CREATE INDEX IF NOT EXISTS ix_temporal_decision_proposal
   ON memory_temporal_decisions(proposal_id,created_at,id);
+
+-- v14: ONE domain-neutral review inbox for future temporal and relational
+-- cards. Temporal rows remain owned by memory_temporal_proposals and are
+-- referenced, never copied into a competing claim/proposal table.
+-- Pending relational identities are NOT canonical memory_relations edges.
+CREATE TABLE IF NOT EXISTS memory_review_items (
+  id TEXT PRIMARY KEY,
+  target_kind TEXT NOT NULL CHECK(target_kind IN ('relation','temporal')),
+  temporal_proposal_id TEXT UNIQUE REFERENCES memory_temporal_proposals(id) ON DELETE CASCADE,
+  source_entity_id TEXT REFERENCES memory_entities(id) ON DELETE CASCADE,
+  target_entity_id TEXT REFERENCES memory_entities(id) ON DELETE CASCADE,
+  relation_kind TEXT,
+  evidence_entity_id TEXT REFERENCES memory_entities(id) ON DELETE CASCADE,
+  source_record_version INTEGER CHECK(source_record_version>0),
+  target_record_version INTEGER CHECK(target_record_version>0),
+  evidence_record_version INTEGER CHECK(evidence_record_version>0),
+  quote TEXT CHECK(quote IS NULL OR (length(quote)>0 AND length(quote)<=6000)),
+  origin TEXT NOT NULL CHECK(origin IN ('manual','model','rule','import')),
+  status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','deferred','dismissed','accepted')),
+  proposal_version INTEGER NOT NULL DEFAULT 1 CHECK(proposal_version>0),
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  CHECK (
+    (target_kind='temporal' AND temporal_proposal_id IS NOT NULL
+       AND source_entity_id IS NULL AND target_entity_id IS NULL
+       AND relation_kind IS NULL AND evidence_entity_id IS NULL
+       AND source_record_version IS NULL AND target_record_version IS NULL
+       AND evidence_record_version IS NULL AND quote IS NULL)
+    OR
+    (target_kind='relation' AND temporal_proposal_id IS NULL
+       AND source_entity_id IS NOT NULL AND target_entity_id IS NOT NULL
+       AND source_entity_id<>target_entity_id
+       AND relation_kind IS NOT NULL AND evidence_entity_id IS NOT NULL
+       AND source_record_version IS NOT NULL AND target_record_version IS NOT NULL
+       AND evidence_record_version IS NOT NULL AND quote IS NOT NULL)
+  ),
+  UNIQUE(source_entity_id,target_entity_id,relation_kind,
+         evidence_entity_id,evidence_record_version,
+         source_record_version,target_record_version,quote)
+);
+CREATE INDEX IF NOT EXISTS ix_review_items_status
+  ON memory_review_items(target_kind,status,created_at,id);
+CREATE INDEX IF NOT EXISTS ix_review_items_source
+  ON memory_review_items(evidence_entity_id,evidence_record_version);
+
 CREATE TABLE IF NOT EXISTS memory_cleanup_preferences (
   entity_id TEXT PRIMARY KEY REFERENCES memory_entities(id) ON DELETE CASCADE,
   guard TEXT NOT NULL DEFAULT 'normal' CHECK(guard IN ('normal','pinned','never_suggest')),
