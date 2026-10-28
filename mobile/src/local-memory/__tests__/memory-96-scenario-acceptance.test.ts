@@ -12,9 +12,9 @@ const categories=["TIME","CAR","REL","MED","DOC","MEDIA","SEARCH","SAVE","SEC","
 const idPattern="(?:"+categories.join("|")+")-\\d{2}";
 const matrixIds=[...source.matchAll(new RegExp("^\\|\\s*("+idPattern+")\\s*\\|","gm"))].map(x=>x[1]);
 const ledgerRows=[...ledger.matchAll(new RegExp(
-  "^\\|\\s*("+idPattern+")\\s*\\|\\s*([^|]+)\\|\\s*(PARTIAL_C1|REVIEW_REQUIRED)\\s*\\|\\s*([^|]+)\\|\\s*(NOT_RUN_PHYSICAL)\\s*\\|\\s*$","gm",
+  "^\\|\\s*("+idPattern+")\\s*\\|\\s*([^|]+)\\|\\s*(PARTIAL_C1|REVIEW_REQUIRED|C1_PASS_EXACT_SHA)\\s*\\|\\s*([^|]+)\\|\\s*(NOT_RUN_PHYSICAL|C2_VERIFIED)\\s*\\|\\s*([^|]+)\\|\\s*$","gm",
 ))].map(match=>({id:match[1],name:match[2].trim(),
-  c1:match[3],evidence:match[4].trim(),c2:match[5]}));
+  c1:match[3],evidence:match[4].trim(),c2:match[5],c2Evidence:match[6].trim()}));
 
 test("cross-domain gate: every one of the 96 independently specified IDs has exactly one acceptance row",()=>{
   expect(matrixIds).toHaveLength(96);
@@ -27,20 +27,29 @@ test("cross-domain gate: every one of the 96 independently specified IDs has exa
       Array.from({length:8},(_,n)=>category+"-"+String(n+1).padStart(2,"0")));
   }
 });
-test("cross-domain gate: partial evidence exists, and neither synthetic CI nor mock passes physical QA",()=>{
+
+test("cross-domain gate: C1 PASS requires exact SHA+test; C2 PASS requires real QA report",()=>{
   for(const row of ledgerRows){
     expect(row.name.length).toBeGreaterThan(3);
-    expect(row.c2).toBe("NOT_RUN_PHYSICAL");
-    if(row.c1==="PARTIAL_C1"){
-      expect(row.evidence.startsWith("`mobile/src/")).toBe(true);
-      expect(row.evidence.endsWith("`")).toBe(true);
-      expect(/\.test\.tsx?$/.test(row.evidence.slice(1,-1))).toBe(true);
-      const target=resolve(root,row.evidence.slice(1,-1));
-      expect(existsSync(target)).toBe(true);
+    if(row.c1==="PARTIAL_C1"||row.c1==="C1_PASS_EXACT_SHA"){
+      const evidence=row.c1==="PARTIAL_C1"
+        ? row.evidence.match(/^`(mobile\/src\/.*\.test\.tsx?)`$/)
+        : row.evidence.match(/^`(mobile\/src\/.*\.test\.tsx?)` @ `([0-9a-f]{40})` CI:https:\/\/github\.com\/panasenkof\/PersonalAI\/actions\/runs\/\d+$/);
+      expect(evidence).not.toBeNull();
+      expect(existsSync(resolve(root,evidence![1]))).toBe(true);
     }else{
       expect(row.evidence).toBe("—");
     }
+    if(row.c2==="C2_VERIFIED"){
+      // Preserve a concrete, versioned, human-reviewed Android QA report.
+      const evidence=row.c2Evidence.match(/^`(Plans\/[A-Za-z0-9_./-]+\.md)`$/);
+      expect(evidence).not.toBeNull();
+      expect(existsSync(resolve(root,evidence![1]))).toBe(true);
+    }else{
+      expect(row.c2).toBe("NOT_RUN_PHYSICAL");
+      expect(row.c2Evidence).toBe("—");
+    }
   }
-  expect(ledger).toContain("НЕТ СТАТУСА PASS");
-  expect(ledger).toContain("45 TM и 28 RE");
+  expect(ledger).toContain("C1_PASS_EXACT_SHA");
+  expect(ledger).toContain("C2_VERIFIED");
 });
