@@ -21,7 +21,7 @@ import { MemoryNoteCard } from "../design/nebula/MemoryNoteCard";
 
 import { mergeText, noteUndoLabel, type NoteAction } from "../local-memory/note-actions";
 import { scheduleVectors } from "../media/vector-runner";
-import type { MemoryReviewBatchPreview, MemoryReviewAction } from "../local-memory/hygiene";
+import type { MemoryReviewBatchPreview, MemoryReviewAction, MemoryReviewGuard } from "../local-memory/hygiene";
 
 export function LocalMemoryScreen() {
   const t = useTheme(); const navigation = useNavigation<NativeStackNavigationProp<RootStackParams>>();
@@ -52,6 +52,7 @@ export function LocalMemoryScreen() {
   const [hygienePreview, setHygienePreview] = useState<MemoryReviewBatchPreview | null>(null);
   const [hygieneAction, setHygieneAction] = useState<MemoryReviewAction>("archive");
   const [hygieneConfirm, setHygieneConfirm] = useState(false);
+  const [hygienePolicyItem, setHygienePolicyItem] = useState<string | null>(null);
   const hygieneGeneration = useRef(0);
   const [undo, setUndo] = useState("");
   const [search, setSearch] = useState(""); const [term, setTerm] = useState("");
@@ -101,7 +102,35 @@ export function LocalMemoryScreen() {
   }
   function closeHygiene(){
     hygieneGeneration.current++;
-    setHygieneReviewOpen(false);setHygieneExcluded([]);setHygienePreview(null);setHygieneConfirm(false);setBusy(false);
+    setHygieneReviewOpen(false);setHygieneExcluded([]);setHygienePreview(null);setHygieneConfirm(false);setHygienePolicyItem(null);setBusy(false);
+  }
+  /** The one existing user-owned retention preference writer (SQLCipher CAS).
+   * A new rule invalidates the entire old preview. Never re-use stale approval.
+   */
+  async function setGroupPolicy(note:EntityRecord,guard:MemoryReviewGuard,days:number|null=null){
+    if(!repository.current||busy||!hygieneReviewOpen||note.record_status!=="active"||
+       !["standard","inherit"].includes(note.sensitivity)||
+       !collections.some(c=>c.id===note.collection_id&&c.sensitivity==="standard"))return;
+    const token=++hygieneGeneration.current,request=generation.current;
+    const targets=selectedNotes.map(n=>({id:n.id,recordVersion:n.record_version}));
+    const skipped=[...hygieneExcluded],mode=hygieneAction;
+    setBusy(true);setError("");setHygienePreview(null);setHygieneConfirm(false);
+    try{
+      const service=repository.current.hygiene();
+      const current=await service.preference(note.id);
+      const until=days===null?null:new Date(Date.now()+days*24*60*60*1000).toISOString();
+      await service.setPreference({id:note.id,recordVersion:note.record_version},
+        current.preferenceVersion,guard,until);
+      const next=await service.previewWithExclusions(targets,skipped,mode);
+      if(token===hygieneGeneration.current&&request===generation.current){
+        setHygienePreview(next);setHygienePolicyItem(null);
+      }
+    }catch(e){
+      if(token===hygieneGeneration.current&&request===generation.current)
+        setError(memoryErrorMessage(e));
+    }finally{
+      if(token===hygieneGeneration.current)setBusy(false);
+    }
   }
   /** Reuse changeNotes+undoNotes. No additional cleanup writer, no purge. */
   async function applyHygiene(){
@@ -141,7 +170,7 @@ export function LocalMemoryScreen() {
       if (profile) scheduleVectors(profile);
     } catch (e) { setError(memoryErrorMessage(e)); } finally { setBusy(false); }
   }
-  useEffect(() => { setSelectedIds([]); setSelecting(false); setActionsOpen(false); setConfirmation(null); setNotes([]); setContextNote(null); setMoveOpen(false); setMergeOpen(false); hygieneGeneration.current++; setHygieneReviewOpen(false); setHygieneExcluded([]); setHygienePreview(null); setHygieneConfirm(false); setHygieneAction("archive"); }, [profile, collectionId, term, status]);
+  useEffect(() => { setSelectedIds([]); setSelecting(false); setActionsOpen(false); setConfirmation(null); setNotes([]); setContextNote(null); setMoveOpen(false); setMergeOpen(false); hygieneGeneration.current++; setHygieneReviewOpen(false); setHygieneExcluded([]); setHygienePreview(null); setHygieneConfirm(false); setHygienePolicyItem(null); setHygieneAction("archive"); }, [profile, collectionId, term, status]);
   function openAll() { setStatus("active"); setCollectionId(undefined); setSearch(""); setTerm(""); setSelectedIds([]); setSelecting(false); }
   function openStatus(value: typeof status) { openAll(); setStatus(value); setMenuOpen(false); }
   const cancelSelection = useCallback(() => {
@@ -289,7 +318,7 @@ export function LocalMemoryScreen() {
           {selectedNotes.length >= 2 && status === "active" ? <Pressable
             disabled={busy} accessibilityRole="button" accessibilityLabel="Проверить последствия групповой ревизии"
             style={actionButton} onPress={() => {
-              setActionsOpen(false);setHygieneExcluded([]);setHygienePreview(null);setHygieneAction("archive");setHygieneConfirm(false);
+              setActionsOpen(false);setHygieneExcluded([]);setHygienePreview(null);setHygieneAction("archive");setHygieneConfirm(false);setHygienePolicyItem(null);
               setHygieneReviewOpen(true);void inspectHygiene([]);
             }}>
             <Text style={{ color:t.secondary }}>Проверить группу и исключения</Text>
@@ -348,6 +377,37 @@ export function LocalMemoryScreen() {
              row?("Нельзя без проверки: "+row.reasons.join(", ")):"Проверка…"}
           </Text>
         </Pressable>;
+      })}
+      {hygienePolicyItem && selectedNotes.some(n=>n.id===hygienePolicyItem) ?
+        <Text style={{color:t.muted}}>Правила хранения сохраняются отдельно от архивации. Они действуют и при следующей ревизии.</Text>:null}
+      {selectedNotes.map(note=>{
+        const available=note.record_status==="active" &&
+          ["standard","inherit"].includes(note.sensitivity) &&
+          collections.some(c=>c.id===note.collection_id&&c.sensitivity==="standard");
+        if(!available)return null;
+        const expanded=hygienePolicyItem===note.id;
+        return <View key={"policy:"+note.id} style={{gap:4}}>
+          <Pressable accessibilityRole="button"
+            accessibilityLabel={"Правила сохранения "+memoryDisplayTitle(note)}
+            accessibilityState={{expanded,disabled:busy}} disabled={busy}
+            style={{...actionButton,minHeight:nebulaTouch.minimum}}
+            onPress={()=>setHygienePolicyItem(expanded?null:note.id)}>
+            <Text style={{color:t.secondary}}>Правила сохранения · {memoryDisplayTitle(note)} {expanded?"⌃":"⌄"}</Text>
+          </Pressable>
+          {expanded?<View style={{gap:4}}>
+            {([
+              {label:"Всегда сохранять",guard:"pinned" as const,days:null},
+              {label:"Не предлагать к очистке",guard:"never_suggest" as const,days:null},
+              {label:"Отложить на 30 дней",guard:"normal" as const,days:30},
+              {label:"Снять ограничения",guard:"normal" as const,days:null},
+            ]).map(policy=><Pressable key={policy.label} accessibilityRole="button"
+              accessibilityLabel={policy.label+" · "+memoryDisplayTitle(note)}
+              disabled={busy} style={actionButton}
+              onPress={()=>void setGroupPolicy(note,policy.guard,policy.days)}>
+              <Text style={{color:t.text}}>{policy.label}</Text>
+            </Pressable>)}
+          </View>:null}
+        </View>;
       })}
       {error?<Text accessibilityRole="alert" style={{color:t.err}}>{error}</Text>:null}
       <Text style={{color:t.muted}}>
