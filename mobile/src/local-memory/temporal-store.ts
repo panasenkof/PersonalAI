@@ -469,8 +469,11 @@ export async function listTemporalStateCandidatesAtDate(
   ];
   if(query.knowledgeAt){
     // A backdated valid-time claim cannot be visible before it was recorded.
-    where.push("c.knowledge_recorded_at<=?");
-    args.push(query.knowledgeAt);
+    where.push("c.knowledge_recorded_at<=?", "e.created_at<=?");
+    // A source imported later cannot be evidence that PersAI knew a claim
+    // before the underlying source itself existed in this local memory.
+    // This is still a CURRENT-source view, not past ACL/decision replay.
+    args.push(query.knowledgeAt,query.knowledgeAt);
   }
   if (query.before) {
     where.push("(c.knowledge_recorded_at<? OR (c.knowledge_recorded_at=? AND c.id<?))");
