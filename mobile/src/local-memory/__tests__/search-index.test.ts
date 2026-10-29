@@ -73,7 +73,7 @@ test("conditional missing source is not a negative fact; declension probes stay 
   expect(searchSteps("мультиметр статья")).toContainEqual({
     term:"мультиметр",prefix:true,weight:4,
   });
-  expect(searchSteps("мультиметре").some(x=>x.term==="мультиметр"&&x.prefix)).toBe(true);
+  expect(searchSteps("мультиметре")).toContainEqual({term:"мультиметр",prefix:true,weight:4});
   expect(searchSteps("Кто любит кофе?").some(x=>x.term==="коф"&&x.prefix&&!x.column)).toBe(false);
 });
 
