@@ -97,7 +97,6 @@ jobs:
         working-directory: mobile
     env:
       PERSAI_EVAL_LLM_SUITE: ${{ inputs.suite }}
-      PERSAI_EVAL_REPORT_PATH: ${{ runner.temp }}/memory-natural-live-report.json
       PERSAI_EVAL_PAID_OPT_IN: ${{ inputs.paid_confirmation }}
       PERSAI_EVAL_MANUAL_TRIGGER: ${{ github.event_name }}
       PERSAI_EVAL_LLM_API_KEY: ${{ secrets.PERSAI_EVAL_LLM_API_KEY }}
@@ -128,6 +127,8 @@ jobs:
         run: npm ci --no-audit --no-fund
       - name: Run real LLM on fictional memory only
         if: steps.setup.outputs.enabled == 'true'
+        env:
+          PERSAI_EVAL_REPORT_PATH: ${{ runner.temp }}/memory-natural-live-report.json
         run: |
           npx jest --ci --runInBand eval/__tests__/live-memory-model.test.ts \
             --json --outputFile="${{ runner.temp }}/memory-live-llm.json"
