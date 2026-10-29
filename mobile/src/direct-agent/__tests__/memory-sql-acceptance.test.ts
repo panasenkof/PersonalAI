@@ -102,7 +102,7 @@ test("SEARCH-06 SEC-01/08: no private titles, hidden counts, or stale source aft
     expect(JSON.stringify(results)).not.toContain("Личная");
     await expect(readApprovedNote("guest",sensitiveInOpen.id,1,0,300,repo))
       .rejects.toThrow("memory_read_not_available");
-    await repo.moveEntity(visible,1,protectedSection.id);
+    await repo.changeNotes("move",[{id:visible,record_version:1}],protectedSection.id);
     const afterMove=await searchApprovedNotes("guest","лаванда",repo);
     expect(afterMove).toEqual([]);
     await expect(readApprovedNote("guest",visible,1,0,300,repo))
