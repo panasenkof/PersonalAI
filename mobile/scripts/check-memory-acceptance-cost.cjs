@@ -20,6 +20,12 @@ function check(workflow,liveTest){
     "Test must refuse non-manual execution even with credentials");
   assert.match(liveTest,/PERSAI_EVAL_PAID_OPT_IN===PAID_CONFIRMATION/,
     "Test must require paid opt-in independently of workflow");
+  assert.match(liveTest,/const MAX_PAID_OUTPUT_TOKENS=512;/,
+    "Paid evaluation must limit model completion tokens");
+  assert.match(liveTest,/const MAX_PAID_INPUT_CHARS=24000;/,
+    "Paid evaluation must reject unbounded input context");
+  assert.match(liveTest,/limited\.max_tokens=Math\.min\(limited\.max_tokens,MAX_PAID_OUTPUT_TOKENS\)/,
+    "Paid evaluation must cap max_tokens before fetch");
   assert.match(liveTest,/const MAX_PAID_API_CALLS=9;/,
     "Test must define a bounded total API request budget");
   assert.match(liveTest,/if\(\+\+totalPaidCalls>MAX_PAID_API_CALLS\)/,
