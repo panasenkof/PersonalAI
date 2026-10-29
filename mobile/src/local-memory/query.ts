@@ -48,7 +48,10 @@ export function requiredSearchEvidence(query: string): string[] {
     .map(m => m[0]).filter(year => !exceptYears.has(year));
   // Negated helper verbs are an instruction about the answer, NOT evidence
   // that the source must literally contain the phrase «не стоит».
-  const helpers = new Set(["стоит", "нужно", "надо", "следует", "показывай", "ищи"]);
+  const helpers = new Set(["стоит", "нужно", "надо", "следует", "показывай", "ищи",
+    // A user saying "не могу найти" or "не помню" describes difficulty,
+    // not a negative claim that must literally appear in a saved record.
+    "могу", "смогу", "помню", "знаю", "нашёл", "нашел", "нахожу", "удаётся", "удается", "удалось"]);
   const negations = [...asserted.matchAll(/(?:^|[^\p{L}])не\s+([\p{L}][\p{L}\p{N}-]{2,})/giu)]
     .map(m => m[1].toLowerCase()).filter(word => !helpers.has(word))
     .map(word => "не " + word);
