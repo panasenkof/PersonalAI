@@ -8,11 +8,11 @@ jest.mock("expo-secure-store", () => ({
 }));
 beforeEach(() => { jest.clearAllMocks(); mockVault.clear(); });
 
-test("the default is four; a saved choice survives reads and is scoped to one device profile", async () => {
-  expect(await loadModelCallLimit("guest")).toBe(4);
+test("the default is five; a saved choice survives reads and is scoped to one device profile", async () => {
+  expect(await loadModelCallLimit("guest")).toBe(5);
   await saveModelCallLimit("guest", 7);
   expect(await loadModelCallLimit("guest")).toBe(7);
-  expect(await loadModelCallLimit("other")).toBe(4);
+  expect(await loadModelCallLimit("other")).toBe(5);
   await saveModelCallLimit("other", 2);
   expect(await loadModelCallLimit("guest")).toBe(7);
   expect(await loadModelCallLimit("other")).toBe(2);
