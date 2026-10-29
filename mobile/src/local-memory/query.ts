@@ -84,7 +84,7 @@ export function searchSteps(query: string): MemorySearchStep[] {
     ...(q.length <= 160 ? [{ term: q, prefix: false, weight: 4 }] : []),
     ...words.map(w => ({ term: w, prefix: false, weight: 2 })),
     // A stem shorter than four letters («как», «лет») matches too much; names may be shorter.
-    ...stems.filter(s => s.term.length >= (names.has(s.word) ? 2 : 4)).map(s => ({ term: s.term, prefix: true, weight: 1 })),
+    ...stems.filter(s => s.term.length >= (names.has(s.word) ? 2 : 4)).map(s => ({ term: s.term, prefix: true, weight: s.term.length >= 8 ? 4 : 1 })),
     ...stems.filter(s => s.term.length === 3 && !names.has(s.word)).map(s => ({ term: s.term, prefix: true, weight: 1, column: "terms" as const })),
     // A long uninflected noun ("мультиметр") must find the declined form
     // ("мультиметра") without semantic guesses or a new search path.
