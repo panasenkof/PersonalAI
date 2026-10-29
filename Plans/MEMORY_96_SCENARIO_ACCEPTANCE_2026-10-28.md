@@ -1,5 +1,7 @@
 # Acceptance crosswalk — все 96 сценариев памяти PersAI (28.10.2026)
 
+**29.10.2026 · фактическое C1 после #217:** [PR #217](https://github.com/panasenkof/PersonalAI/pull/217), required CI [run 40837981692](https://github.com/panasenkof/PersonalAI/actions/runs/40837981692), merged `f9fa748a8ead76c22a653137cf4c563c269814be`. Реальный SQL сценарий `memory-sql-acceptance.test.ts` прошёл на точном head `4eb2a32b5acc9788b0b0b7a887ed2cfaf3bedea6`: user-approved note → canonical FTS → guarded source read → correction → FTS/old-read invalidation; hidden collection and source reclassification; link-only URL with unknown content/page/time. Поэтому **DOC-04** и **DOC-08** переходят из `REVIEW_REQUIRED` только в `PARTIAL_C1`, а **не** в `C1_PASS_EXACT_SHA`: ещё не проверены Android Share-вход, естественно-языковое уточнение «где обсуждался» и полноценное UI-открытие исходного материала. Ни один физический C2 не заявляется выполненным. Эта точная связка соответствует C0-A/C3-B без новых таблиц, хранилища, индекса, модели или альтернативного writer/search.
+
 **Источник истины сценариев:** [MEMORY_SCENARIO_MATRIX_2026-10-27.md](MEMORY_SCENARIO_MATRIX_2026-10-27.md). Здесь нет дополнительного backlog или нового механизма хранения/поиска. В планировании по-прежнему первичен `PLAN.md §2`. Каждая строка ниже — **отдельное обязательство проверки**, не тест и не признание готовности всей функциональности.
 
 **Значения C1:** `PARTIAL_C1` — уже найден узкий воспроизводимый unit/SQLite/UI тест, но полная цепочка не принята; `REVIEW_REQUIRED` — сопоставление ещё не выполнено; `C1_PASS_EXACT_SHA` — допускается **только после** настоящего E2E сценария, проверки запрещённого результата и записи `тестовый файл @40-символьный SHA CI-run`. Все строки, отмеченные `PARTIAL_C1`, **не являются PASS**. **Значения C2:** `NOT_RUN_PHYSICAL` — физическая проверка не выполнена; `C2_VERIFIED` — допустима только со ссылкой на существующий QA-отчёт по реальному Android/шифрованному backup и применимому оригиналу. `NOT_RUN_PHYSICAL` всегда требует `—` в поле C2 evidence. Это позволяет **впоследствии завершать** проверки, а не навсегда фиксировать NOT RUN. Не считать ни TM/RE чистые fixtures, ни зелёный CI физической приёмкой.
@@ -43,11 +45,11 @@
 | DOC-01 | Сохранены два варианта лазаньи с разными соусами | REVIEW_REQUIRED | — | NOT_RUN_PHYSICAL | — |
 | DOC-02 | Рецепт переписан пользователем и дополнен заметкой | PARTIAL_C1 | `mobile/src/local-memory/__tests__/repository.test.ts` | NOT_RUN_PHYSICAL | — |
 | DOC-03 | Веб-страница поменялась после сохранения | REVIEW_REQUIRED | — | NOT_RUN_PHYSICAL | — |
-| DOC-04 | Сохранена только ссылка на статью | REVIEW_REQUIRED | — | NOT_RUN_PHYSICAL | — |
+| DOC-04 | Сохранена только ссылка на статью | PARTIAL_C1 | `mobile/src/direct-agent/__tests__/memory-sql-acceptance.test.ts` | NOT_RUN_PHYSICAL | — |
 | DOC-05 | Два репоста одной статьи с разными комментариями | REVIEW_REQUIRED | — | NOT_RUN_PHYSICAL | — |
 | DOC-06 | Рецепт с фото и двумя видеоссылками | PARTIAL_C1 | `mobile/src/media/__tests__/attachments.test.ts` | NOT_RUN_PHYSICAL | — |
 | DOC-07 | Из веб-страницы извлечён лишний футер | REVIEW_REQUIRED | — | NOT_RUN_PHYSICAL | — |
-| DOC-08 | Вопрос «где обсуждался особый ингредиент?» | REVIEW_REQUIRED | — | NOT_RUN_PHYSICAL | — |
+| DOC-08 | Вопрос «где обсуждался особый ингредиент?» | PARTIAL_C1 | `mobile/src/direct-agent/__tests__/memory-sql-acceptance.test.ts` | NOT_RUN_PHYSICAL | — |
 | MEDIA-01 | Аудио названо «совещание», но участники не указаны | REVIEW_REQUIRED | — | NOT_RUN_PHYSICAL | — |
 | MEDIA-02 | ASR путает «Лена» и «Лина» | REVIEW_REQUIRED | — | NOT_RUN_PHYSICAL | — |
 | MEDIA-03 | Две записи приложены к одной заметке | PARTIAL_C1 | `mobile/src/media/__tests__/batch-recognition.test.ts` | NOT_RUN_PHYSICAL | — |
