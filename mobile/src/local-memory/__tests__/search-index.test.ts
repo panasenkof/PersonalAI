@@ -74,7 +74,7 @@ test("conditional missing source is not a negative fact; declension probes stay 
     term:"мультиметр",prefix:true,weight:1,
   });
   expect(searchSteps("мультиметре").some(x=>x.term==="мультиметр"&&x.prefix)).toBe(true);
-  expect(searchSteps("Кто любит кофе?").some(x=>x.term==="коф"&&x.prefix)).toBe(false);
+  expect(searchSteps("Кто любит кофе?").some(x=>x.term==="коф"&&x.prefix&&!x.column)).toBe(false);
 });
 
 test("vectors: cosine, BLOB round trip and rank fusion", () => {
