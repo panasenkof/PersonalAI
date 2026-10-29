@@ -105,7 +105,10 @@ function checkQuick(workflow){
 function checkTrackedDefaultModelLimit(root=ROOT, runGit){
   const git=runGit || require("node:child_process").execFileSync;
   const paths=String(git("git",["ls-files","-z"],{cwd:root,maxBuffer:12*1024*1024}))
-    .split("\0").filter(Boolean).filter(p=>/\.(?:ts|tsx|js|jsx|cjs|mjs|md|yml|yaml)$/i.test(p));
+    .split("\0").filter(Boolean).filter(p=>/\.(?:ts|tsx|js|jsx|cjs|mjs|md|yml|yaml)$/i.test(p))
+    // This checker deliberately contains literal bad examples as test fixtures.
+    .filter(p=>p!=="mobile/scripts/check-memory-acceptance-cost.cjs" &&
+      p!=="mobile/scripts/check-memory-acceptance-cost.test.cjs");
   const candidate=[],stale=[];
   const explicit=[
     /DEFAULT_MODEL_CALL_LIMIT\s*=\s*4\b/i,
