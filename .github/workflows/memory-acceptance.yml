@@ -80,14 +80,10 @@ jobs:
           retention-days: 30
           if-no-files-found: ignore
 
-  android:
-    name: Android SQLCipher APK and emulator UI smoke
-    uses: ./.github/workflows/mobile-native-sqlcipher.yml
-
   live-model:
     name: Optional blind real-model evaluation
-    # Run independently, in parallel with SQL/Android jobs. A live LLM failure
-    # must become visible before the APK/emulator build finishes.
+    # Run independently, in parallel with deterministic SQL tests.
+    # Android native verification belongs to ordinary CI, not manual memory acceptance.
     # Never paid on a schedule or as a side effect of setting API credentials.
     # Both manual toggle and exact typed acknowledgement are mandatory.
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.live_llm == true && inputs.paid_confirmation == 'RUN_PAID_LLM' }}
