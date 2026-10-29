@@ -126,7 +126,7 @@ test("repository-wide four-call check catches stale UI/defaults but allows histo
       'const MAX_REQUESTS_PER_TURN=4;',
       'export const DEFAULT_MODEL_CALL_LIMIT = 4;',
       "assert.equal(await limitInput.inputValue(), '4');",
-      "status?.textContent?.includes('(1/4)') && status?.getAttribute('data-testid') === 'nebula-home-status';",
+      "document.querySelector('[data-testid=\"nebula-home-status\"]')?.textContent?.includes('(1/4)');",
       'test("the default is four calls",()=>{})',
     ]){
       fs.writeFileSync(file,source);
