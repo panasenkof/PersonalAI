@@ -32,6 +32,14 @@ function check(workflow,liveTest){
     "Budget must be checked before the provider network call");
   assert.match(liveTest,/maxRequests:MAX_REQUESTS_PER_TURN/,
     "Each question must have bounded turns");
+  // Jest-Expo replaces global fetch. A paid live test must use a real HTTPS
+  // transport, or every mock response silently fails as "HTTP undefined".
+  assert.match(liveTest,/import \{request as httpsRequest\} from "node:https"/,
+    "Live evaluation must import the Node HTTPS client");
+  assert.match(liveTest,/return realHttpsTransport\(input,\{\.\.\.init,body:JSON\.stringify\(payload\)\}\)/,
+    "Live evaluation must not call the Jest global fetch mock");
+  assert.match(liveTest,/if\(e instanceof ModelRequestError\)providerFailed=true;/,
+    "Provider/network failure must stop the remaining paid scenarios");
   assert.match(liveTest,/Math\.min\(MAX_PAID_API_CALLS,totalTurns\*MAX_REQUESTS_PER_TURN\)/,
     "The API cap must reflect the manual suite size");
   assert.match(workflow,/PERSAI_EVAL_LLM_SUITE: \$\{\{ inputs\.suite \}\}/,

@@ -8,6 +8,9 @@
  * privacy is tested as non-disclosure, not as answering a clinical question.
  */
 import * as fs from "node:fs";
+import {request as httpsRequest} from "node:https";
+import {Buffer} from "node:buffer";
+import {ModelRequestError} from "../../src/direct-agent/net";
 import {runDirectAgent,type AgentTurn} from "../../src/direct-agent/engine";
 import {searchApprovedNotes,readApprovedNote} from "../../src/direct-agent/memory";
 import {SqliteMemoryRepository} from "../../src/local-memory/repository";
@@ -51,6 +54,52 @@ function verifyEndpoint(){
     url.hostname.includes(":"))
     throw new Error("Live eval requires a public HTTPS API without embedded credentials");
 }
+/**
+ * Jest-Expo installs a synthetic global fetch. In a paid integration test it
+ * can resolve a fake object without ok/status, yielding "HTTP undefined" in
+ * production requestModel and never contacting the provider.
+ *
+ * Use Node's actual HTTPS client only for this test transport. The production
+ * agent, requestModel, TLS validation, abort/time budget and ACLs are unchanged.
+ */
+function realHttpsTransport(input:RequestInfo|URL,init?:RequestInit):Promise<Response>{
+  const target=new URL(String(input));
+  if(target.protocol!=="https:")throw Error("LIVE_EVAL_REQUIRES_HTTPS");
+  const body=init?.body;
+  if(typeof body!=="string")throw Error("LIVE_EVAL_INVALID_JSON_BODY");
+  const method=init?.method||"POST",headers=init?.headers as Record<string,string>;
+  const signal=init?.signal||undefined;
+  return new Promise<Response>((resolve,reject)=>{
+    const request=httpsRequest(target,{
+      method,headers:{...headers,"Content-Length":Buffer.byteLength(body)},signal,
+    },response=>{
+      const chunks:Buffer[]=[];
+      let bytes=0;
+      response.on("data",(chunk:Buffer)=>{
+        bytes+=chunk.length;
+        if(bytes>2_000_000){
+          request.destroy(new Error("LIVE_EVAL_RESPONSE_TOO_LARGE"));
+          return;
+        }
+        chunks.push(chunk);
+      });
+      response.on("error",reject);
+      response.on("end",()=>{
+        const status=response.statusCode;
+        if(!status){reject(new Error("LIVE_EVAL_MISSING_HTTP_STATUS"));return;}
+        const body=Buffer.concat(chunks).toString("utf8");
+        // requestModel needs only these three Response methods/properties.
+        resolve({
+          ok:status>=200&&status<300,status,
+          text:async()=>body,json:async()=>JSON.parse(body),
+        } as Response);
+      });
+    });
+    request.on("error",reject);
+    request.end(body);
+  });
+}
+
 const REPORT_PATH=process.env.PERSAI_EVAL_REPORT_PATH||"memory-natural-live-report.json";
 type Outcome={
  id:string;domain:string;turn:number;question:string;status:"PASS"|"FAIL"|"ERROR";
@@ -138,7 +187,7 @@ testLive("NATURAL LIVE: real LLM chooses the search terms for ordinary dialogues
       timestamp:new Date().toISOString()};
     // Only public synthetic data, no credentials or private originals in logs.
     process.stdout.write("PERSAI_LLM_BUDGET "+JSON.stringify(reportIntro)+"\n");
-    let unsafe=false;
+    let unsafe=false,providerFailed=false;
     for(const scenario of selected){
       const history:AgentTurn[]=[];
       let index=0;
@@ -167,7 +216,7 @@ testLive("NATURAL LIVE: real LLM chooses the search terms for ordinary dialogues
              target.pathname!==base.pathname.replace(/\/$/,"")+"/chat/completions")
             throw Error("UNEXPECTED_LLM_API_ENDPOINT");
           totalPaidCalls++;requests++;
-          return fetch(input,{...init,body:JSON.stringify(payload)});
+          return realHttpsTransport(input,{...init,body:JSON.stringify(payload)});
         }) as typeof fetch;
         try{
           const result=await runDirectAgent({
@@ -194,6 +243,9 @@ testLive("NATURAL LIVE: real LLM chooses the search terms for ordinary dialogues
         }catch(e){
           error=String((e as Error)?.message||e).slice(0,240);
           if(error.includes("PRIVATE_DATA_EXFILTRATION"))unsafe=true;
+          // A shared provider/network error cannot be repaired by repeating
+          // the remaining paid scenarios; preserve the first failure and stop.
+          if(e instanceof ModelRequestError)providerFailed=true;
         }
         let issues=error?[error]:evaluate(turn,answer,usedIds);
         // Withheld question must not return this private record as used evidence.
@@ -208,9 +260,9 @@ testLive("NATURAL LIVE: real LLM chooses the search terms for ordinary dialogues
           id:row.id,turn:row.turn,status:row.status,issues:row.issues,requests:row.requests,
         })+"\n");
         history.push({role:"user",content:turn.question},{role:"assistant",content:answer});
-        if(unsafe||/PAID_.*BUDGET_EXCEEDED/.test(error))break;
+        if(unsafe||providerFailed||/PAID_.*BUDGET_EXCEEDED/.test(error))break;
       }
-      if(unsafe||totalPaidCalls>=budget && cases.length<totalTurns)break;
+      if(unsafe||providerFailed||totalPaidCalls>=budget && cases.length<totalTurns)break;
     }
     const report={...reportIntro,executed:cases.length,calls:totalPaidCalls,
       pass:cases.filter(x=>x.status==="PASS").length,
