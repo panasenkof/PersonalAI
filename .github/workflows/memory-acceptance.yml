@@ -8,6 +8,12 @@ on:
         required: false
         type: boolean
         default: false
+      suite:
+        description: "LLM size: smoke=10, core=54, full=78. Explicit paid confirmation required."
+        required: false
+        type: choice
+        options: [smoke, core, full]
+        default: smoke
       paid_confirmation:
         description: "For paid LLM only, type RUN_PAID_LLM (no API charges without this)"
         required: false
@@ -45,9 +51,12 @@ jobs:
           npx tsc --noEmit
           node scripts/check-memory-acceptance.cjs
           node --test scripts/check-memory-acceptance.test.cjs
+          node scripts/check-memory-acceptance-cost.cjs
+          node --test scripts/check-memory-acceptance-cost.test.cjs
       - name: Run scripted conversations, 54 domain cases, SQL and memory regression
         run: |
           npx jest --ci --runInBand \
+            eval/__tests__/natural-dialogues.test.ts \
             src/direct-agent/__tests__/memory-dialogue-simulation.test.ts \
             eval/__tests__/domain-battery.test.ts \
             src/direct-agent/__tests__/memory-sql-acceptance.test.ts \
@@ -82,11 +91,13 @@ jobs:
     # Both manual toggle and exact typed acknowledgement are mandatory.
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.live_llm == true && inputs.paid_confirmation == 'RUN_PAID_LLM' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 90
     defaults:
       run:
         working-directory: mobile
     env:
+      PERSAI_EVAL_LLM_SUITE: ${{ inputs.suite }}
+      PERSAI_EVAL_REPORT_PATH: ${{ runner.temp }}/memory-natural-live-report.json
       PERSAI_EVAL_PAID_OPT_IN: ${{ inputs.paid_confirmation }}
       PERSAI_EVAL_MANUAL_TRIGGER: ${{ github.event_name }}
       PERSAI_EVAL_LLM_API_KEY: ${{ secrets.PERSAI_EVAL_LLM_API_KEY }}
@@ -123,13 +134,15 @@ jobs:
       - name: Report live-model evidence separately from deterministic results
         if: always() && steps.setup.outputs.enabled == 'true'
         env:
-          REPORT: ${{ runner.temp }}/memory-live-llm.json
+          REPORT: ${{ runner.temp }}/memory-natural-live-report.json
         run: |
-          node -e 'const fs=require("fs");const p=process.env.REPORT;if(!fs.existsSync(p)){fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,"Live LLM: NO TEST REPORT (FAIL)\n");process.exit(0)}const d=JSON.parse(fs.readFileSync(p,"utf8"));fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,"Live LLM on fictional data: "+d.numPassedTests+" PASS, "+d.numFailedTests+" FAIL, "+d.numPendingTests+" SKIPPED. Read artifact for per-scenario answers.\n")'
+          node -e 'const fs=require("fs");const p=process.env.REPORT;if(!fs.existsSync(p)){fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,"Live LLM: NO SCENARIO REPORT (FAIL)\n");process.exit(0)}const d=JSON.parse(fs.readFileSync(p,"utf8"));fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,["### Natural dialogue live LLM (fictional data)","- Suite: "+d.suite+"; dialogues: "+d.scenarioCount+"; turns: "+d.turnCount,"- Executed: "+d.executed+"; PASS: "+d.pass+"; FAIL: "+d.fail+"; ERROR: "+d.errors,"- API calls: "+d.calls+" of "+d.maxApiCalls+" (provider tokens/fees vary)","- Complete: "+d.complete+"; private leakage flag: "+d.unsafe,"- Never run without manual paid confirmation",""].join("\n"))'
       - uses: actions/upload-artifact@v4
         if: always() && steps.setup.outputs.enabled == 'true'
         with:
           name: memory-live-llm-${{ github.sha }}
-          path: ${{ runner.temp }}/memory-live-llm.json
+          path: |
+            ${{ runner.temp }}/memory-live-llm.json
+            ${{ runner.temp }}/memory-natural-live-report.json
           retention-days: 14
           if-no-files-found: ignore
