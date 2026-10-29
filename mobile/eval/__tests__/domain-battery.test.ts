@@ -225,6 +225,23 @@ test("WEB-SNAPSHOT: old web article keeps captured URL/date; unfetched link has 
   expect(read.content).not.toContain("показания мультиметра");
 });
 
+test("WEB-LIVE-RECOVERY: conditional absence and nominative queries locate a saved link, not unseen text",async()=>{
+  const target=f.ids.get("web-repair")!;
+  const natural="Открой все детали из статьи о мультиметре. Если полный текст не сохранился, скажи об этом.";
+  for(const query of [natural,"мультиметр статья","статья о мультиметре"]){
+    const hits=await searchApprovedNotes("synthetic-domain",query,f.repo);
+    expect(hits.map(n=>n.id)).toContain(target);
+    expect(hits.length).toBeLessThanOrEqual(5);
+  }
+  const hit=(await searchApprovedNotes("synthetic-domain",natural,f.repo)).find(n=>n.id===target)!;
+  const opened=await readApprovedNote("synthetic-domain",hit.id,hit.version!,0,4000,f.repo);
+  expect(opened.content).toContain("полный текст не загружался");
+  expect(opened.content).not.toContain("показания мультиметра");
+  // A conditional user's instruction must not grant access to private notes.
+  expect((await searchApprovedNotes("synthetic-domain","СТС",f.repo))
+    .map(n=>n.id)).not.toContain(f.ids.get("car-reg")!);
+});
+
 test("HOME-PHOTOS: independently bound image originals and location caption survive correction",async()=>{
   const cable=f.ids.get("home-cables")!,camera=f.ids.get("home-camera")!;
   for(const [id,attachment,description] of [[cable,"home-photo-cables","box.jpg"],
