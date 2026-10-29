@@ -252,7 +252,7 @@ export class DirectChatStore {
           if (c && !aborter.signal.aborted) this.update(id, { rows: [...c.rows, { id: Crypto.randomUUID(), role: "info", text }] }, true);
         },
         status: progress => { stage = progress; trace("turn.stage", { stage: progress }); if (!aborter.signal.aborted) this.update(id, { progress, progressSince: Date.now() }); },
-        // "Запрос к LLM (1/4): подключаюсь к api.openai.com…" — the step and its network stage.
+        // Example: "Запрос к LLM (1/5): подключаюсь к api.openai.com…" — step and network stage; denominator follows saved profile limit.
         phase: phase => {
           trace("turn.network_phase", { phase });
           if (aborter.signal.aborted) return;
