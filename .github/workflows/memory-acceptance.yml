@@ -8,9 +8,11 @@ on:
         required: false
         type: boolean
         default: false
-  schedule:
-    # Weekly full-memory acceptance, independent of the PR smoke suite.
-    - cron: "30 2 * * 0"
+      paid_confirmation:
+        description: "For paid LLM only, type RUN_PAID_LLM (no API charges without this)"
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -76,13 +78,17 @@ jobs:
   live-model:
     name: Optional blind real-model evaluation
     needs: [deterministic, android]
-    if: ${{ github.event_name == 'schedule' || inputs.live_llm == true }}
+    # Never paid on a schedule or as a side effect of setting API credentials.
+    # Both manual toggle and exact typed acknowledgement are mandatory.
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.live_llm == true && inputs.paid_confirmation == 'RUN_PAID_LLM' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
       run:
         working-directory: mobile
     env:
+      PERSAI_EVAL_PAID_OPT_IN: ${{ inputs.paid_confirmation }}
+      PERSAI_EVAL_MANUAL_TRIGGER: ${{ github.event_name }}
       PERSAI_EVAL_LLM_API_KEY: ${{ secrets.PERSAI_EVAL_LLM_API_KEY }}
       PERSAI_EVAL_LLM_BASE_URL: ${{ vars.PERSAI_EVAL_LLM_BASE_URL }}
       PERSAI_EVAL_LLM_MODEL: ${{ vars.PERSAI_EVAL_LLM_MODEL }}

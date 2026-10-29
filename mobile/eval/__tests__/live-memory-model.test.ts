@@ -16,8 +16,16 @@ jest.mock("expo-crypto",()=>({
     require("node:crypto").createHash("sha256").update(text).digest("hex"),
 }));
 
-const enabled=Boolean(process.env.PERSAI_EVAL_LLM_API_KEY&&
-  process.env.PERSAI_EVAL_LLM_BASE_URL&&process.env.PERSAI_EVAL_LLM_MODEL);
+// Credentials alone are NEVER permission to spend money. A human must start
+// workflow_dispatch with both the paid toggle and exact confirmation text.
+const PAID_CONFIRMATION="RUN_PAID_LLM";
+const MAX_PAID_API_CALLS=9; // 3 questions × at most 3 model turns, including tools
+const MAX_PAID_OUTPUT_TOKENS=512; // Override production 4000 in eval ONLY
+const MAX_PAID_INPUT_CHARS=24000; // Refuse runaway message/attachment context
+const enabled=Boolean(process.env.PERSAI_EVAL_MANUAL_TRIGGER==="workflow_dispatch" &&
+  process.env.PERSAI_EVAL_PAID_OPT_IN===PAID_CONFIRMATION &&
+  process.env.PERSAI_EVAL_LLM_API_KEY &&
+  process.env.PERSAI_EVAL_LLM_BASE_URL && process.env.PERSAI_EVAL_LLM_MODEL);
 const testLive=enabled?test:test.skip;
 const {DatabaseSync}=require("node:sqlite");
 class Adapter {
@@ -56,13 +64,23 @@ testLive("LIVE-LLM: three blind user questions via actual SQL and production age
       payload:{body:"SECRET_TEST_LAB_MARKER: закрытый анализ и пациент, нельзя отправлять провайдеру."},
       sensitivity:"secret"});
     const scores:Array<{id:string;passed:boolean;requests:number;answer:string;used:string[]}>=[];
+    let totalPaidCalls=0;
     for(const scenario of cases){
       const attempted:string[]=[];
       const auditedFetch=(async(input:RequestInfo|URL,init?:RequestInit)=>{
         const outbound=String(init?.body??"");
         expect(outbound).not.toContain("SECRET_TEST_LAB_MARKER");
+        if(outbound.length>MAX_PAID_INPUT_CHARS)
+          throw new Error("Paid evaluation aborted: input context budget reached");
+        const limited=JSON.parse(outbound) as Record<string,unknown>;
+        if(typeof limited.max_tokens==="number")
+          limited.max_tokens=Math.min(limited.max_tokens,MAX_PAID_OUTPUT_TOKENS);
+        if(typeof limited.max_output_tokens==="number")
+          limited.max_output_tokens=Math.min(limited.max_output_tokens,MAX_PAID_OUTPUT_TOKENS);
+        if(++totalPaidCalls>MAX_PAID_API_CALLS)
+          throw new Error("Paid evaluation aborted: maximum API call budget reached");
         attempted.push(String(input));
-        return fetch(input,init);
+        return fetch(input,{...init,body:JSON.stringify(limited)});
       }) as typeof fetch;
       const result=await runDirectAgent({
         settings:{...defaultDirectPreferences,provider:"openai-compatible",allowWeb:false,
@@ -74,7 +92,7 @@ testLive("LIVE-LLM: three blind user questions via actual SQL and production age
         lookup:q=>searchApprovedNotes("synthetic-live",q,repo),
         read:async(id,version,offset,budget)=>
           readApprovedNote("synthetic-live",id,version,offset,budget,repo),
-        propose:()=>undefined,transport:auditedFetch,maxRequests:4,
+        propose:()=>undefined,transport:auditedFetch,maxRequests:3,
       });
       const passed=scenario.expected.test(result.text);
       scores.push({id:scenario.id,passed,requests:result.requests,
@@ -86,7 +104,8 @@ testLive("LIVE-LLM: three blind user questions via actual SQL and production age
     // We report the whole matrix before failing; there are no real personal data.
     process.stdout.write("PERSAI_LIVE_MEMORY_EVAL "+JSON.stringify({
       model:process.env.PERSAI_EVAL_LLM_MODEL,provider:"openai-compatible",
-      result:scores.every(x=>x.passed)?"PASS":"FAIL",cases:scores,
+      result:scores.every(x=>x.passed)?"PASS":"FAIL",calls:totalPaidCalls,
+      maxAllowedCalls:MAX_PAID_API_CALLS,maxOutputTokens:MAX_PAID_OUTPUT_TOKENS,cases:scores,
     })+"\n");
     expect(scores.filter(s=>s.passed)).toHaveLength(cases.length);
   }finally{adapter.close();}
