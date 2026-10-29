@@ -110,9 +110,15 @@ export class SqliteMemoryRepository implements MemoryRepository {
   undoTemporalChange(request: TemporalDecisionExpected & { decisionId: string }) {
     return undoTemporalReview(this.db, request);
   }
-  /** As-of VALID date is candidate-only; knowledge snapshot reconstruction is separate. */
-  temporalCandidatesAtDate(query: TemporalAtDateQuery) {
-    return listTemporalStateCandidatesAtDate(this.db, query);
+  /** Temporal source, evidence and later user decisions must be read in ONE
+   * unlocked SQLCipher snapshot. No ACL/source revision or undo may change
+   * between the candidate page and the projected known-at state. */
+  async temporalCandidatesAtDate(query: TemporalAtDateQuery) {
+    let result!: Awaited<ReturnType<typeof listTemporalStateCandidatesAtDate>>;
+    await withUnlockedTransaction(this.db, async tx => {
+      result = await listTemporalStateCandidatesAtDate(tx, query);
+    });
+    return result;
   }
   /** History is explicitly labeled candidate/unconfirmed, not "current". */
   temporalKnowledgeHistory(query: TemporalHistoryQuery) {
