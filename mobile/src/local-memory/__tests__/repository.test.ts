@@ -1522,3 +1522,67 @@ test("SEC-01, TIME-08: temporal reader enforces current revision, active status 
     context:"actual",validDate:"2025-02-30",
   })).rejects.toThrow("temporal_query_date_invalid");
 });
+
+
+test("TIME-01/08, SAVE-05: historical knowledge replays accepted end and undo without editing current source",async()=>{
+  const sql=new FakeSqlite(),repo=new SqliteMemoryRepository(sql as never);
+  const col=await repo.createCollection({name:"Работа",slug:"work-as-of",sensitivity:"standard"});
+  const a=await repo.createEntity({collection_id:col.id,domain:"notes",payload:{body:"Работа в А"}});
+  const b=await repo.createEntity({collection_id:col.id,domain:"notes",payload:{body:"Работа в Б"}});
+  // Both sources were saved before the claimed knowledge timestamps.
+  for(const id of [a.id,b.id])
+    await sql.runAsync("UPDATE memory_entities SET created_at=? WHERE id=?",
+      ["2025-12-01T00:00:00.000Z",id]);
+  await repo.stageTypedTemporalFact(candidateFromSource(a,{
+    value:"Работа в А",
+    recordedAt:"2026-01-10T00:00:00.000Z",
+    evidence:{entityId:a.id,recordVersion:1,quote:"Работа в А",origin:"direct"},
+  }));
+  const proposed=await repo.stageTypedTemporalFact(candidateFromSource(b,{
+    value:"Работа в Б",occurredOrStarted:boundTime("2024","year"),
+    recordedAt:"2026-02-10T00:00:00.000Z",
+    evidence:{entityId:b.id,recordVersion:1,quote:"Работа в Б",origin:"direct"},
+  }));
+  expect(proposed.proposalIds).toHaveLength(1);
+  const query={subjectId:"person-a",collectionId:col.id,predicate:"employment",context:"primary",
+    validDate:"2025-07-01"};
+  const before=await repo.temporalCandidatesAtDate({...query,knowledgeAt:"2026-03-01T00:00:00.000Z"});
+  expect(before.items.map(x=>x.timeFit)).toEqual(["potentially_applicable","potentially_applicable"]);
+  const accepted=await repo.decideTemporalChange({
+    proposalId:proposed.proposalIds[0],expectedProposalVersion:1,
+    expectedPreviousClaimVersion:1,expectedIncomingClaimVersion:1,
+    choice:"accept",confirmedEnd:boundTime("2024-01-31"),
+  });
+  expect((await repo.temporalCandidatesAtDate(query)).items.map(x=>x.timeFit))
+    .toEqual(["potentially_applicable","outside_date"]);
+  // A current confirmation made in October cannot appear as if PersAI
+  // already knew it in March. Preserve earlier open-state uncertainty.
+  const historical=await repo.temporalCandidatesAtDate({...query,knowledgeAt:"2026-03-01T00:00:00.000Z"});
+  expect(historical.items.map(x=>x.timeFit)).toEqual([
+    "potentially_applicable","potentially_applicable",
+  ]);
+  expect(historical.items.every(x=>x.verification==="candidate_unconfirmed")).toBe(true);
+  // Simulate a recorded June confirmation, then exercise real undo CAS;
+  // an August query must still see the accepted end even after the undo.
+  await sql.runAsync("UPDATE memory_temporal_decisions SET created_at=? WHERE id=?",
+    ["2026-06-01T12:00:00.000Z",accepted.decisionId]);
+  const undone=await repo.undoTemporalChange({
+    proposalId:proposed.proposalIds[0],decisionId:accepted.decisionId,
+    expectedProposalVersion:accepted.nextProposalVersion,
+    expectedPreviousClaimVersion:2,expectedIncomingClaimVersion:1,
+  });
+  expect(undone.nextProposalVersion).toBe(3);
+  expect((await repo.temporalCandidatesAtDate({...query,
+    knowledgeAt:"2026-08-01T00:00:00.000Z"})).items.map(x=>x.timeFit))
+    .toEqual(["potentially_applicable","outside_date"]);
+  expect((await repo.temporalCandidatesAtDate({...query,
+    knowledgeAt:"2026-03-01T00:00:00.000Z"})).items.map(x=>x.timeFit))
+    .toEqual(["potentially_applicable","potentially_applicable"]);
+  expect((await repo.temporalCandidatesAtDate(query)).items.map(x=>x.timeFit))
+    .toEqual(["potentially_applicable","potentially_applicable"]);
+  // No historical replay may override current ACL/revision checks.
+  await repo.setEntityStatus(a.id,1,"archived");
+  const hidden=await repo.temporalCandidatesAtDate({...query,
+    knowledgeAt:"2026-08-01T00:00:00.000Z"});
+  expect(hidden.items.map(x=>x.claim.value)).toEqual(["Работа в Б"]);
+});
