@@ -3,7 +3,7 @@ const test=require("node:test");
 const assert=require("node:assert/strict");
 const {authorize,statusReason,check}=require("./check-llm-access.cjs");
 const valid={
-  trigger:"workflow_dispatch",optIn:"RUN_PAID_LLM",key:"dummy-not-real",
+  trigger:"workflow_dispatch",liveApproved:"true",key:"dummy-not-real",
   baseUrl:"https://api.deepseek.com",model:"deepseek-flash",
 };
 test("public HTTPS base and model resolve to only chat completions",()=>{
@@ -15,7 +15,7 @@ test("no call without manual paid approval or configured credentials",async()=>{
   let calls=0;
   const stub=async()=>{calls++;return {status:200,body:'{"choices":[{"message":{"content":"OK"}}]}'};};
   for(const config of [
-    {...valid,optIn:""}, {...valid,trigger:"push"}, {...valid,key:""},
+    {...valid,liveApproved:""},{...valid,liveApproved:"false"},{...valid,liveApproved:undefined}, {...valid,trigger:"push"}, {...valid,key:""},
     {...valid,baseUrl:"http://api.deepseek.com"},
     {...valid,baseUrl:"https://127.0.0.1"},
     {...valid,baseUrl:"https://api.deepseek.com/other"},

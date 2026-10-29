@@ -4,21 +4,16 @@ on:
   workflow_dispatch:
     inputs:
       live_llm:
-        description: "Test a real model (uses repo secret and variables, never personal data)"
+        description: "Approve paid LLM tests (fictional data only; API charges apply)"
         required: false
         type: boolean
         default: false
       suite:
-        description: "LLM size: smoke=10, core=54, full=78. Explicit paid confirmation required."
+        description: "LLM size: smoke=10, core=54, full=78. Only used with live_llm=true."
         required: false
         type: choice
         options: [smoke, core, full]
         default: smoke
-      paid_confirmation:
-        description: "For paid LLM only, type RUN_PAID_LLM (no API charges without this)"
-        required: false
-        type: string
-        default: ""
 
 permissions:
   contents: read
@@ -80,17 +75,13 @@ jobs:
           retention-days: 30
           if-no-files-found: ignore
 
-  android:
-    name: Android SQLCipher APK and emulator UI smoke
-    uses: ./.github/workflows/mobile-native-sqlcipher.yml
-
   live-model:
     name: Optional blind real-model evaluation
-    # Run independently, in parallel with SQL/Android jobs. A live LLM failure
-    # must become visible before the APK/emulator build finishes.
+    # Run independently, in parallel with deterministic SQL tests.
+    # Android native verification belongs to ordinary CI, not manual memory acceptance.
     # Never paid on a schedule or as a side effect of setting API credentials.
-    # Both manual toggle and exact typed acknowledgement are mandatory.
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.live_llm == true && inputs.paid_confirmation == 'RUN_PAID_LLM' }}
+    # Manual live_llm=true is required; never auto-run paid checks.
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.live_llm == true }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     defaults:
@@ -98,7 +89,7 @@ jobs:
         working-directory: mobile
     env:
       PERSAI_EVAL_LLM_SUITE: ${{ inputs.suite }}
-      PERSAI_EVAL_PAID_OPT_IN: ${{ inputs.paid_confirmation }}
+      PERSAI_EVAL_LIVE_LLM_APPROVED: ${{ inputs.live_llm }}
       PERSAI_EVAL_MANUAL_TRIGGER: ${{ github.event_name }}
       PERSAI_EVAL_LLM_API_KEY: ${{ secrets.PERSAI_EVAL_LLM_API_KEY }}
       PERSAI_EVAL_LLM_BASE_URL: ${{ vars.PERSAI_EVAL_LLM_BASE_URL }}
@@ -142,7 +133,7 @@ jobs:
         env:
           REPORT: ${{ runner.temp }}/memory-natural-live-report.json
         run: |
-          node -e 'const fs=require("fs");const p=process.env.REPORT;if(!fs.existsSync(p)){fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,"Live LLM: NO SCENARIO REPORT (FAIL)\n");process.exit(0)}const d=JSON.parse(fs.readFileSync(p,"utf8"));fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,["### Natural dialogue live LLM (fictional data)","- Suite: "+d.suite+"; dialogues: "+d.scenarioCount+"; turns: "+d.turnCount,"- Executed: "+d.executed+"; PASS: "+d.pass+"; FAIL: "+d.fail+"; ERROR: "+d.errors,"- API calls: "+d.calls+" of "+d.maxApiCalls+" (provider tokens/fees vary)","- Complete: "+d.complete+"; private leakage flag: "+d.unsafe,"- Never run without manual paid confirmation",""].join("\n"))'
+          node -e 'const fs=require("fs");const p=process.env.REPORT;if(!fs.existsSync(p)){fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,"Live LLM: NO SCENARIO REPORT (FAIL)\n");process.exit(0)}const d=JSON.parse(fs.readFileSync(p,"utf8"));fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,["### Natural dialogue live LLM (fictional data)","- Suite: "+d.suite+"; dialogues: "+d.scenarioCount+"; turns: "+d.turnCount,"- Executed: "+d.executed+"; PASS: "+d.pass+"; FAIL: "+d.fail+"; ERROR: "+d.errors,"- API calls: "+d.calls+" of "+d.maxApiCalls+" (provider tokens/fees vary)","- Complete: "+d.complete+"; private leakage flag: "+d.unsafe,"- Paid calls require manual live_llm=true",""].join("\n"))'
       - uses: actions/upload-artifact@v4
         if: always() && steps.setup.outputs.enabled == 'true'
         with:

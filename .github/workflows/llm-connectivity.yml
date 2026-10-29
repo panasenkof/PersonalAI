@@ -4,15 +4,10 @@ on:
   workflow_dispatch:
     inputs:
       live_llm:
-        description: "Make one actual LLM request (not a free offline check)"
+        description: "Approve one paid LLM request (no Android or npm)"
         required: true
         type: boolean
         default: false
-      paid_confirmation:
-        description: "Type RUN_PAID_LLM to allow exactly one API request"
-        required: true
-        type: string
-        default: ""
 
 permissions:
   contents: read
@@ -20,12 +15,12 @@ permissions:
 jobs:
   connectivity:
     name: One-request HTTPS + key + model check (no npm or APK)
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.live_llm == true && inputs.paid_confirmation == 'RUN_PAID_LLM' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.live_llm == true }}
     runs-on: ubuntu-latest
     timeout-minutes: 3
     env:
       PERSAI_EVAL_MANUAL_TRIGGER: ${{ github.event_name }}
-      PERSAI_EVAL_PAID_OPT_IN: ${{ inputs.paid_confirmation }}
+      PERSAI_EVAL_LIVE_LLM_APPROVED: ${{ inputs.live_llm }}
       PERSAI_EVAL_LLM_API_KEY: ${{ secrets.PERSAI_EVAL_LLM_API_KEY }}
       PERSAI_EVAL_LLM_BASE_URL: ${{ vars.PERSAI_EVAL_LLM_BASE_URL }}
       PERSAI_EVAL_LLM_MODEL: ${{ vars.PERSAI_EVAL_LLM_MODEL }}
