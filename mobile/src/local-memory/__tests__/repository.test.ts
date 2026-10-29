@@ -1586,3 +1586,29 @@ test("TIME-01/08, SAVE-05: historical knowledge replays accepted end and undo wi
     knowledgeAt:"2026-08-01T00:00:00.000Z"});
   expect(hidden.items.map(x=>x.claim.value)).toEqual(["Работа в Б"]);
 });
+
+test("TIME-08/SEC-08: as-of source, ACL and decision replay share one unlocked snapshot",async()=>{
+  const sql=new FakeSqlite(),repo=new SqliteMemoryRepository(sql as never);
+  const col=await repo.createCollection({name:"События",slug:"asof-atomic",sensitivity:"standard"});
+  const source=await repo.createEntity({collection_id:col.id,domain:"notes",
+    payload:{body:"Работал в А"}});
+  const candidate=candidateFromSource(source,{
+    recordedAt:"2026-10-29T08:00:00.000Z",
+    evidence:{entityId:source.id,recordVersion:1,quote:"Работал в А",origin:"direct"},
+  });
+  await repo.stageTypedTemporalFact(candidate);
+  const baseline=sql.transactionStatements.length;
+  const query={subjectId:"person-a",collectionId:col.id,
+    predicate:"employment",context:"primary",validDate:"2025-07-01",
+    knowledgeAt:"2026-10-29T10:00:00.000Z"};
+  const page=await repo.temporalCandidatesAtDate(query);
+  expect(page.items).toHaveLength(1);
+  expect(page.verificationScope).toBe("current_source_candidates_only");
+  expect(sql.transactionStatements.slice(baseline)).toEqual(["BEGIN IMMEDIATE","COMMIT"]);
+  const before=sql.transactionStatements.length;
+  await expect(repo.temporalCandidatesAtDate({...query,validDate:"2026-02-30"}))
+    .rejects.toThrow("temporal_query_date_invalid");
+  expect(sql.transactionStatements.slice(before)).toEqual(["BEGIN IMMEDIATE","ROLLBACK"]);
+  // Validation failure must not poison the next read lease.
+  expect((await repo.temporalCandidatesAtDate(query)).items).toHaveLength(1);
+});
