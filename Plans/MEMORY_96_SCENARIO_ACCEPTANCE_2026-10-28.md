@@ -47,7 +47,7 @@
 | DOC-05 | Два репоста одной статьи с разными комментариями | REVIEW_REQUIRED | — | NOT_RUN_PHYSICAL | — |
 | DOC-06 | Рецепт с фото и двумя видеоссылками | PARTIAL_C1 | `mobile/src/media/__tests__/attachments.test.ts` | NOT_RUN_PHYSICAL | — |
 | DOC-07 | Из веб-страницы извлечён лишний футер | REVIEW_REQUIRED | — | NOT_RUN_PHYSICAL | — |
-| DOC-08 | Вопрос «где обсуждался особый ингредиент?» | REVIEW_REQUIRED | — | NOT_RUN_PHYSICAL | — |
+| DOC-08 | Вопрос «где обсуждался особый ингредиент?» | PARTIAL_C1 | `mobile/src/local-memory/__tests__/repository.test.ts` | NOT_RUN_PHYSICAL | — |
 | MEDIA-01 | Аудио названо «совещание», но участники не указаны | REVIEW_REQUIRED | — | NOT_RUN_PHYSICAL | — |
 | MEDIA-02 | ASR путает «Лена» и «Лина» | REVIEW_REQUIRED | — | NOT_RUN_PHYSICAL | — |
 | MEDIA-03 | Две записи приложены к одной заметке | PARTIAL_C1 | `mobile/src/media/__tests__/batch-recognition.test.ts` | NOT_RUN_PHYSICAL | — |
