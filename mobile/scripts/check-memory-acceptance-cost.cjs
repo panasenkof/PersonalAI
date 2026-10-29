@@ -36,6 +36,12 @@ function check(workflow,liveTest){
     "The API cap must reflect the manual suite size");
   assert.match(workflow,/PERSAI_EVAL_LLM_SUITE: \$\{\{ inputs\.suite \}\}/,
     "Manual suite selection must be explicitly forwarded");
+  // Runner context is valid in step-level env, NOT in job-level env.
+  // Without this check GitHub can reject the manually dispatched workflow
+  // only after merge, leaving no PR job to explain the invalid YAML.
+  const liveHeader=workflow.split("\n  live-model:\n")[1]?.split("\n    steps:\n")[0]||"";
+  assert.doesNotMatch(liveHeader,/\$\{\{\s*runner\.temp\s*\}\}/,
+    "runner.temp must not be referenced by job-level env");
   return true;
 }
 if(require.main===module){
