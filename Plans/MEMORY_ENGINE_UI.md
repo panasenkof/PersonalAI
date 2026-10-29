@@ -1,4 +1,6 @@
 # Память PersAI после нового движка — UX/UI этап M4-UX
+
+**28.10.2026 · актуальная M4-UX сверка:** #208 (компактная source-backed временная хронология в карточке) и #209 (pin/never_suggest/отложить через канонические cleanup preferences) в `main`, exact-SHA Android CI PASS. #207 защищённый групповой preview/exclusions/confirm/undo и #210 bounded read-only обнаружение exact-URL/read-later групп также в `main`, Android CI PASS. PR #213 **подключает** найденные группы к тому же существующему экрану ревизии; C1 и Android CI этого PR остаются PENDING до результата. Это **не** завершение M4 целиком: точные страницы/таймкоды, полноценные подтверждённые current/known-as-of, физический QA/TalkBack и 96 E2E отдельно OPEN. Семантическая автогигиена — [необязательный подплан](MEMORY_OPTIONAL_AFTER_ACCEPTANCE.md), не блокирует завершение базовой памяти.
 Дата: 26.10.2026. Статус: M4-UX частично в реализации — U-M5/U-M6 первый typed temporal review screen отдельным PR (CI pending); остальной UX0–UX4 запланирован, НЕ реализован. Основание: Plans/MEMORY_ENGINE_ARCHITECTURE.md и уже утверждённые docs/design/MEMORY_VISUAL_LIBRARY_2026-10-24.md, docs/UI_UX_REDESIGN.md.
 
 ## Зачем переделывать интерфейс
