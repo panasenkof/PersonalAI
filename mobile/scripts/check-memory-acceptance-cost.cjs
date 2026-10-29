@@ -13,13 +13,21 @@ function check(workflow,liveTest){
   assert.doesNotMatch(triggers,/^\s*(?:schedule|cron|push|pull_request|workflow_run|workflow_call)\s*:/m,
     "Memory acceptance must not have an automatic trigger");
   assert.match(triggers,/\blive_llm:/,"Paid toggle is required");
-  assert.match(triggers,/\bpaid_confirmation:/,"Typed confirmation is required");
-  assert.match(workflow,/github\.event_name == 'workflow_dispatch' && inputs\.live_llm == true && inputs\.paid_confirmation == 'RUN_PAID_LLM'/,
-    "Live job must be guarded by both human confirmations and event type");
+  assert.doesNotMatch(triggers,/\bpaid_confirmation:/,
+    "Typed confirmation must not be required");
+  const liveInput=triggers.split("\n      live_llm:\n")[1]?.split(/\n      [a-z_]+:\n/)[0]||"";
+  assert.match(liveInput,/type:\s*boolean\s*\n\s*default:\s*false/,
+    "Paid checkbox must be boolean and default to false");
+  assert.match(workflow,/github\.event_name == 'workflow_dispatch' && inputs\.live_llm == true/,
+    "Live job must require manual dispatch and a checked box");
+  assert.match(workflow,/PERSAI_EVAL_LIVE_LLM_APPROVED:\s*\$\{\{ inputs\.live_llm \}\}/,
+    "The independent paid guard must receive the checkbox value");
+  assert.doesNotMatch(workflow,/RUN_PAID_LLM|PERSAI_EVAL_PAID_OPT_IN/,
+    "Legacy typed opt-in must not remain");
   assert.match(liveTest,/PERSAI_EVAL_MANUAL_TRIGGER==="workflow_dispatch"/,
     "Test must refuse non-manual execution even with credentials");
-  assert.match(liveTest,/PERSAI_EVAL_PAID_OPT_IN===PAID_CONFIRMATION/,
-    "Test must require paid opt-in independently of workflow");
+  assert.match(liveTest,/PERSAI_EVAL_LIVE_LLM_APPROVED==="true"/,
+    "Test must require checked checkbox independently of workflow");
   assert.match(liveTest,/const MAX_PAID_OUTPUT_TOKENS=512;/,
     "Paid evaluation must limit model completion tokens");
   assert.match(liveTest,/const MAX_PAID_INPUT_CHARS=24000;/,
@@ -78,8 +86,12 @@ function checkQuick(workflow){
     "Quick paid connection check must be manual only");
   assert.doesNotMatch(triggers,/^\s*(?:push|schedule|cron|pull_request|workflow_run|workflow_call)\s*:/m);
   assert.match(triggers,/\blive_llm:/);
-  assert.match(triggers,/\bpaid_confirmation:/);
-  assert.match(workflow,/github\.event_name == 'workflow_dispatch' && inputs\.live_llm == true && inputs\.paid_confirmation == 'RUN_PAID_LLM'/);
+  assert.doesNotMatch(triggers,/\bpaid_confirmation:/);
+  const liveInput=triggers.split("\n      live_llm:\n")[1]?.split(/\n      [a-z_]+:\n/)[0]||"";
+  assert.match(liveInput,/type:\s*boolean\s*\n\s*default:\s*false/);
+  assert.match(workflow,/github\.event_name == 'workflow_dispatch' && inputs\.live_llm == true/);
+  assert.match(workflow,/PERSAI_EVAL_LIVE_LLM_APPROVED:\s*\$\{\{ inputs\.live_llm \}\}/);
+  assert.doesNotMatch(workflow,/RUN_PAID_LLM|PERSAI_EVAL_PAID_OPT_IN/);
   assert.match(workflow,/run: node mobile\/scripts\/check-llm-access\.cjs/);
   assert.doesNotMatch(workflow,/npm ci|\bgradle\b|\bmaestro\b|mobile-native-sqlcipher/);
   return true;
@@ -90,6 +102,6 @@ if(require.main===module){
   checkQuick(fs.readFileSync(path.join(ROOT,".github/workflows/llm-connectivity.yml"),"utf8"));
   checkNativeSeparation(fs.readFileSync(path.join(ROOT,".github/workflows/memory-acceptance.yml"),"utf8"),
     fs.readFileSync(path.join(ROOT,".github/workflows/ci.yml"),"utf8"));
-  process.stdout.write("Paid memory eval guard: manual only, double opt-in, capped calls; native only in main CI.\n");
+  process.stdout.write("Paid memory eval guard: manual-only checkbox approval, capped calls; native only in main CI.\n");
 }
 module.exports={check,checkQuick,checkNativeSeparation};
