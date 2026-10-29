@@ -1600,7 +1600,7 @@ test("TIME-08/SEC-08: as-of source, ACL and decision replay share one unlocked s
   const baseline=sql.transactionStatements.length;
   const query={subjectId:"person-a",collectionId:col.id,
     predicate:"employment",context:"primary",validDate:"2025-07-01",
-    knowledgeAt:"2026-10-29T10:00:00.000Z"};
+    knowledgeAt:"2099-10-29T10:00:00.000Z"};
   const page=await repo.temporalCandidatesAtDate(query);
   expect(page.items).toHaveLength(1);
   expect(page.verificationScope).toBe("current_source_candidates_only");
