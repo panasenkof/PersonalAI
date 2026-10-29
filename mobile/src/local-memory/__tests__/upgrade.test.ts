@@ -966,6 +966,13 @@ test("TIME-02/TIME-08/SEARCH-03: knowledge cutoff and valid date are independent
   for(const id of ["early","late","private"]){
     db.prepare("INSERT INTO memory_entities(id,collection_id,domain,payload_json,created_at,updated_at) VALUES (?,'jobs','notes','{}','now','now')").run(id);
   }
+  // Source existence is independently required for a historical knowledge
+  // cutoff. Synthetic installation: these originals were stored before the
+  // claims and evidence were entered, rather than a literal "now" marker.
+  db.prepare("UPDATE memory_entities SET created_at=? WHERE id=?")
+    .run("2026-01-10T00:00:00.000Z","early");
+  db.prepare("UPDATE memory_entities SET created_at=? WHERE id=?")
+    .run("2026-10-26T00:00:00.000Z","late");
   const date=(normalized:string):import("../temporal-claims").TemporalBound=>({
     normalized,precision:"day",raw:normalized,anchorDate:null,sourceTimeZone:null,
   });

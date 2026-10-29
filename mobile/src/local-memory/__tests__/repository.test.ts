@@ -1339,3 +1339,186 @@ test("R3c1/SEC-06/BKP-07: confidential, archived or stale persons cannot be boun
   expect(await repo.chooseProfileSelfIdentity({personId:null,expectedBindingVersion:1,userConfirmed:true}))
     .toEqual({personId:null,bindingVersion:1});
 });
+
+
+/**
+ * TIME-01/02/03/04/08, CAR-01, SEC-01:
+ * use actual SQL schema and one canonical repository rather than a mock temporal
+ * reader. These are bounded integration slices, NOT end-to-end chat answers,
+ * historical authorization snapshots or physical C2 acceptance.
+ */
+const boundTime=(date:string,precision:"year"|"day"="day")=>({
+  normalized:date,precision,raw:date,anchorDate:null,sourceTimeZone:null,
+});
+function candidateFromSource(source:{id:string;record_version:number},changes:Partial<import("../temporal-claims").TemporalClaimCandidate>={}):import("../temporal-claims").TemporalClaimCandidate {
+  return {
+    subjectId:"person-a",predicate:"employment",context:"primary",
+    value:"Работа в А",kind:"state",modality:"asserted",negated:false,
+    cardinality:"single",occurredOrStarted:boundTime("2021","year"),
+    ended:null,endConfirmed:false,recordedAt:"2026-01-01T09:00:00.000Z",
+    evidence:{entityId:source.id,recordVersion:source.record_version,
+      quote:"С 2021 работаю в А",origin:"direct"},
+    ...changes,
+  };
+}
+
+test("TIME-01/02/08: actual SQL distinguishes valid time, recording cutoff and a backdated source",async()=>{
+  const sql=new FakeSqlite(),repo=new SqliteMemoryRepository(sql as never);
+  const col=await repo.createCollection({name:"Память",slug:"memory-work",sensitivity:"standard"});
+  const a=await repo.createEntity({collection_id:col.id,domain:"notes",title:"Старая работа",
+    payload:{body:"С 2021 работаю в А"},sensitivity:"standard"});
+  const b=await repo.createEntity({collection_id:col.id,domain:"notes",title:"Новая работа",
+    payload:{body:"С 2024 работаю в Б"},sensitivity:"standard"});
+  // Synthetic historical installation: both originals existed in local
+  // memory before their explicitly recorded knowledge timestamps.
+  await sql.runAsync("UPDATE memory_entities SET created_at=? WHERE id=?",["2025-12-20T00:00:00.000Z",a.id]);
+  await sql.runAsync("UPDATE memory_entities SET created_at=? WHERE id=?",["2026-08-01T00:00:00.000Z",b.id]);
+  const old=await repo.stageTypedTemporalFact(candidateFromSource(a));
+  const recent=await repo.stageTypedTemporalFact(candidateFromSource(b,{
+    value:"Работа в Б",occurredOrStarted:boundTime("2024","year"),
+    recordedAt:"2026-08-15T12:00:00.000Z",
+    evidence:{entityId:b.id,recordVersion:b.record_version,quote:"С 2024 работаю в Б",origin:"direct"},
+  }));
+  expect(old.proposalIds).toHaveLength(0);
+  expect(recent.proposalIds).toHaveLength(1);
+  // A 2025 request about what was already RECORDED by mid-February must not
+  // see the new evidence, even though that evidence describes 2024 validity.
+  const knownBefore=await repo.temporalCandidatesAtDate({
+    subjectId:"person-a",collectionId:col.id,predicate:"employment",context:"primary",
+    validDate:"2025-07-01",knowledgeAt:"2026-02-15T00:00:00.000Z",
+  });
+  expect(knownBefore.items.map(x=>x.claim.value)).toEqual(["Работа в А"]);
+  expect(knownBefore.knowledgeAt).toBe("2026-02-15T00:00:00.000Z");
+  expect(knownBefore.verificationScope).toBe("current_source_candidates_only");
+  // Counterexample: a recently imported record with a fabricated earlier
+  // knowledge_recorded_at cannot appear in a past knowledge snapshot.
+  const lateSource=await repo.createEntity({collection_id:col.id,domain:"notes",
+    title:"Поздний импорт с задним числом",payload:{body:"Заявление об адресе"}});
+  await repo.stageTypedTemporalFact(candidateFromSource(lateSource,{
+    predicate:"residence",context:"actual",value:"Город Х",
+    recordedAt:"2026-01-10T00:00:00.000Z",
+    evidence:{entityId:lateSource.id,recordVersion:1,quote:"Заявление об адресе",origin:"direct"},
+  }));
+  const forgedPast=await repo.temporalCandidatesAtDate({
+    subjectId:"person-a",collectionId:col.id,predicate:"residence",context:"actual",
+    validDate:"2025-07-01",knowledgeAt:"2026-02-15T00:00:00.000Z",
+  });
+  expect(forgedPast.items).toEqual([]);
+  const existsToday=await repo.temporalCandidatesAtDate({
+    subjectId:"person-a",collectionId:col.id,predicate:"residence",context:"actual",
+    validDate:"2025-07-01",
+  });
+  expect(existsToday.items).toHaveLength(1);
+  const all=await repo.temporalCandidatesAtDate({
+    subjectId:"person-a",collectionId:col.id,predicate:"employment",context:"primary",
+    validDate:"2025-07-01",
+  });
+  expect(all.items.map(x=>x.claim.value)).toEqual(["Работа в Б","Работа в А"]);
+  // Both still fit if the former job was not EXPLICITLY ended. A proposal to
+  // review is never proof that only B is true/current.
+  expect(all.items.every(x=>x.verification==="candidate_unconfirmed")).toBe(true);
+  expect(all.items.every(x=>x.timeFit==="potentially_applicable")).toBe(true);
+  const late=await repo.createEntity({collection_id:col.id,domain:"notes",title:"Приказ из архива",
+    payload:{body:"Работа в Д закончилась в 2019"},sensitivity:"standard"});
+  const oldDocument=await repo.stageTypedTemporalFact(candidateFromSource(late,{
+    value:"Историческая работа в Д",occurredOrStarted:boundTime("2019","year"),
+    recordedAt:"2026-10-29T12:00:00.000Z",
+    evidence:{entityId:late.id,recordVersion:1,quote:"Работа в Д закончилась в 2019",origin:"direct"},
+  }));
+  expect(oldDocument.proposalIds).toHaveLength(0);
+  const history=await repo.temporalKnowledgeHistory({
+    subjectId:"person-a",collectionId:col.id,mode:"all",limit:10,
+  });
+  expect(history.items.map(x=>x.claim.value)).toEqual([
+    "Историческая работа в Д","Работа в Б","Город Х","Работа в А",
+  ]);
+  expect(history.items.every(x=>x.verification==="candidate_unconfirmed")).toBe(true);
+  // Editing the source invalidates ONLY that exact evidence revision.
+  await repo.reviseEntity(b.id,1,{body:"Исправлено вручную"},"Исправление источника");
+  const afterCorrection=await repo.temporalKnowledgeHistory({
+    subjectId:"person-a",collectionId:col.id,mode:"all",
+  });
+  expect(afterCorrection.items.map(x=>x.claim.value)).toEqual([
+    "Историческая работа в Д","Город Х","Работа в А",
+  ]);
+});
+
+test("CAR-01 and TIME-03/04: independent repairs and parallel/planned states survive real SQL search",async()=>{
+  const repo=new SqliteMemoryRepository(new FakeSqlite() as never);
+  const col=await repo.createCollection({name:"Авто и планы",slug:"car-and-plans",sensitivity:"standard"});
+  const first=await repo.createEntity({collection_id:col.id,domain:"notes",title:"Сервис-2025",payload:{body:"Свечи в 2025"}});
+  const second=await repo.createEntity({collection_id:col.id,domain:"notes",title:"Сервис-2023",payload:{body:"Свечи в 2023"}});
+  const one=await repo.stageTypedTemporalFact(candidateFromSource(first,{
+    kind:"event",subjectId:"car-1",predicate:"spark_plugs",context:"engine",
+    cardinality:"multiple",value:"Заменены свечи в 2025",
+    occurredOrStarted:boundTime("2025-05-02"),
+    recordedAt:"2026-03-01T12:00:00.000Z",
+    evidence:{entityId:first.id,recordVersion:1,quote:"Свечи в 2025",origin:"direct"},
+  }));
+  const two=await repo.stageTypedTemporalFact(candidateFromSource(second,{
+    kind:"event",subjectId:"car-1",predicate:"spark_plugs",context:"engine",
+    cardinality:"multiple",value:"Заменены свечи в 2023",
+    occurredOrStarted:boundTime("2023-05-02"),
+    recordedAt:"2026-10-29T12:00:00.000Z",
+    evidence:{entityId:second.id,recordVersion:1,quote:"Свечи в 2023",origin:"direct"},
+  }));
+  expect(one.proposalIds).toHaveLength(0);
+  expect(two.proposalIds).toHaveLength(0);
+  const history=await repo.temporalKnowledgeHistory({
+    subjectId:"car-1",collectionId:col.id,mode:"events",
+  });
+  expect(history.items.map(x=>x.claim.value)).toEqual([
+    "Заменены свечи в 2023","Заменены свечи в 2025",
+  ]);
+  expect(history.items.map(x=>x.claim.occurredOrStarted?.normalized)).toEqual([
+    "2023-05-02","2025-05-02",
+  ]);
+  // Explicit role and modality are source properties, not hints inferred
+  // from a note's position in the memory library.
+  const part=await repo.createEntity({collection_id:col.id,domain:"notes",payload:{body:"Подработка"}});
+  const planned=await repo.createEntity({collection_id:col.id,domain:"notes",payload:{body:"План работы"}});
+  expect((await repo.stageTypedTemporalFact(candidateFromSource(part,{
+    context:"secondary",cardinality:"multiple",value:"Подработка в В",
+    evidence:{entityId:part.id,recordVersion:1,quote:"Подработка",origin:"direct"},
+  }))).proposalIds).toHaveLength(0);
+  expect((await repo.stageTypedTemporalFact(candidateFromSource(planned,{
+    modality:"planned",value:"План перейти в Г",
+    evidence:{entityId:planned.id,recordVersion:1,quote:"План работы",origin:"direct"},
+  }))).proposalIds).toHaveLength(0);
+  const states=await repo.temporalKnowledgeHistory({subjectId:"person-a",collectionId:col.id,mode:"states"});
+  expect(states.items.map(x=>x.claim.modality)).toContain("planned");
+  expect(states.items.map(x=>x.claim.context)).toContain("secondary");
+});
+
+test("SEC-01, TIME-08: temporal reader enforces current revision, active status and collection/item ACL",async()=>{
+  const repo=new SqliteMemoryRepository(new FakeSqlite() as never);
+  const standard=await repo.createCollection({name:"Заметки",slug:"temporal-standard",sensitivity:"standard"});
+  const secret=await repo.createCollection({name:"Личное",slug:"temporal-secret",sensitivity:"secret"});
+  const visible=await repo.createEntity({collection_id:standard.id,domain:"notes",
+    payload:{body:"Живу в городе Б"},sensitivity:"standard"});
+  const hidden=await repo.createEntity({collection_id:secret.id,domain:"notes",
+    payload:{body:"Личная запись"},sensitivity:"secret"});
+  const itemHidden=await repo.createEntity({collection_id:standard.id,domain:"notes",
+    payload:{body:"Скрытая запись"},sensitivity:"sensitive"});
+  const direct=(source:{id:string;record_version:number})=>candidateFromSource(source,{
+    predicate:"residence",context:"actual",value:"Город Б",
+    evidence:{entityId:source.id,recordVersion:source.record_version,
+      quote:source.id===visible.id?"Живу в городе Б":source.id===hidden.id?"Личная запись":"Скрытая запись",origin:"direct"},
+  });
+  const ok=await repo.stageTypedTemporalFact(direct(visible));
+  expect(ok.reviewScope).toBe("standard");
+  expect((await repo.stageTypedTemporalFact(direct(hidden))).reviewScope).toBe("skipped_privacy");
+  expect((await repo.stageTypedTemporalFact(direct(itemHidden))).reviewScope).toBe("skipped_privacy");
+  const query={subjectId:"person-a",collectionId:standard.id,mode:"states" as const};
+  expect((await repo.temporalKnowledgeHistory(query)).items).toHaveLength(1);
+  await repo.setEntityStatus(visible.id,1,"archived");
+  expect((await repo.temporalKnowledgeHistory(query)).items).toHaveLength(0);
+  expect((await repo.temporalCandidatesAtDate({
+    subjectId:"person-a",collectionId:standard.id,predicate:"residence",
+    context:"actual",validDate:"2025-06-01",
+  })).items).toHaveLength(0);
+  await expect(repo.temporalCandidatesAtDate({
+    subjectId:"person-a",collectionId:standard.id,predicate:"residence",
+    context:"actual",validDate:"2025-02-30",
+  })).rejects.toThrow("temporal_query_date_invalid");
+});

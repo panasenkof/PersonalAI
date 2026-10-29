@@ -15,7 +15,7 @@
 | TIME-05 | «Переехал примерно весной», точных дат нет | PARTIAL_C1 | `mobile/src/local-memory/__tests__/temporal-claims.test.ts` | NOT_RUN_PHYSICAL | — |
 | TIME-06 | Прописка в городе А, проживание в городе Б | PARTIAL_C1 | `mobile/src/local-memory/__tests__/temporal-claims.test.ts` | NOT_RUN_PHYSICAL | — |
 | TIME-07 | Два паспорта/документа о работе противоречат друг другу | REVIEW_REQUIRED | — | NOT_RUN_PHYSICAL | — |
-| TIME-08 | «Что было известно год назад?» и «что было верно год назад?» | REVIEW_REQUIRED | — | NOT_RUN_PHYSICAL | — |
+| TIME-08 | «Что было известно год назад?» и «что было верно год назад?» | PARTIAL_C1 | `mobile/src/local-memory/__tests__/repository.test.ts` | NOT_RUN_PHYSICAL | — |
 | CAR-01 | Свечи менялись в 2023 и 2025 | PARTIAL_C1 | `mobile/src/local-memory/__tests__/temporal-claims.test.ts` | NOT_RUN_PHYSICAL | — |
 | CAR-02 | Менялась одна свеча из четырёх | REVIEW_REQUIRED | — | NOT_RUN_PHYSICAL | — |
 | CAR-03 | Сервисный акт без госномера похожей машины | REVIEW_REQUIRED | — | NOT_RUN_PHYSICAL | — |
