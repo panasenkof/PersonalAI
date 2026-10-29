@@ -1,0 +1,129 @@
+name: Memory acceptance (real algorithms + optional live LLM)
+
+on:
+  workflow_dispatch:
+    inputs:
+      live_llm:
+        description: "Test a real model (uses repo secret and variables, never personal data)"
+        required: false
+        type: boolean
+        default: false
+  schedule:
+    # Weekly full-memory acceptance, independent of the PR smoke suite.
+    - cron: "30 2 * * 0"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: memory-acceptance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deterministic:
+    name: Real SQL memory dialogue and 54-domain acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - name: Install locked dependencies
+        env:
+          RNET_SKIP_DOWNLOAD: "1"
+        run: npm ci --no-audit --no-fund
+      - name: Static TypeScript and scenario registry
+        run: |
+          npx tsc --noEmit
+          node scripts/check-memory-acceptance.cjs
+          node --test scripts/check-memory-acceptance.test.cjs
+      - name: Run scripted conversations, 54 domain cases, SQL and memory regression
+        run: |
+          npx jest --ci --runInBand \
+            src/direct-agent/__tests__/memory-dialogue-simulation.test.ts \
+            eval/__tests__/domain-battery.test.ts \
+            src/direct-agent/__tests__/memory-sql-acceptance.test.ts \
+            src/local-memory/__tests__/repository.test.ts \
+            src/local-memory/__tests__/backup.test.ts \
+            src/local-memory/__tests__/extractions.test.ts \
+            src/local-memory/__tests__/cross-domain-temporal.test.ts \
+            src/local-memory/__tests__/memory-96-scenario-acceptance.test.ts \
+            --json --outputFile="${{ runner.temp }}/memory-acceptance.json"
+      - name: Publish deterministic evidence
+        if: always()
+        env:
+          REPORT: ${{ runner.temp }}/memory-acceptance.json
+        run: |
+          node -e 'const fs=require("fs"); const p=process.env.REPORT; if(!fs.existsSync(p)){fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,"Memory acceptance: NO TEST REPORT (FAIL)\n");process.exit(0)} const d=JSON.parse(fs.readFileSync(p,"utf8"));fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,["### Memory deterministic acceptance","- Test suites: "+d.numPassedTestSuites+" passed, "+d.numFailedTestSuites+" failed","- Assertions: "+d.numPassedTests+" passed, "+d.numFailedTests+" failed, "+d.numPendingTests+" skipped","- Production SQLite/repository and scripted model tools; real model not assessed by this job","- Physical phone C2 is not assessed",""].join("\n"))'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: memory-acceptance-${{ github.sha }}
+          path: ${{ runner.temp }}/memory-acceptance.json
+          retention-days: 30
+          if-no-files-found: ignore
+
+  android:
+    name: Android SQLCipher APK and emulator UI smoke
+    uses: ./.github/workflows/mobile-native-sqlcipher.yml
+
+  live-model:
+    name: Optional blind real-model evaluation
+    needs: [deterministic, android]
+    if: ${{ github.event_name == 'schedule' || inputs.live_llm == true }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: mobile
+    env:
+      PERSAI_EVAL_LLM_API_KEY: ${{ secrets.PERSAI_EVAL_LLM_API_KEY }}
+      PERSAI_EVAL_LLM_BASE_URL: ${{ vars.PERSAI_EVAL_LLM_BASE_URL }}
+      PERSAI_EVAL_LLM_MODEL: ${{ vars.PERSAI_EVAL_LLM_MODEL }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Decide whether real-model evaluation is configured
+        id: setup
+        shell: bash
+        run: |
+          if [[ -n "$PERSAI_EVAL_LLM_API_KEY" && -n "$PERSAI_EVAL_LLM_BASE_URL" && -n "$PERSAI_EVAL_LLM_MODEL" ]]; then
+            echo 'enabled=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'enabled=false' >> "$GITHUB_OUTPUT"
+            echo 'Live LLM: NOT RUN (add GitHub Actions secret PERSAI_EVAL_LLM_API_KEY and repo variables PERSAI_EVAL_LLM_BASE_URL / PERSAI_EVAL_LLM_MODEL).' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/setup-node@v4
+        if: steps.setup.outputs.enabled == 'true'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - name: Install locked dependencies
+        if: steps.setup.outputs.enabled == 'true'
+        env:
+          RNET_SKIP_DOWNLOAD: "1"
+        run: npm ci --no-audit --no-fund
+      - name: Run real LLM on fictional memory only
+        if: steps.setup.outputs.enabled == 'true'
+        run: |
+          npx jest --ci --runInBand eval/__tests__/live-memory-model.test.ts \
+            --json --outputFile="${{ runner.temp }}/memory-live-llm.json"
+      - name: Report live-model evidence separately from deterministic results
+        if: always() && steps.setup.outputs.enabled == 'true'
+        env:
+          REPORT: ${{ runner.temp }}/memory-live-llm.json
+        run: |
+          node -e 'const fs=require("fs");const p=process.env.REPORT;if(!fs.existsSync(p)){fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,"Live LLM: NO TEST REPORT (FAIL)\n");process.exit(0)}const d=JSON.parse(fs.readFileSync(p,"utf8"));fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,"Live LLM on fictional data: "+d.numPassedTests+" PASS, "+d.numFailedTests+" FAIL, "+d.numPendingTests+" SKIPPED. Read artifact for per-scenario answers.\n")'
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.setup.outputs.enabled == 'true'
+        with:
+          name: memory-live-llm-${{ github.sha }}
+          path: ${{ runner.temp }}/memory-live-llm.json
+          retention-days: 14
+          if-no-files-found: ignore
