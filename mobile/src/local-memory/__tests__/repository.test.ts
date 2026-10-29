@@ -1363,12 +1363,16 @@ function candidateFromSource(source:{id:string;record_version:number},changes:Pa
 }
 
 test("TIME-01/02/08 and CAR-05: actual SQL distinguishes valid time, recording cutoff and a backdated source",async()=>{
-  const repo=new SqliteMemoryRepository(new FakeSqlite() as never);
+  const sql=new FakeSqlite(),repo=new SqliteMemoryRepository(sql as never);
   const col=await repo.createCollection({name:"Память",slug:"memory-work",sensitivity:"standard"});
   const a=await repo.createEntity({collection_id:col.id,domain:"notes",title:"Старая работа",
     payload:{body:"С 2021 работаю в А"},sensitivity:"standard"});
   const b=await repo.createEntity({collection_id:col.id,domain:"notes",title:"Новая работа",
     payload:{body:"С 2024 работаю в Б"},sensitivity:"standard"});
+  // Synthetic historical installation: both originals existed in local
+  // memory before their explicitly recorded knowledge timestamps.
+  await sql.runAsync("UPDATE memory_entities SET created_at=? WHERE id=?",["2025-12-20T00:00:00.000Z",a.id]);
+  await sql.runAsync("UPDATE memory_entities SET created_at=? WHERE id=?",["2026-08-01T00:00:00.000Z",b.id]);
   const old=await repo.stageTypedTemporalFact(candidateFromSource(a));
   const recent=await repo.stageTypedTemporalFact(candidateFromSource(b,{
     value:"Работа в Б",occurredOrStarted:boundTime("2024","year"),
@@ -1386,6 +1390,25 @@ test("TIME-01/02/08 and CAR-05: actual SQL distinguishes valid time, recording c
   expect(knownBefore.items.map(x=>x.claim.value)).toEqual(["Работа в А"]);
   expect(knownBefore.knowledgeAt).toBe("2026-02-15T00:00:00.000Z");
   expect(knownBefore.verificationScope).toBe("current_source_candidates_only");
+  // Counterexample: a recently imported record with a fabricated earlier
+  // knowledge_recorded_at cannot appear in a past knowledge snapshot.
+  const lateSource=await repo.createEntity({collection_id:col.id,domain:"notes",
+    title:"Поздний импорт с задним числом",payload:{body:"Заявление об адресе"}});
+  await repo.stageTypedTemporalFact(candidateFromSource(lateSource,{
+    predicate:"residence",context:"actual",value:"Город Х",
+    recordedAt:"2026-01-10T00:00:00.000Z",
+    evidence:{entityId:lateSource.id,recordVersion:1,quote:"Заявление об адресе",origin:"direct"},
+  }));
+  const forgedPast=await repo.temporalCandidatesAtDate({
+    subjectId:"person-a",collectionId:col.id,predicate:"residence",context:"actual",
+    validDate:"2025-07-01",knowledgeAt:"2026-02-15T00:00:00.000Z",
+  });
+  expect(forgedPast.items).toEqual([]);
+  const existsToday=await repo.temporalCandidatesAtDate({
+    subjectId:"person-a",collectionId:col.id,predicate:"residence",context:"actual",
+    validDate:"2025-07-01",
+  });
+  expect(existsToday.items).toHaveLength(1);
   const all=await repo.temporalCandidatesAtDate({
     subjectId:"person-a",collectionId:col.id,predicate:"employment",context:"primary",
     validDate:"2025-07-01",
