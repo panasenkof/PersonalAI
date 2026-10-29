@@ -33,11 +33,18 @@ const mockDb={
   listCollections:jest.fn(async():Promise<any>=>[{id:"collection-a",sensitivity:"standard"}]),
 };
 jest.mock("@react-navigation/native",()=>({useNavigation:()=>({push:mockPush})}));
-jest.mock("../../local-memory/repository",()=>({localMemoryRepository:async()=>mockDb}));
+jest.mock("../../local-memory/repository",()=>({
+  localMemoryRepository:async()=>mockDb,
+  SqliteMemoryRepository:jest.fn().mockImplementation(()=>mockDb),
+}));
 jest.mock("../../local-memory/storage",()=>({
   onLocalMemorySessionChange:(fn:(unlocked:boolean)=>void)=>{sessionListener=fn;return()=>{sessionListener=()=>{};};},
+  withLocalMemoryDatabase:jest.fn(async(_profile:string,action:(db:unknown)=>Promise<unknown>)=>action({})),
 }));
 jest.mock("../../local-memory/errors",()=>({memoryErrorMessage:(e:Error)=>e.message}));
+jest.mock("../../local-memory/transaction",()=>({
+  withUnlockedTransaction:jest.fn(async(_db:unknown,read:(db:unknown)=>Promise<unknown>)=>read({})),
+}));
 jest.mock("../../theme",()=>({useTheme:()=>({
   bg:"#05050b",panel:"#181823",soft:"#242435",text:"#fff",muted:"#aaa",
   accent:"#82d4ff",secondary:"#8cdbff",line:"#333",err:"#ff7777",
@@ -76,18 +83,18 @@ test("TIME-05: approximate and unknown time remain raw or explicitly unknown",()
 test("U-M3: source navigation rejects changed version or secret scope, allows current standard source",async()=>{
   const ui=render(<MemoryTemporalTimeline profile="guest" subjectId="car-1" collectionId="collection-a"/>);
   show(ui);
-  await waitFor(()=>ui.getByLabelText("Проверить источник claim-2023"));
+  await waitFor(()=>ui.getByLabelText("Открыть источник для Замена свечей в 2023"));
   mockDb.entity.mockResolvedValueOnce({id:"service-2023",record_version:2,
     collection_id:"collection-a",record_status:"active",sensitivity:"standard"});
-  fireEvent.press(ui.getByLabelText("Проверить источник claim-2023"));
+  fireEvent.press(ui.getByLabelText("Открыть источник для Замена свечей в 2023"));
   await waitFor(()=>ui.getByText("Источник изменён или недоступен. Обновите список."));
   expect(mockPush).not.toHaveBeenCalled();
   mockDb.entity.mockResolvedValueOnce({id:"service-2023",record_version:1,
     collection_id:"collection-a",record_status:"active",sensitivity:"secret"});
-  fireEvent.press(ui.getByLabelText("Проверить источник claim-2023"));
+  fireEvent.press(ui.getByLabelText("Открыть источник для Замена свечей в 2023"));
   await waitFor(()=>expect(mockDb.entity).toHaveBeenCalledTimes(2));
   expect(mockPush).not.toHaveBeenCalled();
-  fireEvent.press(ui.getByLabelText("Проверить источник claim-2023"));
+  fireEvent.press(ui.getByLabelText("Открыть источник для Замена свечей в 2023"));
   await waitFor(()=>expect(mockPush).toHaveBeenCalledWith("MemoryNote",{entityId:"service-2023"}));
 });
 
@@ -120,4 +127,33 @@ test("U-M3: filter mode calls same canonical reader and shows bounded pagination
   await waitFor(()=>expect(mockDb.temporalKnowledgeHistory).toHaveBeenLastCalledWith({
     subjectId:"car-1",collectionId:"collection-a",mode:"events",limit:10,
   }));
+});
+
+test("TIME-05/U-M3: a confirmed end without a precise date is visible, never guessed",async()=>{
+  const ended={...first,claimId:"ended-unknown",claim:{
+    ...first.claim,kind:"state",value:"Прежняя работа",
+    ended:null,endConfirmed:true,
+    evidence:{entityId:"service-2023",recordVersion:1,
+      quote:"Ранее работал здесь, дата окончания неизвестна",origin:"direct"},
+  }};
+  mockDb.temporalKnowledgeHistory.mockResolvedValueOnce({items:[ended],nextCursor:null});
+  const ui=render(<MemoryTemporalTimeline profile="guest" subjectId="car-1" collectionId="collection-a"/>);
+  show(ui);
+  await waitFor(()=>ui.getByText("Состояние · Прежняя работа"));
+  expect(ui.getByText(/Конец периода: Точная дата неизвестна · граница подтверждена пользователем/)).toBeTruthy();
+  expect(ui.queryByText(/Конец периода: 2026-/)).toBeNull();
+});
+
+test("SEC-08/U-M4: source version and collection ACL share a single guarded lease",async()=>{
+  const storage=require("../../local-memory/storage");
+  const tx=require("../../local-memory/transaction");
+  const ui=render(<MemoryTemporalTimeline profile="guest" subjectId="car-1" collectionId="collection-a"/>);
+  show(ui);
+  await waitFor(()=>ui.getByLabelText("Открыть источник для Замена свечей в 2023"));
+  fireEvent.press(ui.getByLabelText("Открыть источник для Замена свечей в 2023"));
+  await waitFor(()=>expect(mockPush).toHaveBeenCalledWith("MemoryNote",{entityId:"service-2023"}));
+  expect(storage.withLocalMemoryDatabase).toHaveBeenCalledWith("guest",expect.any(Function));
+  expect(tx.withUnlockedTransaction).toHaveBeenCalledTimes(1);
+  expect(mockDb.entity).toHaveBeenCalledWith("service-2023");
+  expect(mockDb.listCollections).toHaveBeenCalledTimes(1);
 });
