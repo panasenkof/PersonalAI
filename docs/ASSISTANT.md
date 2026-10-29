@@ -21,7 +21,7 @@ are migrated; the previous whole configuration remains active if a save fails.
 
 A local OpenAI-compatible server on the private network may use HTTP without a
 key. The model runs there, not inside PersAI on the phone. Public APIs use HTTPS.
-Cloud calls may cost money. At most four model calls per question and 4000 output
+Cloud calls may cost money. The default is five model calls per question (configurable 1–20) and 4000 output
 tokens per call (8000 for reasoning models such as o-series and gpt-5); an answer
 cut by the limit is kept with a note. Extraction is a separate user-initiated
 request. Set a monetary budget at the provider too.
@@ -185,6 +185,6 @@ an encrypted copy in the user's own cloud storage — still without a PersAI ser
 данными, а не инструкциями. Сочинённая моделью ссылка не разрешается автоматически.
 В цикле допускаются три поисковых запроса и три чтения; повтор одинакового действия
 отклоняется. Лимит основной LLM на одно сообщение задаётся в «Настройки → Работа ИИ»:
-от 1 до 20, по умолчанию 4. Он сохраняется для профиля, общий для всех подключений
+от 1 до 20, по умолчанию 5. Он сохраняется для профиля, общий для всех подключений
 и применяется к следующим сообщениям; уже начатый ответ сохраняет прежнее значение.
 Служебные запросы, проверка связи и «Улучшить» имеют собственные ограничения.
