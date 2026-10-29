@@ -8,8 +8,8 @@ const https = require("node:https");
 
 function authorize(config) {
   if (config.trigger !== "workflow_dispatch" ||
-      config.optIn !== "RUN_PAID_LLM") {
-    throw Error("MANUAL_PAID_CONFIRMATION_REQUIRED");
+      config.liveApproved !== "true") {
+    throw Error("MANUAL_LLM_OPT_IN_REQUIRED");
   }
   if (!config.key || !config.baseUrl || !config.model) {
     throw Error("LLM_CONFIGURATION_MISSING");
@@ -106,7 +106,7 @@ async function check(config, post = postOnce) {
 if (require.main === module) {
   const config={
     trigger:process.env.PERSAI_EVAL_MANUAL_TRIGGER,
-    optIn:process.env.PERSAI_EVAL_PAID_OPT_IN,
+    liveApproved:process.env.PERSAI_EVAL_LIVE_LLM_APPROVED,
     key:process.env.PERSAI_EVAL_LLM_API_KEY,
     baseUrl:process.env.PERSAI_EVAL_LLM_BASE_URL,
     model:process.env.PERSAI_EVAL_LLM_MODEL,
@@ -120,7 +120,7 @@ if (require.main === module) {
       require("node:fs").appendFileSync(process.env.GITHUB_STEP_SUMMARY,line+"\n");
   }).catch(error=>{
     // Never echo network/provider body or sensitive strings from exception messages.
-    const reason=/^(?:MANUAL_PAID_CONFIRMATION_REQUIRED|LLM_CONFIGURATION_MISSING|INVALID_MODEL_NAME|INVALID_API_URL|PUBLIC_HTTPS_API_REQUIRED|API_BASE_PATH_UNSUPPORTED|INVALID_PROVIDER_JSON|EMPTY_OR_INVALID_MODEL_RESPONSE|HTTP_\d+_[A-Z_]+)$/.test(error?.message)
+    const reason=/^(?:MANUAL_LLM_OPT_IN_REQUIRED|LLM_CONFIGURATION_MISSING|INVALID_MODEL_NAME|INVALID_API_URL|PUBLIC_HTTPS_API_REQUIRED|API_BASE_PATH_UNSUPPORTED|INVALID_PROVIDER_JSON|EMPTY_OR_INVALID_MODEL_RESPONSE|HTTP_\d+_[A-Z_]+)$/.test(error?.message)
       ? error.message : (typeof error?.code==="string" && /^[A-Z_]{3,40}$/.test(error.code)
         ? "NETWORK_"+error.code : "NETWORK_OR_TLS_ERROR");
     const line="LLM connectivity: FAIL ("+reason+"). No Android build or memory acceptance performed.";
