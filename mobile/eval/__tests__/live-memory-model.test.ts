@@ -64,12 +64,13 @@ function verifyEndpoint(){
 function realHttpsTransport(input:RequestInfo|URL,init?:RequestInit):Promise<Response>{
   const target=new URL(String(input));
   if(target.protocol!=="https:")throw Error("LIVE_EVAL_REQUIRES_HTTPS");
-  if(typeof init?.body!=="string")throw Error("LIVE_EVAL_INVALID_JSON_BODY");
+  const body=init?.body;
+  if(typeof body!=="string")throw Error("LIVE_EVAL_INVALID_JSON_BODY");
+  const method=init?.method||"POST",headers=init?.headers as Record<string,string>;
+  const signal=init?.signal;
   return new Promise<Response>((resolve,reject)=>{
     const request=httpsRequest(target,{
-      method:init.method||"POST",
-      headers:init.headers as Record<string,string>,
-      signal:init.signal,
+      method,headers,signal,
     },response=>{
       const chunks:Buffer[]=[];
       let bytes=0;
@@ -94,7 +95,7 @@ function realHttpsTransport(input:RequestInfo|URL,init?:RequestInit):Promise<Res
       });
     });
     request.on("error",reject);
-    request.end(init.body);
+    request.end(body);
   });
 }
 
