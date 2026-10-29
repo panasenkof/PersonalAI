@@ -10,6 +10,8 @@ import {searchApprovedNotes,readApprovedNote} from "../../src/direct-agent/memor
 import {saveExtractionRun,extractionEvidence} from "../../src/local-memory/extractions";
 import {listApprovedSourceSegments} from "../../src/local-memory/source-retrieval";
 import {CASES,type DomainCase} from "../domain-fixtures";
+import {runDirectAgent} from "../../src/direct-agent/engine";
+import {defaultDirectPreferences} from "../../src/direct-agent/settings";
 
 jest.mock("expo-crypto",()=>({
   randomUUID:()=>require("node:crypto").randomUUID(),
@@ -112,6 +114,64 @@ test.each(CASES)("$id — $q: scoped production FTS locates the correct original
       .rejects.toThrow("memory_read_not_available");
   }
 },30000);
+
+
+test.each(CASES)("AGENT-$id — $q: real tool dispatch preserves ACL and correct source",async(row:DomainCase)=>{
+  const id=f.ids.get(row.id)!;
+  const sent:string[]=[];
+  let request=0;
+  const transport=(async(_url:string,init:RequestInit)=>{
+    request++;
+    const payload=JSON.parse(String(init.body));
+    const serialized=JSON.stringify(payload);
+    if(row.scope==="sensitive"){
+      expect(serialized).not.toContain(row.body);
+    }
+    if(request===1){
+      // Only the provider is scripted: all resulting search and evidence data
+      // are resolved through the real production FTS/ACL implementation.
+      return {ok:true,status:200,json:async()=>({
+        choices:[{message:{role:"assistant",content:null,tool_calls:[{
+          id:"lookup-1",type:"function",function:{
+            name:"search_local_notes",arguments:JSON.stringify({query:row.phrase}),
+          },
+        }]}}],
+      })};
+    }
+    const tools=payload.messages.filter((m:any)=>m.role==="tool");
+    expect(tools).toHaveLength(1);
+    const data=JSON.parse(tools[0].content);
+    expect(Array.isArray(data.notes)).toBe(true);
+    if(row.scope==="standard"){
+      expect(data.notes.map((n:any)=>n.id)).toContain(id);
+    }else{
+      expect(data.notes.map((n:any)=>n.id)).not.toContain(id);
+      expect(serialized).not.toContain(row.body);
+    }
+    sent.push(row.id);
+    return {ok:true,status:200,json:async()=>({
+      choices:[{message:{role:"assistant",content:row.scope==="standard"
+        ?"Результат поиска доступен и подтверждён источником."
+        :"Закрытые записи не передаются в облачную модель."}}],
+    })};
+  }) as unknown as typeof fetch;
+  const result=await runDirectAgent({
+    settings:{...defaultDirectPreferences,provider:"openai-compatible",allowWeb:false,
+      baseUrl:"https://eval.example.test/v1",model:"scripted",apiKey:"fictional-key",webSearchKey:""},
+    prompt:row.q,history:[],transport,
+    lookup:query=>searchApprovedNotes("synthetic-domain",query,f.repo),
+    read:async(rid,version,offset,budget)=>readApprovedNote("synthetic-domain",rid,version,offset,budget,f.repo),
+    propose:()=>undefined,
+  });
+  expect(request).toBe(2);
+  expect(sent).toEqual([row.id]);
+  expect(result.sources).toEqual([]);
+  if(row.scope==="standard"){
+    expect(result.memory?.some(n=>n.id===id)).toBe(true);
+  }else{
+    expect(result.memory?.some(n=>n.id===id)).not.toBe(true);
+  }
+});
 
 test("CAR-01/02: successive oil changes are events, not superseding current state",async()=>{
   const older=(await f.repo.entity(f.ids.get("car-oil-23")!))!;
