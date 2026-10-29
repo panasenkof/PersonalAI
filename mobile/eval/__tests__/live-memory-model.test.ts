@@ -105,7 +105,7 @@ type Outcome={
  expected:string[];actualIds:string[];modelQueries:string[];requests:number;
  issues:string[];answer:string;
 };
-const insufficient=/(?:не (?:наш[еёлао]|имею|доступ|могу|вижу|сохранен|знаю|известн|указан|дошл[аои])|нет (?:данных|информации|запис|доступа|в памяти|вложени[яй]|фотографи[ий]|изображени[яй]|ничего)|отсутств|неизвест|уточни|невозможно|не могу|недоступ|не сохрани|не загруж|не опублик)/i;
+const insufficient=/(?:не (?:наш[еёлао]|имею|доступ|могу|вижу|сохранен|знаю|известн|указан|дошл[аои])|нет (?:данных|информации|запис|доступа|в памяти|вложени[яй]|фотографи[ий]|изображени[яй]|ничего|текст\w*|документ\w*|заключени\w*|ни\b)|(?:запис[ьи]|документ\w*|текст\w*|заключени\w*)[^.!?\n]{0,120}\bнет\b|отсутств|неизвест|уточни|невозможно|не могу|недоступ|не сохрани|не загруж|не опублик)/i;
 const suites={smoke:10,core:54,full:NATURAL_DIALOGUES.length} as const;
 type Suite=keyof typeof suites;
 function chosenSuite():EvaluationDialogue[]{
@@ -127,7 +127,12 @@ function chosenSuite():EvaluationDialogue[]{
 function evaluate(turn:EvaluationTurn,answer:string,usedIds:string[]){
   const issues:string[]=[];
   const required=turn.required??[];
-  if(turn.policy){
+  if(turn.policy === "general"){
+    // A conditional conceptual question may have a generic answer without
+    // inventing knowledge of the private document. The privateId gate still applies.
+    if(!turn.match || !new RegExp(turn.match,"i").test(answer))
+      issues.push("unsupported_general_explanation");
+  }else if(turn.policy){
     if(!insufficient.test(answer))issues.push("did_not_abstain_without_evidence");
     // A correct admission of "no attachment" is NOT a guessed image label.
     // Conversely, disclaiming the missing photo while guessing its contents
@@ -151,6 +156,19 @@ test("missing-photo abstention is accepted, but an invented identification is no
     .toContain("invented_image_identification");
   expect(evaluate({question:"Найди отсутствующее заключение",policy:"unknown"},
     "Наверное оно есть",[])).toContain("did_not_abstain_without_evidence");
+});
+
+test("live oracle accepts explicit missing-source answers, not guessed private facts",()=>{
+  expect(evaluate({question:"Где запасные ключи?",policy:"withheld"},
+    "В заметках на телефоне записи о запасном комплекте ключей от дачи нет.",[])).toEqual([]);
+  expect(evaluate({question:"Что написано в заключении МРТ?",policy:"withheld"},
+    "У меня нет текста заключения: в памяти нет ни заметки, ни самого заключения.",[])).toEqual([]);
+  expect(evaluate({question:"Где запасные ключи?",policy:"withheld"},
+    "Ключи лежат в сейфе.",[])).toContain("did_not_abstain_without_evidence");
+  const conceptual={question:"Если написали про люфт, ремонт сделан?",
+    policy:"general" as const,match:"не означает|не значит|не подтверждает|не доказывает"};
+  expect(evaluate(conceptual,"Нет, не означает: обнаружение дефекта не подтверждает ремонт.",[])).toEqual([]);
+  expect(evaluate(conceptual,"Да, ремонт точно сделан.",[])).toContain("unsupported_general_explanation");
 });
 
 testLive("NATURAL LIVE: real LLM chooses the search terms for ordinary dialogues",async()=>{
