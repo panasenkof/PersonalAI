@@ -432,6 +432,72 @@ export function temporalFitAtDate(
   return "potentially_applicable";
 }
 
+/**
+ * Rewind ONLY explicit user-confirmed state ends after a knowledge cutoff.
+ * The existing canonical decision/undo journal is sufficient; no snapshots,
+ * additional fact writer, or parallel history table.
+ *
+ * Fail closed rather than return a misleading past fact if the bounded
+ * journal cannot be replayed. Current source ACL/revision are still enforced
+ * by the query itself; this is NOT historical ACL or archived-source replay.
+ */
+type TemporalDecisionProjection = {
+  id: string; claim_id: string; action: string; details_json: string; created_at: string;
+};
+const MAX_DECISION_REPLAY_ROWS=500;
+
+async function rewindTemporalEnds(
+  db: ScanSQL, rows: ClaimRow[], knowledgeAt: string,
+): Promise<Map<string, {ended:TemporalBound|null;endConfirmed:boolean}>> {
+  if(rows.length===0)return new Map();
+  const ids=rows.map(row=>row.id);
+  const history=await db.getAllAsync<TemporalDecisionProjection>(
+    "SELECT p.previous_claim_id AS claim_id,d.id,d.action,d.details_json,d.created_at " +
+    "FROM memory_temporal_decisions d JOIN memory_temporal_proposals p ON p.id=d.proposal_id " +
+    "WHERE p.previous_claim_id IN ("+ids.map(()=>"?").join(",")+") " +
+    "ORDER BY d.created_at DESC,d.rowid DESC LIMIT ?",
+    [...ids,MAX_DECISION_REPLAY_ROWS+1],
+  );
+  if(history.length>MAX_DECISION_REPLAY_ROWS)
+    throw new Error("temporal_decision_history_limit");
+  const byId=new Map(history.map(d=>[d.id,d]));
+  const result=new Map<string,{ended:TemporalBound|null;endConfirmed:boolean}>();
+  for(const row of rows)result.set(row.id,{
+    ended:row.ended_json===null?null:JSON.parse(row.ended_json) as TemporalBound,
+    endConfirmed:row.end_confirmed===1,
+  });
+  for(const decision of history){
+    if(decision.created_at<=knowledgeAt)continue;
+    const current=result.get(decision.claim_id);
+    if(!current)continue;
+    let details:Record<string,unknown>;
+    try{details=JSON.parse(decision.details_json) as Record<string,unknown>;}
+    catch{throw new Error("temporal_decision_history_corrupt");}
+    if(decision.action==="accept"){
+      const prior=details.previous as {ended?:TemporalBound|null;endConfirmed?:boolean}|undefined;
+      if(!prior||typeof prior.endConfirmed!=="boolean"||prior.ended===undefined)
+        throw new Error("temporal_decision_history_corrupt");
+      result.set(decision.claim_id,{
+        ended:prior.ended,endConfirmed:prior.endConfirmed,
+      });
+    }else if(decision.action==="undo"){
+      const target=byId.get(String(details.undoes??""));
+      if(!target)throw new Error("temporal_decision_history_corrupt");
+      if(target.action==="accept"){
+        let accepted:Record<string,unknown>;
+        try{accepted=JSON.parse(target.details_json) as Record<string,unknown>;}
+        catch{throw new Error("temporal_decision_history_corrupt");}
+        const end=accepted.confirmedEnd as TemporalBound|null|undefined;
+        if(!end)throw new Error("temporal_decision_history_corrupt");
+        result.set(decision.claim_id,{ended:end,endConfirmed:true});
+      }
+    }else if(!["defer","keep_both","dismiss"].includes(decision.action)){
+      throw new Error("temporal_decision_history_corrupt");
+    }
+  }
+  return result;
+}
+
 /** Source-revision/ACL-filtered, keyset-paged valid-time evidence.
  *
  * A SQL bound on predicate/context avoids silently missing relevant states
@@ -499,8 +565,13 @@ export async function listTemporalStateCandidatesAtDate(
     args,
   );
   const visible=rows.slice(0,limit);
+  const knownEnds=query.knowledgeAt?await rewindTemporalEnds(db,visible,query.knowledgeAt):null;
   const items=visible.map(row=>{
-    const claim=fromRow(row);
+    const current=fromRow(row);
+    const known=knownEnds?.get(row.id);
+    // Projections affect only the read result; the canonical claim, evidence,
+    // decision journal and CAS version remain unchanged.
+    const claim=known?{...current,ended:known.ended,endConfirmed:known.endConfirmed}:current;
     return {claimId:row.id,claimVersion:row.claim_version,claim,
       verification:"candidate_unconfirmed" as const,
       timeFit:temporalFitAtDate(claim,query.validDate)};
