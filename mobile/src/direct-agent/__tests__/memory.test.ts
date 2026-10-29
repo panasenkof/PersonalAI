@@ -291,3 +291,30 @@ test("new name with no candidates creates a separate person and links through le
   expect(repo.entitiesByAlias).toHaveBeenCalledWith("Пётр","person");
   expect(repo.linkEntities).toHaveBeenCalledWith("fact-1","new-person-1","about");
 });
+
+
+test("TIME-05/SAVE-01: invalid approved event date is rejected before any note, section or link write",async()=>{
+  const repo=fake();
+  for(const date of ["2026-02-30","2025-02-29","2026-13-01","2026-00-01","not-a-date",null]){
+    await expect(saveApprovedNote("guest",{
+      title:"Событие",body:"Переехал",kind:"event",
+      date:date as string,newSection:"Переезды",person:"Наталья",
+    },repo as unknown as MemoryRepository)).rejects.toThrow("Некорректная дата события");
+  }
+  expect(repo.createCollection).not.toHaveBeenCalled();
+  expect(repo.createEntity).not.toHaveBeenCalled();
+  expect(repo.linkEntities).not.toHaveBeenCalled();
+  expect(repo.entitiesByAlias).not.toHaveBeenCalled();
+});
+
+test("TIME-05: a real leap day remains an exact source date after approval",async()=>{
+  const repo=fake();
+  await saveApprovedNote("guest",{
+    title:"Поездка",body:"Выехали в поход",kind:"event",
+    date:"2024-02-29",section:"notes",
+  },repo as unknown as MemoryRepository);
+  expect(repo.createEntity).toHaveBeenCalledWith(expect.objectContaining({
+    valid_from:"2024-02-29",
+    payload:expect.objectContaining({date:"2024-02-29"}),
+  }));
+});
