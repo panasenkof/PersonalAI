@@ -42,7 +42,7 @@ export function requiredSearchEvidence(query: string): string[] {
   // Conditional requests ("если текст не сохранился, скажи") do not assert
   // that the source literally contains a negative fact. The evidence gate
   // still protects questions asserting negation and exact years.
-  const asserted = tail.replace(/(?:^|[\\s,;.!?])если\\s+[^,;.!?]+/giu, " ");
+  const asserted = tail.replace(/(?:^|[\s,;.!?])если\s+[^,;.!?]+/giu, " ");
   const exceptYears = new Set([...asserted.matchAll(/(?:^|[^\p{L}])не\s+((?:19|20)\d{2})(?!\d)/giu)].map(m => m[1]));
   const years = [...asserted.matchAll(/\b(?:19|20)\d{2}\b/g)]
     .map(m => m[0]).filter(year => !exceptYears.has(year));
