@@ -32,7 +32,7 @@ const goodLive=[
   "const budget=Math.min(MAX_PAID_API_CALLS,totalTurns*MAX_REQUESTS_PER_TURN);",
   "if(totalPaidCalls>=budget)throw Error(\"budget\");",
   "maxRequests:MAX_REQUESTS_PER_TURN"
-].join("\n");\nconst MAX_PAID_OUTPUT_TOKENS=512;\nconst MAX_PAID_INPUT_CHARS=24000;\npayload.max_tokens=Math.min(payload.max_tokens,MAX_PAID_OUTPUT_TOKENS);\nconst MAX_PAID_API_CALLS=240;\nconst budget=Math.min(MAX_PAID_API_CALLS,totalTurns*MAX_REQUESTS_PER_TURN);\nif(totalPaidCalls>=budget)throw Error(\"budget\");\nmaxRequests:MAX_REQUESTS_PER_TURN";
+].join("\n");
 const guardedLive=[goodLive,"import {request as httpsRequest} from \"node:https\";","return realHttpsTransport(input,{...init,body:JSON.stringify(payload)});","if(e instanceof ModelRequestError)providerFailed=true;"].join("\n");
 test("manual-only paid checkbox and limits accepted",()=>assert.equal(check(guardedWorkflow,guardedLive),true));
 test("scheduled, push-triggered or legacy auto LLM eval blocked",()=>{
@@ -79,7 +79,7 @@ const goodQuick=[
   "    steps:",
   "      - name: Verify",
   "        run: node mobile/scripts/check-llm-access.cjs"
-].join("\n");;
+ ].join("\n");
 test("separate quick access check is manual paid only, without npm or Android",()=>{
   assert.equal(checkQuick(goodQuick),true);
   assert.throws(()=>checkQuick(goodQuick.replace("  workflow_dispatch:","  push:")));
