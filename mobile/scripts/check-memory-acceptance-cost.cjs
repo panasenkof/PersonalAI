@@ -39,8 +39,8 @@ function check(workflow,liveTest){
   // Runner context is valid in step-level env, NOT in job-level env.
   // Without this check GitHub can reject the manually dispatched workflow
   // only after merge, leaving no PR job to explain the invalid YAML.
-  const liveHeader=workflow.split("\\n  live-model:\\n")[1]?.split("\\n    steps:\\n")[0]||"";
-  assert.doesNotMatch(liveHeader,/\\$\\{\\{\\s*runner\\.temp\\s*\\}\\}/,
+  const liveHeader=workflow.split("\n  live-model:\n")[1]?.split("\n    steps:\n")[0]||"";
+  assert.doesNotMatch(liveHeader,/\$\{\{\s*runner\.temp\s*\}\}/,
     "runner.temp must not be referenced by job-level env");
   return true;
 }
