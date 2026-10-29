@@ -1,0 +1,93 @@
+/**
+ * Live, opt-in LLM judge for REAL model decision/answer behavior.
+ * This does not run without explicitly configured GitHub secrets/vars.
+ * Uses only fictional records, no user memory or real medical files.
+ */
+import {runDirectAgent} from "../../src/direct-agent/engine";
+import {searchApprovedNotes,readApprovedNote} from "../../src/direct-agent/memory";
+import {SqliteMemoryRepository} from "../../src/local-memory/repository";
+import {SCHEMA_SQL} from "../../src/local-memory/storage";
+import {defaultDirectPreferences} from "../../src/direct-agent/settings";
+
+jest.mock("expo-crypto",()=>({
+  randomUUID:()=>require("node:crypto").randomUUID(),
+  CryptoDigestAlgorithm:{SHA256:"SHA-256"},
+  digestStringAsync:async(_kind:string,text:string)=>
+    require("node:crypto").createHash("sha256").update(text).digest("hex"),
+}));
+
+const enabled=Boolean(process.env.PERSAI_EVAL_LLM_API_KEY&&
+  process.env.PERSAI_EVAL_LLM_BASE_URL&&process.env.PERSAI_EVAL_LLM_MODEL);
+const testLive=enabled?test:test.skip;
+const {DatabaseSync}=require("node:sqlite");
+class Adapter {
+  private db=new DatabaseSync(":memory:");
+  constructor(){this.db.exec("PRAGMA foreign_keys=ON;"+SCHEMA_SQL);}
+  async getFirstAsync<T>(sql:string,p:unknown[]=[]):Promise<T|null>{return (this.db.prepare(sql).get(...p) as T)??null;}
+  async getAllAsync<T>(sql:string,p:unknown[]=[]):Promise<T[]>{return this.db.prepare(sql).all(...p) as T[];}
+  async runAsync(sql:string,p:unknown[]=[]){return {changes:Number(this.db.prepare(sql).run(...p).changes)};}
+  async execAsync(sql:string){this.db.exec(sql);}
+  close(){this.db.close();}
+}
+function verifyEndpoint(){
+  const url=new URL(process.env.PERSAI_EVAL_LLM_BASE_URL!);
+  if(url.protocol!=="https:"||url.username||url.password||url.search||url.hash||
+    /^(?:localhost|.*\.local|.*\.internal)$/i.test(url.hostname)||
+    /^(?:\d{1,3}\.){3}\d{1,3}$/.test(url.hostname)||
+    url.hostname.includes(":"))
+    throw new Error("Live eval requires a public HTTPS LLM API endpoint without embedded credentials");
+}
+const cases=[
+  {id:"LIVE-RECIPE",question:"В моём сохранённом рецепте сырного супа указана приправа. Какая?",expected:/кориандр/i},
+  {id:"LIVE-CAR",question:"Когда меняли фильтр на моём учебном автомобиле Лис?",expected:/17.{0,12}мая|2026-05-17|17\.05\.2026/i},
+  {id:"LIVE-UNKNOWN",question:"Какой VIN у моего учебного велосипеда Сириус?",expected:/нет|неизвест|не указан|не сохрани|не наш|не могу|нет данных/i},
+] as const;
+testLive("LIVE-LLM: three blind user questions via actual SQL and production agent",async()=>{
+  verifyEndpoint();
+  const adapter=new Adapter(),repo=new SqliteMemoryRepository(adapter as never);
+  try{
+    const col=await repo.createCollection({name:"Заметки",slug:"notes",sensitivity:"standard"});
+    const secret=await repo.createCollection({name:"Приватная медицина",slug:"medical-private",sensitivity:"secret"});
+    await repo.createEntity({collection_id:col.id,domain:"notes",title:"Сырный суп",
+      payload:{type:"note",title:"Сырный суп",body:"В сырный суп добавить кориандр, без мускатного ореха."}});
+    await repo.createEntity({collection_id:col.id,domain:"notes",title:"Автомобиль Лис",
+      payload:{type:"note",title:"Автомобиль Лис",body:"На автомобиле Лис воздушный фильтр заменили 17 мая 2026 года."}});
+    await repo.createEntity({collection_id:secret.id,domain:"notes",title:"Медицинская запись",
+      payload:{body:"SECRET_TEST_LAB_MARKER: закрытый анализ и пациент, нельзя отправлять провайдеру."},
+      sensitivity:"secret"});
+    const scores:Array<{id:string;passed:boolean;requests:number;answer:string;used:string[]}>=[];
+    for(const scenario of cases){
+      const attempted:string[]=[];
+      const auditedFetch=(async(input:RequestInfo|URL,init?:RequestInit)=>{
+        const outbound=String(init?.body??"");
+        expect(outbound).not.toContain("SECRET_TEST_LAB_MARKER");
+        attempted.push(String(input));
+        return fetch(input,init);
+      }) as typeof fetch;
+      const result=await runDirectAgent({
+        settings:{...defaultDirectPreferences,provider:"openai-compatible",allowWeb:false,
+          baseUrl:process.env.PERSAI_EVAL_LLM_BASE_URL!,
+          model:process.env.PERSAI_EVAL_LLM_MODEL!,
+          apiKey:process.env.PERSAI_EVAL_LLM_API_KEY!,
+          webSearchKey:""},
+        prompt:scenario.question,history:[],
+        lookup:q=>searchApprovedNotes("synthetic-live",q,repo),
+        read:async(id,version,offset,budget)=>
+          readApprovedNote("synthetic-live",id,version,offset,budget,repo),
+        propose:()=>undefined,transport:auditedFetch,maxRequests:4,
+      });
+      const passed=scenario.expected.test(result.text);
+      scores.push({id:scenario.id,passed,requests:result.requests,
+        answer:result.text.slice(0,240),
+        used:(result.memory??[]).map(n=>n.title)});
+      expect(attempted).toHaveLength(result.requests);
+      expect(result.sources).toEqual([]); // Web must stay disabled.
+    }
+    // We report the whole matrix before failing; there are no real personal data.
+    process.stdout.write("PERSAI_LIVE_MEMORY_EVAL "+JSON.stringify({
+      model:process.env.PERSAI_EVAL_LLM_MODEL,provider:"openai-compatible",
+      result:scores.every(x=>x.passed)?"PASS":"FAIL",cases:scores,
+    })+"\n");
+    expect(scores.filter(s=>s.passed)).toHaveLength(cases.length);
+  }finally{adapter.close();}
+},150000);
