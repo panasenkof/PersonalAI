@@ -28,6 +28,7 @@ jobs:
         run: |
           node mobile/scripts/check-roadmap-integrity.cjs
           node mobile/scripts/check-memory-acceptance.cjs
+          node mobile/scripts/check-memory-acceptance-cost.cjs
           node --test mobile/scripts/check-memory-acceptance.test.cjs
           node mobile/scripts/check-nebula-references.cjs
           node --test mobile/scripts/ci-scope.test.cjs
