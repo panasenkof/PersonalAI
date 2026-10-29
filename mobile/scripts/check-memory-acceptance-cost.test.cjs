@@ -1,31 +1,63 @@
 "use strict";
 const test=require("node:test");
 const assert=require("node:assert/strict");
-const {check}=require("./check-memory-acceptance-cost.cjs");
+const {check,checkQuick}=require("./check-memory-acceptance-cost.cjs");
 const goodWorkflow="name: Manual memory check\non:\n  workflow_dispatch:\n    inputs:\n      live_llm:\n        type: boolean\n        default: false\n      paid_confirmation:\n        type: string\n        default: \"\"\npermissions:\n  contents: read\njobs:\n  live-model:\n    if: ${{ github.event_name == 'workflow_dispatch' && inputs.live_llm == true && inputs.paid_confirmation == 'RUN_PAID_LLM' }}\n    env:\n      PERSAI_EVAL_LLM_SUITE: ${{ inputs.suite }}";
+const guardedWorkflow=goodWorkflow+"\n      - name: Preflight\n        run: node scripts/check-llm-access.cjs";
 const goodLive="const enabled=process.env.PERSAI_EVAL_MANUAL_TRIGGER===\"workflow_dispatch\" &&\n  process.env.PERSAI_EVAL_PAID_OPT_IN===PAID_CONFIRMATION;\nconst MAX_PAID_OUTPUT_TOKENS=512;\nconst MAX_PAID_INPUT_CHARS=24000;\npayload.max_tokens=Math.min(payload.max_tokens,MAX_PAID_OUTPUT_TOKENS);\nconst MAX_PAID_API_CALLS=240;\nconst budget=Math.min(MAX_PAID_API_CALLS,totalTurns*MAX_REQUESTS_PER_TURN);\nif(totalPaidCalls>=budget)throw Error(\"budget\");\nmaxRequests:MAX_REQUESTS_PER_TURN";
 const guardedLive=[goodLive,"import {request as httpsRequest} from \"node:https\";","return realHttpsTransport(input,{...init,body:JSON.stringify(payload)});","if(e instanceof ModelRequestError)providerFailed=true;"].join("\n");
-test("manual-only double confirmation and limit accepted",()=>assert.equal(check(goodWorkflow,guardedLive),true));
+test("manual-only double confirmation and limit accepted",()=>assert.equal(check(guardedWorkflow,guardedLive),true));
 test("scheduled, push-triggered or legacy auto LLM eval blocked",()=>{
-  assert.throws(()=>check(goodWorkflow.replace("permissions:","  schedule:\n    - cron: 0 2 * * *\npermissions:"),guardedLive));
-  assert.throws(()=>check(goodWorkflow.replace("permissions:","  push:\n    branches: [main]\npermissions:"),guardedLive));
-  assert.throws(()=>check(goodWorkflow.replace("github.event_name == 'workflow_dispatch' && inputs.live_llm == true && inputs.paid_confirmation == 'RUN_PAID_LLM'","github.event_name == 'schedule' || inputs.live_llm == true"),guardedLive));
+  assert.throws(()=>check(guardedWorkflow.replace("permissions:","  schedule:\n    - cron: 0 2 * * *\npermissions:"),guardedLive));
+  assert.throws(()=>check(guardedWorkflow.replace("permissions:","  push:\n    branches: [main]\npermissions:"),guardedLive));
+  assert.throws(()=>check(guardedWorkflow.replace("github.event_name == 'workflow_dispatch' && inputs.live_llm == true && inputs.paid_confirmation == 'RUN_PAID_LLM'","github.event_name == 'schedule' || inputs.live_llm == true"),guardedLive));
 });
 test("job-level runner.temp expressions are rejected before merge",()=>{
-  const invalid=goodWorkflow.replace("    env:\n",
+  const invalid=guardedWorkflow.replace("    env:\n",
     "    env:\n      PERSAI_EVAL_REPORT_PATH: ${{ runner.temp }}/report.json\n");
   assert.throws(()=>check(invalid,goodLive));
 });
 test("mere credentials or missing confirmation can never authorize paid calls",()=>{
-  assert.throws(()=>check(goodWorkflow.replace("      paid_confirmation:\n        type: string\n        default: \"\"\n",""),guardedLive));
-  assert.throws(()=>check(goodWorkflow,guardedLive.replace("PERSAI_EVAL_PAID_OPT_IN===PAID_CONFIRMATION","Boolean(PERSAI_EVAL_LLM_API_KEY)")));
-  assert.throws(()=>check(goodWorkflow,guardedLive.replace("const MAX_PAID_API_CALLS=240;","const MAX_PAID_API_CALLS=9999;")));
+  assert.throws(()=>check(guardedWorkflow.replace("      paid_confirmation:\n        type: string\n        default: \"\"\n",""),guardedLive));
+  assert.throws(()=>check(guardedWorkflow,guardedLive.replace("PERSAI_EVAL_PAID_OPT_IN===PAID_CONFIRMATION","Boolean(PERSAI_EVAL_LLM_API_KEY)")));
+  assert.throws(()=>check(guardedWorkflow,guardedLive.replace("const MAX_PAID_API_CALLS=240;","const MAX_PAID_API_CALLS=9999;")));
 });
 
 test("live transport cannot fall back to Jest global fetch",()=>{
-  assert.throws(()=>check(goodWorkflow,
+  assert.throws(()=>check(guardedWorkflow,
     guardedLive.replace("return realHttpsTransport(input,{...init,body:JSON.stringify(payload)});",
       "return fetch(input,{...init,body:JSON.stringify(payload)});")));
-  assert.throws(()=>check(goodWorkflow,
+  assert.throws(()=>check(guardedWorkflow,
     guardedLive.replace("if(e instanceof ModelRequestError)providerFailed=true;","")));
+});
+
+const goodQuick=[
+  "name: Quick LLM check",
+  "on:",
+  "  workflow_dispatch:",
+  "    inputs:",
+  "      live_llm:",
+  "        type: boolean",
+  "      paid_confirmation:",
+  "        type: string",
+  "permissions:",
+  "  contents: read",
+  "jobs:",
+  "  connectivity:",
+  "    if: ${{ github.event_name == 'workflow_dispatch' && inputs.live_llm == true && inputs.paid_confirmation == 'RUN_PAID_LLM' }}",
+  "    steps:",
+  "      - name: Verify",
+  "        run: node mobile/scripts/check-llm-access.cjs"
+].join("\n");
+test("separate quick access check is manual paid only, without npm or Android",()=>{
+  assert.equal(checkQuick(goodQuick),true);
+  assert.throws(()=>checkQuick(goodQuick.replace("  workflow_dispatch:","  push:")));
+  assert.throws(()=>checkQuick(goodQuick.replace("inputs.live_llm == true","true")));
+  assert.throws(()=>checkQuick(goodQuick+"\n        run: npm ci"));
+});
+test("full suite must not wait for Android and must check access first",()=>{
+  assert.throws(()=>check(guardedWorkflow.replace("  live-model:\n",
+    "  live-model:\n    needs: [deterministic, android]\n"),guardedLive));
+  assert.throws(()=>check(guardedWorkflow.replace("run: node scripts/check-llm-access.cjs",
+    "run: echo fake"),guardedLive));
 });
