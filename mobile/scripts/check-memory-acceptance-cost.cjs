@@ -24,14 +24,18 @@ function check(workflow,liveTest){
     "Paid evaluation must limit model completion tokens");
   assert.match(liveTest,/const MAX_PAID_INPUT_CHARS=24000;/,
     "Paid evaluation must reject unbounded input context");
-  assert.match(liveTest,/limited\.max_tokens=Math\.min\(limited\.max_tokens,MAX_PAID_OUTPUT_TOKENS\)/,
+  assert.match(liveTest,/payload\.max_tokens=Math\.min\(payload\.max_tokens,MAX_PAID_OUTPUT_TOKENS\)/,
     "Paid evaluation must cap max_tokens before fetch");
-  assert.match(liveTest,/const MAX_PAID_API_CALLS=9;/,
+  assert.match(liveTest,/const MAX_PAID_API_CALLS=240;/,
     "Test must define a bounded total API request budget");
-  assert.match(liveTest,/if\(\+\+totalPaidCalls>MAX_PAID_API_CALLS\)/,
+  assert.match(liveTest,/if\(totalPaidCalls>=budget\)/,
     "Budget must be checked before the provider network call");
-  assert.match(liveTest,/maxRequests:3/,
+  assert.match(liveTest,/maxRequests:MAX_REQUESTS_PER_TURN/,
     "Each question must have bounded turns");
+  assert.match(liveTest,/Math\.min\(MAX_PAID_API_CALLS,totalTurns\*MAX_REQUESTS_PER_TURN\)/,
+    "The API cap must reflect the manual suite size");
+  assert.match(workflow,/PERSAI_EVAL_LLM_SUITE: \$\{\{ inputs\.suite \}\}/,
+    "Manual suite selection must be explicitly forwarded");
   return true;
 }
 if(require.main===module){
