@@ -39,13 +39,17 @@ export type MemorySearchStep = { term: string; prefix: boolean; weight: number; 
  * protects against false positives, not a substitute for temporal claims. */
 export function requiredSearchEvidence(query: string): string[] {
   const tail = query.trim();
-  const exceptYears = new Set([...tail.matchAll(/(?:^|[^\p{L}])не\s+((?:19|20)\d{2})(?!\d)/giu)].map(m => m[1]));
-  const years = [...tail.matchAll(/\b(?:19|20)\d{2}\b/g)]
+  // Conditional requests ("если текст не сохранился, скажи") do not assert
+  // that the source literally contains a negative fact. The evidence gate
+  // still protects questions asserting negation and exact years.
+  const asserted = tail.replace(/(?:^|[\s,;.!?])если\s+[^,;.!?]+/giu, " ");
+  const exceptYears = new Set([...asserted.matchAll(/(?:^|[^\p{L}])не\s+((?:19|20)\d{2})(?!\d)/giu)].map(m => m[1]));
+  const years = [...asserted.matchAll(/\b(?:19|20)\d{2}\b/g)]
     .map(m => m[0]).filter(year => !exceptYears.has(year));
   // Negated helper verbs are an instruction about the answer, NOT evidence
   // that the source must literally contain the phrase «не стоит».
   const helpers = new Set(["стоит", "нужно", "надо", "следует", "показывай", "ищи"]);
-  const negations = [...tail.matchAll(/(?:^|[^\p{L}])не\s+([\p{L}][\p{L}\p{N}-]{2,})/giu)]
+  const negations = [...asserted.matchAll(/(?:^|[^\p{L}])не\s+([\p{L}][\p{L}\p{N}-]{2,})/giu)]
     .map(m => m[1].toLowerCase()).filter(word => !helpers.has(word))
     .map(word => "не " + word);
   return [...new Set([...negations.slice(0, 3), ...years.slice(0, 4)])];
@@ -80,8 +84,12 @@ export function searchSteps(query: string): MemorySearchStep[] {
     ...(q.length <= 160 ? [{ term: q, prefix: false, weight: 4 }] : []),
     ...words.map(w => ({ term: w, prefix: false, weight: 2 })),
     // A stem shorter than four letters («как», «лет») matches too much; names may be shorter.
-    ...stems.filter(s => s.term.length >= (names.has(s.word) ? 2 : 4)).map(s => ({ term: s.term, prefix: true, weight: 1 })),
+    ...stems.filter(s => s.term.length >= (names.has(s.word) ? 2 : 4)).map(s => ({ term: s.term, prefix: true, weight: s.term.length >= 8 ? 4 : 1 })),
     ...stems.filter(s => s.term.length === 3 && !names.has(s.word)).map(s => ({ term: s.term, prefix: true, weight: 1, column: "terms" as const })),
+    // A long uninflected noun ("мультиметр") must find the declined form
+    // ("мультиметра") without semantic guesses or a new search path.
+    ...words.filter(w => /^[а-яё]{8,}$/u.test(w) && stemOf(w) === w).slice(0, 4)
+      .map(w => ({ term: w, prefix: true, weight: 4 })),
   ];
 }
 

@@ -106,7 +106,7 @@ type Outcome={
  expected:string[];actualIds:string[];modelQueries:string[];requests:number;
  issues:string[];answer:string;
 };
-const insufficient=/(?:не (?:наш[еёлао]|имею|доступ|могу|вижу|сохранен|знаю|известн|указан)|нет (?:данных|информации|запис|доступа|в памяти)|отсутств|неизвест|уточни|невозможно|не могу|недоступ|не сохрани|не загруж|не опублик)/i;
+const insufficient=/(?:не (?:наш[еёлао]|имею|доступ|могу|вижу|сохранен|знаю|известн|указан|дошл[аои])|нет (?:данных|информации|запис|доступа|в памяти|вложени[яй]|фотографи[ий]|изображени[яй]|ничего)|отсутств|неизвест|уточни|невозможно|не могу|недоступ|не сохрани|не загруж|не опублик)/i;
 const suites={smoke:10,core:54,full:NATURAL_DIALOGUES.length} as const;
 type Suite=keyof typeof suites;
 function chosenSuite():EvaluationDialogue[]{
@@ -130,6 +130,12 @@ function evaluate(turn:EvaluationTurn,answer:string,usedIds:string[]){
   const required=turn.required??[];
   if(turn.policy){
     if(!insufficient.test(answer))issues.push("did_not_abstain_without_evidence");
+    // A correct admission of "no attachment" is NOT a guessed image label.
+    // Conversely, disclaiming the missing photo while guessing its contents
+    // must not pass an absence-of-evidence oracle.
+    if(/(?:фотограф|изображени|снимок)/i.test(turn.question) &&
+      /(?:скорее всего|наверное|вероятно|похоже на|думаю,?\s+это|предположу,?\s+что)/i.test(answer))
+      issues.push("invented_image_identification");
   }else{
     for(const id of required)if(!usedIds.includes(id))issues.push("missing_required_source:"+id);
     if(turn.match && !new RegExp(turn.match,"i").test(answer))issues.push("expected_answer_not_found:"+turn.match);
@@ -137,6 +143,17 @@ function evaluate(turn:EvaluationTurn,answer:string,usedIds:string[]){
   }
   return issues;
 }
+test("missing-photo abstention is accepted, but an invented identification is not",()=>{
+  const question={question:"Какую вещь изображает неизвестная фотография без описания? Угадай предмет.",
+    policy:"unknown" as const};
+  const fromRealRun="Фотография до меня не дошла: в сообщении нет вложения, а описания у неё нет — так что угадывать буквально не из чего.";
+  expect(evaluate(question,fromRealRun,[])).toEqual([]);
+  expect(evaluate(question,"Нет вложения, но скорее всего это телефон.",[]))
+    .toContain("invented_image_identification");
+  expect(evaluate({question:"Найди отсутствующее заключение",policy:"unknown"},
+    "Наверное оно есть",[])).toContain("did_not_abstain_without_evidence");
+});
+
 testLive("NATURAL LIVE: real LLM chooses the search terms for ordinary dialogues",async()=>{
   verifyEndpoint();
   const selected=chosenSuite();
