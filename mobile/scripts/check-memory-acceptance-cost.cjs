@@ -98,12 +98,53 @@ function checkQuick(workflow){
   assert.doesNotMatch(workflow,/npm ci|\bgradle\b|\bmaestro\b|mobile-native-sqlcipher/);
   return true;
 }
+
+/** Scan every tracked text file in CI, not only the tests edited in this PR.
+ * Report all model-call/four candidates for review, and fail on explicit stale
+ * four-call defaults. Historical results and gpt-4.1 model names are not defaults. */
+function checkTrackedDefaultModelLimit(root=ROOT, runGit){
+  const git=runGit || require("node:child_process").execFileSync;
+  const paths=String(git("git",["ls-files","-z"],{cwd:root,maxBuffer:12*1024*1024}))
+    .split("\0").filter(Boolean).filter(p=>/\.(?:ts|tsx|js|jsx|cjs|mjs|md|yml|yaml)$/i.test(p));
+  const candidate=[],stale=[];
+  const explicit=[
+    /DEFAULT_MODEL_CALL_LIMIT\s*=\s*4\b/i,
+    /MAX_REQUESTS_PER_TURN\s*=\s*4\b/i,
+    /default is four\b/i,
+    /limitInput\.inputValue\(\)\s*,\s*["']4["']/i,
+    /nebula-home-status.*\(1\/4\)/i,
+    /\b(?:default|по умолчанию).{0,50}(?:four\b|четыр|\b4\b).{0,30}(?:calls?\b|обращени|LLM)/i,
+    /\b(?:calls?\b|обращени|LLM).{0,50}(?:default|по умолчанию).{0,30}(?:four\b|четыр|\b4\b)/i,
+  ];
+  for(const p of paths){
+    const whole=path.join(root,p);
+    if(!fs.existsSync(whole))continue;
+    const content=fs.readFileSync(whole,"utf8");
+    if(content.includes("\0"))continue;
+    content.split(/\r?\n/).forEach((line,index)=>{
+      if(!/(?:\b4\b|\bfour\b|четыр)/i.test(line))return;
+      if(!/(?:LLM|модел|model|лимит|обращени|requests?|calls?|default|по умолчанию|nebula-home-status|inputValue)/i.test(line))return;
+      // A record about previous failed scenarios is not an expected value.
+      const historical=/(?:\b4 FAIL\b|old four-call|прежн.{0,20}4\b|gpt-4[.\-])/i.test(line);
+      const entry=p+":"+(index+1)+": "+line.trim().slice(0,210);
+      if(!historical)candidate.push(entry);
+      if(!historical&&explicit.some(re=>re.test(line)))stale.push(entry);
+    });
+  }
+  process.stdout.write("MODEL_CALL_FOUR_REPO_SCAN "+JSON.stringify({
+    trackedTextFiles:paths.length,candidates:candidate.slice(0,80),candidateCount:candidate.length,stale
+  })+"\n");
+  assert.deepEqual(stale,[],"Stale four-call default found in tracked files");
+  return {trackedTextFiles:paths.length,candidates:candidate,stale};
+}
+
 if(require.main===module){
   check(fs.readFileSync(path.join(ROOT,".github/workflows/memory-acceptance.yml"),"utf8"),
     fs.readFileSync(path.join(ROOT,"mobile/eval/__tests__/live-memory-model.test.ts"),"utf8"));
   checkQuick(fs.readFileSync(path.join(ROOT,".github/workflows/llm-connectivity.yml"),"utf8"));
   checkNativeSeparation(fs.readFileSync(path.join(ROOT,".github/workflows/memory-acceptance.yml"),"utf8"),
     fs.readFileSync(path.join(ROOT,".github/workflows/ci.yml"),"utf8"));
+  checkTrackedDefaultModelLimit();
   process.stdout.write("Paid memory eval guard: manual-only checkbox approval, capped calls; native only in main CI.\n");
 }
-module.exports={check,checkQuick,checkNativeSeparation};
+module.exports={check,checkQuick,checkNativeSeparation,checkTrackedDefaultModelLimit};
