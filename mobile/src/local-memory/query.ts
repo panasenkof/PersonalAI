@@ -89,7 +89,7 @@ export function searchSteps(query: string): MemorySearchStep[] {
     // A long uninflected noun ("мультиметр") must find the declined form
     // ("мультиметра") without semantic guesses or a new search path.
     ...words.filter(w => /^[а-яё]{8,}$/u.test(w) && stemOf(w) === w).slice(0, 4)
-      .map(w => ({ term: w, prefix: true, weight: 3 })),
+      .map(w => ({ term: w, prefix: true, weight: 4 })),
   ];
 }
 
