@@ -57,6 +57,21 @@ function check(workflow,liveTest){
 
   return true;
 }
+function checkNativeSeparation(manualWorkflow, ciWorkflow){
+  assert.doesNotMatch(manualWorkflow,/^  android:\s*$/m,
+    "Manual memory acceptance must not define an Android job");
+  assert.doesNotMatch(manualWorkflow,/mobile-native-sqlcipher\.yml|:app:assembleRelease|android-emulator-runner/,
+    "Manual memory acceptance must not build an APK or run an emulator");
+  const native=ciWorkflow.split("\n  native:\n")[1]?.split(/\n  [a-z_-]+:\n/)[0]||"";
+  assert.match(native,/uses: \.\/\.github\/workflows\/mobile-native-sqlcipher\.yml/,
+    "Ordinary CI must retain the reusable native Android smoke");
+  const required=ciWorkflow.split("\n  required:\n")[1]||"";
+  assert.match(required,/needs: \[changes, mobile, native\]/,
+    "Required main CI must still depend on native checks");
+  assert.match(required,/test "\\$NATIVE" = success/,
+    "Required CI must fail when native Android fails");
+  return true;
+}
 function checkQuick(workflow){
   const triggers=workflow.split(/\npermissions:|\njobs:/)[0];
   assert.match(triggers,/\non:\s*\n\s+workflow_dispatch:/,
@@ -73,6 +88,8 @@ if(require.main===module){
   check(fs.readFileSync(path.join(ROOT,".github/workflows/memory-acceptance.yml"),"utf8"),
     fs.readFileSync(path.join(ROOT,"mobile/eval/__tests__/live-memory-model.test.ts"),"utf8"));
   checkQuick(fs.readFileSync(path.join(ROOT,".github/workflows/llm-connectivity.yml"),"utf8"));
-  process.stdout.write("Paid memory eval guard: manual only, double opt-in, capped calls.\n");
+  checkNativeSeparation(fs.readFileSync(path.join(ROOT,".github/workflows/memory-acceptance.yml"),"utf8"),
+    fs.readFileSync(path.join(ROOT,".github/workflows/ci.yml"),"utf8"));
+  process.stdout.write("Paid memory eval guard: manual only, double opt-in, capped calls; native only in main CI.\n");
 }
-module.exports={check,checkQuick};
+module.exports={check,checkQuick,checkNativeSeparation};
