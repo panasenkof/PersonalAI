@@ -134,7 +134,7 @@ function evaluate(turn:EvaluationTurn,answer:string,usedIds:string[]){
     // Conversely, disclaiming the missing photo while guessing its contents
     // must not pass an absence-of-evidence oracle.
     if(/(?:фотограф|изображени|снимок)/i.test(turn.question) &&
-      /(?:скорее всего|наверное|вероятно|похоже на|думаю,?\\s+это|предположу,?\\s+что)/i.test(answer))
+      /(?:скорее всего|наверное|вероятно|похоже на|думаю,?\s+это|предположу,?\s+что)/i.test(answer))
       issues.push("invented_image_identification");
   }else{
     for(const id of required)if(!usedIds.includes(id))issues.push("missing_required_source:"+id);
