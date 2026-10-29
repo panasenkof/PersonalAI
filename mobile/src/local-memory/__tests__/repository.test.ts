@@ -1430,7 +1430,7 @@ test("TIME-01/02/08: actual SQL distinguishes valid time, recording cutoff and a
     subjectId:"person-a",collectionId:col.id,mode:"all",limit:10,
   });
   expect(history.items.map(x=>x.claim.value)).toEqual([
-    "Историческая работа в Д","Работа в Б","Работа в А",
+    "Историческая работа в Д","Работа в Б","Город Х","Работа в А",
   ]);
   expect(history.items.every(x=>x.verification==="candidate_unconfirmed")).toBe(true);
   // Editing the source invalidates ONLY that exact evidence revision.
@@ -1439,7 +1439,7 @@ test("TIME-01/02/08: actual SQL distinguishes valid time, recording cutoff and a
     subjectId:"person-a",collectionId:col.id,mode:"all",
   });
   expect(afterCorrection.items.map(x=>x.claim.value)).toEqual([
-    "Историческая работа в Д","Работа в А",
+    "Историческая работа в Д","Город Х","Работа в А",
   ]);
 });
 
