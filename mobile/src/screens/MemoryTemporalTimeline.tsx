@@ -6,9 +6,10 @@ import React, {useEffect,useRef,useState} from "react";
 import {ActivityIndicator,Pressable,Text,View} from "react-native";
 import {useNavigation} from "@react-navigation/native";
 import type {NativeStackNavigationProp} from "@react-navigation/native-stack";
-import {localMemoryRepository} from "../local-memory/repository";
+import {localMemoryRepository,SqliteMemoryRepository} from "../local-memory/repository";
 import {memoryErrorMessage} from "../local-memory/errors";
-import {onLocalMemorySessionChange} from "../local-memory/storage";
+import {onLocalMemorySessionChange,withLocalMemoryDatabase} from "../local-memory/storage";
+import {withUnlockedTransaction} from "../local-memory/transaction";
 import type {TemporalHistoryItem,TemporalHistoryMode,TemporalHistoryCursor} from "../local-memory/temporal-store";
 import type {TemporalBound} from "../local-memory/temporal-claims";
 import type {RootStackParams} from "../navigation";
@@ -72,16 +73,20 @@ export function MemoryTemporalTimeline({profile,subjectId,collectionId}:{
     const request=++generation.current;
     setBusy(true);setError("");
     try{
-      const db=await localMemoryRepository(profile);
-      const source=await db.entity(item.claim.evidence.entityId);
-      const sections=await db.listCollections();
-      const collection=sections.find(c=>c.id===source?.collection_id);
-      if(!source||source.record_version!==item.claim.evidence.recordVersion||
-        source.record_status!=="active"||source.collection_id!==collectionId||
-        !["standard","inherit"].includes(source.sensitivity)||
-        collection?.sensitivity!=="standard")
-        throw new Error("Источник изменён или недоступен. Обновите список.");
-      if(request===generation.current)navigation.push("MemoryNote",{entityId:source.id});
+      // Source version and collection privacy must be checked on the SAME
+      // unlocked SQLCipher snapshot; the destination reauthorizes on open.
+      await withLocalMemoryDatabase(profile,db=>withUnlockedTransaction(db,async tx=>{
+        const reader=new SqliteMemoryRepository(tx);
+        const source=await reader.entity(item.claim.evidence.entityId);
+        const sections=await reader.listCollections();
+        const collection=sections.find(c=>c.id===source?.collection_id);
+        if(!source||source.record_version!==item.claim.evidence.recordVersion||
+          source.record_status!=="active"||source.collection_id!==collectionId||
+          !["standard","inherit"].includes(source.sensitivity)||
+          collection?.sensitivity!=="standard")
+          throw new Error("Источник изменён или недоступен. Обновите список.");
+      }));
+      if(request===generation.current)navigation.push("MemoryNote",{entityId:item.claim.evidence.entityId});
     }catch(e){
       if(request===generation.current)setError(memoryErrorMessage(e));
     }finally{
@@ -115,14 +120,14 @@ export function MemoryTemporalTimeline({profile,subjectId,collectionId}:{
           {item.claim.kind==="event"?"Событие":item.claim.kind==="observation"?"Наблюдение":item.claim.kind==="enduring"?"Длительное обстоятельство":"Состояние"} · {item.claim.value}
         </Text>
         <Text style={{color:t.text}}>Время события или состояния: {displayTemporalBound(item.claim.occurredOrStarted)}</Text>
-        {item.claim.ended?<Text style={{color:t.muted}}>Конец периода: {displayTemporalBound(item.claim.ended)}
+        {(item.claim.endConfirmed||item.claim.ended)?<Text style={{color:t.muted}}>Конец периода: {item.claim.ended?displayTemporalBound(item.claim.ended):"Точная дата неизвестна"}
           {item.claim.endConfirmed?" · граница подтверждена пользователем":""}</Text>:null}
         <Text style={{color:t.muted}}>Сведения получены: {new Date(item.claim.recordedAt).toLocaleDateString()}</Text>
         <Text style={{color:t.muted}}>{item.claim.modality==="planned"?"План, не свершившийся факт":
           item.claim.modality==="hypothetical"?"Гипотеза, не факт":
           item.claim.negated?"Отрицательное утверждение источника":"Не подтверждено как текущий факт"}</Text>
         <Text numberOfLines={4} style={{color:t.muted}}>Из источника: «{item.claim.evidence.quote}»</Text>
-        <Pressable accessibilityRole="button" accessibilityLabel={"Проверить источник "+item.claimId}
+        <Pressable accessibilityRole="button" accessibilityLabel={"Открыть источник для "+item.claim.value}
           disabled={busy} style={touch} onPress={()=>void showSource(item)}>
           <Text style={{color:t.secondary}}>Открыть источник</Text>
         </Pressable>
