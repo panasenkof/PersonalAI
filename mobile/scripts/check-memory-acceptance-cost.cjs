@@ -34,10 +34,12 @@ function check(workflow,liveTest){
     "Paid evaluation must reject unbounded input context");
   assert.match(liveTest,/payload\.max_tokens=Math\.min\(payload\.max_tokens,MAX_PAID_OUTPUT_TOKENS\)/,
     "Paid evaluation must cap max_tokens before fetch");
-  assert.match(liveTest,/const MAX_PAID_API_CALLS=240;/,
+  assert.match(liveTest,/const MAX_PAID_API_CALLS=400;/,
     "Test must define a bounded total API request budget");
   assert.match(liveTest,/if\(totalPaidCalls>=budget\)/,
     "Budget must be checked before the provider network call");
+  assert.match(liveTest,/const MAX_REQUESTS_PER_TURN=5;/,
+    "The proposed per-question ceiling is exactly five calls");
   assert.match(liveTest,/maxRequests:MAX_REQUESTS_PER_TURN/,
     "Each question must have bounded turns");
   // Jest-Expo replaces global fetch. A paid live test must use a real HTTPS
