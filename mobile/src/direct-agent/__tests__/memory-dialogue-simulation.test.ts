@@ -253,7 +253,7 @@ test("DIALOGUE-06 SEARCH-07: missing memory remains empty; the engine never sile
       {tool:"search_local_notes",args:{query:"неизвестный проект"}},
       {answer:"В сохранённой памяти нет подтверждённых сведений.",inspect:payload=>{
         const result=JSON.parse(payload.messages.filter((m:any)=>m.role==="tool").at(-1).content);
-        expect(result).toEqual({notes:[]});
+        expect(result).toEqual({notes:[],outcome:"empty"});
         expect(JSON.stringify(payload.tools)).not.toContain("search_web");
       }},
     ]);
