@@ -15,7 +15,9 @@ gradle.beforeProject { project ->
                 "-DCMAKE_C_COMPILER_LAUNCHER=${launcher}",
                 "-DCMAKE_CXX_COMPILER_LAUNCHER=${launcher}"
             ].each { arg ->
-                if (!cmakeArgs.contains(arg)) cmakeArgs.add(arg)
+                // AGP/RN use List<String>; Groovy interpolation produces a GString.
+                String value = arg.toString()
+                if (!cmakeArgs.contains(value)) cmakeArgs.add(value)
             }
         }
     }
