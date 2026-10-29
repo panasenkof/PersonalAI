@@ -11,8 +11,8 @@ test("scheduled, push-triggered or legacy auto LLM eval blocked",()=>{
   assert.throws(()=>check(goodWorkflow.replace("github.event_name == 'workflow_dispatch' && inputs.live_llm == true && inputs.paid_confirmation == 'RUN_PAID_LLM'","github.event_name == 'schedule' || inputs.live_llm == true"),goodLive));
 });
 test("job-level runner.temp expressions are rejected before merge",()=>{
-  const invalid=goodWorkflow.replace("    env:\\n",
-    "    env:\\n      PERSAI_EVAL_REPORT_PATH: ${{ runner.temp }}/report.json\\n");
+  const invalid=goodWorkflow.replace("    env:\n",
+    "    env:\n      PERSAI_EVAL_REPORT_PATH: ${{ runner.temp }}/report.json\n");
   assert.throws(()=>check(invalid,goodLive));
 });
 test("mere credentials or missing confirmation can never authorize paid calls",()=>{
