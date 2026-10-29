@@ -1342,7 +1342,7 @@ test("R3c1/SEC-06/BKP-07: confidential, archived or stale persons cannot be boun
 
 
 /**
- * TIME-01/02/03/04/08, CAR-01/05, SEC-01/06, SAVE-03:
+ * TIME-01/02/03/04/08, CAR-01, SEC-01:
  * use actual SQL schema and one canonical repository rather than a mock temporal
  * reader. These are bounded integration slices, NOT end-to-end chat answers,
  * historical authorization snapshots or physical C2 acceptance.
@@ -1362,7 +1362,7 @@ function candidateFromSource(source:{id:string;record_version:number},changes:Pa
   };
 }
 
-test("TIME-01/02/08 and CAR-05: actual SQL distinguishes valid time, recording cutoff and a backdated source",async()=>{
+test("TIME-01/02/08: actual SQL distinguishes valid time, recording cutoff and a backdated source",async()=>{
   const sql=new FakeSqlite(),repo=new SqliteMemoryRepository(sql as never);
   const col=await repo.createCollection({name:"Память",slug:"memory-work",sensitivity:"standard"});
   const a=await repo.createEntity({collection_id:col.id,domain:"notes",title:"Старая работа",
@@ -1443,7 +1443,7 @@ test("TIME-01/02/08 and CAR-05: actual SQL distinguishes valid time, recording c
   ]);
 });
 
-test("CAR-01/05 and TIME-03/04: independent repairs and parallel/planned states survive real SQL search",async()=>{
+test("CAR-01 and TIME-03/04: independent repairs and parallel/planned states survive real SQL search",async()=>{
   const repo=new SqliteMemoryRepository(new FakeSqlite() as never);
   const col=await repo.createCollection({name:"Авто и планы",slug:"car-and-plans",sensitivity:"standard"});
   const first=await repo.createEntity({collection_id:col.id,domain:"notes",title:"Сервис-2025",payload:{body:"Свечи в 2025"}});
@@ -1490,7 +1490,7 @@ test("CAR-01/05 and TIME-03/04: independent repairs and parallel/planned states 
   expect(states.items.map(x=>x.claim.context)).toContain("secondary");
 });
 
-test("SEC-01/06, TIME-08: temporal reader enforces current revision, active status and collection/item ACL",async()=>{
+test("SEC-01, TIME-08: temporal reader enforces current revision, active status and collection/item ACL",async()=>{
   const repo=new SqliteMemoryRepository(new FakeSqlite() as never);
   const standard=await repo.createCollection({name:"Заметки",slug:"temporal-standard",sensitivity:"standard"});
   const secret=await repo.createCollection({name:"Личное",slug:"temporal-secret",sensitivity:"secret"});
