@@ -68,7 +68,7 @@ function checkNativeSeparation(manualWorkflow, ciWorkflow){
   const required=ciWorkflow.split("\n  required:\n")[1]||"";
   assert.match(required,/needs: \[changes, mobile, native\]/,
     "Required main CI must still depend on native checks");
-  assert.match(required,/test "\\$NATIVE" = success/,
+  assert.match(required,/test "\$NATIVE" = success/,
     "Required CI must fail when native Android fails");
   return true;
 }
