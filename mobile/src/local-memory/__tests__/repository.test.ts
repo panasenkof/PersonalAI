@@ -1612,3 +1612,15 @@ test("TIME-08/SEC-08: as-of source, ACL and decision replay share one unlocked s
   // Validation failure must not poison the next read lease.
   expect((await repo.temporalCandidatesAtDate(query)).items).toHaveLength(1);
 });
+
+
+test("natural user difficulty does not force a literal negation into FTS evidence", async () => {
+  const repo = new SqliteMemoryRepository(new FakeSqlite() as never);
+  const col = await repo.createCollection({ name: "Вещи", slug: "home-tools", sensitivity: "standard" });
+  const drill = await repo.createEntity({ collection_id: col.id, domain: "notes",
+    title: "Шуруповёрт", payload: { body: "Шуруповёрт Бирма хранится в кладовке, стеллаж Б, нижняя полка." } });
+  const hits = await repo.searchMemory("Не могу найти шуруповёрт. Куда положил?", {
+    collectionIds: [col.id], sensitivities: ["standard", "inherit"],
+  });
+  expect(hits.map(hit => hit.entity.id)).toContain(drill.id);
+});
