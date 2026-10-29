@@ -399,21 +399,35 @@ export function LocalMemoryScreen() {
       </BottomSheet>
 
     <BottomSheet visible={hygieneSuggestionsOpen} title="Предложения для ревизии" onClose={closeHygieneSuggestions}>
-      <Text style={{color:t.text}}>
-        Совпадение ссылки не означает одинаковое содержимое. Пометка «позже» не означает ненужность.
-        Выберите группу, проверьте каждую запись и подтвердите действие отдельно.
+      <Text style={{color:t.muted}}>
+        Найденные группы — повод проверить записи, а не решение об удалении. Без вашего подтверждения ничего не изменится.
       </Text>
       {busy?<ActivityIndicator accessibilityLabel="Ищу группы для ревизии" color={t.secondary}/>:null}
+      {hygieneSuggestions?<Text accessibilityLiveRegion="polite" style={{color:t.text,fontWeight:"600"}}>
+        Найдено групп: {hygieneSuggestions.groups.length} · Проверено записей: {hygieneSuggestions.scanned}
+      </Text>:null}
       {hygieneSuggestions?.groups.length===0?
         <Text style={{color:t.muted}}>В проверенной части памяти групп не обнаружено.</Text>:null}
       {hygieneSuggestions?.partial?
-        <Text style={{color:t.muted}}>Просмотрено: {hygieneSuggestions.scanned} записей. Анализ ограничен; другие группы могут находиться за пределами выборки.</Text>:null}
+        <Text style={{color:t.muted}}>Анализ ограничен первыми {hygieneSuggestions.scanned} записями. Другие группы могут находиться за пределами выборки.</Text>:null}
       {hygieneSuggestions?.groups.map((group,index)=>
         <Pressable key={group.reason+":"+index} accessibilityRole="button" disabled={busy}
           accessibilityLabel={"Проверить группу: "+group.title+", записей "+group.targets.length}
-          style={actionButton} onPress={()=>void inspectSuggestedGroup(group)}>
-          <Text style={{color:t.text,fontWeight:"700"}}>{group.title}</Text>
-          <Text style={{color:t.muted,fontSize:13}}>Записей: {group.targets.length}. Только предложение, изменения не применены.</Text>
+          accessibilityHint="Откроется ручная проверка с исключениями; изменения потребуют подтверждения"
+          style={{...actionButton,minHeight:nebulaTouch.minimum,borderWidth:1,borderColor:t.line,
+            borderRadius:nebulaRadii.field,backgroundColor:t.soft,padding:nebulaSpacing.md,gap:6}}
+          onPress={()=>void inspectSuggestedGroup(group)}>
+          <View style={{flexDirection:"row",alignItems:"center",gap:nebulaSpacing.sm}}>
+            <Feather name={group.reason==="same_saved_url"?"link":"bookmark"} size={20} color={t.secondary}/>
+            <Text style={{flex:1,color:t.text,fontWeight:"700"}}>{group.title}</Text>
+            <Feather name="chevron-right" size={18} color={t.muted}/>
+          </View>
+          <Text style={{color:t.muted,fontSize:13,lineHeight:19}}>
+            {group.reason==="same_saved_url"?
+              "Совпала исходная ссылка; тексты и заметки могут отличаться.":
+              "Отмечено «прочитать/посмотреть позже»; интерес к материалам не оценивался."}
+          </Text>
+          <Text style={{color:t.secondary,fontSize:13}}>Записей: {group.targets.length} · Проверить и исключить</Text>
         </Pressable>)}
       {error?<Text accessibilityRole="alert" style={{color:t.err}}>{error}</Text>:null}
       <Pressable accessibilityRole="button" accessibilityLabel="Закрыть предложения для ревизии"

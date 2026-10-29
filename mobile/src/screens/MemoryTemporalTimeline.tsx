@@ -97,7 +97,7 @@ export function MemoryTemporalTimeline({profile,subjectId,collectionId}:{
       <Text style={{color:t.text,fontWeight:"700"}}>Периоды и события {expanded?"⌃":"⌄"}</Text>
     </Pressable>
     {expanded?<View style={{gap:nebulaSpacing.sm}}>
-      <Text style={{color:t.muted}}>Сведения извлечены из доступных источников этого раздела. Это кандидаты, а не подтверждённые текущие факты.</Text>
+      <Text style={{color:t.muted}}>История по источникам. Сведения ещё не подтверждены как текущие факты; дата события может отличаться от даты сохранения.</Text>
       <View style={{flexDirection:"row",flexWrap:"wrap",gap:nebulaSpacing.sm}}>
         {MODES.map(option=><Pressable key={option.mode} accessibilityRole="button"
           accessibilityLabel={"История: "+option.label} accessibilityState={{selected:mode===option.mode,disabled:busy}}
@@ -114,15 +114,14 @@ export function MemoryTemporalTimeline({profile,subjectId,collectionId}:{
         <Text style={{color:t.text,fontWeight:"700"}}>
           {item.claim.kind==="event"?"Событие":item.claim.kind==="observation"?"Наблюдение":item.claim.kind==="enduring"?"Длительное обстоятельство":"Состояние"} · {item.claim.value}
         </Text>
-        <Text style={{color:t.muted}}>{item.claim.predicate} · {item.claim.context}</Text>
-        <Text style={{color:t.muted}}>Относится к: {displayTemporalBound(item.claim.occurredOrStarted)}</Text>
+        <Text style={{color:t.text}}>Время события или состояния: {displayTemporalBound(item.claim.occurredOrStarted)}</Text>
         {item.claim.ended?<Text style={{color:t.muted}}>Конец периода: {displayTemporalBound(item.claim.ended)}
           {item.claim.endConfirmed?" · граница подтверждена пользователем":""}</Text>:null}
-        <Text style={{color:t.muted}}>Записано в память: {new Date(item.claim.recordedAt).toLocaleDateString()}</Text>
+        <Text style={{color:t.muted}}>Сведения получены: {new Date(item.claim.recordedAt).toLocaleDateString()}</Text>
         <Text style={{color:t.muted}}>{item.claim.modality==="planned"?"План, не свершившийся факт":
           item.claim.modality==="hypothetical"?"Гипотеза, не факт":
           item.claim.negated?"Отрицательное утверждение источника":"Не подтверждено как текущий факт"}</Text>
-        <Text style={{color:t.muted}}>Источник: «{item.claim.evidence.quote}»</Text>
+        <Text numberOfLines={4} style={{color:t.muted}}>Из источника: «{item.claim.evidence.quote}»</Text>
         <Pressable accessibilityRole="button" accessibilityLabel={"Проверить источник "+item.claimId}
           disabled={busy} style={touch} onPress={()=>void showSource(item)}>
           <Text style={{color:t.secondary}}>Открыть источник</Text>

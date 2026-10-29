@@ -59,11 +59,12 @@ test("TIME-01/CAR-01/U-M3: candidate history never claims a current fact and kee
   expect(mockDb.temporalKnowledgeHistory).toHaveBeenCalledWith({
     subjectId:"car-1",collectionId:"collection-a",mode:"all",limit:10,
   });
-  expect(ui.getByText("Относится к: 2023 год")).toBeTruthy();
-  expect(ui.getAllByText(/Записано в память:/).length).toBe(2);
-  expect(ui.getByText(/Это кандидаты, а не подтверждённые текущие факты/)).toBeTruthy();
+  expect(ui.getByText("Время события или состояния: 2023 год")).toBeTruthy();
+  expect(ui.getAllByText(/Сведения получены:/).length).toBe(2);
+  expect(ui.getByText(/Сведения ещё не подтверждены как текущие факты/)).toBeTruthy();
+  expect(ui.queryByText("replace_spark_plugs · car.main")).toBeNull();
   expect(ui.getByText("План, не свершившийся факт")).toBeTruthy();
-  expect(ui.getByText("Источник: «Свечи заменены в 2023»")).toBeTruthy();
+  expect(ui.getByText("Из источника: «Свечи заменены в 2023»")).toBeTruthy();
 });
 
 test("TIME-05: approximate and unknown time remain raw or explicitly unknown",()=>{

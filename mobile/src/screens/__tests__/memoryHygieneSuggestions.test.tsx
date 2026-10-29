@@ -93,6 +93,8 @@ test("CLEAN-01/02/07: read-only discovery reaches existing reviewed batch with e
   await openGroups(ui);
   expect(mockDiscover).toHaveBeenCalledWith(100);
   expect(ui.getByText(/Анализ ограничен/)).toBeTruthy();
+  expect(ui.getByText("Совпала исходная ссылка; тексты и заметки могут отличаться.")).toBeTruthy();
+  expect(ui.getByText(/Найдено групп: 1/)).toBeTruthy();
   expect(mockRepo.changeNotes).not.toHaveBeenCalled();
   fireEvent.press(ui.getByLabelText("Проверить группу: Одна сохранённая ссылка — разные записи, записей 2"));
   await waitFor(() => ui.getByLabelText("Исключить из ревизии Запись first"));
@@ -125,4 +127,19 @@ test("SEC-04: lock clears suggestions and prevents applying a late result", asyn
   await act(async () => { mockUnlocked = false; mockSessionChange(false); });
   expect(ui.queryByText("Одна сохранённая ссылка — разные записи")).toBeNull();
   expect(mockRepo.changeNotes).not.toHaveBeenCalled();
+});
+
+test("U-M10: read-later group is described as an optional review, not useless content", async () => {
+  const later = { ...group, reason: "marked_read_later",
+    title: "Отмечено «Посмотреть/прочитать позже»" };
+  mockDiscover.mockResolvedValueOnce({groups: [later],scanned: 2,partial: false});
+  const ui = render(<LocalMemoryScreen />);
+  await waitFor(() => expect(mockRepo.searchNotes).toHaveBeenCalled());
+  fireEvent.press(ui.getByLabelText("Меню памяти"));
+  fireEvent.press(ui.getByLabelText("Найти группы для проверки памяти"));
+  await waitFor(() => expect(ui.getByText(
+    "Отмечено «прочитать/посмотреть позже»; интерес к материалам не оценивался.",
+  )).toBeTruthy());
+  expect(mockRepo.changeNotes).not.toHaveBeenCalled();
+  expect(ui.queryByText(/Анализ ограничен/)).toBeNull();
 });
