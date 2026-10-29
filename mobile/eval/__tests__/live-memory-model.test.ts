@@ -66,7 +66,7 @@ function chosenSuite():EvaluationDialogue[]{
   if(suite==="smoke"){
     const chosen=["NATURAL-car-oil-25","NATURAL-recipe-pancakes",
       "NATURAL-web-llm","NATURAL-home-cables","NATURAL-med-maria-cbc",
-      "EXTRA-CAR-COMPARE","EXTRA-RECIPE-TWO","EXTRA-HOME-UNTAGGED",
+      "EXTRA-CAR-LAST-OIL","EXTRA-RECIPE-TWO","EXTRA-HOME-UNTAGGED",
       "EXTRA-WEB-NOT-INVENT","EXTRA-MED-ISOLATION"];
     return chosen.map(id=>{
       const scenario=NATURAL_DIALOGUES.find(s=>s.id===id);
