@@ -7,6 +7,8 @@ import {createHash,randomUUID} from "node:crypto";
 import {SqliteMemoryRepository} from "../../src/local-memory/repository";
 import {SCHEMA_SQL} from "../../src/local-memory/storage";
 import {searchApprovedNotes,readApprovedNote} from "../../src/direct-agent/memory";
+import {saveExtractionRun,extractionEvidence} from "../../src/local-memory/extractions";
+import {listApprovedSourceSegments} from "../../src/local-memory/source-retrieval";
 import {CASES,type DomainCase} from "../domain-fixtures";
 
 jest.mock("expo-crypto",()=>({
@@ -223,4 +225,56 @@ test("PRIVATE-SCOPE: archive/reclassify never make test medical notes exportable
   expect((await searchApprovedNotes("fixture","ЛБ-202",f.repo)).map(x=>x.id)).not.toContain(id);
   await f.repo.setEntityStatus(id,2,"archived");
   expect((await f.repo.searchMemory("ЛБ-202",{sensitivities:["sensitive","inherit"]})).map(x=>x.entity.id)).not.toContain(id);
+});
+
+
+test("MED/CAR PDF: independently owned original reports, stated page and unknown coordinates",async()=>{
+  const samples=[
+    {key:"car-brakes",filename:"repair.pdf",text:"Колoдки: акт РТ-481",page:2},
+    {key:"med-maria-cbc",filename:"cbc-maria.pdf",text:"Мария, гемоглобин 126 г/л",page:1},
+    {key:"med-dmitry-cbc",filename:"cbc-dmitry.pdf",text:"Дмитрий, гемоглобин 155 г/л",page:3},
+  ];
+  for(const spec of samples){
+    const id=f.ids.get(spec.key)!,attachmentId=randomUUID();
+    const bytes=Uint8Array.from(Buffer.from("%PDF-1.4\nfixture-"+spec.key));
+    const hash=createHash("sha256").update(bytes).digest("hex");
+    await f.sql.runAsync("INSERT INTO memory_attachments(id,entity_id,name,mime,size,created_at) VALUES (?,?,?,?,?,?)",
+      [attachmentId,id,spec.filename,"application/pdf",bytes.length,"2026-10-29"]);
+    await f.sql.runAsync("INSERT INTO memory_attachment_parts(attachment_id,ord,bytes,sha256) VALUES (?,?,?,?)",
+      [attachmentId,0,bytes,hash]);
+    await saveExtractionRun(f.sql as never,{
+      attachmentId,producerKind:"pdf",producerId:"fixture-pdf",producerRevision:"v1",
+      coverage:"partial",status:"partial",language:"ru",
+      segments:[
+        {text:spec.text,location:{kind:"page",page:spec.page}},
+        {text:"Дополнительное поле без подтверждённого номера страницы",location:{kind:"unknown"}},
+      ],
+    });
+    const local=await extractionEvidence(f.sql as never,id,attachmentId);
+    expect(local).toHaveLength(1);
+    expect(local[0].segments.map(x=>x.location)).toEqual([
+      {kind:"page",page:spec.page},{kind:"unknown"},
+    ]);
+    const wrongOwner=f.ids.get(spec.key==="car-brakes"?"med-maria-cbc":"car-brakes")!;
+    expect(await extractionEvidence(f.sql as never,wrongOwner,attachmentId)).toEqual([]);
+    await expect(listApprovedSourceSegments(f.sql as never,id,1))
+      .rejects.toThrow("memory_source_not_available_or_stale");
+    // This test uses a PDF-like byte fixture, NOT actual PDF parser/OCR quality.
+    expect((await f.sql.getFirstAsync<{n:number}>(
+      "SELECT count(*) AS n FROM memory_attachment_parts WHERE attachment_id=?",[attachmentId]))!.n).toBe(1);
+  }
+});
+
+test("MED-FAMILY correction does not modify another person's lab original or history",async()=>{
+  const mariaId=f.ids.get("med-maria-vit")!,alexId=f.ids.get("med-me-chol")!;
+  const alex=(await f.repo.entity(alexId))!,maria=(await f.repo.entity(mariaId))!;
+  await f.repo.reviseEntity(mariaId,1,{
+    ...maria.payload,body:"Пациент Мария, витамин D 33 нг/мл; пользователь исправил опечатку бланка.",
+  },"Исправление значения по бумажному оригиналу");
+  expect((await f.repo.entity(alexId))!.payload.body).toBe(alex.payload.body);
+  expect((await f.repo.entity(mariaId))!.payload.body).toContain("33 нг/мл");
+  expect((await f.repo.revisions("entity",mariaId))).toHaveLength(1);
+  expect((await f.repo.revisions("entity",alexId))).toHaveLength(0);
+  expect((await f.repo.relationsForEntity(mariaId)).map(x=>x.target_entity_id))
+    .toEqual([f.people.get("person-maria")!]);
 });
