@@ -1357,7 +1357,7 @@ function candidateFromSource(source:{id:string;record_version:number},changes:Pa
     cardinality:"single",occurredOrStarted:boundTime("2021","year"),
     ended:null,endConfirmed:false,recordedAt:"2026-01-01T09:00:00.000Z",
     evidence:{entityId:source.id,recordVersion:source.record_version,
-      quote:"Я работал в А с 2021",origin:"direct"},
+      quote:"С 2021 работаю в А",origin:"direct"},
     ...changes,
   };
 }
@@ -1400,7 +1400,7 @@ test("TIME-01/02/08 and CAR-05: actual SQL distinguishes valid time, recording c
   const oldDocument=await repo.stageTypedTemporalFact(candidateFromSource(late,{
     value:"Историческая работа в Д",occurredOrStarted:boundTime("2019","year"),
     recordedAt:"2026-10-29T12:00:00.000Z",
-    evidence:{entityId:late.id,recordVersion:1,quote:"В 2019 работал в Д",origin:"direct"},
+    evidence:{entityId:late.id,recordVersion:1,quote:"Работа в Д закончилась в 2019",origin:"direct"},
   }));
   expect(oldDocument.proposalIds).toHaveLength(0);
   const history=await repo.temporalKnowledgeHistory({
@@ -1430,12 +1430,14 @@ test("CAR-01/05 and TIME-03/04: independent repairs and parallel/planned states 
     cardinality:"multiple",value:"Заменены свечи в 2025",
     occurredOrStarted:boundTime("2025-05-02"),
     recordedAt:"2026-03-01T12:00:00.000Z",
+    evidence:{entityId:first.id,recordVersion:1,quote:"Свечи в 2025",origin:"direct"},
   }));
   const two=await repo.stageTypedTemporalFact(candidateFromSource(second,{
     kind:"event",subjectId:"car-1",predicate:"spark_plugs",context:"engine",
     cardinality:"multiple",value:"Заменены свечи в 2023",
     occurredOrStarted:boundTime("2023-05-02"),
     recordedAt:"2026-10-29T12:00:00.000Z",
+    evidence:{entityId:second.id,recordVersion:1,quote:"Свечи в 2023",origin:"direct"},
   }));
   expect(one.proposalIds).toHaveLength(0);
   expect(two.proposalIds).toHaveLength(0);
@@ -1454,9 +1456,11 @@ test("CAR-01/05 and TIME-03/04: independent repairs and parallel/planned states 
   const planned=await repo.createEntity({collection_id:col.id,domain:"notes",payload:{body:"План работы"}});
   expect((await repo.stageTypedTemporalFact(candidateFromSource(part,{
     context:"secondary",cardinality:"multiple",value:"Подработка в В",
+    evidence:{entityId:part.id,recordVersion:1,quote:"Подработка",origin:"direct"},
   }))).proposalIds).toHaveLength(0);
   expect((await repo.stageTypedTemporalFact(candidateFromSource(planned,{
     modality:"planned",value:"План перейти в Г",
+    evidence:{entityId:planned.id,recordVersion:1,quote:"План работы",origin:"direct"},
   }))).proposalIds).toHaveLength(0);
   const states=await repo.temporalKnowledgeHistory({subjectId:"person-a",collectionId:col.id,mode:"states"});
   expect(states.items.map(x=>x.claim.modality)).toContain("planned");
@@ -1475,6 +1479,8 @@ test("SEC-01/06, TIME-08: temporal reader enforces current revision, active stat
     payload:{body:"Скрытая запись"},sensitivity:"sensitive"});
   const direct=(source:{id:string;record_version:number})=>candidateFromSource(source,{
     predicate:"residence",context:"actual",value:"Город Б",
+    evidence:{entityId:source.id,recordVersion:source.record_version,
+      quote:source.id===visible.id?"Живу в городе Б":source.id===hidden.id?"Личная запись":"Скрытая запись",origin:"direct"},
   });
   const ok=await repo.stageTypedTemporalFact(direct(visible));
   expect(ok.reviewScope).toBe("standard");
