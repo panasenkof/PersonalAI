@@ -5,7 +5,7 @@ import type { MemoryRepository } from "../local-memory/types";
 import { ensureSections, orderCollections } from "../local-memory/sections";
 
 import { memoryText, normalizeAlias as normalizeName } from "../local-memory/search-index";
-import { DEFAULT_SECTIONS, MAX_NOTE_BODY_CHARS, PROPOSABLE_KINDS, findSection, proposableSections } from "./fact-tool";
+import { DEFAULT_SECTIONS, MAX_NOTE_BODY_CHARS, PROPOSABLE_KINDS, findSection, proposableSections, validDate } from "./fact-tool";
 import type { MemorySection, NoteProposal } from "./fact-tool";
 
 /** `section` is the name of the memory section the note lives in. */
@@ -140,7 +140,7 @@ export async function readApprovedNote(
 export async function saveApprovedNote(
   profile: string, proposal: NoteProposal, repository?: MemoryRepository,
 ): Promise<string> {
-  const title = proposal.title.trim().slice(0, 160);
+  // The final approved writer must enforce the same calendar contract as the\n  // draft parser. A restored/stale caller may bypass the parser entirely.\n  if (proposal.date !== undefined && !validDate(proposal.date))\n    throw new Error("Некорректная дата события. Проверьте число, месяц и год.");\n  const title = proposal.title.trim().slice(0, 160);
   const body = proposal.body.trim();
   if (body.length > MAX_NOTE_BODY_CHARS) throw new Error("Заметка слишком длинная (максимум 60 000 символов). Разделите её на части.");
   if (!title && !body) throw new Error("Пустую заметку сохранить нельзя");
