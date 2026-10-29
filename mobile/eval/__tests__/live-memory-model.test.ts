@@ -68,7 +68,7 @@ function realHttpsTransport(input:RequestInfo|URL,init?:RequestInit):Promise<Res
   const body=init?.body;
   if(typeof body!=="string")throw Error("LIVE_EVAL_INVALID_JSON_BODY");
   const method=init?.method||"POST",headers=init?.headers as Record<string,string>;
-  const signal=init?.signal;
+  const signal=init?.signal||undefined;
   return new Promise<Response>((resolve,reject)=>{
     const request=httpsRequest(target,{
       method,headers:{...headers,"Content-Length":Buffer.byteLength(body)},signal,
