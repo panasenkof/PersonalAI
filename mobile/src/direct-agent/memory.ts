@@ -1,6 +1,7 @@
 import { memoryDisplayTitle } from "../design/nebula/memoryNotePresentation";
 import { localMemoryRepository, SqliteMemoryRepository } from "../local-memory/repository";
 import { withLocalMemoryDatabase } from "../local-memory/storage";
+import { withUnlockedTransaction } from "../local-memory/transaction";
 import type { MemoryRepository } from "../local-memory/types";
 import { ensureSections, orderCollections } from "../local-memory/sections";
 
@@ -48,43 +49,57 @@ export async function searchApprovedNotes(
   embed: QueryEmbedder | undefined = repository ? undefined : deviceEmbedder,
 ): Promise<MemorySnippet[]> {
   if (query.trim().length < 2) return [];
-  const db = repository || await localMemoryRepository(profile);
-  const collections = await db.listCollections();
-  // Only explicitly standard collections may leave the device. Never share
-  // unclassified, sensitive or secret content through cloud-model tools.
-  const standards = collections.filter(c => c.sensitivity === "standard").map(c => c.id);
-  if (!standards.length) return [];
+  // Native embeddings may be slow and must never run while SQLCipher is
+  // holding its write transaction. A preflight can skip work for profiles
+  // with no standard collections, but it is NEVER a permission grant.
+  if (!repository) {
+    const preflight=await (await localMemoryRepository(profile)).listCollections();
+    if (!preflight.some(c=>c.sensitivity==="standard")) return [];
+  }
   const values = embed ? await embed(query.trim().slice(0, 500)).catch(() => null) : null;
-  // An injected test embedder does not carry a verifiable model identity.
-  // Only native, locally verified artifacts are allowed into production
-  // semantic search; otherwise fall back to permission-filtered FTS.
+  // An injected embedder has no verifiable native model identity. Its values
+  // can never authorize or bypass the current collection/record ACL.
   const space = values && !repository
     ? await (require("../media/embedder") as typeof import("../media/embedder"))
         .verifiedVectorSpace().catch(() => null)
     : null;
-  const hits = await db.searchMemory(query, { collectionIds: standards, sensitivities: ["standard", "inherit"], limit: 5,
-    ...(values && space ? { vector: { model: space, values } } : {}) });
-  const allowed = hits.filter(({ entity }) => standards.includes(entity.collection_id) && entity.record_status === "active" &&
-    ["standard", "inherit"].includes(entity.sensitivity));
-  let remaining = MAX_CONTEXT_NOTE_CHARS;
-  return allowed.map(({ entity, chunk }, index) => {
-    const section = collections.find(c => c.id === entity.collection_id)?.name;
-    const body = memoryText(entity.payload);
-    // Reserve room for the matching excerpt of every later result, even if the
-    // first notes are long. Never present an excerpt as the complete stored note.
-    const available = Math.max(0, remaining - (allowed.length - index - 1) * EXCERPT_CHARS);
-    const complete = body.length <= FULL_NOTE_CHARS && body.length <= available;
-    const text = complete ? body : (chunk || body).slice(0, Math.min(EXCERPT_CHARS, available));
-    remaining -= text.length;
-    return {
-      id: entity.id,
-      ...(typeof entity.record_version === "number" ? { version: entity.record_version } : {}),
-      title: memoryDisplayTitle(entity).slice(0, 160),
-      body: text,
-      ...(complete ? {} : { excerptOnly: true, totalChars: body.length }),
-      ...(section ? { section: section.slice(0, 60) } : {}),
-    };
-  });
+  const read=async(db:MemoryRepository):Promise<MemorySnippet[]>=>{
+    // This list and ALL subsequent FTS/vector/linked-person reads are within
+    // the SAME unlocked SQLCipher snapshot on the real device. A collection
+    // reclassified mid-query cannot become a stale privacy grant.
+    const collections=await db.listCollections();
+    const standards=collections.filter(c=>c.sensitivity==="standard").map(c=>c.id);
+    if(!standards.length)return [];
+    const hits=await db.searchMemory(query,{
+      collectionIds:standards,sensitivities:["standard","inherit"],limit:5,
+      ...(values&&space?{vector:{model:space,values}}:{}),
+    });
+    const allowed=hits.filter(({entity})=>standards.includes(entity.collection_id)&&
+      entity.record_status==="active"&&["standard","inherit"].includes(entity.sensitivity));
+    let remaining=MAX_CONTEXT_NOTE_CHARS;
+    return allowed.map(({entity,chunk},index)=>{
+      const section=collections.find(c=>c.id===entity.collection_id)?.name;
+      const body=memoryText(entity.payload);
+      const available=Math.max(0,remaining-(allowed.length-index-1)*EXCERPT_CHARS);
+      const complete=body.length<=FULL_NOTE_CHARS&&body.length<=available;
+      const text=complete?body:(chunk||body).slice(0,Math.min(EXCERPT_CHARS,available));
+      remaining-=text.length;
+      return {
+        id:entity.id,
+        ...(typeof entity.record_version==="number"?{version:entity.record_version}:{}),
+        title:memoryDisplayTitle(entity).slice(0,160),
+        body:text,
+        ...(complete?{}:{excerptOnly:true,totalChars:body.length}),
+        ...(section?{section:section.slice(0,60)}:{}),
+      };
+    });
+  };
+  if(repository)return read(repository); // Test-only injection; production uses the atomic lease below.
+  let result:MemorySnippet[]=[];
+  await withLocalMemoryDatabase(profile,db=>withUnlockedTransaction(db,async tx=>{
+    result=await read(new SqliteMemoryRepository(tx));
+  }));
+  return result;
 }
 
 export type ReadMemoryEvidence = {
@@ -133,8 +148,14 @@ export async function readApprovedNote(
         originalPage: null, originalTime: null },
     };
   };
-  if (repository) return read(repository);
-  return withLocalMemoryDatabase(profile, db => read(new SqliteMemoryRepository(db)));
+  if (repository) return read(repository); // Controlled test injection.
+  // An original must be read and reauthorized in one snapshot. A collection
+  // privacy switch between entity() and listCollections() is never a grant.
+  let result!:ReadMemoryEvidence;
+  await withLocalMemoryDatabase(profile,db=>withUnlockedTransaction(db,async tx=>{
+    result=await read(new SqliteMemoryRepository(tx));
+  }));
+  return result;
 }
 
 export async function saveApprovedNote(
