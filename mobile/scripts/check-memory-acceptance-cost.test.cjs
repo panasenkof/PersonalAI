@@ -3,7 +3,8 @@ const test=require("node:test");
 const assert=require("node:assert/strict");
 const fs=require("node:fs");
 const path=require("node:path");
-const {check,checkQuick,checkNativeSeparation}=require("./check-memory-acceptance-cost.cjs");
+const os=require("node:os");
+const {check,checkQuick,checkNativeSeparation,checkTrackedDefaultModelLimit}=require("./check-memory-acceptance-cost.cjs");
 const goodWorkflow=[
   "name: Manual memory check",
   "on:",
@@ -113,4 +114,25 @@ test("Android build cannot silently disappear from required main CI",()=>{
     "needs: [changes, mobile, native]","needs: [changes, mobile]")));
   assert.throws(()=>checkNativeSeparation(manualAcceptance,mainCi.replace(
     'test "$NATIVE" = success','true')));
+});
+
+
+test("repository-wide four-call check catches stale UI/defaults but allows historical values",()=>{
+  const directory=fs.mkdtempSync(path.join(os.tmpdir(),"persai-call-limit-audit-"));
+  const file=path.join(directory,"case.js");
+  const fakeGit=()=>Buffer.from("case.js\0");
+  try{
+    for(const source of [
+      'const MAX_REQUESTS_PER_TURN=4;',
+      'export const DEFAULT_MODEL_CALL_LIMIT = 4;',
+      "assert.equal(await limitInput.inputValue(), '4');",
+      "status?.textContent?.includes('(1/4)') && status?.getAttribute('data-testid') === 'nebula-home-status';",
+      'test("the default is four calls",()=>{})',
+    ]){
+      fs.writeFileSync(file,source);
+      assert.throws(()=>checkTrackedDefaultModelLimit(directory,fakeGit),/Stale four-call default/);
+    }
+    fs.writeFileSync(file,'// Historical run: 4 FAIL. This test can finish beyond the old four-call limit.\nconst model="gpt-4.1";');
+    assert.deepEqual(checkTrackedDefaultModelLimit(directory,fakeGit).stale,[]);
+  }finally{fs.rmSync(directory,{recursive:true,force:true});}
 });
