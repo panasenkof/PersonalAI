@@ -7,7 +7,7 @@ jest.mock("../profile/ProfileContext", () => ({ useProfile: () => "guest" }));
 jest.mock("../components/Collapsible", () => ({ Collapsible: ({ children, summary }: any) => { const { View, Text } = require("react-native"); return <View><Text>{summary}</Text>{children}</View>; } }));
 jest.mock("../direct-agent/agent-preferences", () => ({ loadModelCallLimit: jest.fn(), saveModelCallLimit: jest.fn() }));
 beforeEach(() => {
-  jest.clearAllMocks(); (loadModelCallLimit as jest.Mock).mockResolvedValue(4); (saveModelCallLimit as jest.Mock).mockResolvedValue(undefined);
+  jest.clearAllMocks(); (loadModelCallLimit as jest.Mock).mockResolvedValue(5); (saveModelCallLimit as jest.Mock).mockResolvedValue(undefined);
 });
 const input = "Лимит обращений к LLM на сообщение";
 const save = "Сохранить лимит обращений к LLM";
@@ -35,7 +35,7 @@ test("a failed save keeps the old saved summary and allows retry", async () => {
   const v = render(<AgentLimitsCard />); await waitFor(() => expect(v.getByLabelText(input).props.editable).toBe(true));
   fireEvent.changeText(v.getByLabelText(input), "8"); fireEvent.press(v.getByLabelText(save));
   await waitFor(() => v.getByText(/Прежнее значение остаётся/));
-  expect(v.getByText("До 4 обращений к LLM на сообщение")).toBeTruthy();
+  expect(v.getByText("До 5 обращений к LLM на сообщение")).toBeTruthy();
   fireEvent.press(v.getByLabelText(save)); await waitFor(() => v.getByText(/Лимит сохранён/));
   expect(v.getByText("До 8 обращений к LLM на сообщение")).toBeTruthy();
 });
