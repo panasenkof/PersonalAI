@@ -1586,3 +1586,108 @@ test("TIME-01/08, SAVE-05: historical knowledge replays accepted end and undo wi
     knowledgeAt:"2026-08-01T00:00:00.000Z"});
   expect(hidden.items.map(x=>x.claim.value)).toEqual(["Работа в Б"]);
 });
+
+
+/** M4/C1 acceptance: genuine node:sqlite + one repository + actual agent
+ * approval/search/read flow. This is not an LLM answer or physical C2.
+ * No second store, mock search result or new reading API is introduced.
+ */
+test("DOC-08 / SEARCH-06: approved recipe → one search → versioned evidence read, never private text or counts",async()=>{
+  const {saveApprovedNote,searchApprovedNotes,readApprovedNote}=require("../../direct-agent/memory");
+  const sql=new FakeSqlite(),repo=new SqliteMemoryRepository(sql as never);
+  const firstId=await saveApprovedNote("guest",{
+    title:"Рецепт тыквенного супа",body:"Для супа использую кардамон и имбирь.",
+    section:"notes",kind:"note",
+  },repo);
+  const secondId=await saveApprovedNote("guest",{
+    title:"Второй рецепт",body:"В этом варианте только кориандр и тмин.",
+    section:"notes",kind:"note",
+  },repo);
+  const privateSection=await repo.createCollection({
+    name:"Закрытые заметки",slug:"private-recipes",sensitivity:"sensitive",
+  });
+  const secret=await repo.createEntity({
+    collection_id:privateSection.id,domain:"notes",title:"Кардамон",
+    payload:{title:"Кардамон",body:"Приватный секретный кардамон"},
+    sensitivity:"sensitive",
+  });
+  const hits=await searchApprovedNotes("guest","кардамон",repo);
+  expect(hits.map((item:{id:string})=>item.id)).toEqual([firstId]);
+  expect(hits.map((item:{id:string})=>item.id)).not.toContain(secret.id);
+  expect(hits.map((item:{id:string})=>item.id)).not.toContain(secondId);
+  const evidence=await readApprovedNote("guest",hits[0].id,hits[0].version,0,4000,repo);
+  expect(evidence).toMatchObject({
+    id:firstId,revision:1,title:"Рецепт тыквенного супа",
+    source:{recordId:firstId,sourceRef:"device-approved-agent",location:"unknown"},
+    evidence:{recordId:firstId,recordVersion:1,startChar:0,coverage:"complete",
+      originalPage:null,originalTime:null},
+  });
+  expect(evidence.content).toContain("кардамон");
+  expect(evidence.evidence.endChar).toBe(evidence.content.length);
+  // A search hit is NOT an authorization to read a different/closed record.
+  await expect(readApprovedNote("guest",secret.id,secret.record_version,0,4000,repo))
+    .rejects.toThrow("memory_read_not_available");
+  // Reject an old search result after source revision; its source char offsets
+  // and word hits must never be passed off as evidence of the new revision.
+  const current=(await repo.entity(firstId))!;
+  const revised=await repo.reviseEntity(firstId,current.record_version,
+    {...current.payload,body:"Тыквенный суп теперь готовлю без специи, с укропом."},
+    "Исправил рецепт сам");
+  await expect(readApprovedNote("guest",firstId,hits[0].version,0,4000,repo))
+    .rejects.toThrow("stale_memory_version");
+  expect(await searchApprovedNotes("guest","кардамон",repo)).toEqual([]);
+  const fixed=await searchApprovedNotes("guest","укропом",repo);
+  expect(fixed.map((item:{id:string})=>item.id)).toEqual([firstId]);
+  expect((await readApprovedNote("guest",firstId,revised.record_version,0,4000,repo)).content)
+    .toContain("укропом");
+});
+
+test("SEARCH-06 / SEC-08: revoked ACL and archived source cannot be read after a valid search",async()=>{
+  const {saveApprovedNote,searchApprovedNotes,readApprovedNote}=require("../../direct-agent/memory");
+  const sql=new FakeSqlite(),repo=new SqliteMemoryRepository(sql as never);
+  const id=await saveApprovedNote("guest",{
+    title:"Покупка билетов",body:"Билеты на выставку сохранены в папке.",
+    section:"notes",kind:"note",
+  },repo);
+  const found=await searchApprovedNotes("guest","выставку",repo);
+  expect(found.map((x:{id:string})=>x.id)).toContain(id);
+  expect((await readApprovedNote("guest",id,found[0].version,0,100,repo)).content)
+    .toContain("выставку");
+  await sql.runAsync("UPDATE memory_entities SET sensitivity='secret' WHERE id=?",[id]);
+  await expect(readApprovedNote("guest",id,found[0].version,0,100,repo))
+    .rejects.toThrow("memory_read_not_available");
+  expect(await searchApprovedNotes("guest","выставку",repo)).toEqual([]);
+  // Even a previously standard source is unreadable immediately after archive.
+  await sql.runAsync("UPDATE memory_entities SET sensitivity='standard' WHERE id=?",[id]);
+  await repo.setEntityStatus(id,1,"archived");
+  await expect(readApprovedNote("guest",id,2,0,100,repo))
+    .rejects.toThrow("memory_read_not_available");
+  expect(await searchApprovedNotes("guest","выставку",repo)).toEqual([]);
+});
+
+test("DOC-08: bounded source read covers a long note exactly without fabricating page or timestamp",async()=>{
+  const {saveApprovedNote,searchApprovedNotes,readApprovedNote}=require("../../direct-agent/memory");
+  const repo=new SqliteMemoryRepository(new FakeSqlite() as never);
+  const body="Начало. "+("подробность ".repeat(1500))+"В конце рецепта добавьте шафран.";
+  const id=await saveApprovedNote("guest",{
+    title:"Большой рецепт",body,section:"notes",kind:"note",
+  },repo);
+  const found=await searchApprovedNotes("guest","шафран",repo);
+  expect(found.map((x:{id:string})=>x.id)).toContain(id);
+  expect(found[0].excerptOnly).toBe(true);
+  const chunks:string[]=[];
+  let offset=0,hasMore=true;
+  while(hasMore){
+    const proof=await readApprovedNote("guest",id,found[0].version,offset,4000,repo);
+    expect(proof.evidence).toMatchObject({
+      recordId:id,recordVersion:1,startChar:offset,
+      originalPage:null,originalTime:null,
+    });
+    expect(proof.offset).toBe(offset);
+    chunks.push(proof.content);
+    hasMore=proof.hasMore;
+    offset=proof.nextOffset??offset+proof.content.length;
+  }
+  expect(chunks.join("")).toBe(body);
+  expect(offset).toBe(body.length);
+});
