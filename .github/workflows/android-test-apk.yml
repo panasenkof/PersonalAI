@@ -34,6 +34,9 @@ jobs:
       # Phones are arm64; skipping emulator ABIs halves native compile time.
       ORG_GRADLE_PROJECT_reactNativeArchitectures: arm64-v8a
       RNET_TARGET: android-arm64-v8a
+      CCACHE_COMPILERCHECK: content
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      CCACHE_MAXSIZE: 768M
       # Stable Android identity. Ignore mutable repository Actions Variables.
       PIA_ANDROID_PACKAGE: com.persai.app
       TARGET_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
@@ -105,6 +108,29 @@ jobs:
         with:
           cache-read-only: false
 
+      - name: Restore trusted arm64 C/C++ compiler cache
+        if: steps.changes.outputs.needed == 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/ccache
+          key: ${{ runner.os }}-persai-native-ccache-arm64-v8a-v1-${{ hashFiles('mobile/package-lock.json') }}-${{ github.run_id }}
+          restore-keys: |
+            ${{ runner.os }}-persai-native-ccache-arm64-v8a-v1-${{ hashFiles('mobile/package-lock.json') }}-
+      - name: Install and prepare C/C++ compiler cache
+        if: steps.changes.outputs.needed == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v ccache >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends ccache
+          fi
+          launcher="$(command -v ccache)"
+          test -x "$launcher"
+          echo "PERSAI_CCACHE_BIN=$launcher" >> "$GITHUB_ENV"
+          ccache --zero-stats
+          ccache --version | head -n 1
+
       - uses: android-actions/setup-android@v3
         if: steps.changes.outputs.needed == 'true'
         with:
@@ -162,7 +188,14 @@ jobs:
           PIA_ANDROID_KEY_ALIAS: ${{ secrets.PIA_ANDROID_KEY_ALIAS }}
           PIA_ANDROID_STORE_PASSWORD: ${{ secrets.PIA_ANDROID_STORE_PASSWORD }}
           PIA_ANDROID_KEY_PASSWORD: ${{ secrets.PIA_ANDROID_KEY_PASSWORD }}
-        run: ./gradlew :app:assembleRelease --build-cache --no-configuration-cache --no-daemon --stacktrace
+        run: ./gradlew :app:assembleRelease --init-script ../scripts/ci-native-ccache.init.gradle --build-cache --no-configuration-cache --no-daemon --stacktrace
+
+      - name: Verify compiler cache wiring and report C/C++ hit rate
+        if: steps.changes.outputs.needed == 'true'
+        working-directory: mobile
+        run: |
+          node scripts/verify-native-ccache.cjs
+          ccache --show-stats
 
       - name: Verify APK, embedded JS and signing certificate
         if: steps.changes.outputs.needed == 'true'
@@ -240,3 +273,11 @@ jobs:
               --title "Android test ${TAG}" --notes-file "$RUNNER_TEMP/apk-notes.md" \
               --target "$TARGET_SHA" --prerelease
           fi
+
+      # Never cache signing material or compiled APKs, only native object files.
+      - name: Save trusted arm64 C/C++ compiler cache
+        if: ${{ steps.changes.outputs.needed == 'true' && success() }}
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/ccache
+          key: ${{ runner.os }}-persai-native-ccache-arm64-v8a-v1-${{ hashFiles('mobile/package-lock.json') }}-${{ github.run_id }}
