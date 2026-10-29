@@ -28,7 +28,8 @@ const goodLive=[
   "const MAX_PAID_OUTPUT_TOKENS=512;",
   "const MAX_PAID_INPUT_CHARS=24000;",
   "payload.max_tokens=Math.min(payload.max_tokens,MAX_PAID_OUTPUT_TOKENS);",
-  "const MAX_PAID_API_CALLS=240;",
+  "const MAX_PAID_API_CALLS=400;",
+  "const MAX_REQUESTS_PER_TURN=5;",
   "const budget=Math.min(MAX_PAID_API_CALLS,totalTurns*MAX_REQUESTS_PER_TURN);",
   "if(totalPaidCalls>=budget)throw Error(\"budget\");",
   "maxRequests:MAX_REQUESTS_PER_TURN"
@@ -50,7 +51,8 @@ test("only an explicit manual true checkbox enables paid tests",()=>{
   assert.throws(()=>check(guardedWorkflow.replace("inputs.live_llm == true","true"),guardedLive));
   assert.throws(()=>check(guardedWorkflow.replace("PERSAI_EVAL_LIVE_LLM_APPROVED: ${{ inputs.live_llm }}","PERSAI_EVAL_LIVE_LLM_APPROVED: true"),guardedLive));
   assert.throws(()=>check(guardedWorkflow,guardedLive.replace('PERSAI_EVAL_LIVE_LLM_APPROVED==="true"',"Boolean(PERSAI_EVAL_LLM_API_KEY)")));
-  assert.throws(()=>check(guardedWorkflow,guardedLive.replace("const MAX_PAID_API_CALLS=240;","const MAX_PAID_API_CALLS=9999;")));
+  assert.throws(()=>check(guardedWorkflow,guardedLive.replace("const MAX_PAID_API_CALLS=400;","const MAX_PAID_API_CALLS=9999;")));
+  assert.throws(()=>check(guardedWorkflow,guardedLive.replace("const MAX_REQUESTS_PER_TURN=5;","const MAX_REQUESTS_PER_TURN=20;")));
 });
 
 test("live transport cannot fall back to Jest global fetch",()=>{
