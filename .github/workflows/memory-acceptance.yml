@@ -86,7 +86,8 @@ jobs:
 
   live-model:
     name: Optional blind real-model evaluation
-    needs: [deterministic, android]
+    # Run independently, in parallel with SQL/Android jobs. A live LLM failure
+    # must become visible before the APK/emulator build finishes.
     # Never paid on a schedule or as a side effect of setting API credentials.
     # Both manual toggle and exact typed acknowledgement are mandatory.
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.live_llm == true && inputs.paid_confirmation == 'RUN_PAID_LLM' }}
@@ -113,7 +114,11 @@ jobs:
           else
             echo 'enabled=false' >> "$GITHUB_OUTPUT"
             echo 'Live LLM: NOT RUN (add GitHub Actions secret PERSAI_EVAL_LLM_API_KEY and repo variables PERSAI_EVAL_LLM_BASE_URL / PERSAI_EVAL_LLM_MODEL).' >> "$GITHUB_STEP_SUMMARY"
+            exit 1
           fi
+      - name: Check real LLM access before installing npm dependencies (one paid call)
+        if: steps.setup.outputs.enabled == 'true'
+        run: node scripts/check-llm-access.cjs
       - uses: actions/setup-node@v4
         if: steps.setup.outputs.enabled == 'true'
         with:
