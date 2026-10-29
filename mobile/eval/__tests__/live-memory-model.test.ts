@@ -9,6 +9,7 @@
  */
 import * as fs from "node:fs";
 import {request as httpsRequest} from "node:https";
+import {Buffer} from "node:buffer";
 import {ModelRequestError} from "../../src/direct-agent/net";
 import {runDirectAgent,type AgentTurn} from "../../src/direct-agent/engine";
 import {searchApprovedNotes,readApprovedNote} from "../../src/direct-agent/memory";
@@ -70,7 +71,7 @@ function realHttpsTransport(input:RequestInfo|URL,init?:RequestInit):Promise<Res
   const signal=init?.signal;
   return new Promise<Response>((resolve,reject)=>{
     const request=httpsRequest(target,{
-      method,headers,signal,
+      method,headers:{...headers,"Content-Length":Buffer.byteLength(body)},signal,
     },response=>{
       const chunks:Buffer[]=[];
       let bytes=0;
