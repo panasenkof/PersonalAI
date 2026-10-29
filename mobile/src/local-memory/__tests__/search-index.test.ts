@@ -71,7 +71,7 @@ test("conditional missing source is not a negative fact; declension probes stay 
   expect(requiredSearchEvidence("Если в 2024 записи нет, проверь 2025.")).toEqual(["2025"]);
   expect(requiredSearchEvidence("Кто не любит кофе в 2025 году?")).toEqual(["не любит","2025"]);
   expect(searchSteps("мультиметр статья")).toContainEqual({
-    term:"мультиметр",prefix:true,weight:3,
+    term:"мультиметр",prefix:true,weight:4,
   });
   expect(searchSteps("мультиметре").some(x=>x.term==="мультиметр"&&x.prefix)).toBe(true);
   expect(searchSteps("Кто любит кофе?").some(x=>x.term==="коф"&&x.prefix&&!x.column)).toBe(false);
