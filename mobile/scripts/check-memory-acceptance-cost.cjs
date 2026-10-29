@@ -50,23 +50,23 @@ function check(workflow,liveTest){
   const liveHeader=workflow.split("\n  live-model:\n")[1]?.split("\n    steps:\n")[0]||"";
   assert.doesNotMatch(liveHeader,/\$\{\{\s*runner\.temp\s*\}\}/,
     "runner.temp must not be referenced by job-level env");
-  assert.doesNotMatch(liveHeader,/\\bneeds:/,
+  assert.doesNotMatch(liveHeader,/\bneeds:/,
     "Paid LLM job must not wait for the Android build");
-  assert.match(workflow,/run: node scripts\\/check-llm-access\\.cjs/,
+  assert.match(workflow,/run: node scripts\/check-llm-access\.cjs/,
     "Paid LLM job must check provider connectivity before npm installation");
 
   return true;
 }
 function checkQuick(workflow){
-  const triggers=workflow.split(/\\npermissions:|\\njobs:/)[0];
-  assert.match(triggers,/\\non:\\s*\\n\\s+workflow_dispatch:/,
+  const triggers=workflow.split(/\npermissions:|\njobs:/)[0];
+  assert.match(triggers,/\non:\s*\n\s+workflow_dispatch:/,
     "Quick paid connection check must be manual only");
-  assert.doesNotMatch(triggers,/^\\s*(?:push|schedule|cron|pull_request|workflow_run|workflow_call)\\s*:/m);
-  assert.match(triggers,/\\blive_llm:/);
-  assert.match(triggers,/\\bpaid_confirmation:/);
-  assert.match(workflow,/github\\.event_name == 'workflow_dispatch' && inputs\\.live_llm == true && inputs\\.paid_confirmation == 'RUN_PAID_LLM'/);
-  assert.match(workflow,/run: node mobile\\/scripts\\/check-llm-access\\.cjs/);
-  assert.doesNotMatch(workflow,/npm ci|\\bgradle\\b|\\bmaestro\\b|mobile-native-sqlcipher/);
+  assert.doesNotMatch(triggers,/^\s*(?:push|schedule|cron|pull_request|workflow_run|workflow_call)\s*:/m);
+  assert.match(triggers,/\blive_llm:/);
+  assert.match(triggers,/\bpaid_confirmation:/);
+  assert.match(workflow,/github\.event_name == 'workflow_dispatch' && inputs\.live_llm == true && inputs\.paid_confirmation == 'RUN_PAID_LLM'/);
+  assert.match(workflow,/run: node mobile\/scripts\/check-llm-access\.cjs/);
+  assert.doesNotMatch(workflow,/npm ci|\bgradle\b|\bmaestro\b|mobile-native-sqlcipher/);
   return true;
 }
 if(require.main===module){
