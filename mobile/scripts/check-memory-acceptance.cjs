@@ -18,9 +18,9 @@ function validate(matrix, acceptance, fileExists=()=>true) {
   const required=idsIn(matrix), reported=idsIn(acceptance);
   assert.deepEqual(required,IDS,"The original 96 scenarios must remain complete and ordered");
   assert.deepEqual(reported,IDS,"Acceptance must cover all original 96 IDs once in order");
-  const rows=acceptance.split("\n").filter(line=>ID_PATTERN.test(line));
-  // The regexp is global, so reset before using it to filter another line.
-  ID_PATTERN.lastIndex=0;
+  // Avoid a stateful /g test() across separate lines (would skip rows).
+  const rows=acceptance.split("\n").filter(line=>
+    /^\|\s*(?:TIME|CAR|REL|MED|DOC|MEDIA|SEARCH|SAVE|SEC|CLEAN|BKP|ACT)-\d{2}\s*\|/.test(line));
   assert.equal(rows.length,96,"Exactly 96 acceptance rows required");
   for (const line of rows) {
     const cells=line.split("|").slice(1,-1).map(s=>s.trim());
