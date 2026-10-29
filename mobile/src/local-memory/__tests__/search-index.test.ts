@@ -64,6 +64,19 @@ test("a three-letter stem is searched only among index words and names", () => {
   expect(ftsPhrase("шеф", true, "terms")).toBe('{terms aliases} : "шеф"*');
 });
 
+test("conditional missing source is not a negative fact; declension probes stay bounded",()=>{
+  const {requiredSearchEvidence}=require("../query");
+  const q="Открой статью о мультиметре. Если полный текст не сохранился, скажи об этом.";
+  expect(requiredSearchEvidence(q)).toEqual([]);
+  expect(requiredSearchEvidence("Если в 2024 записи нет, проверь 2025.")).toEqual(["2025"]);
+  expect(requiredSearchEvidence("Кто не любит кофе в 2025 году?")).toEqual(["не любит","2025"]);
+  expect(searchSteps("мультиметр статья")).toContainEqual({
+    term:"мультиметр",prefix:true,weight:1,
+  });
+  expect(searchSteps("мультиметре").some(x=>x.term==="мультиметр"&&x.prefix)).toBe(true);
+  expect(searchSteps("Кто любит кофе?").some(x=>x.term==="коф"&&x.prefix)).toBe(false);
+});
+
 test("vectors: cosine, BLOB round trip and rank fusion", () => {
   const { cosine, toBlob, fromBlob, fuseRanks } = require("../vectors");
   const a = Float32Array.from([1, 0, 0]), b = Float32Array.from([0.6, 0.8, 0]);
