@@ -27,7 +27,9 @@ test.each(CASES)("NATURAL $id: blind natural-language question, evidence-only or
     expect(t.required).toEqual([row.id]);
     expect(t.policy).toBeUndefined();
     expect(t.match).toBeTruthy();
-    expect(()=>new RegExp(t.match,"i")).not.toThrow();
+    const answerPattern=t.match;
+    if(!answerPattern)throw Error("Missing expected answer for "+row.id);
+    expect(()=>new RegExp(answerPattern,"i")).not.toThrow();
   }else{
     expect(t.policy).toBe("withheld");
     expect(t.privateId).toBe(row.id);
