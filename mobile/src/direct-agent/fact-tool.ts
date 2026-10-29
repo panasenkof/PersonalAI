@@ -79,7 +79,7 @@ export function factGuide(sections: MemorySection[] = DEFAULT_SECTIONS): string 
 }
 export const FACT_GUIDE = factGuide();
 
-const validDate = (value: unknown): value is string => typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) &&
+export const validDate = (value: unknown): value is string => typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) &&
   !Number.isNaN(Date.parse(value + "T00:00:00Z")) && new Date(value + "T00:00:00Z").toISOString().startsWith(value);
 const text = (value: unknown, cap: number) => typeof value === "string" ? value.slice(0, cap).trim() : "";
 function optional(args: Record<string, unknown>) {
