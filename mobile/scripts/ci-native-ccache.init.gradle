@@ -1,0 +1,24 @@
+// CI-only CMake compiler launcher; do not patch generated Expo or node_modules files.
+// Android Gradle Plugin uses absolute NDK compiler paths, so PATH-based ccache
+// wrappers alone would not intercept C/C++ compilation.
+def launcher = System.getenv('PERSAI_CCACHE_BIN')
+if (!launcher || !new File(launcher).isFile() || !new File(launcher).canExecute()) {
+    throw new GradleException('PERSAI_CCACHE_BIN must point to an executable ccache')
+}
+
+gradle.beforeProject { project ->
+    ['com.android.application', 'com.android.library'].each { pluginId ->
+        project.plugins.withId(pluginId) {
+            def cmakeArgs = project.extensions.getByName('android')
+                .defaultConfig.externalNativeBuild.cmake.arguments
+            [
+                "-DCMAKE_C_COMPILER_LAUNCHER=${launcher}",
+                "-DCMAKE_CXX_COMPILER_LAUNCHER=${launcher}"
+            ].each { arg ->
+                // AGP/RN use List<String>; Groovy interpolation produces a GString.
+                String value = arg.toString()
+                if (!cmakeArgs.contains(value)) cmakeArgs.add(value)
+            }
+        }
+    }
+}

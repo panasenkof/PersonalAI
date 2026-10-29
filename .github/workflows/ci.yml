@@ -34,6 +34,7 @@ jobs:
           node --test mobile/scripts/check-memory-acceptance.test.cjs
           node mobile/scripts/check-nebula-references.cjs
           node --test mobile/scripts/ci-scope.test.cjs
+          node --test mobile/scripts/verify-native-ccache.test.cjs
           node --test mobile/scripts/classify-emulator-failure.test.cjs
           node mobile/scripts/ci-scope.cjs
 
