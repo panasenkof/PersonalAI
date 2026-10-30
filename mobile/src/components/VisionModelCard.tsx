@@ -69,7 +69,7 @@ export function VisionModelCard() {
               </Text>
             </View>
             <View style={{ height: 6, borderRadius: 3, backgroundColor: t.soft, overflow: "hidden" }}>
-              <View style={{ height: 6, width: String(state.progress) + "%",
+              <View style={{ height: 6, width: `${state.progress}%` as `${number}%`,
                 backgroundColor: t.secondary }} />
             </View>
             <Pressable accessibilityRole="button" accessibilityLabel="Отменить скачивание модели"
