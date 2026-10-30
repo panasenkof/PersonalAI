@@ -273,30 +273,13 @@ export class SqliteMemoryRepository implements MemoryRepository {
     return updated;
   }
 
+  /** Compatibility entry used by card/other clients; the only archive writer
+   * is changeNotes, which also records a durable, CAS-protected undo token. */
   async setEntityStatus(id: string, expectedVersion: number, status: "active" | "archived"): Promise<EntityRecord> {
     if (status !== "active" && status !== "archived") throw new Error("invalid_record_status");
-    let updated: EntityRecord | null = null;
-    await withUnlockedTransaction(this.db, async tx => {
-      const row = await tx.getFirstAsync<Row>("SELECT * FROM memory_entities WHERE id=?", [id]);
-      if (!row) throw new MemoryAccessError("entity_not_found");
-      const before = entityFrom(row);
-      if (before.record_version !== expectedVersion) throw new MemoryConflictError("stale_memory_version");
-      const timestamp = now();
-      const result = await tx.runAsync(
-        "UPDATE memory_entities SET record_status=?,record_version=record_version+1,updated_at=? WHERE id=? AND record_version=?",
-        [status, timestamp, id, expectedVersion],
-      );
-      if (result.changes !== 1) throw new MemoryConflictError("stale_memory_version");
-      const after = { ...before, record_status: status, record_version: before.record_version + 1, updated_at: timestamp };
-      await tx.runAsync(
-        `INSERT INTO memory_revisions(id,record_type,entity_id,observation_id,version,reason,actor_kind,before_json,after_json,created_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?)`,
-        [uid(), "entity", id, null, after.record_version, status === "archived" ? "Перенос в архив" : "Возврат из архива", "user", JSON.stringify(before), JSON.stringify(after), timestamp],
-      );
-      if (status === 'active') await markEntityVectorsDirty(tx, id, timestamp);
-      updated = after;
-    });
-    if (!updated) throw new Error("revision_not_committed");
+    await this.changeNotes(status === "archived" ? "archive" : "unarchive", [{ id, record_version: expectedVersion }]);
+    const updated = await this.entity(id);
+    if (!updated) throw new MemoryAccessError("entity_not_found");
     return updated;
   }
 
