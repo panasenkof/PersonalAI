@@ -1,0 +1,7 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+          xmlns:tools="http://schemas.android.com/tools">
+  <!-- MediaPipe transitively requests INTERNET in its library manifest.
+       This isolated ABI consumer must remain offline; remove the merged permission. -->
+  <uses-permission android:name="android.permission.INTERNET" tools:node="remove"/>
+  <application android:allowBackup="false" android:label="PersAI ABI Probe"/>
+</manifest>

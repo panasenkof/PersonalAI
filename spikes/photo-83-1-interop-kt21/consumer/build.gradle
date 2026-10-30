@@ -1,0 +1,43 @@
+plugins {
+  id 'com.android.application'
+  id 'org.jetbrains.kotlin.android'
+}
+android {
+  namespace 'com.persai.visioninteropconsumer'
+  compileSdk 35
+  defaultConfig {
+    applicationId 'com.persai.visioninteropconsumer'
+    minSdk 26
+    targetSdk 35
+  }
+  compileOptions {
+    sourceCompatibility JavaVersion.VERSION_17
+    targetCompatibility JavaVersion.VERSION_17
+  }
+  kotlinOptions { jvmTarget = '17' }
+}
+dependencies {
+  // LOCAL AAR is compiled separately with Kotlin 2.4.21. Its only public
+  // exposed method takes Android/Java types. No direct MediaPipe Kotlin
+  // dependency belongs on the consumer's Kotlin compile classpath.
+  // Compile against an API-only Java JAR created from the 2.4 AAR in CI.
+  // NO Kotlin 2.4 module metadata appears on the Kotlin 2.1 compile classpath.
+  compileOnly files('libs/vision-api.jar')
+  runtimeOnly files('../../photo-83-1-android/probe/build/outputs/aar/probe-debug.aar')
+
+  // Vendor SDK is packaged at runtime only. No transitive Kotlin 2.4 metadata
+  // is presented as a declared compile dependency to Kotlin 2.1.
+  runtimeOnly 'com.google.mediapipe:tasks-retrieval:1.1.0'
+  runtimeOnly 'com.google.ai.edge.litertlm:litertlm-android:0.18.0'
+}
+
+// Android Gradle links runtime-only LiteRT-LM and aligns its Kotlin stdlib
+// 2.4 *constraint* into debugCompileClasspath. The consumer compiler is
+// Kotlin 2.1, so keep its compile classpath on Kotlin stdlib 2.1.
+// At runtime the vendor still gets its required 2.4 stdlib. This is a
+// separate consumer-only experiment; never apply globally to Expo.
+configurations.configureEach { cfg ->
+  if (cfg.name.endsWith('CompileClasspath')) {
+    cfg.resolutionStrategy.force 'org.jetbrains.kotlin:kotlin-stdlib:2.1.20'
+  }
+}

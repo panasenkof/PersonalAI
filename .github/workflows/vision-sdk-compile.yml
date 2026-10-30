@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "spikes/photo-83-1-android/**"
+      - "spikes/photo-83-1-interop-kt21/**"
       - ".github/workflows/vision-sdk-compile.yml"
   workflow_dispatch:
 
@@ -70,3 +71,60 @@ jobs:
           echo "Offline Android 16 lab APK compiled; no weights or photos bundled." >> "$GITHUB_STEP_SUMMARY"
           echo "Missing-class diagnostics await real Vivo X200 Pro runtime validation." >> "$GITHUB_STEP_SUMMARY"
           echo "Main PersAI Kotlin toolchain and memory remain untouched." >> "$GITHUB_STEP_SUMMARY"
+
+  kotlin21-java-abi-consumer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.13"
+      - name: Build Kotlin 2.4 engine AAR with Java ABI
+        run: gradle -p spikes/photo-83-1-android :probe:assembleDebug --no-daemon --stacktrace
+      - name: Inspect public Java ABI and hard fail on vendor types
+        shell: bash
+        run: |
+          set -euo pipefail
+          AAR=spikes/photo-83-1-android/probe/build/outputs/aar/probe-debug.aar
+          test -s "$AAR"
+          unzip -p "$AAR" classes.jar > "$RUNNER_TEMP/producer.jar"
+          javap -public -classpath "$RUNNER_TEMP/producer.jar" com.persai.visionsdkprobe.VisionInteropApi > "$RUNNER_TEMP/abi.txt"
+          grep -q 'public static double scoreTextImage(android.content.Context, java.io.File, android.graphics.Bitmap, java.lang.String)' "$RUNNER_TEMP/abi.txt"
+          if grep -Eq 'com.google.|kotlin.|UniversalEmbedder|Function1|List<' "$RUNNER_TEMP/abi.txt"; then
+            echo "::error::Vendor or Kotlin types escaped into the Java ABI"; exit 1
+          fi
+          cat "$RUNNER_TEMP/abi.txt"
+      - name: Publish API-only Java compile stub, no Kotlin 2.4 metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          DEST="$GITHUB_WORKSPACE/spikes/photo-83-1-interop-kt21/consumer/libs"
+          mkdir -p "$DEST"
+          STUB="$(mktemp -d)"
+          ( cd "$STUB" && jar xf "$RUNNER_TEMP/producer.jar" com/persai/visionsdkprobe/VisionInteropApi.class && jar cf "$DEST/vision-api.jar" com/persai/visionsdkprobe/VisionInteropApi.class )
+          test -s "$DEST/vision-api.jar"
+          if jar tf "$DEST/vision-api.jar" | grep -Eq 'kotlin_module|UniversalVisionCompileProbe'; then
+            echo "::error::Compile stub leaked Kotlin 2.4 metadata"; exit 1
+          fi
+      - name: Inspect consumer Kotlin compile dependencies
+        run: gradle -p spikes/photo-83-1-interop-kt21 :consumer:dependencies --configuration debugCompileClasspath --no-daemon
+      - name: Compile Kotlin 2.1 consuming the prebuilt Kotlin 2.4 AAR
+        run: gradle -p spikes/photo-83-1-interop-kt21 :consumer:assembleDebug --no-daemon --stacktrace
+      - name: Validate standalone ABI test APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=spikes/photo-83-1-interop-kt21/consumer/build/outputs/apk/debug/consumer-debug.apk
+          test -s "$APK"
+          unzip -t "$APK" >/dev/null
+          AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -1)"
+          if "$AAPT" dump permissions "$APK" | grep -q 'android.permission.INTERNET'; then
+            echo "::error::ABI probe must be offline"; exit 1
+          fi
+          unzip -Z1 "$APK" | grep -E '^classes[0-9]*.dex$'
+          echo "Kotlin 2.1 Android APK compiled against Kotlin 2.4 AAR Java ABI. Runtime/Expo still NOT VERIFIED." >> "$GITHUB_STEP_SUMMARY"
