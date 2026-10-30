@@ -11,32 +11,6 @@ permissions:
   contents: read
 
 jobs:
-  synthetic-fixtures:
-    runs-on: ubuntu-latest
-    timeout-minutes: 8
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Install pinned image generator for deterministic offline test cases
-        run: python -m pip install Pillow==11.3.0
-      - name: Verify fixture labels, real JPEG files and photo-photo anchor
-        run: python -m unittest discover -s spikes/photo-83-1-android/fixtures -p 'test_*.py' -v
-      - name: Generate test JPEGs and package user-downloadable archive
-        run: python spikes/photo-83-1-android/fixtures/generate.py spikes/photo-83-1-android/build/vision-fixtures
-      - name: Upload 41 reproducible synthetic image cases
-        uses: actions/upload-artifact@v4
-        with:
-          name: persai-vision-41-labeled-jpegs
-          path: spikes/photo-83-1-android/build/vision-fixtures/PersAI_Vision_41_cases.zip
-          if-no-files-found: error
-          retention-days: 14
-      - name: Fixture provenance
-        run: |
-          echo "41 synthetic illustrations and expected labels; reproducible source in fixtures/" >> "$GITHUB_STEP_SUMMARY"
-          echo "Visual gallery is not a substitute for real-image Recall@K." >> "$GITHUB_STEP_SUMMARY"
-
   android-sdk-compile:
     runs-on: ubuntu-latest
     timeout-minutes: 22
