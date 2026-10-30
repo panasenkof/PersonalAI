@@ -1,0 +1,21 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'com.persai'
+version = '0.1.0'
+
+android {
+  namespace 'expo.modules.persaivision'
+  defaultConfig {
+    versionCode 1
+    versionName '0.1.0'
+  }
+}
+
+dependencies {
+  // Exact version is intentional. Never use "latest.release" in native builds.
+  // No model weights are bundled; inference is explicitly opt-in in a lab.
+  implementation 'com.google.mediapipe:tasks-retrieval:1.1.0'
+}
