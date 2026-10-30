@@ -195,10 +195,10 @@ class MainActivity : Activity() {
     // only the dimensions in bounds are meaningful.
     check(bounds.outWidth in 1..MAX_IMAGE_SIDE &&
       bounds.outHeight in 1..MAX_IMAGE_SIDE) { "image_dimensions_invalid" }
-    val sampled = BitmapFactory.Options()
-    while (bounds.outWidth / sampled.inSampleSize > 1536 ||
-      bounds.outHeight / sampled.inSampleSize > 1536) {
-      sampled.inSampleSize *= 2
+    // BitmapFactory.Options.inSampleSize defaults to zero on Android.
+    // The platform decoder treats zero as 1, but our own division must not.
+    val sampled = BitmapFactory.Options().apply {
+      inSampleSize = ImageSampling.factor(bounds.outWidth, bounds.outHeight)
     }
     return contentResolver.openInputStream(uri)?.use {
       BitmapFactory.decodeStream(it, null, sampled)
