@@ -30,3 +30,14 @@ dependencies {
   runtimeOnly 'com.google.mediapipe:tasks-retrieval:1.1.0'
   runtimeOnly 'com.google.ai.edge.litertlm:litertlm-android:0.18.0'
 }
+
+// Android Gradle links runtime-only LiteRT-LM and aligns its Kotlin stdlib
+// 2.4 *constraint* into debugCompileClasspath. The consumer compiler is
+// Kotlin 2.1, so keep its compile classpath on Kotlin stdlib 2.1.
+// At runtime the vendor still gets its required 2.4 stdlib. This is a
+// separate consumer-only experiment; never apply globally to Expo.
+configurations.configureEach { cfg ->
+  if (cfg.name.endsWith('CompileClasspath')) {
+    cfg.resolutionStrategy.force 'org.jetbrains.kotlin:kotlin-stdlib:2.1.20'
+  }
+}
