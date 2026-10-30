@@ -26,10 +26,10 @@ jest.mock("expo-crypto",()=>({
     require("node:crypto").createHash("sha256").update(text).digest("hex"),
 }));
 
-const MAX_PAID_API_CALLS=240; // 80 natural turns × up to 3 genuine model calls
+const MAX_PAID_API_CALLS=400; // 80 natural turns × up to 5 genuine model calls
 const MAX_PAID_OUTPUT_TOKENS=512;
 const MAX_PAID_INPUT_CHARS=24000;
-const MAX_REQUESTS_PER_TURN=3;
+const MAX_REQUESTS_PER_TURN=5;
 const enabled=Boolean(process.env.PERSAI_EVAL_MANUAL_TRIGGER==="workflow_dispatch" &&
   process.env.PERSAI_EVAL_LIVE_LLM_APPROVED==="true" &&
   process.env.PERSAI_EVAL_LLM_API_KEY &&

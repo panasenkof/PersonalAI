@@ -37,3 +37,16 @@ test.each(protocols)("%s rejects invalid limits before spending a request", asyn
   await expect(run(provider, 21, transport)).rejects.toThrow("от 1 до 20");
   expect(transport).not.toHaveBeenCalled();
 });
+
+
+test.each(protocols)("%s defaults to five calls with no explicit user override", async provider => {
+  const transport = jest.fn(async () => response(provider));
+  const settings = { ...defaultDirectPreferences, provider, apiKey: "test-key", webSearchKey: "" };
+  const status = jest.fn();
+  await expect(runDirectAgent({
+    settings, prompt: "Найди заметку", history: [], lookup: async () => [],
+    propose: () => {}, transport: transport as any, status,
+  })).rejects.toThrow("лимит обращений к LLM за один вопрос: 5");
+  expect(transport).toHaveBeenCalledTimes(5);
+  expect(status).toHaveBeenCalledWith("Запрос к LLM (5/5)");
+});

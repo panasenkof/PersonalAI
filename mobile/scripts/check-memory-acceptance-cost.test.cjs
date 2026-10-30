@@ -3,7 +3,8 @@ const test=require("node:test");
 const assert=require("node:assert/strict");
 const fs=require("node:fs");
 const path=require("node:path");
-const {check,checkQuick,checkNativeSeparation}=require("./check-memory-acceptance-cost.cjs");
+const os=require("node:os");
+const {check,checkQuick,checkNativeSeparation,checkTrackedDefaultModelLimit}=require("./check-memory-acceptance-cost.cjs");
 const goodWorkflow=[
   "name: Manual memory check",
   "on:",
@@ -28,7 +29,8 @@ const goodLive=[
   "const MAX_PAID_OUTPUT_TOKENS=512;",
   "const MAX_PAID_INPUT_CHARS=24000;",
   "payload.max_tokens=Math.min(payload.max_tokens,MAX_PAID_OUTPUT_TOKENS);",
-  "const MAX_PAID_API_CALLS=240;",
+  "const MAX_PAID_API_CALLS=400;",
+  "const MAX_REQUESTS_PER_TURN=5;",
   "const budget=Math.min(MAX_PAID_API_CALLS,totalTurns*MAX_REQUESTS_PER_TURN);",
   "if(totalPaidCalls>=budget)throw Error(\"budget\");",
   "maxRequests:MAX_REQUESTS_PER_TURN"
@@ -50,7 +52,8 @@ test("only an explicit manual true checkbox enables paid tests",()=>{
   assert.throws(()=>check(guardedWorkflow.replace("inputs.live_llm == true","true"),guardedLive));
   assert.throws(()=>check(guardedWorkflow.replace("PERSAI_EVAL_LIVE_LLM_APPROVED: ${{ inputs.live_llm }}","PERSAI_EVAL_LIVE_LLM_APPROVED: true"),guardedLive));
   assert.throws(()=>check(guardedWorkflow,guardedLive.replace('PERSAI_EVAL_LIVE_LLM_APPROVED==="true"',"Boolean(PERSAI_EVAL_LLM_API_KEY)")));
-  assert.throws(()=>check(guardedWorkflow,guardedLive.replace("const MAX_PAID_API_CALLS=240;","const MAX_PAID_API_CALLS=9999;")));
+  assert.throws(()=>check(guardedWorkflow,guardedLive.replace("const MAX_PAID_API_CALLS=400;","const MAX_PAID_API_CALLS=9999;")));
+  assert.throws(()=>check(guardedWorkflow,guardedLive.replace("const MAX_REQUESTS_PER_TURN=5;","const MAX_REQUESTS_PER_TURN=20;")));
 });
 
 test("live transport cannot fall back to Jest global fetch",()=>{
@@ -111,4 +114,25 @@ test("Android build cannot silently disappear from required main CI",()=>{
     "needs: [changes, mobile, native]","needs: [changes, mobile]")));
   assert.throws(()=>checkNativeSeparation(manualAcceptance,mainCi.replace(
     'test "$NATIVE" = success','true')));
+});
+
+
+test("repository-wide four-call check catches stale UI/defaults but allows historical values",()=>{
+  const directory=fs.mkdtempSync(path.join(os.tmpdir(),"persai-call-limit-audit-"));
+  const file=path.join(directory,"case.js");
+  const fakeGit=()=>Buffer.from("case.js\0");
+  try{
+    for(const source of [
+      'const MAX_REQUESTS_PER_TURN=4;',
+      'export const DEFAULT_MODEL_CALL_LIMIT = 4;',
+      "assert.equal(await limitInput.inputValue(), '4');",
+      "document.querySelector('[data-testid=\"nebula-home-status\"]')?.textContent?.includes('(1/4)');",
+      'test("the default is four calls",()=>{})',
+    ]){
+      fs.writeFileSync(file,source);
+      assert.throws(()=>checkTrackedDefaultModelLimit(directory,fakeGit),/Stale four-call default/);
+    }
+    fs.writeFileSync(file,'// Historical run: 4 FAIL. This test can finish beyond the old four-call limit.\nconst model="gpt-4.1";');
+    assert.deepEqual(checkTrackedDefaultModelLimit(directory,fakeGit).stale,[]);
+  }finally{fs.rmSync(directory,{recursive:true,force:true});}
 });

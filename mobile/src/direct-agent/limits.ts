@@ -1,7 +1,7 @@
 /** Output budget for one model call. */
 export const MAX_DIRECT_REPLY_TOKENS = 4000;
 /** Main model calls per user message; auxiliary operations have their own limits. */
-export const DEFAULT_MODEL_CALL_LIMIT = 4;
+export const DEFAULT_MODEL_CALL_LIMIT = 5;
 export const MAX_MODEL_CALL_LIMIT = 20;
 export function validateModelCallLimit(value: unknown): number {
   if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > MAX_MODEL_CALL_LIMIT) {
