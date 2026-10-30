@@ -83,6 +83,37 @@ function checkedTerms(terms: string[]): string {
     .filter(w => w.length >= 2 && w.length <= 40))].slice(0, 40);
   return words.join(" ");
 }
+/** User-authored names and search words are durable card data, NOT a derived index.
+ * Save them in the same SQLCipher transaction and revision as the edited record. */
+export type NoteCardFields = { kind: MemoryKind; aliases: string[]; userTerms: string[] };
+function prepareNoteCard(fields: NoteCardFields) {
+  const kind = checkedKind(fields.kind);
+  const names = new Map<string, string>();
+  for (const raw of fields.aliases) {
+    const alias = String(raw).replace(/\s+/g, " ").trim();
+    if (!alias) continue;
+    if (alias.length > 80) throw new Error("invalid_memory_alias");
+    const normalized = normalizeAlias(alias);
+    if (!names.has(normalized)) names.set(normalized, alias);
+  }
+  if (names.size > 20) throw new Error("too_many_memory_aliases");
+  return { kind, names, words: checkedTerms(fields.userTerms) };
+}
+async function writeNoteCardFields(db: SQL, entityId: string, fields: ReturnType<typeof prepareNoteCard>, timestamp: string) {
+  await db.runAsync("DELETE FROM memory_aliases WHERE entity_id=?", [entityId]);
+  for (const [normalized, alias] of fields.names) {
+    await db.runAsync("INSERT INTO memory_aliases(entity_id,alias,normalized) VALUES (?,?,?)", [entityId, alias, normalized]);
+  }
+  await db.runAsync("DELETE FROM memory_index_terms WHERE entity_id=? AND source='user'", [entityId]);
+  if (fields.words) {
+    const current = await db.getFirstAsync<Row>(
+      "SELECT e.record_version,c.name FROM memory_entities e JOIN memory_collections c ON c.id=e.collection_id WHERE e.id=?", [entityId]);
+    if (!current) throw new MemoryAccessError("entity_not_found");
+    await db.runAsync(
+      "INSERT INTO memory_index_terms(entity_id,terms,source,created_at,source_record_version,source_collection_name) VALUES (?,?,?,?,?,?)",
+      [entityId, fields.words, "user", timestamp, Number(current.record_version), String(current.name)]);
+  }
+}
 // bm25 column weights: entity_id, chunk_id, title, body, terms, aliases.
 const RANK = "bm25(memory_search_fts, 0, 0, 4, 1, 2, 4)";
 function validPayload(payload: Record<string, unknown>) {
@@ -192,12 +223,13 @@ export class SqliteMemoryRepository implements MemoryRepository {
     return page(rows.map(entityFrom), limit, offset);
   }
 
-  async createEntity(item: NewEntity, writeAttachment?: (tx: SQL, entityId: string) => Promise<void>): Promise<EntityRecord> {
+  async createEntity(item: NewEntity, writeAttachment?: (tx: SQL, entityId: string) => Promise<void>, cardFields?: NoteCardFields): Promise<EntityRecord> {
+    const card = cardFields ? prepareNoteCard(cardFields) : null;
     const collection = await this.db.getFirstAsync<Row>(
       "SELECT id, slug FROM memory_collections WHERE id = ?", [item.collection_id],
     );
     if (!collection) throw new MemoryAccessError("collection_not_found");
-    const kind = item.kind === undefined ? defaultKind(TEXT(collection.slug)) : checkedKind(item.kind);
+    const kind = card?.kind ?? (item.kind === undefined ? defaultKind(TEXT(collection.slug)) : checkedKind(item.kind));
     const timestamp = now();
     const id = uid(), payload = clone(item.payload);
     const record: EntityRecord = {
@@ -219,13 +251,15 @@ export class SqliteMemoryRepository implements MemoryRepository {
           record.source_kind, record.source_ref, record.valid_from, null, timestamp, timestamp, 1, kind],
       );
       if (writeAttachment) await writeAttachment(tx, id);
+      if (card) await writeNoteCardFields(tx, id, card, timestamp);
       await indexEntity(tx, id, timestamp);
     });
     return record;
   }
 
-  async reviseEntity(id: string, expectedVersion: number, payload: Record<string, unknown>, reason: string, collectionId?: string, allowAgent = false, writeAttachment?: (tx: SQL, entityId: string) => Promise<void>): Promise<EntityRecord> {
+  async reviseEntity(id: string, expectedVersion: number, payload: Record<string, unknown>, reason: string, collectionId?: string, allowAgent = false, writeAttachment?: (tx: SQL, entityId: string) => Promise<void>, cardFields?: NoteCardFields): Promise<EntityRecord> {
     safeReason(reason);
+    const card = cardFields ? prepareNoteCard(cardFields) : null;
     if (expectedVersion < 1) throw new Error("invalid_expected_version");
     const data = validPayload(payload);
     let updated: EntityRecord | null = null;
@@ -251,14 +285,15 @@ export class SqliteMemoryRepository implements MemoryRepository {
         sensitivity = "standard";
       }
       const title = typeof payload.title === "string" ? payload.title : before.title;
+      const kind = card?.kind ?? before.kind;
       const timestamp = now();
       const result = await tx.runAsync(
-        `UPDATE memory_entities SET payload_json=?, title=?, collection_id=?, sensitivity=?, record_version=record_version+1,
+        `UPDATE memory_entities SET payload_json=?, title=?, kind=?, collection_id=?, sensitivity=?, record_version=record_version+1,
           updated_at=? WHERE id=? AND record_version=?`,
-        [data, title, collection, sensitivity, timestamp, id, expectedVersion],
+        [data, title, kind, collection, sensitivity, timestamp, id, expectedVersion],
       );
       if (result.changes !== 1) throw new MemoryConflictError("stale_memory_version");
-      const after = { ...before, payload: clone(payload), title, collection_id: collection, sensitivity, record_version: expectedVersion + 1, updated_at: timestamp };
+      const after = { ...before, payload: clone(payload), title, kind, collection_id: collection, sensitivity, record_version: expectedVersion + 1, updated_at: timestamp };
       await tx.runAsync(
         `INSERT INTO memory_revisions(id,record_type,entity_id,observation_id,version,
           reason,actor_kind,before_json,after_json,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)`,
@@ -266,6 +301,7 @@ export class SqliteMemoryRepository implements MemoryRepository {
           JSON.stringify(before), JSON.stringify(after), timestamp],
       );
       if (writeAttachment) await writeAttachment(tx, id);
+      if (card) await writeNoteCardFields(tx, id, card, timestamp);
       await indexEntity(tx, id, timestamp);
       updated = after;
     });
