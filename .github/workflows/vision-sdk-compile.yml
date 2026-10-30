@@ -20,54 +20,31 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      # ubuntu-latest already has an Android SDK. Avoid setup-android@v3's
-      # obsolete 'tools' package request, which fails before our Gradle test.
       - name: Verify preinstalled Android SDK
         shell: bash
         run: |
-          test -d "${ANDROID_HOME}/platforms/android-35" || {
+          test -d "$ANDROID_HOME/platforms/android-35" || {
             echo "::error::Android SDK platform 35 not present on runner"; exit 1;
           }
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.13"
-      - name: Compile isolated Kotlin 2.4 SDK and Android 16 lab APK without model weights
+      - name: Compile SDK, JUnit diagnostics and offline lab APK
         run: gradle -p spikes/photo-83-1-android :probe:compileDebugKotlin :probe:assembleDebug :app:testDebugUnitTest :app:assembleDebug --no-daemon --stacktrace
-      - name: Verify test APK does not request Internet permission
+      - name: Verify APK permissions and inspect ARM64 native libraries
         shell: bash
         run: |
           APK="$(find spikes/photo-83-1-android/app/build/outputs/apk/debug -type f -name '*.apk' | head -1)"
           test -f "$APK" || { echo "::error::No debug APK built"; exit 1; }
-          AAPT="$(find "${ANDROID_HOME}/build-tools" -type f -name aapt | sort -V | tail -1)"
+          AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -1)"
           test -x "$AAPT" || { echo "::error::Android aapt not found"; exit 1; }
           if "$AAPT" dump permissions "$APK" | grep -q 'android.permission.INTERNET'; then
-            echo "::error::Offline vision lab APK must NOT request Internet permission"
+            echo "::error::Offline lab must NOT request Internet permission"
             exit 1
           fi
-      - name: Report packaged native libraries and retrieval dependency version
-        shell: bash
-        run: |
-          APK="$(find spikes/photo-83-1-android/app/build/outputs/apk/debug -type f -name '*.apk' | head -1)"
-          echo "### Offline vision lab runtime packaging inventory" >> "$GITHUB_STEP_SUMMARY"
-          echo 'Native libraries present:' >> "$GITHUB_STEP_SUMMARY"
-          unzip -Z1 "$APK" | grep '^lib/arm64-v8a/.*\\.so
-        with:
-          name: persai-vision-lab-android16-diagnostic
-          path: spikes/photo-83-1-android/app/build/outputs/apk/debug/*.apk
-          if-no-files-found: error
-          retention-days: 14
-      - name: Record proof boundary
-        if: always()
-        run: |
-          echo "Standalone Android 16 lab APK compiled; no model weights or private images are bundled." >> "$GITHUB_STEP_SUMMARY"
-          echo "No runtime inference is confirmed until tested on Vivo X200 Pro with a user-selected official model." >> "$GITHUB_STEP_SUMMARY"
-          echo "PersAI main mobile Gradle config unchanged. Model weights not downloaded." >> "$GITHUB_STEP_SUMMARY"
- | sed 's#^lib/arm64-v8a/##' | sort | head -45 >> "$GITHUB_STEP_SUMMARY" || true
-          echo 'Resolved selected Gradle dependencies:' >> "$GITHUB_STEP_SUMMARY"
-          gradle -p spikes/photo-83-1-android :app:dependencies --configuration debugRuntimeClasspath --no-daemon |
-            grep -E '(tasks-retrieval|litertlm-android|tasks-core|kotlin-stdlib)' |
-            sort -u | head -24 >> "$GITHUB_STEP_SUMMARY" || true
-      - name: Publish installable standalone lab APK
+          echo "### Packaged native libraries (ARM64)" >> "$GITHUB_STEP_SUMMARY"
+          unzip -Z1 "$APK" | grep 'lib/arm64-v8a/' | head -40 >> "$GITHUB_STEP_SUMMARY" || true
+      - name: Publish installable offline diagnostic lab APK
         uses: actions/upload-artifact@v4
         with:
           name: persai-vision-lab-android16-diagnostic
@@ -77,6 +54,6 @@ jobs:
       - name: Record proof boundary
         if: always()
         run: |
-          echo "Standalone Android 16 lab APK compiled; no model weights or private images are bundled." >> "$GITHUB_STEP_SUMMARY"
-          echo "No runtime inference is confirmed until tested on Vivo X200 Pro with a user-selected official model." >> "$GITHUB_STEP_SUMMARY"
-          echo "PersAI main mobile Gradle config unchanged. Model weights not downloaded." >> "$GITHUB_STEP_SUMMARY"
+          echo "Offline Android 16 lab APK compiled; no weights or photos bundled." >> "$GITHUB_STEP_SUMMARY"
+          echo "Missing-class diagnostics await real Vivo X200 Pro runtime validation." >> "$GITHUB_STEP_SUMMARY"
+          echo "Main PersAI Kotlin toolchain and memory remain untouched." >> "$GITHUB_STEP_SUMMARY"
