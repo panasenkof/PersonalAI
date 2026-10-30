@@ -168,3 +168,19 @@ export function noteUndoLabel(token: string): string {
   const labels: Record<string, string> = { move: 'Отменить перенос', trash: 'Отменить удаление', restore: 'Отменить восстановление', merge: 'Отменить объединение', archive: 'Отменить архивирование', unarchive: 'Отменить возврат из архива' };
   return labels[token.split(':')[1]] || 'Отменить операцию с записями';
 }
+
+/** Show the single batch journal as readable history, never raw UUID tokens. */
+export function noteHistoryLabel(reason: string): string {
+  const match = /^(Отмена )?notes:(move|trash|restore|merge|archive|unarchive):/.exec(reason);
+  if (!match) return reason;
+  const labels: Record<string, string> = {
+    move: "Перенос в другой раздел",
+    trash: "Перемещение в корзину",
+    restore: "Восстановление из корзины",
+    merge: "Объединение записей",
+    archive: "Перенос в архив",
+    unarchive: "Возврат из архива",
+  };
+  const label = labels[match[2]];
+  return match[1] ? "Отмена: " + label.toLowerCase() : label;
+}

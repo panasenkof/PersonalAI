@@ -17,6 +17,7 @@ import { VoiceInput } from "../components/VoiceInput";
 import { localMemoryRepository } from "../local-memory/repository";
 import type { SqliteMemoryRepository } from "../local-memory/repository";
 import { MemoryConflictError } from "../local-memory/types";
+import { noteHistoryLabel } from "../local-memory/note-actions";
 import type { CollectionRecord, EntityRecord, ObservationRecord, RelationRecord, RevisionRecord } from "../local-memory/types";
 import { onLocalMemorySessionChange } from "../local-memory/storage";
 import { memoryErrorMessage } from "../local-memory/errors";
@@ -273,7 +274,7 @@ export function MemoryNoteScreen() {
           <Pressable accessibilityRole="button" accessibilityLabel="История, события и связи" accessibilityState={{ expanded: details }} onPress={() => details ? setDetails(false) : void loadDetails()} style={{ ...button, backgroundColor: t.soft }}><Text style={{ color: t.text }}>История, события и связи {details ? "⌃" : "⌄"}</Text></Pressable>
           {details ? <View style={{ gap: 12, padding: 16, borderWidth: 1, borderColor: t.line, borderRadius: 20 }}>
             <Text style={{ color: t.text, fontWeight: "700" }}>История изменений · версия {selected.record_version}</Text>
-            {history.map(r => <Text key={r.id} style={{ color: t.muted }}>{new Date(r.created_at).toLocaleDateString()} · {r.reason}</Text>)}
+            {history.map(r => <Text key={r.id} style={{ color: t.muted }}>{new Date(r.created_at).toLocaleDateString()} · {noteHistoryLabel(r.reason)}</Text>)}
             <Text style={{ color: t.text, fontWeight: "700" }}>События</Text>
             {events.map(e => <Text key={e.id} style={{ color: t.muted }}>{new Date(e.occurred_at).toLocaleDateString()} · {String(e.payload.text || e.kind)}</Text>)}
             <TextInput accessibilityLabel="Новое событие" value={eventText} onChangeText={setEventText} placeholder="Что произошло?" placeholderTextColor={t.muted} style={field} />
