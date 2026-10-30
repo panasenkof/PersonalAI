@@ -13,6 +13,7 @@ const { SCHEMA_SQL } = require("../storage");
 class FakeSqlite {
   private sqlite = new DatabaseSync(":memory:");
   updates = 0;
+  failOnAliasInsert = false;
   transactionStatements: string[] = [];
   constructor() { this.sqlite.exec(SCHEMA_SQL); }
   async getFirstAsync<T>(sql: string, params: unknown[] = []): Promise<T | null> {
@@ -22,6 +23,7 @@ class FakeSqlite {
     return this.sqlite.prepare(sql).all(...params) as T[];
   }
   async runAsync(sql: string, params: unknown[] = []): Promise<{ changes: number }> {
+    if (this.failOnAliasInsert && sql.startsWith("INSERT INTO memory_aliases(")) throw new Error("injected_alias_failure");
     const result = this.sqlite.prepare(sql).run(...params);
     if (sql.startsWith("UPDATE memory_entities")) this.updates += Number(result.changes);
     return { changes: Number(result.changes) };
@@ -1623,4 +1625,67 @@ test("natural user difficulty does not force a literal negation into FTS evidenc
     collectionIds: [col.id], sensitivities: ["standard", "inherit"],
   });
   expect(hits.map(hit => hit.entity.id)).toContain(drill.id);
+});
+
+test("C3: card saves type, names, user words and content as one entity version", async () => {
+  const fake = new FakeSqlite();
+  const repo = new SqliteMemoryRepository(fake as never);
+  const c = await repo.createCollection({ name: "People", slug: "people", sensitivity: "standard" });
+  const first = await repo.createEntity(
+    { collection_id: c.id, domain: "notes", payload: { title: "Елизавета", body: "Сестра" } },
+    undefined, { kind: "person", aliases: ["Лиза", " лиза ", "Лизавета"], userTerms: ["сестра", "семья"] });
+  expect(first.kind).toBe("person");
+  expect(first.record_version).toBe(1);
+  expect(await repo.aliases(first.id)).toEqual(["Лиза", "Лизавета"]);
+  expect((await repo.indexTerms(first.id)).find(x => x.source === "user")?.terms).toEqual(["сестра", "семья"]);
+  const edited = await repo.reviseEntity(
+    first.id, 1, { title: "Лиза", body: "Переехала" }, "Правка карточки", c.id, false, undefined,
+    { kind: "fact", aliases: ["Лизонька"], userTerms: ["переезд"] });
+  expect(edited.record_version).toBe(2);
+  expect(edited.kind).toBe("fact");
+  expect(await repo.aliases(first.id)).toEqual(["Лизонька"]);
+  expect((await repo.indexTerms(first.id)).find(x => x.source === "user")?.terms).toEqual(["переезд"]);
+  expect((await repo.revisions("entity", first.id)).map(x => x.version)).toEqual([2]);
+  expect((await repo.entity(first.id))?.payload.body).toBe("Переехала");
+  expect((await repo.searchNotes("Лизонька"))[0]?.id).toBe(first.id);
+  expect(await repo.searchNotes("Лизавета")).toEqual([]);
+});
+
+test("C3: card edit rolls back everything when metadata SQL fails after entity UPDATE", async () => {
+  const fake = new FakeSqlite();
+  const repo = new SqliteMemoryRepository(fake as never);
+  const c = await repo.createCollection({ name: "Notes", slug: "notes", sensitivity: "standard" });
+  const old = await repo.createEntity(
+    { collection_id: c.id, domain: "notes", payload: { title: "Старая", body: "Оригинал" } },
+    undefined, { kind: "note", aliases: ["Первое имя"], userTerms: ["старое"] });
+  fake.failOnAliasInsert = true;
+  await expect(repo.reviseEntity(old.id, 1, { title: "Новая", body: "Изменение" },
+    "Попытка изменить", c.id, false, undefined,
+    { kind: "document", aliases: ["Новое имя"], userTerms: ["новое"] })).rejects.toThrow("injected_alias_failure");
+  fake.failOnAliasInsert = false;
+  const found = await repo.entity(old.id);
+  expect(found?.record_version).toBe(1);
+  expect(found?.kind).toBe("note");
+  expect(found?.title).toBe("Старая");
+  expect(found?.payload.body).toBe("Оригинал");
+  expect(await repo.aliases(old.id)).toEqual(["Первое имя"]);
+  expect((await repo.indexTerms(old.id)).find(x => x.source === "user")?.terms).toEqual(["старое"]);
+  expect(await repo.revisions("entity", old.id)).toEqual([]);
+  expect((await repo.searchNotes("Первое имя"))[0]?.id).toBe(old.id);
+  expect(await repo.searchNotes("Новое имя")).toEqual([]);
+  await expect(repo.reviseEntity(old.id, 2, { title: "Новая" }, "stale")).rejects.toBeInstanceOf(MemoryConflictError);
+});
+
+test("C3: invalid names and failed creation never leave a partial note", async () => {
+  const fake = new FakeSqlite();
+  const repo = new SqliteMemoryRepository(fake as never);
+  const c = await repo.createCollection({ name: "Notes", slug: "notes", sensitivity: "standard" });
+  const fields = { kind: "note" as const, aliases: ["z".repeat(81)], userTerms: ["foo"] };
+  await expect(repo.createEntity({ collection_id: c.id, domain: "notes", payload: { title: "Не сохранять" } },
+    undefined, fields)).rejects.toThrow("invalid_memory_alias");
+  fake.failOnAliasInsert = true;
+  await expect(repo.createEntity({ collection_id: c.id, domain: "notes", payload: { title: "Отмена" } },
+    undefined, { kind: "note", aliases: ["ошибка"], userTerms: [] })).rejects.toThrow("injected_alias_failure");
+  fake.failOnAliasInsert = false;
+  expect((await repo.entities()).items).toEqual([]);
 });
