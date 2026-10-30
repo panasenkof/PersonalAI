@@ -1,6 +1,7 @@
 package com.persai.visionlab
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ImageSamplingTest {
@@ -25,10 +26,10 @@ class ImageSamplingTest {
     )
     for ((width, height) in photos) {
       val sample = ImageSampling.factor(width, height)
-      assert(sample >= 1)
+      assertTrue(sample >= 1)
       assertEquals(0, sample and (sample - 1)) // power of two
-      assert(width / sample <= 1536)
-      assert(height / sample <= 1536)
+      assertTrue(width / sample <= 1536)
+      assertTrue(height / sample <= 1536)
     }
   }
 
