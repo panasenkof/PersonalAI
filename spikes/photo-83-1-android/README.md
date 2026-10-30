@@ -51,6 +51,42 @@ References:
 - https://github.com/google-ai-edge/LiteRT-LM/issues/3753
 
 
+## Vivo X200 Pro Android 16 — missing ActivationDataType (v0.1.3)
+
+**Physical device result from Vision Lab v0.1.2:** at `embedder-create`,
+Android reported `NoClassDefFoundError:
+com.google.ai.edge.litertlm.ActivationDataType`. The model/image selectors
+had worked. This is not evidence of invalid photo bytes or corrupt model
+weights.
+
+**Version-level finding:** `tasks-retrieval:1.1.0` selected transitive
+`litertlm-android:0.17.0-alpha1`. Google AI Edge added the missing
+`ActivationDataType` in September 2026 (see
+[upstream change d667433](https://chromium.googlesource.com/external/github.com/google-ai-edge/LiteRT-LM/+/d667433118e4a1e6a0a6e18768a5d3abd29184e2)).
+The released `litertlm-android:0.18.1` includes newer EmbeddingGemma 2
+support plus a published v0.18.1 ABI fix. Version `0.18.1` is
+**explicitly pinned ONLY in this standalone lab**. MediaPipe itself
+remains at 1.1.0. The main Expo 57 app retains its Kotlin 2.1 toolchain
+and disabled experimental MediaPipe autolinking.
+
+**New exact-head CI gates:** compile the Kotlin 2.4 lab and JUnit tests,
+resolve LiteRT-LM `0.18.1` on the consuming app runtime classpath,
+load `ActivationDataType` in a JVM regression test, and inspect the
+**final APK's DEX files** for its type descriptor; check no Internet
+permission and publish `persai-vision-lab-android16-litertfix`.
+
+**User action once CI passes:** remove **only** PersAI Vision Lab from
+the phone before installing the new `app-debug.apk`, because GitHub
+Actions debug signing keys can differ. This does not affect PersAI
+(`com.persai.app`). Select the existing `.litertlm` file in Downloads,
+then the same photo/query. Do not redownload model weights.
+
+**Acceptance boundary:** this fixes a specific missing-class packaging
+failure; it does *not* prove runtime compatibility between newer LiteRT-LM
+and MediaPipe's internal APIs. Any next missing symbol or JNI failure
+must be diagnosed on the device. Do not upgrade Kotlin or the MediaPipe
+module in production, and do not claim visual search completed.
+
 ## Vivo X200 Pro / Android 16: runtime class linkage diagnostic (v0.1.2)
 
 The user's **second** real device attempt passed image decoding but displayed
