@@ -60,7 +60,7 @@ jobs:
       - name: Publish installable offline diagnostic lab APK
         uses: actions/upload-artifact@v4
         with:
-          name: persai-vision-lab-android16-litertlm018
+          name: persai-vision-lab-android16-ranking
           path: spikes/photo-83-1-android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14
