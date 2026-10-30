@@ -20,7 +20,14 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - uses: android-actions/setup-android@v3
+      # ubuntu-latest already has an Android SDK. Avoid setup-android@v3's
+      # obsolete 'tools' package request, which fails before our Gradle test.
+      - name: Verify preinstalled Android SDK
+        shell: bash
+        run: |
+          test -d "${ANDROID_HOME}/platforms/android-35" || {
+            echo "::error::Android SDK platform 35 not present on runner"; exit 1;
+          }
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.13"
