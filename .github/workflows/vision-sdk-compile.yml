@@ -99,6 +99,20 @@ jobs:
             echo "::error::Vendor or Kotlin types escaped into the Java ABI"; exit 1
           fi
           cat "$RUNNER_TEMP/abi.txt"
+      - name: Publish API-only Java compile stub, no Kotlin 2.4 metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          DEST="$GITHUB_WORKSPACE/spikes/photo-83-1-interop-kt21/consumer/libs"
+          mkdir -p "$DEST"
+          STUB="$(mktemp -d)"
+          ( cd "$STUB" && jar xf "$RUNNER_TEMP/producer.jar" com/persai/visionsdkprobe/VisionInteropApi.class && jar cf "$DEST/vision-api.jar" com/persai/visionsdkprobe/VisionInteropApi.class )
+          test -s "$DEST/vision-api.jar"
+          if jar tf "$DEST/vision-api.jar" | grep -Eq 'kotlin_module|UniversalVisionCompileProbe'; then
+            echo "::error::Compile stub leaked Kotlin 2.4 metadata"; exit 1
+          fi
+      - name: Inspect consumer Kotlin compile dependencies
+        run: gradle -p spikes/photo-83-1-interop-kt21 :consumer:dependencies --configuration debugCompileClasspath --no-daemon
       - name: Compile Kotlin 2.1 consuming the prebuilt Kotlin 2.4 AAR
         run: gradle -p spikes/photo-83-1-interop-kt21 :consumer:assembleDebug --no-daemon --stacktrace
       - name: Validate standalone ABI test APK
