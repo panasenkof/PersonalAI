@@ -6,6 +6,7 @@ import com.google.mediapipe.framework.image.BitmapImageBuilder
 import com.google.mediapipe.tasks.core.BaseOptions
 import com.google.mediapipe.tasks.retrieval.universalembedder.UniversalEmbedder
 import com.google.mediapipe.tasks.retrieval.universalembedder.UniversalEmbedderOptions
+import com.google.ai.edge.litertlm.ActivationDataType
 import java.io.File
 
 /**
@@ -21,6 +22,12 @@ object UniversalVisionCompileProbe {
     require(model.isFile && model.name.endsWith(".litertlm")) { "vision_model_absent" }
     require(query.isNotBlank()) { "vision_query_absent" }
     mark("embedder-options")
+    // Verify the exact class that was missing in the Vivo trace *before*
+    // entering the vendor embedder constructor; no reflection on user input.
+    check(ActivationDataType::class.java.name ==
+      "com.google.ai.edge.litertlm.ActivationDataType") {
+      "vision_runtime_activation_type_mismatch"
+    }
     val options = UniversalEmbedderOptions.builder()
       .setBaseOptions(BaseOptions.builder().setModelAssetPath(model.absolutePath).build())
       .setL2Normalize(true)
