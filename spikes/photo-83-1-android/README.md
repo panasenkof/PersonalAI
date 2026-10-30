@@ -51,6 +51,34 @@ References:
 - https://github.com/google-ai-edge/LiteRT-LM/issues/3753
 
 
+## Vivo X200 Pro / Android 16: fixed image decode (v0.1.1)
+
+The first on-device run exposed `ArithmeticException` when tapping
+"Проверить сходство локально". Root cause in `MainActivity.decodeBoundedImage`:
+`BitmapFactory.Options.inSampleSize` was used as an integer divisor before
+being initialized. The Android decoder treats `0` as `1`, **Kotlin division
+does not**. This occurred before any MediaPipe call, so it was not evidence
+of invalid model weights or a broken image.
+
+The fix initializes sampling at **1**, computes safe downsampling using
+`ImageSampling.factor`, and includes real JUnit cases for small/large and
+invalid dimensions. The standalone CI runs those tests before producing
+`persai-vision-lab-android16-fixed`.
+
+**Installation after the first APK:** CI-created debug APKs are signed with
+runner-specific ephemeral debug certificates. A direct APK upgrade may fail
+with `INSTALL_FAILED_UPDATE_INCOMPATIBLE` (signatures differ). Uninstall
+**only PersAI Vision Lab**, not PersAI; then install the corrected lab. This
+erases only the lab's private imported model copy. The original model
+downloaded in the phone's Downloads directory is unaffected: simply select
+the existing `.litertlm` again, along with the same test photo. No need to
+download model weights again. The corrected APK's application id is still
+`com.persai.visionlab` (not `com.persai.app`).
+
+**Acceptance boundary:** passing CI means sample sizing is tested and the
+offline APK is built. Real model runtime still needs re-checking on Vivo
+X200 Pro; never claim inference works based on a unit test.
+
 ## №83.1 · Vivo X200 Pro / Android 16 lab application
 
 The separate `:app` module builds an **installable offline debug APK** with
