@@ -3,9 +3,15 @@ name: Native Android UI smoke
 on:
   workflow_dispatch:
   workflow_call:
+    inputs:
+      vision_expo_gate:
+        description: "Isolated Kotlin 2.4 engine in real Expo/SQLCipher APK; CI only"
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
-  group: native-sqlcipher-${{ github.ref }}
+  group: native-sqlcipher-${{ github.ref }}-${{ inputs.vision_expo_gate && 'vision' || 'normal' }}
   cancel-in-progress: true
 
 permissions:
@@ -121,8 +127,30 @@ jobs:
         run: |
           node node_modules/react-native-executorch/scripts/download-libs.js
           test -s node_modules/react-native-executorch/third-party/android/libs/executorch.jar
+      - name: Install isolated Gradle 8.13 for Kotlin 2.4 vision producer
+        if: ${{ inputs.vision_expo_gate }}
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.13"
+          cache-disabled: true
+      - name: Stage offline vision AAR and Java ABI for Expo compatibility gate
+        if: ${{ inputs.vision_expo_gate }}
+        env:
+          PIA_VISION_EXPO_GATE: "true"
+        run: |
+          gradle -p ../spikes/photo-83-1-android :probe:assembleDebug --no-daemon --stacktrace
+          node scripts/stage-vision-expo-gate.cjs prepare
       - name: Generate native Android project including Expo SQLCipher
         run: npx expo prebuild --platform android --no-install --clean
+      - name: Inject opt-in vision runtime into generated Expo APK only
+        if: ${{ inputs.vision_expo_gate }}
+        env:
+          PIA_VISION_EXPO_GATE: "true"
+        run: |
+          node scripts/stage-vision-expo-gate.cjs inject
+          test -s modules/persai-vision/android/libs/vision-api.jar
+          test -s modules/persai-vision/android/libs/vision-engine.aar
+          grep -q 'PersAI #83.2 Expo native inference ABI CI gate' android/app/build.gradle
       - name: Local models over http:// are allowed by the manifest
         run: grep -q 'android:usesCleartextTraffic="true"' android/app/src/main/AndroidManifest.xml
       - name: Compile standalone release APK with an ephemeral CI-only signing key
@@ -161,6 +189,27 @@ jobs:
           done
           echo "APK generated and archive verified: $APK"
 
+      - name: Prove opt-in engine classes in the real signed Expo release APK
+        if: ${{ inputs.vision_expo_gate }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=android/app/build/outputs/apk/release/app-release.apk
+          test -s "$APK"
+          DEX_LIST="$(unzip -Z1 "$APK" | grep -E '^classes[0-9]*[.]dex$')"
+          test -n "$DEX_LIST"
+          found=0
+          while IFS= read -r dex; do
+            if unzip -p "$APK" "$dex" | strings | grep -q 'VisionInteropApi'; then
+              found=1
+              break
+            fi
+          done <<< "$DEX_LIST"
+          test "$found" -eq 1 || { echo "::error::Vision ABI missing in signed Expo APK"; exit 1; }
+          if unzip -Z1 "$APK" | grep -E '[.]litertlm$'; then
+            echo "::error::Model weights included unexpectedly"; exit 1
+          fi
+          echo "Expo release APK embeds Kotlin 2.4 engine Java ABI; runtime inference still not proved." >> "$GITHUB_STEP_SUMMARY"
       - name: Save standalone emulator APK
         uses: actions/upload-artifact@v4
         with:
