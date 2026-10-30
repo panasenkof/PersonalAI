@@ -13,6 +13,12 @@ import { ftsPhrase } from "./query";
 
 type SQL = Pick<SQLite.SQLiteDatabase, "getFirstAsync" | "getAllAsync" | "runAsync" | "execAsync">;
 type Row = Record<string, unknown>;
+/** One source-read/search authorization predicate. All three operations
+ * recheck it at the time of use; a previously found ID is never a grant.
+ * Keep original provenance/version checks separate from ACL. */
+const APPROVED_SOURCE_ACL =
+  "e.domain='notes' AND e.record_status='active' " +
+  "AND e.sensitivity IN ('standard','inherit') AND c.sensitivity='standard'";
 export type ApprovedSourcePreview = {
   attachmentId: string; attachmentName: string; mime: string;
   extractionId: string; segmentId: string; sourceVersion: string;
@@ -56,9 +62,7 @@ async function requireAllowed(db: SQL, recordId: string, version: number): Promi
   const authorized = await db.getFirstAsync<{ id: string }>(
     `SELECT e.id FROM memory_entities e
        JOIN memory_collections c ON c.id=e.collection_id
-      WHERE e.id=? AND e.record_version=? AND e.domain='notes'
-        AND e.record_status='active' AND e.sensitivity IN ('standard','inherit')
-        AND c.sensitivity='standard'`,
+      WHERE e.id=? AND e.record_version=? AND ${APPROVED_SOURCE_ACL}`,
     [recordId, version]);
   if (!authorized) throw new Error("memory_source_not_available_or_stale");
 }
@@ -217,9 +221,7 @@ export async function searchApprovedSourceSegments(db: SQL, query: string, limit
          JOIN memory_entities e ON e.id=a.entity_id
          JOIN memory_collections c ON c.id=e.collection_id
         WHERE memory_extraction_fts MATCH ?
-          AND e.domain='notes' AND e.record_status='active'
-          AND e.sensitivity IN ('standard','inherit')
-          AND c.sensitivity='standard'
+          AND ${APPROVED_SOURCE_ACL}
           AND r.status IN ('complete','partial')
         ORDER BY bm25(memory_extraction_fts),s.id LIMIT ?`,
       [ftsPhrase(query.trim()), result.candidateLimit+1],
