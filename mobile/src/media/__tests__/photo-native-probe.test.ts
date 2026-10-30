@@ -13,6 +13,14 @@ const { requireOptionalNativeModule } = require("expo-modules-core") as {
   requireOptionalNativeModule: jest.Mock;
 };
 const unlocked = localMemorySessionUnlocked as jest.Mock;
+// Native SDK 1.1.0 requires newer Kotlin metadata than the stable PersAI
+// build. The probe must not be autolinked into production until independently verified.
+const moduleConfig = require("../../../modules/persai-vision/expo-module.config.json") as { platforms: string[] };
+
+test("83.1: incompatible native experiment cannot autolink into standard APK", () => {
+  expect(moduleConfig.platforms).not.toContain("android");
+});
+
 const input = { modelName: "vision.litertlm", modelSha256: "a".repeat(64),
   imageName: "fixture.jpg", query: "красный велосипед" };
 
