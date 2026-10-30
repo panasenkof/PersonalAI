@@ -397,19 +397,6 @@ export const NATURAL_DIALOGUES:EvaluationDialogue[]=[
     ]
   },
   {
-    id: "EXTRA-WEB-TOPICS",
-    domain: "web",
-    turns: [
-      {
-        question: "Что я себе откладывал про безопасность ИИ, кроме архитектуры агентов?",
-        required: [
-          "web-security"
-        ],
-        match: "prompt|инъек|недоверен"
-      }
-    ]
-  },
-  {
     id: "EXTRA-WEB-DETAILS",
     domain: "web",
     turns: [
@@ -527,5 +514,5 @@ export const NATURAL_DIALOGUES:EvaluationDialogue[]=[
 ] as EvaluationDialogue[]),
 ];
 export const CORE_DIALOGUE_COUNT=CASES.length;
-export const FULL_DIALOGUE_COUNT=CASES.length+24;
+export const FULL_DIALOGUE_COUNT=NATURAL_DIALOGUES.length;
 export const totalNaturalTurns=NATURAL_DIALOGUES.reduce((sum,d)=>sum+d.turns.length,0);
