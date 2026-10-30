@@ -59,6 +59,7 @@ export async function attachmentImageMatches(db: SQL, input: ModelSpace & {
   validateSpace(input);
   if (input.collectionIds?.length === 0 || input.sensitivities?.length === 0) return [];
   const filters = ["e.domain='notes'", "e.record_status='active'",
+    "e.sensitivity IN ('standard','inherit')", "c.sensitivity='standard'",
     "a.mime IN ('image/jpeg','image/png','image/webp','image/heic','image/heif')",
     "v.model=?", "v.dim=?", "length(v.vector)=?"];
   const params: SQLite.SQLiteBindValue[] = [input.model,IMAGE_VECTOR_DIM,IMAGE_VECTOR_DIM*4];
