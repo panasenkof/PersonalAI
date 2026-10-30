@@ -30,6 +30,9 @@ const MAX_PAID_API_CALLS=400; // 80 natural turns × up to 5 genuine model calls
 const MAX_PAID_OUTPUT_TOKENS=512;
 const MAX_PAID_INPUT_CHARS=24000;
 const MAX_REQUESTS_PER_TURN=5;
+// Full ordinary responses belong in the downloadable synthetic-data artifact,
+// never in unbounded CI console output. A rare longer answer is flagged.
+const MAX_REPORT_ANSWER_CHARS=12_000;
 const enabled=Boolean(process.env.PERSAI_EVAL_MANUAL_TRIGGER==="workflow_dispatch" &&
   process.env.PERSAI_EVAL_LIVE_LLM_APPROVED==="true" &&
   process.env.PERSAI_EVAL_LLM_API_KEY &&
@@ -103,9 +106,23 @@ const REPORT_PATH=process.env.PERSAI_EVAL_REPORT_PATH||"memory-natural-live-repo
 type Outcome={
  id:string;domain:string;turn:number;question:string;status:"PASS"|"FAIL"|"ERROR";
  expected:string[];actualIds:string[];modelQueries:string[];requests:number;
- issues:string[];answer:string;
+ issues:string[];answer:string;answerChars:number;answerTruncated:boolean;
 };
 const insufficient=/(?:не (?:наш[еёлао]|имею|доступ|могу|вижу|сохранен|знаю|известн|указан|дошл[аои])|нет (?:данных|информации|запис|доступа|в памяти|вложени[яй]|фотографи[ий]|изображени[яй]|ничего|текст[а-яё]*|документ[а-яё]*|заключени[а-яё]*|ни(?=\s|$|[.,!?]))|(?:запис[ьи]|документ[а-яё]*|текст[а-яё]*|заключени[а-яё]*)[^.!?\n]{0,120}(?:^|\s)нет(?:$|[\s.,!?])|отсутств|неизвест|уточни|невозможно|не могу|недоступ|не сохрани|не загруж|не опублик)/i;
+// Russian genitive absence: "точной даты техосмотра нет" and "рецепта кваса
+// в памяти нет" explicitly deny the evidence even though "нет" follows the
+// item, not the other way around. Keep the subject nouns bounded, so a stray
+// "нет" elsewhere in a speculative answer is not enough to pass.
+const absentNamedEvidence=/(?:^|[\s«"(])(?:точн(?:ой|ых)\s+)?(?:дат[ыау]|рецепт[а-яё]*|сведени[йя]|подтверждени[яй])[^.!?\n]{0,100}\s+нет(?=$|[\s.,!?;:—)»"])/iu;
+function admitsMissingEvidence(answer:string):boolean {
+  return insufficient.test(answer)||absentNamedEvidence.test(answer);
+}
+// Report the original answer, not its old 400-character preview. All records
+// in this suite are fictional; result is an artifact, not a log message.
+function reportAnswer(answer:string){
+  return {answer:answer.slice(0,MAX_REPORT_ANSWER_CHARS),
+    answerChars:answer.length,answerTruncated:answer.length>MAX_REPORT_ANSWER_CHARS};
+}
 const suites={smoke:10,core:54,full:NATURAL_DIALOGUES.length} as const;
 type Suite=keyof typeof suites;
 function chosenSuite():EvaluationDialogue[]{
@@ -133,7 +150,7 @@ function evaluate(turn:EvaluationTurn,answer:string,usedIds:string[]){
     if(!turn.match || !new RegExp(turn.match,"i").test(answer))
       issues.push("unsupported_general_explanation");
   }else if(turn.policy){
-    if(!insufficient.test(answer))issues.push("did_not_abstain_without_evidence");
+    if(!admitsMissingEvidence(answer))issues.push("did_not_abstain_without_evidence");
     // A correct admission of "no attachment" is NOT a guessed image label.
     // Conversely, disclaiming the missing photo while guessing its contents
     // must not pass an absence-of-evidence oracle.
@@ -156,6 +173,30 @@ test("missing-photo abstention is accepted, but an invented identification is no
     .toContain("invented_image_identification");
   expect(evaluate({question:"Найди отсутствующее заключение",policy:"unknown"},
     "Наверное оно есть",[])).toContain("did_not_abstain_without_evidence");
+});
+
+test("live oracle accepts natural genitive absence but rejects invented dates/recipes",()=>{
+  const inspection={question:"Когда машина проходила техосмотр, согласно сохранённым документам?",
+    policy:"withheld" as const};
+  const kvass={question:"Мы сохраняли точный рецепт домашнего кваса?",policy:"unknown" as const};
+  expect(evaluate(inspection,
+    "В сохранённых заметках точной даты техосмотра нет. Есть записи про замену масла и дворников.",[])).toEqual([]);
+  expect(evaluate(kvass,
+    "Нет, рецепта кваса в памяти телефона нет — поиск ничего не дал. Есть только домашний хлеб.",[])).toEqual([]);
+  expect(evaluate(inspection,"Техосмотр был 12 октября 2025 года.",[]))
+    .toContain("did_not_abstain_without_evidence");
+  expect(evaluate(kvass,"Рецепт кваса точно сохранён: солод и сахар.",[]))
+    .toContain("did_not_abstain_without_evidence");
+});
+
+test("live artifact retains full normal answers and explicitly marks size caps",()=>{
+  const answer="В сохранённых заметках точной даты техосмотра нет. ".repeat(30);
+  expect(answer.length).toBeGreaterThan(400);
+  expect(reportAnswer(answer)).toEqual({answer,answerChars:answer.length,answerTruncated:false});
+  const oversized="а".repeat(MAX_REPORT_ANSWER_CHARS+1);
+  expect(reportAnswer(oversized)).toEqual({
+    answer:"а".repeat(MAX_REPORT_ANSWER_CHARS),answerChars:oversized.length,answerTruncated:true,
+  });
 });
 
 test("live oracle accepts explicit missing-source answers, not guessed private facts",()=>{
@@ -288,7 +329,7 @@ testLive("NATURAL LIVE: real LLM chooses the search terms for ordinary dialogues
         const row:Outcome={id:scenario.id,domain:scenario.domain,turn:index,
           question:turn.question,status:error?"ERROR":issues.length?"FAIL":"PASS",
           expected:turn.required??(turn.policy?[turn.policy]:[]),
-          actualIds:usedIds,modelQueries,requests,issues,answer:answer.slice(0,400)};
+          actualIds:usedIds,modelQueries,requests,issues,...reportAnswer(answer)};
         cases.push(row);
         process.stdout.write("PERSAI_LLM_CASE "+JSON.stringify({
           id:row.id,turn:row.turn,status:row.status,issues:row.issues,requests:row.requests,
