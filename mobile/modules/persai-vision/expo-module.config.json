@@ -1,0 +1,8 @@
+{
+  "platforms": [],
+  "android": {
+    "modules": [
+      "expo.modules.persaivision.PersaiVisionProbeModule"
+    ]
+  }
+}

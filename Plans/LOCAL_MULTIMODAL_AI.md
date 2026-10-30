@@ -18,7 +18,7 @@
 
 **Проверены официальные API 30.10.2026:** [MediaPipe Universal Embedder Android](https://developers.google.com/edge/mediapipe/solutions/retrieval/universal_embedder/android) поддерживает `embedText` и `embedImage` через `com.google.mediapipe:tasks-retrieval`/LiteRT-LM. Документация использует `latest.release` лишь в примере; в PersAI версия должна быть закреплена после проверки Maven/ABI. Для Expo 57 нужен собственный native bridge; текущий ExecuTorch не принимает `.litertlm` по умолчанию. Рабочая Android-совместимость, 440M memory budget, SHA весов и русское качество — **не подтверждены**, не утверждать, что поиск по фото готов.
 
-**Состояние:** 83.0 `IN_REVIEW` до зелёного CI и merge; 83.1 — следующий маленький native spike, без production переключения памяти, нового индекса и обязательного скачивания тяжёлых весов в стандартном CI.
+**Фактическое состояние 83.0/83.1:** baseline #247 слит в main с CI PASS. Android spike #248 обнаружил проверенную несовместимость: MediaPipe `tasks-retrieval:1.1.0` транзитивно требует LiteRT-LM `0.17.0-alpha1` с Kotlin metadata 2.4, Expo/RN проект компилируется Kotlin 2.1. Ошибка воспроизводится с Java-адаптером в CI #41068005020 и #41069503073. **Модуль отключён от стандартной APK через `expo-module.config.json: platforms=[]`**, исходники эксперимента сохранены, основной поиск не затронут. Этап реального инференса 83.1 **BLOCKED: нужна изолированная Android сборка Kotlin 2.4+ и отдельная проверка на устройстве**; 83.2 и переход к новой модели запрещены до этого доказательства. Не повышать Kotlin всего PersAI только ради эксперимента без отдельной совместимости.
 
 ## 1. Почему пересматриваем п. 83
 
