@@ -29,9 +29,10 @@ const legalImage = (mime: string) => /^image\/(jpeg|png|webp|heic|heif)$/.test(m
  * holding an encrypted transaction. Edits/deletes cannot race the write.
  */
 export async function saveAttachmentImageVector(db: SQL, input: ModelSpace & {
-  attachmentId: string;
+  attachmentId: string; sourceVersion: string;
 }): Promise<boolean> {
   validateSpace(input);
+  if (!/^[a-f0-9]{64}$/.test(input.sourceVersion)) throw new Error("invalid_vision_source_version");
   let stored = false;
   await withUnlockedTransaction(db, async tx => {
     const row = await tx.getFirstAsync<{ mime: string; status: string; domain: string }>(
