@@ -14,4 +14,10 @@ android {
 dependencies {
   // Single available published retrieval artifact; no model weights bundled.
   implementation 'com.google.mediapipe:tasks-retrieval:1.1.0'
+  // tasks-retrieval:1.1.0 requests LiteRT-LM 0.17.0-alpha1, whose
+  // published AAR predates ActivationDataType (required by retrieval JNI
+  // creation and exposed after September 2026). Pin a published runtime
+  // with the required class and EmbeddingGemma 2 support. This is ONLY in
+  // the standalone Kotlin 2.4 experiment, not Expo/PersAI production.
+  implementation 'com.google.ai.edge.litertlm:litertlm-android:0.18.1'
 }
