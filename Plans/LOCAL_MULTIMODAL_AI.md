@@ -18,7 +18,7 @@
 
 **Проверены официальные API 30.10.2026:** [MediaPipe Universal Embedder Android](https://developers.google.com/edge/mediapipe/solutions/retrieval/universal_embedder/android) поддерживает `embedText` и `embedImage` через `com.google.mediapipe:tasks-retrieval`/LiteRT-LM. Документация использует `latest.release` лишь в примере; в PersAI версия должна быть закреплена после проверки Maven/ABI. Для Expo 57 нужен собственный native bridge; текущий ExecuTorch не принимает `.litertlm` по умолчанию. Рабочая Android-совместимость, 440M memory budget, SHA весов и русское качество — **не подтверждены**, не утверждать, что поиск по фото готов.
 
-**Состояние:** 83.0 `IN_REVIEW` до зелёного CI и merge; 83.1 — следующий маленький native spike, без production переключения памяти, нового индекса и обязательного скачивания тяжёлых весов в стандартном CI.
+**Состояние:** 83.0 baseline проверяется в PR #247; 83.1 **изолированный нативный spike в отдельном PR**, без production переключения памяти, нового индекса или скачивания весов в стандартном CI. Спроектирован Expo Android bridge `mobile/modules/persai-vision` с закреплённой `tasks-retrieval:1.1.0`, ограничением app-private input и проверкой SHA-256. **Наличие bridge и зелёная сборка не подтверждают запуск модели или визуальный поиск на устройстве.** Перед 83.2 обязателен отдельный реальный Android эксперимент с валидной 440M моделью, тестовыми фото, RAM/latency/quality.
 
 ## 1. Почему пересматриваем п. 83
 
