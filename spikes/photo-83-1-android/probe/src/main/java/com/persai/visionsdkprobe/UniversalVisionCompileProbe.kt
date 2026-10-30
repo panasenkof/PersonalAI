@@ -14,22 +14,31 @@ import java.io.File
  * Model path must be an app-owned local file in eventual device tests.
  */
 object UniversalVisionCompileProbe {
-  fun compare(context: Context, model: File, image: Bitmap, query: String): Double {
+  fun compare(
+    context: Context, model: File, image: Bitmap, query: String,
+    mark: (String) -> Unit = {}
+  ): Double {
     require(model.isFile && model.name.endsWith(".litertlm")) { "vision_model_absent" }
     require(query.isNotBlank()) { "vision_query_absent" }
+    mark("embedder-options")
     val options = UniversalEmbedderOptions.builder()
       .setBaseOptions(BaseOptions.builder().setModelAssetPath(model.absolutePath).build())
       .setL2Normalize(true)
       .build()
+    mark("embedder-create")
     val embedder = UniversalEmbedder.createFromOptions(context, options)
     return try {
+      mark("embed-text")
       val textResult = embedder.embedText(query)
+      mark("embed-image")
       val imageResult = embedder.embedImage(BitmapImageBuilder(image).build())
+      mark("cosine-similarity")
       val similarity = UniversalEmbedder.cosineSimilarity(
         textResult.embeddings().first(), imageResult.embeddings().first())
       check(similarity.isFinite()) { "invalid_similarity" }
       similarity
     } finally {
+      mark("embedder-close")
       embedder.close()
     }
   }
