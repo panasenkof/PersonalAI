@@ -39,7 +39,7 @@ check on PR changes; it does not run the mobile app's native build.
 - No cloud inference fallback, no model download, no automatic production
   switch and no mixed vector spaces.
 - After a compile PASS the next real gate requires a separately provisioned
-  licensed 440M `.litertlm` and synthetic photo(s) on a real Android device,
+  licensed 440M `.litertlm` and manually selected test photos on a real Android device,
   with latency, memory, Recall@K and negative same-color vehicle pairs.
 - Back in PersAI, `mobile/modules/persai-vision/expo-module.config.json`
   must remain disabled (`platforms: []`) until a **separate** Expo-compatible
