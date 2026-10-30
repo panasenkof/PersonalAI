@@ -40,6 +40,9 @@ export async function saveAttachmentImageVector(db: SQL, input: ModelSpace & {
        JOIN memory_entities e ON e.id=a.entity_id WHERE a.id=?`, [input.attachmentId]);
     if (!row || !legalImage(row.mime) || row.status !== "active" || row.domain !== "notes") return;
     const source = await fingerprintExtractionSource(tx, input.attachmentId);
+    // Original might change after the model decoded it. Never stamp an old
+    // embedding with the *new* source revision.
+    if (source !== input.sourceVersion) return;
     await tx.runAsync(
       `INSERT OR REPLACE INTO memory_attachment_vectors
        (attachment_id,model,dim,vector,source_version,created_at) VALUES (?,?,?,?,?,?)`,
