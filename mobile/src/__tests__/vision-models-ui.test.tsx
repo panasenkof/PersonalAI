@@ -11,7 +11,7 @@ jest.mock("../theme", () => ({ useTheme: () => ({
   soft: "#26395c", secondary: "#30caed", ok: "#2fd3a4", err: "#ff9faf"
 }) }));
 jest.mock("../components/Collapsible", () => ({
-  Collapsible: ({children, summary}: any) => <View><Text>{summary}</Text>{children}</View>,
+  Collapsible: ({children, summary}: any) => { const { View, Text } = require("react-native"); return <View><Text>{summary}</Text>{children}</View>; },
 }));
 jest.mock("../media/vision-model-manager", () => ({
   useVisionModelStatus: () => mockStatus.current,
