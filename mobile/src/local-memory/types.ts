@@ -131,7 +131,8 @@ export interface MemoryRepository {
   applyIndexEnrichment(snapshot: EnrichmentSnapshot, terms: string[], people: string[], signal?: AbortSignal): Promise<boolean>;
   staleIndexTerms(source: string, limit?: number): Promise<string[]>;
   indexTermsStatus(source: string): Promise<{ done: number; pending: number }>;
-  searchMemory(query: string, options?: { collectionIds?: string[]; sensitivities?: string[]; limit?: number; vector?: { model: string; values: Float32Array }; verifiedRelative?: { ownerPersonId: string; relationKind: DirectPersonRelation } }): Promise<MemoryHit[]>;
+  searchMemory(query: string, options?: { collectionIds?: string[]; sensitivities?: string[]; limit?: number; vector?: { model: string; values: Float32Array }; imageVector?: { model: string; values: Float32Array }; verifiedRelative?: { ownerPersonId: string; relationKind: DirectPersonRelation } }): Promise<MemoryHit[]>;
+  saveImageVector(attachmentId: string, model: string, values: Float32Array): Promise<boolean>;
   pendingVectorChunks(model: string, limit?: number): Promise<Array<{ chunkId: string; text: string; hash: string }>>;
   saveVectors(model: string, items: Array<{ chunkId: string; vector: Float32Array; hash: string }>): Promise<number>;
   vectorStatus(model: string): Promise<{ done: number; total: number }>;
