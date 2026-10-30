@@ -38,18 +38,25 @@ Expo/RN's project Kotlin compiler accepts **2.1 metadata** in this build:
 `persai-vision:compileReleaseKotlin` fails. This is a *real* reproducible
 incompatibility; TypeScript/Jest green does not repair it.
 
-**Current guarded experiment:** a tiny `VisionProbeEngine.java` calls only
-the Java-exposed MediaPipe API. The Expo Kotlin module calls its
-`score(Context,String,Bitmap,String)` boundary rather than importing the
-vendor API or parsing vendor Kotlin classes. This avoids globally raising
-the Kotlin Gradle plugin for every app module. It still needs successful
-exact-head Android compilation, APK smoke and a **separate on-device runtime**
-test to establish that the transitive Kotlin runtime is compatible.
+**Second exact-head CI run #41069503073:** a small `VisionProbeEngine.java`
+adapter did **not** resolve the mismatch: `persai-vision:compileReleaseKotlin`
+still rejected the Kotlin 2.4 metadata. Because compilation fails before
+the APK starts, **no inference, ABI, RAM or search-quality result exists**.
 
-**Fail-safe:** if compilation or runtime still fails, disable/exclude the
-experimental module before any default rollout; do not force Gradle resolution
-to an older LiteRT version against the 1.1.0 API, do not silence metadata
-errors, and do not update the whole Expo/RN Kotlin toolchain blindly.
+**Fail-safe now enforced:** `expo-module.config.json` has
+`"platforms": []`, which excludes this experimental native module from
+Expo's default Android autolinking. The code and pinned dependency remain
+only as source for an independent **native Kotlin 2.4+ compatibility spike**,
+not as an app feature. The JavaScript wrapper fails closed with
+`vision_native_unavailable`. A regression test prevents silently switching
+Android autolinking back on. Existing Expo/RN Kotlin 2.1 remains unchanged.
+
+**Next real go/no-go:** create a standalone Android sample with compatible
+Kotlin/AGP/Gradle, compile and run the actual 440M model on synthetic photos;
+measure RAM and latencies. Only **after** that may a separate integration PR
+propose verified toolchain compatibility with Expo. Do not force Gradle
+resolution to older LiteRT against MediaPipe 1.1.0, suppress metadata errors,
+or globally upgrade Kotlin without a separate full-stack compatibility review.
 
 ## Deliberate limitations
 
