@@ -51,6 +51,43 @@ References:
 - https://github.com/google-ai-edge/LiteRT-LM/issues/3753
 
 
+## Vivo X200 Pro / Android 16: multi-photo ranking experiment (v0.1.4)
+
+The real-device user confirmed: first photo = **red bicycle near a tree**
+(relevant, cosine 0.7686); second photo = **completely unrelated**
+(irrelevant, cosine 0.5397). One correctly ordered relevant/irrelevant pair
+is a useful smoke test, **not a proven Recall@K or general precision
+estimate**. We must test harder and multiple negatives before production.
+
+This incremental version adds 2–5-photo *text→image ranking* to the **same
+isolated APK / same UniversalEmbedder**. It does not modify main PersAI,
+create an image index or persist user photos/vectors.
+
+1. Install the GitHub Actions artifact named
+   `persai-vision-lab-android16-ranking` from the passing exact-head
+   **Vision SDK compile spike (isolated)** run. Uninstall **only Vision
+   Lab** first if the ephemeral CI debug signing certificate differs.
+   Application ID stays `com.persai.visionlab` (never `com.persai.app`).
+2. Import the **same already downloaded** .litertlm model; do not redownload.
+3. Enter one plain Russian query, e.g. `красный велосипед возле дерева`.
+4. Tap **4. Добавить фото в тестовый набор** 2–5 times. Select photos
+   individually, in an order you can recognize. Photo #1 means first
+   picked, #2 second picked, etc. Mix a matching image, an unrelated
+   image, and at least one **hard negative** (another bicycle or a similar
+   red object). No need to send personal photos to the developer.
+5. Tap **5. Найти наиболее подходящее фото**. The lab computes text
+   embedding once, decodes/recycles images sequentially, returns sorted
+   numbers `Фото №N`, scores, elapsed time and before/after PSS.
+6. Compare ranked photo numbers with the photos you selected. Report
+   the ranking and whether the correct photo came first. Repeat with
+   other objects if desired. **There is no threshold/probability or
+   confirmation of a specific person's/item's identity.**
+
+JUnit tests use the user-labeled 0.7686 vs 0.5397 pair to validate sort
+order, negative scores, tie handling, 2–5 bounds and invalid NaN
+rejection. This checks code behavior only; actual 2–5-photo inference
+still requires Vivo testing and photo→photo is a later, distinct gate.
+
 ## Vivo X200 Pro / Android 16: LiteRT-LM class linkage fix attempt (v0.1.3)
 
 The user's third real Android 16 screenshot now identifies the exact blocker:
