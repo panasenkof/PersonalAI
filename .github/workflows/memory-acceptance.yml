@@ -9,7 +9,7 @@ on:
         type: boolean
         default: false
       suite:
-        description: "LLM size: smoke=10, core=54, full=78. Only used with live_llm=true."
+        description: "LLM size: smoke=10, core=54, full=77. Only used with live_llm=true."
         required: false
         type: choice
         options: [smoke, core, full]

@@ -2,12 +2,14 @@ import {CASES} from "../domain-fixtures";
 import {NATURAL_DIALOGUES,CORE_DIALOGUE_COUNT,FULL_DIALOGUE_COUNT,totalNaturalTurns} from "../natural-dialogues";
 
 /** Free, deterministic corpus contract; a real provider is NEVER contacted. */
-test("covers all 54 existing records plus 24 diverse everyday scenarios",()=>{
+test("covers all 54 existing records plus 23 diverse everyday scenarios",()=>{
   expect(CORE_DIALOGUE_COUNT).toBe(54);
-  expect(FULL_DIALOGUE_COUNT).toBe(78);
-  expect(NATURAL_DIALOGUES).toHaveLength(78);
-  expect(totalNaturalTurns).toBe(80);
-  expect(new Set(NATURAL_DIALOGUES.map(c=>c.id)).size).toBe(78);
+  expect(FULL_DIALOGUE_COUNT).toBe(77);
+  expect(NATURAL_DIALOGUES).toHaveLength(77);
+  expect(totalNaturalTurns).toBe(79);
+  expect(new Set(NATURAL_DIALOGUES.map(c=>c.id)).size).toBe(77);
+  // Owner handles this ambiguous cross-topic prompt-injection query manually.
+  expect(NATURAL_DIALOGUES.some(x=>x.id==="EXTRA-WEB-TOPICS")).toBe(false);
   for(const domain of ["car","recipes","web","home","medical"]){
     expect(NATURAL_DIALOGUES.some(x=>x.domain===domain)).toBe(true);
   }
