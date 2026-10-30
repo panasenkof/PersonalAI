@@ -20,7 +20,10 @@ dependencies {
   // LOCAL AAR is compiled separately with Kotlin 2.4.21. Its only public
   // exposed method takes Android/Java types. No direct MediaPipe Kotlin
   // dependency belongs on the consumer's Kotlin compile classpath.
-  implementation files('../../photo-83-1-android/probe/build/outputs/aar/probe-debug.aar')
+  // Compile against an API-only Java JAR created from the 2.4 AAR in CI.
+  // NO Kotlin 2.4 module metadata appears on the Kotlin 2.1 compile classpath.
+  compileOnly files('libs/vision-api.jar')
+  runtimeOnly files('../../photo-83-1-android/probe/build/outputs/aar/probe-debug.aar')
 
   // Vendor SDK is packaged at runtime only. No transitive Kotlin 2.4 metadata
   // is presented as a declared compile dependency to Kotlin 2.1.
