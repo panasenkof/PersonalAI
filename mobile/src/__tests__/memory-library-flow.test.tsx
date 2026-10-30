@@ -4,6 +4,7 @@ import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 import { LocalMemoryScreen } from "../screens/LocalMemoryScreen";
 const mockNavigate = jest.fn();
 const mockHygienePreference=jest.fn(async(id:string)=>({entityId:id,guard:"normal",skipUntil:null,preferenceVersion:2}));
+const mockLastNoteOperation=jest.fn(async()=> "");
 const mockHygieneSetPreference=jest.fn(async()=>({entityId:"one",guard:"pinned",skipUntil:null,preferenceVersion:3}));
 const mockHygienePreview = jest.fn(async(targets: Array<{id:string;recordVersion:number}>,excluded:string[],action:string)=>({
  action,selectedCount:targets.length,excludedIds:targets.filter(t=>excluded.includes(t.id)).map(t=>t.id),
@@ -20,7 +21,8 @@ const notes = [
 const mockDb = {
  hygiene: () => ({ previewWithExclusions: mockHygienePreview, preference:mockHygienePreference,setPreference:mockHygieneSetPreference }),
  changeNotes: jest.fn(async () => "notes:archive:test"),
- lastNoteOperation: async () => "", collectionNoteCounts: async () => ({ a: 1, b: 1 }),
+ lastNoteOperation: mockLastNoteOperation, undoNotes: jest.fn(async () => {}),
+ collectionNoteCounts: async () => ({ a: 1, b: 1 }),
  searchNotes: jest.fn(async (term, _limit, _offset, filter) => notes.filter(n => n.record_status === filter.status && (!filter.collectionId || n.collection_id === filter.collectionId) && n.title.includes(term))),
 };
 jest.mock("../local-memory/repository", () => ({ localMemoryRepository: async () => mockDb }));
@@ -36,7 +38,7 @@ jest.mock("../theme", () => ({ useTheme: () => ({}) }));
 jest.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ top: 24, bottom: 24 }) }));
 jest.mock("../components/BottomSheet", () => ({ BottomSheet: ({ visible, children, title, onClose }: any) => { const { Pressable, Text } = require("react-native"); return visible ? <><Pressable accessibilityLabel={"Закрыть панель " + title} onPress={onClose}><Text>Закрыть</Text></Pressable>{children}</> : null; } }));
 jest.mock("@react-navigation/native", () => ({ useNavigation: () => ({ navigate: mockNavigate }), useFocusEffect: (fn: any) => require("react").useEffect(fn, [fn]) }));
-beforeEach(() => { jest.clearAllMocks(); mockDb.changeNotes.mockResolvedValue("notes:archive:test"); mockHygienePreference.mockResolvedValue({entityId:"one",guard:"normal",skipUntil:null,preferenceVersion:2}); });
+beforeEach(() => { jest.clearAllMocks(); mockLastNoteOperation.mockResolvedValue(""); mockDb.changeNotes.mockResolvedValue("notes:archive:test"); mockHygienePreference.mockResolvedValue({entityId:"one",guard:"normal",skipUntil:null,preferenceVersion:2}); });
 test("all-records clears collection, archive and search from either entry", async () => {
  const v = render(<LocalMemoryScreen />); await waitFor(() => v.getByLabelText("Открыть заметку Первая"));
  fireEvent.press(v.getByLabelText("Раздел Заметки")); await waitFor(() => expect(v.queryByLabelText("Открыть заметку Вторая")).toBeNull());
@@ -257,4 +259,12 @@ test("CLEAN-08: policy CAS conflict never implicitly approves a group action",as
   expect(v.getByText("stale_review_preference")).toBeTruthy();
   expect(mockDb.changeNotes).not.toHaveBeenCalled();
   expect(v.getByText("Выбрано: 2")).toBeTruthy();
+});
+
+test("C3: returning from a note card exposes the canonical archive undo", async () => {
+  mockLastNoteOperation.mockResolvedValueOnce("notes:archive:card-click");
+  const view = render(<LocalMemoryScreen />);
+  await waitFor(() => view.getByText("Отменить архивирование"));
+  await act(async () => { fireEvent.press(view.getByText("Отменить архивирование")); });
+  expect(mockDb.undoNotes).toHaveBeenCalledWith("notes:archive:card-click");
 });
