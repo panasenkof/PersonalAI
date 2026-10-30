@@ -1,6 +1,8 @@
 {
-  "platforms": ["android"],
+  "platforms": [],
   "android": {
-    "modules": ["expo.modules.persaivision.PersaiVisionProbeModule"]
+    "modules": [
+      "expo.modules.persaivision.PersaiVisionProbeModule"
+    ]
   }
 }
