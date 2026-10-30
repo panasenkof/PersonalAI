@@ -28,8 +28,13 @@ const mockDb = {
 };
 const names = ["memory_collections", "memory_entities", "memory_observations",
   "memory_relations", "memory_revisions", "memory_notes_fts"];
+const userMetadataTables = ["memory_aliases", "memory_index_terms"] as const;
 let mockTables = names;
-const tablesOnce = (tables: string[]) => { mockTables = tables; };
+// Historical fixtures from v3 onward contain both user-owned tables.
+// Pass exact=true only when deliberately testing a missing/corrupt table.
+const tablesOnce = (tables: string[], exact = false) => {
+  mockTables = exact ? tables : [...new Set([...tables, ...userMetadataTables])];
+};
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -63,6 +68,7 @@ beforeEach(() => {
     if (sql.includes("pia_import.integrity_check")) return { integrity_check: "ok" };
     if (sql === "SELECT count(*) AS n FROM pia_import.persai_backup_manifest") return { n: 1 };
     if (sql === "SELECT count(*) AS n FROM direct_conversations") return { n: 0 };
+    if (/^SELECT count\(\*\) AS n FROM (pia_import\.)?memory_(aliases|index_terms)$/.test(sql)) return { n: 2 };
     if (sql.includes("JOIN main.direct_conversations current")) return { n: 0 };
     if (sql.includes("pia_import.memory_entities")) return { n: 2 };
     if (sql === "SELECT count(*) AS n FROM memory_collections") {
@@ -818,4 +824,65 @@ test("BKP-08/R3c1: v17 forged identity count fails before restoring a single not
   await expect(restoreEncryptedBackup("guest","file:///forged-self-v17.db",code))
     .rejects.toThrow("backup_manifest_mismatch");
   expect(mockDb.execAsync.mock.calls.some(([sql])=>String(sql).includes("INSERT INTO memory_entities"))).toBe(false);
+});
+
+
+test.each([3, 6, 17])("C3-4: v%s archives without user aliases/terms refuse restore before writes", async version => {
+  const read = mockDb.getFirstAsync.getMockImplementation()!;
+  mockDb.getFirstAsync.mockImplementation(async sql =>
+    sql === "PRAGMA pia_import.user_version" ? { user_version: version } : read(sql));
+  // Even a seemingly complete v17 manifest must not excuse missing names.
+  tablesOnce([...names, "memory_aliases"], true);
+  await expect(restoreEncryptedBackup("guest", "file:///incomplete.db", code))
+    .rejects.toThrow("incompatible_backup_schema");
+  const sql = mockDb.execAsync.mock.calls.map(([query]: string[]) => query);
+  expect(sql).not.toContain("BEGIN IMMEDIATE");
+  expect(sql.some(q => q.startsWith("INSERT INTO"))).toBe(false);
+  expect(sql).toContain("DETACH DATABASE pia_import");
+});
+
+test("C3-4: v3 user names/terms are imported and checked before COMMIT without schema changes", async () => {
+  const read = mockDb.getFirstAsync.getMockImplementation()!;
+  mockDb.getFirstAsync.mockImplementation(async sql =>
+    sql === "PRAGMA pia_import.user_version" ? { user_version: 3 } : read(sql));
+  tablesOnce([...names, ...userMetadataTables], true);
+  await restoreEncryptedBackup("guest", "file:///v3.db", code);
+  const sql = mockDb.execAsync.mock.calls.map(([q]: string[]) => q);
+  const namesAt = sql.findIndex(q => q.startsWith("INSERT INTO memory_aliases("));
+  const termsAt = sql.findIndex(q => q.startsWith("INSERT INTO memory_index_terms("));
+  expect(namesAt).toBeGreaterThan(sql.indexOf("BEGIN IMMEDIATE"));
+  expect(termsAt).toBeGreaterThan(namesAt);
+  expect(sql.indexOf("COMMIT")).toBeGreaterThan(termsAt);
+  for (const table of userMetadataTables) {
+    expect(mockDb.getFirstAsync).toHaveBeenCalledWith(`SELECT count(*) AS n FROM pia_import.${table}`);
+    expect(mockDb.getFirstAsync).toHaveBeenCalledWith(`SELECT count(*) AS n FROM ${table}`);
+  }
+});
+
+test("C3-4: partial user metadata import is rolled back, never accepted as restored memory", async () => {
+  const read = mockDb.getFirstAsync.getMockImplementation()!;
+  mockDb.getFirstAsync.mockImplementation(async sql => {
+    if (sql === "PRAGMA pia_import.user_version") return { user_version: 3 };
+    if (sql === "SELECT count(*) AS n FROM memory_aliases") return { n: 1 };
+    return read(sql);
+  });
+  tablesOnce([...names, ...userMetadataTables], true);
+  await expect(restoreEncryptedBackup("guest", "file:///partial-v3.db", code))
+    .rejects.toThrow("backup_user_metadata_count_mismatch");
+  const sql = mockDb.execAsync.mock.calls.map(([q]: string[]) => q);
+  expect(sql).toContain("BEGIN IMMEDIATE");
+  expect(sql).toContain("ROLLBACK");
+  expect(sql).not.toContain("COMMIT");
+});
+
+test("C3-4: old v2 archives remain restorable without v3 metadata tables", async () => {
+  const read = mockDb.getFirstAsync.getMockImplementation()!;
+  mockDb.getFirstAsync.mockImplementation(async sql =>
+    sql === "PRAGMA pia_import.user_version" ? { user_version: 2 } : read(sql));
+  tablesOnce([...names], true);
+  await restoreEncryptedBackup("guest", "file:///v2.db", code);
+  const sql = mockDb.execAsync.mock.calls.map(([q]: string[]) => q);
+  expect(sql).toContain("COMMIT");
+  expect(sql.some(q => q.startsWith("INSERT INTO memory_aliases("))).toBe(false);
+  expect(sql.some(q => q.startsWith("INSERT INTO memory_index_terms("))).toBe(false);
 });

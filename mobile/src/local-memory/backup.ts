@@ -31,6 +31,7 @@ const V3_TABLES = {
   memory_aliases: "entity_id,alias,normalized",
   memory_index_terms: "entity_id,terms,source,created_at",
 } as const;
+const USER_SEARCH_TABLES = Object.keys(V3_TABLES) as Array<keyof typeof V3_TABLES>;
 const ENTITY_COLUMNS = "id,collection_id,domain,schema_version,title,payload_json,record_status,sensitivity," +
   "source_kind,source_ref,valid_from,valid_until,created_at,updated_at,record_version";
 export const RESTORABLE_VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17];
@@ -318,6 +319,13 @@ export async function restoreEncryptedBackup(
         if (!version || !RESTORABLE_VERSIONS.includes(version.user_version) || version.user_version > LOCAL_MEMORY_SCHEMA_VERSION) {
           throw new Error("incompatible_backup_version");
         }
+        // Names and manually entered search words are user data since v3,
+        // not disposable search projections. A missing table is a corrupt
+        // backup; never silently import records without their metadata.
+        if (version.user_version >= 3 &&
+            !USER_SEARCH_TABLES.every(table => available.has(table))) {
+          throw new Error("incompatible_backup_schema");
+        }
         // A v7 archive must carry the user-owned Android Share receipts.
         if (version.user_version >= 7 && !available.has("memory_received_shares")) {
           throw new Error("incompatible_backup_schema");
@@ -465,9 +473,20 @@ export async function restoreEncryptedBackup(
               throw new Error("backup_profile_self_count_mismatch");
           }
           for (const [table, columns] of Object.entries(V3_TABLES)) {
+            // Old v1/v2 archives did not have these tables. From v3 onward
+            // both are mandatory, already checked before touching the target.
+            if (!available.has(table)) continue;
+            const sourceRows = await tx.getFirstAsync<{ n: number }>(
+              `SELECT count(*) AS n FROM pia_import.${table}`);
+            if (!sourceRows || !Number.isSafeInteger(sourceRows.n) || sourceRows.n < 0)
+              throw new Error("backup_user_metadata_count_unavailable");
             const copyColumns = table === "memory_index_terms" && version.user_version >= 6
               ? columns + ",source_record_version,source_collection_name" : columns;
-            if (available.has(table)) await tx.execAsync(`INSERT INTO ${table}(${copyColumns}) SELECT ${copyColumns} FROM pia_import.${table}`);
+            await tx.execAsync(`INSERT INTO ${table}(${copyColumns}) SELECT ${copyColumns} FROM pia_import.${table}`);
+            const importedRows = await tx.getFirstAsync<{ n: number }>(
+              `SELECT count(*) AS n FROM ${table}`);
+            if (!importedRows || importedRows.n !== sourceRows.n)
+              throw new Error("backup_user_metadata_count_mismatch");
           }
           if (version.user_version >= 4) {
             for (const table of ["memory_attachments", "memory_attachment_parts"] as const) {
