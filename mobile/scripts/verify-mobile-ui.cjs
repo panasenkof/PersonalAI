@@ -458,7 +458,8 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       assert.equal(persistedAliases, 'Индюшка, индюк', 'Aliases persist after save and reopen');
       assert.equal(await page.getByLabel('Тип записи: Факт', { exact: true }).getAttribute('aria-selected'), 'true', 'The chosen record type is kept');
       await page.getByLabel('История, события и связи', { exact: true }).click();
-      await page.getByText('История изменений · версия 4', { exact: true }).waitFor();
+      // Text, type and names now share one revision (the former sequential Save added two).
+      await page.getByText('История изменений · версия 3', { exact: true }).waitFor();
       // Rejecting an unsaved edit must return to the list without overwriting the saved record.
       await page.getByLabel('Текст заметки', { exact: true }).fill('Черновик — НЕ СОХРАНЯТЬ');
       await page.getByLabel(/back/i).click();
