@@ -26,7 +26,7 @@ jest.mock("expo-crypto",()=>({
     require("node:crypto").createHash("sha256").update(text).digest("hex"),
 }));
 
-const MAX_PAID_API_CALLS=400; // 80 natural turns × up to 5 genuine model calls
+const MAX_PAID_API_CALLS=400; // hard ceiling; full 79-turn suite enforces 79 × 5 = 395 calls
 const MAX_PAID_OUTPUT_TOKENS=512;
 const MAX_PAID_INPUT_CHARS=24000;
 const MAX_REQUESTS_PER_TURN=5;
