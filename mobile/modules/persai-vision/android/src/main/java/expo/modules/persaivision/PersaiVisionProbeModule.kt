@@ -2,10 +2,6 @@ package expo.modules.persaivision
 
 import android.graphics.BitmapFactory
 import android.os.Build
-import com.google.mediapipe.framework.image.BitmapImageBuilder
-import com.google.mediapipe.tasks.core.BaseOptions
-import com.google.mediapipe.tasks.retrieval.universalembedder.UniversalEmbedder
-import com.google.mediapipe.tasks.retrieval.universalembedder.UniversalEmbedderOptions
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import java.io.File
@@ -71,24 +67,17 @@ class PersaiVisionProbeModule : Module() {
         ?: throw IllegalArgumentException("vision_image_decode_failed")
       val start = System.nanoTime()
       try {
-        val options = UniversalEmbedderOptions.builder()
-          .setBaseOptions(BaseOptions.builder().setModelAssetPath(model.absolutePath).build())
-          .setL2Normalize(true)
-          .build()
-        val embedder = UniversalEmbedder.createFromOptions(ctx, options)
-        try {
-          val textEmbedding = embedder.embedText(query).embeddings().first()
-          val imageEmbedding = embedder.embedImage(BitmapImageBuilder(bitmap).build()).embeddings().first()
-          val cosine = UniversalEmbedder.cosineSimilarity(textEmbedding, imageEmbedding)
-          require(cosine.isFinite()) { "invalid_vision_similarity" }
-          mapOf(
-            "cosine" to cosine,
-            "elapsedMs" to ((System.nanoTime() - start) / 1_000_000L),
-            "model" to "embeddinggemma2-text-vision-spike"
-          )
-        } finally {
-          embedder.close()
+        // Do not reference vendor Kotlin metadata here: the tested bridge
+        // has a Java-only API boundary for the newer LiteRT SDK.
+        val cosine = VisionProbeEngine.score(ctx, model.absolutePath, bitmap, query)
+        require(cosine.isFinite() && cosine in -1.00001..1.00001) {
+          "invalid_vision_similarity"
         }
+        mapOf(
+          "cosine" to cosine,
+          "elapsedMs" to ((System.nanoTime() - start) / 1_000_000L),
+          "model" to "embeddinggemma2-text-vision-spike"
+        )
       } finally {
         bitmap.recycle()
       }
