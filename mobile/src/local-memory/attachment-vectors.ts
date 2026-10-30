@@ -80,6 +80,7 @@ export async function attachmentImageMatches(db: SQL, input: ModelSpace & {
          e.record_version AS recordVersion,v.vector,v.source_version AS sourceVersion
       FROM memory_attachment_vectors v JOIN memory_attachments a ON a.id=v.attachment_id
       JOIN memory_entities e ON e.id=a.entity_id
+      JOIN memory_collections c ON c.id=e.collection_id
       WHERE ${filters.join(" AND ")}
       ORDER BY a.id LIMIT 5000`, params);
   const candidates = rows.flatMap(row => {
