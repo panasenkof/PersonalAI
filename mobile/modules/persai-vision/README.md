@@ -30,6 +30,27 @@ model in the APK**. Native compilation alone is not a model inference PASS.
    SHA/model revision, reference query and expected image label. Delete
    staged synthetic image and uninstall/test-clean the model if desired.
 
+## Native ABI finding from CI #41068005020 (30 Oct 2026)
+
+The pinned MediaPipe `tasks-retrieval:1.1.0` brings transitive
+`litertlm-android:0.17.0-alpha1` built with Kotlin **2.4 metadata**.
+Expo/RN's project Kotlin compiler accepts **2.1 metadata** in this build:
+`persai-vision:compileReleaseKotlin` fails. This is a *real* reproducible
+incompatibility; TypeScript/Jest green does not repair it.
+
+**Current guarded experiment:** a tiny `VisionProbeEngine.java` calls only
+the Java-exposed MediaPipe API. The Expo Kotlin module calls its
+`score(Context,String,Bitmap,String)` boundary rather than importing the
+vendor API or parsing vendor Kotlin classes. This avoids globally raising
+the Kotlin Gradle plugin for every app module. It still needs successful
+exact-head Android compilation, APK smoke and a **separate on-device runtime**
+test to establish that the transitive Kotlin runtime is compatible.
+
+**Fail-safe:** if compilation or runtime still fails, disable/exclude the
+experimental module before any default rollout; do not force Gradle resolution
+to an older LiteRT version against the 1.1.0 API, do not silence metadata
+errors, and do not update the whole Expo/RN Kotlin toolchain blindly.
+
 ## Deliberate limitations
 
 - A high cosine means visual similarity, **never confirmed identity** of a
