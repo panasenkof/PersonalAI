@@ -14,6 +14,7 @@ import { nebulaSpacing, nebulaTypography } from "../design/nebula/tokens";
 import { useTheme } from "../theme";
 import { VoiceModelCard } from "../components/VoiceModelCard";
 import { SmartSearchCard } from "../components/SmartSearchCard";
+import { VisionModelCard } from "../components/VisionModelCard";
 import { AgentLimitsCard } from "../components/AgentLimitsCard";
 
 export function DeviceSettingsScreen() {
@@ -39,6 +40,7 @@ export function DeviceSettingsScreen() {
         <AgentLimitsCard key={profile} />
       </NebulaSection>
       <NebulaSection title="Мультимедиа">
+        <VisionModelCard />
         <Collapsible id="settings.media-routing" icon="image" title="Распознавание файлов"
           summary="Фото, видео и аудио · выбор подключений">
           {profile && connections.length
