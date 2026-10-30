@@ -51,6 +51,41 @@ References:
 - https://github.com/google-ai-edge/LiteRT-LM/issues/3753
 
 
+## Vivo X200 Pro / Android 16: runtime class linkage diagnostic (v0.1.2)
+
+The user's **second** real device attempt passed image decoding but displayed
+`NoClassDefFoundError`. This exception means Android cannot resolve a
+required Java class (or a transitive class failed to initialize); its
+**exact class name is missing from the v0.1.1 UI**, so it is not yet
+possible to safely select a particular dependency fix. This is **not proof**
+of a corrupt .litertlm model, so do not ask the user to redownload the
+model or replace the photo.
+
+This narrow step:
+
+- Adds an allowlisted error stage around model options, engine creation,
+  text/image embedding and cosine calculation, to identify where the SDK fails.
+- Extracts only missing Java class identifiers from `NoClassDefFoundError`
+  or nested `ClassNotFoundException` and prints them in the lab UI. It
+  suppresses other raw messages that could contain photos, SAF URIs,
+  model file paths or user text. Unit tests cover both class resolution
+  styles and privacy sanitization.
+- Records the packaged ARM64 native libraries and selected Gradle runtime
+  dependencies in the isolated CI summary; this is build-time data, not
+  user-device telemetry. Neither source photos nor model weights are sent.
+- Ships artifact `persai-vision-lab-android16-diagnostic`, version `0.1.2`;
+  the main PersAI app and Kotlin 2.1 toolchain stay untouched.
+- As previous debug APKs were signed with ephemeral CI keys, remove
+  **only PersAI Vision Lab** before installing this new diagnostic build.
+  Reselect the already downloaded model and the original test photo.
+  The copied model inside the lab is removed by uninstall; the original
+  in Downloads stays on the phone.
+
+**Stop condition:** once the actual missing class and stage are visible,
+fix only its verified packaging/runtime dependency in a subsequent small PR.
+Do **not** invent model-support claims or disable a missing-class error to
+force a green result.
+
 ## Vivo X200 Pro / Android 16: fixed image decode (v0.1.1)
 
 The first on-device run exposed `ArithmeticException` when tapping
