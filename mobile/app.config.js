@@ -8,6 +8,12 @@
 // encrypted on-device database from future upgrades.
 const PERSAI_ANDROID_PACKAGE = 'com.persai.app';
 
+const withKotlinCompiler24 = (expoConfig) => require('expo/config-plugins').withProjectBuildGradle(expoConfig, mod => {
+  if (mod.modResults.language !== 'groovy') throw new Error('kotlin_pin_requires_groovy');
+  mod.modResults.contents = require('./scripts/kotlin-compiler-gradle.cjs').pinKotlinGradlePlugin(mod.modResults.contents);
+  return mod;
+});
+
 const withLocalModelCleartext = (expoConfig) => require('expo/config-plugins').withAndroidManifest(expoConfig, mod => {
   const application = mod.modResults.manifest.application?.[0];
   if (application) application.$['android:usesCleartextTraffic'] = 'true';
@@ -34,7 +40,7 @@ module.exports = ({ config }) => {
   }
   return {
     ...config,
-    plugins: [...(config.plugins || []), withLocalModelCleartext],
+    plugins: [...(config.plugins || []), withLocalModelCleartext, withKotlinCompiler24],
     ...(androidCiRelease && versionCode ? { version: `${config.version}-test.${versionCode}` } : {}),
     ios: { ...config.ios, ...(process.env.PIA_IOS_BUNDLE_ID ? { bundleIdentifier: process.env.PIA_IOS_BUNDLE_ID } : {}) },
     android: { ...config.android, package: PERSAI_ANDROID_PACKAGE, softwareKeyboardLayoutMode: 'resize', ...(versionCode ? { versionCode } : {}) },
