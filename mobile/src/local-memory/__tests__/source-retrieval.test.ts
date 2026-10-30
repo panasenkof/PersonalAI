@@ -207,3 +207,53 @@ test("transactional FTS triggers update, delete, and cascade with source segment
     expect((await db.getFirstAsync<{n:number}>("SELECT count(*) AS n FROM memory_extraction_fts"))!.n).toBe(0);
   } finally {db.close();}
 });
+
+
+test("C3 source ACL: found segment never grants access after collection reclassification", async () => {
+  const {db,entity,run}=await fixture();
+  try {
+    const found=await searchApprovedSourceSegments(db as never,"информация");
+    expect(found.segments).toHaveLength(1);
+    const segment=found.segments[0];
+    expect(segment.recordId).toBe(entity.id);
+    await db.runAsync("UPDATE memory_collections SET sensitivity='secret' WHERE id=?",
+      [entity.collection_id]);
+    expect((await searchApprovedSourceSegments(db as never,"информация")).segments).toEqual([]);
+    await expect(listApprovedSourceSegments(db as never,segment.recordId,segment.recordVersion))
+      .rejects.toThrow("memory_source_not_available_or_stale");
+    await expect(readApprovedSourceSegment(db as never,segment.recordId,segment.recordVersion,
+      segment.attachmentId,run,segment.segmentId))
+      .rejects.toThrow("memory_source_not_available_or_stale");
+
+    // Both record and collection classifications must pass independently.
+    await db.runAsync("UPDATE memory_collections SET sensitivity='standard' WHERE id=?",
+      [entity.collection_id]);
+    await db.runAsync("UPDATE memory_entities SET sensitivity='secret' WHERE id=?",
+      [entity.id]);
+    expect((await searchApprovedSourceSegments(db as never,"информация")).segments).toEqual([]);
+    await expect(listApprovedSourceSegments(db as never,entity.id,1))
+      .rejects.toThrow("memory_source_not_available_or_stale");
+    await expect(readApprovedSourceSegment(db as never,entity.id,1,
+      "a1",run,segment.segmentId))
+      .rejects.toThrow("memory_source_not_available_or_stale");
+  }finally{db.close();}
+});
+
+test("C3 source ACL: stale search results cannot bypass revised note version",async()=>{
+  const {db,entity,repo,run}=await fixture();
+  try {
+    const original=(await searchApprovedSourceSegments(db as never,"информация")).segments[0];
+    expect(original.recordVersion).toBe(1);
+    const updated=await repo.reviseEntity(entity.id,1,
+      {...entity.payload,body:"Новое описание"},"Изменение источника");
+    expect(updated.record_version).toBe(2);
+    const refreshed=(await searchApprovedSourceSegments(db as never,"информация")).segments[0];
+    expect(refreshed.recordVersion).toBe(2);
+    await expect(readApprovedSourceSegment(db as never,original.recordId,
+      original.recordVersion,original.attachmentId,run,original.segmentId))
+      .rejects.toThrow("memory_source_not_available_or_stale");
+    expect((await readApprovedSourceSegment(db as never,refreshed.recordId,
+      refreshed.recordVersion,refreshed.attachmentId,run,refreshed.segmentId)).content)
+      .toContain("информация со страницы");
+  }finally{db.close();}
+});
