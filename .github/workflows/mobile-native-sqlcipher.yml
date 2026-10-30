@@ -5,7 +5,7 @@ on:
   workflow_call:
     inputs:
       vision_expo_gate:
-        description: 'Opt-in Kotlin 2.4 Java ABI inside real Expo/SQLCipher APK; never regular release'
+        description: "Isolated Kotlin 2.4 engine in real Expo/SQLCipher APK; CI only"
         required: false
         type: boolean
         default: false
@@ -189,292 +189,27 @@ jobs:
           done
           echo "APK generated and archive verified: $APK"
 
-      - name: Prove opt-in engine classes are packaged in actual Expo release APK
+      - name: Prove opt-in engine classes in the real signed Expo release APK
         if: ${{ inputs.vision_expo_gate }}
         shell: bash
         run: |
           set -euo pipefail
           APK=android/app/build/outputs/apk/release/app-release.apk
           test -s "$APK"
-          # A valid package must contain a dex class reference to the
-          # separately built producer and the RN/Expo entry point.
-          unzip -Z1 "$APK" | grep -E '^classes[0-9]*.dex
-        with:
-          name: android-ui-apk-${{ github.sha }}
-          path: mobile/android/app/build/outputs/apk/release/app-release.apk
-          retention-days: 3
-      - name: Install pinned Maestro CLI
-        run: |
-          curl --fail --location --retry 3 -o "$RUNNER_TEMP/maestro.zip" "https://github.com/mobile-dev-inc/maestro/releases/download/cli-${MAESTRO_VERSION}/maestro.zip"
-          unzip -q "$RUNNER_TEMP/maestro.zip" -d "$RUNNER_TEMP/maestro-cli"
-          echo "$RUNNER_TEMP/maestro-cli/maestro/bin" >> "$GITHUB_PATH"
-      - name: Enable KVM
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-      # AOSP (no Google Pixel Launcher) is sufficient for the offline flow.
-      # Each attempt creates its own AVD. The second is only for a proven
-      # system/emulator failure, never for a failed product assertion.
-      - name: Run real Android UI smoke
-        id: android_ui_first
-        continue-on-error: true
-        uses: reactivecircus/android-emulator-runner@v2
-        env:
-          SMOKE_ATTEMPT: '1'
-          MAESTRO_CLI_NO_ANALYTICS: '1'
-        with:
-          api-level: 35
-          arch: x86_64
-          target: default
-          profile: pixel_2
-          ram-size: 2048M
-          heap-size: 384M
-          disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
-          script: |
-            bash mobile/scripts/android-ui-smoke.sh
-            bash mobile/scripts/android-pdf-page-smoke.sh
-      - name: Classify first Android smoke failure
-        id: android_ui_classify
-        if: ${{ steps.android_ui_first.outcome == 'failure' }}
-        run: node scripts/classify-emulator-failure.cjs qa/android-results/attempt-1
-      - name: Retry only an emulator infrastructure failure
-        id: android_ui_retry
-        if: ${{ steps.android_ui_first.outcome == 'failure' && steps.android_ui_classify.outputs.retry == 'true' }}
-        uses: reactivecircus/android-emulator-runner@v2
-        env:
-          SMOKE_ATTEMPT: '2'
-          MAESTRO_CLI_NO_ANALYTICS: '1'
-        with:
-          api-level: 35
-          arch: x86_64
-          target: default
-          profile: pixel_2
-          ram-size: 2048M
-          heap-size: 384M
-          disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
-          script: |
-            bash mobile/scripts/android-ui-smoke.sh
-            bash mobile/scripts/android-pdf-page-smoke.sh
-      - name: Preserve Android evidence even after failure
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: android-ui-evidence-${{ github.sha }}
-          path: mobile/qa/android-results/
-          retention-days: 7
-          if-no-files-found: warn
-      - name: Require successful Android smoke, without suppressing app failures
-        if: ${{ always() }}
-        env:
-          FIRST: ${{ steps.android_ui_first.outcome }}
-          SECOND: ${{ steps.android_ui_retry.outcome }}
-        run: |
-          if [ "$FIRST" = success ] || [ "$SECOND" = success ]; then
-            echo "Android UI smoke PASSED"
-          else
-            echo "::error::Android UI smoke failed (first=$FIRST, retry=$SECOND). See saved evidence."
-            exit 1
-          fi
-      # Only main is allowed to publish compiler objects for future PR restores.
-      - name: Save trusted x86_64 C/C++ compiler cache
-        if: ${{ github.ref == 'refs/heads/main' && success() }}
-        uses: actions/cache/save@v4
-        with:
-          path: ~/.cache/ccache
-          key: ${{ runner.os }}-persai-native-ccache-x86_64-v1-${{ hashFiles('mobile/package-lock.json') }}-${{ github.run_id }}
-
-          if ! for_dex="$(unzip -Z1 "$APK" | grep -E '^classes[0-9]*.dex
-        with:
-          name: android-ui-apk-${{ github.sha }}
-          path: mobile/android/app/build/outputs/apk/release/app-release.apk
-          retention-days: 3
-      - name: Install pinned Maestro CLI
-        run: |
-          curl --fail --location --retry 3 -o "$RUNNER_TEMP/maestro.zip" "https://github.com/mobile-dev-inc/maestro/releases/download/cli-${MAESTRO_VERSION}/maestro.zip"
-          unzip -q "$RUNNER_TEMP/maestro.zip" -d "$RUNNER_TEMP/maestro-cli"
-          echo "$RUNNER_TEMP/maestro-cli/maestro/bin" >> "$GITHUB_PATH"
-      - name: Enable KVM
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-      # AOSP (no Google Pixel Launcher) is sufficient for the offline flow.
-      # Each attempt creates its own AVD. The second is only for a proven
-      # system/emulator failure, never for a failed product assertion.
-      - name: Run real Android UI smoke
-        id: android_ui_first
-        continue-on-error: true
-        uses: reactivecircus/android-emulator-runner@v2
-        env:
-          SMOKE_ATTEMPT: '1'
-          MAESTRO_CLI_NO_ANALYTICS: '1'
-        with:
-          api-level: 35
-          arch: x86_64
-          target: default
-          profile: pixel_2
-          ram-size: 2048M
-          heap-size: 384M
-          disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
-          script: |
-            bash mobile/scripts/android-ui-smoke.sh
-            bash mobile/scripts/android-pdf-page-smoke.sh
-      - name: Classify first Android smoke failure
-        id: android_ui_classify
-        if: ${{ steps.android_ui_first.outcome == 'failure' }}
-        run: node scripts/classify-emulator-failure.cjs qa/android-results/attempt-1
-      - name: Retry only an emulator infrastructure failure
-        id: android_ui_retry
-        if: ${{ steps.android_ui_first.outcome == 'failure' && steps.android_ui_classify.outputs.retry == 'true' }}
-        uses: reactivecircus/android-emulator-runner@v2
-        env:
-          SMOKE_ATTEMPT: '2'
-          MAESTRO_CLI_NO_ANALYTICS: '1'
-        with:
-          api-level: 35
-          arch: x86_64
-          target: default
-          profile: pixel_2
-          ram-size: 2048M
-          heap-size: 384M
-          disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
-          script: |
-            bash mobile/scripts/android-ui-smoke.sh
-            bash mobile/scripts/android-pdf-page-smoke.sh
-      - name: Preserve Android evidence even after failure
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: android-ui-evidence-${{ github.sha }}
-          path: mobile/qa/android-results/
-          retention-days: 7
-          if-no-files-found: warn
-      - name: Require successful Android smoke, without suppressing app failures
-        if: ${{ always() }}
-        env:
-          FIRST: ${{ steps.android_ui_first.outcome }}
-          SECOND: ${{ steps.android_ui_retry.outcome }}
-        run: |
-          if [ "$FIRST" = success ] || [ "$SECOND" = success ]; then
-            echo "Android UI smoke PASSED"
-          else
-            echo "::error::Android UI smoke failed (first=$FIRST, retry=$SECOND). See saved evidence."
-            exit 1
-          fi
-      # Only main is allowed to publish compiler objects for future PR restores.
-      - name: Save trusted x86_64 C/C++ compiler cache
-        if: ${{ github.ref == 'refs/heads/main' && success() }}
-        uses: actions/cache/save@v4
-        with:
-          path: ~/.cache/ccache
-          key: ${{ runner.os }}-persai-native-ccache-x86_64-v1-${{ hashFiles('mobile/package-lock.json') }}-${{ github.run_id }}
-)"; then
-            echo "::error::No DEX in actual app APK"; exit 1
-          fi
+          DEX_LIST="$(unzip -Z1 "$APK" | grep -E '^classes[0-9]*[.]dex$')"
+          test -n "$DEX_LIST"
           found=0
           while IFS= read -r dex; do
             if unzip -p "$APK" "$dex" | strings | grep -q 'VisionInteropApi'; then
               found=1
               break
             fi
-          done <<< "$for_dex"
-          test "$found" -eq 1 || { echo "::error::No vision bridge in Expo APK"; exit 1; }
-          if unzip -Z1 "$APK" | grep -E '\\.litertlm
-        with:
-          name: android-ui-apk-${{ github.sha }}
-          path: mobile/android/app/build/outputs/apk/release/app-release.apk
-          retention-days: 3
-      - name: Install pinned Maestro CLI
-        run: |
-          curl --fail --location --retry 3 -o "$RUNNER_TEMP/maestro.zip" "https://github.com/mobile-dev-inc/maestro/releases/download/cli-${MAESTRO_VERSION}/maestro.zip"
-          unzip -q "$RUNNER_TEMP/maestro.zip" -d "$RUNNER_TEMP/maestro-cli"
-          echo "$RUNNER_TEMP/maestro-cli/maestro/bin" >> "$GITHUB_PATH"
-      - name: Enable KVM
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-      # AOSP (no Google Pixel Launcher) is sufficient for the offline flow.
-      # Each attempt creates its own AVD. The second is only for a proven
-      # system/emulator failure, never for a failed product assertion.
-      - name: Run real Android UI smoke
-        id: android_ui_first
-        continue-on-error: true
-        uses: reactivecircus/android-emulator-runner@v2
-        env:
-          SMOKE_ATTEMPT: '1'
-          MAESTRO_CLI_NO_ANALYTICS: '1'
-        with:
-          api-level: 35
-          arch: x86_64
-          target: default
-          profile: pixel_2
-          ram-size: 2048M
-          heap-size: 384M
-          disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
-          script: |
-            bash mobile/scripts/android-ui-smoke.sh
-            bash mobile/scripts/android-pdf-page-smoke.sh
-      - name: Classify first Android smoke failure
-        id: android_ui_classify
-        if: ${{ steps.android_ui_first.outcome == 'failure' }}
-        run: node scripts/classify-emulator-failure.cjs qa/android-results/attempt-1
-      - name: Retry only an emulator infrastructure failure
-        id: android_ui_retry
-        if: ${{ steps.android_ui_first.outcome == 'failure' && steps.android_ui_classify.outputs.retry == 'true' }}
-        uses: reactivecircus/android-emulator-runner@v2
-        env:
-          SMOKE_ATTEMPT: '2'
-          MAESTRO_CLI_NO_ANALYTICS: '1'
-        with:
-          api-level: 35
-          arch: x86_64
-          target: default
-          profile: pixel_2
-          ram-size: 2048M
-          heap-size: 384M
-          disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
-          script: |
-            bash mobile/scripts/android-ui-smoke.sh
-            bash mobile/scripts/android-pdf-page-smoke.sh
-      - name: Preserve Android evidence even after failure
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: android-ui-evidence-${{ github.sha }}
-          path: mobile/qa/android-results/
-          retention-days: 7
-          if-no-files-found: warn
-      - name: Require successful Android smoke, without suppressing app failures
-        if: ${{ always() }}
-        env:
-          FIRST: ${{ steps.android_ui_first.outcome }}
-          SECOND: ${{ steps.android_ui_retry.outcome }}
-        run: |
-          if [ "$FIRST" = success ] || [ "$SECOND" = success ]; then
-            echo "Android UI smoke PASSED"
-          else
-            echo "::error::Android UI smoke failed (first=$FIRST, retry=$SECOND). See saved evidence."
-            exit 1
+          done <<< "$DEX_LIST"
+          test "$found" -eq 1 || { echo "::error::Vision ABI missing in signed Expo APK"; exit 1; }
+          if unzip -Z1 "$APK" | grep -E '[.]litertlm$'; then
+            echo "::error::Model weights included unexpectedly"; exit 1
           fi
-      # Only main is allowed to publish compiler objects for future PR restores.
-      - name: Save trusted x86_64 C/C++ compiler cache
-        if: ${{ github.ref == 'refs/heads/main' && success() }}
-        uses: actions/cache/save@v4
-        with:
-          path: ~/.cache/ccache
-          key: ${{ runner.os }}-persai-native-ccache-x86_64-v1-${{ hashFiles('mobile/package-lock.json') }}-${{ github.run_id }}
-; then
-            echo "::error::Model weights were bundled unexpectedly"; exit 1
-          fi
-          echo "Actual Expo/SQLCipher/ExecuTorch release APK includes Kotlin 2.4 vision Java ABI; no model bundled. No on-device inference or production memory indexing proved." >> "$GITHUB_STEP_SUMMARY"
+          echo "Expo release APK embeds Kotlin 2.4 engine Java ABI; runtime inference still not proved." >> "$GITHUB_STEP_SUMMARY"
       - name: Save standalone emulator APK
         uses: actions/upload-artifact@v4
         with:
