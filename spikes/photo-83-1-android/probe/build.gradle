@@ -14,4 +14,10 @@ android {
 dependencies {
   // Single available published retrieval artifact; no model weights bundled.
   implementation 'com.google.mediapipe:tasks-retrieval:1.1.0'
+  // Device diagnostic #83.1: tasks-retrieval 1.1.0 pulled LiteRT-LM
+  // 0.17.0-alpha1. Its runtime did not resolve ActivationDataType on
+  // Vivo X200 Pro / Android 16. Pin a stable LiteRT-LM 0.18.0
+  // explicitly ONLY in this standalone lab. The independent CI verifies
+  // the exact class in the downloaded AAR and final APK.
+  implementation 'com.google.ai.edge.litertlm:litertlm-android:0.18.0'
 }
