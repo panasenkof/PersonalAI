@@ -2,44 +2,23 @@ package expo.modules.persaivision;
 
 import android.content.Context;
 import android.graphics.Bitmap;
-import com.google.mediapipe.framework.image.BitmapImageBuilder;
-import com.google.mediapipe.tasks.core.BaseOptions;
-import com.google.mediapipe.tasks.retrieval.universalembedder.UniversalEmbedder;
-import com.google.mediapipe.tasks.retrieval.universalembedder.UniversalEmbedderOptions;
+import com.persai.visionsdkprobe.VisionInteropApi;
+import java.io.File;
 
 /**
- * Java-only adapter for the isolated #83.1 experiment.
+ * Thin Expo-side Java adapter for the #83.2 exact-head Android integration gate.
+ * Java-facing producer API is the same engine verified on Vivo in Vision Lab.
+ * No MediaPipe/Kotlin-2.4 types can escape into the Expo Kotlin 2.1 compiler.
  *
- * MediaPipe Tasks Retrieval 1.1.0 resolves LiteRT-LM 0.17 with Kotlin 2.4
- * metadata, while Expo SDK 57 is built with Kotlin 2.1. Keep the vendor API
- * off the Kotlin compiler's source references; javac reads the Java-visible
- * API without attempting to deserialize the newer Kotlin metadata.
- *
- * This is a guarded interoperability experiment, NOT production support:
- * native ABI/runtime compatibility still requires exact-head Android CI and
- * a separate device inference run with real model weights.
+ * The module is still disabled by expo-module.config.json: platforms=[] in
+ * every ordinary build. The opt-in CI workflow stages a verified Java-only
+ * stub and the separately built engine AAR without replacing the root Kotlin
+ * compiler, text embedding model, or any SQLCipher index.
  */
 public final class VisionProbeEngine {
   private VisionProbeEngine() {}
 
   public static double score(Context context, String modelPath, Bitmap bitmap, String query) {
-    UniversalEmbedderOptions options = UniversalEmbedderOptions.builder()
-        .setBaseOptions(BaseOptions.builder().setModelAssetPath(modelPath).build())
-        .setL2Normalize(true)
-        .build();
-    UniversalEmbedder embedder = UniversalEmbedder.createFromOptions(context, options);
-    try {
-      var textResult = embedder.embedText(query);
-      var imageResult = embedder.embedImage(new BitmapImageBuilder(bitmap).build());
-      if (textResult.embeddings().isEmpty() || imageResult.embeddings().isEmpty()) {
-        throw new IllegalStateException("vision_empty_embedding");
-      }
-      double score = UniversalEmbedder.cosineSimilarity(
-          textResult.embeddings().get(0), imageResult.embeddings().get(0));
-      if (!Double.isFinite(score)) throw new IllegalStateException("vision_invalid_similarity");
-      return score;
-    } finally {
-      embedder.close();
-    }
+    return VisionInteropApi.scoreTextImage(context, new File(modelPath), bitmap, query);
   }
 }
