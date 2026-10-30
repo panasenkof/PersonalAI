@@ -4,6 +4,7 @@
 import { SqliteMemoryRepository } from "../repository";
 import { SCHEMA_SQL, LOCAL_MEMORY_SCHEMA_VERSION } from "../storage";
 import { IMAGE_VECTOR_DIM } from "../attachment-vectors";
+import { fingerprintExtractionSource } from "../extractions";
 
 jest.mock("expo-crypto", () => ({
   randomUUID: () => require("node:crypto").randomUUID(),
@@ -48,6 +49,10 @@ async function attachment(db:DB,repo:SqliteMemoryRepository,collectionId:string,
     [id,0,raw,sha]);
   return {attachmentId:id,entityId:e.id};
 }
+async function save(db: DB, repo: SqliteMemoryRepository, attachmentId: string, model: string, values: Float32Array) {
+  return repo.saveImageVector(attachmentId,model,values,
+    await fingerprintExtractionSource(db as never,attachmentId));
+}
 test("v18 index is derived, encrypted and lives with attachment foreign keys",async()=>{
   const db=new DB();
   try{
@@ -64,8 +69,8 @@ test("searchMemory merges photo rank with text without creating a second unscope
     const c=await repo.createCollection({name:"Фото",slug:"photos",sensitivity:"standard"});
     const x=await attachment(db,repo,c.id,"red-bike.jpg");
     const y=await attachment(db,repo,c.id,"blue-car.jpg");
-    expect(await repo.saveImageVector(x.attachmentId,MODEL,vector(1,0))).toBe(true);
-    expect(await repo.saveImageVector(y.attachmentId,MODEL,vector(0,1))).toBe(true);
+    expect(await save(db,repo,x.attachmentId,MODEL,vector(1,0))).toBe(true);
+    expect(await save(db,repo,y.attachmentId,MODEL,vector(0,1))).toBe(true);
     const hits=await repo.searchMemory("",{imageVector:{model:MODEL,values:vector(1,0)}});
     expect(hits.map(h=>h.entity.id)).toEqual([x.entityId,y.entityId]);
     expect(hits[0].originals).toEqual([expect.objectContaining({
@@ -85,14 +90,21 @@ test("same model vector is hidden after source edit, archive, collection filter 
     const c=await repo.createCollection({name:"Фото",slug:"photos",sensitivity:"standard"});
     const x=await attachment(db,repo,c.id,"tree.jpg");
     const opts={imageVector:{model:MODEL,values:vector(1,0)}};
-    await repo.saveImageVector(x.attachmentId,MODEL,vector(1,0));
+    await save(db,repo,x.attachmentId,MODEL,vector(1,0));
     expect((await repo.searchMemory("",opts))).toHaveLength(1);
     expect(await repo.searchMemory("",{...opts,collectionIds:["unrelated"]})).toEqual([]);
     expect(await repo.searchMemory("",{...opts,sensitivities:[]})).toEqual([]);
+    const before=await fingerprintExtractionSource(db as never,x.attachmentId);
     await db.runAsync("UPDATE memory_attachment_parts SET sha256=? WHERE attachment_id=?",
       ["c".repeat(64),x.attachmentId]);
     expect(await repo.searchMemory("",opts)).toEqual([]);
-    await repo.saveImageVector(x.attachmentId,MODEL,vector(1,0));
+    // A model result computed before the edit MUST NOT receive a new source
+    // fingerprint and silently become current.
+    expect(await repo.saveImageVector(x.attachmentId,MODEL,vector(1,0),before)).toBe(false);
+    const actual=require("node:crypto").createHash("sha256").update(Uint8Array.from([1,2,3,4])).digest("hex");
+    await db.runAsync("UPDATE memory_attachment_parts SET sha256=? WHERE attachment_id=?",
+      [actual,x.attachmentId]);
+    await save(db,repo,x.attachmentId,MODEL,vector(1,0));
     await db.runAsync("UPDATE memory_entities SET record_status='archived' WHERE id=?",[x.entityId]);
     expect(await repo.searchMemory("",opts)).toEqual([]);
     await db.runAsync("DELETE FROM memory_attachments WHERE id=?",[x.attachmentId]);
@@ -106,13 +118,13 @@ test("reject unsupported dimensions, model-space crossover, or non-image origina
     const repo=new SqliteMemoryRepository(db as never);
     const c=await repo.createCollection({name:"Файлы",slug:"files",sensitivity:"standard"});
     const x=await attachment(db,repo,c.id,"scan.pdf","application/pdf");
-    expect(await repo.saveImageVector(x.attachmentId,MODEL,vector(1,0))).toBe(false);
-    await expect(repo.saveImageVector(x.attachmentId,"minilm",vector(1,0)))
+    expect(await save(db,repo,x.attachmentId,MODEL,vector(1,0))).toBe(false);
+    await expect(save(db,repo,x.attachmentId,"minilm",vector(1,0)))
       .rejects.toThrow("invalid_vision_vector_space");
-    await expect(repo.saveImageVector(x.attachmentId,MODEL,new Float32Array(384)))
+    await expect(save(db,repo,x.attachmentId,MODEL,new Float32Array(384)))
       .rejects.toThrow("invalid_vision_vector_space");
     const bad=vector(1,0);bad[5]=NaN;
-    await expect(repo.saveImageVector(x.attachmentId,MODEL,bad))
+    await expect(save(db,repo,x.attachmentId,MODEL,bad))
       .rejects.toThrow("invalid_vision_vector_space");
   }finally{db.close();}
 });
