@@ -1,6 +1,7 @@
 import { SqliteMemoryRepository } from "../repository";
 import { VECTOR_DIM, VECTOR_MODEL, isCurrentVectorSpace, vectorSpaceKey } from "../vectors";
 import { MemoryAccessError, MemoryConflictError } from "../types";
+import { noteHistoryLabel } from "../note-actions";
 
 jest.mock("expo-crypto", () => ({
   randomUUID: jest.fn(() => "fixed-" + Math.random().toString(36).slice(2)),
@@ -1623,4 +1624,49 @@ test("natural user difficulty does not force a literal negation into FTS evidenc
     collectionIds: [col.id], sensitivities: ["standard", "inherit"],
   });
   expect(hits.map(hit => hit.entity.id)).toContain(drill.id);
+});
+
+test("C3: card and batch archive share one durable notes journal and undo", async () => {
+  const db = new FakeSqlite();
+  const repo = new SqliteMemoryRepository(db as never);
+  const c = await repo.createCollection({ name: "Documents", slug: "documents", sensitivity: "standard" });
+  const n = await repo.createEntity({ collection_id: c.id, domain: "notes", title: "Гарантия", payload: { body: "До 2030" } });
+  const archived = await repo.setEntityStatus(n.id, n.record_version, "archived");
+  expect(archived.record_status).toBe("archived");
+  expect(archived.record_version).toBe(n.record_version + 1);
+  const token = await repo.lastNoteOperation();
+  expect(token).toMatch(/^notes:archive:/);
+  const revisions = await repo.revisions("entity", n.id);
+  expect(revisions).toHaveLength(1);
+  expect(revisions[0].reason).toBe(token);
+  expect(noteHistoryLabel(token)).toBe("Перенос в архив");
+  expect((await repo.searchNotes("гарантия"))).toHaveLength(0);
+  await new SqliteMemoryRepository(db as never).undoNotes(token);
+  expect((await repo.entity(n.id))?.record_status).toBe("active");
+  expect((await repo.searchNotes("гарантия"))[0]?.id).toBe(n.id);
+  expect(await repo.lastNoteOperation()).toBe("");
+  expect(noteHistoryLabel("Отмена " + token)).toBe("Отмена: перенос в архив");
+  await expect(repo.undoNotes(token)).rejects.toBeInstanceOf(MemoryConflictError);
+  const current = (await repo.entity(n.id))!;
+  const batch = await repo.changeNotes("archive", [{ id: n.id, record_version: current.record_version }]);
+  expect(await repo.lastNoteOperation()).toBe(batch);
+  const restored = await repo.setEntityStatus(n.id, current.record_version + 1, "active");
+  expect(restored.record_status).toBe("active");
+  expect(await repo.lastNoteOperation()).toMatch(/^notes:unarchive:/);
+});
+
+test("C3: archive CAS rejects stale and later edits prevent unsafe undo", async () => {
+  const db = new FakeSqlite();
+  const repo = new SqliteMemoryRepository(db as never);
+  const c = await repo.createCollection({ name: "Notes", slug: "notes", sensitivity: "standard" });
+  const n = await repo.createEntity({ collection_id: c.id, domain: "notes", payload: { body: "История" } });
+  await expect(repo.setEntityStatus(n.id, 99, "archived")).rejects.toBeInstanceOf(MemoryConflictError);
+  expect(await repo.lastNoteOperation()).toBe("");
+  const archived = await repo.setEntityStatus(n.id, 1, "archived");
+  const token = await repo.lastNoteOperation();
+  await expect(repo.setEntityStatus(n.id, archived.record_version, "archived")).rejects.toThrow("Статус записи изменился");
+  await repo.reviseEntity(n.id, archived.record_version, { body: "Исправленная история" }, "Поправка после архива");
+  await expect(repo.undoNotes(token)).rejects.toBeInstanceOf(MemoryConflictError);
+  expect((await repo.entity(n.id))?.record_status).toBe("archived");
+  expect((await repo.entity(n.id))?.payload.body).toBe("Исправленная история");
 });
