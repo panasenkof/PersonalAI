@@ -3,7 +3,11 @@ import { localMemorySessionUnlocked } from "../../local-memory/storage";
 
 jest.mock("react-native", () => ({ Platform: { OS: "android" } }));
 jest.mock("../../local-memory/storage", () => ({ localMemorySessionUnlocked: jest.fn() }));
-jest.mock("expo-modules-core", () => ({ requireOptionalNativeModule: jest.fn() }));
+// Keep Expo's own requireNativeModule for its test runtime/fetch polyfill.
+jest.mock("expo-modules-core", () => ({
+  ...jest.requireActual("expo-modules-core"),
+  requireOptionalNativeModule: jest.fn(),
+}));
 
 const { requireOptionalNativeModule } = require("expo-modules-core") as {
   requireOptionalNativeModule: jest.Mock;
