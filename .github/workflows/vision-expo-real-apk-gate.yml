@@ -1,0 +1,24 @@
+name: Vision Expo real APK compatibility gate (opt-in)
+
+on:
+  pull_request:
+    paths:
+      - "mobile/modules/persai-vision/**"
+      - "mobile/scripts/stage-vision-expo-gate.cjs"
+      - "spikes/photo-83-1-android/**"
+      - "spikes/photo-83-1-interop-kt21/**"
+      - ".github/workflows/vision-expo-real-apk-gate.yml"
+      - ".github/workflows/mobile-native-sqlcipher.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  real-expo-sqlcipher-apk:
+    # Reuse the existing full release-APK + emulator acceptance. The only
+    # difference from normal CI is opt-in staging of the isolated Kotlin 2.4
+    # engine and its Java ABI. No weights, photos or new memory writer.
+    uses: ./.github/workflows/mobile-native-sqlcipher.yml
+    with:
+      vision_expo_gate: true
