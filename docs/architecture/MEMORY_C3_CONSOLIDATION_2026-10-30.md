@@ -58,6 +58,13 @@
 - **Проверки:** тесты настоящего SQLite на единую ревизию/token, возврат из архива, rollback после undo, запрет undo после более поздней правки; C2 физический Android отдельно `NOT_RUN_PHYSICAL`.
 - **Оставшийся C3:** журналы временных и relation decisions сохраняются как семантически самостоятельные, их нельзя объединять с архивом только из-за слова «отмена».
 
+### C3-2a · Источники: единый ACL при поиске, списке и чтении
+
+- **Инвентаризация фактических вызовов:** `direct-agent/tool-catalog.ts` exposes `search_local_source_segments`, `list_local_sources`, `read_local_source_segment`; `source-retrieval.ts` implements `searchApprovedSourceSegments` (FTS поиска извлечённого оригинала), `listApprovedSourceSegments` (ограниченный список конкретной заметки), `readApprovedSourceSegment` (ограниченное чтение с повторной проверкой). Вызовы `direct-agent/memory.ts:searchApprovedNotes/readApprovedNote` остаются допустимым поиском/чтением самой *заметки* через `SqliteMemoryRepository.searchMemory`, а не дублем поиска по содержимому оригиналов. Физический просмотр байтов — `media/attachments.ts:materializeAttachment`, с отдельной повторной проверкой прав и целостности.
+- **Подтверждённое дублирование:** SQL-фильтр `domain=notes`, `status=active`, record-level `standard|inherit` и collection-level `standard` в `source-retrieval.ts` повторялся для адресного `requireAllowed` и глобального FTS. Это один и тот же ACL-контракт, который рисковал разойтись при будущих изменениях. Оставили **одну SQL-константу `APPROVED_SOURCE_ACL` в том же модуле**, без слоя, таблицы, нового индекса или writer.
+- **Непересекающиеся обязанности:** FTS source-search не подменяет поиск заметок/векторный поиск; все три source-операции повторно проверяют ACL при использовании, а `read` независимо требует точный record version, attachment/extraction/segment IDs и свежий `part_manifest_revision`. Нет доверия к идентификатору, когда-то выданному поиском. При невозможности доказать лишний поиск — **NO CHANGE NEEDED** для существующих FTS/vector/source режимов.
+- **C1-регрессии:** настоящий SQLite проверяет, что после получения результатов поиск, список и чтение отказывают при переводе раздела в `secret` или записи в `secret`, а после изменения версии прежний курсор чтения не годится. Платная LLM и реальные файлы пользователя не затрагиваются. Physical C2 — `NOT_RUN_PHYSICAL`.
+
 ## 3. Чего не делаем
 
 1. Не меняем SQLCipher схему «для красоты», не объединяем таблицы фактов, событий, истории и доказательств только из-за родственных имен.
