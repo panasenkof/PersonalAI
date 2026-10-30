@@ -13,7 +13,7 @@ internal object VisionFailure {
   )
   private val allowedStages = setOf(
     "image-decode", "image-metrics", "embedder-options", "embedder-create",
-    "embed-text", "embed-image", "cosine-similarity", "embedder-close"
+    "embed-text", "embed-reference", "embed-image", "cosine-similarity", "embedder-close"
   )
 
   fun report(stage: String, error: Throwable): String {
