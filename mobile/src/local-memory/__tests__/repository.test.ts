@@ -1,4 +1,5 @@
 import { SqliteMemoryRepository } from "../repository";
+import { reindexAll } from "../search-index";
 import { VECTOR_DIM, VECTOR_MODEL, isCurrentVectorSpace, vectorSpaceKey } from "../vectors";
 import { MemoryAccessError, MemoryConflictError } from "../types";
 import { noteHistoryLabel } from "../note-actions";
@@ -1734,4 +1735,57 @@ test("C3: archive CAS rejects stale and later edits prevent unsafe undo", async 
   await expect(repo.undoNotes(token)).rejects.toBeInstanceOf(MemoryConflictError);
   expect((await repo.entity(n.id))?.record_status).toBe("archived");
   expect((await repo.entity(n.id))?.payload.body).toBe("Исправленная история");
+});
+
+test("C3-3: card and standalone edits preserve the same user metadata across FTS rebuild", async () => {
+  const fake = new FakeSqlite();
+  const repo = new SqliteMemoryRepository(fake as never);
+  const c = await repo.createCollection({ name: "Рецепты", slug: "recipes", sensitivity: "standard" });
+  const first = await repo.createEntity({
+    collection_id: c.id, domain: "notes", title: "Завтрак", payload: { title: "Завтрак", body: "Приготовить утром" },
+  }, undefined, { kind: "note", aliases: ["Быстрый омлет", " быстрый  омлет "], userTerms: ["яйца"] });
+  expect(await repo.aliases(first.id)).toEqual(["Быстрый омлет"]);
+  expect((await repo.indexTerms(first.id)).find(x => x.source === "user")?.terms).toEqual(["яйца"]);
+  await repo.setIndexTerms(first.id, ["полезный"], "model:manual");
+  expect((await repo.searchNotes("полезный"))[0]?.id).toBe(first.id);
+
+  expect(await repo.setAliases(first.id, ["Глазунья", "глазунья", "Сытный завтрак"]))
+    .toEqual(["Глазунья", "Сытный завтрак"]);
+  await repo.setIndexTerms(first.id, ["перекус"], "user");
+  expect((await repo.indexTerms(first.id)).find(x => x.source === "model:manual")?.terms)
+    .toEqual(["полезный"]);
+  await reindexAll(fake as never);
+  expect((await repo.searchNotes("Глазунья"))[0]?.id).toBe(first.id);
+  expect((await repo.searchNotes("перекус"))[0]?.id).toBe(first.id);
+  expect(await repo.searchNotes("яйца")).toEqual([]);
+
+  const edited = await repo.reviseEntity(first.id, first.record_version,
+    { title: "Завтрак", body: "Приготовить утром" }, "Одна карточка", c.id, false, undefined,
+    { kind: "note", aliases: ["Завтрак на скорую руку"], userTerms: ["быстро"] });
+  expect(edited.record_version).toBe(2);
+  await reindexAll(fake as never);
+  expect((await repo.searchNotes("быстро"))[0]?.id).toBe(first.id);
+  expect((await repo.searchNotes("Завтрак на скорую руку"))[0]?.id).toBe(first.id);
+  expect(await repo.searchNotes("Глазунья")).toEqual([]);
+  // Model enrichment belongs to its earlier record version; do not promote it.
+  expect((await repo.indexTerms(first.id)).find(x => x.source === "model:manual")?.terms)
+    .toEqual(["полезный"]);
+  expect(await repo.searchNotes("полезный")).toEqual([]);
+});
+
+test("C3-3: standalone alias edit rolls back old names and FTS if insertion fails", async () => {
+  const fake = new FakeSqlite();
+  const repo = new SqliteMemoryRepository(fake as never);
+  const c = await repo.createCollection({ name: "Люди", slug: "people", sensitivity: "standard" });
+  const n = await repo.createEntity({ collection_id: c.id, domain: "notes",
+    title: "Сосед", payload: { title: "Сосед", body: "Адрес" } },
+    undefined, { kind: "person", aliases: ["Николай"], userTerms: ["соседство"] });
+  fake.failOnAliasInsert = true;
+  await expect(repo.setAliases(n.id, ["Коля"])).rejects.toThrow("injected_alias_failure");
+  fake.failOnAliasInsert = false;
+  expect(await repo.aliases(n.id)).toEqual(["Николай"]);
+  expect((await repo.searchNotes("Николай"))[0]?.id).toBe(n.id);
+  expect(await repo.searchNotes("Коля")).toEqual([]);
+  expect((await repo.indexTerms(n.id)).find(x => x.source === "user")?.terms)
+    .toEqual(["соседство"]);
 });

@@ -86,10 +86,10 @@ function checkedTerms(terms: string[]): string {
 /** User-authored names and search words are durable card data, NOT a derived index.
  * Save them in the same SQLCipher transaction and revision as the edited record. */
 export type NoteCardFields = { kind: MemoryKind; aliases: string[]; userTerms: string[] };
-function prepareNoteCard(fields: NoteCardFields) {
-  const kind = checkedKind(fields.kind);
+/** One validation contract for the card editor and standalone name writer. */
+function prepareAliases(aliases: string[]): Map<string, string> {
   const names = new Map<string, string>();
-  for (const raw of fields.aliases) {
+  for (const raw of aliases) {
     const alias = String(raw).replace(/\s+/g, " ").trim();
     if (!alias) continue;
     if (alias.length > 80) throw new Error("invalid_memory_alias");
@@ -97,22 +97,34 @@ function prepareNoteCard(fields: NoteCardFields) {
     if (!names.has(normalized)) names.set(normalized, alias);
   }
   if (names.size > 20) throw new Error("too_many_memory_aliases");
-  return { kind, names, words: checkedTerms(fields.userTerms) };
+  return names;
+}
+/** These are user-owned rows, never a disposable FTS or vector projection.
+ * Call only from an unlocked transaction and rebuild FTS before committing. */
+async function replaceAliases(tx: SQL, entityId: string, names: ReadonlyMap<string, string>): Promise<void> {
+  await tx.runAsync("DELETE FROM memory_aliases WHERE entity_id=?", [entityId]);
+  for (const [normalized, alias] of names) {
+    await tx.runAsync("INSERT INTO memory_aliases(entity_id,alias,normalized) VALUES (?,?,?)", [entityId, alias, normalized]);
+  }
+}
+/** One source-specific terms writer for both card metadata and standalone edits.
+ * Never replace model enrichment while changing the user's own search words. */
+async function replaceIndexTerms(tx: SQL, entityId: string, words: string, source: string, timestamp: string): Promise<void> {
+  const current = await tx.getFirstAsync<Row>(
+    "SELECT e.record_version,c.name FROM memory_entities e JOIN memory_collections c ON c.id=e.collection_id WHERE e.id=?", [entityId]);
+  if (!current) throw new MemoryAccessError("entity_not_found");
+  await tx.runAsync("DELETE FROM memory_index_terms WHERE entity_id=? AND source=?", [entityId, source]);
+  // An empty model response is also durable proof that enrichment ran.
+  if (words || source.startsWith("model:")) await tx.runAsync(
+    "INSERT INTO memory_index_terms(entity_id,terms,source,created_at,source_record_version,source_collection_name) VALUES (?,?,?,?,?,?)",
+    [entityId, words, source, timestamp, Number(current.record_version), String(current.name)]);
+}
+function prepareNoteCard(fields: NoteCardFields) {
+  return { kind: checkedKind(fields.kind), names: prepareAliases(fields.aliases), words: checkedTerms(fields.userTerms) };
 }
 async function writeNoteCardFields(db: SQL, entityId: string, fields: ReturnType<typeof prepareNoteCard>, timestamp: string) {
-  await db.runAsync("DELETE FROM memory_aliases WHERE entity_id=?", [entityId]);
-  for (const [normalized, alias] of fields.names) {
-    await db.runAsync("INSERT INTO memory_aliases(entity_id,alias,normalized) VALUES (?,?,?)", [entityId, alias, normalized]);
-  }
-  await db.runAsync("DELETE FROM memory_index_terms WHERE entity_id=? AND source='user'", [entityId]);
-  if (fields.words) {
-    const current = await db.getFirstAsync<Row>(
-      "SELECT e.record_version,c.name FROM memory_entities e JOIN memory_collections c ON c.id=e.collection_id WHERE e.id=?", [entityId]);
-    if (!current) throw new MemoryAccessError("entity_not_found");
-    await db.runAsync(
-      "INSERT INTO memory_index_terms(entity_id,terms,source,created_at,source_record_version,source_collection_name) VALUES (?,?,?,?,?,?)",
-      [entityId, fields.words, "user", timestamp, Number(current.record_version), String(current.name)]);
-  }
+  await replaceAliases(db, entityId, fields.names);
+  await replaceIndexTerms(db, entityId, fields.words, "user", timestamp);
 }
 // bm25 column weights: entity_id, chunk_id, title, body, terms, aliases.
 const RANK = "bm25(memory_search_fts, 0, 0, 4, 1, 2, 4)";
@@ -523,23 +535,13 @@ export class SqliteMemoryRepository implements MemoryRepository {
 
   /** Replaces the record's names; up to 20, each up to 80 characters. */
   async setAliases(entityId: string, aliases: string[]): Promise<string[]> {
-    const unique = new Map<string, string>();
-    for (const raw of aliases) {
-      const alias = String(raw).replace(/\s+/g, " ").trim();
-      if (!alias) continue;
-      if (alias.length > 80) throw new Error("invalid_memory_alias");
-      if (!unique.has(normalizeAlias(alias))) unique.set(normalizeAlias(alias), alias);
-    }
-    if (unique.size > 20) throw new Error("too_many_memory_aliases");
+    const names = prepareAliases(aliases);
     await withUnlockedTransaction(this.db, async tx => {
       if (!await tx.getFirstAsync<Row>("SELECT id FROM memory_entities WHERE id=?", [entityId])) throw new MemoryAccessError("entity_not_found");
-      await tx.runAsync("DELETE FROM memory_aliases WHERE entity_id=?", [entityId]);
-      for (const [normalized, alias] of unique) {
-        await tx.runAsync("INSERT INTO memory_aliases(entity_id,alias,normalized) VALUES (?,?,?)", [entityId, alias, normalized]);
-      }
+      await replaceAliases(tx, entityId, names);
       await indexEntity(tx, entityId);
     });
-    return [...unique.values()];
+    return [...names.values()];
   }
 
   /** Records with exactly this name or title, e.g. the person a fact is about.
@@ -570,13 +572,7 @@ export class SqliteMemoryRepository implements MemoryRepository {
     if (!/^(user|model:[a-z0-9._-]{1,60})$/i.test(source)) throw new Error("invalid_index_terms_source");
     const words = checkedTerms(terms);
     await withUnlockedTransaction(this.db, async tx => {
-      const input = await tx.getFirstAsync<Row>("SELECT e.record_version,c.name FROM memory_entities e JOIN memory_collections c ON c.id=e.collection_id WHERE e.id=?", [entityId]);
-      if (!input) throw new MemoryAccessError("entity_not_found");
-      await tx.runAsync("DELETE FROM memory_index_terms WHERE entity_id=? AND source=?", [entityId, source]);
-      // A model's empty answer is kept too: it marks the record as done.
-      if (words || source.startsWith("model:")) await tx.runAsync(
-        "INSERT INTO memory_index_terms(entity_id,terms,source,created_at,source_record_version,source_collection_name) VALUES (?,?,?,?,?,?)",
-        [entityId, words, source, now(), Number(input.record_version), String(input.name)]);
+      await replaceIndexTerms(tx, entityId, words, source, now());
       await indexEntity(tx, entityId);
     });
     return words.split(" ").filter(Boolean);
