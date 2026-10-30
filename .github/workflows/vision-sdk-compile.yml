@@ -31,10 +31,29 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.13"
-      - name: Compile isolated Kotlin 2.4 MediaPipe API without model weights
-        run: gradle -p spikes/photo-83-1-android :probe:compileDebugKotlin :probe:assembleDebug --no-daemon --stacktrace
+      - name: Compile isolated Kotlin 2.4 SDK and Android 16 lab APK without model weights
+        run: gradle -p spikes/photo-83-1-android :probe:compileDebugKotlin :probe:assembleDebug :app:assembleDebug --no-daemon --stacktrace
+      - name: Verify test APK does not request Internet permission
+        shell: bash
+        run: |
+          APK="$(find spikes/photo-83-1-android/app/build/outputs/apk/debug -type f -name '*.apk' | head -1)"
+          test -f "$APK" || { echo "::error::No debug APK built"; exit 1; }
+          AAPT="$(find "${ANDROID_HOME}/build-tools" -type f -name aapt | sort -V | tail -1)"
+          test -x "$AAPT" || { echo "::error::Android aapt not found"; exit 1; }
+          if "$AAPT" dump permissions "$APK" | grep -q 'android.permission.INTERNET'; then
+            echo "::error::Offline vision lab APK must NOT request Internet permission"
+            exit 1
+          fi
+      - name: Publish installable standalone lab APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: persai-vision-lab-android16
+          path: spikes/photo-83-1-android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
       - name: Record proof boundary
         if: always()
         run: |
-          echo "This is SDK ABI compilation only; no Android inference and no source images." >> "$GITHUB_STEP_SUMMARY"
+          echo "Standalone Android 16 lab APK compiled; no model weights or private images are bundled." >> "$GITHUB_STEP_SUMMARY"
+          echo "No runtime inference is confirmed until tested on Vivo X200 Pro with a user-selected official model." >> "$GITHUB_STEP_SUMMARY"
           echo "PersAI main mobile Gradle config unchanged. Model weights not downloaded." >> "$GITHUB_STEP_SUMMARY"
