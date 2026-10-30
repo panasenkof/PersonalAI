@@ -9,17 +9,40 @@ import com.google.mediapipe.tasks.retrieval.universalembedder.UniversalEmbedderO
 import java.io.File
 
 /**
- * Compile-only native SDK API contract with Kotlin 2.4.21.
- * This library is never linked into the production app.
- * Model path must be an app-owned local file in eventual device tests.
+ * One isolated offline Android 16 engine. Single-photo and batch experiments
+ * share the same model/options/embedding path. Never linked into PersAI.
  */
 object UniversalVisionCompileProbe {
   fun compare(
     context: Context, model: File, image: Bitmap, query: String,
     mark: (String) -> Unit = {}
-  ): Double {
+  ): Double = compareMany(
+    context = context,
+    model = model,
+    imageCount = 1,
+    query = query,
+    imageAt = { image },
+    releaseImage = { /* Single photo caller owns its bitmap. */ },
+    mark = mark
+  ).single()
+
+  /**
+   * Encode query once, score 1..5 user-selected photos sequentially with the
+   * same embedder, then close it. No image/vector caching or extra writer.
+   * imageAt must decode only one bitmap at a time; releaseImage must recycle it.
+   */
+  fun compareMany(
+    context: Context,
+    model: File,
+    imageCount: Int,
+    query: String,
+    imageAt: (Int) -> Bitmap,
+    releaseImage: (Bitmap) -> Unit,
+    mark: (String) -> Unit = {}
+  ): List<Double> {
     require(model.isFile && model.name.endsWith(".litertlm")) { "vision_model_absent" }
     require(query.isNotBlank()) { "vision_query_absent" }
+    require(imageCount in 1..5) { "invalid_image_batch_size" }
     mark("embedder-options")
     val options = UniversalEmbedderOptions.builder()
       .setBaseOptions(BaseOptions.builder().setModelAssetPath(model.absolutePath).build())
@@ -29,14 +52,27 @@ object UniversalVisionCompileProbe {
     val embedder = UniversalEmbedder.createFromOptions(context, options)
     return try {
       mark("embed-text")
-      val textResult = embedder.embedText(query)
-      mark("embed-image")
-      val imageResult = embedder.embedImage(BitmapImageBuilder(image).build())
-      mark("cosine-similarity")
-      val similarity = UniversalEmbedder.cosineSimilarity(
-        textResult.embeddings().first(), imageResult.embeddings().first())
-      check(similarity.isFinite()) { "invalid_similarity" }
-      similarity
+      val textEmbedding = embedder.embedText(query).embeddings().first()
+      List(imageCount) { index ->
+        mark("image-decode")
+        val bitmap = imageAt(index)
+        try {
+          mark("embed-image")
+          val imageEmbedding = embedder.embedImage(
+            BitmapImageBuilder(bitmap).build()
+          ).embeddings().first()
+          mark("cosine-similarity")
+          val similarity = UniversalEmbedder.cosineSimilarity(
+            textEmbedding, imageEmbedding
+          )
+          check(similarity.isFinite() && similarity in -1.00001..1.00001) {
+            "invalid_similarity"
+          }
+          similarity
+        } finally {
+          releaseImage(bitmap)
+        }
+      }
     } finally {
       mark("embedder-close")
       embedder.close()
