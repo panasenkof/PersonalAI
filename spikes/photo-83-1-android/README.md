@@ -51,6 +51,37 @@ References:
 - https://github.com/google-ai-edge/LiteRT-LM/issues/3753
 
 
+## Vivo X200 Pro / Android 16: LiteRT-LM class linkage fix attempt (v0.1.3)
+
+The user's third real Android 16 screenshot now identifies the exact blocker:
+`Stage: embedder-create`, missing Java class
+`com.google.ai.edge.litertlm.ActivationDataType`.
+
+This is **a runtime class-resolution error**, not a failure in image
+downsampling or evidence that the user's model/download is corrupt.
+MediaPipe `tasks-retrieval:1.1.0` originally resolved the pre-release
+`litertlm-android:0.17.0-alpha1`. Google LiteRT-LM's current public Kotlin
+API defines the `ActivationDataType` enum and publishes stable
+`litertlm-android:0.18.0`. The standalone lab therefore pins 0.18.0 as
+an explicit **test-only** dependency, allowing Gradle to select it instead
+of the older transitive alpha.
+
+The isolated CI must build the APK, verify no INTERNET permission, and
+**inspect the resolved 0.18.0 AAR** to confirm that
+`ActivationDataType.class` is actually present before publishing
+`persai-vision-lab-android16-litertlm018`. A successful compile/class
+check does not prove binary compatibility of every MediaPipe call or that
+the model will load on the Vivo. Real inference is still a device gate.
+The existing error-stage diagnostic remains in this version for any
+subsequent class/linkage failure. This test does **not** change Expo
+Kotlin, PersAI memory/search, default app or the external model bytes.
+
+The lab keeps application id `com.persai.visionlab`. Since CI debug
+APK signatures may change, uninstall **only PersAI Vision Lab** when
+installing this version. Reselect the existing original .litertlm file
+in Downloads (the app-private imported copy is deleted by uninstall);
+redownloading the 388 MB model is unnecessary.
+
 ## Vivo X200 Pro / Android 16: runtime class linkage diagnostic (v0.1.2)
 
 The user's **second** real device attempt passed image decoding but displayed
