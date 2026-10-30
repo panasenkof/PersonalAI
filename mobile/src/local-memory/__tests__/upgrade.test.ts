@@ -1421,3 +1421,42 @@ test("v16 to v17 adds the nullable one-slot profile identity without changing ex
   expect((await next.entity(self.id))?.record_version).toBe(1);
   expect(mockConnections.at(-1).sqlite.prepare("PRAGMA user_version").get()).toMatchObject({user_version:18});
 });
+
+
+test("v17 to v18 adds disposable photo vectors without changing encrypted originals or note",async()=>{
+  const repo=await localMemoryRepository("guest");
+  const collection=await repo.createCollection({
+    name:"Личные фото",slug:"photo-migration",sensitivity:"standard",
+  });
+  const note=await repo.createEntity({
+    collection_id:collection.id,domain:"notes",title:"Прежняя фотография",
+    payload:{body:"Не стирать это описание"},
+  });
+  const identity=await localMemoryIdentity("guest");
+  await closeLocalMemory();
+  const disk=new DatabaseSync(path.join(mockDirectory,identity.databaseName));
+  const raw=Uint8Array.from([1,2,3,4,5]);
+  const checksum=require("node:crypto").createHash("sha256").update(raw).digest("hex");
+  disk.exec("PRAGMA foreign_keys=ON");
+  disk.prepare("INSERT INTO memory_attachments(id,entity_id,name,mime,size,created_at) VALUES (?,?,?,?,?,?)")
+    .run("a-v17",note.id,"original.jpg","image/jpeg",raw.length,"2026-10-30");
+  disk.prepare("INSERT INTO memory_attachment_parts(attachment_id,ord,bytes,sha256) VALUES (?,?,?,?)")
+    .run("a-v17",0,raw,checksum);
+  // Mimic an already-installed v17 database before its v18 migration. The
+  // schema migration must create the new table without replacing originals.
+  disk.exec("DROP INDEX IF EXISTS ix_memory_attachment_vectors_model");
+  disk.exec("DROP TABLE IF EXISTS memory_attachment_vectors");
+  disk.exec("PRAGMA user_version=17");
+  disk.close();
+  await openLocalMemory("guest");
+  const db=mockConnections.at(-1).sqlite;
+  expect(db.prepare("PRAGMA user_version").get().user_version).toBe(18);
+  expect(db.prepare("SELECT payload_json FROM memory_entities WHERE id=?").get(note.id))
+    .toMatchObject({payload_json:JSON.stringify({body:"Не стирать это описание"})});
+  expect(Array.from(db.prepare("SELECT bytes FROM memory_attachment_parts WHERE attachment_id='a-v17'").get().bytes))
+    .toEqual([1,2,3,4,5]);
+  expect(db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='memory_attachment_vectors'").get()?.name)
+    .toBe("memory_attachment_vectors");
+  expect(db.prepare("SELECT count(*) AS n FROM memory_attachment_vectors").get().n).toBe(0);
+  expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+});
