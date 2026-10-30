@@ -31,6 +31,19 @@ jobs:
           gradle-version: "8.13"
       - name: Compile SDK, JUnit diagnostics and offline lab APK
         run: gradle -p spikes/photo-83-1-android :probe:compileDebugKotlin :probe:assembleDebug :app:testDebugUnitTest :app:assembleDebug --no-daemon --stacktrace
+      - name: Verify missing ActivationDataType is present in pinned LiteRT-LM 0.18.0 AAR
+        shell: bash
+        run: |
+          ROOT="$HOME/.gradle/caches/modules-2/files-2.1/com.google.ai.edge.litertlm/litertlm-android/0.18.0"
+          AAR="$(find "$ROOT" -type f -name '*.aar' -print -quit)"
+          test -f "$AAR" || { echo "::error::LiteRT-LM 0.18.0 AAR not resolved"; exit 1; }
+          unzip -p "$AAR" classes.jar > "$RUNNER_TEMP/litertlm-classes.jar"
+          if ! jar tf "$RUNNER_TEMP/litertlm-classes.jar" |
+            grep -Fxq 'com/google/ai/edge/litertlm/ActivationDataType.class'; then
+            echo "::error::Pinned LiteRT-LM AAR still lacks ActivationDataType"
+            exit 1
+          fi
+          echo "LiteRT-LM 0.18.0 AAR contains ActivationDataType.class" >> "$GITHUB_STEP_SUMMARY"
       - name: Verify APK permissions and inspect ARM64 native libraries
         shell: bash
         run: |
@@ -47,7 +60,7 @@ jobs:
       - name: Publish installable offline diagnostic lab APK
         uses: actions/upload-artifact@v4
         with:
-          name: persai-vision-lab-android16-diagnostic
+          name: persai-vision-lab-android16-litertlm018
           path: spikes/photo-83-1-android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14
