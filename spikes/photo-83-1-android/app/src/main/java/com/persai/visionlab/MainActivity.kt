@@ -29,6 +29,7 @@ class MainActivity : Activity() {
     const val MODEL_PICK = 71
     const val IMAGE_PICK = 72
     const val BATCH_IMAGE_PICK = 73
+    const val REFERENCE_IMAGE_PICK = 74
     const val MAX_MODEL_BYTES = 900L * 1024 * 1024
     const val MAX_IMAGE_SIDE = 16384
   }
@@ -37,6 +38,7 @@ class MainActivity : Activity() {
   private lateinit var query: EditText
   private lateinit var runButton: Button
   private var imageUri: Uri? = null
+  private var referenceImageUri: Uri? = null
   private val rankedImageUris = mutableListOf<Uri>()
   private lateinit var rankSelection: TextView
   private var importedModel: File? = null
@@ -131,6 +133,23 @@ class MainActivity : Activity() {
     }
     page.addView(rankButton)
 
+    val refHeader = TextView(this).apply {
+      text = "Фото → фото: ищем похожее на выбранный образец"
+      textSize = 18f
+      setPadding(0, dp(22), 0, dp(8))
+    }
+    page.addView(refHeader)
+    val selectReference = Button(this).apply {
+      text = "6. Выбрать фото-образец"
+      setOnClickListener { if (!busy) chooseFile("image/*", REFERENCE_IMAGE_PICK) }
+    }
+    page.addView(selectReference)
+    val rankByPhoto = Button(this).apply {
+      text = "7. Найти похожие фото среди набора"
+      setOnClickListener { rankByReferencePhoto() }
+    }
+    page.addView(rankByPhoto)
+
     status = TextView(this).apply {
       text = "Модель и фото не выбраны. Сначала скачайте модель из официального каталога LiteRT Community."
       textSize = 15f
@@ -160,6 +179,14 @@ class MainActivity : Activity() {
     if (requestCode == IMAGE_PICK) {
       imageUri = uri
       status.text = "Фотография выбрана. Изображение не сохраняется в памяти приложения."
+    } else if (requestCode == REFERENCE_IMAGE_PICK) {
+      referenceImageUri = uri
+      if (rankedImageUris.contains(uri)) {
+        status.text = "Образец уже присутствует в тестовом наборе. " +
+          "Замените его или выберите отдельные кандидаты."
+      } else {
+        status.text = "Фото-образец выбрано. Теперь выберите 2–5 фотографий-кандидатов."
+      }
     } else if (requestCode == BATCH_IMAGE_PICK) {
       if (rankedImageUris.size >= 5) {
         status.text = "Максимум 5 изображений в одном тестовом наборе."
@@ -328,6 +355,50 @@ class MainActivity : Activity() {
         "${pssBefore / 1024}/${pssAfter / 1024} МиБ (не пиковая RAM). " +
         "Отпечаток модели: ${modelDigest?.take(16)}…. " +
         "Фото не сохранены. Сходство — не вероятность и не идентичность.")
+    }
+  }
+
+  private fun rankByReferencePhoto() {
+    val model = importedModel
+    val reference = referenceImageUri
+    val selected = rankedImageUris.toList()
+    if (model == null || reference == null || selected.size !in 2..5) {
+      status.text = "Выберите модель, отдельное фото-образец и 2–5 фото-кандидатов."
+      return
+    }
+    if (selected.any { it == reference }) {
+      status.text = "Образец не должен быть одним из кандидатов: " +
+        "иначе получится тривиальное совпадение файла с самим собой."
+      return
+    }
+    startTask("Локально сопоставляю фото-образец с ${selected.size} кадрами…") { mark ->
+      mark("image-metrics")
+      val pssBefore = Debug.MemoryInfo().apply {
+        Debug.getMemoryInfo(this)
+      }.totalPss
+      val started = SystemClock.elapsedRealtime()
+      val scores = UniversalVisionCompileProbe.comparePhotoToMany(
+        context = this,
+        model = model,
+        imageCount = selected.size,
+        referenceAt = { decodeBoundedImage(reference) },
+        candidateAt = { index -> decodeBoundedImage(selected[index]) },
+        releaseImage = { bitmap -> bitmap.recycle() },
+        mark = mark
+      )
+      val elapsed = SystemClock.elapsedRealtime() - started
+      val pssAfter = Debug.MemoryInfo().apply {
+        Debug.getMemoryInfo(this)
+      }.totalPss
+      val ranked = VisionRanking.order(scores)
+      val rankingLines = ranked.mapIndexed { index, photo ->
+        "${index + 1}. Фото №${photo.selectedNumber}: ${"%.4f".format(photo.cosine)}"
+      }.joinToString("\n")
+      update("Фото → фото. Рейтинг похожести к образцу:\n" + rankingLines +
+        "\nВсего: ${elapsed} мс. PSS до/после: " +
+        "${pssBefore / 1024}/${pssAfter / 1024} МиБ (не peak RAM). " +
+        "Модель: ${modelDigest?.take(16)}…. " +
+        "Сходство не означает тот же объект. Изображения не сохранялись.")
     }
   }
 
