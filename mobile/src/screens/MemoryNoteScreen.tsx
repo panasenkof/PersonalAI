@@ -145,16 +145,20 @@ export function MemoryNoteScreen() {
     const finalTitle = title.trim() || body.trim().split("\n")[0].slice(0, 80);
     const payload = { ...selected?.payload, type: "note", title: finalTitle, body: body.trim(), extracted_text: extractedText.trim() };
     const base = baseline.current;
-    let saved: EntityRecord;
+    const cardFields = { kind, aliases: splitNames(namesForSave.current), userTerms: splitNames(terms) };
     if (selected) {
       const textChanged = allowAgent || extractedText !== String(selected.payload.extracted_text || "") || title !== base.title || body !== base.body || collectionId !== base.collectionId;
-      saved = textChanged ? await db.reviseEntity(selected.id, selected.record_version, payload, allowAgent ? "Разрешён доступ агенту" : beforeAi ? "Подтверждённая правка ИИ" : "Редактирование записи", collection, allowAgent) : selected;
-      if (kind !== saved.kind) saved = await db.setEntityKind(saved.id, saved.record_version, kind);
-    } else saved = await db.createEntity({ collection_id: collection, domain: "notes", title: finalTitle, payload, kind,
-      sensitivity: "inherit", source_kind: "user", source_ref: "device" });
-    const nextAliases = splitNames(namesForSave.current);
-    if (nextAliases.join(",") !== splitNames(base.names).join(",")) await db.setAliases(saved.id, nextAliases);
-    if (terms.trim() !== base.terms.trim()) await db.setIndexTerms(saved.id, splitNames(terms), "user");
+      const metadataChanged = kind !== base.kind || cardFields.aliases.join(",") !== splitNames(base.names).join(",") || terms.trim() !== base.terms.trim();
+      if (textChanged || metadataChanged) {
+        // One durable entity revision, aliases and user-owned terms. Failure rolls back all.
+        await db.reviseEntity(selected.id, selected.record_version, payload,
+          allowAgent ? "Разрешён доступ агенту" : beforeAi ? "Подтверждённая правка ИИ" : "Редактирование записи",
+          collection, allowAgent, undefined, cardFields);
+      }
+    } else {
+      await db.createEntity({ collection_id: collection, domain: "notes", title: finalTitle, payload, kind,
+        sensitivity: "inherit", source_kind: "user", source_ref: "device" }, undefined, cardFields);
+    }
     if (profile) { scheduleIndexTerms(profile); scheduleVectors(profile); }
     if (alive.current) setLeaving(true);
   });
