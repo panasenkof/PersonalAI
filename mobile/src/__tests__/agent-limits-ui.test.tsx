@@ -15,14 +15,17 @@ const save = "Сохранить лимит обращений к LLM";
 test("the loaded value can be stepped and saved, and is restored on a new mount", async () => {
   const v = render(<AgentLimitsCard />);
   await waitFor(() => expect(v.getByLabelText(input).props.editable).toBe(true));
-  fireEvent.press(v.getByLabelText("Увеличить лимит обращений к LLM"));
+  // An explicitly loaded default of 5 steps to 6; saving the stepped
+  // value must survive unmount/remount without overwriting other profiles.
   expect(v.getByLabelText(input).props.value).toBe("5");
+  fireEvent.press(v.getByLabelText("Увеличить лимит обращений к LLM"));
+  expect(v.getByLabelText(input).props.value).toBe("6");
   fireEvent.press(v.getByLabelText(save));
   await waitFor(() => v.getByText(/Лимит сохранён/));
-  expect(saveModelCallLimit).toHaveBeenCalledWith("guest", 5);
-  v.unmount(); (loadModelCallLimit as jest.Mock).mockResolvedValue(5);
+  expect(saveModelCallLimit).toHaveBeenCalledWith("guest", 6);
+  v.unmount(); (loadModelCallLimit as jest.Mock).mockResolvedValue(6);
   const reopened = render(<AgentLimitsCard />);
-  await waitFor(() => expect(reopened.getByLabelText(input).props.value).toBe("5"));
+  await waitFor(() => expect(reopened.getByLabelText(input).props.value).toBe("6"));
 });
 test.each(["", "0", "21", "1.5", "abc"])("invalid input %s is explained without writing settings", async value => {
   const v = render(<AgentLimitsCard />);
