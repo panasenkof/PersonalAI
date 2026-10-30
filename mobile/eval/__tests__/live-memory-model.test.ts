@@ -113,7 +113,7 @@ const insufficient=/(?:не (?:наш[еёлао]|имею|доступ|могу
 // в памяти нет" explicitly deny the evidence even though "нет" follows the
 // item, not the other way around. Keep the subject nouns bounded, so a stray
 // "нет" elsewhere in a speculative answer is not enough to pass.
-const absentNamedEvidence=/(?:^|[\\s«"(])(?:точн(?:ой|ых)\\s+)?(?:дат[ыау]|рецепт[а-яё]*|сведени[йя]|подтверждени[яй])[^.!?\\n]{0,100}\\s+нет(?=$|[\\s.,!?;:—)»"])/iu;
+const absentNamedEvidence=/(?:^|[\s«"(])(?:точн(?:ой|ых)\s+)?(?:дат[ыау]|рецепт[а-яё]*|сведени[йя]|подтверждени[яй])[^.!?\n]{0,100}\s+нет(?=$|[\s.,!?;:—)»"])/iu;
 function admitsMissingEvidence(answer:string):boolean {
   return insufficient.test(answer)||absentNamedEvidence.test(answer);
 }
