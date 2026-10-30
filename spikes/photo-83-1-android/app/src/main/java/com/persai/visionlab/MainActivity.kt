@@ -124,18 +124,19 @@ class MainActivity : Activity() {
     }
   }
 
-  private fun startTask(label: String, task: () -> Unit) {
+  private fun startTask(label: String, task: (mark: (String) -> Unit) -> Unit) {
     if (busy) return
     busy = true
     runButton.isEnabled = false
     status.text = label
     worker.execute {
+      var stage = "unknown"
       try {
-        task()
+        task { nextStage -> stage = nextStage }
       } catch (error: Throwable) {
-        // Never log or show the selected URI, model bytes, query or photo.
-        update("Ошибка проверки: ${error.javaClass.simpleName}. " +
-          "Попробуйте оригинальный файл модели и другое изображение.")
+        // Show only an allowlisted stage and extracted missing class name.
+        // Never log or reveal the model URI, original photo or user prompt.
+        update(VisionFailure.report(stage, error))
       } finally {
         if (!isDestroyed) runOnUiThread {
           busy = false
@@ -150,7 +151,7 @@ class MainActivity : Activity() {
   }
 
   private fun importModel(uri: Uri) {
-    startTask("Импорт модели во внутреннее хранилище (без сети)…") {
+    startTask("Импорт модели во внутреннее хранилище (без сети)…") { _ ->
       val folder = File(filesDir, "vision-lab").apply { mkdirs() }
       val temp = File(folder, "model.partial")
       val target = File(folder, "embeddinggemma-2-text-vision-440m.litertlm")
@@ -213,12 +214,16 @@ class MainActivity : Activity() {
       status.text = "Сначала выберите модель, фотографию и короткий запрос."
       return
     }
-    startTask("Модель анализирует изображение только на устройстве…") {
+    startTask("Модель анализирует изображение только на устройстве…") { mark ->
+      mark("image-decode")
       val bitmap = decodeBoundedImage(image)
       try {
+        mark("image-metrics")
         val before = Debug.MemoryInfo().apply { Debug.getMemoryInfo(this) }.totalPss
         val start = SystemClock.elapsedRealtime()
-        val similarity = UniversalVisionCompileProbe.compare(this, model, bitmap, textQuery)
+        mark("embedder-create")
+        val similarity = UniversalVisionCompileProbe.compare(
+          this, model, bitmap, textQuery, mark)
         val elapsed = SystemClock.elapsedRealtime() - start
         val after = Debug.MemoryInfo().apply { Debug.getMemoryInfo(this) }.totalPss
         update("Готово. Косинусное сходство: ${"%.4f".format(similarity)}. " +
