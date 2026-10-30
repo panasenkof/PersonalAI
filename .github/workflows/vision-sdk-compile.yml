@@ -32,7 +32,7 @@ jobs:
         with:
           gradle-version: "8.13"
       - name: Compile isolated Kotlin 2.4 SDK and Android 16 lab APK without model weights
-        run: gradle -p spikes/photo-83-1-android :probe:compileDebugKotlin :probe:assembleDebug :app:assembleDebug --no-daemon --stacktrace
+        run: gradle -p spikes/photo-83-1-android :probe:compileDebugKotlin :probe:assembleDebug :app:testDebugUnitTest :app:assembleDebug --no-daemon --stacktrace
       - name: Verify test APK does not request Internet permission
         shell: bash
         run: |
@@ -47,7 +47,7 @@ jobs:
       - name: Publish installable standalone lab APK
         uses: actions/upload-artifact@v4
         with:
-          name: persai-vision-lab-android16
+          name: persai-vision-lab-android16-fixed
           path: spikes/photo-83-1-android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14
