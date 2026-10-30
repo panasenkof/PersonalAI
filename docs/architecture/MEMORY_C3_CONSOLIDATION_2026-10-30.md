@@ -79,6 +79,21 @@
 - **Проверки:** негативные случаи для v3/v6/v17, count mismatch/rollback, позитивный v3 и legacy v2; обычный CI, в том числе реальный native SQLCipher, без реального профиля пользователя. Заданные пользователем имена, слова и оригиналы сохраняются; восстановление всё ещё выполняет `reindexAll` и не доверяет заархивированным проекциям.
 - **Осознанно не делаем:** `shareEncryptedBackup` через `sqlcipher_export` пока экспортирует и производные FTS/vector-таблицы. Уменьшение архива потребовало бы менять attached SQLCipher-копию после шифрованного экспорта, учитывать triggers/FK/переносимость и проводить отдельную native restore-приёмку на нескольких версиях. Нет доказательства, что выгода стоит риска для данных: `DEFERRED`, а не новый scope C3.
 
+### C3-5 · Итоговая сверка по фактическим изменениям
+
+| Сценарий | Authority и применение | Подтверждённый результат / сохранённые ограничения |
+| --- | --- | --- |
+| Создать/исправить карточку | `memory_entities` + `memory_aliases` + пользовательские `memory_index_terms`, `SqliteMemoryRepository.createEntity/reviseEntity` | #241 одна CAS-ревизия и SQLCipher-транзакция, rollback на ошибке. #244 общие внутренние валидаторы/writer у карточки и независимых операций, без второй базы и новых API. |
+| Архивировать и отменить | `memory_entities`/`memory_revisions`, `changeNotes/undoNotes` | #242 адаптер `setEntityStatus` пишет через один батчевый CAS/undo-журнал; UI и provenance сохранены. |
+| Найти факт или заметку | `SqliteMemoryRepository.searchMemory` → `searchApprovedNotes/readApprovedNote` для внешней LLM | Один запрос к каноническому поиску, разрешения по текущему SQLCipher snapshot. FTS/vector — оправданные отдельные **проекции**, не независимые источники фактов. |
+| Найти текст в оригинале | `source-retrieval.ts` → список/поиск/точное чтение сегмента | #243 один ACL-предикат, версии и manifest fingerprint проверяются при чтении, original bytes через отдельный `materializeAttachment` с повторной авторизацией. Эти две операции не дубликаты. |
+| Перестроить индекс | `search-index.ts:indexEntity/reindexAll` и `vector-jobs.ts` | FTS/chunks/vector/jobs — производные. Ручные имена/слова, extraction evidence, temporal/relation decisions остаются в SQLCipher как пользовательские данные. Не смешивать устаревшие model terms с текущим пользовательским фактом. |
+| Сохранить и восстановить архив | `backup.ts:shareEncryptedBackup/restoreEncryptedBackup`, SQLCipher, source schema 1–17 | #245 требует обязательные таблицы пользовательских поисковых данных от v3, сравнивает source/target counts до COMMIT; v1/v2 легаси-путь сохраняется. Дата, исходники, evidence, история/undo импортируются существующими схемами, не синтезируются LLM. |
+| Время и связи | `temporal-*`, `relation-evidence.ts`, `memory_review_actions` | **NO CHANGE NEEDED:** журнал временных решений, версии подтверждений родства и undo должны сохранять свои доказательства/семантику; объединение с журналом действий заметок сделало бы модель слабее. |
+| Профиль/блокировка/устройство | `local-memory/storage.ts`, AppLock, lease и UI | Существующий один профильный SQLCipher lease/lock сохранён; физический телефон не проверяли: **C2 NOT_RUN_PHYSICAL**. Успешная сборка и emulator smoke относятся только к CI. |
+
+**Контроль остановки C3 — SUCCESS по коду и CI:** PR #241–#245 объединены непосредственно в `main` с обязательными exact-SHA проверками. Для последней защитной правки #245 [CI #41057973936](https://github.com/panasenkof/PersonalAI/actions/runs/41057973936) завершился SUCCESS, включая native Android smoke. (a) `PLAN.md §2` и единственный `Plans/ROADMAP_STATUS.md` синхронизированы в docs-only PR #246; (b) новых таблиц, конкурирующих writer/graph/search не введено; (c) следующая активная очередь — шаг 7 №83.0–83.3. Физический телефон **C2 NOT_RUN_PHYSICAL**, 96-case ручная/полная E2E-проверка **не объявлена PASS**. Оптимизация размера encrypted export и масштабный 2+ GiB native benchmark остаются DEFERRED, фото/семантическая очистка — в своих шагах плана.
+
 ## 3. Чего не делаем
 
 1. Не меняем SQLCipher схему «для красоты», не объединяем таблицы фактов, событий, истории и доказательств только из-за родственных имен.
