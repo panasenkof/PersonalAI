@@ -1,0 +1,389 @@
+{
+  "version": 1,
+  "kind": "procedurally_generated_illustrations_not_photos",
+  "notes": "Synthetic illustrations test instrumentation and ambiguity, not real-world image retrieval performance. All labels are human-authored intents; model scores must not be fabricated.",
+  "groups": [
+    {
+      "group": "BICYCLES",
+      "query": "Красный велосипед рядом с деревом",
+      "cases": [
+        {
+          "id": "bike_red_tree",
+          "object": "bicycle",
+          "color": "red",
+          "scene": "park",
+          "label": "positive",
+          "description": "Красный велосипед у дерева"
+        },
+        {
+          "id": "bike_red_bench",
+          "object": "bicycle",
+          "color": "red",
+          "scene": "bench",
+          "label": "hard",
+          "description": "Красный велосипед у лавочки, без дерева"
+        },
+        {
+          "id": "bike_blue_tree",
+          "object": "bicycle",
+          "color": "blue",
+          "scene": "park",
+          "label": "hard",
+          "description": "Синий велосипед у дерева"
+        },
+        {
+          "id": "bike_red_motorcycle",
+          "object": "motorcycle",
+          "color": "red",
+          "scene": "park",
+          "label": "hard",
+          "description": "Красный мотоцикл у дерева"
+        },
+        {
+          "id": "bike_tree_only",
+          "object": "tree",
+          "color": "green",
+          "scene": "park",
+          "label": "negative",
+          "description": "Дерево без транспорта"
+        }
+      ]
+    },
+    {
+      "group": "CARS",
+      "query": "Красный автомобиль возле дома",
+      "cases": [
+        {
+          "id": "car_red_home",
+          "object": "car",
+          "color": "red",
+          "scene": "home",
+          "label": "positive",
+          "description": "Красная легковая машина у дома"
+        },
+        {
+          "id": "car_red_park",
+          "object": "car",
+          "color": "red",
+          "scene": "park",
+          "label": "hard",
+          "description": "Красная машина в парке"
+        },
+        {
+          "id": "car_blue_home",
+          "object": "car",
+          "color": "blue",
+          "scene": "home",
+          "label": "hard",
+          "description": "Синяя машина у дома"
+        },
+        {
+          "id": "car_red_bus",
+          "object": "bus",
+          "color": "red",
+          "scene": "home",
+          "label": "hard",
+          "description": "Красный автобус у дома"
+        },
+        {
+          "id": "car_home_only",
+          "object": "house",
+          "color": "white",
+          "scene": "home",
+          "label": "negative",
+          "description": "Дом без машины"
+        }
+      ]
+    },
+    {
+      "group": "PETS",
+      "query": "Полосатый кот на диване",
+      "cases": [
+        {
+          "id": "pet_cat_sofa",
+          "object": "cat",
+          "color": "tabby",
+          "scene": "sofa",
+          "label": "positive",
+          "description": "Кот на диване"
+        },
+        {
+          "id": "pet_cat_floor",
+          "object": "cat",
+          "color": "tabby",
+          "scene": "living",
+          "label": "hard",
+          "description": "Кот на полу"
+        },
+        {
+          "id": "pet_dog_sofa",
+          "object": "dog",
+          "color": "brown",
+          "scene": "sofa",
+          "label": "hard",
+          "description": "Собака на диване"
+        },
+        {
+          "id": "pet_sofa_only",
+          "object": "sofa",
+          "color": "gray",
+          "scene": "sofa",
+          "label": "negative",
+          "description": "Пустой диван"
+        },
+        {
+          "id": "pet_cat_chair",
+          "object": "cat",
+          "color": "tabby",
+          "scene": "chair",
+          "label": "hard",
+          "description": "Кот на стуле"
+        }
+      ]
+    },
+    {
+      "group": "FLOWERS",
+      "query": "Красные розы в вазе",
+      "cases": [
+        {
+          "id": "flowers_red_vase",
+          "object": "flowers",
+          "color": "red",
+          "scene": "table",
+          "label": "positive",
+          "description": "Красные розы в вазе"
+        },
+        {
+          "id": "flowers_pink_vase",
+          "object": "flowers",
+          "color": "pink",
+          "scene": "table",
+          "label": "hard",
+          "description": "Розовые цветы в вазе"
+        },
+        {
+          "id": "flowers_red_garden",
+          "object": "flowers",
+          "color": "red",
+          "scene": "garden",
+          "label": "hard",
+          "description": "Красные цветы без вазы"
+        },
+        {
+          "id": "flowers_empty_vase",
+          "object": "vase",
+          "color": "glass",
+          "scene": "table",
+          "label": "negative",
+          "description": "Пустая ваза"
+        },
+        {
+          "id": "flowers_tulips_vase",
+          "object": "tulips",
+          "color": "red",
+          "scene": "table",
+          "label": "hard",
+          "description": "Красные тюльпаны в вазе"
+        }
+      ]
+    },
+    {
+      "group": "FOOD",
+      "query": "Тарелка со спагетти",
+      "cases": [
+        {
+          "id": "food_pasta_plate",
+          "object": "pasta",
+          "color": "orange",
+          "scene": "table",
+          "label": "positive",
+          "description": "Спагетти на тарелке"
+        },
+        {
+          "id": "food_pasta_bowl",
+          "object": "pasta",
+          "color": "orange",
+          "scene": "bowl",
+          "label": "hard",
+          "description": "Паста в глубокой миске"
+        },
+        {
+          "id": "food_salad_plate",
+          "object": "salad",
+          "color": "green",
+          "scene": "table",
+          "label": "hard",
+          "description": "Салат на тарелке"
+        },
+        {
+          "id": "food_empty_plate",
+          "object": "plate",
+          "color": "white",
+          "scene": "table",
+          "label": "negative",
+          "description": "Пустая тарелка"
+        },
+        {
+          "id": "food_soup",
+          "object": "soup",
+          "color": "orange",
+          "scene": "bowl",
+          "label": "negative",
+          "description": "Томатный суп в миске"
+        }
+      ]
+    },
+    {
+      "group": "LANDSCAPES",
+      "query": "Горы и озеро",
+      "cases": [
+        {
+          "id": "land_mountain_lake",
+          "object": "lake",
+          "color": "blue",
+          "scene": "mountains",
+          "label": "positive",
+          "description": "Горное озеро"
+        },
+        {
+          "id": "land_snowy_mountains",
+          "object": "mountain",
+          "color": "blue",
+          "scene": "snow",
+          "label": "hard",
+          "description": "Заснеженные горы без озера"
+        },
+        {
+          "id": "land_forest",
+          "object": "forest",
+          "color": "green",
+          "scene": "forest",
+          "label": "negative",
+          "description": "Лесная тропинка"
+        },
+        {
+          "id": "land_ocean",
+          "object": "sea",
+          "color": "blue",
+          "scene": "beach",
+          "label": "negative",
+          "description": "Морское побережье"
+        },
+        {
+          "id": "land_city",
+          "object": "city",
+          "color": "gray",
+          "scene": "city",
+          "label": "negative",
+          "description": "Городские здания"
+        }
+      ]
+    },
+    {
+      "group": "HOME",
+      "query": "Синяя кружка на столе",
+      "cases": [
+        {
+          "id": "home_blue_mug_table",
+          "object": "mug",
+          "color": "blue",
+          "scene": "table",
+          "label": "positive",
+          "description": "Синяя кружка на столе"
+        },
+        {
+          "id": "home_red_mug_table",
+          "object": "mug",
+          "color": "red",
+          "scene": "table",
+          "label": "hard",
+          "description": "Красная кружка на столе"
+        },
+        {
+          "id": "home_blue_vase_table",
+          "object": "vase",
+          "color": "blue",
+          "scene": "table",
+          "label": "hard",
+          "description": "Синяя ваза на столе"
+        },
+        {
+          "id": "home_empty_table",
+          "object": "table",
+          "color": "white",
+          "scene": "table",
+          "label": "negative",
+          "description": "Пустой стол"
+        },
+        {
+          "id": "home_blue_mug_shelf",
+          "object": "mug",
+          "color": "blue",
+          "scene": "shelf",
+          "label": "hard",
+          "description": "Синяя кружка на полке"
+        }
+      ]
+    },
+    {
+      "group": "IMAGE_TO_IMAGE",
+      "query": "Фото-образец красного велосипеда и визуально похожие фотографии",
+      "cases": [
+        {
+          "id": "ref_bike_A",
+          "object": "bicycle",
+          "color": "red",
+          "scene": "park",
+          "label": "reference",
+          "description": "Образец: красный велосипед у дерева, вариант A",
+          "identity": "A"
+        },
+        {
+          "id": "candidate_bike_A_angle",
+          "object": "bicycle",
+          "color": "red",
+          "scene": "park",
+          "label": "positive",
+          "description": "Тот же схематический велосипед A, немного другой ракурс",
+          "identity": "A"
+        },
+        {
+          "id": "candidate_bike_B",
+          "object": "bicycle",
+          "color": "red",
+          "scene": "park",
+          "label": "hard",
+          "description": "Другой красный велосипед B, почти такая же сцена",
+          "identity": "B"
+        },
+        {
+          "id": "candidate_blue_bike",
+          "object": "bicycle",
+          "color": "blue",
+          "scene": "park",
+          "label": "hard",
+          "description": "Синий велосипед возле дерева",
+          "identity": "C"
+        },
+        {
+          "id": "candidate_red_scooter",
+          "object": "motorcycle",
+          "color": "red",
+          "scene": "park",
+          "label": "negative",
+          "description": "Красный мотоцикл у дерева",
+          "identity": "D"
+        },
+        {
+          "id": "candidate_tree_bench",
+          "object": "bench",
+          "color": "brown",
+          "scene": "park",
+          "label": "negative",
+          "description": "Дерево и лавочка без велосипеда",
+          "identity": "E"
+        }
+      ]
+    }
+  ]
+}
