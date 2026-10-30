@@ -44,7 +44,42 @@ jobs:
           fi
           echo "### Packaged native libraries (ARM64)" >> "$GITHUB_STEP_SUMMARY"
           unzip -Z1 "$APK" | grep 'lib/arm64-v8a/' | head -40 >> "$GITHUB_STEP_SUMMARY" || true
-      - name: Publish installable offline diagnostic lab APK
+      - name: Verify resolved LiteRT-LM runtime and ActivationDataType in final APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle -p spikes/photo-83-1-android :app:dependencyInsight --dependency litertlm-android --configuration debugRuntimeClasspath --no-daemon > /tmp/vision-litert-runtime.txt
+          if ! grep -qF 'litertlm-android:0.18.1' /tmp/vision-litert-runtime.txt; then
+            echo "::error::Vision Lab must resolve LiteRT-LM 0.18.1, not stale 0.17.0-alpha1"
+            exit 1
+          fi
+          APK="$(find spikes/photo-83-1-android/app/build/outputs/apk/debug -type f -name '*.apk' | head -1)"
+          test -f "$APK"
+          FOUND=0
+          while IFS= read -r DEX; do
+            if unzip -p "$APK" "$DEX" | strings -a | grep -F 'Lcom/google/ai/edge/litertlm/ActivationDataType;' > /dev/null; then
+              FOUND=1
+              break
+            fi
+          done < <(unzip -Z1 "$APK" | grep -E '^classes([0-9]+)?[.]dex
+        with:
+          name: persai-vision-lab-android16-litertfix
+          path: spikes/photo-83-1-android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
+      - name: Record proof boundary
+        if: always()
+        run: |
+          echo "Offline Android 16 lab APK compiled; no weights or photos bundled." >> "$GITHUB_STEP_SUMMARY"
+          echo "Missing-class diagnostics await real Vivo X200 Pro runtime validation." >> "$GITHUB_STEP_SUMMARY"
+          echo "Main PersAI Kotlin toolchain and memory remain untouched." >> "$GITHUB_STEP_SUMMARY"
+)
+          if [[ "$FOUND" != 1 ]]; then
+            echo "::error::ActivationDataType class descriptor absent from the installable APK"
+            exit 1
+          fi
+          echo "LiteRT-LM 0.18.1 selected and ActivationDataType descriptor present in final APK." >> "$GITHUB_STEP_SUMMARY"
+      - name: Publish installable offline runtime-linkage-fixed lab APK
         uses: actions/upload-artifact@v4
         with:
           name: persai-vision-lab-android16-diagnostic
