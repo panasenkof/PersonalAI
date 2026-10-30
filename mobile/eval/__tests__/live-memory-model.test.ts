@@ -108,7 +108,7 @@ type Outcome={
  expected:string[];actualIds:string[];modelQueries:string[];requests:number;
  issues:string[];answer:string;answerChars:number;answerTruncated:boolean;
 };
-const insufficient=/(?:не (?:наш[еёлао]|имею|доступ|могу|вижу|сохранен|знаю|известн|указан|дошл[аои])|нет (?:данных|информации|запис|доступа|в памяти|вложени[яй]|фотографи[ий]|изображени[яй]|ничего|текст[а-яё]*|документ[а-яё]*|заключени[а-яё]*|ни(?=\s|$|[.,!?]))|(?:запис[ьи]|документ[а-яё]*|текст[а-яё]*|заключени[а-яё]*)[^.!?\n]{0,120}(?:^|\s)нет(?:$|[\s.,!?])|отсутств|неизвест|уточни|невозможно|не могу|недоступ|не сохрани|не загруж|не опублик)/i;
+const insufficient=/(?:не (?:наш[еёлао]|имею|доступ|могу|вижу|сохранен|знаю|известн|указан|дошл[аои])|нет (?:данных|информации|запис|доступа|в памяти|вложени[яй]|фотографи[ий]|изображени[яй]|ничего|текст[а-яё]*|документ[а-яё]*|заключени[а-яё]*|ни(?=\s|$|[.,!?]))|(?:запис[ьи]|документ[а-яё]*|текст[а-яё]*|заключени[а-яё]*|описани[яйе])[^.!?\n]{0,120}(?:^|\s)нет(?:$|[\s.,!?])|отсутств|неизвест|уточни|невозможно|не могу|недоступ|не сохрани|не загруж|не опублик)/i;
 // Russian genitive absence: "точной даты техосмотра нет" and "рецепта кваса
 // в памяти нет" explicitly deny the evidence even though "нет" follows the
 // item, not the other way around. Keep the subject nouns bounded, so a stray
@@ -187,6 +187,23 @@ test("live oracle accepts natural genitive absence but rejects invented dates/re
     .toContain("did_not_abstain_without_evidence");
   expect(evaluate(kvass,"Рецепт кваса точно сохранён: солод и сахар.",[]))
     .toContain("did_not_abstain_without_evidence");
+});
+
+test("oracle accepts unavailable ultrasound description, but not invented findings",()=>{
+  const turn={question:"Есть ли у меня описание последнего обследования УЗИ?",policy:"withheld" as const};
+  expect(evaluate(turn,"Проверил память телефона — описания УЗИ там нет.",[])).toEqual([]);
+  expect(evaluate(turn,"УЗИ показало кисту 5 см.",[]))
+    .toContain("did_not_abstain_without_evidence");
+});
+
+test("oracle recognizes diagnostic report versus completed repair without asserting private act",()=>{
+  const turn={question:"Если в акте диагностики написали про люфт, это означает, что ремонт уже сделан?",
+    policy:"general" as const,
+    match:"не означает|не значит|не подтверждает|не доказывает|не подтверждени",
+    privateId:"car-diagnostic"};
+  expect(evaluate(turn,"Обнаруженный люфт — это описание дефекта, а не подтверждение того, что ремонт сделан.",[])).toEqual([]);
+  expect(evaluate(turn,"Да, акт диагностики подтверждает выполненный ремонт.",[]))
+    .toContain("unsupported_general_explanation");
 });
 
 test("live artifact retains full normal answers and explicitly marks size caps",()=>{
@@ -299,7 +316,10 @@ testLive("NATURAL LIVE: real LLM chooses the search terms for ordinary dialogues
               baseUrl:process.env.PERSAI_EVAL_LLM_BASE_URL!,
               model:process.env.PERSAI_EVAL_LLM_MODEL!,
               apiKey:process.env.PERSAI_EVAL_LLM_API_KEY!,webSearchKey:""},
-            prompt:turn.question,history,transport:inspectedFetch,
+            // Match ChatStore production path: it enables the optional LLM
+            // rewrite when initial lexical retrieval is empty. This helper
+            // uses the same bounded, manually approved test transport.
+            prompt:turn.question,history,rewrite:true,transport:inspectedFetch,
             maxRequests:MAX_REQUESTS_PER_TURN,
             lookup:async query=>{
               modelQueries.push(query);
