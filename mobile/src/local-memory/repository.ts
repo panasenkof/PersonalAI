@@ -841,8 +841,8 @@ export class SqliteMemoryRepository implements MemoryRepository {
 
   /** One repository writer shared by the visual indexing scheduler.
    * Untrusted/stale original rows never receive derived vectors. */
-  async saveImageVector(attachmentId: string, model: string, values: Float32Array): Promise<boolean> {
-    return saveAttachmentImageVector(this.db,{attachmentId,model,values});
+  async saveImageVector(attachmentId: string, model: string, values: Float32Array, sourceVersion: string): Promise<boolean> {
+    return saveAttachmentImageVector(this.db,{attachmentId,model,values,sourceVersion});
   }
 
   /** The assistant's memory search: the whole phrase, each word, each stem and
