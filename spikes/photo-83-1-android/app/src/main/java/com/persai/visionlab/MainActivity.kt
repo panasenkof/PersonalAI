@@ -188,8 +188,11 @@ class MainActivity : Activity() {
 
   private fun decodeBoundedImage(uri: Uri): Bitmap {
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-    contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+    val boundsStream = contentResolver.openInputStream(uri)
       ?: error("image_not_accessible")
+    boundsStream.use { BitmapFactory.decodeStream(it, null, bounds) }
+    // With inJustDecodeBounds=true, decodeStream intentionally returns null;
+    // only the dimensions in bounds are meaningful.
     check(bounds.outWidth in 1..MAX_IMAGE_SIDE &&
       bounds.outHeight in 1..MAX_IMAGE_SIDE) { "image_dimensions_invalid" }
     val sampled = BitmapFactory.Options()
