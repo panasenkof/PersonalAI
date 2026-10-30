@@ -11,7 +11,7 @@ on:
         default: false
 
 concurrency:
-  group: native-sqlcipher-${{ github.ref }}
+  group: native-sqlcipher-${{ github.ref }}-${{ inputs.vision_expo_gate && 'vision' || 'normal' }}
   cancel-in-progress: true
 
 permissions:
