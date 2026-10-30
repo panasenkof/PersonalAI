@@ -28,6 +28,7 @@ class MainActivity : Activity() {
   private companion object {
     const val MODEL_PICK = 71
     const val IMAGE_PICK = 72
+    const val BATCH_IMAGE_PICK = 73
     const val MAX_MODEL_BYTES = 900L * 1024 * 1024
     const val MAX_IMAGE_SIDE = 16384
   }
@@ -36,6 +37,8 @@ class MainActivity : Activity() {
   private lateinit var query: EditText
   private lateinit var runButton: Button
   private var imageUri: Uri? = null
+  private val rankedImageUris = mutableListOf<Uri>()
+  private lateinit var rankSelection: TextView
   private var importedModel: File? = null
   private var modelDigest: String? = null
   private var busy = false
@@ -90,6 +93,44 @@ class MainActivity : Activity() {
     }
     page.addView(runButton, LinearLayout.LayoutParams(
       ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+    val rankHeader = TextView(this).apply {
+      text = "Проверка качества: ранжирование 2–5 фотографий"
+      textSize = 18f
+      setPadding(0, dp(22), 0, dp(8))
+    }
+    page.addView(rankHeader)
+    val addRankPhoto = Button(this).apply {
+      text = "4. Добавить фото в тестовый набор"
+      setOnClickListener {
+        if (!busy) {
+          if (rankedImageUris.size < 5) chooseFile("image/*", BATCH_IMAGE_PICK)
+          else status.text = "Максимум 5 фотографий. Очистите набор для следующей проверки."
+        }
+      }
+    }
+    page.addView(addRankPhoto)
+    rankSelection = TextView(this).apply {
+      text = "Набор пуст. Добавляйте фото по одному: номер зависит от порядка выбора."
+      textSize = 14f
+      setPadding(0, dp(6), 0, dp(6))
+    }
+    page.addView(rankSelection)
+    val clearRankPhotos = Button(this).apply {
+      text = "Очистить тестовый набор"
+      setOnClickListener {
+        if (!busy) {
+          rankedImageUris.clear()
+          rankSelection.text = "Набор очищен; изображения не копировались в приложение."
+        }
+      }
+    }
+    page.addView(clearRankPhotos)
+    val rankButton = Button(this).apply {
+      text = "5. Найти наиболее подходящее фото"
+      setOnClickListener { rankPhotos() }
+    }
+    page.addView(rankButton)
+
     status = TextView(this).apply {
       text = "Модель и фото не выбраны. Сначала скачайте модель из официального каталога LiteRT Community."
       textSize = 15f
@@ -119,6 +160,17 @@ class MainActivity : Activity() {
     if (requestCode == IMAGE_PICK) {
       imageUri = uri
       status.text = "Фотография выбрана. Изображение не сохраняется в памяти приложения."
+    } else if (requestCode == BATCH_IMAGE_PICK) {
+      if (rankedImageUris.size >= 5) {
+        status.text = "Максимум 5 изображений в одном тестовом наборе."
+      } else if (rankedImageUris.contains(uri)) {
+        status.text = "Это фото уже есть в наборе; выберите другое."
+      } else {
+        rankedImageUris.add(uri)
+        rankSelection.text = "Выбрано: ${rankedImageUris.size}/5. " +
+          "Последнее добавлено как Фото №${rankedImageUris.size}. " +
+          "Порядок выбора определяет номера; фото не сохраняются."
+      }
     } else if (requestCode == MODEL_PICK) {
       importModel(uri)
     }
@@ -235,6 +287,47 @@ class MainActivity : Activity() {
       } finally {
         bitmap.recycle()
       }
+    }
+  }
+
+  private fun rankPhotos() {
+    val model = importedModel
+    val selected = rankedImageUris.toList()
+    val textQuery = query.text.toString().trim()
+    if (model == null || selected.size !in 2..5 ||
+      textQuery.isBlank() || textQuery.length > 256) {
+      status.text = "Для ранжирования выберите модель, 2–5 разных фото и короткий запрос."
+      return
+    }
+    startTask("Локально сравниваю ${selected.size} фото с одним запросом…") { mark ->
+      mark("image-metrics")
+      val pssBefore = Debug.MemoryInfo().apply {
+        Debug.getMemoryInfo(this)
+      }.totalPss
+      val started = SystemClock.elapsedRealtime()
+      val scores = UniversalVisionCompileProbe.compareMany(
+        context = this,
+        model = model,
+        imageCount = selected.size,
+        query = textQuery,
+        imageAt = { index -> decodeBoundedImage(selected[index]) },
+        releaseImage = { bitmap -> bitmap.recycle() },
+        mark = mark
+      )
+      val elapsed = SystemClock.elapsedRealtime() - started
+      val pssAfter = Debug.MemoryInfo().apply {
+        Debug.getMemoryInfo(this)
+      }.totalPss
+      val ranked = VisionRanking.order(scores)
+      val rankingLines = ranked.mapIndexed { rank, photo ->
+        "${rank + 1}. Фото №${photo.selectedNumber}: ${"%.4f".format(photo.cosine)}"
+      }.joinToString("\n")
+      update("Ранжирование ${selected.size} фото по одному русскому запросу:\n" +
+        rankingLines + "\n" +
+        "Всего: ${elapsed} мс. PSS до/после: " +
+        "${pssBefore / 1024}/${pssAfter / 1024} МиБ (не пиковая RAM). " +
+        "Отпечаток модели: ${modelDigest?.take(16)}…. " +
+        "Фото не сохранены. Сходство — не вероятность и не идентичность.")
     }
   }
 
