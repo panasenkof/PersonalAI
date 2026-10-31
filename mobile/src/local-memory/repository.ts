@@ -854,6 +854,8 @@ export class SqliteMemoryRepository implements MemoryRepository {
     vector?: { model: string; values: Float32Array };
     /** EmbeddingGemma visual vector; same search entrypoint, separate checked embedding space. */
     imageVector?: { model: string; values: Float32Array };
+    /** Optional provisional calibrated floor for visual candidates only. */
+    minImageSimilarity?: number;
     /** Stable owner ID and exact confirmed role, never a name heuristic. */
     verifiedRelative?: { ownerPersonId: string; relationKind: DirectPersonRelation };
   } = {}): Promise<MemoryHit[]> {
@@ -983,6 +985,7 @@ export class SqliteMemoryRepository implements MemoryRepository {
       const similarImages = await attachmentImageMatches(this.db, {
         ...options.imageVector, collectionIds: options.collectionIds,
         sensitivities: options.sensitivities, limit: 20,
+        minSimilarity: options.minImageSimilarity,
       });
       const photoRank: string[] = [];
       for (const image of similarImages) {
