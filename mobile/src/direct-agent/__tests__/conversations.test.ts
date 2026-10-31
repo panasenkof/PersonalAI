@@ -1,5 +1,5 @@
 import { beginTask } from "../task-state";
-import { conversationRepository } from "../conversations";
+import { conversationRepository, parseConversation } from "../conversations";
 import { SCHEMA_SQL, withLocalMemoryDatabase } from "../../local-memory/storage";
 jest.mock("../../local-memory/storage", () => ({ ...jest.requireActual("../../local-memory/storage"), withLocalMemoryDatabase: jest.fn() }));
 const { DatabaseSync } = require("node:sqlite");
@@ -51,4 +51,15 @@ test("one damaged chat does not hide the others and intact messages are kept", a
   // The unreadable record is left in place for a future repair, never deleted.
   expect(db.prepare("SELECT count(*) AS n FROM direct_conversations").get().n).toBe(3);
   db.close();
+});
+
+test("photo search turn retains up to 20 distinct originals across reopen",()=>{
+  const memory=Array.from({length:20},(_,i)=>({
+    id:"one-note",title:"Коллекция велосипеда",via:"search",photo:true,photoAttachmentId:"photo-"+i,
+  }));
+  const c=parseConversation(JSON.stringify({
+    id:"multi",title:"Поиск",createdAt:"2026-10-31",updatedAt:"2026-10-31",
+    question:"",drafts:[],rows:[{id:"answer",role:"assistant",text:"Найдено фото",memory}],
+  }));
+  expect(c?.rows[0].memory?.map(m=>m.photoAttachmentId)).toEqual(memory.map(m=>m.photoAttachmentId));
 });
