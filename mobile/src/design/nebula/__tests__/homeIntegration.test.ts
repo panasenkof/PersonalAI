@@ -62,7 +62,12 @@ describe("Native Home integration remains isolated and accessible", () => {
   it("camera opens directly and shows shared photo actions after capturing", () => {
     expect(home).toContain('onPress={() => void captureToDraft()}');
     expect(home).toContain("await capturePhotoDraft83(controller.signal)");
-    expect(home).toContain('testID="photo-context-actions"');
+    const photoActions=readFileSync(join(base, "..", "..", "media", "PhotoContextActions.tsx"), "utf8");
+    expect(home).toContain("<PhotoContextActions");
+    expect(photoActions).toContain('testID="photo-context-actions"');
+    expect(photoActions).toContain('testID="photo-action-cancel"');
+    expect(home).toContain("onCancel={discardSelectedPhoto}");
+    expect(photoActions).toContain('borderRadius:nebulaRadii.card');
     for(const label of ['В интернете','В моей памяти','Сохранить заметку','Посмотреть']){
       expect(home).toContain('label:"'+label+'"');
     }
