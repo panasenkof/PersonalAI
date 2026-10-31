@@ -11,11 +11,10 @@ import { localMemorySessionUnlocked, withLocalMemoryDatabase } from "../local-me
 import { SqliteMemoryRepository } from "../local-memory/repository";
 import { fingerprintExtractionSource } from "../local-memory/extractions";
 import { materializeAttachment, type Attachment } from "./attachments";
-import { verifiedActiveVisionModel } from "./vision-model-manager";
+import { readyNativeVisionModel83 } from "./vision-native-model";
 import { embedVisionImage83 } from "./vision-native-vectors";
 import type { VerifiedOriginalLocator } from "../local-memory/types";
 
-const shaModel = /^eg2\|vision\|768\|sha256:([a-f0-9]{64})$/;
 const fileSuffix = new Map([
   ["image/jpeg",".jpg"],["image/png",".png"],["image/webp",".webp"],
 ]);
@@ -35,13 +34,8 @@ export async function indexSavedPhoto83(
   if (!profile || profile.length>160 || !validId.test(attachmentId))
     throw new Error("vision_invalid_index_target");
   guard(signal);
-  const active=await verifiedActiveVisionModel();
-  if (!active) return { indexed:false,attachmentId,reason:"model_not_installed" };
-  const match=shaModel.exec(active.space);
-  const modelName=active.path.split("/").at(-1) || "";
-  if (!match || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,119}\.litertlm$/.test(modelName) ||
-      !active.path.endsWith("/persai-vision-models/"+modelName))
-    throw new Error("vision_model_path_invalid");
+  const model=await readyNativeVisionModel83();
+  if (!model) return { indexed:false,attachmentId,reason:"model_not_installed" };
   guard(signal);
   const candidate=await withLocalMemoryDatabase(profile,async db=>{
     const row=await db.getFirstAsync<Attachment & { record_version:number }>(
@@ -76,17 +70,17 @@ export async function indexSavedPhoto83(
     new File(preview).copy(staged);
     guard(signal);
     const vector=await embedVisionImage83({
-      modelName,modelSha256:match[1],imageName:staged.name,
+      modelName:model.modelName,modelSha256:model.modelSha256,imageName:staged.name,
     });
     guard(signal);
     const accepted=await withLocalMemoryDatabase(profile, async db => {
       // CAS against original manifest inside the existing repository's
       // encrypted transaction. Source changed during inference -> discard.
       return new SqliteMemoryRepository(db).saveImageVector(
-        attachmentId,active.space,vector,candidate.sourceVersion);
+        attachmentId,model.modelSpace,vector,candidate.sourceVersion);
     });
     guard(signal);
-    return accepted ? {indexed:true,attachmentId,modelSpace:active.space} :
+    return accepted ? {indexed:true,attachmentId,modelSpace:model.modelSpace} :
       {indexed:false,attachmentId,reason:"source_changed"};
   } finally {
     // All derived plaintext previews are disposable, including failures,
