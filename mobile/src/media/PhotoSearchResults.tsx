@@ -1,11 +1,14 @@
-import React, { useState } from "react";
+import React from "react";
 import { Pressable, Text, View, useWindowDimensions } from "react-native";
 import type { ChatMemoryRef } from "../direct-agent/conversations";
 import { MemoryCover } from "./MemoryCover";
 import { useTheme } from "../theme";
-import { nebulaSpacing, nebulaTouch } from "../design/nebula/tokens";
+import { nebulaRadii, nebulaSpacing, nebulaTouch } from "../design/nebula/tokens";
 
-/** Bounded initial previews keep a long result turn readable in the chat. */
+/** All relevant returned matches are visible in similarity order, not silently
+ * hidden behind a one-result preview. Each attachment has a distinct key:
+ * several photographs can belong to one note.
+ */
 export function PhotoSearchResults({ profile, results, onOpen }: {
   profile: string;
   results: ChatMemoryRef[];
@@ -13,27 +16,24 @@ export function PhotoSearchResults({ profile, results, onOpen }: {
 }) {
   const t = useTheme();
   const { width, fontScale } = useWindowDimensions();
-  const [expanded, setExpanded] = useState(false);
-  const twoColumns = width >= 430 && fontScale <= 1.2;
-  const visible = expanded ? results : results.slice(0, 1);
+  const twoColumns = width >= 360 && fontScale <= 1.2;
   return <View style={{ gap: nebulaSpacing.sm }}>
     <View style={{ flexDirection: "row", flexWrap: "wrap", gap: nebulaSpacing.sm }}>
-      {visible.map(result => <View key={result.id} style={{ width: expanded && twoColumns ? "47%" : "100%", gap: nebulaSpacing.xs }}>
-        <Pressable accessibilityRole="link" accessibilityLabel={"Открыть найденное фото " + result.title}
+      {results.map((result, index) => <View key={result.id+":"+(result.photoAttachmentId||index)}
+        style={{ width: twoColumns ? "47%" : "100%", gap: nebulaSpacing.xs,
+          padding:nebulaSpacing.xs,borderRadius:nebulaRadii.card,borderWidth:1,
+          borderColor:t.line,backgroundColor:t.soft }}>
+        <Pressable accessibilityRole="link" accessibilityLabel={"Открыть найденное фото " + result.title+" "+(index+1)}
           onPress={() => onOpen(result, true)} style={{ minHeight: nebulaTouch.minimum }}>
           <MemoryCover profile={profile} entityId={result.id} photoAttachmentId={result.photoAttachmentId}
-            height={!expanded ? 220 : 160} fit="contain" label={"Найденная фотография " + result.title} />
-          <Text numberOfLines={2} style={{ color: t.text }}>{result.title}</Text>
+            height={twoColumns ? 142 : 210} fit="contain" label={"Найденная фотография " + result.title} />
+          <Text numberOfLines={2} style={{ color: t.text,fontSize:13,fontWeight:"600" }}>{result.title}</Text>
         </Pressable>
-        <Pressable accessibilityRole="link" accessibilityLabel={"Открыть запись " + result.title}
+        <Pressable accessibilityRole="link" accessibilityLabel={"Открыть запись " + result.title+" "+(index+1)}
           onPress={() => onOpen(result, false)} style={{ minHeight: nebulaTouch.minimum, justifyContent: "center" }}>
-          <Text style={{ color: t.secondary }}>Открыть запись</Text>
+          <Text style={{ color: t.secondary,fontSize:12 }}>Открыть запись</Text>
         </Pressable>
       </View>)}
     </View>
-    {results.length > 1 ? <Pressable accessibilityRole="button" accessibilityState={{ expanded }}
-      onPress={() => setExpanded(value => !value)} style={{ minHeight: nebulaTouch.minimum, justifyContent: "center" }}>
-      <Text style={{ color: t.accent }}>{expanded ? "Скрыть другие варианты" : `Показать другие варианты (${results.length - 1})`}</Text>
-    </Pressable> : null}
   </View>;
 }
