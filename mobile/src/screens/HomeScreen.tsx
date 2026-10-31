@@ -257,7 +257,6 @@ function NebulaHomeContent() {
         <ChatAttachmentList files={active.attachments} disabled={busy || cameraBusy || pickingAttachment} onSearch={file => { void store.searchPhotosLocally(file, active.id); }} onRemove={id => { try {store.setAttachments(active.id, active.attachments!.filter(f => f.id !== id));} catch(e) {setNotice((e as Error).message);} }}/>
         <Text style={{color:t.muted,fontSize:12}}>«Найти похожие в памяти» ищет на телефоне. При отправке обычного вопроса вложения получит выбранная модель.</Text>
       </> : null}
-      {(active?.attachments?.some(file => file.kind === "image") || localPhotoSearch) ? <Pressable accessibilityRole="link" onPress={() => navigation.navigate("Tabs", {screen:"Settings"})} style={{minHeight:48,justifyContent:"center"}}><Text style={{color:t.secondary}}>Модель и подготовка фото в настройках</Text></Pressable> : null}
       {suggestedPhotoSearch && ready && !busy && !cameraBusy && !pickingAttachment && !dictating ? <Pressable
         accessibilityRole="button" accessibilityLabel="Поискать в моих фото" style={{minHeight:48,justifyContent:"center"}}
         onPress={() => { Keyboard.dismiss(); void store.searchPhotosLocally(undefined, active?.id, true); }}>

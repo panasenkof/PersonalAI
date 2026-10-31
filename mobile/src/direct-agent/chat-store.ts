@@ -192,9 +192,11 @@ export class DirectChatStore {
     this.requests.set(id,aborter);
     const pending=this.update(id,{
       busy:true,progress:"Ищу фотографии в памяти…",updatedAt:new Date().toISOString(),
-      // A direct camera search does not alter an unrelated unsent draft.
-      // Keep the draft available for correction or retry.
-      // Attached files already belong to the encrypted chat draft, never to the search turn.
+      // An explicit sent text query consumes its draft, like normal send().
+      // One-tap camera/gallery searches preserve any unrelated unsent draft.
+      // On failure restore the consumed draft only if the user has not typed a replacement.
+      question:camera ? current.question : "",
+      ...(camera ? {} : {attachments:[]}),
       title:current.rows.length?current.title:prompt.slice(0,60),
       rows:[...current.rows,{id:Crypto.randomUUID(),role:"user",text:prompt}],
     })!;
@@ -213,6 +215,7 @@ export class DirectChatStore {
       if(this.disposed)return;
       const latest=this.snapshot.conversations.find(c=>c.id===id);
       if(latest)this.update(id,{
+        ...(!camera && latest.question === "" ? {question:current.question,attachments:current.attachments} : {}),
         rows:[...latest.rows,{id:Crypto.randomUUID(),role:"info",
           text:aborter.signal.aborted?"Поиск фотографий остановлен":memoryErrorMessage(e)}],
       });

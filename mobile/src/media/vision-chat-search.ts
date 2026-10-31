@@ -87,9 +87,9 @@ export async function searchLocalPhotosFromChat83(
   }));
   return {
     text:memory.length
-      ? `${intent.mode === "image" ? "Похожие фото" : "Фото по описанию"} · записей: ${memory.length}. Нажмите на снимок, чтобы открыть его. Результаты упорядочены по сходству.`
+      ? `Самое похожее фото — ниже.${memory.length > 1 ? " Другие варианты можно раскрыть." : ""} Нажмите на снимок, чтобы открыть оригинал.`
       : "Среди подготовленных доступных фотографий похожих не найдено. Попробуйте другое описание или снимок предмета крупнее. Если вы недавно добавили фото, подготовьте их для поиска в настройках.",
     memory,
-    ...(readiness === "partial" || readiness === "unknown" ? {photoAction:"prepare" as const} : {}),
+    ...(!memory.length && (readiness === "partial" || readiness === "unknown") ? {photoAction:"prepare" as const} : {}),
   };
 }

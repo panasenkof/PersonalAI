@@ -99,3 +99,19 @@ test("attachment action owns photo suggestions and typing does not search",()=>{
   expect(textSearch).not.toHaveBeenCalled();
   expect(photoSearchReadiness83).not.toHaveBeenCalled();
 });
+
+test("successful visual matches do not offer prepare action for partial/unknown index",async()=>{
+  for(const state of ["partial","unknown"]){
+    (photoSearchReadiness83 as jest.Mock).mockResolvedValueOnce(state);
+    const result=await searchLocalPhotosFromChat83("guest",{mode:"text",description:"красный велосипед"});
+    expect(result.memory).toHaveLength(1);
+    expect(result.photoAction).toBeUndefined();
+    expect(result.text).not.toMatch(/записей:|Результаты упорядочены/);
+  }
+});
+test("empty visual matches still offer index recovery when coverage is partial",async()=>{
+  (photoSearchReadiness83 as jest.Mock).mockResolvedValueOnce("partial");
+  textSearch.mockResolvedValueOnce([]);
+  const result=await searchLocalPhotosFromChat83("guest",{mode:"text",description:"велосипед"});
+  expect(result.photoAction).toBe("prepare");
+});

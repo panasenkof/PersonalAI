@@ -65,6 +65,8 @@ test("explicit text photo query is local and still works with no LLM setup",asyn
   expect(runner).not.toHaveBeenCalled();
   expect(search).toHaveBeenCalledWith("guest",expect.objectContaining({mode:"text"}),[],expect.any(Object));
   expect(records.get(store.getSnapshot().activeId!)?.rows.at(-1)?.role).toBe("assistant");
+  expect(records.get(store.getSnapshot().activeId!)?.question).toBe("");
+  expect(store.getSnapshot().conversations[0].question).toBe("");
   store.dispose();
 });
 test("ordinary image understanding request still follows remote model path, no forced photo search",async()=>{
@@ -110,5 +112,25 @@ test("suggested search uses latest draft once, retains it on failure, and never 
   store.setQuestion("Другая фраза");
   await store.searchPhotosLocally(undefined,id,true);
   expect(search).toHaveBeenCalledTimes(1);
+  store.dispose();
+});
+
+test("failed sent photo search restores consumed query for retry",async()=>{
+  const {repo,runner}=fixture();
+  const store=new DirectChatStore("guest",repo,runner);await store.initialize();
+  store.setQuestion("Найди фото красного велосипеда");
+  search.mockRejectedValueOnce(new Error("vision_native_unavailable"));
+  await store.searchPhotosLocally();
+  expect(store.getSnapshot().conversations[0].question).toBe("Найди фото красного велосипеда");
+  expect(runner).not.toHaveBeenCalled();
+  store.dispose();
+});
+test("failed search never replaces a new draft typed while searching",async()=>{
+  const {repo}=fixture();
+  const store=new DirectChatStore("guest",repo);await store.initialize();
+  store.setQuestion("Найди фото велосипеда");
+  search.mockImplementationOnce(async()=>{store.setQuestion("Совсем новый черновик");throw new Error("vision_native_unavailable");});
+  await store.searchPhotosLocally();
+  expect(store.getSnapshot().conversations[0].question).toBe("Совсем новый черновик");
   store.dispose();
 });
