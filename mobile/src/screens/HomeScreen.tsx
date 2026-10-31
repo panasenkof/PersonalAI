@@ -52,10 +52,13 @@ function NebulaHomeContent() {
   const [cameraBusy,setCameraBusy] = useState(false);
   const [selectedPhotoId,setSelectedPhotoId]=useState<string|null>(null);
   const [previewPhotoId,setPreviewPhotoId]=useState<string|null>(null);
-  const cameraOriginal=useRef<{conversationId:string;attachmentId:string;uri:string}|null>(null);
-  const releaseCameraOriginal=()=>{
-    if(cameraOriginal.current)discardCameraPhotoDraft83(cameraOriginal.current.uri);
-    cameraOriginal.current=null;
+  const cameraOriginal=useRef(new Map<string,{conversationId:string;uri:string}>());
+  const releaseCameraOriginal=(id?:string)=>{
+    for(const [key,photo] of cameraOriginal.current){
+      if(id && key!==id)continue;
+      discardCameraPhotoDraft83(photo.uri);
+      cameraOriginal.current.delete(key);
+    }
   };
   const cameraController = useRef<AbortController|null>(null);
   useEffect(() => {
@@ -66,10 +69,10 @@ function NebulaHomeContent() {
   },[profile]);
   const {picking: pickingAttachment, pick: pickAttachment} = useChatAttachments(store, active?.id, isFocused, setNotice);
   useEffect(()=>{
-    if(cameraOriginal.current &&
-      (cameraOriginal.current.conversationId!==active?.id ||
-       !active?.attachments?.some(f=>f.id===cameraOriginal.current?.attachmentId)))
-      releaseCameraOriginal();
+    for(const [id,original] of cameraOriginal.current){
+      if(original.conversationId!==active?.id || !active?.attachments?.some(f=>f.id===id))
+        releaseCameraOriginal(id);
+    }
   },[active?.id,active?.attachments]);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [voiceReset, setVoiceReset] = useState(0);
@@ -161,8 +164,7 @@ function NebulaHomeContent() {
       }
       try{store.setAttachments(conversationId,[...(current.attachments || []),draft.attachment]);}
       catch(e){discardCameraPhotoDraft83(draft.originalUri);throw e;}
-      releaseCameraOriginal();
-      cameraOriginal.current={conversationId,attachmentId:draft.attachment.id,uri:draft.originalUri};
+      cameraOriginal.current.set(draft.attachment.id,{conversationId,uri:draft.originalUri});
       setSelectedPhotoId(draft.attachment.id);
     } catch(e) {
       if(!controller.signal.aborted)Alert.alert("Камера",memoryErrorMessage(e),[{text:"Закрыть"}]);
@@ -193,13 +195,13 @@ function NebulaHomeContent() {
     if(!selectedPhoto || !active?.id || busy || cameraBusy)return;
     const photo=selectedPhoto;
     const conversationId=active.id;
-    const original=cameraOriginal.current?.attachmentId===photo.id &&
-      cameraOriginal.current?.conversationId===conversationId ? cameraOriginal.current.uri : null;
+    const matched=cameraOriginal.current.get(photo.id);
+    const original=matched?.conversationId===conversationId ? matched.uri : null;
     let staged=original;
     try {
       if(!staged)staged=await stageChatImageForNote83(photo);
       if(store.getSnapshot().activeId!==conversationId){discardCameraPhotoDraft83(staged);return;}
-      if(original)cameraOriginal.current=null; // ownership moves to MemoryImport
+      if(original)cameraOriginal.current.delete(photo.id); // ownership moves to MemoryImport
       navigation.navigate("MemoryImport",{source:"photo",initialPhotoUri:staged});
     }catch(e){if(staged && staged!==original)discardCameraPhotoDraft83(staged);setNotice(memoryErrorMessage(e));}
   }
@@ -319,7 +321,7 @@ function NebulaHomeContent() {
         <ChatAttachmentList files={active.attachments} disabled={busy || cameraBusy || pickingAttachment}
           selectedImageId={selectedPhoto?.id} onSelectImage={setSelectedPhotoId}
           onRemove={id => {try {
-            if(cameraOriginal.current?.attachmentId===id)releaseCameraOriginal();
+            releaseCameraOriginal(id);
             store.setAttachments(active.id,active.attachments!.filter(f=>f.id!==id));
             if(previewPhotoId===id)setPreviewPhotoId(null);
             if(selectedPhotoId===id)setSelectedPhotoId(null);
