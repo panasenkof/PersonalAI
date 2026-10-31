@@ -77,3 +77,21 @@ test("ordinary image understanding request still follows remote model path, no f
   expect(search).not.toHaveBeenCalled();
   store.dispose();
 });
+
+test.each(["vision_model_not_installed", "application_locked", "vision_native_unavailable", "vision_query_cancelled"])("selected photo keeps draft and never falls back to LLM on %s", async message => {
+  const {repo,runner}=fixture();
+  const store=new DirectChatStore("guest",repo,runner);
+  await store.initialize();
+  const id=store.getSnapshot().activeId!;
+  store.setQuestion("Вопрос, который ещё редактирую");
+  store.setAttachments(id,[image,{...image,id:"second"}]);
+  search.mockRejectedValueOnce(new Error(message));
+  await store.searchPhotosLocally(image,id);
+  const current=store.getSnapshot().conversations.find(c=>c.id===id)!;
+  expect(current.question).toBe("Вопрос, который ещё редактирую");
+  expect(current.attachments).toHaveLength(2);
+  expect(current.busy).toBe(false);
+  expect(runner).not.toHaveBeenCalled();
+  expect(search).toHaveBeenCalledWith("guest",expect.anything(),[image],expect.anything());
+  store.dispose();
+});

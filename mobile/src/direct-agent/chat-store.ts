@@ -193,7 +193,8 @@ export class DirectChatStore {
     const pending=this.update(id,{
       busy:true,progress:"Ищу фотографии в памяти…",updatedAt:new Date().toISOString(),
       // A direct camera search does not alter an unrelated unsent draft.
-      ...(!camera?{question:"",attachments:[]}:{}),
+      // Keep the draft available for correction or retry.
+      // Attached files already belong to the encrypted chat draft, never to the search turn.
       title:current.rows.length?current.title:prompt.slice(0,60),
       rows:[...current.rows,{id:Crypto.randomUUID(),role:"user",text:prompt}],
     })!;

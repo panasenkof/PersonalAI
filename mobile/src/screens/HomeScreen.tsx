@@ -130,7 +130,11 @@ function NebulaHomeContent() {
       if(!capture || controller.signal.aborted || store.getSnapshot().activeId!==conversationId)return;
       await store.searchPhotosLocally(capture,conversationId);
     } catch(e) {
-      if(!controller.signal.aborted)setNotice(memoryErrorMessage(e));
+      if(!controller.signal.aborted)Alert.alert("Поиск фотографий", memoryErrorMessage(e), [
+        {text:"Закрыть",style:"cancel"},
+        {text:"Выбрать из галереи",onPress:() => void pickAttachment()},
+        {text:"Настройки",onPress:() => navigation.navigate("Tabs", {screen:"Settings"})},
+      ]);
     } finally {
       cameraController.current=null;
       setCameraBusy(false);
@@ -202,12 +206,12 @@ function NebulaHomeContent() {
           <Text selectable style={{ color: item.role === "user" ? t.userText : item.role === "info" ? t.muted : t.text, lineHeight: 23 }}>{item.text}</Text>}
         {item.attachments?.length ? <ChatAttachmentList files={item.attachments}/> : null}
         {item.memory?.length ? <View style={{ gap: 4 }}><Text style={{ color: t.muted, fontSize: 12 }}>Из памяти</Text>
-          {item.memory.map(m => <Pressable key={m.id} accessibilityRole="link" accessibilityLabel={"Открыть запись " + m.title}
-            onPress={() => navigation.navigate("MemoryNote", { entityId: m.id })} style={{ minHeight: 40, justifyContent: "center" }}>
+          {item.memory.map(m => <View key={m.id}><Pressable key={m.id} accessibilityRole="link" accessibilityLabel={(m.photo ? "Открыть найденное фото " : "Открыть запись ") + m.title}
+            onPress={() => navigation.navigate("MemoryNote", { entityId: m.id, photoAttachmentId: m.photoAttachmentId })} style={{ minHeight: 48, justifyContent: "center" }}>
             {m.photo ? <MemoryCover profile={profile} entityId={m.id} photoAttachmentId={m.photoAttachmentId} compact height={86}
               label={"Найденная фотография: "+m.title} /> : null}
             <Text numberOfLines={1} style={{ color: t.accent }}>{m.title}<Text style={{ color: t.muted, fontSize: 12 }}>{(m.section ? " · " + m.section : "") + (m.via === "rewrite" ? " · найдено другими словами" : m.via === "assistant" ? " · нашёл помощник" : "")}</Text></Text>
-          </Pressable>)}</View> : null}
+          </Pressable>{m.photo ? <Pressable accessibilityRole="link" onPress={() => navigation.navigate("MemoryNote", {entityId:m.id})} style={{minHeight:48,justifyContent:"center"}}><Text style={{color:t.secondary}}>Открыть запись</Text></Pressable> : null}</View>)}</View> : null}
         {item.sources?.length ? <View style={{ gap: 4 }}><Text style={{ color: t.muted, fontSize: 12 }}>Источники</Text>{item.sources.map(url => <Pressable key={url} accessibilityRole="link" onPress={() => void Linking.openURL(url).catch(() => setNotice("Не удалось открыть ссылку."))} style={{ minHeight: 44, justifyContent: "center" }}>
           <Text numberOfLines={2} style={{ color: t.accent, textDecorationLine: "underline" }}>{url}</Text>
         </Pressable>)}</View> : null}
@@ -244,9 +248,10 @@ function NebulaHomeContent() {
     {!canSend && ready && !(needsSetup && !active?.rows.length) ? <Pressable accessibilityRole="button" onPress={() => openConnections()} style={{ paddingHorizontal: 16, minHeight: 44, justifyContent: "center" }}><Text style={{ color: t.accent }}>Добавьте модель в настройках подключений →</Text></Pressable> : null}
     <View style={{ zIndex: 3, padding: 10, gap: 5, backgroundColor: t.panel, borderTopWidth: 1, borderColor: t.line }}>
       {active?.attachments?.length ? <>
-        <ChatAttachmentList files={active.attachments} disabled={busy || pickingAttachment} onRemove={id => { try {store.setAttachments(active.id, active.attachments!.filter(f => f.id !== id));} catch(e) {setNotice((e as Error).message);} }}/>
-        <Text style={{color:t.muted,fontSize:12}}>Для запроса «Найди похожие фото» или «Найди фото по описанию» поиск выполняется локально в памяти. В остальных запросах вложения могут отправляться выбранной LLM.</Text>
+        <ChatAttachmentList files={active.attachments} disabled={busy || cameraBusy || pickingAttachment} onSearch={file => { void store.searchPhotosLocally(file, active.id); }} onRemove={id => { try {store.setAttachments(active.id, active.attachments!.filter(f => f.id !== id));} catch(e) {setNotice((e as Error).message);} }}/>
+        <Text style={{color:t.muted,fontSize:12}}>«Найти похожие в памяти» ищет на телефоне. При отправке обычного вопроса вложения получит выбранная модель.</Text>
       </> : null}
+      {(active?.attachments?.some(file => file.kind === "image") || localPhotoSearch) ? <Pressable accessibilityRole="link" onPress={() => navigation.navigate("Tabs", {screen:"Settings"})} style={{minHeight:48,justifyContent:"center"}}><Text style={{color:t.secondary}}>Модель и подготовка фото в настройках</Text></Pressable> : null}
       <PromptInput value={question} onChange={value => store.setQuestion(value)} onClear={() => { normalization.reset(); setVoiceReset(n => n + 1); }} editable={ready} onFocusChange={setComposerFocused} />
       <View testID="composer-actions" style={{ zIndex: 1, flexDirection: "row", alignItems: "center", gap: 4 }}>
         <IconAction compact icon="paperclip" label="Файл" accessibilityLabel="Прикрепить файл к сообщению" hint="JPEG, PNG, WebP или текст UTF-8. До 3 файлов, каждый до 2 МБ; текст вместе до 24 000 символов. Файлы не сохраняются как заметки." hintAbove hintAlign="start" disabled={!ready || busy || pickingAttachment || dictating} onPress={() => void pickAttachment()} />
@@ -263,8 +268,8 @@ function NebulaHomeContent() {
           disabled={!ready || dictating || (!normalization.busy && (!question.trim() || (!normalization.alternate && !canSend)))}
           onPress={() => void normalization.toggle(settings)} />
         <View style={{ flex: 1, minWidth: 0 }} />
-        <IconAction compact icon={busy ? "square" : "arrow-up"} label={busy ? "Стоп" : "Отправить"} accessibilityLabel={busy ? "Остановить запрос" : "Отправить запрос"}
-          hint={busy ? "Остановить ответ ИИ в этом диалоге." : "Отправить написанное сообщение выбранной модели."} hintAbove emphasized={!busy}
+        <IconAction compact icon={busy ? "square" : "arrow-up"} label={busy ? "Стоп" : localPhotoSearch ? "Найти" : "Отправить"} accessibilityLabel={busy ? "Остановить запрос" : localPhotoSearch ? "Найти фотографии в памяти" : "Отправить запрос"}
+          hint={busy ? "Остановить ответ ИИ в этом диалоге." : localPhotoSearch ? "Найти фотографии на телефоне." : "Отправить написанное сообщение выбранной модели."} hintAbove emphasized={!busy}
           disabled={!busy && (!(canSend || canSearchLocal) || (!question.trim() && !active?.attachments?.length))} onPress={sendOrStop} />
       </View>
     </View>
