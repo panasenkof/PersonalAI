@@ -236,6 +236,7 @@ test("internet photo action sends only selected photo, requests web and preserve
   expect(runner).toHaveBeenCalledTimes(1);
   const call=runner.mock.calls[0][0];
   expect(call.prompt).toContain("Найди в интернете");
+  expect(call.prompt).toContain("проверяемые факты");
   expect(call.attachments).toHaveLength(1);
   expect(call.attachments[0].id).toBe("photo");
   expect(call.history).toEqual([]);
@@ -248,6 +249,8 @@ test("internet photo action sends only selected photo, requests web and preserve
   expect(result.attachments).toHaveLength(1);
   expect(result.attachments?.[0].id).toBe("note");
   expect(result.rows[0].attachments).toHaveLength(1);
+  expect(result.rows[0].text).toBe("Что изображено на фото? Найти информацию в интернете");
+  expect(result.title).not.toContain("Найди в интернете сведения");
   expect(records.get(id)?.rows.at(-1)?.sources).toEqual(["https://example.org/source"]);
   store.dispose();
 });

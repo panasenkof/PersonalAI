@@ -15,11 +15,13 @@ export function useChatAttachments(store: DirectChatStore, conversationId: strin
   async function pick() {
     if(controller.current || !conversationId) return;
     const aborter=new AbortController();controller.current=aborter;setPicking(true);
+    onError(""); // Dismiss a stale file-size or picker error before retry.
     try {
       const files=await pickChatAttachments(aborter.signal);
       if(aborter.signal.aborted || !alive.current || store.getSnapshot().activeId!==conversationId || !files.length) return;
       const draft=store.getSnapshot().conversations.find(c=>c.id===conversationId);
       store.setAttachments(conversationId,[...(draft?.attachments || []),...files]);
+      onError("");
       const photo = [...files].reverse().find(file => file.kind === "image");
       if (photo) onPhotoPicked?.(photo.id);
     } catch(e) {if(alive.current && !aborter.signal.aborted)onError((e as Error).message);}

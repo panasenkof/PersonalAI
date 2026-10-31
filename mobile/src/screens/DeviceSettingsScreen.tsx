@@ -16,6 +16,7 @@ import { VoiceModelCard } from "../components/VoiceModelCard";
 import { SmartSearchCard } from "../components/SmartSearchCard";
 import { VisionModelCard } from "../components/VisionModelCard";
 import { AgentLimitsCard } from "../components/AgentLimitsCard";
+import { PhotoResultsSettings } from "../components/PhotoResultsSettings";
 
 export function DeviceSettingsScreen() {
   const profile = useProfile();
@@ -41,6 +42,7 @@ export function DeviceSettingsScreen() {
       </NebulaSection>
       <NebulaSection title="Мультимедиа">
         <VisionModelCard />
+        <PhotoResultsSettings key={profile} />
         <Collapsible id="settings.media-routing" icon="image" title="Распознавание файлов"
           summary="Фото, видео и аудио · выбор подключений">
           {profile && connections.length

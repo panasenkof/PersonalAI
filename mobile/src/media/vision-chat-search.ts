@@ -3,6 +3,7 @@
  * an intent/format adapter, not a new search route or second search engine.
  */
 import { photoSearchReadiness83 } from "./vision-index-pages";
+import { loadPhotoResultCount, DEFAULT_PHOTO_RESULT_COUNT } from "./photo-result-preferences";
 import type { ChatAttachment } from "../direct-agent/chat-attachments";
 import type { MemoryHit } from "../local-memory/types";
 import type { ChatMemoryRef } from "../direct-agent/conversations";
@@ -65,11 +66,11 @@ export function localPhotoSuggestion83(question: string, attachments: readonly C
   return localPhotoIntent83("Найди " + prompt);
 }
 
-function closestPhotos(hits: MemoryHit[]): ChatMemoryRef[] {
+function closestPhotos(hits: MemoryHit[], count: number): ChatMemoryRef[] {
   return hits.flatMap(({entity, originals}) =>
     (originals || []).filter(file => file.kind === "image").map(file => ({entity, file}))
   ).sort((a, b) => (b.file.imageSimilarity ?? -1) - (a.file.imageSimilarity ?? -1))
-    .slice(0, 6).map(({entity, file}) => ({
+    .slice(0, count).map(({entity, file}) => ({
       id: entity.id, title: (entity.title || "Фотография в памяти").slice(0, 160),
       via: "search", photo: true, photoAttachmentId: file.attachmentId,
     }));
@@ -84,6 +85,8 @@ export async function searchLocalPhotosFromChat83(
     if(!localMemorySessionUnlocked())throw new Error("application_locked");
   };
   guard();
+  const maxPhotos = await loadPhotoResultCount(profile).catch(() => DEFAULT_PHOTO_RESULT_COUNT);
+  guard();
   if(intent.mode==="image" && attachments.filter(a=>a.kind==="image").length!==1)
     throw new Error("vision_query_one_image");
   if(intent.mode==="all") {
@@ -95,9 +98,9 @@ export async function searchLocalPhotosFromChat83(
       minImageSimilarity:VISION_TEXT_FLOOR83,
     });
     guard();
-    // The chat presents at most six closest photos, while ordinary matching
+    // The chat presents the selected count of closest photos, while ordinary matching
     // notes are still included without modifying their memory evidence.
-    const photos = closestPhotos(hits);
+    const photos = closestPhotos(hits, maxPhotos);
     const notes = hits.filter(hit => !hit.originals?.some(file => file.kind === "image"))
       .map(({entity}) => ({id: entity.id, title: (entity.title || "Запись в памяти").slice(0,160), via: "search" as const}));
     const memory = [...photos, ...notes];
@@ -131,7 +134,7 @@ export async function searchLocalPhotosFromChat83(
   guard();
   // A note can hold several photos: each matching original gets its own
   // result card; no photos vanish merely because they share a record ID.
-  const memory = closestPhotos(hits);
+  const memory = closestPhotos(hits, maxPhotos);
   return {
     text:memory.length
       ? `${memory.length === 1 ? "Нашёл одно подходящее фото." : `Нашёл подходящих фото: ${memory.length}. Остальные варианты можно раскрыть.` } Нажмите на снимок, чтобы открыть оригинал.`
