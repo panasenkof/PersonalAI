@@ -3,6 +3,8 @@ import { localMemorySessionUnlocked, withLocalMemoryDatabase } from "../../local
 import { readyNativeVisionModel83 } from "../vision-native-model";
 import { embedVisionText83 } from "../vision-native-vectors";
 import { SqliteMemoryRepository } from "../../local-memory/repository";
+import { withUnlockedTransaction } from "../../local-memory/transaction";
+import { embedQuery,verifiedVectorSpace } from "../embedder";
 
 jest.mock("../../local-memory/storage",()=>({
   localMemorySessionUnlocked:jest.fn(),withLocalMemoryDatabase:jest.fn(),
@@ -10,12 +12,17 @@ jest.mock("../../local-memory/storage",()=>({
 jest.mock("../vision-native-model",()=>({readyNativeVisionModel83:jest.fn()}));
 jest.mock("../vision-native-vectors",()=>({embedVisionText83:jest.fn()}));
 jest.mock("../../local-memory/repository",()=>({SqliteMemoryRepository:jest.fn()}));
+jest.mock("../../local-memory/transaction",()=>({withUnlockedTransaction:jest.fn(async (_db:any,fn:any)=>fn({}))}));
+jest.mock("../embedder",()=>({embedQuery:jest.fn(),verifiedVectorSpace:jest.fn()}));
 const unlocked=localMemorySessionUnlocked as jest.Mock;
 const database=withLocalMemoryDatabase as jest.Mock;
 const model=readyNativeVisionModel83 as jest.Mock;
 const vector=embedVisionText83 as jest.Mock;
 const Repo=SqliteMemoryRepository as jest.Mock;
 const mockSearch=jest.fn();
+const mockCollections=jest.fn();
+const textEmbedding=embedQuery as jest.Mock;
+const modelSpace=verifiedVectorSpace as jest.Mock;
 const active={
  modelSpace:"eg2|vision|768|sha256:"+"a".repeat(64),
  modelName:"eg2-model.litertlm",modelSha256:"a".repeat(64),
@@ -26,7 +33,10 @@ beforeEach(()=>{
  database.mockImplementation(async (_:string,work:(db:unknown)=>Promise<unknown>)=>work({}));
  model.mockResolvedValue(active);
  vector.mockResolvedValue(new Float32Array([1,...Array(767).fill(0)]));
- Repo.mockImplementation(()=>({searchMemory:mockSearch}));
+ Repo.mockImplementation(()=>({searchMemory:mockSearch,listCollections:mockCollections}));
+ mockCollections.mockResolvedValue([{id:"photos",sensitivity:"standard"},{id:"secret",sensitivity:"secret"}]);
+ textEmbedding.mockResolvedValue(new Float32Array([1,...Array(383).fill(0)]));
+ modelSpace.mockResolvedValue("verified-minilm-space");
  mockSearch.mockResolvedValue([{entity:{id:"note"},score:0.9,chunk:""}]);
 });
 test("image search uses canonical searchMemory with existing text MiniLM + scope, not parallel query",async()=>{
@@ -76,4 +86,50 @@ test("explicit photo mode without installed model never disguises text-only hits
  expect(vector).not.toHaveBeenCalled();
  expect(mockSearch).not.toHaveBeenCalled();
  expect(database).not.toHaveBeenCalled();
+});
+
+test("generic object search fuses MiniLM + vision + FTS in one ACL snapshot",async()=>{
+ await searchWithVision83("guest","велосипед",{
+   includeTextVector:true,standardCollectionsOnly:true,
+   sensitivities:["standard","inherit"],minImageSimilarity:0.65,limit:8,
+ });
+ expect(textEmbedding).toHaveBeenCalledWith("велосипед");
+ expect(withUnlockedTransaction).toHaveBeenCalledTimes(1);
+ expect(mockSearch).toHaveBeenCalledTimes(1);
+ expect(mockSearch).toHaveBeenCalledWith("велосипед",{
+   collectionIds:["photos"],sensitivities:["standard","inherit"],limit:8,
+   minImageSimilarity:0.65,
+   vector:{model:"verified-minilm-space",values:expect.any(Float32Array)},
+   imageVector:{model:active.modelSpace,values:expect.any(Float32Array)},
+ });
+});
+test("generic lookup preserves text results when vision weights are missing",async()=>{
+ model.mockResolvedValue(null);
+ await searchWithVision83("guest","велосипед",{
+   includeTextVector:true,standardCollectionsOnly:true,sensitivities:["standard","inherit"],
+ });
+ expect(vector).not.toHaveBeenCalled();
+ expect(mockSearch).toHaveBeenCalledWith("велосипед",{
+   sensitivities:["standard","inherit"],collectionIds:["photos"],
+   vector:{model:"verified-minilm-space",values:expect.any(Float32Array)},
+ });
+});
+test("generic lookup with no readable collections cannot disclose matches",async()=>{
+ mockCollections.mockResolvedValueOnce([{id:"private",sensitivity:"secret"}]);
+ await searchWithVision83("guest","велосипед",{standardCollectionsOnly:true});
+ expect(mockSearch).toHaveBeenCalledWith("велосипед",{
+   collectionIds:[],imageVector:{model:active.modelSpace,values:expect.any(Float32Array)},
+ });
+});
+
+test("ordinary object lookup retains text evidence after vision-native failure",async()=>{
+ vector.mockRejectedValueOnce(new Error("native_failed"));
+ await searchWithVision83("guest","велосипед",{
+   includeTextVector:true,standardCollectionsOnly:true,sensitivities:["standard","inherit"],
+ });
+ expect(mockSearch).toHaveBeenCalledWith("велосипед",{
+   sensitivities:["standard","inherit"],collectionIds:["photos"],
+   vector:{model:"verified-minilm-space",values:expect.any(Float32Array)},
+ });
+ expect(withUnlockedTransaction).toHaveBeenCalledTimes(1);
 });

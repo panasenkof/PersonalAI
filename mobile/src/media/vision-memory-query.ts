@@ -7,6 +7,7 @@
  */
 import { localMemorySessionUnlocked, withLocalMemoryDatabase } from "../local-memory/storage";
 import { SqliteMemoryRepository } from "../local-memory/repository";
+import { withUnlockedTransaction } from "../local-memory/transaction";
 import type { MemoryHit } from "../local-memory/types";
 import { readyNativeVisionModel83 } from "./vision-native-model";
 import { embedVisionText83 } from "./vision-native-vectors";
@@ -14,6 +15,11 @@ import { embedVisionText83 } from "./vision-native-vectors";
 type ScopedSearch = {
   /** User explicitly chose photo search: never silently show only text results. */
   requireVisionModel?:boolean;
+  /** Short object requests use both current MiniLM text and the visual model. */
+  includeTextVector?:boolean;
+  /** Force collection ACL on text and visual hits in the same DB lease. */
+  standardCollectionsOnly?:boolean;
+  minImageSimilarity?:number;
   collectionIds?:string[];sensitivities?:string[];limit?:number;
   vector?:{model:string;values:Float32Array};
 };
@@ -28,14 +34,50 @@ export async function searchWithVision83(
   const model=await readyNativeVisionModel83();
   if(!localMemorySessionUnlocked())throw new Error("application_locked");
   if (!model && options.requireVisionModel) throw new Error("vision_model_not_installed");
-  const imageVector=model?{
-    model:model.modelSpace,
-    values:await embedVisionText83({
-      modelName:model.modelName,modelSha256:model.modelSha256,
-    },query),
-  }:undefined;
+  let imageVector: {model:string;values:Float32Array}|undefined;
+  if(model) {
+    try {
+      imageVector={model:model.modelSpace,
+        values:await embedVisionText83({modelName:model.modelName,modelSha256:model.modelSha256},query)};
+    } catch (error) {
+      // An ordinary object search must retain FTS/MiniLM when vision inference
+      // fails; an explicitly requested photo search must report its real error.
+      if(!options.includeTextVector || options.requireVisionModel) throw error;
+    }
+  }
   if(!localMemorySessionUnlocked())throw new Error("application_locked");
-  const { requireVisionModel: _required, ...memoryScope } = options;
-  return withLocalMemoryDatabase(profile, async db => new SqliteMemoryRepository(db)
-    .searchMemory(query,{...memoryScope,...(imageVector?{imageVector}:{})}));
+  // Compose the two existing vector spaces without running another search.
+  // Model initialization happens before the SQLCipher lease, one at a time.
+  let textVector=options.vector;
+  if (options.includeTextVector && !textVector) {
+    const embedder = require("./embedder") as typeof import("./embedder");
+    const values=await embedder.embedQuery(query).catch(()=>null);
+    if(!localMemorySessionUnlocked())throw new Error("application_locked");
+    const space=values?await embedder.verifiedVectorSpace().catch(()=>null):null;
+    if(!localMemorySessionUnlocked())throw new Error("application_locked");
+    if(values && space) textVector={model:space,values};
+  }
+  const { requireVisionModel: _required, includeTextVector: _text, standardCollectionsOnly: _acl,
+    ...memoryScope } = options;
+  return withLocalMemoryDatabase(profile, async db => {
+    const read=async (current:typeof db) => {
+      const repository=new SqliteMemoryRepository(current);
+      if(!localMemorySessionUnlocked())throw new Error("application_locked");
+      const allowedCollections=options.standardCollectionsOnly
+        ? (await repository.listCollections()).filter(c=>c.sensitivity==="standard").map(c=>c.id)
+        : undefined;
+      const scope=allowedCollections ? {
+        collectionIds:options.collectionIds
+          ? options.collectionIds.filter(id=>allowedCollections.includes(id)) : allowedCollections,
+      } : {};
+      if(!localMemorySessionUnlocked())throw new Error("application_locked");
+      return repository.searchMemory(query,{...memoryScope,...scope,
+        ...(textVector?{vector:textVector}:{}),...(imageVector?{imageVector}:{})});
+    };
+    // ACL preflight + ranked results need the same SQLCipher snapshot.
+    if (!options.standardCollectionsOnly) return read(db);
+    let hits:MemoryHit[]=[];
+    await withUnlockedTransaction(db,async tx=>{ hits=await read(tx); });
+    return hits;
+  });
 }

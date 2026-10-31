@@ -36,8 +36,10 @@ export function VisionModelCard({ defaultOpen = false }: {defaultOpen?:boolean} 
   const current = VISION_MODELS.find(m => m.id === state.activeId);
   const summary = !state.loaded ? "Загрузка сведений…" :
     state.busy ? "Скачивание " + state.progress + "%" :
-    state.installed.length ? "Установлено " + state.installed.length +
-      (current ? " · выбрана " + current.title : "") : "Модель ещё не скачана";
+    state.installed.length
+      ? (state.installed.length === 1 ? "Модель скачана" : "Скачано моделей: " + state.installed.length) +
+        (current ? " · выбрана " + current.title : "")
+      : "Модель ещё не скачана";
   return <Collapsible defaultOpen={defaultOpen} forceOpen={defaultOpen} id="settings.vision-models" icon="image"
     title="Модели поиска по фото" summary={summary}>
     <View style={{ gap: nebulaSpacing.sm }}>
@@ -56,8 +58,12 @@ export function VisionModelCard({ defaultOpen = false }: {defaultOpen?:boolean} 
           borderRadius: nebulaRadii.card, padding: nebulaSpacing.md,
           gap: nebulaSpacing.xs }}>
           <Text style={{ color: t.text, ...nebulaTypography.body, fontWeight: "600" }}>
-            {m.title}{active ? " · Выбрана" : ""}
+            {m.title}
           </Text>
+          {installed ? <Text accessibilityLabel={active ? "Модель скачана и выбрана для поиска" : "Модель скачана на телефон"}
+            style={{ color: t.ok, ...nebulaTypography.label, fontWeight: "600" }}>
+            {active ? "Скачана · Выбрана" : "Скачана"}
+          </Text> : null}
           <Text style={{ color: t.muted, ...nebulaTypography.label }}>{m.description}</Text>
           <Text style={{ color: t.muted, ...nebulaTypography.label }}>
             Около {m.approxMB} МБ · {m.modalities.includes("audio") ? "текст, фото и аудио" : "текст и фото"}

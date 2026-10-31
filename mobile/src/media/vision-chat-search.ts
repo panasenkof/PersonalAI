@@ -10,7 +10,13 @@ import { SqliteMemoryRepository } from "../local-memory/repository";
 import { searchWithVision83 } from "./vision-memory-query";
 import { preparePhotoMatchChatAttachment83 } from "./vision-photo-query";
 
-export type LocalPhotoIntent83 = { mode:"text"|"image"; description:string };
+export type LocalPhotoIntent83 = { mode:"text"|"image"|"all"; description:string };
+/** Provisional Vivo X200 Pro / EmbeddingGemma 2 cosine floors, not probabilities.
+ * Test set: text relevant >= .6682 vs unrelated <= .6244; image related
+ * .8587 vs unrelated .6902. Re-evaluate on larger positives/negatives in 83.6.
+ */
+export const VISION_TEXT_FLOOR83 = 0.65;
+export const VISION_IMAGE_FLOOR83 = 0.77;
 const findVerb=/(?:найд|найти|ищ|поиск|поищ|покаж|показать|отыс|разыщ|find|search|show)/iu;
 const photoWord=/(?:фото|фотограф|сним(?:ок|к|ки|ков)|изображен|картин|\b(?:photo|picture|image)s?\b)/iu;
 const similarWord=/(?:похож|сходн|аналогич|такие же|такое же|similar|like this)/iu;
@@ -30,7 +36,18 @@ export function localPhotoIntent83(
   if(imageCount && (similarWord.test(prompt) ||
     (photoWord.test(prompt) && /(?:по (?:этому|моему|приложенному)?\s*(?:фото|снимк|изображен)|как (?:на|здесь)|так(?:ое|ие) же)/iu.test(prompt))))
     return {mode:"image",description:""};
-  if(!photoWord.test(prompt))return null;
+  if(!photoWord.test(prompt)) {
+    // Short object searches cover notes AND image originals. Do not intercept
+    // conversations, people, documents or complex questions: the agent must
+    // retain their richer retrieval and evidence path.
+    if(attachments.length)return null;
+    const match=/^(?:найди|найти|покажи|показать|отыщи|разыщи|ищи|поищи)\s+(?:мне\s+)?(.+)$/iu.exec(prompt);
+    if(!match)return null;
+    const object=match[1].replace(/[.!]+$/u,"").trim();
+    if(!object || object.length>100 || object.split(/\s+/u).length>6 ||
+      /(?:разговор|бесед|сестр|брат|родител|мам|пап|доч|сын|рецепт|документ|заметк|контакт|сообщени|письм|ссылк|сайт|инструкц|проект|задач|договор|полис|событи|истори|информаци|новост|про\s+меня)/iu.test(object))return null;
+    return {mode:"all",description:object};
+  }
   const description=prompt
     .replace(/^(?:у меня есть|есть ли у меня|сохранил(?:а)? ли я)\s+/iu, "")
     .replace(/^\s*(?:найди|найти|покажи|показать|отыщи|разыщи|ищи|поищи|поиск|find|search|show)\s+(?:мне\s+)?/iu,"")
@@ -58,6 +75,27 @@ export async function searchLocalPhotosFromChat83(
   guard();
   if(intent.mode==="image" && attachments.filter(a=>a.kind==="image").length!==1)
     throw new Error("vision_query_one_image");
+  if(intent.mode==="all") {
+    // A single existing searchMemory call fuses FTS, MiniLM and vision, under
+    // standard collection ACL. Missing vision weights still permit text hits.
+    const hits=await searchWithVision83(profile,intent.description,{
+      sensitivities:["standard","inherit"],limit:8,
+      includeTextVector:true,standardCollectionsOnly:true,
+      minImageSimilarity:VISION_TEXT_FLOOR83,
+    });
+    guard();
+    const memory:ChatMemoryRef[]=hits.map(hit=>{
+      const image=hit.originals?.find(file=>file.kind==="image");
+      return {id:hit.entity.id,title:(hit.entity.title||"Запись в памяти").slice(0,160),
+        via:"search" as const,...(image?{photo:true,photoAttachmentId:image.attachmentId}:{})};
+    });
+    const photoCount=memory.filter(item=>item.photo).length;
+    const noteCount=memory.length-photoCount;
+    const noteNoun=noteCount===1?"запись":noteCount<5?"записи":"записей";
+    return {memory,text:memory.length
+      ? `Нашёл в памяти: ${photoCount ? `${photoCount} фото` : ""}${photoCount && noteCount ? " и " : ""}${noteCount ? `${noteCount} ${noteNoun}` : ""}. Нажмите на результат, чтобы открыть его.`
+      : "В доступной памяти совпадений не найдено. Если фотографии добавлены недавно, проверьте их подготовку в настройках."};
+  }
   const readiness = await photoSearchReadiness83(profile, signal);
   guard();
   if (readiness === "model_missing") return {text:"Для поиска фотографий нужна модель на телефоне.",memory:[],photoAction:"model"};
@@ -71,10 +109,12 @@ export async function searchLocalPhotosFromChat83(
           .searchMemory("",{
             sensitivities:["standard","inherit"],limit:8,
             imageVector:{model:vector.model,values:vector.values},
+            minImageSimilarity:VISION_IMAGE_FLOOR83,
           }));
       })()
     : await searchWithVision83(profile,intent.description,{
         sensitivities:["standard","inherit"],limit:8,requireVisionModel:true,
+        minImageSimilarity:VISION_TEXT_FLOOR83,
       });
   guard();
   const photos=hits.filter(hit=>hit.originals?.some(file=>file.kind==="image"));

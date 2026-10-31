@@ -59,15 +59,20 @@ export async function saveAttachmentImageVector(db: SQL, input: ModelSpace & {
   return stored;
 }
 
-/** Bounded candidate retrieval. No fixed similarity threshold: user device
- * trials did not establish one. Filters are the SAME scope as searchMemory.
+/** Bounded candidate retrieval. No default similarity threshold: users of this
+ * adapter can opt into a mode-specific provisional gate backed by device QA.
+ * Filters are the SAME scope as searchMemory.
  * A stale image fingerprint or damaged byte/part manifest is never returned.
  * No image bytes or original path leave this adapter.
  */
 export async function attachmentImageMatches(db: SQL, input: ModelSpace & {
   collectionIds?: string[]; sensitivities?: string[]; limit?: number;
+  /** Provisional device-evaluated cosine gate for a specific query mode. */
+  minSimilarity?: number;
 }): Promise<ImageVectorHit[]> {
   validateSpace(input);
+  if (input.minSimilarity !== undefined && (!Number.isFinite(input.minSimilarity) || input.minSimilarity < 0 || input.minSimilarity > 1))
+    throw new Error("invalid_vision_min_similarity");
   if (input.collectionIds?.length === 0 || input.sensitivities?.length === 0) return [];
   const filters = ["e.domain='notes'", "e.record_status='active'",
     "e.sensitivity IN ('standard','inherit')", "c.sensitivity='standard'",
@@ -98,7 +103,8 @@ export async function attachmentImageMatches(db: SQL, input: ModelSpace & {
     const vector = fromBlob(row.vector);
     if (!vector || vector.length!==IMAGE_VECTOR_DIM || !vector.every(Number.isFinite)) return [];
     return [{row,similarity:cosine(input.values,vector)}];
-  }).filter(x=>Number.isFinite(x.similarity))
+  }).filter(x=>Number.isFinite(x.similarity) &&
+    (input.minSimilarity === undefined || x.similarity >= input.minSimilarity))
     .sort((a,b)=>b.similarity-a.similarity||a.row.attachmentId.localeCompare(b.row.attachmentId));
   const limit = Math.min(20,Math.max(1,Math.trunc(input.limit??8)));
   const out:ImageVectorHit[] = [];

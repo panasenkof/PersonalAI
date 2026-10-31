@@ -73,6 +73,13 @@ test("searchMemory merges photo rank with text without creating a second unscope
     expect(await save(db,repo,y.attachmentId,MODEL,vector(0,1))).toBe(true);
     const hits=await repo.searchMemory("",{imageVector:{model:MODEL,values:vector(1,0)}});
     expect(hits.map(h=>h.entity.id)).toEqual([x.entityId,y.entityId]);
+    // Relevance floor only affects visual candidates. No unverified weak match.
+    const filtered=await repo.searchMemory("",{
+      imageVector:{model:MODEL,values:vector(1,0)},minImageSimilarity:0.65,
+    });
+    expect(filtered.map(h=>h.entity.id)).toEqual([x.entityId]);
+    await expect(repo.searchMemory("",{imageVector:{model:MODEL,values:vector(1,0)},
+      minImageSimilarity:Number.NaN})).rejects.toThrow("invalid_vision_min_similarity");
     expect(hits[0].originals).toEqual([expect.objectContaining({
       attachmentId:x.attachmentId,recordId:x.entityId,metadataOnly:true,
       kind:"image",originalPage:null,originalTime:null,

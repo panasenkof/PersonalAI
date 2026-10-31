@@ -211,9 +211,9 @@ function NebulaHomeContent() {
         </Pressable> : null}
         {item.attachments?.length ? <ChatAttachmentList files={item.attachments}/> : null}
         {item.memory?.length ? <View style={{ gap: 4 }}><Text style={{ color: t.muted, fontSize: 12 }}>Из памяти</Text>
-          {item.memory.every(m => m.photo) ? <PhotoSearchResults key={item.id} profile={profile} results={item.memory}
-            onOpen={(result, original) => navigation.navigate("MemoryNote", {entityId:result.id, photoAttachmentId:original ? result.photoAttachmentId : undefined})} /> :
-            item.memory.map(m => <Pressable key={m.id} accessibilityRole="link" accessibilityLabel={"Открыть запись " + m.title}
+          {item.memory.some(m => m.photo) ? <PhotoSearchResults key={item.id} profile={profile} results={item.memory.filter(m=>m.photo)}
+            onOpen={(result, original) => navigation.navigate("MemoryNote", {entityId:result.id, photoAttachmentId:original ? result.photoAttachmentId : undefined})} /> : null}
+          {item.memory.filter(m=>!m.photo).map(m => <Pressable key={m.id} accessibilityRole="link" accessibilityLabel={"Открыть запись " + m.title}
               onPress={() => navigation.navigate("MemoryNote", {entityId:m.id})} style={{minHeight:48,justifyContent:"center"}}>
               <Text style={{color:t.accent}}>{m.title}<Text style={{color:t.muted,fontSize:12}}>{(m.section ? " · " + m.section : "") + (m.via === "rewrite" ? " · найдено другими словами" : m.via === "assistant" ? " · нашёл помощник" : "")}</Text></Text>
             </Pressable>)}
