@@ -1,5 +1,6 @@
 import { embedVisionImage83, embedVisionText83 } from "../vision-native-vectors";
 import { localMemorySessionUnlocked } from "../../local-memory/storage";
+jest.mock("expo-crypto",()=>({ CryptoDigestAlgorithm: { SHA256:"sha256" }, digestStringAsync: jest.fn() }));
 jest.mock("react-native",()=>({Platform:{OS:"android"}}));
 jest.mock("../../local-memory/storage",()=>({localMemorySessionUnlocked:jest.fn()}));
 jest.mock("expo-modules-core",()=>({
