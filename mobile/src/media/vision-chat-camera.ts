@@ -6,7 +6,7 @@ import * as Crypto from "expo-crypto";
 import * as ImagePicker from "expo-image-picker";
 import { manipulateAsync, SaveFormat } from "expo-image-manipulator";
 import { Directory, File, Paths } from "expo-file-system";
-import * as FileSystem from "expo-file-system/legacy";
+import { toByteArray } from "base64-js";
 import { localMemorySessionUnlocked } from "../local-memory/storage";
 import { checkedChatAttachments, MAX_CHAT_FILE_BYTES, type ChatAttachment } from "../direct-agent/chat-attachments";
 import { withNativeInteraction } from "../security/native-interaction";
@@ -24,9 +24,10 @@ function discard(uri:string) {
 
 /** Original photo is never placed in persistent chat history or uploaded in the background. */
 export type CameraPhotoDraft83 = { attachment:ChatAttachment; originalUri:string };
-const originalFolder=Paths.cache.uri.replace(/\/$/,"")+"/persai-camera-drafts/";
+const originalFolder=()=>Paths.cache.uri.replace(/\/$/,"")+"/persai-camera-drafts/";
 export function discardCameraPhotoDraft83(uri:string) {
-  if(!uri.startsWith(originalFolder) || uri.slice(originalFolder.length).includes("/"))return;
+  const folder=originalFolder();
+  if(!uri.startsWith(folder) || uri.slice(folder.length).includes("/"))return;
   try { const f=new File(uri);if(f.exists)f.delete(); }catch {}
 }
 export async function stageChatImageForNote83(attachment:ChatAttachment):Promise<string>{
@@ -37,7 +38,7 @@ export async function stageChatImageForNote83(attachment:ChatAttachment):Promise
   const ext=image.mime==="image/png"?".png":image.mime==="image/webp"?".webp":".jpg";
   const target=new File(dir,Crypto.randomUUID()+ext);
   try{
-    await FileSystem.writeAsStringAsync(target.uri,image.data,{encoding:FileSystem.EncodingType.Base64});
+    target.write(toByteArray(image.data));
     guard();
     return target.uri;
   }catch(e){discardCameraPhotoDraft83(target.uri);throw e;}
@@ -86,7 +87,7 @@ async function capturePhoto83(signal?:AbortSignal,forSearch=false,preserveOrigin
         dir.create({intermediates:true,idempotent:true});
         const target=new File(dir,Crypto.randomUUID()+".jpg");
         originalUri=target.uri;
-        await FileSystem.copyAsync({from:source,to:target.uri});
+        new File(source).copy(target);
         guard(signal);
       }
       return {attachment,...(originalUri?{originalUri}:{})};
