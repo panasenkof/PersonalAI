@@ -29,7 +29,7 @@ export type PhotoIndexPageResult = {
   indexed: number;
   sourceChanged: number;
   failed: number;
-  halted: "none" | "model_not_installed" | "failed";
+  halted: "none" | "model_not_installed" | "model_changed" | "failed";
 };
 
 const ID = /^[a-zA-Z0-9-]{1,128}$/;
@@ -107,8 +107,20 @@ export async function indexPhotoPage83(
             continue;
           }
         }
+        // A user may change the selected model while an index page is open.
+        // Never present vectors from mixed model namespaces as one page.
+        const stillSelected = await readyNativeVisionModel83();
+        guard(options.signal);
+        if (stillSelected?.modelSpace !== model.modelSpace) {
+          result.halted = "model_changed";
+          break;
+        }
         const indexed = await indexSavedPhoto83(profile, row.attachmentId, options.signal);
         guard(options.signal);
+        if (indexed.indexed && indexed.modelSpace !== model.modelSpace) {
+          result.halted = "model_changed";
+          break;
+        }
         if (indexed.indexed) {
           result.indexed++;
         } else if (indexed.reason === "source_changed" ||
