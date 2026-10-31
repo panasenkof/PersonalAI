@@ -1,0 +1,69 @@
+import { localPhotoIntent83, searchLocalPhotosFromChat83 } from "../vision-chat-search";
+import { searchWithVision83 } from "../vision-memory-query";
+import { preparePhotoMatchChatAttachment83 } from "../vision-photo-query";
+import { withLocalMemoryDatabase,localMemorySessionUnlocked } from "../../local-memory/storage";
+import { SqliteMemoryRepository } from "../../local-memory/repository";
+import type { ChatAttachment } from "../../direct-agent/chat-attachments";
+
+jest.mock("../vision-memory-query",()=>({searchWithVision83:jest.fn()}));
+jest.mock("../vision-photo-query",()=>({preparePhotoMatchChatAttachment83:jest.fn()}));
+jest.mock("../../local-memory/storage",()=>({
+  localMemorySessionUnlocked:jest.fn(),withLocalMemoryDatabase:jest.fn(),
+}));
+jest.mock("../../local-memory/repository",()=>({SqliteMemoryRepository:jest.fn()}));
+const textSearch=searchWithVision83 as jest.Mock;
+const imageVector=preparePhotoMatchChatAttachment83 as jest.Mock;
+const lease=withLocalMemoryDatabase as jest.Mock;
+const Repo=SqliteMemoryRepository as jest.Mock;
+const unlocked=localMemorySessionUnlocked as jest.Mock;
+const search=jest.fn();
+const attachment:ChatAttachment={id:"photo",name:"img.jpg",mime:"image/jpeg",kind:"image",data:"/9j/2Q==",size:4};
+const photo={entity:{id:"note-1",title:"Красный велосипед"},score:0.7,
+  originals:[{attachmentId:"a",kind:"image"}]};
+beforeEach(()=>{
+  jest.clearAllMocks();
+  unlocked.mockReturnValue(true);
+  lease.mockImplementation(async (_:string,cb:(db:unknown)=>Promise<unknown>)=>cb({}));
+  Repo.mockImplementation(()=>({searchMemory:search}));
+  imageVector.mockResolvedValue({model:"eg2|vision|768|sha256:"+"a".repeat(64),values:new Float32Array(768)});
+  textSearch.mockResolvedValue([photo]);
+  search.mockResolvedValue([photo]);
+});
+test("text photo request uses local visual search; no unrelated text requests",()=>{
+  expect(localPhotoIntent83("Найди фото красного велосипеда у дерева")).toMatchObject({mode:"text",description:"красного велосипеда у дерева"});
+  expect(localPhotoIntent83("Посмотри, что изображено на фото",[attachment])).toBeNull();
+  expect(localPhotoIntent83("Найди новости в интернете")).toBeNull();
+});
+test("camera and attached query photo use local image mode",()=>{
+  expect(localPhotoIntent83("Найди похожие фотографии в моей памяти",[attachment])?.mode).toBe("image");
+  expect(localPhotoIntent83("Найди такие же снимки",[attachment])?.mode).toBe("image");
+});
+test("text result contains only verified photo-source hits and same scope",async()=>{
+  textSearch.mockResolvedValueOnce([photo,{entity:{id:"text-note",title:"ordinary note"}}]);
+  const result=await searchLocalPhotosFromChat83("guest",{mode:"text",description:"красный велосипед"});
+  expect(result.memory).toEqual([{id:"note-1",title:"Красный велосипед",via:"search",photo:true}]);
+  expect(textSearch).toHaveBeenCalledWith("guest","красный велосипед",{
+    sensitivities:["standard","inherit"],limit:8,requireVisionModel:true,
+  });
+});
+test("image query reuses canonical encrypted searchMemory with same ACL; never calls text search",async()=>{
+  const result=await searchLocalPhotosFromChat83("guest",{mode:"image",description:""},[attachment]);
+  expect(result.memory).toHaveLength(1);
+  expect(search).toHaveBeenCalledWith("",{
+    sensitivities:["standard","inherit"],limit:8,
+    imageVector:{model:expect.any(String),values:expect.any(Float32Array)},
+  });
+  expect(textSearch).not.toHaveBeenCalled();
+});
+test("two attached pictures are rejected instead of guessing which one to search",async()=>{
+  await expect(searchLocalPhotosFromChat83("guest",{mode:"image",description:""},[
+    attachment,{...attachment,id:"other"},
+  ])).rejects.toThrow("vision_query_one_image");
+  expect(search).not.toHaveBeenCalled();
+});
+test("lock expiry prevents result display",async()=>{
+  imageVector.mockImplementationOnce(async()=>{unlocked.mockReturnValue(false);return {model:"model",values:new Float32Array(768)};});
+  await expect(searchLocalPhotosFromChat83("guest",{mode:"image",description:""},[attachment]))
+    .rejects.toThrow("application_locked");
+  expect(search).not.toHaveBeenCalled();
+});
