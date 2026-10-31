@@ -79,15 +79,18 @@ export async function searchLocalPhotosFromChat83(
     // A single existing searchMemory call fuses FTS, MiniLM and vision, under
     // standard collection ACL. Missing vision weights still permit text hits.
     const hits=await searchWithVision83(profile,intent.description,{
-      sensitivities:["standard","inherit"],limit:8,
+      sensitivities:["standard","inherit"],limit:20,
       includeTextVector:true,standardCollectionsOnly:true,
       minImageSimilarity:VISION_TEXT_FLOOR83,
     });
     guard();
-    const memory:ChatMemoryRef[]=hits.map(hit=>{
-      const image=hit.originals?.find(file=>file.kind==="image");
-      return {id:hit.entity.id,title:(hit.entity.title||"Запись в памяти").slice(0,160),
-        via:"search" as const,...(image?{photo:true,photoAttachmentId:image.attachmentId}:{})};
+    const memory:ChatMemoryRef[]=hits.flatMap(hit=>{
+      const images=hit.originals?.filter(file=>file.kind==="image") || [];
+      return images.length ? images.map(image=>({
+        id:hit.entity.id,title:(hit.entity.title||"Фотография в памяти").slice(0,160),
+        via:"search" as const,photo:true,photoAttachmentId:image.attachmentId,
+      })) : [{id:hit.entity.id,title:(hit.entity.title||"Запись в памяти").slice(0,160),
+        via:"search" as const}];
     });
     const photoCount=memory.filter(item=>item.photo).length;
     const noteCount=memory.length-photoCount;
@@ -107,27 +110,29 @@ export async function searchLocalPhotosFromChat83(
         guard();
         return withLocalMemoryDatabase(profile,db=>new SqliteMemoryRepository(db)
           .searchMemory("",{
-            sensitivities:["standard","inherit"],limit:8,
+            sensitivities:["standard","inherit"],limit:20,
             imageVector:{model:vector.model,values:vector.values},
             minImageSimilarity:VISION_IMAGE_FLOOR83,
           }));
       })()
     : await searchWithVision83(profile,intent.description,{
-        sensitivities:["standard","inherit"],limit:8,requireVisionModel:true,
+        sensitivities:["standard","inherit"],limit:20,requireVisionModel:true,
         minImageSimilarity:VISION_TEXT_FLOOR83,
       });
   guard();
-  const photos=hits.filter(hit=>hit.originals?.some(file=>file.kind==="image"));
-  const memory:ChatMemoryRef[]=photos.map(hit=>({
-    id:hit.entity.id,
-    title:(hit.entity.title || "Фотография в памяти").slice(0,160),
-    via:"search" as const,
-    photo:true,
-    photoAttachmentId:hit.originals?.find(file=>file.kind==="image")?.attachmentId,
-  }));
+  // A note can hold several photos: each matching original gets its own
+  // result card; no photos vanish merely because they share a record ID.
+  const memory:ChatMemoryRef[]=hits.flatMap(hit=>
+    (hit.originals||[]).filter(file=>file.kind==="image").map(image=>({
+      id:hit.entity.id,
+      title:(hit.entity.title || "Фотография в памяти").slice(0,160),
+      via:"search" as const,
+      photo:true,
+      photoAttachmentId:image.attachmentId,
+    })));
   return {
     text:memory.length
-      ? `Самое похожее фото — ниже.${memory.length > 1 ? " Другие варианты можно раскрыть." : ""} Нажмите на снимок, чтобы открыть оригинал.`
+      ? `Нашёл подходящие фотографии: ${memory.length}. Все найденные снимки показаны ниже по релевантности. Нажмите на снимок, чтобы открыть оригинал.`
       : "Среди подготовленных доступных фотографий похожих не найдено. Попробуйте другое описание или снимок предмета крупнее. Если вы недавно добавили фото, подготовьте их для поиска в настройках.",
     memory,
     ...(!memory.length && (readiness === "partial" || readiness === "unknown") ? {photoAction:"prepare" as const} : {}),
