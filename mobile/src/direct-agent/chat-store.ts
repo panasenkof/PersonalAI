@@ -252,10 +252,13 @@ export class DirectChatStore {
     const startedAt = Date.now();
     const aborter = new AbortController();
     this.requests.set(id, aborter);
-    const previousSources = [...current.rows].reverse().filter(r => r.role === "assistant" && r.sources?.length).slice(0, 3).flatMap(r => r.sources!).slice(0, 15);
-    const history = current.rows.filter(r => r.role !== "info").slice(-8)
+    // A one-tap image-to-web query is a standalone purpose. Never transmit
+    // unrelated history images, private drafts or prior conversation selections.
+    const previousSources = internetPhotoId ? [] : [...current.rows].reverse().filter(r => r.role === "assistant" && r.sources?.length).slice(0, 3).flatMap(r => r.sources!).slice(0, 15);
+    const history = internetPhotoId ? [] : current.rows.filter(r => r.role !== "info").slice(-8)
       .map(r => ({ role: r.role as "user" | "assistant", content: r.text, ...(r.attachments?.length ? {attachments:r.attachments} : {}) }));
-    const taskState = { ...beginTask(current.taskState, prompt), webPreference: webPreference({ prompt, history, taskState: current.taskState }) };
+    const previousTaskState = internetPhotoId ? undefined : current.taskState;
+    const taskState = { ...beginTask(previousTaskState, prompt), webPreference: webPreference({ prompt, history, taskState: previousTaskState }) };
     this.publish({ error: "" });
     const pending = this.update(id, {
       taskState, question: internetPhotoId ? current.question : "",
@@ -292,7 +295,7 @@ export class DirectChatStore {
       const maxRequests = await loadModelCallLimit(this.profile);
       if (this.disposed || aborter.signal.aborted) throw new Error("aborted");
       modelStarted = true;
-      const result = await this.runner({ settings, maxRequests, prompt, attachments, skipLocalMemory:Boolean(internetPhotoId), history, previousSources, taskState, pendingNotes: current.drafts,
+      const result = await this.runner({ settings, maxRequests, prompt, attachments, skipLocalMemory:Boolean(internetPhotoId), history, previousSources, taskState, pendingNotes: internetPhotoId ? [] : current.drafts,
         onTaskState: next => {
           const active = this.snapshot.conversations.find(c => c.id === id);
           if (active && !aborter.signal.aborted) this.update(id, { taskState: mergeTaskReceipts(next, active.taskState) }, true);
