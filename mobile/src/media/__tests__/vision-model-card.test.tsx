@@ -8,9 +8,12 @@ jest.mock("../../theme",()=>({useTheme:()=>({
   text:"#ffffff",muted:"#bbbbbb",secondary:"#00ffff",ok:"#00bb77",
   err:"#ff0000",line:"#444444",panel:"#222222",
 })}));
-jest.mock("../../components/Collapsible",()=>({
-  Collapsible:({children,summary}:any)=><>{summary}{children}</>,
-}));
+jest.mock("../../components/Collapsible",()=>{
+  const React=require("react");
+  const {Text}=require("react-native");
+  return {Collapsible:({children,summary}:any)=>React.createElement(React.Fragment,null,
+    React.createElement(Text,null,summary),children)};
+});
 jest.mock("../../components/VisionIndexControls",()=>({
   VisionIndexControls:()=>null,
 }));
