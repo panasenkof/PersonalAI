@@ -200,7 +200,7 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
         assert.equal(await page.getByLabel(choice, { exact: true }).count(), 1, 'Camera intent is an explicit choice: ' + choice);
       }
       await page.getByLabel('Закрыть панель Что сделать со снимком?', { exact: true }).click();
-      assert.equal(await page.getByText('Что сделать со снимком?', { exact: true }).count(), 0, 'Closing the chooser makes no photo');
+      await page.getByText('Что сделать со снимком?', { exact: true }).waitFor({ state: 'hidden' });
 
       if (process.env.SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, `draft-improved-${width}.png`) });
       await page.getByLabel('Вернуть исходный текст', { exact: true }).click();
