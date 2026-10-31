@@ -203,7 +203,7 @@ function NebulaHomeContent() {
       if(store.getSnapshot().activeId!==conversationId){discardCameraPhotoDraft83(staged);return;}
       if(original)cameraOriginal.current.delete(photo.id); // ownership moves to MemoryImport
       navigation.navigate("MemoryImport",{source:"photo",initialPhotoUri:staged});
-    }catch(e){if(staged && staged!==original)discardCameraPhotoDraft83(staged);setNotice(memoryErrorMessage(e));}
+    }catch(e){if(staged)discardCameraPhotoDraft83(staged);setNotice(memoryErrorMessage(e));}
   }
   const sendOrStop = () => {
     if (busy) { store.stop(); return; }
