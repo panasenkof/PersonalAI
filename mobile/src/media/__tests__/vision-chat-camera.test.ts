@@ -1,4 +1,4 @@
-import { capturePhotoForSearch83 } from "../vision-chat-camera";
+import { capturePhotoForChat83, capturePhotoForSearch83 } from "../vision-chat-camera";
 import { localMemorySessionUnlocked } from "../../local-memory/storage";
 import * as ImagePicker from "expo-image-picker";
 import { manipulateAsync } from "expo-image-manipulator";
@@ -65,4 +65,18 @@ test("AppLock after photo capture aborts and does not return image bytes",async(
   await expect(capturePhotoForSearch83()).rejects.toThrow("application_locked");
   expect(mockBase64).not.toHaveBeenCalled();
   expect(mockDelete).toHaveBeenCalledTimes(2);
+});
+
+test("ordinary chat snapshot works without a visual embedding model and is not searched or saved automatically",async()=>{
+  activeModel.mockResolvedValueOnce(null);
+  const image=await capturePhotoForChat83();
+  expect(image).toMatchObject({kind:"image",mime:"image/jpeg",name:"Снимок.jpg"});
+  expect(activeModel).not.toHaveBeenCalled();
+  expect(camera).toHaveBeenCalledTimes(1);
+  expect(mockDelete).toHaveBeenCalledTimes(2);
+});
+test("ordinary camera cancel leaves the draft untouched",async()=>{
+  camera.mockResolvedValueOnce({canceled:true,assets:[]});
+  expect(await capturePhotoForChat83()).toBeNull();
+  expect(mockBase64).not.toHaveBeenCalled();
 });
