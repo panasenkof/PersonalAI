@@ -238,6 +238,9 @@ test("internet photo action sends only selected photo, requests web and preserve
   expect(call.prompt).toContain("Найди в интернете");
   expect(call.attachments).toHaveLength(1);
   expect(call.attachments[0].id).toBe("photo");
+  expect(call.history).toEqual([]);
+  expect(call.pendingNotes).toEqual([]);
+  expect(call.skipLocalMemory).toBe(true);
   expect(call.taskState.webPreference).toBe("allow");
   const result=store.getSnapshot().conversations[0];
   expect(result.question).toBe("Неотправленный вопрос");
