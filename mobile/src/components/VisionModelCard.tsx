@@ -2,13 +2,14 @@ import React from "react";
 import { ActivityIndicator, Alert, Pressable, Text, View } from "react-native";
 import { useTheme } from "../theme";
 import { Collapsible } from "./Collapsible";
+import { VisionIndexControls } from "./VisionIndexControls";
 import { nebulaRadii, nebulaSpacing, nebulaTouch, nebulaTypography } from "../design/nebula/tokens";
 import { VISION_MODELS, type VisionModelId } from "../media/vision-model-catalog";
 import { cancelVisionModelDownload, chooseVisionModel, deleteVisionModel,
   downloadVisionModel, useVisionModelStatus } from "../media/vision-model-manager";
 
-/** #83.2 — downloadable model assets, separate from the existing text MiniLM.
- * This intentionally never claims that production photo search is enabled.
+/** #83.2 — local multimodal assets and explicit indexing of SQLCipher photos.
+ * Text MiniLM remains unchanged; no automatic background indexing.
  */
 export function VisionModelCard() {
   const t = useTheme();
@@ -41,9 +42,9 @@ export function VisionModelCard() {
     title="Модели поиска по фото" summary={summary}>
     <View style={{ gap: nebulaSpacing.sm }}>
       <Text style={{ color: t.muted, ...nebulaTypography.label }}>
-        Модели EmbeddingGemma 2 работают локально. Загрузка и выбор доступны здесь;
-        поиск по сохранённым фотографиям будет включён только после проверки нативной интеграции.
-        Текущий поиск по словам и смыслу продолжает работать отдельно.
+        Модели EmbeddingGemma 2 работают локально. После установки можно
+        проиндексировать сохранённые фотографии вручную и искать их по описанию
+        в разделе «Память». Смысловой поиск текста MiniLM остаётся без изменений.
       </Text>
       {VISION_MODELS.map(m => {
         const installed = downloaded(m.id);
@@ -96,6 +97,7 @@ export function VisionModelCard() {
           </Pressable>}
         </View>;
       })}
+      <VisionIndexControls activeModel={Boolean(state.activeId && downloaded(state.activeId)) && !state.busy} />
       {state.error ? <Text accessibilityRole="alert" style={{ color: t.err }}>{state.error}</Text> : null}
       {state.notice ? <Text accessibilityLiveRegion="polite" style={{ color: t.ok }}>{state.notice}</Text> : null}
       <Text style={{ color: t.muted, ...nebulaTypography.caption }}>
