@@ -34,12 +34,17 @@ export async function searchWithVision83(
   const model=await readyNativeVisionModel83();
   if(!localMemorySessionUnlocked())throw new Error("application_locked");
   if (!model && options.requireVisionModel) throw new Error("vision_model_not_installed");
-  const imageVector=model?{
-    model:model.modelSpace,
-    values:await embedVisionText83({
-      modelName:model.modelName,modelSha256:model.modelSha256,
-    },query),
-  }:undefined;
+  let imageVector: {model:string;values:Float32Array}|undefined;
+  if(model) {
+    try {
+      imageVector={model:model.modelSpace,
+        values:await embedVisionText83({modelName:model.modelName,modelSha256:model.modelSha256},query)};
+    } catch (error) {
+      // An ordinary object search must retain FTS/MiniLM when vision inference
+      // fails; an explicitly requested photo search must report its real error.
+      if(!options.includeTextVector || options.requireVisionModel) throw error;
+    }
+  }
   if(!localMemorySessionUnlocked())throw new Error("application_locked");
   // Compose the two existing vector spaces without running another search.
   // Model initialization happens before the SQLCipher lease, one at a time.
