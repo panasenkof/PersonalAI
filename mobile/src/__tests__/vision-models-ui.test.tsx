@@ -10,6 +10,7 @@ jest.mock("../theme", () => ({ useTheme: () => ({
   text: "#ffffff", muted: "#abbad8", panel: "#14213d", line: "#445574",
   soft: "#26395c", secondary: "#30caed", ok: "#2fd3a4", err: "#ff9faf"
 }) }));
+jest.mock("../components/VisionIndexControls", () => ({ VisionIndexControls: () => null }));
 jest.mock("../components/Collapsible", () => ({
   Collapsible: ({children, summary}: any) => { const { View, Text } = require("react-native"); return <View><Text>{summary}</Text>{children}</View>; },
 }));
