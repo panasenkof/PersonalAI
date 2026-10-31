@@ -18,7 +18,7 @@ export const resetActionHints = () => { explainedByTap.clear(); };
 /** Visible names make icons discoverable; a tap or hold also explains the
  * action. Hints use no native window, so they cannot steal Android focus. */
 export function IconAction({ icon, label, accessibilityLabel, hint, onPress, disabled = false,
-  emphasized = false, compact = false, hintAbove = false, hintAlign = "end" }: {
+  emphasized = false, compact = false, hintAbove = false, hintAlign = "end", explainOnTap = true }: {
   icon: React.ComponentProps<typeof Feather>["name"]; label: string; accessibilityLabel: string;
   hint: string; onPress: () => void; disabled?: boolean; emphasized?: boolean; compact?: boolean; hintAbove?: boolean; hintAlign?: "start" | "center" | "end";
 }) {
@@ -44,7 +44,7 @@ export function IconAction({ icon, label, accessibilityLabel, hint, onPress, dis
   return <View ref={anchor} collapsable={false} style={{ position: "relative", zIndex: help ? 10 : 0 }}>
     <Pressable accessibilityRole="button" accessibilityLabel={accessibilityLabel} accessibilityHint={hint}
       accessibilityState={{ disabled }} disabled={disabled} onLongPress={explain}
-      onPress={() => { if (!explainedByTap.has(accessibilityLabel)) { explainedByTap.add(accessibilityLabel); explain(); } onPress(); }}
+      onPress={() => { if (explainOnTap && !explainedByTap.has(accessibilityLabel)) { explainedByTap.add(accessibilityLabel); explain(); } onPress(); }}
       style={{ minHeight: 48, minWidth: compact ? 48 : 56, paddingHorizontal: compact ? 0 : 7, gap: 3, alignItems: "center", justifyContent: "center", borderRadius: 15,
         backgroundColor: emphasized && !disabled ? t.accent : "transparent", opacity: disabled ? 0.5 : 1 }}>
       <Feather name={icon} size={21} color={emphasized && !disabled ? "#fff" : t.accent} />
