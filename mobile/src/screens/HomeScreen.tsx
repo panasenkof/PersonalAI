@@ -5,6 +5,7 @@ import { MAX_CHAT_FILES } from "../direct-agent/chat-attachments";
 import type { ChatAttachment } from "../direct-agent/chat-attachments";
 import { localPhotoIntent83, localPhotoSuggestion83 } from "../media/vision-chat-search";
 import { PhotoSearchResults } from "../media/PhotoSearchResults";
+import { PhotoContextActions } from "../media/PhotoContextActions";
 import { memoryErrorMessage } from "../local-memory/errors";
 import { onLocalMemorySessionChange } from "../local-memory/storage";
 import { useFocusEffect, useIsFocused, useNavigation } from "@react-navigation/native";
@@ -167,12 +168,27 @@ function NebulaHomeContent() {
       catch(e){discardCameraPhotoDraft83(draft.originalUri);throw e;}
       cameraOriginal.current.set(draft.attachment.id,{conversationId,uri:draft.originalUri});
       setSelectedPhotoId(draft.attachment.id);
+      Keyboard.dismiss();
+      setComposerFocused(false);
     } catch(e) {
       if(!controller.signal.aborted)Alert.alert("Камера",memoryErrorMessage(e),[{text:"Закрыть"}]);
     } finally {cameraController.current=null;setCameraBusy(false);}
   }
+  function discardSelectedPhoto() {
+    if(!selectedPhoto || busy || cameraBusy || !active?.id)return;
+    const photoId=selectedPhoto.id;
+    const conversationId=active.id;
+    const current=store.getSnapshot().conversations.find(c=>c.id===conversationId);
+    if(!current || current.busy || current.deleting)return;
+    store.setAttachments(conversationId,(current.attachments||[]).filter(file=>file.id!==photoId));
+    releaseCameraOriginal(photoId);
+    setPreviewPhotoId(value=>value===photoId?null:value);
+    setSelectedPhotoId(null);
+  }
   function searchSelectedPhoto() {
     if(!selectedPhoto || busy || cameraBusy || !active?.id)return;
+    Keyboard.dismiss();setComposerFocused(false);
+    // The submitted image leaves the composer on search start; other drafts remain.
     void store.searchPhotosLocally(selectedPhoto,active.id);
   }
   function findSelectedOnline() {
@@ -335,24 +351,14 @@ function NebulaHomeContent() {
             if(previewPhotoId===id)setPreviewPhotoId(null);
             if(selectedPhotoId===id)setSelectedPhotoId(null);
           }catch(e){setNotice((e as Error).message);}}}/>
-        {selectedPhoto ? <View testID="photo-context-actions" style={{gap:6}}>
-          <Text style={{color:t.muted,fontSize:12}}>Фото готово. Выберите действие или задайте вопрос ИИ ниже.</Text>
-          <View style={{flexDirection:"row",flexWrap:"wrap",gap:8}}>
-            {([
-              {id:"internet",label:"В интернете",run:findSelectedOnline},
-              {id:"memory",label:"В моей памяти",run:searchSelectedPhoto},
-              {id:"note",label:"Сохранить заметку",run:()=>void saveSelectedPhotoNote()},
-              {id:"preview",label:"Посмотреть",run:()=>setPreviewPhotoId(selectedPhoto.id)},
-            ] as const).map(action=><Pressable key={action.id} testID={"photo-action-"+action.id}
-              accessibilityRole="button" accessibilityLabel={action.label}
-              disabled={busy || cameraBusy || pickingAttachment} onPress={action.run}
-              style={{minHeight:48,paddingHorizontal:12,justifyContent:"center",borderRadius:14,
-                borderWidth:1,borderColor:t.line,backgroundColor:t.soft}}>
-              <Text style={{color:t.accent,fontWeight:"600",fontSize:13}}>{action.label}</Text>
-            </Pressable>)}
-          </View>
-          <Text style={{color:t.muted,fontSize:11}}>В памяти — только на телефоне. В интернете — отправка фото выбранному ИИ после подтверждения.</Text>
-        </View> : null}
+        {selectedPhoto ? <PhotoContextActions disabled={busy || cameraBusy || pickingAttachment}
+          onCancel={discardSelectedPhoto}
+          actions={[
+            {id:"internet",label:"В интернете",run:findSelectedOnline},
+            {id:"memory",label:"В моей памяти",run:searchSelectedPhoto},
+            {id:"note",label:"Сохранить заметку",run:()=>void saveSelectedPhotoNote()},
+            {id:"preview",label:"Посмотреть",run:()=>setPreviewPhotoId(selectedPhoto.id)},
+          ]} /> : null}
       </> : null}
       {suggestedPhotoSearch && ready && !busy && !cameraBusy && !pickingAttachment && !dictating ? <Pressable
         accessibilityRole="button" accessibilityLabel="Поискать в моих фото" style={{minHeight:48,justifyContent:"center"}}
