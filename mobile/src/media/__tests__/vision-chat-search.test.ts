@@ -41,7 +41,7 @@ test("camera and attached query photo use local image mode",()=>{
 test("text result contains only verified photo-source hits and same scope",async()=>{
   textSearch.mockResolvedValueOnce([photo,{entity:{id:"text-note",title:"ordinary note"}}]);
   const result=await searchLocalPhotosFromChat83("guest",{mode:"text",description:"красный велосипед"});
-  expect(result.memory).toEqual([{id:"note-1",title:"Красный велосипед",via:"search",photo:true}]);
+  expect(result.memory).toEqual([{id:"note-1",title:"Красный велосипед",via:"search",photo:true,photoAttachmentId:"a"}]);
   expect(textSearch).toHaveBeenCalledWith("guest","красный велосипед",{
     sensitivities:["standard","inherit"],limit:8,requireVisionModel:true,
   });
