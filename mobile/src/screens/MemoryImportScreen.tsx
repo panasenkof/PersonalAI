@@ -34,6 +34,7 @@ import { useWhisperStatus } from "../media/whisper";
 import { scheduleIndexTerms } from "../direct-agent/enrich-runner";
 import { scheduleVectors } from "../media/vector-runner";
 import { discardCameraPhotoDraft83 } from "../media/vision-chat-camera";
+import { autoIndexNotePhotos83 } from "../media/auto-index-note-photos";
 
 export function MemoryImportScreen() {
   const route = useRoute<RouteProp<RootStackParams, "MemoryImport">>();
