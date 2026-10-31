@@ -9,6 +9,7 @@ import { File, Paths } from "expo-file-system";
 import { localMemorySessionUnlocked } from "../local-memory/storage";
 import { checkedChatAttachments, MAX_CHAT_FILE_BYTES, type ChatAttachment } from "../direct-agent/chat-attachments";
 import { withNativeInteraction } from "../security/native-interaction";
+import { readyNativeVisionModel83 } from "./vision-native-model";
 
 function guard(signal?:AbortSignal) {
   if(signal?.aborted)throw new Error("vision_query_cancelled");
@@ -25,6 +26,10 @@ function discard(uri:string) {
  */
 export async function capturePhotoForSearch83(signal?:AbortSignal):Promise<ChatAttachment|null>{
   guard(signal);
+  // Fail before opening the camera if there is no verified on-device model.
+  const model=await readyNativeVisionModel83();
+  guard(signal);
+  if(!model)throw new Error("vision_model_not_installed");
   const permission=await withNativeInteraction(
     ()=>ImagePicker.requestCameraPermissionsAsync(),{permissionPrompt:true});
   guard(signal);
