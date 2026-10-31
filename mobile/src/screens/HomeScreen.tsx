@@ -69,7 +69,7 @@ function NebulaHomeContent() {
     });
     return () => {cameraController.current?.abort();releaseCameraOriginal();off();};
   },[profile]);
-  const {picking: pickingAttachment, pick: pickAttachment} = useChatAttachments(store, active?.id, isFocused, setNotice);
+  const {picking: pickingAttachment, pick: pickAttachment} = useChatAttachments(store, active?.id, isFocused, setNotice, setSelectedPhotoId);
   useEffect(()=>{
     for(const [id,original] of cameraOriginal.current){
       if(original.conversationId!==active?.id || !active?.attachments?.some(f=>f.id===id))
@@ -141,8 +141,7 @@ function NebulaHomeContent() {
   const artworkSize = nebulaEmptyOrbSize(artLayout);
   const action = { minHeight: 44, minWidth: 44, justifyContent: "center" as const, alignItems: "center" as const };
   const selectedPhoto:ChatAttachment|undefined =
-    active?.attachments?.find(f=>f.id===selectedPhotoId && f.kind==="image") ||
-    [...(active?.attachments || [])].reverse().find(f=>f.kind==="image");
+    active?.attachments?.find(f=>f.id===selectedPhotoId && f.kind==="image");
   const previewPhoto=active?.attachments?.find(f=>f.id===previewPhotoId && f.kind==="image");
   async function captureToDraft() {
     if(cameraController.current || !ready || !active?.id || busy || pickingAttachment || dictating)return;
@@ -294,6 +293,11 @@ function NebulaHomeContent() {
         borderWidth: item.role === "assistant" ? 1 : 0, borderColor: t.line, borderRadius: 20, padding: 15, gap: 10 }}>
         {item.role === "assistant" ? <MarkdownText text={item.text} style={{ color: t.text, lineHeight: 23 }} /> :
           <Text selectable style={{ color: item.role === "user" ? t.userText : item.role === "info" ? t.muted : t.text, lineHeight: 23 }}>{item.text}</Text>}
+        {active?.retryPhoto?.rowId === item.id && active?.retryPhoto ? <Pressable accessibilityRole="button"
+          disabled={busy} onPress={() => void store.searchPhotosLocally(active.retryPhoto!.image,active.id)}
+          style={{minHeight:48,justifyContent:"center"}}>
+          <Text style={{color:t.secondary}}>Повторить поиск по фото</Text>
+        </Pressable> : null}
         {item.photoAction ? <Pressable accessibilityRole="button" style={{minHeight:48,justifyContent:"center"}}
           onPress={() => item.photoAction === "import" ? navigation.navigate("MemoryImport", {source:"photo"}) : navigation.navigate("PhotoSearchSettings")}>
           <Text style={{color:t.secondary}}>{item.photoAction === "model" ? "Выбрать модель" : item.photoAction === "import" ? "Добавить фото в память" : "Подготовить фото"}</Text>

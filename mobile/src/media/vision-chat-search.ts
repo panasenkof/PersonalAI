@@ -4,6 +4,7 @@
  */
 import { photoSearchReadiness83 } from "./vision-index-pages";
 import type { ChatAttachment } from "../direct-agent/chat-attachments";
+import type { MemoryHit } from "../local-memory/types";
 import type { ChatMemoryRef } from "../direct-agent/conversations";
 import { localMemorySessionUnlocked, withLocalMemoryDatabase } from "../local-memory/storage";
 import { SqliteMemoryRepository } from "../local-memory/repository";
@@ -64,6 +65,16 @@ export function localPhotoSuggestion83(question: string, attachments: readonly C
   return localPhotoIntent83("Найди " + prompt);
 }
 
+function closestPhotos(hits: MemoryHit[]): ChatMemoryRef[] {
+  return hits.flatMap(({entity, originals}) =>
+    (originals || []).filter(file => file.kind === "image").map(file => ({entity, file}))
+  ).sort((a, b) => (b.file.imageSimilarity ?? -1) - (a.file.imageSimilarity ?? -1))
+    .slice(0, 6).map(({entity, file}) => ({
+      id: entity.id, title: (entity.title || "Фотография в памяти").slice(0, 160),
+      via: "search", photo: true, photoAttachmentId: file.attachmentId,
+    }));
+}
+
 export async function searchLocalPhotosFromChat83(
   profile:string,intent:LocalPhotoIntent83,attachments:readonly ChatAttachment[]=[],
   signal?:AbortSignal,
@@ -86,16 +97,11 @@ export async function searchLocalPhotosFromChat83(
     guard();
     // The chat presents at most six closest photos, while ordinary matching
     // notes are still included without modifying their memory evidence.
-    let photoCountShown=0;
-    const memory:ChatMemoryRef[]=hits.flatMap((hit):ChatMemoryRef[]=>{
-      const images=hit.originals?.filter(file=>file.kind==="image") || [];
-      return images.length ? images.map(image=>({
-        id:hit.entity.id,title:(hit.entity.title||"Фотография в памяти").slice(0,160),
-        via:"search" as const,photo:true,photoAttachmentId:image.attachmentId,
-      })) : [{id:hit.entity.id,title:(hit.entity.title||"Запись в памяти").slice(0,160),
-        via:"search" as const}];
-    }).filter(item=>!item.photo || photoCountShown++ < 6);
-    const photoCount=memory.filter(item=>item.photo).length;
+    const photos = closestPhotos(hits);
+    const notes = hits.filter(hit => !hit.originals?.some(file => file.kind === "image"))
+      .map(({entity}) => ({id: entity.id, title: (entity.title || "Запись в памяти").slice(0,160), via: "search" as const}));
+    const memory = [...photos, ...notes];
+    const photoCount = photos.length;
     const noteCount=memory.length-photoCount;
     const noteNoun=noteCount===1?"запись":noteCount<5?"записи":"записей";
     return {memory,text:memory.length
@@ -125,17 +131,10 @@ export async function searchLocalPhotosFromChat83(
   guard();
   // A note can hold several photos: each matching original gets its own
   // result card; no photos vanish merely because they share a record ID.
-  const memory:ChatMemoryRef[]=hits.flatMap(hit=>
-    (hit.originals||[]).filter(file=>file.kind==="image").map(image=>({
-      id:hit.entity.id,
-      title:(hit.entity.title || "Фотография в памяти").slice(0,160),
-      via:"search" as const,
-      photo:true,
-      photoAttachmentId:image.attachmentId,
-    }))).slice(0,6);
+  const memory = closestPhotos(hits);
   return {
     text:memory.length
-      ? `Нашёл подходящие фотографии: ${memory.length}. Самая близкая показана сразу, остальные до пяти доступны по кнопке. Нажмите на снимок, чтобы открыть оригинал.`
+      ? `${memory.length === 1 ? "Нашёл одно подходящее фото." : `Нашёл подходящих фото: ${memory.length}. Остальные варианты можно раскрыть.` } Нажмите на снимок, чтобы открыть оригинал.`
       : "Среди подготовленных доступных фотографий похожих не найдено. Попробуйте другое описание или снимок предмета крупнее. Если вы недавно добавили фото, подготовьте их для поиска в настройках.",
     memory,
     ...(!memory.length && (readiness === "partial" || readiness === "unknown") ? {photoAction:"prepare" as const} : {}),

@@ -22,7 +22,7 @@ import { defaultKind, indexEntity, isMemoryKind, normalizeAlias } from "./search
 import type { MemoryKind } from "./search-index";
 import { ftsPhrase, requiredSearchEvidence, searchSteps } from "./query";
 import { MIN_SIMILARITY, VECTOR_DIM, cosine, embeddingHash, embeddingText, fromBlob, fuseRanks, isCurrentVectorSpace, toBlob } from "./vectors";
-import { attachmentImageMatches, saveAttachmentImageVector } from "./attachment-vectors";
+import { type ImageVectorHit, attachmentImageMatches, saveAttachmentImageVector } from "./attachment-vectors";
 import type {
   CollectionRecord, EntityRecord, MemoryHit, MemoryPage, MemoryRepository, NewEntity, NewObservation,
   ObservationRecord, RelationRecord, RevisionRecord, RecordSensitivity,
@@ -965,7 +965,7 @@ export class SqliteMemoryRepository implements MemoryRepository {
     let top = [...scored.values()].sort((a, b) => b.score - a.score || a.order - b.order);
     // One note can contain many independently indexed photos. Preserve every
     // matching attachment locator in similarity order, not just the last one.
-    const imageLocators = new Map<string, Array<{ attachmentId:string;name:string;mime:string;size:number;recordVersion:number }>>();
+    const imageLocators = new Map<string, ImageVectorHit[]>();
     // Meaning (п. 13): the closest chunks join through rank fusion. Without the
     // model, or when nothing is close enough, the word search stands as it is.
     if (options.vector) {
@@ -1002,10 +1002,7 @@ export class SqliteMemoryRepository implements MemoryRepository {
           photoRank.push(image.entityId);
           imageLocators.set(image.entityId,[]);
         }
-        imageLocators.get(image.entityId)!.push({
-          attachmentId:image.attachmentId,name:image.name,mime:image.mime,
-          size:image.size,recordVersion:image.recordVersion,
-        });
+        imageLocators.get(image.entityId)!.push(image);
       }
       if (photoRank.length) {
         const fused = fuseRanks([top.map(x=>String(x.row.id)),photoRank]);
@@ -1040,7 +1037,7 @@ export class SqliteMemoryRepository implements MemoryRepository {
         [item.chunk ?? String(item.row.id)]);
       const photos = imageLocators.get(String(item.row.id));
       const originals = photos?.map(photo=>({
-        attachmentId:photo.attachmentId,recordId:String(item.row.id),
+        imageSimilarity:photo.similarity,attachmentId:photo.attachmentId,recordId:String(item.row.id),
         recordVersion:photo.recordVersion,name:photo.name,
         mime:photo.mime,size:photo.size,kind:"image" as const,
         metadataOnly:true as const,originalTime:null,originalPage:null,

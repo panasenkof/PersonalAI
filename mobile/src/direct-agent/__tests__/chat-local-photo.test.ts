@@ -179,3 +179,24 @@ test("confirmed internet photo consumes only selected image, not another draft",
   expect(c.rows[0].attachments?.map(f=>f.id)).toEqual(["captured"]);
   store.dispose();
 });
+
+test.each(["model","exception"])("retries the same photo after %s without persisting it or consuming newer edits",async failure=>{
+  const {repo,records,runner}=fixture();
+  const store=new DirectChatStore("guest",repo,runner);
+  await store.initialize();
+  const id=store.getSnapshot().activeId!;
+  if(failure==="model") search.mockResolvedValueOnce({text:"Нужна модель",memory:[],photoAction:"model"});
+  else search.mockRejectedValueOnce(new Error("vision_native_unavailable"));
+  await store.searchPhotosLocally(image,id);
+  const failed=store.getSnapshot().conversations[0];
+  expect(failed.retryPhoto).toEqual({rowId:failed.rows.at(-1)?.id,image});
+  expect(JSON.stringify(records.get(id))).not.toContain(image.data);
+  store.setQuestion("Новый текст");
+  await store.searchPhotosLocally(failed.retryPhoto!.image,id);
+  const done=store.getSnapshot().conversations[0];
+  expect(done.retryPhoto).toBeUndefined();
+  expect(done.question).toBe("Новый текст");
+  expect(search).toHaveBeenLastCalledWith("guest",expect.anything(),[image],expect.anything());
+  expect(runner).not.toHaveBeenCalled();
+  store.dispose();
+});

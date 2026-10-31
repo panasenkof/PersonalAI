@@ -81,7 +81,7 @@ test("searchMemory merges photo rank with text without creating a second unscope
     await expect(repo.searchMemory("",{imageVector:{model:MODEL,values:vector(1,0)},
       minImageSimilarity:Number.NaN})).rejects.toThrow("invalid_vision_min_similarity");
     expect(hits[0].originals).toEqual([expect.objectContaining({
-      attachmentId:x.attachmentId,recordId:x.entityId,metadataOnly:true,
+      attachmentId:x.attachmentId,recordId:x.entityId,imageSimilarity:1,metadataOnly:true,
       kind:"image",originalPage:null,originalTime:null,
     })]);
     expect((await repo.searchMemory("несуществующий велосипед")).some(h=>h.entity.id===x.entityId)).toBe(false);

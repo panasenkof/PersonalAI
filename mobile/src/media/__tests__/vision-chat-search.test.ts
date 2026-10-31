@@ -53,6 +53,7 @@ test("text result contains only verified photo-source hits and same scope",async
 test("image query reuses canonical encrypted searchMemory with same ACL; never calls text search",async()=>{
   const result=await searchLocalPhotosFromChat83("guest",{mode:"image",description:""},[attachment]);
   expect(result.memory).toHaveLength(1);
+  expect(result.text).not.toMatch(/раскрыть|кнопке/);
   expect(search).toHaveBeenCalledWith("",{
     sensitivities:["standard","inherit"],limit:20,
     imageVector:{model:expect.any(String),values:expect.any(Float32Array)},
@@ -177,7 +178,7 @@ test("photo-only search keeps closest six from a larger ranked collection",async
   expect(result.memory).toHaveLength(6);
   expect(result.memory.map(m=>m.photoAttachmentId)).toEqual(
     Array.from({length:6},(_,i)=>"image-"+i));
-  expect(result.text).toContain("остальные до пяти");
+  expect(result.text).toContain("Остальные варианты можно раскрыть");
   expect(result.text).not.toContain("Все найденные снимки показаны");
 });
 test("mixed text-and-photo search limits visible photos to six without hiding text evidence",async()=>{
@@ -202,4 +203,15 @@ test("image-to-image search also returns no more than six matches",async()=>{
   expect(result.memory).toHaveLength(6);
   expect(result.memory[0].photoAttachmentId).toBe("image-0");
   expect(result.memory[5].photoAttachmentId).toBe("image-5");
+});
+
+test.each(["all","text","image"] as const)("ranks attachments across notes before limiting %s results", async mode => {
+  const originals = [0.99,0.89,0.88,0.87,0.86,0.85].map((imageSimilarity,i) =>
+    ({attachmentId:"a"+i,kind:"image",imageSimilarity}));
+  const hits = [{...photo,originals},{entity:{id:"other",title:"Другой велосипед"},
+    originals:[{attachmentId:"b",kind:"image",imageSimilarity:0.98}]}];
+  (mode === "image" ? search : textSearch).mockResolvedValueOnce(hits);
+  const result = await searchLocalPhotosFromChat83("guest",{mode,description:"велосипед"},
+    mode === "image" ? [attachment] : []);
+  expect(result.memory.map(item=>item.photoAttachmentId)).toEqual(["a0","b","a1","a2","a3","a4"]);
 });

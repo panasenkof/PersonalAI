@@ -33,6 +33,7 @@ export type EntityRecord = {
  * Never a file:// URL, decrypted bytes, ASR proof, page or timecode.
  * Read/open needs an independent fresh app-lock + ACL + source check. */
 export type VerifiedOriginalLocator = {
+  imageSimilarity?: number;
   attachmentId: string; recordId: string; recordVersion: number;
   name: string; mime: string; size: number; kind: "audio" | "video" | "document" | "image" | "other";
   metadataOnly: true; originalTime: null; originalPage: null;
