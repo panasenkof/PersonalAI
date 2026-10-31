@@ -196,7 +196,11 @@ export class DirectChatStore {
       // One-tap camera/gallery searches preserve any unrelated unsent draft.
       // On failure restore the consumed draft only if the user has not typed a replacement.
       question:camera ? current.question : "",
-      ...(camera ? {} : {attachments:[]}),
+      // A one-tap image search consumes only its selected image, not other
+      // draft files or the user's unsent text. Hide the action panel immediately.
+      attachments:camera
+        ? (current.attachments || []).filter(file=>file.id!==camera.id)
+        : [],
       title:current.rows.length?current.title:prompt.slice(0,60),
       rows:[...current.rows,{id:Crypto.randomUUID(),role:"user",text:prompt}],
     })!;
@@ -262,7 +266,11 @@ export class DirectChatStore {
     this.publish({ error: "" });
     const pending = this.update(id, {
       taskState, question: internetPhotoId ? current.question : "",
-      attachments: internetPhotoId ? current.attachments : [],
+      // Once the user confirms web lookup, the chosen photo is submitted in
+      // the user turn and leaves the draft. Other files are never uploaded.
+      attachments: internetPhotoId
+        ? (current.attachments || []).filter(file=>file.id!==internetPhotoId)
+        : [],
       busy: true, progress: "Сохраняю вопрос…", updatedAt: new Date().toISOString(),
       title: current.rows.length ? current.title : prompt.slice(0, 60),
       rows: [...current.rows, { id: Crypto.randomUUID(), role: "user", text: prompt, ...(attachments.length ? {attachments} : {}) }],
