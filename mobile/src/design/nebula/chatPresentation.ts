@@ -9,12 +9,19 @@ export function presentChatRows(rows: ChatRow[], busy: boolean, streamText = "")
   let answered = false;
   let reply = 0;
   const result = rows.map(row => {
+    // Older APKs persisted the internal web-photo instruction as the visible
+    // user text. Render those exact legacy turns in human language; leave the
+    // encrypted original history untouched and never rewrite ordinary prompts.
+    const visible = row.role === "user" && row.attachments?.some(file => file.kind === "image") &&
+      row.text.startsWith("Найди в интернете сведения о том, что изображено на приложенной фотографии. Определи объект по фото,")
+      ? { ...row, text: "Что изображено на фото? Найти информацию в интернете" }
+      : row;
     if (row.role === "user") { turn = row.id; answered = false; reply = 0; }
     if (row.role === "assistant" && turn) {
       answered = true;
-      return { ...row, viewKey: `reply:${turn}:${reply++}` };
+      return { ...visible, viewKey: `reply:${turn}:${reply++}` };
     }
-    return { ...row, viewKey: row.id };
+    return { ...visible, viewKey: row.id };
   });
   if (busy && turn && !answered && streamText) {
     result.push({ id: `reply:${turn}:0`, viewKey: `reply:${turn}:0`, role: "assistant", text: streamText, streaming: true } as PresentedChatRow);
