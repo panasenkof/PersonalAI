@@ -31,7 +31,7 @@ beforeEach(() => {
   rows = [];
   unlocked.mockReturnValue(true);
   model.mockResolvedValue(info());
-  database.mockImplementation(async (_profile: string, work: (db: typeof db) => Promise<unknown>) => work(db));
+  database.mockImplementation(async (_profile: string, work: (connection: { getAllAsync: jest.Mock }) => Promise<unknown>) => work(db));
   db.getAllAsync.mockImplementation(async (sql: string, params: unknown[]) => {
     expect(sql).toContain("memory_attachment_vectors");
     expect(sql).toContain("e.sensitivity IN ('standard','inherit')");
