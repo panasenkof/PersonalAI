@@ -59,18 +59,20 @@ describe("Native Home integration remains isolated and accessible", () => {
     expect(voice).toContain("onPhaseChange?.(phase)");
     expect(voice).toContain("onActiveChange?.(phase !== \"idle\")");
   });
-  it("camera requires an explicit purpose, and note capture uses existing importer", () => {
-    expect(home).toContain('onPress={() => setCameraPurposeOpen(true)}');
-    expect(home).toContain('title="Что сделать со снимком?"');
-    expect(home).toContain('title:"Сохранить в память"');
-    expect(home).toContain('title:"Прикрепить к сообщению"');
-    expect(home).toContain('title:"Найти похожее в памяти"');
-    expect(home).toContain('navigation.navigate("MemoryImport",{source:"photo",camera:true})');
-    expect(home).toContain('await capturePhotoForChat83(controller.signal)');
-    expect(home).toContain('await capturePhotoForSearch83(controller.signal)');
-    expect(home).toContain('store.setAttachments(conversationId,[...(current.attachments || []),capture])');
-    expect(home).not.toContain('onPress={() => void captureAndSearch()}');
+  it("camera opens directly and shows shared photo actions after capturing", () => {
+    expect(home).toContain('onPress={() => void captureToDraft()}');
+    expect(home).toContain("await capturePhotoDraft83(controller.signal)");
+    expect(home).toContain('testID="photo-context-actions"');
+    for(const label of ['В интернете','В моей памяти','Сохранить заметку','Посмотреть']){
+      expect(home).toContain('label:"'+label+'"');
+    }
+    expect(home).toContain("store.searchPhotosLocally(selectedPhoto,active.id)");
+    expect(home).toContain("store.send(settings,id)");
+    expect(home).toContain('navigation.navigate("MemoryImport",{source:"photo",initialPhotoUri:staged})');
+    expect(home).not.toContain("cameraPurposeOpen");
     const importer = readFileSync(join(base, "..", "..", "screens", "MemoryImportScreen.tsx"), "utf8");
+    expect(importer).toContain("route.params?.initialPhotoUri");
+    expect(importer).toContain("discardCameraPhotoDraft83(uri)");
     expect(importer.split("async function camera()")[1].split("useEffect")[0]).toContain("setKeepOriginal(true)");
   });
   it("uses a dark theme only on Home and matches the bottom tab palette there", () => {
