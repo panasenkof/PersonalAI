@@ -101,6 +101,14 @@ export async function indexPhotoPage83(
             fingerprintExtractionSource(db, row.attachmentId));
           guard(options.signal);
           if (row.indexedVersion === current) {
+            // An active-model switch must not advance the cursor even when
+            // this particular original was already indexed in the old space.
+            const stillSelected = await readyNativeVisionModel83();
+            guard(options.signal);
+            if (stillSelected?.modelSpace !== model.modelSpace) {
+              result.halted = "model_changed";
+              break;
+            }
             result.examined++;
             result.alreadyCurrent++;
             result.nextCursor = row.attachmentId;
