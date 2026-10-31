@@ -29,5 +29,8 @@ test("disabled context prevents cancellation and search while running",()=>{
   const onCancel=jest.fn(),run=jest.fn();
   const ui=render(<PhotoContextActions actions={[{id:"memory",label:"В моей памяти",run}]} onCancel={onCancel} disabled/>);
   expect(ui.getByLabelText("В моей памяти").props.accessibilityState.disabled).toBe(true);
-  expect(ui.getByLabelText("Отмена: убрать выбранное фото").props.disabled).toBe(true);
+  fireEvent.press(ui.getByLabelText("Отмена: убрать выбранное фото"));
+  fireEvent.press(ui.getByLabelText("В моей памяти"));
+  expect(onCancel).not.toHaveBeenCalled();
+  expect(run).not.toHaveBeenCalled();
 });

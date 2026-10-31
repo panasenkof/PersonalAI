@@ -108,14 +108,11 @@ export async function attachmentImageMatches(db: SQL, input: ModelSpace & {
     .sort((a,b)=>b.similarity-a.similarity||a.row.attachmentId.localeCompare(b.row.attachmentId));
   const limit = Math.min(20,Math.max(1,Math.trunc(input.limit??8)));
   const out:ImageVectorHit[] = [];
-  const seen = new Set<string>();
   for (const {row,similarity} of candidates) {
     if (out.length>=limit) break;
-    if (seen.has(row.entityId)) continue;
     try {
       if (row.sourceVersion!==await fingerprintExtractionSource(db,row.attachmentId)) continue;
     } catch { continue; }
-    seen.add(row.entityId);
     out.push({entityId:row.entityId,attachmentId:row.attachmentId,name:row.name,
       mime:row.mime,size:row.size,recordVersion:Number(row.recordVersion),similarity});
   }
