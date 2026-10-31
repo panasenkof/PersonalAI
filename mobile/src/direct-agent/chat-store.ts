@@ -292,7 +292,7 @@ export class DirectChatStore {
       const maxRequests = await loadModelCallLimit(this.profile);
       if (this.disposed || aborter.signal.aborted) throw new Error("aborted");
       modelStarted = true;
-      const result = await this.runner({ settings, maxRequests, prompt, attachments, history, previousSources, taskState, pendingNotes: current.drafts,
+      const result = await this.runner({ settings, maxRequests, prompt, attachments, skipLocalMemory:Boolean(internetPhotoId), history, previousSources, taskState, pendingNotes: current.drafts,
         onTaskState: next => {
           const active = this.snapshot.conversations.find(c => c.id === id);
           if (active && !aborter.signal.aborted) this.update(id, { taskState: mergeTaskReceipts(next, active.taskState) }, true);
