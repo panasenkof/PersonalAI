@@ -34,7 +34,8 @@ export async function stageChatImageForNote83(attachment:ChatAttachment):Promise
   if(image.kind!=="image")throw new Error("Выберите фотографию.");
   const dir=new Directory(Paths.cache,"persai-camera-drafts");
   dir.create({intermediates:true,idempotent:true});
-  const target=new File(dir,Crypto.randomUUID()+".jpg");
+  const ext=image.mime==="image/png"?".png":image.mime==="image/webp"?".webp":".jpg";
+  const target=new File(dir,Crypto.randomUUID()+ext);
   try{
     await FileSystem.writeAsStringAsync(target.uri,image.data,{encoding:FileSystem.EncodingType.Base64});
     guard();
