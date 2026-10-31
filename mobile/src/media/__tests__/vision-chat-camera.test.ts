@@ -2,6 +2,7 @@ import { capturePhotoForSearch83 } from "../vision-chat-camera";
 import { localMemorySessionUnlocked } from "../../local-memory/storage";
 import * as ImagePicker from "expo-image-picker";
 import { manipulateAsync } from "expo-image-manipulator";
+import { readyNativeVisionModel83 } from "../vision-native-model";
 const mockDelete=jest.fn();
 const mockBase64=jest.fn(async()=>Buffer.from([255,216,255,224,1,2,3,4]).toString("base64"));
 jest.mock("expo-crypto",()=>({randomUUID:()=>"temporary-camera"}));
@@ -18,16 +19,19 @@ jest.mock("expo-file-system",()=>({
   })),
 }));
 jest.mock("../../local-memory/storage",()=>({localMemorySessionUnlocked:jest.fn()}));
+jest.mock("../vision-native-model",()=>({readyNativeVisionModel83:jest.fn()}));
 jest.mock("../../security/native-interaction",()=>({
   withNativeInteraction:jest.fn(async(fn:()=>Promise<unknown>)=>fn()),
 }));
 const unlocked=localMemorySessionUnlocked as jest.Mock;
+const activeModel=readyNativeVisionModel83 as jest.Mock;
 const permission=ImagePicker.requestCameraPermissionsAsync as jest.Mock;
 const camera=ImagePicker.launchCameraAsync as jest.Mock;
 const manipulate=manipulateAsync as jest.Mock;
 beforeEach(()=>{
   jest.clearAllMocks();
   unlocked.mockReturnValue(true);
+  activeModel.mockResolvedValue({modelSpace:"model"});
   permission.mockResolvedValue({granted:true});
   camera.mockResolvedValue({canceled:false,assets:[{uri:"file:///cache/photo.jpg"}]});
   manipulate.mockResolvedValue({uri:"file:///cache/resized.jpg"});
@@ -44,6 +48,12 @@ test("camera cancel creates no attachment and sends nothing",async()=>{
   camera.mockResolvedValueOnce({canceled:true,assets:[]});
   expect(await capturePhotoForSearch83()).toBeNull();
   expect(manipulate).not.toHaveBeenCalled();
+});
+test("no installed photo model stops before opening camera",async()=>{
+  activeModel.mockResolvedValueOnce(null);
+  await expect(capturePhotoForSearch83()).rejects.toThrow("vision_model_not_installed");
+  expect(permission).not.toHaveBeenCalled();
+  expect(camera).not.toHaveBeenCalled();
 });
 test("camera permission denied prevents photographing",async()=>{
   permission.mockResolvedValueOnce({granted:false});
