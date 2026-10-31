@@ -7,6 +7,7 @@
  */
 import { localMemorySessionUnlocked, withLocalMemoryDatabase } from "../local-memory/storage";
 import { SqliteMemoryRepository } from "../local-memory/repository";
+import { withUnlockedTransaction } from "../local-memory/transaction";
 import type { MemoryHit } from "../local-memory/types";
 import { readyNativeVisionModel83 } from "./vision-native-model";
 import { embedVisionText83 } from "./vision-native-vectors";
@@ -54,18 +55,21 @@ export async function searchWithVision83(
   const { requireVisionModel: _required, includeTextVector: _text, standardCollectionsOnly: _acl,
     ...memoryScope } = options;
   return withLocalMemoryDatabase(profile, async db => {
-    const repository=new SqliteMemoryRepository(db);
-    if(!localMemorySessionUnlocked())throw new Error("application_locked");
-    const allowedCollections=options.standardCollectionsOnly
-      ? (await repository.listCollections()).filter(c=>c.sensitivity==="standard").map(c=>c.id)
-      : undefined;
-    const scope=allowedCollections ? {
-      collectionIds:options.collectionIds
-        ? options.collectionIds.filter(id=>allowedCollections.includes(id)) : allowedCollections,
-    } : {};
-    if(!localMemorySessionUnlocked())throw new Error("application_locked");
-    return repository.searchMemory(query,{...memoryScope,...scope,
-      ...(textVector?{vector:textVector}:{}),...(imageVector?{imageVector}:{})});
+    const read=async (current:typeof db) => {
+      const repository=new SqliteMemoryRepository(current);
+      if(!localMemorySessionUnlocked())throw new Error("application_locked");
+      const allowedCollections=options.standardCollectionsOnly
+        ? (await repository.listCollections()).filter(c=>c.sensitivity==="standard").map(c=>c.id)
+        : undefined;
+      const scope=allowedCollections ? {
+        collectionIds:options.collectionIds
+          ? options.collectionIds.filter(id=>allowedCollections.includes(id)) : allowedCollections,
+      } : {};
+      if(!localMemorySessionUnlocked())throw new Error("application_locked");
+      return repository.searchMemory(query,{...memoryScope,...scope,
+        ...(textVector?{vector:textVector}:{}),...(imageVector?{imageVector}:{})});
+    };
+    // ACL preflight + ranked results need the same SQLCipher snapshot.
+    return options.standardCollectionsOnly ? withUnlockedTransaction(db,read) : read(db);
   });
-
 }
