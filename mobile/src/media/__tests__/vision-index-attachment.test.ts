@@ -14,7 +14,7 @@ jest.mock("expo-file-system",()=>({
     create(){} },
   File:class { uri:string;name:string;exists=true;
     constructor(...args:any[]){this.uri=args.map(a=>typeof a==="string"?a:a.path).join("/");
-      this.name=this.uri.split("/").at(-1);}
+      this.name=this.uri.split("/").at(-1) ?? "";}
     copy(dest:{uri:string}){mockCopies.push(dest.uri);}
     delete(){mockFilesDeleted.push(this.uri);}
   },
