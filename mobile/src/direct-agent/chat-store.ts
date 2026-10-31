@@ -246,6 +246,7 @@ export class DirectChatStore {
     const prompt = internetPhotoId
       ? "Найди в интернете сведения о том, что изображено на приложенной фотографии. Определи объект по фото, затем воспользуйся разрешённым веб-поиском. Ответь по-русски, приведи проверяемые факты и ссылки на реальные источники. Если изображение или поиск недоступны, сообщи об этом, не выдумывай источники."
       : current.question.trim() || "Посмотри приложенные файлы.";
+    const displayPrompt = internetPhotoId ? "Что изображено на фото? Найти информацию в интернете" : prompt;
     const attachments = checkedChatAttachments(internetPhotoId ? [selected!] : current.attachments);
     // Explicit photo intent runs only against encrypted device memory.
     // Do not send user image bytes or photo search text to the remote LLM.
@@ -276,8 +277,8 @@ export class DirectChatStore {
         ? (current.attachments || []).filter(file=>file.id!==internetPhotoId)
         : [],
       busy: true, progress: "Сохраняю вопрос…", updatedAt: new Date().toISOString(),
-      title: current.rows.length ? current.title : prompt.slice(0, 60),
-      rows: [...current.rows, { id: Crypto.randomUUID(), role: "user", text: prompt, ...(attachments.length ? {attachments} : {}) }],
+      title: current.rows.length ? current.title : displayPrompt.slice(0, 60),
+      rows: [...current.rows, { id: Crypto.randomUUID(), role: "user", text: displayPrompt, ...(attachments.length ? {attachments} : {}) }],
     })!;
     let modelStarted = false;
     let beforeModelError = "Запрос не отправлен: не удалось сохранить историю.";
