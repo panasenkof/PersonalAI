@@ -87,7 +87,7 @@ export async function searchLocalPhotosFromChat83(
     // The chat presents at most six closest photos, while ordinary matching
     // notes are still included without modifying their memory evidence.
     let photoCountShown=0;
-    const memory:ChatMemoryRef[]=hits.flatMap(hit=>{
+    const memory:ChatMemoryRef[]=hits.flatMap((hit):ChatMemoryRef[]=>{
       const images=hit.originals?.filter(file=>file.kind==="image") || [];
       return images.length ? images.map(image=>({
         id:hit.entity.id,title:(hit.entity.title||"Фотография в памяти").slice(0,160),
