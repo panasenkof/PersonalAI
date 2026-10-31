@@ -17,6 +17,24 @@ import kotlin.jvm.functions.Function1;
 public final class VisionInteropApi {
   private VisionInteropApi() {}
 
+  /** Java primitive arrays keep Kotlin 2.4 vendor metadata outside the
+   * Kotlin 2.1 Expo consumer compile classpath. No SDK types in API.
+   */
+  public static float[] embedText(Context context, File model, String query) {
+    if (context == null || model == null || query == null ||
+        query.trim().isEmpty() || query.length() > 256) {
+      throw new IllegalArgumentException("invalid_vision_input");
+    }
+    return UniversalVisionCompileProbe.INSTANCE.embedTextVector(context, model, query);
+  }
+
+  public static float[] embedImage(Context context, File model, Bitmap image) {
+    if (context == null || model == null || image == null || image.isRecycled()) {
+      throw new IllegalArgumentException("invalid_vision_input");
+    }
+    return UniversalVisionCompileProbe.INSTANCE.embedImageVector(context, model, image);
+  }
+
   public static double scoreTextImage(Context context, File model, Bitmap image, String query) {
     if (context == null || model == null || image == null ||
         query == null || query.trim().isEmpty() || query.length() > 256) {

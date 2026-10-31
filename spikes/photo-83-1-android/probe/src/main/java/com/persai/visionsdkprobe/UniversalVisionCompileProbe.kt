@@ -26,6 +26,35 @@ object UniversalVisionCompileProbe {
     mark = mark
   ).single()
 
+  /** Raw 768D vectors from the SAME model/normalization as compareMany.
+   * They are transient: no second index and no source bytes persisted here.
+   * The producer may be Kotlin 2.4, but only Java float[] crosses the ABI.
+   */
+  fun embedTextVector(context: Context, model: File, query: String): FloatArray {
+    require(query.isNotBlank() && query.length <= 256) { "invalid_vision_query" }
+    return withEmbedder(context, model, {}) { embedder ->
+      checkedVector(embedder.embedText(query).embeddings().first().floatEmbedding())
+    }
+  }
+
+  fun embedImageVector(context: Context, model: File, image: Bitmap): FloatArray {
+    require(!image.isRecycled && image.width > 0 && image.height > 0) { "invalid_vision_bitmap" }
+    return withEmbedder(context, model, {}) { embedder ->
+      checkedVector(embedder.embedImage(
+        BitmapImageBuilder(image).build()
+      ).embeddings().first().floatEmbedding())
+    }
+  }
+
+  private fun checkedVector(values: FloatArray): FloatArray {
+    check(values.size == 768 && values.all { it.isFinite() }) { "invalid_vision_vector" }
+    // Preserve the L2-normalized model output. No dimension truncation,
+    // quantization, synthetic results or unversioned model crossovers.
+    val energy = values.sumOf { (it * it).toDouble() }
+    check(energy.isFinite() && energy in 0.9..1.1) { "invalid_vision_vector_norm" }
+    return values.copyOf()
+  }
+
   /**
    * Encode query once, score 1..5 user-selected photos sequentially with the
    * same embedder, then close it. No image/vector caching or extra writer.

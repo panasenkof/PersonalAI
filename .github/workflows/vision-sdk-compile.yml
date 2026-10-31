@@ -95,6 +95,8 @@ jobs:
           unzip -p "$AAR" classes.jar > "$RUNNER_TEMP/producer.jar"
           javap -public -classpath "$RUNNER_TEMP/producer.jar" com.persai.visionsdkprobe.VisionInteropApi > "$RUNNER_TEMP/abi.txt"
           grep -q 'public static double scoreTextImage(android.content.Context, java.io.File, android.graphics.Bitmap, java.lang.String)' "$RUNNER_TEMP/abi.txt"
+          grep -Fq 'public static float[] embedText(android.content.Context, java.io.File, java.lang.String)' "$RUNNER_TEMP/abi.txt"
+          grep -Fq 'public static float[] embedImage(android.content.Context, java.io.File, android.graphics.Bitmap)' "$RUNNER_TEMP/abi.txt"
           if grep -Eq 'com.google.|kotlin.|UniversalEmbedder|Function1|List<' "$RUNNER_TEMP/abi.txt"; then
             echo "::error::Vendor or Kotlin types escaped into the Java ABI"; exit 1
           fi
