@@ -4,8 +4,8 @@ import * as ImagePicker from "expo-image-picker";
 import { manipulateAsync } from "expo-image-manipulator";
 import { readyNativeVisionModel83 } from "../vision-native-model";
 const mockDelete=jest.fn();
-const mockCopy=jest.fn(async()=>{});
-const mockWrite=jest.fn(async()=>{});
+const mockCopy=jest.fn(async(_from:string,_to:string)=>{});
+const mockWrite=jest.fn(async(_data:Uint8Array)=>{});
 const mockBase64=jest.fn(async()=>Buffer.from([255,216,255,224,1,2,3,4]).toString("base64"));
 jest.mock("expo-crypto",()=>({randomUUID:()=>"temporary-camera"}));
 jest.mock("expo-image-picker",()=>({
