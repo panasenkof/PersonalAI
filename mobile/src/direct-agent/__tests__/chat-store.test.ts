@@ -244,7 +244,9 @@ test("internet photo action sends only selected photo, requests web and preserve
   expect(call.taskState.webPreference).toBe("allow");
   const result=store.getSnapshot().conversations[0];
   expect(result.question).toBe("Неотправленный вопрос");
-  expect(result.attachments).toHaveLength(2);
+  // The selected photo is consumed; unrelated draft files are preserved.
+  expect(result.attachments).toHaveLength(1);
+  expect(result.attachments?.[0].id).toBe("note");
   expect(result.rows[0].attachments).toHaveLength(1);
   expect(records.get(id)?.rows.at(-1)?.sources).toEqual(["https://example.org/source"]);
   store.dispose();
