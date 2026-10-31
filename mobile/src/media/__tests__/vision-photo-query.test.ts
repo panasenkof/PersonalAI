@@ -4,13 +4,13 @@ import { readyNativeVisionModel83 } from "../vision-native-model";
 import { embedVisionImage83 } from "../vision-native-vectors";
 import type { ChatAttachment } from "../../direct-agent/chat-attachments";
 
-const write=jest.fn(),cleanup=jest.fn();
+const mockWrite=jest.fn(),mockCleanup=jest.fn();
 jest.mock("expo-crypto",()=>({randomUUID:()=>"photo-query-test"}));
 jest.mock("expo-file-system",()=>({
   Paths:{cache:{uri:"file:///app/cache"}},
   Directory:jest.fn().mockImplementation(()=>({create:jest.fn()})),
   File:jest.fn().mockImplementation((_:unknown,name:string)=>({
-    name,exists:true,write,delete:cleanup,
+    name,exists:true,write:mockWrite,delete:mockCleanup,
   })),
 }));
 jest.mock("../../local-memory/storage",()=>({localMemorySessionUnlocked:jest.fn()}));
@@ -34,11 +34,11 @@ test("chat JPEG is never stored, inference uses temporary private file, then del
   const result=await preparePhotoMatchChatAttachment83(attachment);
   expect(result.model).toBe(modelSpace);
   expect(result.values.length).toBe(768);
-  expect(write).toHaveBeenCalledTimes(1);
+  expect(mockWrite).toHaveBeenCalledTimes(1);
   expect(native).toHaveBeenCalledWith({
     modelName:"eg2.litertlm",modelSha256:"a".repeat(64),imageName:"photo-query-test.jpg",
   });
-  expect(cleanup).toHaveBeenCalledTimes(1);
+  expect(mockCleanup).toHaveBeenCalledTimes(1);
 });
 test("reject damaged and nonimage attachments before native inference",async()=>{
   await expect(preparePhotoMatchChatAttachment83({...attachment,mime:"image/heic"}))
@@ -50,22 +50,22 @@ test("reject damaged and nonimage attachments before native inference",async()=>
 test("missing model cannot infer an image",async()=>{
   model.mockResolvedValue(null);
   await expect(preparePhotoMatchChatAttachment83(attachment)).rejects.toThrow("vision_model_not_installed");
-  expect(write).not.toHaveBeenCalled();
+  expect(mockWrite).not.toHaveBeenCalled();
 });
 test("native errors and lock expiry clean temporary query bytes",async()=>{
   native.mockRejectedValueOnce(new Error("native_failure"));
   await expect(preparePhotoMatchChatAttachment83(attachment)).rejects.toThrow("native_failure");
-  expect(cleanup).toHaveBeenCalledTimes(1);
+  expect(mockCleanup).toHaveBeenCalledTimes(1);
   native.mockImplementationOnce(async()=>{
     unlocked.mockReturnValue(false);
     return new Float32Array(768);
   });
   await expect(preparePhotoMatchChatAttachment83(attachment)).rejects.toThrow("application_locked");
-  expect(cleanup).toHaveBeenCalledTimes(2);
+  expect(mockCleanup).toHaveBeenCalledTimes(2);
 });
 test("switching model during inference rejects mismatched space",async()=>{
   model.mockResolvedValueOnce({modelName:"eg2.litertlm",modelSha256:"a".repeat(64),modelSpace})
     .mockResolvedValueOnce({modelName:"new.litertlm",modelSha256:"b".repeat(64),modelSpace:"eg2|vision|768|sha256:"+"b".repeat(64)});
   await expect(preparePhotoMatchChatAttachment83(attachment)).rejects.toThrow("vision_model_changed");
-  expect(cleanup).toHaveBeenCalledTimes(1);
+  expect(mockCleanup).toHaveBeenCalledTimes(1);
 });
