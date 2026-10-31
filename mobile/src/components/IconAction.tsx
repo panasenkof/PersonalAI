@@ -20,7 +20,7 @@ export const resetActionHints = () => { explainedByTap.clear(); };
 export function IconAction({ icon, label, accessibilityLabel, hint, onPress, disabled = false,
   emphasized = false, compact = false, hintAbove = false, hintAlign = "end", explainOnTap = true }: {
   icon: React.ComponentProps<typeof Feather>["name"]; label: string; accessibilityLabel: string;
-  hint: string; onPress: () => void; disabled?: boolean; emphasized?: boolean; compact?: boolean; hintAbove?: boolean; hintAlign?: "start" | "center" | "end";
+  hint: string; onPress: () => void; disabled?: boolean; emphasized?: boolean; compact?: boolean; hintAbove?: boolean; hintAlign?: "start" | "center" | "end"; explainOnTap?: boolean;
 }) {
   const t = useTheme(); const owner = useId();
   const { width: viewportWidth } = useWindowDimensions();
