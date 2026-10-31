@@ -6,7 +6,7 @@ import type { TaskState } from "./task-state";
 import { restoredProposal } from "./fact-tool";
 
 /** `memory`: records the answer used, with how each was found («Из памяти»). */
-export type ChatMemoryRef = { id: string; title: string; section?: string; via: "search" | "rewrite" | "assistant"; photo?: boolean };
+export type ChatMemoryRef = { id: string; title: string; section?: string; via: "search" | "rewrite" | "assistant"; photo?: boolean; photoAttachmentId?: string };
 export type ChatRow = { id: string; role: "user" | "assistant" | "info"; text: string; sources?: string[]; memory?: ChatMemoryRef[]; attachments?: ChatAttachment[] };
 const VIA = new Set(["search", "rewrite", "assistant"]);
 export type ChatDraft = NoteProposal & { id: string };
@@ -38,7 +38,7 @@ export function parseConversation(json: string): SavedConversation | null {
     if (!r || typeof r.id !== "string" || typeof r.text !== "string" || !ROLES.has(r.role)) return [];
     const sources = Array.isArray(r.sources) ? r.sources.filter((url: unknown) => typeof url === "string" && url.startsWith("https://")) : undefined;
     const memory = Array.isArray(r.memory) ? r.memory.filter((m: any) => m && typeof m.id === "string" && typeof m.title === "string" && VIA.has(m.via))
-      .slice(0, 8).map((m: any) => ({ id: m.id, title: m.title.slice(0, 160), via: m.via, ...(m.photo === true ? { photo: true } : {}), ...(typeof m.section === "string" ? { section: m.section.slice(0, 60) } : {}) })) : undefined;
+      .slice(0, 8).map((m: any) => ({ id: m.id, title: m.title.slice(0, 160), via: m.via, ...(m.photo === true ? { photo: true } : {}), ...(typeof m.photoAttachmentId === "string" && /^[A-Za-z0-9-]{1,128}$/.test(m.photoAttachmentId) ? { photoAttachmentId: m.photoAttachmentId } : {}), ...(typeof m.section === "string" ? { section: m.section.slice(0, 60) } : {}) })) : undefined;
     return [{ id: r.id, role: r.role, text: r.text, ...(r.attachments?.length ? {attachments:checkedChatAttachments(r.attachments)} : {}), ...(sources?.length ? { sources } : {}), ...(memory?.length ? { memory } : {}) }];
   });
   const drafts: ChatDraft[] = (Array.isArray(value.drafts) ? value.drafts : []).filter((d: any) =>
