@@ -5,7 +5,8 @@
 import * as Crypto from "expo-crypto";
 import * as ImagePicker from "expo-image-picker";
 import { manipulateAsync, SaveFormat } from "expo-image-manipulator";
-import { File, Paths } from "expo-file-system";
+import { Directory, File, Paths } from "expo-file-system";
+import * as FileSystem from "expo-file-system/legacy";
 import { localMemorySessionUnlocked } from "../local-memory/storage";
 import { checkedChatAttachments, MAX_CHAT_FILE_BYTES, type ChatAttachment } from "../direct-agent/chat-attachments";
 import { withNativeInteraction } from "../security/native-interaction";
@@ -21,10 +22,29 @@ function discard(uri:string) {
   try { const file=new File(uri); if(file.exists)file.delete(); } catch {}
 }
 
-/** Returns one temporary in-memory JPEG. The source and resized cache copies
- * are deleted even on cancel, lock expiry, decode or native failure.
- */
-export async function capturePhotoForChat83(signal?:AbortSignal, forSearch=false):Promise<ChatAttachment|null>{
+/** Original photo is never placed in persistent chat history or uploaded in the background. */
+export type CameraPhotoDraft83 = { attachment:ChatAttachment; originalUri:string };
+const originalFolder=Paths.cache.uri.replace(/\/$/,"")+"/persai-camera-drafts/";
+export function discardCameraPhotoDraft83(uri:string) {
+  if(!uri.startsWith(originalFolder) || uri.slice(originalFolder.length).includes("/"))return;
+  try { const f=new File(uri);if(f.exists)f.delete(); }catch {}
+}
+export async function stageChatImageForNote83(attachment:ChatAttachment):Promise<string>{
+  const image=checkedChatAttachments([attachment])[0];
+  if(image.kind!=="image")throw new Error("Выберите фотографию.");
+  const dir=new Directory(Paths.cache,"persai-camera-drafts");
+  dir.create({intermediates:true,idempotent:true});
+  const target=new File(dir,Crypto.randomUUID()+".jpg");
+  try{
+    await FileSystem.writeAsStringAsync(target.uri,image.data,{encoding:FileSystem.EncodingType.Base64});
+    guard();
+    return target.uri;
+  }catch(e){discardCameraPhotoDraft83(target.uri);throw e;}
+}
+/** Source and resized copies are always cleaned; a note action can explicitly
+ * retain its original in a bounded temporary folder until MemoryImport copies it. */
+async function capturePhoto83(signal?:AbortSignal,forSearch=false,preserveOriginal=false):
+  Promise<{attachment:ChatAttachment;originalUri?:string}|null>{
   guard(signal);
   // Opening the camera for a chat message must not require an embedding model.
   if(forSearch){
@@ -43,6 +63,7 @@ export async function capturePhotoForChat83(signal?:AbortSignal, forSearch=false
   if(shot.canceled || !shot.assets.length)return null;
   const source=shot.assets[0].uri;
   let output="";
+  let originalUri="";
   try {
     for(const width of [1280,960,720]) {
       guard(signal);
@@ -57,16 +78,34 @@ export async function capturePhotoForChat83(signal?:AbortSignal, forSearch=false
       if(file.size>MAX_CHAT_FILE_BYTES)continue;
       const data=await file.base64();
       guard(signal);
-      return checkedChatAttachments([{id:Crypto.randomUUID(),name:forSearch ? "Снимок для поиска.jpg" : "Снимок.jpg",
+      const attachment=checkedChatAttachments([{id:Crypto.randomUUID(),name:forSearch ? "Снимок для поиска.jpg" : "Снимок.jpg",
         kind:"image",mime:"image/jpeg",data,size:file.size}])[0];
+      if(preserveOriginal){
+        const dir=new Directory(Paths.cache,"persai-camera-drafts");
+        dir.create({intermediates:true,idempotent:true});
+        const target=new File(dir,Crypto.randomUUID()+".jpg");
+        originalUri=target.uri;
+        await FileSystem.copyAsync({from:source,to:target.uri});
+        guard(signal);
+      }
+      return {attachment,...(originalUri?{originalUri}:{})};
     }
     throw new Error("vision_query_image_size");
-  } finally {
+  }catch(e){
+    if(originalUri)discardCameraPhotoDraft83(originalUri);
+    throw e;
+  }finally{
     if(output && output!==source)discard(output);
     discard(source);
   }
 }
-
+export async function capturePhotoDraft83(signal?:AbortSignal):Promise<CameraPhotoDraft83|null>{
+  const result=await capturePhoto83(signal,false,true);
+  return result?{attachment:result.attachment,originalUri:result.originalUri!}:null;
+}
+export async function capturePhotoForChat83(signal?:AbortSignal,forSearch=false):Promise<ChatAttachment|null>{
+  return (await capturePhoto83(signal,forSearch))?.attachment || null;
+}
 /** Preserve the explicit search contract for callers that chose photo search. */
 export function capturePhotoForSearch83(signal?:AbortSignal):Promise<ChatAttachment|null>{
   return capturePhotoForChat83(signal,true);
