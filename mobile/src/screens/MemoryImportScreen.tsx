@@ -180,7 +180,7 @@ export function MemoryImportScreen() {
       if (!alive.current) { if (target.exists) target.delete(); return; }
       ownedFiles.current.push(target.uri);
       setFiles([{ uri: target.uri, name: asset.fileName || "camera.jpg", mimeType: asset.mimeType || "image/jpeg" }]); setRecognitionResults([]);
-      setTitle("Снимок"); setSourceUrl(""); setLinkDraft(""); setSourcePickerOpen(false); setProcessingOptionsOpen(false); setKeepOriginal(false); setExtractedText(""); setBody("");
+      setTitle("Снимок"); setSourceUrl(""); setLinkDraft(""); setSourcePickerOpen(false); setProcessingOptionsOpen(false); setKeepOriginal(true); setExtractedText(""); setBody("");
     } catch (e) { if (alive.current) setNotice(memoryErrorMessage(e)); }
   }
   useEffect(() => { if (route.params?.camera && !cameraStarted.current) { cameraStarted.current = true; void camera(); } }, [route.params?.camera]);
