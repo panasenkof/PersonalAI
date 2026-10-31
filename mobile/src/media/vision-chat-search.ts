@@ -84,6 +84,9 @@ export async function searchLocalPhotosFromChat83(
       minImageSimilarity:VISION_TEXT_FLOOR83,
     });
     guard();
+    // The chat presents at most six closest photos, while ordinary matching
+    // notes are still included without modifying their memory evidence.
+    let photoCountShown=0;
     const memory:ChatMemoryRef[]=hits.flatMap(hit=>{
       const images=hit.originals?.filter(file=>file.kind==="image") || [];
       return images.length ? images.map(image=>({
@@ -91,7 +94,7 @@ export async function searchLocalPhotosFromChat83(
         via:"search" as const,photo:true,photoAttachmentId:image.attachmentId,
       })) : [{id:hit.entity.id,title:(hit.entity.title||"Запись в памяти").slice(0,160),
         via:"search" as const}];
-    });
+    }).filter(item=>!item.photo || photoCountShown++ < 6);
     const photoCount=memory.filter(item=>item.photo).length;
     const noteCount=memory.length-photoCount;
     const noteNoun=noteCount===1?"запись":noteCount<5?"записи":"записей";
@@ -129,10 +132,10 @@ export async function searchLocalPhotosFromChat83(
       via:"search" as const,
       photo:true,
       photoAttachmentId:image.attachmentId,
-    })));
+    }))).slice(0,6);
   return {
     text:memory.length
-      ? `Нашёл подходящие фотографии: ${memory.length}. Все найденные снимки показаны ниже по релевантности. Нажмите на снимок, чтобы открыть оригинал.`
+      ? `Нашёл подходящие фотографии: ${memory.length}. Самая близкая показана сразу, остальные до пяти доступны по кнопке. Нажмите на снимок, чтобы открыть оригинал.`
       : "Среди подготовленных доступных фотографий похожих не найдено. Попробуйте другое описание или снимок предмета крупнее. Если вы недавно добавили фото, подготовьте их для поиска в настройках.",
     memory,
     ...(!memory.length && (readiness === "partial" || readiness === "unknown") ? {photoAction:"prepare" as const} : {}),
