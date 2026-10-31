@@ -2,8 +2,8 @@
  * A photo vector is optional. Existing MiniLM vector + FTS/OCR options are
  * unchanged. No second SQL query, result model, or fallback index.
  *
- * This is deliberately not wired to the normal search UI until on-device
- * native inference and real photo indexing have passed release acceptance.
+ * Called explicitly from chat photo intent; Android runtime quality still
+ * needs physical-device QA. Ordinary FTS/MiniLM chat search stays unchanged.
  */
 import { localMemorySessionUnlocked, withLocalMemoryDatabase } from "../local-memory/storage";
 import { SqliteMemoryRepository } from "../local-memory/repository";

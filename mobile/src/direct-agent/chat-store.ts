@@ -18,6 +18,7 @@ import { conversationRepository } from "./conversations";
 import type { ChatDraft, ConversationRepository, SavedConversation } from "./conversations";
 import type { DirectAgentSettings } from "./settings";
 import { waitForApplicationSession } from "../local-memory/storage";
+import { localPhotoIntent83, searchLocalPhotosFromChat83 } from "../media/vision-chat-search";
 
 /** `streamText` is the answer as it arrives; it is never persisted. */
 /** `progressSince` is when the current stage began, for the elapsed timer. */
@@ -174,12 +175,64 @@ export class DirectChatStore {
     this.writes = work;
     try { await work; } catch { this.update(id, { deleting: false }); this.publish({ error: "Не удалось удалить диалог." }); }
   }
+  /** Local visual retrieval is a chat turn, not a remote LLM request.
+   * A captured camera image is *never* stored in a conversation or in Memory.
+   * A normal attached photo also remains local for explicit photo-search turns.
+   */
+  async searchPhotosLocally(camera?: ChatAttachment, expectedConversationId?:string):Promise<void> {
+    const id=expectedConversationId || this.snapshot.activeId;
+    const current=this.snapshot.conversations.find(c=>c.id===id);
+    if(!id || !current || id!==this.snapshot.activeId || current.busy ||
+      current.deleting || this.disposed || !this.snapshot.ready)return;
+    const prompt=camera ? "Найди похожие фотографии в моей памяти" : current.question.trim();
+    const attachments=camera ? [camera] : checkedChatAttachments(current.attachments);
+    const intent=localPhotoIntent83(prompt,attachments);
+    if(!intent) return;
+    const aborter=new AbortController();
+    this.requests.set(id,aborter);
+    const pending=this.update(id,{
+      busy:true,progress:"Ищу фотографии в памяти…",updatedAt:new Date().toISOString(),
+      // A direct camera search does not alter an unrelated unsent draft.
+      ...(!camera?{question:"",attachments:[]}:{}),
+      title:current.rows.length?current.title:prompt.slice(0,60),
+      rows:[...current.rows,{id:Crypto.randomUUID(),role:"user",text:prompt}],
+    })!;
+    try {
+      // Preserve the turn BEFORE running native inference, just like send().
+      await this.persist(pending);
+      if(aborter.signal.aborted || this.disposed)throw new Error("vision_query_cancelled");
+      const result=await searchLocalPhotosFromChat83(this.profile,intent,attachments,aborter.signal);
+      if(aborter.signal.aborted || this.disposed)throw new Error("vision_query_cancelled");
+      const latest=this.snapshot.conversations.find(c=>c.id===id);
+      if(latest)this.update(id,{
+        rows:[...latest.rows,{id:Crypto.randomUUID(),role:"assistant",
+          text:result.text,memory:result.memory}],updatedAt:new Date().toISOString(),
+      });
+    } catch(e) {
+      if(this.disposed)return;
+      const latest=this.snapshot.conversations.find(c=>c.id===id);
+      if(latest)this.update(id,{
+        rows:[...latest.rows,{id:Crypto.randomUUID(),role:"info",
+          text:aborter.signal.aborted?"Поиск фотографий остановлен":memoryErrorMessage(e)}],
+      });
+    } finally {
+      this.requests.delete(id);
+      const latest=this.update(id,{busy:false,progress:"",progressSince:undefined});
+      if(latest)await this.persist(latest).catch(()=>{});
+    }
+  }
+
   async send(settings: DirectAgentSettings) {
     const id = this.snapshot.activeId;
     const current = this.snapshot.conversations.find(c => c.id === id);
     if (!id || !current || current.busy || current.deleting || (!current.question.trim() && !current.attachments?.length) || this.disposed) return;
     const prompt = current.question.trim() || "Посмотри приложенные файлы.";
     const attachments = checkedChatAttachments(current.attachments);
+    // Explicit photo intent runs only against encrypted device memory.
+    // Do not send user image bytes or photo search text to the remote LLM.
+    if (localPhotoIntent83(prompt,attachments)) {
+      await this.searchPhotosLocally(); return;
+    }
     if (prompt.length > MAX_USER_PROMPT_CHARS) {
       this.publish({ error: "Сообщение длиннее 24 000 символов. Разделите его на части: текст не отправлен и не обрезан." });
       return;

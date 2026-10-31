@@ -21,7 +21,6 @@ import { MemoryNoteCard } from "../design/nebula/MemoryNoteCard";
 
 import { mergeText, noteUndoLabel, type NoteAction } from "../local-memory/note-actions";
 import { scheduleVectors } from "../media/vector-runner";
-import { searchWithVision83 } from "../media/vision-memory-query";
 import type { MemoryReviewBatchPreview, MemoryReviewAction, MemoryReviewGuard, MemoryHygieneSuggestions, MemoryHygieneSuggestedGroup } from "../local-memory/hygiene";
 import { localMemorySessionUnlocked, onLocalMemorySessionChange } from "../local-memory/storage";
 
@@ -61,9 +60,6 @@ export function LocalMemoryScreen() {
   const hygieneGeneration = useRef(0);
   const [undo, setUndo] = useState("");
   const [search, setSearch] = useState(""); const [term, setTerm] = useState("");
-  // Explicit submit only: do not run a large native vision model on every
-  // keystroke or change the existing MiniLM/FTS note search semantics.
-  const [photoQuery, setPhotoQuery] = useState<string | null>(null);
   const [notes, setNotes] = useState<EntityRecord[]>([]); const [more, setMore] = useState(false);
   const selectedNotes = contextNote ? [contextNote] : selectedIds.map(id => notes.find(n => n.id === id)).filter((note): note is EntityRecord => Boolean(note));
   const reviewNotes = suggestedReviewNotes ?? selectedNotes;
@@ -72,24 +68,16 @@ export function LocalMemoryScreen() {
   const [sectionOpen, setSectionOpen] = useState(false); const [sectionName, setSectionName] = useState("");
   const repository = useRef<SqliteMemoryRepository | null>(null); const generation = useRef(0);
   useEffect(() => { const timer = setTimeout(() => setTerm(search.trim()), 250); return () => clearTimeout(timer); }, [search]);
-  useEffect(() => { setPhotoQuery(null); setCollectionId(undefined); setSearch(""); setStatus("active"); setCollections([]); setNotes([]); setCollectionCards([]); setSelectedIds([]); setSelecting(false); setCounts({}); setVisibleIds(new Set()); }, [profile]);
+  useEffect(() => { setCollectionId(undefined); setSearch(""); setStatus("active"); setCollections([]); setNotes([]); setCollectionCards([]); setSelectedIds([]); setSelecting(false); setCounts({}); setVisibleIds(new Set()); }, [profile]);
   useFocusEffect(useCallback(() => {
     const request = ++generation.current; setLoading(true); setError("");
     if (profile) void localMemoryRepository(profile).then(async db => {
       const [sections, page, totals] = await Promise.all([
-        ensureSections(db),
-        photoQuery && status === "active"
-          ? searchWithVision83(profile, photoQuery, {
-              collectionIds: collectionId ? [collectionId] : undefined,
-              sensitivities: ["standard", "inherit"], limit: 20,
-              requireVisionModel: true,
-            }).then(hits => hits.filter(hit => hit.originals?.some(o => o.kind === "image"))
-              .map(hit => hit.entity))
-          : db.searchNotes(term, 50, 0, { collectionId, status }),
+        ensureSections(db), db.searchNotes(term, 50, 0, { collectionId, status }),
         db.collectionNoteCounts(),
       ]);
       if (request !== generation.current) return;
-      setCounts(totals); repository.current = db; void db.lastNoteOperation().then(value => { if (request === generation.current) setUndo(value); }).catch(() => {}); setCollections(sections); setNotes(page); setMore(!photoQuery && page.length === 50);
+      setCounts(totals); repository.current = db; void db.lastNoteOperation().then(value => { if (request === generation.current) setUndo(value); }).catch(() => {}); setCollections(sections); setNotes(page); setMore(page.length === 50);
       const recentIds = [...new Set(page.map(n => n.collection_id))];
       const shownSections = [...sections].sort((a, b) => {
         const rank = (id: string) => recentIds.includes(id) ? recentIds.indexOf(id) : recentIds.length;
@@ -100,7 +88,7 @@ export function LocalMemoryScreen() {
     }).catch(e => { if (request === generation.current) { repository.current = null; setError(memoryErrorMessage(e)); } })
       .finally(() => { if (request === generation.current) setLoading(false); });
     return () => { generation.current++; repository.current = null; };
-  }, [profile, term, photoQuery, collectionId, status, retry]));
+  }, [profile, term, collectionId, status, retry]));
   useEffect(() => onLocalMemorySessionChange(unlocked => {
     if (!unlocked) {
       hygieneGeneration.current++;
@@ -255,7 +243,7 @@ export function LocalMemoryScreen() {
     } catch (e) { setError(memoryErrorMessage(e)); } finally { setBusy(false); }
   }
   useEffect(() => { setSelectedIds([]); setSelecting(false); setActionsOpen(false); setConfirmation(null); setNotes([]); setContextNote(null); setMoveOpen(false); setMergeOpen(false); hygieneGeneration.current++; setHygieneReviewOpen(false); setHygieneSuggestionsOpen(false); setHygieneSuggestions(null); setSuggestedReviewNotes(null); setHygieneExcluded([]); setHygienePreview(null); setHygieneConfirm(false); setHygienePolicyItem(null); setHygieneAction("archive"); }, [profile, collectionId, term, status]);
-  function openAll() { setPhotoQuery(null); setStatus("active"); setCollectionId(undefined); setSearch(""); setTerm(""); setSelectedIds([]); setSelecting(false); }
+  function openAll() { setStatus("active"); setCollectionId(undefined); setSearch(""); setTerm(""); setSelectedIds([]); setSelecting(false); }
   function openStatus(value: typeof status) { openAll(); setStatus(value); setMenuOpen(false); }
   const cancelSelection = useCallback(() => {
     setSelectedIds([]); setSelecting(false); setActionsOpen(false); setConfirmation(null); setContextNote(null);
@@ -287,7 +275,7 @@ export function LocalMemoryScreen() {
     if (!repository.current || busy) return;
     const request = generation.current; setBusy(true);
     try {
-      const page = photoQuery ? [] : await repository.current.searchNotes(term, 50, notes.length, { collectionId, status });
+      const page = await repository.current.searchNotes(term, 50, notes.length, { collectionId, status });
       if (request === generation.current) { setNotes(prev => [...prev, ...page]); setMore(page.length === 50); }
     } catch (e) { if (request === generation.current) setError(memoryErrorMessage(e)); }
     finally { setBusy(false); }
@@ -322,32 +310,14 @@ export function LocalMemoryScreen() {
         <View style={{ flexDirection: "row", alignItems: "center", borderWidth: 1, borderColor: t.line, borderRadius: nebulaRadii.field, backgroundColor: t.panel }}>
           <Feather name="search" size={19} color={t.muted} style={{ marginLeft: nebulaSpacing.sm }} />
           <TextInput testID="memory-search" accessibilityLabel="Поиск по заметкам"
-            value={search} editable={!selecting && !loading} onChangeText={value => { setPhotoQuery(null); setSearch(value); }} placeholder="Поиск по памяти"
+            value={search} editable={!selecting && !loading} onChangeText={setSearch} placeholder="Поиск по памяти"
             placeholderTextColor={t.muted} returnKeyType="search"
             style={{ flex: 1, minWidth: 0, minHeight: nebulaTouch.minimum, fontSize: 16, color: t.text, paddingHorizontal: nebulaSpacing.sm }} />
           {search ? <Pressable accessibilityRole="button" disabled={selecting} accessibilityLabel="Очистить поиск по памяти"
-            onPress={() => { setPhotoQuery(null); setSearch(""); }} style={{ minWidth: nebulaTouch.minimum, minHeight: nebulaTouch.minimum, justifyContent: "center", alignItems: "center" }}>
+            onPress={() => setSearch("")} style={{ minWidth: nebulaTouch.minimum, minHeight: nebulaTouch.minimum, justifyContent: "center", alignItems: "center" }}>
             <Feather name="x" size={20} color={t.muted} />
           </Pressable> : null}
         </View>
-        {term && status === "active" && !selecting ? <View style={{ flexDirection: "row", alignItems: "center", gap: nebulaSpacing.sm }}>
-          <Pressable accessibilityRole="button" accessibilityLabel="Найти фотографии по описанию"
-            disabled={loading || term.length > 256}
-            onPress={() => setPhotoQuery(term)}
-            style={{ minHeight: nebulaTouch.minimum, borderRadius: nebulaRadii.field,
-              backgroundColor: t.panel, borderWidth: 1,
-              borderColor: photoQuery ? t.secondary : t.line,
-              paddingHorizontal: nebulaSpacing.md, justifyContent: "center",
-              opacity: loading || term.length > 256 ? 0.5 : 1 }}>
-            <Text style={{ color: t.secondary, fontWeight: "700" }}>Найти фото по описанию</Text>
-          </Pressable>
-          {photoQuery ? <Pressable accessibilityRole="button" accessibilityLabel="Вернуться к поиску заметок"
-            onPress={() => setPhotoQuery(null)}
-            style={{ minHeight: nebulaTouch.minimum, justifyContent: "center",
-              paddingHorizontal: nebulaSpacing.sm }}>
-            <Text style={{ color: t.muted }}>Заметки</Text>
-          </Pressable> : null}
-        </View> : null}
         {!term && status === "active" && !collectionId ? <>
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
             <Text style={{ color: t.text, fontSize: 18, fontWeight: "700" }}>Коллекции</Text>
@@ -364,7 +334,7 @@ export function LocalMemoryScreen() {
         </> : null}
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
           {collectionId || status !== "active" || term ? <Pressable accessibilityRole="button" disabled={selecting} accessibilityLabel="Ко всем записям" onPress={openAll} style={{ ...button, paddingHorizontal: 8 }}><Feather name="arrow-left" size={20} color={t.secondary} /></Pressable> : null}
-          <Text style={{ flex: 1, color: t.text, fontSize: 18, fontWeight: "700" }}>{photoQuery ? "Найденные фотографии" : term ? "Результаты поиска" : status === "archived" ? "Архив" : status === "trashed" ? "Корзина" : collectionId ? collections.find(c => c.id === collectionId)?.name : "Недавнее"}</Text>
+          <Text style={{ flex: 1, color: t.text, fontSize: 18, fontWeight: "700" }}>{term ? "Результаты поиска" : status === "archived" ? "Архив" : status === "trashed" ? "Корзина" : collectionId ? collections.find(c => c.id === collectionId)?.name : "Недавнее"}</Text>
           <Pressable accessibilityRole="button" accessibilityLabel={grid ? "Показать списком" : "Показать плитками"} disabled={selecting} onPress={() => setGrid(v => !v)} style={{ ...button, paddingHorizontal: 12 }}>
             <Feather name={grid ? "list" : "grid"} size={20} color={t.secondary} />
           </Pressable>

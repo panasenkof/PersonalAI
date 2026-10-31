@@ -43,8 +43,8 @@ export function VisionModelCard() {
     <View style={{ gap: nebulaSpacing.sm }}>
       <Text style={{ color: t.muted, ...nebulaTypography.label }}>
         Модели EmbeddingGemma 2 работают локально. После установки можно
-        проиндексировать сохранённые фотографии вручную и искать их по описанию
-        в разделе «Память». Смысловой поиск текста MiniLM остаётся без изменений.
+        проиндексировать сохранённые фотографии вручную и искать их из чата
+        по описанию или другому снимку. Смысловой поиск текста MiniLM остаётся без изменений.
       </Text>
       {VISION_MODELS.map(m => {
         const installed = downloaded(m.id);

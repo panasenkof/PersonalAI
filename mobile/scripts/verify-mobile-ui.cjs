@@ -185,7 +185,7 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByTestId('action-hint').waitFor();
       const improveHint = await page.getByTestId('action-hint').boundingBox();
       let composerRowY = null;
-      for (const label of ['Прикрепить файл к сообщению', 'Сфотографировать и распознать', 'Голосовой ввод', 'Вернуть исходный текст', 'Отправить запрос']) {
+      for (const label of ['Прикрепить файл к сообщению', 'Сфотографировать и найти похожее в памяти', 'Голосовой ввод', 'Вернуть исходный текст', 'Отправить запрос']) {
         const box = await page.getByTestId('composer-actions').getByLabel(label, { exact: true }).boundingBox();
         assert(box.x >= 0 && box.x + box.width <= width, `Composer action ${label} stays inside the viewport`);
         assert(box.height >= 46, `Composer action ${label} has a usable touch target`);

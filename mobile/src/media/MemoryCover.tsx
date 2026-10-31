@@ -27,18 +27,18 @@ export function removeCoverFile(uri: string) {
 
 /** Local-only disposable thumbnail. No remote URL, no persistent plaintext cache.
  * Large/unsupported files remain readable through the explicit attachment viewer. */
-export function MemoryCover({ profile, entityId, active = true, height = 132, label = "Обложка записи", compact = false }: {
-  profile: string; entityId: string; active?: boolean; height?: number; label?: string; compact?: boolean;
+export function MemoryCover({ profile, entityId, photoAttachmentId, active = true, height = 132, label = "Обложка записи", compact = false }: {
+  profile: string; entityId: string; photoAttachmentId?: string; active?: boolean; height?: number; label?: string; compact?: boolean;
 }) {
   const t = useTheme(); const focused = useIsFocused(); const visible = useApplicationVisible();
   const [unlocked, setUnlocked] = useState(true);
   const [uri, setUri] = useState(""); const [failed, setFailed] = useState(false);
   const [noPreview, setNoPreview] = useState(false);
-  useEffect(() => setNoPreview(false), [profile, entityId]);
+  useEffect(() => setNoPreview(false), [profile, entityId, photoAttachmentId]);
   const [message, setMessage] = useState(""); const [loading, setLoading] = useState(false); const [attempt, setAttempt] = useState(0);
   useEffect(() => onLocalMemorySessionChange(setUnlocked), []);
   const activation = useRef({ key: "", seen: false });
-  const key = profile + ":" + entityId;
+  const key = profile + ":" + entityId + ":" + (photoAttachmentId || "");
   if (activation.current.key !== key || !focused || !visible || !unlocked) activation.current = { key, seen: false };
   if (active && focused && visible && unlocked) activation.current.seen = true;
   // Retain only while mounted in the bounded FlatList window. Blur, lock,
@@ -50,7 +50,7 @@ export function MemoryCover({ profile, entityId, active = true, height = 132, la
     if (enabled) void coverSlot(async () => {
       if (controller.signal.aborted) return;
       const items = await attachmentsForEntity(profile, entityId);
-      const image = items.find(item => attachmentPreviewKind(item) === "image" && item.size <= 12 * 1024 * 1024);
+      const image = items.find(item => (!photoAttachmentId || item.id === photoAttachmentId) && attachmentPreviewKind(item) === "image" && item.size <= 12 * 1024 * 1024);
       if (controller.signal.aborted) return;
       if (!image) {
         setNoPreview(true);
@@ -75,7 +75,7 @@ export function MemoryCover({ profile, entityId, active = true, height = 132, la
     }).catch(() => { if (!controller.signal.aborted) { setFailed(true); setNoPreview(true); setMessage("Не удалось загрузить превью"); } })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => { controller.abort(); removeCoverFile(thumbnail); };
-  }, [enabled, profile, entityId, attempt]);
+  }, [enabled, profile, entityId, photoAttachmentId, attempt]);
   return <View testID={"memory-cover-" + entityId} style={{ height: noPreview ? undefined : height, minHeight: compact ? 48 : 64, paddingVertical: uri ? 0 : 8, backgroundColor: t.soft, justifyContent: "center", alignItems: "center", overflow: "hidden" }}>
     {enabled && uri && !failed ? <Image source={{ uri }} accessibilityLabel={label} resizeMode="cover"
       onError={() => { removeCoverFile(uri); setUri(""); setFailed(true); setNoPreview(true); setMessage("Не удалось показать превью"); }} style={{ width: "100%", height: "100%" }} /> : <>

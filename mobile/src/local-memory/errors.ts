@@ -6,6 +6,12 @@ export function memoryErrorMessage(error: unknown): string {
   const known: Record<string, string> = {
     application_locked: "Для доступа войдите в приложение.",
     vision_model_not_installed: "Чтобы искать фотографии, сначала скачайте и выберите модель EmbeddingGemma 2 в настройках.",
+    vision_invalid_query_image: "Выберите JPEG, PNG или WebP из файлов телефона. HEIC пока не поддерживается.",
+    vision_query_image_size: "Фотография пуста или превышает 80 МБ. Выберите файл меньшего размера.",
+    vision_query_cancelled: "Поиск похожих фотографий остановлен.",
+    vision_camera_permission_denied: "Разрешите доступ к камере, чтобы сфотографировать предмет для поиска.",
+    vision_query_one_image: "Для поиска похожих фотографий прикрепите один снимок.",
+    vision_model_changed: "Выбранная модель изменилась во время поиска. Повторите запрос.",
     vision_native_unavailable: "В установленной версии PersAI недоступен модуль поиска фотографий. Установите актуальное обновление.",
     vision_model_checksum_mismatch: "Файл модели повреждён. Удалите его в настройках и скачайте заново.",
     hygiene_review_changed_repeat_preview: "Записи, доступ или правила сохранения изменились. Проверьте группу заново — ничего не изменено.",
