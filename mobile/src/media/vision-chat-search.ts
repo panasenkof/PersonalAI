@@ -11,7 +11,7 @@ import { preparePhotoMatchChatAttachment83 } from "./vision-photo-query";
 
 export type LocalPhotoIntent83 = { mode:"text"|"image"; description:string };
 const findVerb=/(?:найд|найти|ищ|поиск|поищ|покаж|показать|отыс|разыщ|find|search|show)/iu;
-const photoWord=/(?:фото|фотограф|снимк|изображен|картин|\b(?:photo|picture|image)s?\b)/iu;
+const photoWord=/(?:фото|фотограф|сним(?:ок|к|ки|ков)|изображен|картин|\b(?:photo|picture|image)s?\b)/iu;
 const similarWord=/(?:похож|сходн|аналогич|такие же|такое же|similar|like this)/iu;
 const externalWeb=/(?:в интернете|из интернета|в сети|онлайн|\bonline\b|\bweb\b)/iu;
 
