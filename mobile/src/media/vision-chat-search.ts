@@ -22,7 +22,8 @@ export function localPhotoIntent83(
   question:string, attachments:readonly ChatAttachment[] = [],
 ):LocalPhotoIntent83|null {
   const prompt=question.trim();
-  if(!prompt || prompt.length>256 || externalWeb.test(prompt) || !findVerb.test(prompt))
+  const everydayPhotoQuestion = /^(?:у меня есть|есть ли у меня|сохранил(?:а)? ли я)\s+(?:фото|сним|изображен)/iu.test(prompt);
+  if(!prompt || prompt.length>256 || externalWeb.test(prompt) || /^как(?:\s|[?.,])/iu.test(prompt) || (!findVerb.test(prompt) && !everydayPhotoQuestion))
     return null;
   const imageCount=attachments.filter(a=>a.kind==="image").length;
   if(imageCount && (similarWord.test(prompt) ||
@@ -30,6 +31,7 @@ export function localPhotoIntent83(
     return {mode:"image",description:""};
   if(!photoWord.test(prompt))return null;
   const description=prompt
+    .replace(/^(?:у меня есть|есть ли у меня|сохранил(?:а)? ли я)\s+/iu, "")
     .replace(/^\s*(?:найди|найти|покажи|показать|отыщи|разыщи|ищи|поищи|поиск|find|search|show)\s+(?:мне\s+)?/iu,"")
     .replace(/^\s*(?:фотографии|фотографию|фотографий|фотография|фото|снимки|снимок|изображения|изображение|картинки|картинку|photos?|pictures?|images?)\s*/iu,"")
     .trim();
@@ -71,8 +73,8 @@ export async function searchLocalPhotosFromChat83(
   }));
   return {
     text:memory.length
-      ? `Найдено похожих фотографий: ${memory.length}. Откройте карточку, чтобы посмотреть оригинал. Порядок — по приблизительному сходству, не гарантированное распознавание объекта.`
-      : "Среди проиндексированных доступных фотографий совпадений не найдено. Проверьте, что модель загружена, а снимки проиндексированы в настройках.",
+      ? `${intent.mode === "image" ? "Похожие фото" : "Фото по описанию"} · записей: ${memory.length}. Нажмите на снимок, чтобы открыть его. Результаты упорядочены по сходству.`
+      : "Среди подготовленных доступных фотографий похожих не найдено. Попробуйте другое описание или снимок предмета крупнее. Если вы недавно добавили фото, подготовьте их для поиска в настройках.",
     memory,
   };
 }
