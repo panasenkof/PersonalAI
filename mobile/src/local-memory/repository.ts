@@ -963,7 +963,9 @@ export class SqliteMemoryRepository implements MemoryRepository {
       }
     }
     let top = [...scored.values()].sort((a, b) => b.score - a.score || a.order - b.order);
-    const imageLocators = new Map<string, { attachmentId:string;name:string;mime:string;size:number;recordVersion:number }>();
+    // One note can contain many independently indexed photos. Preserve every
+    // matching attachment locator in similarity order, not just the last one.
+    const imageLocators = new Map<string, Array<{ attachmentId:string;name:string;mime:string;size:number;recordVersion:number }>>();
     // Meaning (п. 13): the closest chunks join through rank fusion. Without the
     // model, or when nothing is close enough, the word search stands as it is.
     if (options.vector) {
@@ -996,8 +998,11 @@ export class SqliteMemoryRepository implements MemoryRepository {
         const found = scored.get(image.entityId) ||
           { row, score: 0, order: scored.size, chunk: null, weight: 0 };
         scored.set(image.entityId,found);
-        photoRank.push(image.entityId);
-        imageLocators.set(image.entityId, {
+        if(!imageLocators.has(image.entityId)) {
+          photoRank.push(image.entityId);
+          imageLocators.set(image.entityId,[]);
+        }
+        imageLocators.get(image.entityId)!.push({
           attachmentId:image.attachmentId,name:image.name,mime:image.mime,
           size:image.size,recordVersion:image.recordVersion,
         });
@@ -1033,15 +1038,15 @@ export class SqliteMemoryRepository implements MemoryRepository {
       const chunk = await this.db.getFirstAsync<Row>(
         item.chunk ? "SELECT text FROM memory_chunks WHERE id=?" : "SELECT text FROM memory_chunks WHERE entity_id=? ORDER BY ord LIMIT 1",
         [item.chunk ?? String(item.row.id)]);
-      const photo = imageLocators.get(String(item.row.id));
-      const originals = photo ? [{
+      const photos = imageLocators.get(String(item.row.id));
+      const originals = photos?.map(photo=>({
         attachmentId:photo.attachmentId,recordId:String(item.row.id),
         recordVersion:photo.recordVersion,name:photo.name,
         mime:photo.mime,size:photo.size,kind:"image" as const,
         metadataOnly:true as const,originalTime:null,originalPage:null,
-      }] : undefined;
+      }));
       hits.push({ entity: entityFrom(item.row), score: item.score,
-        chunk: TEXT(chunk?.text) || photo?.name || "", ...(originals ? {originals} : {}) });
+        chunk: TEXT(chunk?.text) || photos?.[0]?.name || "", ...(originals?.length ? {originals} : {}) });
     }
     return hits;
   }
