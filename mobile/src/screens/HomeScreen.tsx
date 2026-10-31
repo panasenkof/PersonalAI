@@ -345,7 +345,14 @@ function NebulaHomeContent() {
       <Text style={{ color: t.accent, fontSize: 12 }}>↓ К последнему</Text>
     </Pressable> : null}
     </View>
-    {error || notice || historyNotice ? <View style={{ paddingHorizontal: 16, paddingVertical: 6 }}><Text accessibilityRole="alert" style={{ color: error || notice ? t.err : t.muted }}>{error || notice || historyNotice}</Text>
+    {error || notice || historyNotice ? <View style={{ paddingHorizontal: 16, paddingVertical: 6 }}>
+      <View style={{flexDirection:"row",alignItems:"center",gap:8}}>
+        <Text accessibilityRole="alert" style={{ flex:1,color: error || notice ? t.err : t.muted }}>{error || notice || historyNotice}</Text>
+        {notice ? <Pressable accessibilityRole="button" accessibilityLabel="Закрыть сообщение об ошибке" onPress={() => setNotice("")}
+          style={{minWidth:44,minHeight:44,justifyContent:"center",alignItems:"center"}}>
+          <Feather name="x" size={18} color={t.secondary}/>
+        </Pressable> : null}
+      </View>
       {error && ready ? <Pressable accessibilityRole="button" onPress={() => void store.checkpoint().catch(() => {})} style={{ minHeight: 44, justifyContent: "center" }}><Text style={{ color: t.accent }}>Повторить сохранение истории</Text></Pressable> : null}</View> : null}
     {!canSend && ready && !(needsSetup && !active?.rows.length) ? <Pressable accessibilityRole="button" onPress={() => openConnections()} style={{ paddingHorizontal: 16, minHeight: 44, justifyContent: "center" }}><Text style={{ color: t.accent }}>Добавьте модель в настройках подключений →</Text></Pressable> : null}
     <View style={{ zIndex: 3, padding: 10, gap: 5, backgroundColor: t.panel, borderTopWidth: 1, borderColor: t.line }}>
@@ -374,7 +381,7 @@ function NebulaHomeContent() {
       </Pressable> : null}
       <PromptInput value={question} onChange={value => store.setQuestion(value)} onClear={() => { normalization.reset(); setVoiceReset(n => n + 1); }} editable={ready} onFocusChange={setComposerFocused} />
       <View testID="composer-actions" style={{ zIndex: 1, flexDirection: "row", alignItems: "center", gap: 4 }}>
-        <IconAction compact icon="paperclip" label="Файл" accessibilityLabel="Прикрепить файл к сообщению" hint="JPEG, PNG, WebP или текст UTF-8. До 3 файлов, каждый до 2 МБ; текст вместе до 24 000 символов. Файлы не сохраняются как заметки." hintAbove hintAlign="start" disabled={!ready || busy || pickingAttachment || dictating} onPress={() => void pickAttachment()} />
+        <IconAction compact icon="paperclip" label="Файл" accessibilityLabel="Прикрепить файл к сообщению" hint="JPEG, PNG, WebP или текст UTF-8. До 3 файлов: фото до 80 МБ автоматически уменьшается для чата (до 6 МБ); текст вместе до 24 000 символов. Файлы не сохраняются как заметки." hintAbove hintAlign="start" disabled={!ready || busy || pickingAttachment || dictating} onPress={() => void pickAttachment()} />
 <IconAction compact icon="camera" label={cameraBusy?"Съёмка…":"Камера"} accessibilityLabel="Сделать снимок"
           hint="Камера откроется сразу. После съёмки можно спросить ИИ, найти в интернете или памяти, сохранить заметку."
           hintAbove disabled={!ready || cameraBusy || busy || pickingAttachment || dictating}
