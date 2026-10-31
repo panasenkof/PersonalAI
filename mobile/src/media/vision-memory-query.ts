@@ -12,6 +12,8 @@ import { readyNativeVisionModel83 } from "./vision-native-model";
 import { embedVisionText83 } from "./vision-native-vectors";
 
 type ScopedSearch = {
+  /** User explicitly chose photo search: never silently show only text results. */
+  requireVisionModel?:boolean;
   collectionIds?:string[];sensitivities?:string[];limit?:number;
   vector?:{model:string;values:Float32Array};
 };
@@ -25,6 +27,7 @@ export async function searchWithVision83(
   if(!localMemorySessionUnlocked())throw new Error("application_locked");
   const model=await readyNativeVisionModel83();
   if(!localMemorySessionUnlocked())throw new Error("application_locked");
+  if (!model && options.requireVisionModel) throw new Error("vision_model_not_installed");
   const imageVector=model?{
     model:model.modelSpace,
     values:await embedVisionText83({
@@ -32,6 +35,7 @@ export async function searchWithVision83(
     },query),
   }:undefined;
   if(!localMemorySessionUnlocked())throw new Error("application_locked");
+  const { requireVisionModel: _required, ...memoryScope } = options;
   return withLocalMemoryDatabase(profile, async db => new SqliteMemoryRepository(db)
-    .searchMemory(query,{...options,...(imageVector?{imageVector}:{})}));
+    .searchMemory(query,{...memoryScope,...(imageVector?{imageVector}:{})}));
 }

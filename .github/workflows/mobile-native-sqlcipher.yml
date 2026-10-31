@@ -5,7 +5,7 @@ on:
   workflow_call:
     inputs:
       vision_expo_gate:
-        description: "Isolated Kotlin 2.4 engine in real Expo/SQLCipher APK; CI only"
+        description: "Kotlin 2.4 vision engine in real Expo/SQLCipher APK; ordinary release parity"
         required: false
         type: boolean
         default: false

@@ -5,6 +5,9 @@ export function memoryErrorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : "";
   const known: Record<string, string> = {
     application_locked: "Для доступа войдите в приложение.",
+    vision_model_not_installed: "Чтобы искать фотографии, сначала скачайте и выберите модель EmbeddingGemma 2 в настройках.",
+    vision_native_unavailable: "В установленной версии PersAI недоступен модуль поиска фотографий. Установите актуальное обновление.",
+    vision_model_checksum_mismatch: "Файл модели повреждён. Удалите его в настройках и скачайте заново.",
     hygiene_review_changed_repeat_preview: "Записи, доступ или правила сохранения изменились. Проверьте группу заново — ничего не изменено.",
     memory_source_not_available_or_stale: "Источник изменён или недоступен. Повторите поиск.",
     local_memory_unlock_failed: "Ключ существующей памяти недоступен. Исходная база сохранена; не удаляйте приложение.",
