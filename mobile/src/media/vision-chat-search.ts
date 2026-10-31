@@ -67,6 +67,7 @@ export async function searchLocalPhotosFromChat83(
     title:(hit.entity.title || "Фотография в памяти").slice(0,160),
     via:"search" as const,
     photo:true,
+    photoAttachmentId:hit.originals?.find(file=>file.kind==="image")?.attachmentId,
   }));
   return {
     text:memory.length
