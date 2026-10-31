@@ -5,19 +5,20 @@ import { MemoryCover } from "./MemoryCover";
 import { useTheme } from "../theme";
 import { nebulaRadii, nebulaSpacing, nebulaTouch } from "../design/nebula/tokens";
 
-/** One best match is visible by default; up to five next-best photos can be
+/** One best match is visible by default; more ranked photos can be
  * expanded on demand. Distinct attachment keys preserve images within a note.
  */
-export function PhotoSearchResults({ profile, results, onOpen }: {
+export function PhotoSearchResults({ profile, results, limit = 6, onOpen }: {
   profile: string;
   results: ChatMemoryRef[];
+  limit?: number;
   onOpen: (result: ChatMemoryRef, original: boolean) => void;
 }) {
   const t = useTheme();
   const { width, fontScale } = useWindowDimensions();
   const [expanded, setExpanded] = useState(false);
   const twoColumns = width >= 360 && fontScale <= 1.2;
-  const closest = results.slice(0, 6);
+  const closest = results.slice(0, Number.isInteger(limit) && limit >= 1 && limit <= 20 ? limit : 6);
   const visible = expanded ? closest : closest.slice(0, 1);
   return <View style={{ gap: nebulaSpacing.sm }}>
     <View style={{ flexDirection: "row", flexWrap: "wrap", gap: nebulaSpacing.sm }}>
