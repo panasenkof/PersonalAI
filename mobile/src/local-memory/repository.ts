@@ -22,6 +22,7 @@ import { defaultKind, indexEntity, isMemoryKind, normalizeAlias } from "./search
 import type { MemoryKind } from "./search-index";
 import { ftsPhrase, requiredSearchEvidence, searchSteps } from "./query";
 import { MIN_SIMILARITY, VECTOR_DIM, cosine, embeddingHash, embeddingText, fromBlob, fuseRanks, isCurrentVectorSpace, toBlob } from "./vectors";
+import { attachmentImageMatches, saveAttachmentImageVector } from "./attachment-vectors";
 import type {
   CollectionRecord, EntityRecord, MemoryHit, MemoryPage, MemoryRepository, NewEntity, NewObservation,
   ObservationRecord, RelationRecord, RevisionRecord, RecordSensitivity,
@@ -838,6 +839,12 @@ export class SqliteMemoryRepository implements MemoryRepository {
        ORDER BY e.updated_at DESC LIMIT 8`, params);
   }
 
+  /** One repository writer shared by the visual indexing scheduler.
+   * Untrusted/stale original rows never receive derived vectors. */
+  async saveImageVector(attachmentId: string, model: string, values: Float32Array, sourceVersion: string): Promise<boolean> {
+    return saveAttachmentImageVector(this.db,{attachmentId,model,values,sourceVersion});
+  }
+
   /** The assistant's memory search: the whole phrase, each word, each stem and
    * names, every search over title, text, index words and names. A record
    * found by more of them ranks higher. Each hit carries its best chunk.
@@ -845,6 +852,8 @@ export class SqliteMemoryRepository implements MemoryRepository {
   async searchMemory(query: string, options: { collectionIds?: string[]; sensitivities?: string[]; limit?: number;
     /** The question's vector from the on-device model (п. 13), if it is downloaded. */
     vector?: { model: string; values: Float32Array };
+    /** EmbeddingGemma visual vector; same search entrypoint, separate checked embedding space. */
+    imageVector?: { model: string; values: Float32Array };
     /** Stable owner ID and exact confirmed role, never a name heuristic. */
     verifiedRelative?: { ownerPersonId: string; relationKind: DirectPersonRelation };
   } = {}): Promise<MemoryHit[]> {
@@ -952,6 +961,7 @@ export class SqliteMemoryRepository implements MemoryRepository {
       }
     }
     let top = [...scored.values()].sort((a, b) => b.score - a.score || a.order - b.order);
+    const imageLocators = new Map<string, { attachmentId:string;name:string;mime:string;size:number;recordVersion:number }>();
     // Meaning (п. 13): the closest chunks join through rank fusion. Without the
     // model, or when nothing is close enough, the word search stands as it is.
     if (options.vector) {
@@ -965,6 +975,34 @@ export class SqliteMemoryRepository implements MemoryRepository {
         }
         const fused = fuseRanks([top.map(t => String(t.row.id)), near.map(n => String(n.row.id))]);
         top = [...scored.values()].sort((a, b) => (fused.get(String(b.row.id)) || 0) - (fused.get(String(a.row.id)) || 0) || a.order - b.order);
+      }
+    }
+    if (options.imageVector) {
+      // A photo hit goes through the same searchMemory fusion and final
+      // evidence/ACL path, never a separate unscoped image search endpoint.
+      const similarImages = await attachmentImageMatches(this.db, {
+        ...options.imageVector, collectionIds: options.collectionIds,
+        sensitivities: options.sensitivities, limit: 20,
+      });
+      const photoRank: string[] = [];
+      for (const image of similarImages) {
+        const row = await this.db.getFirstAsync<Row>(
+          "SELECT * FROM memory_entities WHERE id=? AND record_status='active' AND domain='notes'",
+          [image.entityId]);
+        if (!row || Number(row.record_version) !== image.recordVersion) continue;
+        const found = scored.get(image.entityId) ||
+          { row, score: 0, order: scored.size, chunk: null, weight: 0 };
+        scored.set(image.entityId,found);
+        photoRank.push(image.entityId);
+        imageLocators.set(image.entityId, {
+          attachmentId:image.attachmentId,name:image.name,mime:image.mime,
+          size:image.size,recordVersion:image.recordVersion,
+        });
+      }
+      if (photoRank.length) {
+        const fused = fuseRanks([top.map(x=>String(x.row.id)),photoRank]);
+        top = [...scored.values()].sort((a,b)=>
+          (fused.get(String(b.row.id))||0)-(fused.get(String(a.row.id))||0) || a.order-b.order);
       }
     }
     const required = requiredSearchEvidence(query);
@@ -992,7 +1030,15 @@ export class SqliteMemoryRepository implements MemoryRepository {
       const chunk = await this.db.getFirstAsync<Row>(
         item.chunk ? "SELECT text FROM memory_chunks WHERE id=?" : "SELECT text FROM memory_chunks WHERE entity_id=? ORDER BY ord LIMIT 1",
         [item.chunk ?? String(item.row.id)]);
-      hits.push({ entity: entityFrom(item.row), score: item.score, chunk: TEXT(chunk?.text) ?? "" });
+      const photo = imageLocators.get(String(item.row.id));
+      const originals = photo ? [{
+        attachmentId:photo.attachmentId,recordId:String(item.row.id),
+        recordVersion:photo.recordVersion,name:photo.name,
+        mime:photo.mime,size:photo.size,kind:"image" as const,
+        metadataOnly:true as const,originalTime:null,originalPage:null,
+      }] : undefined;
+      hits.push({ entity: entityFrom(item.row), score: item.score,
+        chunk: TEXT(chunk?.text) || photo?.name || "", ...(originals ? {originals} : {}) });
     }
     return hits;
   }

@@ -34,7 +34,7 @@ const V3_TABLES = {
 const USER_SEARCH_TABLES = Object.keys(V3_TABLES) as Array<keyof typeof V3_TABLES>;
 const ENTITY_COLUMNS = "id,collection_id,domain,schema_version,title,payload_json,record_status,sensitivity," +
   "source_kind,source_ref,valid_from,valid_until,created_at,updated_at,record_version";
-export const RESTORABLE_VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17];
+export const RESTORABLE_VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18];
 const LEGACY_MAX_BACKUP_BYTES = 2 * 1024 * 1024 * 1024;
 const MANIFEST_FORMAT_VERSION = 8;
 const MANIFEST_TABLE = 'persai_backup_manifest' as const;

@@ -42,7 +42,7 @@ export function onLocalMemorySessionChange(listener: (unlocked: boolean) => void
 }
 export const localMemorySessionUnlocked = () => applicationSessionUnlocked;
 const requireApplicationSession = () => { if (!applicationSessionUnlocked) throw new Error("application_locked"); };
-export const LOCAL_MEMORY_SCHEMA_VERSION = 17;
+export const LOCAL_MEMORY_SCHEMA_VERSION = 18;
 const KIND_CHECK = `CHECK(kind IN (${MEMORY_KINDS.map(k => `'${k}'`).join(",")}))`;
 
 /** All memory (including full-text indexes, revisions, and WAL) is in SQLCipher. */
@@ -85,6 +85,19 @@ CREATE TABLE IF NOT EXISTS memory_attachment_parts (
   attachment_id TEXT NOT NULL REFERENCES memory_attachments(id) ON DELETE CASCADE,
   ord INTEGER NOT NULL, bytes BLOB NOT NULL, sha256 TEXT NOT NULL, PRIMARY KEY(attachment_id, ord)
 );
+-- v18: disposable photo vectors in the SAME encrypted SQLCipher profile.
+-- Not part of the user-owned backup, not a second data store or a new search UI.
+-- Attachment FK cascades, source_version fingerprint is checked at read time.
+CREATE TABLE IF NOT EXISTS memory_attachment_vectors (
+  attachment_id TEXT NOT NULL REFERENCES memory_attachments(id) ON DELETE CASCADE,
+  model TEXT NOT NULL, dim INTEGER NOT NULL CHECK(dim=768),
+  vector BLOB NOT NULL CHECK(length(vector)=3072),
+  source_version TEXT NOT NULL CHECK(length(source_version)=64),
+  created_at TEXT NOT NULL,
+  PRIMARY KEY(attachment_id,model)
+);
+CREATE INDEX IF NOT EXISTS ix_memory_attachment_vectors_model
+  ON memory_attachment_vectors(model,attachment_id);
 -- Source/extraction records are USER DATA: backup/restore must preserve them.
 -- A source_version hashes the immutable part hashes, not guessed file paths.
 CREATE TABLE IF NOT EXISTS memory_extractions (
