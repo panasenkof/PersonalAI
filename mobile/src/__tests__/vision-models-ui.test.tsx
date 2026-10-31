@@ -27,7 +27,7 @@ beforeEach(() => {
 test("shows honest unintegrated state and a confirmed, optional 388MB download", () => {
   const a = jest.spyOn(Alert, "alert").mockImplementation(() => {});
   const v = render(<VisionModelCard />);
-  expect(v.getByText(/поиск по сохранённым фотографиям будет включён только после/)).toBeTruthy();
+  expect(v.getByText(/можно\s+проиндексировать сохранённые фотографии вручную/)).toBeTruthy();
   fireEvent.press(v.getByLabelText("Скачать EmbeddingGemma 2 · Фото"));
   expect(a).toHaveBeenCalledTimes(1);
   expect(downloadVisionModel).not.toHaveBeenCalled();
