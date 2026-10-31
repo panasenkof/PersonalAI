@@ -27,8 +27,8 @@ export function removeCoverFile(uri: string) {
 
 /** Local-only disposable thumbnail. No remote URL, no persistent plaintext cache.
  * Large/unsupported files remain readable through the explicit attachment viewer. */
-export function MemoryCover({ profile, entityId, photoAttachmentId, active = true, height = 132, label = "Обложка записи", compact = false }: {
-  profile: string; entityId: string; photoAttachmentId?: string; active?: boolean; height?: number; label?: string; compact?: boolean;
+export function MemoryCover({ profile, entityId, photoAttachmentId, active = true, height = 132, label = "Обложка записи", compact = false, fit = "cover" }: {
+  profile: string; entityId: string; photoAttachmentId?: string; active?: boolean; height?: number; label?: string; compact?: boolean; fit?: "cover" | "contain";
 }) {
   const t = useTheme(); const focused = useIsFocused(); const visible = useApplicationVisible();
   const [unlocked, setUnlocked] = useState(true);
@@ -77,7 +77,7 @@ export function MemoryCover({ profile, entityId, photoAttachmentId, active = tru
     return () => { controller.abort(); removeCoverFile(thumbnail); };
   }, [enabled, profile, entityId, photoAttachmentId, attempt]);
   return <View testID={"memory-cover-" + entityId} style={{ height: noPreview ? undefined : height, minHeight: compact ? 48 : 64, paddingVertical: uri ? 0 : 8, backgroundColor: t.soft, justifyContent: "center", alignItems: "center", overflow: "hidden" }}>
-    {enabled && uri && !failed ? <Image source={{ uri }} accessibilityLabel={label} resizeMode="cover"
+    {enabled && uri && !failed ? <Image source={{ uri }} accessibilityLabel={label} resizeMode={fit}
       onError={() => { removeCoverFile(uri); setUri(""); setFailed(true); setNoPreview(true); setMessage("Не удалось показать превью"); }} style={{ width: "100%", height: "100%" }} /> : <>
       {loading ? <ActivityIndicator accessibilityLabel="Загрузка обложки" /> : <Feather name="image" size={compact ? 24 : 28} color={t.muted} />}
       {!compact ? <Text style={{ color: t.muted, fontSize: 13, padding: 8, textAlign: "center" }}>{loading ? "Загружаю фото…" : message || "Фото"}</Text> : null}

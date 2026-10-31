@@ -67,3 +67,10 @@ test("lock expiry prevents result display",async()=>{
     .rejects.toThrow("application_locked");
   expect(search).not.toHaveBeenCalled();
 });
+
+test.each(["У меня есть фото красного велосипеда?", "Есть ли у меня фото коробки с инструментами?", "Сохранила ли я фото чека?"])("everyday request stays local: %s", prompt => {
+  expect(localPhotoIntent83(prompt)).toMatchObject({mode:"text"});
+});
+test.each(["Как найти фото в интернете?", "Что написано на этом фото?", "Как найти фото в памяти?"])("question about using or understanding photos stays a conversation: %s", prompt => {
+  expect(localPhotoIntent83(prompt,[attachment])).toBeNull();
+});

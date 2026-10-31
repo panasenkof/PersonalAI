@@ -2,7 +2,7 @@ import { ChatAttachmentList } from "../media/ChatAttachmentList";
 import { useChatAttachments } from "../media/useChatAttachments";
 import { capturePhotoForSearch83 } from "../media/vision-chat-camera";
 import { localPhotoIntent83 } from "../media/vision-chat-search";
-import { MemoryCover } from "../media/MemoryCover";
+import { PhotoSearchResults } from "../media/PhotoSearchResults";
 import { memoryErrorMessage } from "../local-memory/errors";
 import { onLocalMemorySessionChange } from "../local-memory/storage";
 import { useFocusEffect, useIsFocused, useNavigation } from "@react-navigation/native";
@@ -206,12 +206,13 @@ function NebulaHomeContent() {
           <Text selectable style={{ color: item.role === "user" ? t.userText : item.role === "info" ? t.muted : t.text, lineHeight: 23 }}>{item.text}</Text>}
         {item.attachments?.length ? <ChatAttachmentList files={item.attachments}/> : null}
         {item.memory?.length ? <View style={{ gap: 4 }}><Text style={{ color: t.muted, fontSize: 12 }}>Из памяти</Text>
-          {item.memory.map(m => <View key={m.id}><Pressable key={m.id} accessibilityRole="link" accessibilityLabel={(m.photo ? "Открыть найденное фото " : "Открыть запись ") + m.title}
-            onPress={() => navigation.navigate("MemoryNote", { entityId: m.id, photoAttachmentId: m.photoAttachmentId })} style={{ minHeight: 48, justifyContent: "center" }}>
-            {m.photo ? <MemoryCover profile={profile} entityId={m.id} photoAttachmentId={m.photoAttachmentId} compact height={86}
-              label={"Найденная фотография: "+m.title} /> : null}
-            <Text numberOfLines={1} style={{ color: t.accent }}>{m.title}<Text style={{ color: t.muted, fontSize: 12 }}>{(m.section ? " · " + m.section : "") + (m.via === "rewrite" ? " · найдено другими словами" : m.via === "assistant" ? " · нашёл помощник" : "")}</Text></Text>
-          </Pressable>{m.photo ? <Pressable accessibilityRole="link" onPress={() => navigation.navigate("MemoryNote", {entityId:m.id})} style={{minHeight:48,justifyContent:"center"}}><Text style={{color:t.secondary}}>Открыть запись</Text></Pressable> : null}</View>)}</View> : null}
+          {item.memory.every(m => m.photo) ? <PhotoSearchResults key={item.id} profile={profile} results={item.memory}
+            onOpen={(result, original) => navigation.navigate("MemoryNote", {entityId:result.id, photoAttachmentId:original ? result.photoAttachmentId : undefined})} /> :
+            item.memory.map(m => <Pressable key={m.id} accessibilityRole="link" accessibilityLabel={"Открыть запись " + m.title}
+              onPress={() => navigation.navigate("MemoryNote", {entityId:m.id})} style={{minHeight:48,justifyContent:"center"}}>
+              <Text style={{color:t.accent}}>{m.title}<Text style={{color:t.muted,fontSize:12}}>{(m.section ? " · " + m.section : "") + (m.via === "rewrite" ? " · найдено другими словами" : m.via === "assistant" ? " · нашёл помощник" : "")}</Text></Text>
+            </Pressable>)}
+        </View> : null}
         {item.sources?.length ? <View style={{ gap: 4 }}><Text style={{ color: t.muted, fontSize: 12 }}>Источники</Text>{item.sources.map(url => <Pressable key={url} accessibilityRole="link" onPress={() => void Linking.openURL(url).catch(() => setNotice("Не удалось открыть ссылку."))} style={{ minHeight: 44, justifyContent: "center" }}>
           <Text numberOfLines={2} style={{ color: t.accent, textDecorationLine: "underline" }}>{url}</Text>
         </Pressable>)}</View> : null}
@@ -255,7 +256,7 @@ function NebulaHomeContent() {
       <PromptInput value={question} onChange={value => store.setQuestion(value)} onClear={() => { normalization.reset(); setVoiceReset(n => n + 1); }} editable={ready} onFocusChange={setComposerFocused} />
       <View testID="composer-actions" style={{ zIndex: 1, flexDirection: "row", alignItems: "center", gap: 4 }}>
         <IconAction compact icon="paperclip" label="Файл" accessibilityLabel="Прикрепить файл к сообщению" hint="JPEG, PNG, WebP или текст UTF-8. До 3 файлов, каждый до 2 МБ; текст вместе до 24 000 символов. Файлы не сохраняются как заметки." hintAbove hintAlign="start" disabled={!ready || busy || pickingAttachment || dictating} onPress={() => void pickAttachment()} />
-<IconAction compact icon="camera" label={cameraBusy?"Ищу фото":"Камера"} accessibilityLabel="Сфотографировать и найти похожее в памяти"
+<IconAction compact icon="camera" label={cameraBusy?"Ищу фото":"Снять и найти"} accessibilityLabel="Сфотографировать и найти похожее в памяти"
           hint="Снять предмет и сразу найти похожие сохранённые фотографии. Без облачной LLM и без сохранения снимка в заметки."
           hintAbove disabled={!ready || cameraBusy || busy || pickingAttachment || dictating}
           onPress={() => void captureAndSearch()} />
