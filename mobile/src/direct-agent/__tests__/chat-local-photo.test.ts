@@ -12,6 +12,7 @@ jest.mock("../../media/vision-chat-search",()=>({
   searchLocalPhotosFromChat83:jest.fn(),
 }));
 jest.mock("expo-crypto",()=>({randomUUID:()=>"id-"+Math.random().toString(36).slice(2)}));
+jest.mock("../agent-preferences",()=>({loadModelCallLimit:jest.fn(async()=>4)}));
 const intent=localPhotoIntent83 as jest.Mock;
 const search=searchLocalPhotosFromChat83 as jest.Mock;
 const settings={provider:"openai",apiKey:"never-send",model:"remote",baseUrl:"https://api.openai.com/v1"} as any;
