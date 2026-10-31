@@ -144,10 +144,15 @@ test("search immediately hides submitted photo while preserving unrelated draft 
   store.setAttachments(id,[image,other]);
   store.setQuestion("Мой несвязанный текст");
   let finishSearch!:(value:unknown)=>void;
-  search.mockImplementationOnce(()=>new Promise(resolve=>{finishSearch=resolve;}));
+  let signalSearchStarted!:()=>void;
+  const searchStarted=new Promise<void>(resolve=>{signalSearchStarted=resolve;});
+  search.mockImplementationOnce(()=>{
+    signalSearchStarted();
+    return new Promise(resolve=>{finishSearch=resolve;});
+  });
   const pending=store.searchPhotosLocally(image,id);
   // The photo is gone before native inference; other draft content survives.
-  await Promise.resolve();
+  await searchStarted;
   const during=store.getSnapshot().conversations.find(c=>c.id===id)!;
   expect(during.busy).toBe(true);
   expect(during.attachments?.map(f=>f.id)).toEqual(["other"]);
