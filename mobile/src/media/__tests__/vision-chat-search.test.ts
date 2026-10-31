@@ -85,3 +85,17 @@ test.each([["model_missing","model"],["empty","import"],["unprepared","prepare"]
   expect(textSearch).not.toHaveBeenCalled();
   expect(imageVector).not.toHaveBeenCalled();
 });
+
+import { localPhotoSuggestion83 } from "../vision-chat-search";
+test.each(["Фото коробки с инструментами", "Снимок красного велосипеда"])("description suggests explicit local action: %s", prompt=>{
+  expect(localPhotoSuggestion83(prompt)).toMatchObject({mode:"text"});
+});
+test.each(["Красный велосипед", "Как найти фото в интернете?", "Сделай фото для объявления", "Что написано на этикетке?", "", "У меня есть фото велосипеда?"])("ordinary or already explicit prompt has no extra suggestion: %s", prompt=>{
+  expect(localPhotoSuggestion83(prompt)).toBeNull();
+});
+test("attachment action owns photo suggestions and typing does not search",()=>{
+  expect(localPhotoSuggestion83("Фото коробки",[attachment])).toBeNull();
+  localPhotoSuggestion83("Фото коробки");
+  expect(textSearch).not.toHaveBeenCalled();
+  expect(photoSearchReadiness83).not.toHaveBeenCalled();
+});

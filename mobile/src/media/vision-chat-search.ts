@@ -39,6 +39,14 @@ export function localPhotoIntent83(
   return {mode:"text",description:description.length>1?description:prompt};
 }
 
+/** Suggest only a short photo description. The caller still requires a tap. */
+export function localPhotoSuggestion83(question: string, attachments: readonly ChatAttachment[] = []): LocalPhotoIntent83 | null {
+  const prompt = question.trim();
+  if (attachments.length || prompt.length > 200 || externalWeb.test(prompt) || localPhotoIntent83(prompt)) return null;
+  if (!/^(?:фото|фотография|фотографии|снимок|снимки|изображение|изображения)\s+[^?]+$/iu.test(prompt)) return null;
+  return localPhotoIntent83("Найди " + prompt);
+}
+
 export async function searchLocalPhotosFromChat83(
   profile:string,intent:LocalPhotoIntent83,attachments:readonly ChatAttachment[]=[],
   signal?:AbortSignal,

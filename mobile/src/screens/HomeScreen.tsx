@@ -1,7 +1,7 @@
 import { ChatAttachmentList } from "../media/ChatAttachmentList";
 import { useChatAttachments } from "../media/useChatAttachments";
 import { capturePhotoForSearch83 } from "../media/vision-chat-camera";
-import { localPhotoIntent83 } from "../media/vision-chat-search";
+import { localPhotoIntent83, localPhotoSuggestion83 } from "../media/vision-chat-search";
 import { PhotoSearchResults } from "../media/PhotoSearchResults";
 import { memoryErrorMessage } from "../local-memory/errors";
 import { onLocalMemorySessionChange } from "../local-memory/storage";
@@ -109,6 +109,7 @@ function NebulaHomeContent() {
   const canSend = Boolean(ready && !pickingAttachment && !cameraBusy && !active?.deleting && settings && (settings.apiKey || anonymousLocalAllowed(settings)));
   const question = active?.question || "";
   const localPhotoSearch = localPhotoIntent83(question,active?.attachments || []);
+  const suggestedPhotoSearch = localPhotoSuggestion83(question, active?.attachments || []);
   const canSearchLocal = Boolean(ready && !cameraBusy && !pickingAttachment && !active?.deleting && localPhotoSearch);
   const busy = active?.busy || false;
   const statusSignals = { voicePhase, busy, streamText: active?.streamText, progress: active?.progress, error, ready };
@@ -257,6 +258,11 @@ function NebulaHomeContent() {
         <Text style={{color:t.muted,fontSize:12}}>«Найти похожие в памяти» ищет на телефоне. При отправке обычного вопроса вложения получит выбранная модель.</Text>
       </> : null}
       {(active?.attachments?.some(file => file.kind === "image") || localPhotoSearch) ? <Pressable accessibilityRole="link" onPress={() => navigation.navigate("Tabs", {screen:"Settings"})} style={{minHeight:48,justifyContent:"center"}}><Text style={{color:t.secondary}}>Модель и подготовка фото в настройках</Text></Pressable> : null}
+      {suggestedPhotoSearch && ready && !busy && !cameraBusy && !pickingAttachment && !dictating ? <Pressable
+        accessibilityRole="button" accessibilityLabel="Поискать в моих фото" style={{minHeight:48,justifyContent:"center"}}
+        onPress={() => { Keyboard.dismiss(); void store.searchPhotosLocally(undefined, active?.id, true); }}>
+        <Text style={{color:t.accent}}>Поискать в моих фото</Text>
+      </Pressable> : null}
       <PromptInput value={question} onChange={value => store.setQuestion(value)} onClear={() => { normalization.reset(); setVoiceReset(n => n + 1); }} editable={ready} onFocusChange={setComposerFocused} />
       <View testID="composer-actions" style={{ zIndex: 1, flexDirection: "row", alignItems: "center", gap: 4 }}>
         <IconAction compact icon="paperclip" label="Файл" accessibilityLabel="Прикрепить файл к сообщению" hint="JPEG, PNG, WebP или текст UTF-8. До 3 файлов, каждый до 2 МБ; текст вместе до 24 000 символов. Файлы не сохраняются как заметки." hintAbove hintAlign="start" disabled={!ready || busy || pickingAttachment || dictating} onPress={() => void pickAttachment()} />
