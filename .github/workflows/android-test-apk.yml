@@ -161,8 +161,6 @@ jobs:
           PIA_ANDROID_RELEASE: 'true'
           PIA_ANDROID_VERSION_CODE: ${{ steps.version.outputs.code }}
           PIA_ANDROID_BUILD_SHA: ${{ env.TARGET_SHA }}
-          # Same engine as exact-head CI; this is the existing com.persai.app,
-          # never a second application or an automatic data reset.
           PIA_VISION_EXPO_GATE: 'true'
         run: |
           gradle -p ../spikes/photo-83-1-android :probe:assembleDebug --no-daemon --stacktrace
@@ -223,158 +221,19 @@ jobs:
           unzip -Z1 "$apk" | grep -Fx 'assets/index.android.bundle'
           aapt_bin="$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -n 1)"
           "$aapt_bin" dump badging "$apk" | grep -Fq "package: name='com.persai.app'"
-          # Native embeddings must be present in the SAME upgradable app,
-          # never only in an ephemeral test/lab APK.
-          dex_list="$(unzip -Z1 "$apk" | grep -E '^classes[0-9]*[.]dex
-          # On-device Whisper: the ExecuTorch runtime and its CPU backend are packaged.
-          for lib in libRnExecutorch.so libexecutorch.so libxnnpack_executorch_backend.so; do
-            unzip -Z1 "$apk" | grep -Fx "lib/arm64-v8a/$lib"
-          done
-          apksigner="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
-          test -x "$apksigner"
-          "$apksigner" verify --verbose "$apk"
-          # Supports both legacy "Signer #1" and new "V2 Signer:" apksigner outputs.
-          # Keep signature verification and certificate equality fail-closed.
-          actual="$("$apksigner" verify --print-certs "$apk" | node scripts/apk-signing-certificate.cjs)"
-          expected="$(keytool -exportcert -alias "$PIA_ANDROID_KEY_ALIAS" -keystore "$PIA_ANDROID_KEYSTORE_PATH" \
-            -storepass "$PIA_ANDROID_STORE_PASSWORD" | sha256sum | cut -d ' ' -f 1)"
-          if [ "$actual" != "$expected" ]; then
-            echo "::error::APK certificate SHA-256 is ${actual}; configured release keystore certificate SHA-256 is ${expected}. Publishing blocked."
-            exit 1
-          fi
-          echo "APK signing certificate matches the configured release key."
-          mkdir -p dist
-          tag="android-test-b${GITHUB_RUN_NUMBER}-a${GITHUB_RUN_ATTEMPT}"
-          name="PersAI-${tag}.apk"
-          cp "$apk" "dist/$name"
-          (cd dist && sha256sum "$name" > "$name.sha256")
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "name=$name" >> "$GITHUB_OUTPUT"
-
-      - name: Publish permanent GitHub prerelease
-        if: steps.changes.outputs.needed == 'true'
-        working-directory: mobile
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.artifact.outputs.tag }}
-          APK_NAME: ${{ steps.artifact.outputs.name }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          # The branch may advance during Gradle compilation; never publish stale binaries.
-          current_main="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')"
-          if [ "$current_main" != "$TARGET_SHA" ]; then
-            echo "Main advanced while building; skip stale APK. The next green CI will trigger a fresh build."
-            exit 0
-          fi
-          cat > "$RUNNER_TEMP/apk-notes.md" <<EOF
-          Android test APK built from verified main commit ${TARGET_SHA}.
-
-          - Standalone release APK with native SQLCipher (not Expo Go/debug).
-          - Android package: ${{ env.PIA_ANDROID_PACKAGE }}
-          - Build number: ${{ steps.version.outputs.code }}
-          - Checksum: see attached .sha256 file.
-          - Upgrade without uninstalling: keep the same signing certificate and package ID.
-          - Test build. Local test memory need not be backed up for this acceptance; preserve package and signing certificate.
-
-          Setup: docs/RELEASE_APK.md · Device QA: docs/DEVICE_QA.md
-          EOF
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" "dist/$APK_NAME" "dist/$APK_NAME.sha256" --clobber
-            gh release edit "$TAG" --notes-file "$RUNNER_TEMP/apk-notes.md"
-          else
-            gh release create "$TAG" "dist/$APK_NAME" "dist/$APK_NAME.sha256" \
-              --title "Android test ${TAG}" --notes-file "$RUNNER_TEMP/apk-notes.md" \
-              --target "$TARGET_SHA" --prerelease
-          fi
-
-      # Never cache signing material or compiled APKs, only native object files.
-      - name: Save trusted arm64 C/C++ compiler cache
-        if: ${{ steps.changes.outputs.needed == 'true' && success() }}
-        uses: actions/cache/save@v4
-        with:
-          path: ~/.cache/ccache
-          key: ${{ runner.os }}-persai-native-ccache-arm64-v8a-v1-${{ hashFiles('mobile/package-lock.json') }}-${{ github.run_id }}
-)"
+          # Test the user-upgradable com.persai.app, not a separate lab APK.
+          dex_list="$(unzip -Z1 "$apk" | grep -E '^classes[0-9]*[.]dex$')"
+          test -n "$dex_list"
           found=0
           while IFS= read -r dex; do
             if unzip -p "$apk" "$dex" | strings | grep -q 'VisionInteropApi'; then
-              found=1; break
+              found=1
+              break
             fi
           done <<< "$dex_list"
-          test "$found" -eq 1 || { echo "::error::Vision ABI missing from signed PersAI release"; exit 1; }
-          if unzip -Z1 "$apk" | grep -Eq '[.]litertlm
-          # On-device Whisper: the ExecuTorch runtime and its CPU backend are packaged.
-          for lib in libRnExecutorch.so libexecutorch.so libxnnpack_executorch_backend.so; do
-            unzip -Z1 "$apk" | grep -Fx "lib/arm64-v8a/$lib"
-          done
-          apksigner="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
-          test -x "$apksigner"
-          "$apksigner" verify --verbose "$apk"
-          # Supports both legacy "Signer #1" and new "V2 Signer:" apksigner outputs.
-          # Keep signature verification and certificate equality fail-closed.
-          actual="$("$apksigner" verify --print-certs "$apk" | node scripts/apk-signing-certificate.cjs)"
-          expected="$(keytool -exportcert -alias "$PIA_ANDROID_KEY_ALIAS" -keystore "$PIA_ANDROID_KEYSTORE_PATH" \
-            -storepass "$PIA_ANDROID_STORE_PASSWORD" | sha256sum | cut -d ' ' -f 1)"
-          if [ "$actual" != "$expected" ]; then
-            echo "::error::APK certificate SHA-256 is ${actual}; configured release keystore certificate SHA-256 is ${expected}. Publishing blocked."
-            exit 1
-          fi
-          echo "APK signing certificate matches the configured release key."
-          mkdir -p dist
-          tag="android-test-b${GITHUB_RUN_NUMBER}-a${GITHUB_RUN_ATTEMPT}"
-          name="PersAI-${tag}.apk"
-          cp "$apk" "dist/$name"
-          (cd dist && sha256sum "$name" > "$name.sha256")
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "name=$name" >> "$GITHUB_OUTPUT"
-
-      - name: Publish permanent GitHub prerelease
-        if: steps.changes.outputs.needed == 'true'
-        working-directory: mobile
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.artifact.outputs.tag }}
-          APK_NAME: ${{ steps.artifact.outputs.name }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          # The branch may advance during Gradle compilation; never publish stale binaries.
-          current_main="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')"
-          if [ "$current_main" != "$TARGET_SHA" ]; then
-            echo "Main advanced while building; skip stale APK. The next green CI will trigger a fresh build."
-            exit 0
-          fi
-          cat > "$RUNNER_TEMP/apk-notes.md" <<EOF
-          Android test APK built from verified main commit ${TARGET_SHA}.
-
-          - Standalone release APK with native SQLCipher (not Expo Go/debug).
-          - Android package: ${{ env.PIA_ANDROID_PACKAGE }}
-          - Build number: ${{ steps.version.outputs.code }}
-          - Checksum: see attached .sha256 file.
-          - Upgrade without uninstalling: keep the same signing certificate and package ID.
-          - Test build only. Validate encrypted memory backup/restore on real devices.
-
-          Setup: docs/RELEASE_APK.md · Device QA: docs/DEVICE_QA.md
-          EOF
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" "dist/$APK_NAME" "dist/$APK_NAME.sha256" --clobber
-            gh release edit "$TAG" --notes-file "$RUNNER_TEMP/apk-notes.md"
-          else
-            gh release create "$TAG" "dist/$APK_NAME" "dist/$APK_NAME.sha256" \
-              --title "Android test ${TAG}" --notes-file "$RUNNER_TEMP/apk-notes.md" \
-              --target "$TARGET_SHA" --prerelease
-          fi
-
-      # Never cache signing material or compiled APKs, only native object files.
-      - name: Save trusted arm64 C/C++ compiler cache
-        if: ${{ steps.changes.outputs.needed == 'true' && success() }}
-        uses: actions/cache/save@v4
-        with:
-          path: ~/.cache/ccache
-          key: ${{ runner.os }}-persai-native-ccache-arm64-v8a-v1-${{ hashFiles('mobile/package-lock.json') }}-${{ github.run_id }}
-; then
-            echo "::error::Vision weights bundled without user opt-in"; exit 1
+          test "$found" -eq 1 || { echo "::error::Vision ABI missing from signed PersAI APK"; exit 1; }
+          if unzip -Z1 "$apk" | grep -Eq '[.]litertlm$'; then
+            echo "::error::Model weights bundled without consent"; exit 1
           fi
           # On-device Whisper: the ExecuTorch runtime and its CPU backend are packaged.
           for lib in libRnExecutorch.so libexecutorch.so libxnnpack_executorch_backend.so; do
