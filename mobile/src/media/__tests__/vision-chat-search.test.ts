@@ -46,7 +46,7 @@ test("text result contains only verified photo-source hits and same scope",async
   const result=await searchLocalPhotosFromChat83("guest",{mode:"text",description:"красный велосипед"});
   expect(result.memory).toEqual([{id:"note-1",title:"Красный велосипед",via:"search",photo:true,photoAttachmentId:"a"}]);
   expect(textSearch).toHaveBeenCalledWith("guest","красный велосипед",{
-    sensitivities:["standard","inherit"],limit:8,requireVisionModel:true,
+    sensitivities:["standard","inherit"],limit:20,requireVisionModel:true,
     minImageSimilarity:0.65,
   });
 });
@@ -54,7 +54,7 @@ test("image query reuses canonical encrypted searchMemory with same ACL; never c
   const result=await searchLocalPhotosFromChat83("guest",{mode:"image",description:""},[attachment]);
   expect(result.memory).toHaveLength(1);
   expect(search).toHaveBeenCalledWith("",{
-    sensitivities:["standard","inherit"],limit:8,
+    sensitivities:["standard","inherit"],limit:20,
     imageVector:{model:expect.any(String),values:expect.any(Float32Array)},
     minImageSimilarity:0.77,
   });
@@ -140,7 +140,7 @@ test("generic local request combines photos and notes without readiness gate or 
     {id:"plain-note",title:"Ремонт велосипеда",via:"search"},
   ]);
   expect(textSearch).toHaveBeenCalledWith("guest","велосипед",{
-    sensitivities:["standard","inherit"],limit:8,
+    sensitivities:["standard","inherit"],limit:20,
     includeTextVector:true,standardCollectionsOnly:true,minImageSimilarity:0.65,
   });
   expect(photoSearchReadiness83).not.toHaveBeenCalled();
@@ -156,4 +156,13 @@ test("generic local search returns text-only hits if image model is unavailable"
 
 test("attached non-photo command still uses normal model route",()=>{
   expect(localPhotoIntent83("Найди велосипед",[attachment])).toBeNull();
+});
+
+test("all matched originals of a single note are returned, in similarity order",async()=>{
+  textSearch.mockResolvedValueOnce([{...photo,originals:[
+    {attachmentId:"a",kind:"image"}, {attachmentId:"b",kind:"image"},{attachmentId:"c",kind:"image"},
+  ]}]);
+  const result=await searchLocalPhotosFromChat83("guest",{mode:"text",description:"велосипед"});
+  expect(result.memory.map(m=>m.photoAttachmentId)).toEqual(["a","b","c"]);
+  expect(result.text).toContain("3");
 });
