@@ -66,8 +66,11 @@ function NebulaHomeContent() {
   },[profile]);
   const {picking: pickingAttachment, pick: pickAttachment} = useChatAttachments(store, active?.id, isFocused, setNotice);
   useEffect(()=>{
-    if(cameraOriginal.current && cameraOriginal.current.conversationId!==active?.id)releaseCameraOriginal();
-  },[active?.id]);
+    if(cameraOriginal.current &&
+      (cameraOriginal.current.conversationId!==active?.id ||
+       !active?.attachments?.some(f=>f.id===cameraOriginal.current?.attachmentId)))
+      releaseCameraOriginal();
+  },[active?.id,active?.attachments]);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [voiceReset, setVoiceReset] = useState(0);
   const [dictating, setDictating] = useState(false);
