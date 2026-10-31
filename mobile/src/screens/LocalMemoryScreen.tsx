@@ -255,7 +255,7 @@ export function LocalMemoryScreen() {
     } catch (e) { setError(memoryErrorMessage(e)); } finally { setBusy(false); }
   }
   useEffect(() => { setSelectedIds([]); setSelecting(false); setActionsOpen(false); setConfirmation(null); setNotes([]); setContextNote(null); setMoveOpen(false); setMergeOpen(false); hygieneGeneration.current++; setHygieneReviewOpen(false); setHygieneSuggestionsOpen(false); setHygieneSuggestions(null); setSuggestedReviewNotes(null); setHygieneExcluded([]); setHygienePreview(null); setHygieneConfirm(false); setHygienePolicyItem(null); setHygieneAction("archive"); }, [profile, collectionId, term, status]);
-  function openAll() { setStatus("active"); setCollectionId(undefined); setSearch(""); setTerm(""); setSelectedIds([]); setSelecting(false); }
+  function openAll() { setPhotoQuery(null); setStatus("active"); setCollectionId(undefined); setSearch(""); setTerm(""); setSelectedIds([]); setSelecting(false); }
   function openStatus(value: typeof status) { openAll(); setStatus(value); setMenuOpen(false); }
   const cancelSelection = useCallback(() => {
     setSelectedIds([]); setSelecting(false); setActionsOpen(false); setConfirmation(null); setContextNote(null);
