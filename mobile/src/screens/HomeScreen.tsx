@@ -313,8 +313,32 @@ function NebulaHomeContent() {
     {!canSend && ready && !(needsSetup && !active?.rows.length) ? <Pressable accessibilityRole="button" onPress={() => openConnections()} style={{ paddingHorizontal: 16, minHeight: 44, justifyContent: "center" }}><Text style={{ color: t.accent }}>Добавьте модель в настройках подключений →</Text></Pressable> : null}
     <View style={{ zIndex: 3, padding: 10, gap: 5, backgroundColor: t.panel, borderTopWidth: 1, borderColor: t.line }}>
       {active?.attachments?.length ? <>
-        <ChatAttachmentList files={active.attachments} disabled={busy || cameraBusy || pickingAttachment} onSearch={file => { void store.searchPhotosLocally(file, active.id); }} onRemove={id => { try {store.setAttachments(active.id, active.attachments!.filter(f => f.id !== id));} catch(e) {setNotice((e as Error).message);} }}/>
-        <Text style={{color:t.muted,fontSize:12}}>«Найти похожие в памяти» ищет на телефоне. При отправке обычного вопроса вложения получит выбранная модель.</Text>
+        <ChatAttachmentList files={active.attachments} disabled={busy || cameraBusy || pickingAttachment}
+          selectedImageId={selectedPhoto?.id} onSelectImage={setSelectedPhotoId}
+          onRemove={id => {try {
+            if(cameraOriginal.current?.attachmentId===id)releaseCameraOriginal();
+            store.setAttachments(active.id,active.attachments!.filter(f=>f.id!==id));
+            if(previewPhotoId===id)setPreviewPhotoId(null);
+            if(selectedPhotoId===id)setSelectedPhotoId(null);
+          }catch(e){setNotice((e as Error).message);}}}/>
+        {selectedPhoto ? <View testID="photo-context-actions" style={{gap:6}}>
+          <Text style={{color:t.muted,fontSize:12}}>Фото готово. Выберите действие или задайте вопрос ИИ ниже.</Text>
+          <View style={{flexDirection:"row",flexWrap:"wrap",gap:8}}>
+            {([
+              {id:"internet",label:"В интернете",run:findSelectedOnline},
+              {id:"memory",label:"В моей памяти",run:searchSelectedPhoto},
+              {id:"note",label:"Сохранить заметку",run:()=>void saveSelectedPhotoNote()},
+              {id:"preview",label:"Посмотреть",run:()=>setPreviewPhotoId(selectedPhoto.id)},
+            ] as const).map(action=><Pressable key={action.id} testID={"photo-action-"+action.id}
+              accessibilityRole="button" accessibilityLabel={action.label}
+              disabled={busy || cameraBusy || pickingAttachment} onPress={action.run}
+              style={{minHeight:48,paddingHorizontal:12,justifyContent:"center",borderRadius:14,
+                borderWidth:1,borderColor:t.line,backgroundColor:t.soft}}>
+              <Text style={{color:t.accent,fontWeight:"600",fontSize:13}}>{action.label}</Text>
+            </Pressable>)}
+          </View>
+          <Text style={{color:t.muted,fontSize:11}}>В памяти — только на телефоне. В интернете — отправка фото выбранному ИИ после подтверждения.</Text>
+        </View> : null}
       </> : null}
       {suggestedPhotoSearch && ready && !busy && !cameraBusy && !pickingAttachment && !dictating ? <Pressable
         accessibilityRole="button" accessibilityLabel="Поискать в моих фото" style={{minHeight:48,justifyContent:"center"}}
