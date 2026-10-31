@@ -5,6 +5,7 @@ import { MAX_CHAT_FILES } from "../direct-agent/chat-attachments";
 import type { ChatAttachment } from "../direct-agent/chat-attachments";
 import { localPhotoIntent83, localPhotoSuggestion83 } from "../media/vision-chat-search";
 import { PhotoSearchResults } from "../media/PhotoSearchResults";
+import { loadPhotoResultCount, DEFAULT_PHOTO_RESULT_COUNT } from "../media/photo-result-preferences";
 import { PhotoContextActions } from "../media/PhotoContextActions";
 import { memoryErrorMessage } from "../local-memory/errors";
 import { onLocalMemorySessionChange } from "../local-memory/storage";
@@ -51,6 +52,7 @@ function NebulaHomeContent() {
   const { store, ready, error, notice: historyNotice, conversations, active, sections } = useDirectChat();
   const [settings, setSettings] = useState<DirectAgentSettings | null>(null);
   const [notice, setNotice] = useState("");
+  const [photoResultCount, setPhotoResultCount] = useState<number>(DEFAULT_PHOTO_RESULT_COUNT);
   const [cameraBusy,setCameraBusy] = useState(false);
   const [selectedPhotoId,setSelectedPhotoId]=useState<string|null>(null);
   const [previewPhotoId,setPreviewPhotoId]=useState<string|null>(null);
@@ -116,6 +118,7 @@ function NebulaHomeContent() {
   useFocusEffect(useCallback(() => {
     let alive = true;
     setSettings(null);
+    if (profile) void loadPhotoResultCount(profile).then(value => { if (alive) setPhotoResultCount(value); }).catch(() => { if (alive) setPhotoResultCount(DEFAULT_PHOTO_RESULT_COUNT); });
     if (profile) void loadDirectConnections(profile).then(value => {
       if (!alive) return;
       const connection = value.connections.find(c => c.id === value.activeId)!;
@@ -304,7 +307,7 @@ function NebulaHomeContent() {
         </Pressable> : null}
         {item.attachments?.length ? <ChatAttachmentList files={item.attachments}/> : null}
         {item.memory?.length ? <View style={{ gap: 4 }}><Text style={{ color: t.muted, fontSize: 12 }}>Из памяти</Text>
-          {item.memory.some(m => m.photo) ? <PhotoSearchResults key={item.id} profile={profile} results={item.memory.filter(m=>m.photo)}
+          {item.memory.some(m => m.photo) ? <PhotoSearchResults key={item.id} profile={profile} results={item.memory.filter(m=>m.photo)} limit={photoResultCount}
             onOpen={(result, original) => navigation.navigate("MemoryNote", {entityId:result.id, photoAttachmentId:original ? result.photoAttachmentId : undefined})} /> : null}
           {item.memory.filter(m=>!m.photo).map(m => <Pressable key={m.id} accessibilityRole="link" accessibilityLabel={"Открыть запись " + m.title}
               onPress={() => navigation.navigate("MemoryNote", {entityId:m.id})} style={{minHeight:48,justifyContent:"center"}}>
