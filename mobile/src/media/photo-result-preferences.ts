@@ -1,13 +1,13 @@
 import * as SecureStore from "expo-secure-store";
 
 /** User-controlled number of ranked matches, not a similarity threshold. */
-export const PHOTO_RESULT_COUNTS = [1, 3, 6, 10, 20] as const;
-export type PhotoResultCount = typeof PHOTO_RESULT_COUNTS[number];
+export const MAX_PHOTO_RESULT_COUNT = 20;
+export type PhotoResultCount = number;
 export const DEFAULT_PHOTO_RESULT_COUNT: PhotoResultCount = 6;
 const key = (profile: string) => "persai.photo-result-count.v1." + profile;
 
 export function validPhotoResultCount(value: unknown): value is PhotoResultCount {
-  return typeof value === "number" && PHOTO_RESULT_COUNTS.some(x => x === value);
+  return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= MAX_PHOTO_RESULT_COUNT;
 }
 export async function loadPhotoResultCount(profile: string): Promise<PhotoResultCount> {
   const raw = await SecureStore.getItemAsync(key(profile));
