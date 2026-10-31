@@ -30,7 +30,7 @@ name: PersAI native offline smoke
 # 4. Create/edit a real SQLCipher note, without network/model credentials.
 - tapOn: "Вкладка Память"
 - tapOn: "Добавить в память"
-- tapOn: "Новая заметка"
+- tapOn: "Текст или голос"
 - tapOn:
     id: "note-title-input"
 - inputText: "Native smoke note"

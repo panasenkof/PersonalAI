@@ -58,8 +58,8 @@ test("selection starts empty and taps select only the chosen record", async () =
 test("add menu passes collection to the existing import screen", async () => {
  const v = render(<LocalMemoryScreen />); await waitFor(() => v.getByLabelText("Открыть заметку Первая"));
  fireEvent.press(v.getByLabelText("Раздел Заметки")); fireEvent.press(v.getByLabelText("Добавить в память"));
- await act(async () => { fireEvent.press(v.getByLabelText("Добавить фото")); });
- expect(mockNavigate).toHaveBeenCalledWith("MemoryImport", { source: "photo", collectionId: "a" });
+ await act(async () => { fireEvent.press(v.getByLabelText("Галерея")); });
+ expect(mockNavigate).toHaveBeenCalledWith("MemoryImport", { source: "gallery", collectionId: "a" });
 });
 
 

@@ -5,6 +5,7 @@ import { MAX_CHAT_FILES } from "../direct-agent/chat-attachments";
 import type { ChatAttachment } from "../direct-agent/chat-attachments";
 import { localPhotoIntent83, localPhotoSuggestion83 } from "../media/vision-chat-search";
 import { PhotoSearchResults } from "../media/PhotoSearchResults";
+import { PhotoContextActions } from "../media/PhotoContextActions";
 import { memoryErrorMessage } from "../local-memory/errors";
 import { onLocalMemorySessionChange } from "../local-memory/storage";
 import { useFocusEffect, useIsFocused, useNavigation } from "@react-navigation/native";
@@ -68,7 +69,7 @@ function NebulaHomeContent() {
     });
     return () => {cameraController.current?.abort();releaseCameraOriginal();off();};
   },[profile]);
-  const {picking: pickingAttachment, pick: pickAttachment} = useChatAttachments(store, active?.id, isFocused, setNotice);
+  const {picking: pickingAttachment, pick: pickAttachment} = useChatAttachments(store, active?.id, isFocused, setNotice, setSelectedPhotoId);
   useEffect(()=>{
     for(const [id,original] of cameraOriginal.current){
       if(original.conversationId!==active?.id || !active?.attachments?.some(f=>f.id===id))
@@ -140,8 +141,7 @@ function NebulaHomeContent() {
   const artworkSize = nebulaEmptyOrbSize(artLayout);
   const action = { minHeight: 44, minWidth: 44, justifyContent: "center" as const, alignItems: "center" as const };
   const selectedPhoto:ChatAttachment|undefined =
-    active?.attachments?.find(f=>f.id===selectedPhotoId && f.kind==="image") ||
-    [...(active?.attachments || [])].reverse().find(f=>f.kind==="image");
+    active?.attachments?.find(f=>f.id===selectedPhotoId && f.kind==="image");
   const previewPhoto=active?.attachments?.find(f=>f.id===previewPhotoId && f.kind==="image");
   async function captureToDraft() {
     if(cameraController.current || !ready || !active?.id || busy || pickingAttachment || dictating)return;
@@ -167,12 +167,27 @@ function NebulaHomeContent() {
       catch(e){discardCameraPhotoDraft83(draft.originalUri);throw e;}
       cameraOriginal.current.set(draft.attachment.id,{conversationId,uri:draft.originalUri});
       setSelectedPhotoId(draft.attachment.id);
+      Keyboard.dismiss();
+      setComposerFocused(false);
     } catch(e) {
       if(!controller.signal.aborted)Alert.alert("Камера",memoryErrorMessage(e),[{text:"Закрыть"}]);
     } finally {cameraController.current=null;setCameraBusy(false);}
   }
+  function discardSelectedPhoto() {
+    if(!selectedPhoto || busy || cameraBusy || !active?.id)return;
+    const photoId=selectedPhoto.id;
+    const conversationId=active.id;
+    const current=store.getSnapshot().conversations.find(c=>c.id===conversationId);
+    if(!current || current.busy || current.deleting)return;
+    store.setAttachments(conversationId,(current.attachments||[]).filter(file=>file.id!==photoId));
+    releaseCameraOriginal(photoId);
+    setPreviewPhotoId(value=>value===photoId?null:value);
+    setSelectedPhotoId(null);
+  }
   function searchSelectedPhoto() {
     if(!selectedPhoto || busy || cameraBusy || !active?.id)return;
+    Keyboard.dismiss();setComposerFocused(false);
+    // The submitted image leaves the composer on search start; other drafts remain.
     void store.searchPhotosLocally(selectedPhoto,active.id);
   }
   function findSelectedOnline() {
@@ -278,6 +293,11 @@ function NebulaHomeContent() {
         borderWidth: item.role === "assistant" ? 1 : 0, borderColor: t.line, borderRadius: 20, padding: 15, gap: 10 }}>
         {item.role === "assistant" ? <MarkdownText text={item.text} style={{ color: t.text, lineHeight: 23 }} /> :
           <Text selectable style={{ color: item.role === "user" ? t.userText : item.role === "info" ? t.muted : t.text, lineHeight: 23 }}>{item.text}</Text>}
+        {active?.retryPhoto?.rowId === item.id && active?.retryPhoto ? <Pressable accessibilityRole="button"
+          disabled={busy} onPress={() => void store.searchPhotosLocally(active.retryPhoto!.image,active.id)}
+          style={{minHeight:48,justifyContent:"center"}}>
+          <Text style={{color:t.secondary}}>Повторить поиск по фото</Text>
+        </Pressable> : null}
         {item.photoAction ? <Pressable accessibilityRole="button" style={{minHeight:48,justifyContent:"center"}}
           onPress={() => item.photoAction === "import" ? navigation.navigate("MemoryImport", {source:"photo"}) : navigation.navigate("PhotoSearchSettings")}>
           <Text style={{color:t.secondary}}>{item.photoAction === "model" ? "Выбрать модель" : item.photoAction === "import" ? "Добавить фото в память" : "Подготовить фото"}</Text>
@@ -335,24 +355,14 @@ function NebulaHomeContent() {
             if(previewPhotoId===id)setPreviewPhotoId(null);
             if(selectedPhotoId===id)setSelectedPhotoId(null);
           }catch(e){setNotice((e as Error).message);}}}/>
-        {selectedPhoto ? <View testID="photo-context-actions" style={{gap:6}}>
-          <Text style={{color:t.muted,fontSize:12}}>Фото готово. Выберите действие или задайте вопрос ИИ ниже.</Text>
-          <View style={{flexDirection:"row",flexWrap:"wrap",gap:8}}>
-            {([
-              {id:"internet",label:"В интернете",run:findSelectedOnline},
-              {id:"memory",label:"В моей памяти",run:searchSelectedPhoto},
-              {id:"note",label:"Сохранить заметку",run:()=>void saveSelectedPhotoNote()},
-              {id:"preview",label:"Посмотреть",run:()=>setPreviewPhotoId(selectedPhoto.id)},
-            ] as const).map(action=><Pressable key={action.id} testID={"photo-action-"+action.id}
-              accessibilityRole="button" accessibilityLabel={action.label}
-              disabled={busy || cameraBusy || pickingAttachment} onPress={action.run}
-              style={{minHeight:48,paddingHorizontal:12,justifyContent:"center",borderRadius:14,
-                borderWidth:1,borderColor:t.line,backgroundColor:t.soft}}>
-              <Text style={{color:t.accent,fontWeight:"600",fontSize:13}}>{action.label}</Text>
-            </Pressable>)}
-          </View>
-          <Text style={{color:t.muted,fontSize:11}}>В памяти — только на телефоне. В интернете — отправка фото выбранному ИИ после подтверждения.</Text>
-        </View> : null}
+        {selectedPhoto ? <PhotoContextActions disabled={busy || cameraBusy || pickingAttachment}
+          onCancel={discardSelectedPhoto}
+          actions={[
+            {id:"internet",label:"В интернете",run:findSelectedOnline},
+            {id:"memory",label:"В моей памяти",run:searchSelectedPhoto},
+            {id:"note",label:"Сохранить заметку",run:()=>void saveSelectedPhotoNote()},
+            {id:"preview",label:"Посмотреть",run:()=>setPreviewPhotoId(selectedPhoto.id)},
+          ]} /> : null}
       </> : null}
       {suggestedPhotoSearch && ready && !busy && !cameraBusy && !pickingAttachment && !dictating ? <Pressable
         accessibilityRole="button" accessibilityLabel="Поискать в моих фото" style={{minHeight:48,justifyContent:"center"}}

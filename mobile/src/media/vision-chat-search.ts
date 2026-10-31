@@ -4,6 +4,7 @@
  */
 import { photoSearchReadiness83 } from "./vision-index-pages";
 import type { ChatAttachment } from "../direct-agent/chat-attachments";
+import type { MemoryHit } from "../local-memory/types";
 import type { ChatMemoryRef } from "../direct-agent/conversations";
 import { localMemorySessionUnlocked, withLocalMemoryDatabase } from "../local-memory/storage";
 import { SqliteMemoryRepository } from "../local-memory/repository";
@@ -64,6 +65,16 @@ export function localPhotoSuggestion83(question: string, attachments: readonly C
   return localPhotoIntent83("Найди " + prompt);
 }
 
+function closestPhotos(hits: MemoryHit[]): ChatMemoryRef[] {
+  return hits.flatMap(({entity, originals}) =>
+    (originals || []).filter(file => file.kind === "image").map(file => ({entity, file}))
+  ).sort((a, b) => (b.file.imageSimilarity ?? -1) - (a.file.imageSimilarity ?? -1))
+    .slice(0, 6).map(({entity, file}) => ({
+      id: entity.id, title: (entity.title || "Фотография в памяти").slice(0, 160),
+      via: "search", photo: true, photoAttachmentId: file.attachmentId,
+    }));
+}
+
 export async function searchLocalPhotosFromChat83(
   profile:string,intent:LocalPhotoIntent83,attachments:readonly ChatAttachment[]=[],
   signal?:AbortSignal,
@@ -79,17 +90,18 @@ export async function searchLocalPhotosFromChat83(
     // A single existing searchMemory call fuses FTS, MiniLM and vision, under
     // standard collection ACL. Missing vision weights still permit text hits.
     const hits=await searchWithVision83(profile,intent.description,{
-      sensitivities:["standard","inherit"],limit:8,
+      sensitivities:["standard","inherit"],limit:20,
       includeTextVector:true,standardCollectionsOnly:true,
       minImageSimilarity:VISION_TEXT_FLOOR83,
     });
     guard();
-    const memory:ChatMemoryRef[]=hits.map(hit=>{
-      const image=hit.originals?.find(file=>file.kind==="image");
-      return {id:hit.entity.id,title:(hit.entity.title||"Запись в памяти").slice(0,160),
-        via:"search" as const,...(image?{photo:true,photoAttachmentId:image.attachmentId}:{})};
-    });
-    const photoCount=memory.filter(item=>item.photo).length;
+    // The chat presents at most six closest photos, while ordinary matching
+    // notes are still included without modifying their memory evidence.
+    const photos = closestPhotos(hits);
+    const notes = hits.filter(hit => !hit.originals?.some(file => file.kind === "image"))
+      .map(({entity}) => ({id: entity.id, title: (entity.title || "Запись в памяти").slice(0,160), via: "search" as const}));
+    const memory = [...photos, ...notes];
+    const photoCount = photos.length;
     const noteCount=memory.length-photoCount;
     const noteNoun=noteCount===1?"запись":noteCount<5?"записи":"записей";
     return {memory,text:memory.length
@@ -107,27 +119,22 @@ export async function searchLocalPhotosFromChat83(
         guard();
         return withLocalMemoryDatabase(profile,db=>new SqliteMemoryRepository(db)
           .searchMemory("",{
-            sensitivities:["standard","inherit"],limit:8,
+            sensitivities:["standard","inherit"],limit:20,
             imageVector:{model:vector.model,values:vector.values},
             minImageSimilarity:VISION_IMAGE_FLOOR83,
           }));
       })()
     : await searchWithVision83(profile,intent.description,{
-        sensitivities:["standard","inherit"],limit:8,requireVisionModel:true,
+        sensitivities:["standard","inherit"],limit:20,requireVisionModel:true,
         minImageSimilarity:VISION_TEXT_FLOOR83,
       });
   guard();
-  const photos=hits.filter(hit=>hit.originals?.some(file=>file.kind==="image"));
-  const memory:ChatMemoryRef[]=photos.map(hit=>({
-    id:hit.entity.id,
-    title:(hit.entity.title || "Фотография в памяти").slice(0,160),
-    via:"search" as const,
-    photo:true,
-    photoAttachmentId:hit.originals?.find(file=>file.kind==="image")?.attachmentId,
-  }));
+  // A note can hold several photos: each matching original gets its own
+  // result card; no photos vanish merely because they share a record ID.
+  const memory = closestPhotos(hits);
   return {
     text:memory.length
-      ? `Самое похожее фото — ниже.${memory.length > 1 ? " Другие варианты можно раскрыть." : ""} Нажмите на снимок, чтобы открыть оригинал.`
+      ? `${memory.length === 1 ? "Нашёл одно подходящее фото." : `Нашёл подходящих фото: ${memory.length}. Остальные варианты можно раскрыть.` } Нажмите на снимок, чтобы открыть оригинал.`
       : "Среди подготовленных доступных фотографий похожих не найдено. Попробуйте другое описание или снимок предмета крупнее. Если вы недавно добавили фото, подготовьте их для поиска в настройках.",
     memory,
     ...(!memory.length && (readiness === "partial" || readiness === "unknown") ? {photoAction:"prepare" as const} : {}),

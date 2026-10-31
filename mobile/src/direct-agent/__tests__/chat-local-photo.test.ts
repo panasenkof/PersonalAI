@@ -92,7 +92,8 @@ test.each(["vision_model_not_installed", "application_locked", "vision_native_un
   await store.searchPhotosLocally(image,id);
   const current=store.getSnapshot().conversations.find(c=>c.id===id)!;
   expect(current.question).toBe("Вопрос, который ещё редактирую");
-  expect(current.attachments).toHaveLength(2);
+  expect(current.attachments).toHaveLength(1);
+  expect(current.attachments?.[0].id).toBe("second");
   expect(current.busy).toBe(false);
   expect(runner).not.toHaveBeenCalled();
   expect(search).toHaveBeenCalledWith("guest",expect.anything(),[image],expect.anything());
@@ -132,5 +133,70 @@ test("failed search never replaces a new draft typed while searching",async()=>{
   search.mockImplementationOnce(async()=>{store.setQuestion("Совсем новый черновик");throw new Error("vision_native_unavailable");});
   await store.searchPhotosLocally();
   expect(store.getSnapshot().conversations[0].question).toBe("Совсем новый черновик");
+  store.dispose();
+});
+
+test("search immediately hides submitted photo while preserving unrelated draft and supports Stop",async()=>{
+  const {repo,runner}=fixture();
+  const store=new DirectChatStore("guest",repo,runner);await store.initialize();
+  const id=store.getSnapshot().activeId!;
+  const other:ChatAttachment={...image,id:"other"};
+  store.setAttachments(id,[image,other]);
+  store.setQuestion("Мой несвязанный текст");
+  let finishSearch!:(value:unknown)=>void;
+  let signalSearchStarted!:()=>void;
+  const searchStarted=new Promise<void>(resolve=>{signalSearchStarted=resolve;});
+  search.mockImplementationOnce(()=>{
+    signalSearchStarted();
+    return new Promise(resolve=>{finishSearch=resolve;});
+  });
+  const pending=store.searchPhotosLocally(image,id);
+  // The photo is gone before native inference; other draft content survives.
+  await searchStarted;
+  const during=store.getSnapshot().conversations.find(c=>c.id===id)!;
+  expect(during.busy).toBe(true);
+  expect(during.attachments?.map(f=>f.id)).toEqual(["other"]);
+  expect(during.question).toBe("Мой несвязанный текст");
+  store.stop(id);
+  finishSearch({text:"Найдено",memory:[]});
+  await pending;
+  expect(store.getSnapshot().conversations.find(c=>c.id===id)?.busy).toBe(false);
+  expect(runner).not.toHaveBeenCalled();
+  store.dispose();
+});
+test("confirmed internet photo consumes only selected image, not another draft",async()=>{
+  const {repo,runner}=fixture();
+  const store=new DirectChatStore("guest",repo,runner);await store.initialize();
+  const id=store.getSnapshot().activeId!;
+  const other:ChatAttachment={...image,id:"other"};
+  store.setAttachments(id,[image,other]);
+  store.setQuestion("Неотправленный черновик");
+  runner.mockResolvedValue({text:"Ответ",sources:[],requests:1});
+  await store.send({...settings,allowWeb:true},image.id);
+  const c=store.getSnapshot().conversations.find(c=>c.id===id)!;
+  expect(c.attachments?.map(f=>f.id)).toEqual(["other"]);
+  expect(c.question).toBe("Неотправленный черновик");
+  expect(c.rows[0].attachments?.map(f=>f.id)).toEqual(["captured"]);
+  store.dispose();
+});
+
+test.each(["model","exception"])("retries the same photo after %s without persisting it or consuming newer edits",async failure=>{
+  const {repo,records,runner}=fixture();
+  const store=new DirectChatStore("guest",repo,runner);
+  await store.initialize();
+  const id=store.getSnapshot().activeId!;
+  if(failure==="model") search.mockResolvedValueOnce({text:"Нужна модель",memory:[],photoAction:"model"});
+  else search.mockRejectedValueOnce(new Error("vision_native_unavailable"));
+  await store.searchPhotosLocally(image,id);
+  const failed=store.getSnapshot().conversations[0];
+  expect(failed.retryPhoto).toEqual({rowId:failed.rows.at(-1)?.id,image});
+  expect(JSON.stringify(records.get(id))).not.toContain(image.data);
+  store.setQuestion("Новый текст");
+  await store.searchPhotosLocally(failed.retryPhoto!.image,id);
+  const done=store.getSnapshot().conversations[0];
+  expect(done.retryPhoto).toBeUndefined();
+  expect(done.question).toBe("Новый текст");
+  expect(search).toHaveBeenLastCalledWith("guest",expect.anything(),[image],expect.anything());
+  expect(runner).not.toHaveBeenCalled();
   store.dispose();
 });

@@ -46,15 +46,16 @@ test("text result contains only verified photo-source hits and same scope",async
   const result=await searchLocalPhotosFromChat83("guest",{mode:"text",description:"красный велосипед"});
   expect(result.memory).toEqual([{id:"note-1",title:"Красный велосипед",via:"search",photo:true,photoAttachmentId:"a"}]);
   expect(textSearch).toHaveBeenCalledWith("guest","красный велосипед",{
-    sensitivities:["standard","inherit"],limit:8,requireVisionModel:true,
+    sensitivities:["standard","inherit"],limit:20,requireVisionModel:true,
     minImageSimilarity:0.65,
   });
 });
 test("image query reuses canonical encrypted searchMemory with same ACL; never calls text search",async()=>{
   const result=await searchLocalPhotosFromChat83("guest",{mode:"image",description:""},[attachment]);
   expect(result.memory).toHaveLength(1);
+  expect(result.text).not.toMatch(/раскрыть|кнопке/);
   expect(search).toHaveBeenCalledWith("",{
-    sensitivities:["standard","inherit"],limit:8,
+    sensitivities:["standard","inherit"],limit:20,
     imageVector:{model:expect.any(String),values:expect.any(Float32Array)},
     minImageSimilarity:0.77,
   });
@@ -140,7 +141,7 @@ test("generic local request combines photos and notes without readiness gate or 
     {id:"plain-note",title:"Ремонт велосипеда",via:"search"},
   ]);
   expect(textSearch).toHaveBeenCalledWith("guest","велосипед",{
-    sensitivities:["standard","inherit"],limit:8,
+    sensitivities:["standard","inherit"],limit:20,
     includeTextVector:true,standardCollectionsOnly:true,minImageSimilarity:0.65,
   });
   expect(photoSearchReadiness83).not.toHaveBeenCalled();
@@ -156,4 +157,61 @@ test("generic local search returns text-only hits if image model is unavailable"
 
 test("attached non-photo command still uses normal model route",()=>{
   expect(localPhotoIntent83("Найди велосипед",[attachment])).toBeNull();
+});
+
+test("all matched originals of a single note are returned, in similarity order",async()=>{
+  textSearch.mockResolvedValueOnce([{...photo,originals:[
+    {attachmentId:"a",kind:"image"}, {attachmentId:"b",kind:"image"},{attachmentId:"c",kind:"image"},
+  ]}]);
+  const result=await searchLocalPhotosFromChat83("guest",{mode:"text",description:"велосипед"});
+  expect(result.memory.map(m=>m.photoAttachmentId)).toEqual(["a","b","c"]);
+  expect(result.text).toContain("3");
+});
+
+test("photo-only search keeps closest six from a larger ranked collection",async()=>{
+  const ranked=Array.from({length:9},(_,i)=>({
+    entity:{id:"note-"+i,title:"Велосипед "+i},
+    originals:[{attachmentId:"image-"+i,kind:"image"}],
+  }));
+  textSearch.mockResolvedValueOnce(ranked);
+  const result=await searchLocalPhotosFromChat83("guest",{mode:"text",description:"велосипед"});
+  expect(result.memory).toHaveLength(6);
+  expect(result.memory.map(m=>m.photoAttachmentId)).toEqual(
+    Array.from({length:6},(_,i)=>"image-"+i));
+  expect(result.text).toContain("Остальные варианты можно раскрыть");
+  expect(result.text).not.toContain("Все найденные снимки показаны");
+});
+test("mixed text-and-photo search limits visible photos to six without hiding text evidence",async()=>{
+  const ranked=Array.from({length:9},(_,i)=>({
+    entity:{id:"note-"+i,title:"Велосипед "+i},
+    originals:[{attachmentId:"image-"+i,kind:"image"}],
+  }));
+  ranked.push({entity:{id:"text-note",title:"Текстовая запись"}} as any);
+  textSearch.mockResolvedValueOnce(ranked);
+  const result=await searchLocalPhotosFromChat83("guest",{mode:"all",description:"велосипед"});
+  expect(result.memory.filter(m=>m.photo)).toHaveLength(6);
+  expect(result.memory.some(m=>m.id==="text-note"&&!m.photo)).toBe(true);
+  expect(result.text).toContain("6 фото");
+  expect(result.text).toContain("1 запись");
+});
+test("image-to-image search also returns no more than six matches",async()=>{
+  search.mockResolvedValueOnce(Array.from({length:9},(_,i)=>({
+    entity:{id:"note-"+i,title:"Велосипед "+i},
+    originals:[{attachmentId:"image-"+i,kind:"image"}],
+  })));
+  const result=await searchLocalPhotosFromChat83("guest",{mode:"image",description:""},[attachment]);
+  expect(result.memory).toHaveLength(6);
+  expect(result.memory[0].photoAttachmentId).toBe("image-0");
+  expect(result.memory[5].photoAttachmentId).toBe("image-5");
+});
+
+test.each(["all","text","image"] as const)("ranks attachments across notes before limiting %s results", async mode => {
+  const originals = [0.99,0.89,0.88,0.87,0.86,0.85].map((imageSimilarity,i) =>
+    ({attachmentId:"a"+i,kind:"image",imageSimilarity}));
+  const hits = [{...photo,originals},{entity:{id:"other",title:"Другой велосипед"},
+    originals:[{attachmentId:"b",kind:"image",imageSimilarity:0.98}]}];
+  (mode === "image" ? search : textSearch).mockResolvedValueOnce(hits);
+  const result = await searchLocalPhotosFromChat83("guest",{mode,description:"велосипед"},
+    mode === "image" ? [attachment] : []);
+  expect(result.memory.map(item=>item.photoAttachmentId)).toEqual(["a0","b","a1","a2","a3","a4"]);
 });

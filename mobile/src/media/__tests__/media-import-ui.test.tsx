@@ -59,8 +59,8 @@ test('shared text opens an unsaved draft with a section selector and saves only 
   const screen = render(<MemoryImportScreen />);
   await waitFor(() => expect(screen.getByLabelText('Сведения из файла').props.value).toBe('Семейный рецепт'));
   expect(saveMediaNote).not.toHaveBeenCalled();
-  fireEvent.press(screen.getByLabelText('Выбрать раздел импорта'));
-  fireEvent.press(screen.getByLabelText('Раздел: Заметки'));
+  fireEvent.press(screen.getByLabelText('Выбрать коллекцию'));
+  fireEvent.press(screen.getByLabelText('Коллекция: Заметки'));
   fireEvent.changeText(screen.getByLabelText('Сведения из файла'), 'Рецепт с моей подписью');
   fireEvent.press(screen.getByLabelText('Сохранить сведения в память'));
   await waitFor(() => expect(saveMediaNote).toHaveBeenCalledWith('guest', expect.objectContaining({ body: 'Рецепт с моей подписью', collectionId: 'notes', file: undefined }), expect.anything()));
@@ -84,6 +84,7 @@ test('recognition does not overwrite the user annotation', async () => {
 test('URL download network error is not shown as a local-memory failure', async () => {
   (importLink as jest.Mock).mockRejectedValueOnce(new Error('Не удалось загрузить ссылку (этап: соединение).'));
   const screen = render(<MemoryImportScreen />);
+  fireEvent.press(screen.getByText('Ссылка'));
   fireEvent.changeText(screen.getByLabelText('Ссылка для импорта'), 'https://files.example.org/music.mp3');
   fireEvent.press(screen.getByText('Загрузить по ссылке'));
   await waitFor(() => expect(screen.getByText(/этап: соединение/)).toBeTruthy());
@@ -97,7 +98,8 @@ test('U3 presents one source step and preserves the file when a replacement URL 
   fireEvent.press(screen.getByLabelText('Выбрать файл для памяти'));
   await waitFor(() => expect(screen.getByText('photo.png')).toBeTruthy());
   expect(screen.queryByLabelText('Ссылка для импорта')).toBeNull();
-  fireEvent.press(screen.getByLabelText('Изменить источник'));
+  fireEvent.press(screen.getByLabelText('Заменить вложение'));
+  fireEvent.press(screen.getByText('Ссылка'));
   fireEvent.changeText(screen.getByLabelText('Ссылка для импорта'), 'https://files.example.org/other.mp3');
   // An unconfirmed replacement cannot poison the stored file provenance.
   fireEvent.press(screen.getByLabelText('Сохранить сведения в память'));
@@ -126,7 +128,7 @@ test('U3 does not show source replacement buttons for Android Share text', async
   const screen = render(<MemoryImportScreen />);
   await waitFor(() => expect(screen.getByLabelText('Сведения из файла').props.value).toBe('Семейный рецепт'));
   expect(screen.queryByLabelText('Ссылка для импорта')).toBeNull();
-  expect(screen.queryByLabelText('Сфотографировать и распознать')).toBeNull();
+  expect(screen.queryByLabelText('Сфотографировать')).toBeNull();
   fireEvent.press(screen.getByLabelText('Сохранить сведения в память'));
   await waitFor(() => expect(saveMediaNote).toHaveBeenCalledWith('guest', expect.objectContaining({ body: 'Семейный рецепт' }), expect.anything()));
 });
@@ -134,6 +136,7 @@ test('U3 does not show source replacement buttons for Android Share text', async
 test('U3 uses the confirmed URL returned by a successful text download', async () => {
   (importLink as jest.Mock).mockResolvedValueOnce({ source: 'https://example.org/recipe', text: 'Хлеб: мука и вода' });
   const screen = render(<MemoryImportScreen />);
+  fireEvent.press(screen.getByText('Ссылка'));
   fireEvent.changeText(screen.getByLabelText('Ссылка для импорта'), 'https://example.org/recipe');
   fireEvent.press(screen.getByText('Загрузить по ссылке'));
   await waitFor(() => expect(screen.getByLabelText('Распознанное содержимое файла').props.value).toBe('Хлеб: мука и вода'));
@@ -238,7 +241,7 @@ test('compact import hides optional controls and prevents saving a discarded ori
   await waitFor(() => screen.getByText('photo.png'));
   expect(screen.queryByLabelText('Извлечь сведения из файла')).toBeNull();
   expect(screen.queryByLabelText('Название импортируемой заметки')).toBeNull();
-  expect(screen.queryByLabelText('Раздел: Заметки')).toBeNull();
+  expect(screen.queryByLabelText('Коллекция: Заметки')).toBeNull();
   expect(screen.getByTestId('import-save-bar')).toBeTruthy();
   expect(screen.getByLabelText('Сохранить сведения в память').props.accessibilityState.disabled).toBe(false);
   fireEvent.press(screen.getByLabelText('Дополнительные параметры'));
@@ -263,4 +266,41 @@ test('lock during incoming copy discards late result and deletes it again after 
   const s=render(<MemoryImportScreen/>);await waitFor(()=>expect(resolve).toBeDefined());
   act(()=>mockSessionListeners.forEach(fn=>fn(false)));const deletes=mockIncomingDelete.mock.calls.length;
   await act(async()=>resolve());expect(mockIncomingDelete.mock.calls.length).toBeGreaterThan(deletes);expect(saveMediaNote).not.toHaveBeenCalled();expect(s.getByText('Подготовка прервана блокировкой. Повторите приём после разблокировки.')).toBeTruthy();
+});
+
+test.each(['camera','gallery','file'])('direct %s launch opens once and cancellation returns without saving', async source => {
+  mockParams = {source};
+  const picker = require('expo-image-picker');
+  picker.requestCameraPermissionsAsync.mockResolvedValue({granted:true});
+  const launch = source === 'camera' ? picker.launchCameraAsync : source === 'gallery'
+    ? picker.launchImageLibraryAsync : DocumentPicker.getDocumentAsync as jest.Mock;
+  launch.mockResolvedValueOnce({canceled:true});
+  render(<MemoryImportScreen/>);
+  await waitFor(() => expect(mockBack).toHaveBeenCalledTimes(1));
+  expect(launch).toHaveBeenCalledTimes(1);
+  expect(saveMediaNote).not.toHaveBeenCalled();
+});
+
+test('leaving a typed link is guarded before download', () => {
+  mockParams = {source:'link'};
+  const ui = render(<MemoryImportScreen/>);
+  const guard = require('@react-navigation/native').usePreventRemove;
+  expect(guard).toHaveBeenLastCalledWith(false,expect.any(Function));
+  fireEvent.changeText(ui.getByLabelText('Ссылка для импорта'),'https://example.org');
+  expect(guard).toHaveBeenLastCalledWith(true,expect.any(Function));
+  expect(importLink).not.toHaveBeenCalled();
+});
+
+test('cancelled replacement keeps caption and original in preview', async () => {
+  mockParams = {source:'file'};
+  const ui = render(<MemoryImportScreen/>);
+  await waitFor(() => ui.getByText('photo.png'));
+  fireEvent.changeText(ui.getByLabelText('Сведения из файла'),'Моя подпись');
+  fireEvent.press(ui.getByLabelText('Заменить вложение'));
+  (DocumentPicker.getDocumentAsync as jest.Mock).mockResolvedValueOnce({canceled:true});
+  fireEvent.press(ui.getByLabelText('Выбрать файл для памяти'));
+  await waitFor(() => ui.getByLabelText('Заменить вложение'));
+  expect(ui.getByText('photo.png')).toBeTruthy();
+  expect(ui.getByLabelText('Сведения из файла').props.value).toBe('Моя подпись');
+  expect(mockBack).not.toHaveBeenCalled();
 });

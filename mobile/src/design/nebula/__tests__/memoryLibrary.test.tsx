@@ -51,7 +51,7 @@ describe("U2 Memory library note presentation", () => {
   });
   it("retains the operations that existing browser/native flows require", () => {
     const home = readFileSync(join(__dirname, "..", "..", "..", "screens", "LocalMemoryScreen.tsx"), "utf8");
-    for (const label of ["Новая заметка", "Добавить в память", "Поиск по заметкам",
+    for (const label of ["Текст или голос", "Добавить в память", "Поиск по заметкам",
       "Раздел ", "Открыть архив", "Открыть текущие записи", "Открыть корзину",
       "Резервные копии", "Выбрать записи", "Новый раздел памяти"]) {
       expect(home).toContain(label);

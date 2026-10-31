@@ -552,9 +552,23 @@ export function LocalMemoryScreen() {
     </BottomSheet>
 
     <BottomSheet visible={addOpen} title="Добавить в память" onClose={() => setAddOpen(false)}>
-      <Pressable accessibilityRole="button" accessibilityLabel="Новая заметка" style={{ ...button, alignItems: "flex-start" }} onPress={() => { setAddOpen(false); navigation.navigate("MemoryNote", { collectionId }); }}><Text style={{ color: t.text, fontSize: 16 }}>Текст или голос</Text><Text style={{ color: t.muted }}>Напишите или надиктуйте мысль</Text></Pressable>
-      {(["photo", "file", "link"] as const).map((source, i) => <Pressable key={source} accessibilityRole="button" style={{ ...button, alignItems: "flex-start" }} accessibilityLabel={["Добавить фото", "Добавить файл", "Добавить ссылку"][i]}
-        onPress={() => { setAddOpen(false); navigation.navigate("MemoryImport", { source, collectionId }); }}><Text style={{ color: t.text, fontSize: 16 }}>{["Фото · камера или галерея", "Файл · документы, аудио, видео", "Ссылка · статья или файл"][i]}</Text></Pressable>)}
+      {([
+        ["text", "edit-3", "Текст или голос", "Написать или надиктовать заметку"],
+        ["camera", "camera", "Камера", "Сделать новый снимок"],
+        ["gallery", "image", "Галерея", "Выбрать одно или несколько фото"],
+        ["file", "paperclip", "Файл", "Документы, аудио и видео"],
+        ["link", "link", "Ссылка", "Загрузить статью или файл"],
+      ] as const).map(([source, icon, label, hint]) => <Pressable key={source} accessibilityRole="button"
+        accessibilityLabel={label} accessibilityHint={hint} onPress={() => {
+          setAddOpen(false);
+          if (source === "text") navigation.navigate("MemoryNote", { collectionId });
+          else navigation.navigate("MemoryImport", { source, collectionId });
+        }} style={({pressed}) => ({flexDirection:"row", alignItems:"center", gap:14,
+          padding:12, minHeight:56, borderRadius:16, backgroundColor:pressed ? t.line : t.soft})}>
+        <Feather name={icon} size={21} color={t.secondary}/>
+        <View style={{flex:1}}><Text style={{color:t.text,fontSize:16,fontWeight:"600"}}>{label}</Text>
+          <Text style={{color:t.muted,fontSize:13}}>{hint}</Text></View>
+      </Pressable>)}
     </BottomSheet>
     <BottomSheet visible={menuOpen} title="Память" onClose={() => setMenuOpen(false)}>
       <Text style={{ color: t.muted }}>Показать</Text>

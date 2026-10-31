@@ -22,7 +22,7 @@ import { localPhotoIntent83, localPhotoSuggestion83, searchLocalPhotosFromChat83
 
 /** `streamText` is the answer as it arrives; it is never persisted. */
 /** `progressSince` is when the current stage began, for the elapsed timer. */
-export type LiveConversation = SavedConversation & { busy: boolean; progress: string; progressSince?: number; streamText?: string; savingDraft?: string; deleting?: boolean };
+export type LiveConversation = SavedConversation & { retryPhoto?: {rowId:string; image:ChatAttachment}; busy: boolean; progress: string; progressSince?: number; streamText?: string; savingDraft?: string; deleting?: boolean };
 /** `notice` is informational (e.g. unreadable old chats), unlike `error`. */
 /** `sections` are the memory sections a proposal can go to, the user's own included. */
 export type ChatSnapshot = { ready: boolean; error: string; notice: string; conversations: LiveConversation[]; activeId: string | null; sections: MemorySection[] };
@@ -31,7 +31,7 @@ const newConversation = (): LiveConversation => {
   return { id: Crypto.randomUUID(), title: "Новый диалог", createdAt: timestamp, updatedAt: timestamp,
     rows: [], drafts: [], question: "", busy: false, progress: "" };
 };
-const saved = ({ busy, progress, progressSince, streamText, savingDraft, deleting, ...conversation }: LiveConversation): SavedConversation =>
+const saved = ({ busy, progress, progressSince, streamText, savingDraft, deleting, retryPhoto, ...conversation }: LiveConversation): SavedConversation =>
   ({ ...conversation, interrupted: busy });
 
 /** Where a proposal will be saved: its section, the new one, or «Заметки». */
@@ -191,12 +191,16 @@ export class DirectChatStore {
     const aborter=new AbortController();
     this.requests.set(id,aborter);
     const pending=this.update(id,{
-      busy:true,progress:"Ищу фотографии в памяти…",updatedAt:new Date().toISOString(),
+      retryPhoto:undefined,busy:true,progress:"Ищу фотографии в памяти…",updatedAt:new Date().toISOString(),
       // An explicit sent text query consumes its draft, like normal send().
       // One-tap camera/gallery searches preserve any unrelated unsent draft.
       // On failure restore the consumed draft only if the user has not typed a replacement.
       question:camera ? current.question : "",
-      ...(camera ? {} : {attachments:[]}),
+      // A one-tap image search consumes only its selected image, not other
+      // draft files or the user's unsent text. Hide the action panel immediately.
+      attachments:camera
+        ? (current.attachments || []).filter(file=>file.id!==camera.id)
+        : [],
       title:current.rows.length?current.title:prompt.slice(0,60),
       rows:[...current.rows,{id:Crypto.randomUUID(),role:"user",text:prompt}],
     })!;
@@ -207,16 +211,20 @@ export class DirectChatStore {
       const result=await searchLocalPhotosFromChat83(this.profile,intent,attachments,aborter.signal);
       if(aborter.signal.aborted || this.disposed)throw new Error("vision_query_cancelled");
       const latest=this.snapshot.conversations.find(c=>c.id===id);
+      const rowId = Crypto.randomUUID();
       if(latest)this.update(id,{
-        rows:[...latest.rows,{id:Crypto.randomUUID(),role:"assistant",
+        retryPhoto:camera && result.photoAction ? {rowId,image:camera} : undefined,
+        rows:[...latest.rows,{id:rowId,role:"assistant",
           text:result.text,memory:result.memory,photoAction:result.photoAction}],updatedAt:new Date().toISOString(),
       });
     } catch(e) {
       if(this.disposed)return;
+      const rowId = Crypto.randomUUID();
       const latest=this.snapshot.conversations.find(c=>c.id===id);
       if(latest)this.update(id,{
+        ...(camera && !aborter.signal.aborted ? {retryPhoto:{rowId,image:camera}} : {}),
         ...(!camera && latest.question === "" ? {question:current.question,attachments:current.attachments} : {}),
-        rows:[...latest.rows,{id:Crypto.randomUUID(),role:"info",
+        rows:[...latest.rows,{id:rowId,role:"info",
           text:aborter.signal.aborted?"Поиск фотографий остановлен":memoryErrorMessage(e)}],
       });
     } finally {
@@ -262,7 +270,11 @@ export class DirectChatStore {
     this.publish({ error: "" });
     const pending = this.update(id, {
       taskState, question: internetPhotoId ? current.question : "",
-      attachments: internetPhotoId ? current.attachments : [],
+      // Once the user confirms web lookup, the chosen photo is submitted in
+      // the user turn and leaves the draft. Other files are never uploaded.
+      attachments: internetPhotoId
+        ? (current.attachments || []).filter(file=>file.id!==internetPhotoId)
+        : [],
       busy: true, progress: "Сохраняю вопрос…", updatedAt: new Date().toISOString(),
       title: current.rows.length ? current.title : prompt.slice(0, 60),
       rows: [...current.rows, { id: Crypto.randomUUID(), role: "user", text: prompt, ...(attachments.length ? {attachments} : {}) }],
