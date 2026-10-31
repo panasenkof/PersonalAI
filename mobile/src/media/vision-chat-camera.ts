@@ -59,7 +59,7 @@ async function capturePhoto83(signal?:AbortSignal,forSearch=false,preserveOrigin
   guard(signal);
   if(!permission.granted)throw new Error("vision_camera_permission_denied");
   const shot=await withNativeInteraction(()=>ImagePicker.launchCameraAsync({
-    mediaTypes:["images"],allowsEditing:false,quality:0.75,
+    mediaTypes:["images"],allowsEditing:false,quality:1,
   }));
   guard(signal);
   if(shot.canceled || !shot.assets.length)return null;
