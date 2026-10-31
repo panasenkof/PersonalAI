@@ -15,7 +15,8 @@ import { ActivityIndicator, Alert, FlatList, Image, Keyboard, KeyboardAvoidingVi
 import { useProfile } from "../profile/ProfileContext";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useDirectChat } from "../direct-agent/ChatContext";
-import { PROVIDER_PRESETS, anonymousLocalAllowed, loadDirectConnections } from "../direct-agent/settings";
+import { PROVIDER_PRESETS, anonymousLocalAllowed, loadDirectConnections, searchKeyOf } from "../direct-agent/settings";
+import { searchProviderOf } from "../direct-agent/web-search";
 import type { DirectAgentSettings } from "../direct-agent/settings";
 import type { RootStackParams } from "../navigation";
 import { NebulaHomeHeader } from "../design/nebula/NebulaHomeHeader";
@@ -182,6 +183,14 @@ function NebulaHomeContent() {
     }
     if(!settings.allowWeb){
       Alert.alert("Интернет-поиск выключен","Включите интернет-поиск у выбранного подключения.",
+        [{text:"Закрыть"},{text:"Настройки",onPress:()=>openConnections()}]);return;
+    }
+    const webProvider=searchProviderOf(settings);
+    const webConfigured=webProvider==="builtin"
+      ? settings.provider==="openai"
+      : Boolean(searchKeyOf(settings,webProvider));
+    if(!webConfigured){
+      Alert.alert("Интернет-поиск не настроен","Выберите и настройте поисковый сервис в параметрах подключения, чтобы получить ссылки на источники.",
         [{text:"Закрыть"},{text:"Настройки",onPress:()=>openConnections()}]);return;
     }
     const id=selectedPhoto.id;
