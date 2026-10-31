@@ -12,4 +12,12 @@ import java.io.File
 object ConsumerBridge {
   fun score(context: Context, model: File, photo: Bitmap, query: String): Double =
     VisionInteropApi.scoreTextImage(context, model, photo, query)
+
+  // Compile-contract only: vectors are Java float[], no Kotlin 2.4
+  // or MediaPipe symbol leaks into this Kotlin 2.1 consumer.
+  fun textVector(context: Context, model: File, query: String): FloatArray =
+    VisionInteropApi.embedText(context, model, query)
+
+  fun photoVector(context: Context, model: File, photo: Bitmap): FloatArray =
+    VisionInteropApi.embedImage(context, model, photo)
 }
