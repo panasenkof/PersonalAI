@@ -362,6 +362,7 @@ function NebulaHomeContent() {
           selectedImageId={selectedPhoto?.id} onSelectImage={setSelectedPhotoId}
           onRemove={id => {try {
             releaseCameraOriginal(id);
+            setNotice("");
             store.setAttachments(active.id,active.attachments!.filter(f=>f.id!==id));
             if(previewPhotoId===id)setPreviewPhotoId(null);
             if(selectedPhotoId===id)setSelectedPhotoId(null);
