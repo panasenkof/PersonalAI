@@ -33,6 +33,7 @@ import { NoteEditorSection } from "../design/nebula/NoteEditorSection";
 import { useWhisperStatus } from "../media/whisper";
 import { scheduleIndexTerms } from "../direct-agent/enrich-runner";
 import { scheduleVectors } from "../media/vector-runner";
+import { discardCameraPhotoDraft83 } from "../media/vision-chat-camera";
 
 export function MemoryImportScreen() {
   const route = useRoute<RouteProp<RootStackParams, "MemoryImport">>();
@@ -180,10 +181,38 @@ export function MemoryImportScreen() {
       if (!alive.current) { if (target.exists) target.delete(); return; }
       ownedFiles.current.push(target.uri);
       setFiles([{ uri: target.uri, name: asset.fileName || "camera.jpg", mimeType: asset.mimeType || "image/jpeg" }]); setRecognitionResults([]);
-      setTitle("Снимок"); setSourceUrl(""); setLinkDraft(""); setSourcePickerOpen(false); setProcessingOptionsOpen(false); setKeepOriginal(false); setExtractedText(""); setBody("");
+      setTitle("Снимок"); setSourceUrl(""); setLinkDraft(""); setSourcePickerOpen(false); setProcessingOptionsOpen(false); setKeepOriginal(true); setExtractedText(""); setBody("");
     } catch (e) { if (alive.current) setNotice(memoryErrorMessage(e)); }
   }
-  useEffect(() => { if (route.params?.camera && !cameraStarted.current) { cameraStarted.current = true; void camera(); } }, [route.params?.camera]);
+  useEffect(() => {
+    const uri=route.params?.initialPhotoUri;
+    if(!uri || cameraStarted.current)return;
+    cameraStarted.current=true;
+    const folder=Paths.cache.uri.replace(/\/$/,"")+"/persai-camera-drafts/";
+    if(!uri.startsWith(folder) || uri.slice(folder.length).includes("/")){
+      setNotice("Недопустимый источник снимка.");return;
+    }
+    setPreparing(true);
+    void (async()=>{
+      let target:File|undefined;
+      try{
+        const dir=new Directory(Paths.cache,"persai-incoming");
+        dir.create({intermediates:true,idempotent:true});
+        const extension=uri.match(/\.(jpg|jpeg|png|webp)$/i)?.[0]?.toLowerCase() || ".jpg";
+        const mime=extension===".png"?"image/png":extension===".webp"?"image/webp":"image/jpeg";
+        target=new File(dir,Crypto.randomUUID()+extension);
+        await FileSystem.copyAsync({from:uri,to:target.uri});
+        if(!alive.current){if(target.exists)target.delete();return;}
+        ownedFiles.current.push(target.uri);
+        setFiles([{uri:target.uri,name:"Снимок"+extension,mimeType:mime}]);
+        setTitle("Снимок");setSourceChoice("photo");setSourcePickerOpen(false);
+        setProcessingOptionsOpen(false);setKeepOriginal(true);
+        setExtractedText("");setBody("");setNotice("");
+      }catch(e){if(target?.exists)target.delete();if(alive.current)setNotice(memoryErrorMessage(e));}
+      finally{discardCameraPhotoDraft83(uri);if(alive.current)setPreparing(false);}
+    })();
+  },[route.params?.initialPhotoUri]);
+  useEffect(() => { if (route.params?.camera && !route.params?.initialPhotoUri && !cameraStarted.current) { cameraStarted.current = true; void camera(); } }, [route.params?.camera,route.params?.initialPhotoUri]);
   async function readLink() {
     if (busy) return;
     const aborter = new AbortController(); controller.current = aborter; setBusy(true); setNotice("");

@@ -37,11 +37,12 @@ describe("Nebula Home native B+C screen contracts", () => {
     expect(home).toContain("normalization.toggle(settings)");
     expect(home).toContain("void store.send(settings)");
     expect(home).toContain('accessibilityLabel="Прикрепить файл к сообщению"');
-    // The camera now searches local photos directly; it must not open memory import.
-    expect(home).toContain("capturePhotoForSearch83(controller.signal)");
-    expect(home).toContain("await store.searchPhotosLocally(capture,conversationId)");
-    expect(home).toContain("onPress={() => void captureAndSearch()}");
-    expect(home).not.toContain('navigation.navigate("MemoryImport", { camera: true })');
+    // One photo, no automatic model request, then explicit local/web/note actions.
+    expect(home).toContain("onPress={() => void captureToDraft()}");
+    expect(home).toContain("capturePhotoDraft83(controller.signal)");
+    expect(home).toContain("store.searchPhotosLocally(selectedPhoto,active.id)");
+    expect(home).toContain("store.send(settings,id)");
+    expect(home).toContain('navigation.navigate("MemoryImport",{source:"photo",initialPhotoUri:staged})');
     // Found media still opens the corresponding memory entry, including after results UI extraction.
     expect(home).toMatch(/navigation\.navigate\("MemoryNote",\s*\{\s*entityId\s*:\s*(?:m|result)\.id/);
     expect(home).toContain("needsSetup");
