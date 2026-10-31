@@ -20,10 +20,9 @@ jest.mock("expo-file-system",()=>({
   File:jest.fn().mockImplementation((uri:any,name?:string)=>({
     uri:name?"file:///cache/persai-camera-drafts/"+name:uri,
     exists:true,size:500,base64:mockBase64,delete:mockDelete,
+    copy:jest.fn((target:any)=>mockCopy(uri,target.uri)),
+    write:jest.fn((data:Uint8Array)=>mockWrite(data)),
   })),
-}));
-jest.mock("expo-file-system/legacy",()=>({
-  copyAsync:mockCopy,writeAsStringAsync:mockWrite,EncodingType:{Base64:"base64"},
 }));
 jest.mock("../../local-memory/storage",()=>({localMemorySessionUnlocked:jest.fn()}));
 jest.mock("../vision-native-model",()=>({readyNativeVisionModel83:jest.fn()}));
@@ -94,7 +93,7 @@ test("capture-first does not need embeddings and retains original only for later
   expect(activeModel).not.toHaveBeenCalled();
   expect(draft?.attachment).toMatchObject({name:"Снимок.jpg",kind:"image"});
   expect(draft?.originalUri).toContain("persai-camera-drafts");
-  expect(mockCopy).toHaveBeenCalledWith({from:"file:///cache/photo.jpg",to:draft?.originalUri});
+  expect(mockCopy).toHaveBeenCalledWith("file:///cache/photo.jpg",draft?.originalUri);
   expect(mockDelete).toHaveBeenCalledTimes(2);
   discardCameraPhotoDraft83(draft!.originalUri);
   expect(mockDelete).toHaveBeenCalledTimes(3);
