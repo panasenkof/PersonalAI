@@ -185,7 +185,7 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByTestId('action-hint').waitFor();
       const improveHint = await page.getByTestId('action-hint').boundingBox();
       let composerRowY = null;
-      for (const label of ['Прикрепить файл к сообщению', 'Сфотографировать и найти похожее в памяти', 'Голосовой ввод', 'Вернуть исходный текст', 'Отправить запрос']) {
+      for (const label of ['Прикрепить файл к сообщению', 'Сделать снимок', 'Голосовой ввод', 'Вернуть исходный текст', 'Отправить запрос']) {
         const box = await page.getByTestId('composer-actions').getByLabel(label, { exact: true }).boundingBox();
         assert(box.x >= 0 && box.x + box.width <= width, `Composer action ${label} stays inside the viewport`);
         assert(box.height >= 46, `Composer action ${label} has a usable touch target`);
@@ -193,6 +193,15 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
         assert(Math.abs(box.y - composerRowY) <= 3, `Composer action ${label} remains in one row at ${width}px`);
       }
       assert(improveHint.x >= 0 && improveHint.x + improveHint.width <= width, 'Improvement hint stays inside the viewport');
+      // Camera must not silently search. The same launcher offers note, draft and local search.
+      await page.getByTestId('composer-actions').getByLabel('Сделать снимок', { exact: true }).click();
+      await page.getByText('Что сделать со снимком?', { exact: true }).waitFor();
+      for(const choice of ['Сохранить в память','Прикрепить к сообщению','Найти похожее в памяти']) {
+        assert.equal(await page.getByLabel(choice, { exact: true }).count(), 1, 'Camera intent is an explicit choice: ' + choice);
+      }
+      await page.getByLabel('Закрыть панель Что сделать со снимком?', { exact: true }).click();
+      assert.equal(await page.getByText('Что сделать со снимком?', { exact: true }).count(), 0, 'Closing the chooser makes no photo');
+
       if (process.env.SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, `draft-improved-${width}.png`) });
       await page.getByLabel('Вернуть исходный текст', { exact: true }).click();
       assert.equal(await prompt.inputValue(), originalDraft);
