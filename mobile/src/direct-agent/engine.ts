@@ -26,6 +26,8 @@ export type DirectAgentOptions = {
   prompt: string;
   history: AgentTurn[];
   attachments?: ChatAttachment[];
+  /** Explicit image-to-web action bypasses unrelated personal-memory prefetch. */
+  skipLocalMemory?: boolean;
   taskState?: TaskState;
   onTaskState?: (state: TaskState) => void;
   pendingNotes?: Array<NoteProposal & { id: string }>;
