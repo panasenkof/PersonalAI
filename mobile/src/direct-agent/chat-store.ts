@@ -18,7 +18,7 @@ import { conversationRepository } from "./conversations";
 import type { ChatDraft, ConversationRepository, SavedConversation } from "./conversations";
 import type { DirectAgentSettings } from "./settings";
 import { waitForApplicationSession } from "../local-memory/storage";
-import { localPhotoIntent83, searchLocalPhotosFromChat83 } from "../media/vision-chat-search";
+import { localPhotoIntent83, localPhotoSuggestion83, searchLocalPhotosFromChat83 } from "../media/vision-chat-search";
 
 /** `streamText` is the answer as it arrives; it is never persisted. */
 /** `progressSince` is when the current stage began, for the elapsed timer. */
@@ -179,14 +179,14 @@ export class DirectChatStore {
    * A captured camera image is *never* stored in a conversation or in Memory.
    * A normal attached photo also remains local for explicit photo-search turns.
    */
-  async searchPhotosLocally(camera?: ChatAttachment, expectedConversationId?:string):Promise<void> {
+  async searchPhotosLocally(camera?: ChatAttachment, expectedConversationId?:string, suggested = false):Promise<void> {
     const id=expectedConversationId || this.snapshot.activeId;
     const current=this.snapshot.conversations.find(c=>c.id===id);
     if(!id || !current || id!==this.snapshot.activeId || current.busy ||
       current.deleting || this.disposed || !this.snapshot.ready)return;
     const prompt=camera ? "Найди похожие фотографии в моей памяти" : current.question.trim();
     const attachments=camera ? [camera] : checkedChatAttachments(current.attachments);
-    const intent=localPhotoIntent83(prompt,attachments);
+    const intent=suggested ? localPhotoSuggestion83(prompt,attachments) : localPhotoIntent83(prompt,attachments);
     if(!intent) return;
     const aborter=new AbortController();
     this.requests.set(id,aborter);

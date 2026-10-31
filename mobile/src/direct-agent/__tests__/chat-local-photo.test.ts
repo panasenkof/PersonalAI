@@ -9,6 +9,7 @@ jest.mock("../../local-memory/storage",()=>({
 }));
 jest.mock("../../media/vision-chat-search",()=>({
   localPhotoIntent83:jest.fn(),
+  localPhotoSuggestion83:jest.fn((q:string,files:unknown[])=>q.startsWith("Фото ") && !files.length ? {mode:"text",description:q}:null),
   searchLocalPhotosFromChat83:jest.fn(),
 }));
 jest.mock("expo-crypto",()=>({randomUUID:()=>"id-"+Math.random().toString(36).slice(2)}));
@@ -93,5 +94,21 @@ test.each(["vision_model_not_installed", "application_locked", "vision_native_un
   expect(current.busy).toBe(false);
   expect(runner).not.toHaveBeenCalled();
   expect(search).toHaveBeenCalledWith("guest",expect.anything(),[image],expect.anything());
+  store.dispose();
+});
+
+test("suggested search uses latest draft once, retains it on failure, and never calls LLM",async()=>{
+  const {repo,runner}=fixture();
+  const store=new DirectChatStore("guest",repo,runner);await store.initialize();
+  store.setQuestion("Фото коробки");
+  search.mockRejectedValueOnce(new Error("vision_native_unavailable"));
+  const id=store.getSnapshot().activeId!;
+  await Promise.all([store.searchPhotosLocally(undefined,id,true),store.searchPhotosLocally(undefined,id,true)]);
+  expect(search).toHaveBeenCalledTimes(1);
+  expect(runner).not.toHaveBeenCalled();
+  expect(store.getSnapshot().conversations[0].question).toBe("Фото коробки");
+  store.setQuestion("Другая фраза");
+  await store.searchPhotosLocally(undefined,id,true);
+  expect(search).toHaveBeenCalledTimes(1);
   store.dispose();
 });
