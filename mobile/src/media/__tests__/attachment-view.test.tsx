@@ -161,3 +161,12 @@ test("R3b2a/SEARCH-06: invalid or stale source version never exposes bytes or a 
   expect(materializeAttachment).toHaveBeenCalledTimes(1);
   expect((materializeAttachment as jest.Mock).mock.calls[0][3]).toMatchObject({recordVersion:7});
 });
+
+test("search photo opens the exact original immediately and never substitutes a missing id", async () => {
+  const screen = render(<AttachmentView profile="guest" entityId="note" photoAttachmentId="photo" />);
+  await waitFor(() => expect(materializeAttachment).toHaveBeenCalledWith("guest",items[0],expect.anything(),undefined));
+  expect(screen.queryByText("голос.mp3")).toBeNull();
+  screen.rerender(<AttachmentView profile="guest" entityId="note" photoAttachmentId="deleted" />);
+  await waitFor(() => expect(screen.getByText("Источник изменён или недоступен. Повторите поиск.")).toBeTruthy());
+  expect(materializeAttachment).toHaveBeenCalledTimes(1);
+});

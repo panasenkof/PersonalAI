@@ -53,7 +53,7 @@ function AudioPreview({ uri, onError }: { uri: string; onError: (message: string
   </Pressable>;
 }
 
-export function AttachmentView({ profile, entityId, verifiedOriginal }: { profile: string; entityId: string; verifiedOriginal?: VerifiedOriginalLocator }) {
+export function AttachmentView({ profile, entityId, verifiedOriginal, photoAttachmentId }: { profile: string; entityId: string; verifiedOriginal?: VerifiedOriginalLocator; photoAttachmentId?: string }) {
   const t = useTheme();
   const focused = useIsFocused();
   const appVisible = useApplicationVisible();
@@ -79,13 +79,13 @@ export function AttachmentView({ profile, entityId, verifiedOriginal }: { profil
   const scoped = verifiedOriginal ? attachments.filter(item =>
     item.id === verifiedOriginal.attachmentId &&
     item.entity_id === verifiedOriginal.recordId &&
-    item.entity_id === entityId) : attachments;
-  const missingVerified = Boolean(verifiedOriginal && !loading && !error && scoped.length !== 1);
+    item.entity_id === entityId) : photoAttachmentId ? attachments.filter(item => item.id === photoAttachmentId && item.entity_id === entityId) : attachments;
+  const missingVerified = Boolean((verifiedOriginal || photoAttachmentId) && !loading && !error && scoped.length !== 1);
   // Background, navigation away and app lock immediately disable all previews.
   useEffect(() => { if (!visible) setOpenId(null); }, [visible]);
   useEffect(() => { setOpenId(null); }, [verifiedOriginal?.attachmentId, verifiedOriginal?.recordVersion]);
 
-  if (!loading && !error && scoped.length === 0 && !verifiedOriginal) return null;
+  if (!loading && !error && scoped.length === 0 && !verifiedOriginal && !photoAttachmentId) return null;
   return <View style={{ gap: nebulaSpacing.sm }}>
     <Text accessibilityRole="header" style={{ color: t.text, fontSize: 18, fontWeight: "700" }}>Вложения{scoped.length ? " · " + scoped.length : ""}</Text>
     {loading ? <Text style={{ color: t.muted }}>Загружаю список вложений…</Text> : null}
@@ -98,8 +98,8 @@ export function AttachmentView({ profile, entityId, verifiedOriginal }: { profil
     </> : null}
     {missingVerified ? <Text accessibilityRole="alert" style={{ color: t.err }}>Источник изменён или недоступен. Повторите поиск.</Text> : null}
     {scoped.map(attachment => <OneAttachment key={attachment.id} profile={profile} attachment={attachment} verified={verifiedOriginal}
-      expanded={visible && openId === attachment.id} visible={visible}
-      onToggle={() => setOpenId(id => id === attachment.id ? null : attachment.id)} />)}
+      expanded={visible && (openId === attachment.id || (openId === null && attachment.id === photoAttachmentId))} visible={visible}
+      onToggle={() => setOpenId(id => id === attachment.id || (id === null && attachment.id === photoAttachmentId) ? "" : attachment.id)} />)}
   </View>;
 }
 

@@ -30,7 +30,7 @@ export type RootStackParams = {
   Tabs: NavigatorScreenParams<TabParams> | undefined;
   /** `presetId` adds and selects a ready-made provider (first-run setup). */
   ModelConnections: { presetId?: string } | undefined;
-  MemoryNote: { entityId?: string; collectionId?: string; verifiedOriginal?: VerifiedOriginalLocator };
+  MemoryNote: { entityId?: string; collectionId?: string; photoAttachmentId?: string; verifiedOriginal?: VerifiedOriginalLocator };
   MemoryBackup: undefined;
   MemoryTemporalReview: { collectionId: string };
   MemoryImport: { incoming?: SharePayload[]; camera?: boolean; source?: "photo" | "file" | "link"; collectionId?: string } | undefined;
