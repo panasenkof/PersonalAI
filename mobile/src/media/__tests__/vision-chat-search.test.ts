@@ -47,6 +47,7 @@ test("text result contains only verified photo-source hits and same scope",async
   expect(result.memory).toEqual([{id:"note-1",title:"Красный велосипед",via:"search",photo:true,photoAttachmentId:"a"}]);
   expect(textSearch).toHaveBeenCalledWith("guest","красный велосипед",{
     sensitivities:["standard","inherit"],limit:8,requireVisionModel:true,
+    minImageSimilarity:0.65,
   });
 });
 test("image query reuses canonical encrypted searchMemory with same ACL; never calls text search",async()=>{
@@ -55,6 +56,7 @@ test("image query reuses canonical encrypted searchMemory with same ACL; never c
   expect(search).toHaveBeenCalledWith("",{
     sensitivities:["standard","inherit"],limit:8,
     imageVector:{model:expect.any(String),values:expect.any(Float32Array)},
+    minImageSimilarity:0.77,
   });
   expect(textSearch).not.toHaveBeenCalled();
 });
@@ -114,4 +116,44 @@ test("empty visual matches still offer index recovery when coverage is partial",
   textSearch.mockResolvedValueOnce([]);
   const result=await searchLocalPhotosFromChat83("guest",{mode:"text",description:"велосипед"});
   expect(result.photoAction).toBe("prepare");
+});
+
+test.each([
+  ["Найди велосипед", "велосипед"],
+  ["Найди красный велосипед возле дерева", "красный велосипед возле дерева"],
+  ["Покажи мне синий автомобиль", "синий автомобиль"],
+  ["Найди ключи", "ключи"],
+])("short object request searches all local memory: %s", (prompt,description)=>{
+  expect(localPhotoIntent83(prompt)).toEqual({mode:"all",description});
+});
+test.each([
+  "Найди разговор с сестрой","Найди рецепт лазаньи","Найди документы на автомобиль",
+  "Найди новости в интернете","Как найти велосипед?",
+])("unrelated/complex tasks are not captured: %s", prompt=>{
+  expect(localPhotoIntent83(prompt)).toBeNull();
+});
+test("generic local request combines photos and notes without readiness gate or LLM",async()=>{
+  textSearch.mockResolvedValueOnce([photo,{entity:{id:"plain-note",title:"Ремонт велосипеда"},score:1}]);
+  const result=await searchLocalPhotosFromChat83("guest",{mode:"all",description:"велосипед"});
+  expect(result.memory).toEqual([
+    {id:"note-1",title:"Красный велосипед",via:"search",photo:true,photoAttachmentId:"a"},
+    {id:"plain-note",title:"Ремонт велосипеда",via:"search"},
+  ]);
+  expect(textSearch).toHaveBeenCalledWith("guest","велосипед",{
+    sensitivities:["standard","inherit"],limit:8,
+    includeTextVector:true,standardCollectionsOnly:true,minImageSimilarity:0.65,
+  });
+  expect(photoSearchReadiness83).not.toHaveBeenCalled();
+  expect(result.text).toContain("1 фото");
+  expect(result.text).toContain("1 записей");
+});
+test("generic local search returns text-only hits if image model is unavailable",async()=>{
+  textSearch.mockResolvedValueOnce([{entity:{id:"plain",title:"Велосипед в гараже"}}]);
+  const result=await searchLocalPhotosFromChat83("guest",{mode:"all",description:"велосипед"});
+  expect(result.memory).toEqual([{id:"plain",title:"Велосипед в гараже",via:"search"}]);
+  expect(result.photoAction).toBeUndefined();
+});
+
+test("attached non-photo command still uses normal model route",()=>{
+  expect(localPhotoIntent83("Найди велосипед",[attachment])).toBeNull();
 });
