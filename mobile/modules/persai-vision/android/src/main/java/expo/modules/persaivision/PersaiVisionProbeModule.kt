@@ -38,10 +38,61 @@ class PersaiVisionProbeModule : Module() {
     return digest.digest().joinToString("") { "%02x".format(it.toInt() and 0xff) }
   }
 
+  private fun checkedModel(ctx: android.content.Context, name: String, checksum: String): File {
+    require(Build.VERSION.SDK_INT >= 26) { "vision_android_version_unsupported" }
+    require(checksum.matches(Regex("^[a-f0-9]{64}$"))) { "invalid_vision_model_checksum" }
+    val model = privateFile(ctx.filesDir, "persai-vision-models", name, setOf(".litertlm"))
+    require(model.length() in 1024L..(1024L * 1024 * 1024)) { "invalid_vision_model_size" }
+    require(sha256(model) == checksum) { "vision_model_checksum_mismatch" }
+    return model
+  }
+
+  private fun checkedImage(ctx: android.content.Context, name: String): File {
+    val image = privateFile(ctx.cacheDir, "persai-vision-probe", name,
+      setOf(".jpg", ".jpeg", ".png", ".webp"))
+    require(image.length() in 1L..(12L * 1024 * 1024)) { "invalid_vision_image_size" }
+    val dimensions = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeFile(image.absolutePath, dimensions)
+    require(dimensions.outWidth in 1..4096 && dimensions.outHeight in 1..4096) {
+      "vision_image_dimensions_unsupported"
+    }
+    return image
+  }
+
+  /** 768D normalized floating-point values only, not an identity match or
+   * search hit. This is still opt-in and isolated from SQLCipher indexing.
+   */
+  private fun validatedVector(values: FloatArray): List<Double> {
+    require(values.size == 768 && values.all { it.isFinite() }) { "invalid_vision_vector" }
+    return values.map { it.toDouble() }
+  }
+
   override fun definition() = ModuleDefinition {
     Name("PersaiVisionProbe")
 
     Function("isSupported") { Build.VERSION.SDK_INT >= 26 }
+
+    AsyncFunction("embedTextVector") {
+        modelName: String, modelSha256: String, query: String ->
+      require(query.isNotBlank() && query.length <= 256) { "invalid_vision_query" }
+      val ctx = appContext.reactContext ?: throw IllegalStateException("vision_context_unavailable")
+      val model = checkedModel(ctx, modelName, modelSha256)
+      validatedVector(VisionProbeEngine.textVector(ctx, model.absolutePath, query))
+    }
+
+    AsyncFunction("embedImageVector") {
+        modelName: String, modelSha256: String, imageName: String ->
+      val ctx = appContext.reactContext ?: throw IllegalStateException("vision_context_unavailable")
+      val model = checkedModel(ctx, modelName, modelSha256)
+      val image = checkedImage(ctx, imageName)
+      val bitmap = BitmapFactory.decodeFile(image.absolutePath)
+        ?: throw IllegalArgumentException("vision_image_decode_failed")
+      try {
+        validatedVector(VisionProbeEngine.imageVector(ctx, model.absolutePath, bitmap))
+      } finally {
+        bitmap.recycle()
+      }
+    }
 
     AsyncFunction("scoreTextAgainstImage") {
         modelName: String, modelSha256: String, imageName: String, query: String ->
@@ -49,18 +100,8 @@ class PersaiVisionProbeModule : Module() {
       require(modelSha256.matches(Regex("^[a-f0-9]{64}$"))) { "invalid_vision_model_checksum" }
       require(query.isNotBlank() && query.length <= 256) { "invalid_vision_query" }
       val ctx = appContext.reactContext ?: throw IllegalStateException("vision_context_unavailable")
-      val model = privateFile(ctx.filesDir, "persai-vision-models", modelName, setOf(".litertlm"))
-      val image = privateFile(ctx.cacheDir, "persai-vision-probe", imageName,
-        setOf(".jpg", ".jpeg", ".png", ".webp"))
-      require(model.length() in 1024L..(1024L * 1024 * 1024)) { "invalid_vision_model_size" }
-      require(image.length() in 1L..(12L * 1024 * 1024)) { "invalid_vision_image_size" }
-      require(sha256(model) == modelSha256) { "vision_model_checksum_mismatch" }
-
-      val dimensions = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-      BitmapFactory.decodeFile(image.absolutePath, dimensions)
-      require(dimensions.outWidth in 1..4096 && dimensions.outHeight in 1..4096) {
-        "vision_image_dimensions_unsupported"
-      }
+      val model = checkedModel(ctx, modelName, modelSha256)
+      val image = checkedImage(ctx, imageName)
       // The model is opened only for this single opt-in lab call and released
       // even after an inference failure. NEVER log the query, paths or image.
       val bitmap = BitmapFactory.decodeFile(image.absolutePath)
