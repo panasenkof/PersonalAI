@@ -136,3 +136,13 @@ test("overlapping page calls are rejected before a second inference",async()=>{
   resume();
   expect((await first).indexed).toBe(1);
 });
+
+test("active model switch during already-current fingerprint does not advance cursor",async()=>{
+  rows=[{attachmentId:"att-01",indexedVersion:"att-01-current"}];
+  model.mockResolvedValueOnce(info()).mockResolvedValueOnce(info(altSpace));
+  const page=await indexPhotoPage83("guest",{limit:1});
+  expect(page.halted).toBe("model_changed");
+  expect(page.nextCursor).toBe("");
+  expect(page.alreadyCurrent).toBe(0);
+  expect(indexOne).not.toHaveBeenCalled();
+});
