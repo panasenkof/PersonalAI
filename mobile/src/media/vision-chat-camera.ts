@@ -1,4 +1,4 @@
-/** Chat camera → ephemeral local photo retrieval, no note creation.
+/** Chat camera → ephemeral in-memory JPEG for an explicit search or chat attachment.
  * Downsample large camera originals to the existing bounded chat image
  * attachment format; only the normalized bytes enter native inference.
  */
@@ -24,12 +24,14 @@ function discard(uri:string) {
 /** Returns one temporary in-memory JPEG. The source and resized cache copies
  * are deleted even on cancel, lock expiry, decode or native failure.
  */
-export async function capturePhotoForSearch83(signal?:AbortSignal):Promise<ChatAttachment|null>{
+export async function capturePhotoForChat83(signal?:AbortSignal, forSearch=false):Promise<ChatAttachment|null>{
   guard(signal);
-  // Fail before opening the camera if there is no verified on-device model.
-  const model=await readyNativeVisionModel83();
-  guard(signal);
-  if(!model)throw new Error("vision_model_not_installed");
+  // Opening the camera for a chat message must not require an embedding model.
+  if(forSearch){
+    const model=await readyNativeVisionModel83();
+    guard(signal);
+    if(!model)throw new Error("vision_model_not_installed");
+  }
   const permission=await withNativeInteraction(
     ()=>ImagePicker.requestCameraPermissionsAsync(),{permissionPrompt:true});
   guard(signal);
@@ -55,7 +57,7 @@ export async function capturePhotoForSearch83(signal?:AbortSignal):Promise<ChatA
       if(file.size>MAX_CHAT_FILE_BYTES)continue;
       const data=await file.base64();
       guard(signal);
-      return checkedChatAttachments([{id:Crypto.randomUUID(),name:"Снимок для поиска.jpg",
+      return checkedChatAttachments([{id:Crypto.randomUUID(),name:forSearch ? "Снимок для поиска.jpg" : "Снимок.jpg",
         kind:"image",mime:"image/jpeg",data,size:file.size}])[0];
     }
     throw new Error("vision_query_image_size");
@@ -63,4 +65,9 @@ export async function capturePhotoForSearch83(signal?:AbortSignal):Promise<ChatA
     if(output && output!==source)discard(output);
     discard(source);
   }
+}
+
+/** Preserve the explicit search contract for callers that chose photo search. */
+export function capturePhotoForSearch83(signal?:AbortSignal):Promise<ChatAttachment|null>{
+  return capturePhotoForChat83(signal,true);
 }
