@@ -145,7 +145,7 @@ test("generic local request combines photos and notes without readiness gate or 
   });
   expect(photoSearchReadiness83).not.toHaveBeenCalled();
   expect(result.text).toContain("1 фото");
-  expect(result.text).toContain("1 записей");
+  expect(result.text).toContain("1 запись");
 });
 test("generic local search returns text-only hits if image model is unavailable",async()=>{
   textSearch.mockResolvedValueOnce([{entity:{id:"plain",title:"Велосипед в гараже"}}]);
