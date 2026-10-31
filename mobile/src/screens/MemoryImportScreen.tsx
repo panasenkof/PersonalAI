@@ -196,12 +196,14 @@ export function MemoryImportScreen() {
     void (async()=>{
       const dir=new Directory(Paths.cache,"persai-incoming");
       dir.create({intermediates:true,idempotent:true});
-      const target=new File(dir,Crypto.randomUUID()+".jpg");
+      const extension=uri.match(/\.(jpg|jpeg|png|webp)$/i)?.[0]?.toLowerCase() || ".jpg";
+      const mime=extension===".png"?"image/png":extension===".webp"?"image/webp":"image/jpeg";
+      const target=new File(dir,Crypto.randomUUID()+extension);
       try{
         await FileSystem.copyAsync({from:uri,to:target.uri});
         if(!alive.current){if(target.exists)target.delete();return;}
         ownedFiles.current.push(target.uri);
-        setFiles([{uri:target.uri,name:"Снимок.jpg",mimeType:"image/jpeg"}]);
+        setFiles([{uri:target.uri,name:"Снимок"+extension,mimeType:mime}]);
         setTitle("Снимок");setSourceChoice("photo");setSourcePickerOpen(false);
         setProcessingOptionsOpen(false);setKeepOriginal(true);
         setExtractedText("");setBody("");setNotice("");
