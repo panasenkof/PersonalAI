@@ -36,6 +36,9 @@ export function VisionIndexControls({ activeModel }: { activeModel: boolean }) {
 
   async function start() {
     if (busy || !activeModel) return;
+    // A completed pass is safe to repeat: new UUIDs may sort before the
+    // old cursor, while unchanged already-indexed photos are skipped.
+    if (!hasMore && processed > 0) cursor.current = "";
     const signal = new AbortController();
     controller.current = signal;
     setBusy(true); setMessage("");
