@@ -223,3 +223,37 @@ test('external Share appends atomically to the current draft without model invoc
   const before=JSON.stringify(store.getSnapshot());expect(()=>store.appendSharedDraft(id,'x'.repeat(24000),[])).toThrow('24 000');expect(()=>store.appendSharedDraft(id,'new',Array(3).fill(file))).toThrow('3 файлов');expect(JSON.stringify(store.getSnapshot())).toBe(before);
   store.create();expect(()=>store.appendSharedDraft(id,'late',[])).toThrow('недоступен');store.dispose();
 });
+
+test("internet photo action sends only selected photo, requests web and preserves the unsent draft",async()=>{
+  const {repo,records}=repository();const runner=jest.fn().mockResolvedValue({text:"Информация найдена",sources:["https://example.org/source"],requests:1});
+  const store=new DirectChatStore("guest",repo,runner);await store.initialize();
+  const id=store.getSnapshot().activeId!;
+  const data=Buffer.from([255,216,255,224,1,2,3,4]).toString("base64");
+  const image={id:"photo",name:"Снимок.jpg",kind:"image" as const,mime:"image/jpeg",data,size:8};
+  const text={id:"note",name:"note.txt",kind:"text" as const,mime:"text/plain",data:"Черновик",size:8};
+  store.setAttachments(id,[image,text]);store.setQuestion("Неотправленный вопрос");
+  await store.send({...settings,allowWeb:true},"photo");
+  expect(runner).toHaveBeenCalledTimes(1);
+  const call=runner.mock.calls[0][0];
+  expect(call.prompt).toContain("Найди в интернете");
+  expect(call.attachments).toHaveLength(1);
+  expect(call.attachments[0].id).toBe("photo");
+  expect(call.taskState.webPreference).toBe("allow");
+  const result=store.getSnapshot().conversations[0];
+  expect(result.question).toBe("Неотправленный вопрос");
+  expect(result.attachments).toHaveLength(2);
+  expect(result.rows[0].attachments).toHaveLength(1);
+  expect(records.get(id)?.rows.at(-1)?.sources).toEqual(["https://example.org/source"]);
+  store.dispose();
+});
+
+test("internet photo action needs the exact selected image and enabled web, never silently sends",async()=>{
+  const {repo}=repository(),runner=jest.fn();
+  const store=new DirectChatStore("guest",repo,runner);await store.initialize();
+  const id=store.getSnapshot().activeId!;
+  store.setQuestion("Обычный вопрос");
+  await store.send({...settings,allowWeb:false},"missing");
+  expect(runner).not.toHaveBeenCalled();
+  expect(store.getSnapshot().conversations[0].rows).toHaveLength(0);
+  store.dispose();
+});
