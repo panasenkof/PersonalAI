@@ -36,7 +36,7 @@ export type RootStackParams = {
   PhotoSearchSettings: undefined;
   MemoryBackup: undefined;
   MemoryTemporalReview: { collectionId: string };
-  MemoryImport: { incoming?: SharePayload[]; camera?: boolean; source?: "photo" | "file" | "link"; collectionId?: string } | undefined;
+  MemoryImport: { incoming?: SharePayload[]; camera?: boolean; initialPhotoUri?:string; source?: "photo" | "file" | "link"; collectionId?: string } | undefined;
   ShareDestination: { incoming: SharePayload[] };
   DiagnosticLogs: undefined;
   /** Research-only native graphics screen (not a bottom tab). */
