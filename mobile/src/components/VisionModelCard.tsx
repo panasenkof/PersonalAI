@@ -11,7 +11,7 @@ import { cancelVisionModelDownload, chooseVisionModel, deleteVisionModel,
 /** #83.2 — local multimodal assets and explicit indexing of SQLCipher photos.
  * Text MiniLM remains unchanged; no automatic background indexing.
  */
-export function VisionModelCard() {
+export function VisionModelCard({ defaultOpen = false }: {defaultOpen?:boolean} = {}) {
   const t = useTheme();
   const state = useVisionModelStatus();
   const downloaded = (id: VisionModelId) => state.installed.some(m => m.id === id);
@@ -38,7 +38,7 @@ export function VisionModelCard() {
     state.busy ? "Скачивание " + state.progress + "%" :
     state.installed.length ? "Установлено " + state.installed.length +
       (current ? " · выбрана " + current.title : "") : "Модель ещё не скачана";
-  return <Collapsible id="settings.vision-models" icon="image"
+  return <Collapsible defaultOpen={defaultOpen} forceOpen={defaultOpen} id="settings.vision-models" icon="image"
     title="Модели поиска по фото" summary={summary}>
     <View style={{ gap: nebulaSpacing.sm }}>
       <Text style={{ color: t.muted, ...nebulaTypography.label }}>

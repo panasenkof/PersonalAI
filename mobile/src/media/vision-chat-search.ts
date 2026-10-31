@@ -2,6 +2,7 @@
  * Explicit local-photo requests never need or contact a cloud LLM. This is
  * an intent/format adapter, not a new search route or second search engine.
  */
+import { photoSearchReadiness83 } from "./vision-index-pages";
 import type { ChatAttachment } from "../direct-agent/chat-attachments";
 import type { ChatMemoryRef } from "../direct-agent/conversations";
 import { localMemorySessionUnlocked, withLocalMemoryDatabase } from "../local-memory/storage";
@@ -41,7 +42,7 @@ export function localPhotoIntent83(
 export async function searchLocalPhotosFromChat83(
   profile:string,intent:LocalPhotoIntent83,attachments:readonly ChatAttachment[]=[],
   signal?:AbortSignal,
-):Promise<{ text:string; memory:ChatMemoryRef[] }> {
+):Promise<{ text:string; memory:ChatMemoryRef[]; photoAction?: "model" | "import" | "prepare" }> {
   const guard=()=> {
     if(signal?.aborted)throw new Error("vision_query_cancelled");
     if(!localMemorySessionUnlocked())throw new Error("application_locked");
@@ -49,6 +50,11 @@ export async function searchLocalPhotosFromChat83(
   guard();
   if(intent.mode==="image" && attachments.filter(a=>a.kind==="image").length!==1)
     throw new Error("vision_query_one_image");
+  const readiness = await photoSearchReadiness83(profile, signal);
+  guard();
+  if (readiness === "model_missing") return {text:"Для поиска фотографий нужна модель на телефоне.",memory:[],photoAction:"model"};
+  if (readiness === "empty") return {text:"Пока нет фотографий, доступных для поиска.",memory:[],photoAction:"import"};
+  if (readiness === "unprepared") return {text:"Фотографии есть. Подготовьте их для первого поиска.",memory:[],photoAction:"prepare"};
   const hits=intent.mode==="image"
     ? await (async()=>{
         const vector=await preparePhotoMatchChatAttachment83(attachments.find(a=>a.kind==="image")!,signal);
@@ -76,5 +82,6 @@ export async function searchLocalPhotosFromChat83(
       ? `${intent.mode === "image" ? "Похожие фото" : "Фото по описанию"} · записей: ${memory.length}. Нажмите на снимок, чтобы открыть его. Результаты упорядочены по сходству.`
       : "Среди подготовленных доступных фотографий похожих не найдено. Попробуйте другое описание или снимок предмета крупнее. Если вы недавно добавили фото, подготовьте их для поиска в настройках.",
     memory,
+    ...(readiness === "partial" || readiness === "unknown" ? {photoAction:"prepare" as const} : {}),
   };
 }

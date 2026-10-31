@@ -32,6 +32,9 @@ export type PhotoIndexPageResult = {
   halted: "none" | "model_not_installed" | "model_changed" | "failed";
 };
 
+const PHOTO_INDEX_SCOPE83 = `e.record_status='active' AND e.domain='notes'
+          AND e.sensitivity IN ('standard','inherit') AND c.sensitivity='standard'
+          AND a.mime IN ('image/jpeg','image/png','image/webp')`;
 const ID = /^[a-zA-Z0-9-]{1,128}$/;
 let pageRunning = false;
 function guard(signal?: AbortSignal) {
@@ -80,9 +83,7 @@ export async function indexPhotoPage83(
          JOIN memory_collections c ON c.id=e.collection_id
          LEFT JOIN memory_attachment_vectors v
            ON v.attachment_id=a.id AND v.model=?
-        WHERE a.id>? AND e.record_status='active' AND e.domain='notes'
-          AND e.sensitivity IN ('standard','inherit') AND c.sensitivity='standard'
-          AND a.mime IN ('image/jpeg','image/png','image/webp')
+        WHERE a.id>? AND ${PHOTO_INDEX_SCOPE83}
           ${options.collectionId ? "AND e.collection_id=?" : ""}
         ORDER BY a.id LIMIT ?`,
       options.collectionId
@@ -154,4 +155,39 @@ export async function indexPhotoPage83(
   } finally {
     pageRunning = false;
   }
+}
+
+/** Bounded metadata-only readiness. A larger library keeps coverage unknown. */
+export async function photoSearchReadiness83(profile: string, signal?: AbortSignal): Promise<
+  "model_missing" | "empty" | "unprepared" | "partial" | "ready" | "unknown"
+> {
+  guard(signal);
+  const model = await readyNativeVisionModel83();
+  guard(signal);
+  if (!model) return "model_missing";
+  const state = await withLocalMemoryDatabase(profile, async db => {
+    const rows = await db.getAllAsync<{attachmentId:string; indexedVersion:string|null}>(
+      `SELECT a.id AS attachmentId, v.source_version AS indexedVersion
+       FROM memory_attachments a
+       JOIN memory_entities e ON e.id=a.entity_id
+       JOIN memory_collections c ON c.id=e.collection_id
+       LEFT JOIN memory_attachment_vectors v ON v.attachment_id=a.id AND v.model=?
+       WHERE ${PHOTO_INDEX_SCOPE83}
+       ORDER BY a.id LIMIT 5`, [model.modelSpace]);
+    if (!rows.length) return "empty" as const;
+    // No inference, bytes, counts or full-library scan for a readiness message.
+    if (rows.length > 4) return "unknown" as const;
+    let current = 0;
+    for (const row of rows) {
+      guard(signal);
+      if (row.indexedVersion && row.indexedVersion === await fingerprintExtractionSource(db, row.attachmentId)) current++;
+    }
+    if (!current) return "unprepared" as const;
+    return current === rows.length ? "ready" as const : "partial" as const;
+  });
+  guard(signal);
+  const latest = await readyNativeVisionModel83();
+  guard(signal);
+  if (latest?.modelSpace !== model.modelSpace) throw new Error("vision_model_changed");
+  return state;
 }

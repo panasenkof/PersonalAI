@@ -18,12 +18,13 @@ function remember(id: string, open: boolean) {
 }
 
 /** A settings group that folds to its title and a one-line summary. */
-export function Collapsible({ id, title, summary, defaultOpen = false, children, card = true, icon }: {
-  id: string; title: string; summary?: string; defaultOpen?: boolean; children: React.ReactNode; card?: boolean; icon?: React.ComponentProps<typeof Feather>["name"];
+export function Collapsible({ id, title, summary, defaultOpen = false, forceOpen = false, children, card = true, icon }: {
+  id: string; title: string; summary?: string; defaultOpen?: boolean; forceOpen?: boolean; children: React.ReactNode; card?: boolean; icon?: React.ComponentProps<typeof Feather>["name"];
 }) {
   const t = useTheme();
   const [open, setOpen] = useState(remembered?.[id] ?? defaultOpen);
-  useEffect(() => { let alive = true; void load().then(r => { if (alive && r[id] !== undefined) setOpen(r[id]); }); return () => { alive = false; }; }, [id]);
+  useEffect(() => { let alive = true; void load().then(r => { if (alive && !forceOpen && r[id] !== undefined) setOpen(r[id]); }); return () => { alive = false; }; }, [id, forceOpen]);
+  useEffect(() => { if (forceOpen) setOpen(true); }, [forceOpen]);
   const toggle = () => { setOpen(v => { remember(id, !v); return !v; }); };
   const box = card ? { backgroundColor: t.panel, padding: nebulaSpacing.md, gap: nebulaSpacing.sm, borderRadius: nebulaRadii.card, borderWidth: 1, borderColor: t.line } : { gap: 10 };
   return <View style={box}>
