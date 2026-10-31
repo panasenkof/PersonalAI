@@ -151,3 +151,30 @@ test("visual vector writer refuses secret note and secret collection even if inf
       "SELECT count(*) AS n FROM memory_attachment_vectors"))?.n).toBe(0);
   } finally {db.close();}
 });
+
+test("all verified photos in one note survive ranking and retain attachment-specific originals",async()=>{
+  const db=new DB();
+  try {
+    const repo=new SqliteMemoryRepository(db as never);
+    const c=await repo.createCollection({name:"Коллекция",slug:"multi-photo",sensitivity:"standard"});
+    const first=await attachment(db,repo,c.id,"bike-front.jpg");
+    const secondId="att-bike-side.jpg";
+    const bytes=Uint8Array.from([1,2,3,4]);
+    const sha=require("node:crypto").createHash("sha256").update(bytes).digest("hex");
+    await db.runAsync("INSERT INTO memory_attachments(id,entity_id,name,mime,size,created_at) VALUES(?,?,?,?,?,?)",
+      [secondId,first.entityId,"bike-side.jpg","image/jpeg",bytes.length,"2026-10-31"]);
+    await db.runAsync("INSERT INTO memory_attachment_parts(attachment_id,ord,bytes,sha256) VALUES(?,?,?,?)",
+      [secondId,0,bytes,sha]);
+    await save(db,repo,first.attachmentId,MODEL,vector(1,0));
+    await save(db,repo,secondId,MODEL,vector(1,0.1));
+    const matches=await repo.searchMemory("",{
+      imageVector:{model:MODEL,values:vector(1,0)},minImageSimilarity:0.65,limit:20,
+    });
+    expect(matches).toHaveLength(1);
+    expect(matches[0].originals?.map(o=>o.attachmentId)).toEqual([first.attachmentId,secondId]);
+    await db.runAsync("UPDATE memory_entities SET sensitivity='secret' WHERE id=?",[first.entityId]);
+    expect(await repo.searchMemory("",{
+      imageVector:{model:MODEL,values:vector(1,0)},sensitivities:["standard","inherit"],
+    })).toEqual([]);
+  } finally { db.close(); }
+});
