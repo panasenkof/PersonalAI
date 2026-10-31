@@ -38,7 +38,7 @@ export async function stageChatImageForNote83(attachment:ChatAttachment):Promise
   const ext=image.mime==="image/png"?".png":image.mime==="image/webp"?".webp":".jpg";
   const target=new File(dir,Crypto.randomUUID()+ext);
   try{
-    target.write(toByteArray(image.data));
+    await target.write(toByteArray(image.data));
     guard();
     return target.uri;
   }catch(e){discardCameraPhotoDraft83(target.uri);throw e;}
@@ -87,7 +87,7 @@ async function capturePhoto83(signal?:AbortSignal,forSearch=false,preserveOrigin
         dir.create({intermediates:true,idempotent:true});
         const target=new File(dir,Crypto.randomUUID()+".jpg");
         originalUri=target.uri;
-        new File(source).copy(target);
+        await new File(source).copy(target);
         guard(signal);
       }
       return {attachment,...(originalUri?{originalUri}:{})};
