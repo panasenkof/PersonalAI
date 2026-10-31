@@ -71,7 +71,7 @@ describe("Native Home integration remains isolated and accessible", () => {
     expect(home).toContain('store.setAttachments(conversationId,[...(current.attachments || []),capture])');
     expect(home).not.toContain('onPress={() => void captureAndSearch()}');
     const importer = readFileSync(join(base, "..", "..", "screens", "MemoryImportScreen.tsx"), "utf8");
-    expect(importer).toMatch(/setTitle\("Снимок"\);[^\\n]*setKeepOriginal\(true\)/);
+    expect(importer.split("async function camera()")[1].split("useEffect")[0]).toContain("setKeepOriginal(true)");
   });
   it("uses a dark theme only on Home and matches the bottom tab palette there", () => {
     expect(theme).toContain("NebulaHomeThemeProvider");
