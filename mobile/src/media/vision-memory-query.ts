@@ -70,6 +70,9 @@ export async function searchWithVision83(
         ...(textVector?{vector:textVector}:{}),...(imageVector?{imageVector}:{})});
     };
     // ACL preflight + ranked results need the same SQLCipher snapshot.
-    return options.standardCollectionsOnly ? withUnlockedTransaction(db,read) : read(db);
+    if (!options.standardCollectionsOnly) return read(db);
+    let hits:MemoryHit[]=[];
+    await withUnlockedTransaction(db,async tx=>{ hits=await read(tx); });
+    return hits;
   });
 }
