@@ -15,14 +15,14 @@ export function PhotoSearchResults({ profile, results, onOpen }: {
   const { width, fontScale } = useWindowDimensions();
   const [expanded, setExpanded] = useState(false);
   const twoColumns = width >= 430 && fontScale <= 1.2;
-  const visible = expanded ? results : results.slice(0, 4);
+  const visible = expanded ? results : results.slice(0, 1);
   return <View style={{ gap: nebulaSpacing.sm }}>
     <View style={{ flexDirection: "row", flexWrap: "wrap", gap: nebulaSpacing.sm }}>
-      {visible.map(result => <View key={result.id} style={{ width: twoColumns ? "47%" : "100%", gap: nebulaSpacing.xs }}>
+      {visible.map(result => <View key={result.id} style={{ width: expanded && twoColumns ? "47%" : "100%", gap: nebulaSpacing.xs }}>
         <Pressable accessibilityRole="link" accessibilityLabel={"Открыть найденное фото " + result.title}
           onPress={() => onOpen(result, true)} style={{ minHeight: nebulaTouch.minimum }}>
           <MemoryCover profile={profile} entityId={result.id} photoAttachmentId={result.photoAttachmentId}
-            height={results.length === 1 ? 220 : 160} fit="contain" label={"Найденная фотография " + result.title} />
+            height={!expanded ? 220 : 160} fit="contain" label={"Найденная фотография " + result.title} />
           <Text numberOfLines={2} style={{ color: t.text }}>{result.title}</Text>
         </Pressable>
         <Pressable accessibilityRole="link" accessibilityLabel={"Открыть запись " + result.title}
@@ -31,9 +31,9 @@ export function PhotoSearchResults({ profile, results, onOpen }: {
         </Pressable>
       </View>)}
     </View>
-    {results.length > 4 ? <Pressable accessibilityRole="button" accessibilityState={{ expanded }}
+    {results.length > 1 ? <Pressable accessibilityRole="button" accessibilityState={{ expanded }}
       onPress={() => setExpanded(value => !value)} style={{ minHeight: nebulaTouch.minimum, justifyContent: "center" }}>
-      <Text style={{ color: t.accent }}>{expanded ? "Свернуть фотографии" : `Показать ещё ${results.length - 4}`}</Text>
+      <Text style={{ color: t.accent }}>{expanded ? "Скрыть другие варианты" : `Показать другие варианты (${results.length - 1})`}</Text>
     </Pressable> : null}
   </View>;
 }
