@@ -41,7 +41,7 @@ export function MemoryImportScreen() {
   const [keepOriginal, setKeepOriginal] = useState(true);
   const [sourceUrl, setSourceUrl] = useState(""); // Confirmed provenance only.
   const [linkDraft, setLinkDraft] = useState(""); // Unconfirmed URL never changes saved provenance.
-  const [sourceChoice, setSourceChoice] = useState<"photo" | "file" | "link" | undefined>(route.params?.source);
+  const [sourceChoice, setSourceChoice] = useState(route.params?.source);
   const [sourcePickerOpen, setSourcePickerOpen] = useState(true);
   const [processingOptionsOpen, setProcessingOptionsOpen] = useState(false);
   const [recognitionOpen, setRecognitionOpen] = useState(false);
@@ -122,7 +122,7 @@ export function MemoryImportScreen() {
     })().catch(e => { cleanup(); if (!cancelled) setNotice(memoryErrorMessage(e)); }).finally(() => { if (!cancelled) setPreparing(false); });
     return () => { cancelled = true; off(); cleanup(); };
   }, [incoming, position, prepareAttempt]);
-  usePreventRemove(!leaving && Boolean(incoming || file || body || extractedText), ({ data }) => {
+  usePreventRemove(!leaving && Boolean(incoming || file || body || extractedText || linkDraft.trim()), ({ data }) => {
     if (busy) { setNotice("Дождитесь завершения операции или остановите её."); return; }
     Alert.alert("Закрыть без сохранения?", "Несохранённые материалы будут отменены.", [{ text: "Продолжить", style: "cancel" }, { text: "Закрыть", style: "destructive", onPress: () => navigation.dispatch(data.action) }]);
   });
@@ -145,12 +145,22 @@ export function MemoryImportScreen() {
   const field = { color: t.text, backgroundColor: t.panel, borderWidth: 1, borderColor: t.line, borderRadius: 16, padding: 14, minHeight: 50 };
   const button = { backgroundColor: t.accent, padding: 14, borderRadius: 17, minHeight: 50, justifyContent: "center" as const, alignItems: "center" as const };
 
+  function cancelPicker() {
+    if (!alive.current) return;
+    if (file || extractedText) {
+      setSourcePickerOpen(false);
+      setLinkDraft(sourceUrl);
+    } else if (route.params?.source || route.params?.camera) {
+      navigation.goBack();
+    }
+  }
   async function gallery() {
     setPreparing(true);
     const copies: ImportFile[] = [];
     try {
       const result = await withNativeInteraction(() => ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], allowsMultipleSelection: true, selectionLimit: MAX_ORIGINALS_PER_NOTE, quality: 1 }));
-      if (result.canceled || !alive.current) return;
+      if (result.canceled) { cancelPicker(); return; }
+      if (!alive.current) return;
       const originals = result.assets.map(asset => ({ uri: asset.uri, name: asset.fileName || "photo.jpg", mimeType: asset.mimeType || "image/jpeg" }));
       if (originals.length > MAX_ORIGINALS_PER_NOTE || originals.reduce((sum, asset) => sum + new File(asset.uri).size, 0) > MAX_TOTAL_ORIGINAL_BYTES) throw new Error("Выберите до 10 фото общим размером до 80 МБ.");
       const directory = new Directory(Paths.cache, "persai-incoming"); directory.create({ intermediates: true, idempotent: true });
@@ -168,11 +178,14 @@ export function MemoryImportScreen() {
     } finally { if (alive.current) setPreparing(false); }
   }
   async function camera() {
+    setPreparing(true);
     try {
       const permission = await withNativeInteraction(() => ImagePicker.requestCameraPermissionsAsync());
+      if (!alive.current) return;
       if (!permission.granted) throw new Error("Разрешите камеру в настройках телефона.");
       const shot = await withNativeInteraction(() => ImagePicker.launchCameraAsync({ mediaTypes: ["images"], quality: 1 }));
-      if (shot.canceled || !alive.current) return;
+      if (shot.canceled) { cancelPicker(); return; }
+      if (!alive.current) return;
       const asset = shot.assets[0];
       const dir = new Directory(Paths.cache, "persai-incoming"); dir.create({ intermediates: true, idempotent: true });
       const target = new File(dir, Crypto.randomUUID() + ".jpg");
@@ -183,6 +196,7 @@ export function MemoryImportScreen() {
       setFiles([{ uri: target.uri, name: asset.fileName || "camera.jpg", mimeType: asset.mimeType || "image/jpeg" }]); setRecognitionResults([]);
       setTitle("Снимок"); setSourceUrl(""); setLinkDraft(""); setSourcePickerOpen(false); setProcessingOptionsOpen(false); setKeepOriginal(true); setExtractedText(""); setBody("");
     } catch (e) { if (alive.current) setNotice(memoryErrorMessage(e)); }
+    finally { if (alive.current) setPreparing(false); }
   }
   useEffect(() => {
     const uri=route.params?.initialPhotoUri;
@@ -212,7 +226,15 @@ export function MemoryImportScreen() {
       finally{discardCameraPhotoDraft83(uri);if(alive.current)setPreparing(false);}
     })();
   },[route.params?.initialPhotoUri]);
-  useEffect(() => { if (route.params?.camera && !route.params?.initialPhotoUri && !cameraStarted.current) { cameraStarted.current = true; void camera(); } }, [route.params?.camera,route.params?.initialPhotoUri]);
+  useEffect(() => {
+    if (cameraStarted.current || incoming || route.params?.initialPhotoUri) return;
+    const source = route.params?.camera ? "camera" : route.params?.source;
+    if (source !== "camera" && source !== "gallery" && source !== "file") return;
+    cameraStarted.current = true;
+    if (source === "camera") void camera();
+    else if (source === "gallery") void gallery();
+    else void pick();
+  }, [incoming, route.params]);
   async function readLink() {
     if (busy) return;
     const aborter = new AbortController(); controller.current = aborter; setBusy(true); setNotice("");
@@ -227,12 +249,14 @@ export function MemoryImportScreen() {
     finally { if (alive.current) setBusy(false); }
   }
   async function pick() {
+    setPreparing(true);
     setNotice("");
     try {
       const result = await withNativeInteraction(() => DocumentPicker.getDocumentAsync({
         type: ["image/*", "audio/*", "video/*", "text/*", "application/json", "application/pdf"], copyToCacheDirectory: true, multiple: true,
       }));
-      if (!alive.current || result.canceled || !result.assets.length) return;
+      if (result.canceled || !result.assets.length) { cancelPicker(); return; }
+      if (!alive.current) return;
       const chosen = result.assets.map(asset => ({ uri: asset.uri, name: asset.name, mimeType: asset.mimeType, size: asset.size }));
       if (chosen.length > MAX_ORIGINALS_PER_NOTE) throw new Error("Не более 10 вложений в одной заметке.");
       chosen.forEach(mediaKind);
@@ -245,6 +269,7 @@ export function MemoryImportScreen() {
       setSourceUrl(""); setLinkDraft(""); setSourcePickerOpen(false); setProcessingOptionsOpen(false);
       setKeepOriginal(true); setTitle(chosen[0].name.slice(0, 160)); setBody(""); setExtractedText(""); setClassification("standard");
     } catch (e) { if (alive.current) setNotice((e as Error).message); }
+    finally { if (alive.current) setPreparing(false); }
   }
   async function extract() {
     if (!file || !canExtract || busy) return;
@@ -345,27 +370,30 @@ export function MemoryImportScreen() {
   return <View style={{ flex: 1, backgroundColor: t.bg, paddingBottom: keyboardOpen ? 0 : insets.bottom }}>
   <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"} keyboardVerticalOffset={Platform.OS === "ios" ? header : 0}>
     <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentContainerStyle={{ padding: 18, gap: 15, paddingBottom: 24 }}>
-      <Text accessibilityRole="header" style={{ color: t.text, fontSize: 25, fontWeight: "800" }}>{incoming ? `Новая заметка · ${position + 1}/${incoming.length}` : file || extractedText ? "Проверьте и сохраните" : "Выберите материал"}</Text>
-      {!hasMaterial ? <Text style={{ color: t.muted, lineHeight: 21 }}>Фото, документы и ссылки сохраняются в заметку. Распознавание — по вашему выбору.</Text> : null}
+      <Text accessibilityRole="header" style={{ color: t.text, fontSize: 25, fontWeight: "800" }}>{incoming ? `Новая заметка · ${position + 1}/${incoming.length}` : file || extractedText ? "Проверьте и сохраните" : sourceChoice === "link" ? "Добавить ссылку" : sourceChoice === "file" ? "Файл" : sourceChoice === "camera" ? "Камера" : sourceChoice === "gallery" ? "Галерея" : "Выберите материал"}</Text>
+      {!hasMaterial && !sourceChoice ? <Text style={{ color: t.muted, lineHeight: 21 }}>Фото, документы и ссылки сохраняются в заметку. Распознавание — по вашему выбору.</Text> : null}
 
       {incoming ? <Text style={{ color: t.muted }}>Получено через «Поделиться». Сохранение — только после подтверждения.</Text> : null}
-      {!incoming && (file || extractedText) && !sourcePickerOpen ? <Pressable disabled={busy || preparing} accessibilityRole="button" accessibilityLabel="Изменить источник" onPress={() => { setSourceChoice(undefined); setSourcePickerOpen(true); }}
+      {!incoming && (file || extractedText) && !sourcePickerOpen ? <Pressable disabled={busy || preparing} accessibilityRole="button" accessibilityLabel="Заменить вложение" onPress={() => { setSourceChoice(undefined); setSourcePickerOpen(true); }}
         style={{ minHeight: 48, justifyContent: "center", padding: 12, backgroundColor: t.panel, borderColor: t.line, borderWidth: 1, borderRadius: 14 }}>
-        <Text style={{ color: t.secondary, fontWeight: "700" }}>Изменить источник</Text>
+        <Text style={{ color: t.secondary, fontWeight: "700" }}>Заменить вложение</Text>
       </Pressable> : null}
       {!incoming && (sourcePickerOpen || (!file && !extractedText)) ? <View testID="import-source-choices" style={{ gap: 12, padding: 14, borderRadius: 18, borderWidth: 1, borderColor: t.line, backgroundColor: t.panel }}>
         {(!sourceChoice || sourceChoice === "file") ? <Pressable disabled={busy || preparing} accessibilityRole="button" accessibilityLabel="Выбрать файл для памяти" style={{ ...button, backgroundColor: t.soft, alignItems: "flex-start" }} onPress={() => void pick()}><Text style={{ color: t.text, fontSize: 16, fontWeight: "700" }}>Выбрать файл с телефона</Text><Text style={{ color: t.muted }}>Документ, аудио или видео</Text></Pressable> : null}
-        {(!sourceChoice || sourceChoice === "photo") ? <>
+        {(!sourceChoice || sourceChoice === "photo" || sourceChoice === "gallery") ? <>
         <Pressable disabled={busy || preparing} accessibilityRole="button" accessibilityLabel="Выбрать фото из галереи" style={{ ...button, backgroundColor: t.soft, alignItems: "flex-start" }} onPress={() => void gallery()}><Text style={{ color: t.text, fontSize: 16 }}>Выбрать фото из галереи</Text></Pressable>
-        <Pressable disabled={busy || preparing} accessibilityRole="button" accessibilityLabel="Сфотографировать и распознать" style={{ ...button, backgroundColor: t.soft, alignItems: "flex-start" }} onPress={() => void camera()}><Text style={{ color: t.text, fontSize: 16 }}>Сфотографировать</Text></Pressable>
         </> : null}
-        {(!sourceChoice || sourceChoice === "link") ? <>
+        {(!sourceChoice || sourceChoice === "photo" || sourceChoice === "camera") ? <>
+        <Pressable disabled={busy || preparing} accessibilityRole="button" accessibilityLabel="Сфотографировать" style={{ ...button, backgroundColor: t.soft, alignItems: "flex-start" }} onPress={() => void camera()}><Text style={{ color: t.text, fontSize: 16 }}>Сфотографировать</Text></Pressable>
+        </> : null}
+        {!sourceChoice ? <Pressable accessibilityRole="button" disabled={busy || preparing} style={{...button, backgroundColor:t.soft}} onPress={() => setSourceChoice("link")}><Text style={{color:t.text}}>Ссылка</Text></Pressable> : null}
+        {sourceChoice === "link" ? <>
         <Text style={{ color: t.text, fontWeight: "600" }}>Ссылка на статью или файл</Text>
-        <TextInput accessibilityLabel="Ссылка для импорта" value={linkDraft} onChangeText={setLinkDraft} editable={!busy} autoCapitalize="none" autoCorrect={false} keyboardType="url" placeholder="https://…" placeholderTextColor={t.muted} style={field} />
+        <TextInput autoFocus accessibilityLabel="Ссылка для импорта" value={linkDraft} onChangeText={setLinkDraft} editable={!busy} autoCapitalize="none" autoCorrect={false} keyboardType="url" placeholder="https://…" placeholderTextColor={t.muted} style={field} />
         <Pressable disabled={busy || !linkDraft.trim()} accessibilityRole="button" style={[button, { opacity: busy || !linkDraft.trim() ? .5 : 1 }]} onPress={() => void readLink()}><Text style={{ color: t.userText }}>Загрузить по ссылке</Text></Pressable>
         <Text style={{ color: t.muted, fontSize: 13, lineHeight: 20 }}>Ссылка должна открываться без входа на сайт.</Text>
         </> : null}
-        {sourceChoice ? <Pressable accessibilityRole="button" disabled={busy || preparing} style={{ ...button, backgroundColor: t.panel }} onPress={() => setSourceChoice(undefined)}><Text style={{ color: t.secondary }}>Другой источник</Text></Pressable> : null}
+        {hasMaterial ? <Pressable accessibilityRole="button" disabled={busy || preparing} style={button} onPress={cancelPicker}><Text style={{color:t.userText}}>Оставить текущее</Text></Pressable> : null}
       </View> : null}
       {!file && extractedText ? <Text style={{ color: t.muted, fontSize: 12 }}>Выбранный источник: текст по ссылке</Text> : null}
       {preparing ? <ActivityIndicator accessibilityLabel="Подготовка входящего файла" /> : null}
@@ -385,8 +413,8 @@ export function MemoryImportScreen() {
       {notice ? <Text accessibilityRole="alert" style={{ color: t.muted }}>{notice}</Text> : null}
       {hasMaterial ? <>
         <TextInput accessibilityLabel="Сведения из файла" editable={!busy} multiline value={body} onChangeText={setBody} maxLength={60_000} style={[field, { minHeight: 96, textAlignVertical: "top" }]} placeholder="Добавьте подпись — необязательно" placeholderTextColor={t.muted} />
-        <Pressable accessibilityRole="button" accessibilityLabel="Выбрать раздел импорта" disabled={busy} onPress={() => { Keyboard.dismiss(); setSectionOpen(true); }} style={{ ...button, backgroundColor: t.panel, alignItems: "flex-start" }}><Text style={{ color: t.text }}>Коллекция: {collections.find(c => c.id === collectionId)?.name || "Заметки"} · Изменить</Text></Pressable>
-        {collections.find(c => c.id === collectionId)?.sensitivity !== "standard" ? <Text style={{ color: t.muted }}>Выбранный раздел закрыт для агента независимо от настройки записи.</Text> : null}
+        <Pressable accessibilityRole="button" accessibilityLabel="Выбрать коллекцию" disabled={busy} onPress={() => { Keyboard.dismiss(); setSectionOpen(true); }} style={{ ...button, backgroundColor: t.panel, alignItems: "flex-start" }}><Text style={{ color: t.text }}>Коллекция: {collections.find(c => c.id === collectionId)?.name || "Заметки"} · Изменить</Text></Pressable>
+        {collections.find(c => c.id === collectionId)?.sensitivity !== "standard" ? <Text style={{ color: t.muted }}>Выбранная коллекция закрыта для агента независимо от настройки записи.</Text> : null}
         <Text style={{ color: t.text, fontWeight: "600" }}>Доступ к записи</Text>
         {([ ["sensitive", "Личные — только на телефоне"], ["standard", "Обычные — доступны агенту и разбору у провайдера"] ] as const).map(([id, label]) =>
           <Pressable disabled={busy} key={id} accessibilityRole="button" accessibilityLabel={label} onPress={() => { setClassification(id); if (id === "sensitive") setRecognitionMode("sequential"); }} style={{ minHeight: 46, justifyContent: "center" }}>
@@ -451,7 +479,7 @@ export function MemoryImportScreen() {
     </View> : null}
   </KeyboardAvoidingView>
   <BottomSheet visible={sectionOpen} title="Коллекция для записи" onClose={() => setSectionOpen(false)}>
-        {collections.map(c => <Pressable key={c.id} disabled={busy} accessibilityRole="button" accessibilityLabel={"Раздел: " + c.name} onPress={() => { setCollectionId(c.id); setSectionOpen(false); }} style={{ minHeight: 44 }}><Text style={{ color: c.id === collectionId ? t.secondary : t.text }}>{c.id === collectionId ? "● " : "○ "}{c.name}</Text></Pressable>)}
+        {collections.map(c => <Pressable key={c.id} disabled={busy} accessibilityRole="button" accessibilityLabel={"Коллекция: " + c.name} onPress={() => { setCollectionId(c.id); setSectionOpen(false); }} style={{ minHeight: 44 }}><Text style={{ color: c.id === collectionId ? t.secondary : t.text }}>{c.id === collectionId ? "● " : "○ "}{c.name}</Text></Pressable>)}
   </BottomSheet>
   </View>;
 }
