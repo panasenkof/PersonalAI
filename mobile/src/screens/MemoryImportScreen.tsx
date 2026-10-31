@@ -353,7 +353,7 @@ export function MemoryImportScreen() {
         : keepOriginal && files.length === 1 && file && mediaKind(file) === "text" && content.trim()
           ? [{ index: 0, name: file.name, status: "success", text: content }]
           : [];
-      await saveMediaNote(profile, {
+      const savedId = await saveMediaNote(profile, {
         ...(keepOriginal && files.length > 1 ? { files } : { file: keepOriginal ? file || undefined : undefined }),
         title, body, extractedText: content,
         ...(keepOriginal && sourceRecognitions.length ? { recognitions: sourceRecognitions } : {}),
@@ -361,6 +361,18 @@ export function MemoryImportScreen() {
         ...(incoming ? { receipt: JSON.stringify(incoming[position]) } : {}),
       }, aborter.signal);
       scheduleIndexTerms(profile); scheduleVectors(profile);
+      // Derived visual vectors are written only after the note commits.
+      // A failed model must never imply the original note was not saved.
+      if (keepOriginal && files.length) {
+        try {
+          const indexed = await autoIndexNotePhotos83(profile, savedId, aborter.signal);
+          if (indexed.pending || indexed.failed) {
+            Alert.alert("Заметка сохранена", "Не все фотографии удалось подготовить для поиска. Повторите индексацию в настройках фото.");
+          }
+        } catch {
+          Alert.alert("Заметка сохранена", "Фото сохранено, но индексация не завершена. Повторите её в настройках.");
+        }
+      }
       if (!keepOriginal) for (const item of files) { await FileSystem.deleteAsync(item.uri, { idempotent: true }).catch(() => {}); }
       if (alive.current) { if (incoming && position + 1 < incoming.length) setPosition(p => p + 1); else setLeaving(true); }
     } catch (e) { if (alive.current) setNotice("Не удалось сохранить: " + memoryErrorMessage(e)); }
