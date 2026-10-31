@@ -18,6 +18,14 @@ import java.io.File;
 public final class VisionProbeEngine {
   private VisionProbeEngine() {}
 
+  public static float[] textVector(Context context, String modelPath, String query) {
+    return VisionInteropApi.embedText(context, new File(modelPath), query);
+  }
+
+  public static float[] imageVector(Context context, String modelPath, Bitmap bitmap) {
+    return VisionInteropApi.embedImage(context, new File(modelPath), bitmap);
+  }
+
   public static double score(Context context, String modelPath, Bitmap bitmap, String query) {
     return VisionInteropApi.scoreTextImage(context, new File(modelPath), bitmap, query);
   }
