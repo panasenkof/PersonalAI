@@ -1,4 +1,5 @@
 import { ChatAttachmentList } from "../media/ChatAttachmentList";
+import Feather from "@expo/vector-icons/Feather";
 import { useChatAttachments } from "../media/useChatAttachments";
 import { capturePhotoDraft83, discardCameraPhotoDraft83, stageChatImageForNote83 } from "../media/vision-chat-camera";
 import { MAX_CHAT_FILES } from "../direct-agent/chat-attachments";
