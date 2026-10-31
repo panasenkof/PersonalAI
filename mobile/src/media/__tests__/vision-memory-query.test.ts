@@ -68,3 +68,12 @@ test("native failure never returns invented photo hits",async()=>{
  await expect(searchWithVision83("guest","склад")).rejects.toThrow("native_failed");
  expect(mockSearch).not.toHaveBeenCalled();
 });
+
+test("explicit photo mode without installed model never disguises text-only hits as photo results",async()=>{
+ model.mockResolvedValue(null);
+ await expect(searchWithVision83("guest","птица у окна",{requireVisionModel:true}))
+   .rejects.toThrow("vision_model_not_installed");
+ expect(vector).not.toHaveBeenCalled();
+ expect(mockSearch).not.toHaveBeenCalled();
+ expect(database).not.toHaveBeenCalled();
+});
