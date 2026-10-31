@@ -166,3 +166,40 @@ test("all matched originals of a single note are returned, in similarity order",
   expect(result.memory.map(m=>m.photoAttachmentId)).toEqual(["a","b","c"]);
   expect(result.text).toContain("3");
 });
+
+test("photo-only search keeps closest six from a larger ranked collection",async()=>{
+  const ranked=Array.from({length:9},(_,i)=>({
+    entity:{id:"note-"+i,title:"Велосипед "+i},
+    originals:[{attachmentId:"image-"+i,kind:"image"}],
+  }));
+  textSearch.mockResolvedValueOnce(ranked);
+  const result=await searchLocalPhotosFromChat83("guest",{mode:"text",description:"велосипед"});
+  expect(result.memory).toHaveLength(6);
+  expect(result.memory.map(m=>m.photoAttachmentId)).toEqual(
+    Array.from({length:6},(_,i)=>"image-"+i));
+  expect(result.text).toContain("остальные до пяти");
+  expect(result.text).not.toContain("Все найденные снимки показаны");
+});
+test("mixed text-and-photo search limits visible photos to six without hiding text evidence",async()=>{
+  const ranked=Array.from({length:9},(_,i)=>({
+    entity:{id:"note-"+i,title:"Велосипед "+i},
+    originals:[{attachmentId:"image-"+i,kind:"image"}],
+  }));
+  ranked.push({entity:{id:"text-note",title:"Текстовая запись"}} as any);
+  textSearch.mockResolvedValueOnce(ranked);
+  const result=await searchLocalPhotosFromChat83("guest",{mode:"all",description:"велосипед"});
+  expect(result.memory.filter(m=>m.photo)).toHaveLength(6);
+  expect(result.memory.some(m=>m.id==="text-note"&&!m.photo)).toBe(true);
+  expect(result.text).toContain("6 фото");
+  expect(result.text).toContain("1 запись");
+});
+test("image-to-image search also returns no more than six matches",async()=>{
+  search.mockResolvedValueOnce(Array.from({length:9},(_,i)=>({
+    entity:{id:"note-"+i,title:"Велосипед "+i},
+    originals:[{attachmentId:"image-"+i,kind:"image"}],
+  })));
+  const result=await searchLocalPhotosFromChat83("guest",{mode:"image",description:""},[attachment]);
+  expect(result.memory).toHaveLength(6);
+  expect(result.memory[0].photoAttachmentId).toBe("image-0");
+  expect(result.memory[5].photoAttachmentId).toBe("image-5");
+});
