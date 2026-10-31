@@ -128,3 +128,19 @@ test("reject unsupported dimensions, model-space crossover, or non-image origina
       .rejects.toThrow("invalid_vision_vector_space");
   }finally{db.close();}
 });
+
+test("visual vector writer refuses secret note and secret collection even if inference completed",async()=>{
+  const db=new DB();
+  try {
+    const repo=new SqliteMemoryRepository(db as never);
+    const c=await repo.createCollection({name:"Оригиналы",slug:"secure-photo-writer",sensitivity:"standard"});
+    const x=await attachment(db,repo,c.id,"confidential.jpg");
+    await db.runAsync("UPDATE memory_entities SET sensitivity='secret' WHERE id=?",[x.entityId]);
+    expect(await save(db,repo,x.attachmentId,MODEL,vector(1,0))).toBe(false);
+    await db.runAsync("UPDATE memory_entities SET sensitivity='inherit' WHERE id=?",[x.entityId]);
+    await db.runAsync("UPDATE memory_collections SET sensitivity='secret' WHERE id=?",[c.id]);
+    expect(await save(db,repo,x.attachmentId,MODEL,vector(1,0))).toBe(false);
+    expect((await db.getFirstAsync<{n:number}>(
+      "SELECT count(*) AS n FROM memory_attachment_vectors"))?.n).toBe(0);
+  } finally {db.close();}
+});

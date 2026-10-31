@@ -50,13 +50,39 @@ class PersaiVisionProbeModule : Module() {
   private fun checkedImage(ctx: android.content.Context, name: String): File {
     val image = privateFile(ctx.cacheDir, "persai-vision-probe", name,
       setOf(".jpg", ".jpeg", ".png", ".webp"))
-    require(image.length() in 1L..(12L * 1024 * 1024)) { "invalid_vision_image_size" }
+    // The canonical original importer already caps each attachment at 80 MiB.
+    // Large modern camera JPEGs are decoded with a bounded sample size, never
+    // fully allocated at the original resolution or rewritten in SQLCipher.
+    require(image.length() in 1L..(80L * 1024 * 1024)) { "invalid_vision_image_size" }
     val dimensions = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     BitmapFactory.decodeFile(image.absolutePath, dimensions)
-    require(dimensions.outWidth in 1..4096 && dimensions.outHeight in 1..4096) {
+    require(dimensions.outWidth in 1..32768 && dimensions.outHeight in 1..32768) {
       "vision_image_dimensions_unsupported"
     }
     return image
+  }
+
+  private fun decodeBounded(image: File): android.graphics.Bitmap {
+    val dimensions = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeFile(image.absolutePath, dimensions)
+    require(dimensions.outWidth in 1..32768 && dimensions.outHeight in 1..32768) {
+      "vision_image_dimensions_unsupported"
+    }
+    var sample = 1
+    while (dimensions.outWidth / sample > 4096 || dimensions.outHeight / sample > 4096) {
+      sample *= 2
+    }
+    val options = BitmapFactory.Options().apply {
+      inSampleSize = sample
+      inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
+    }
+    val bitmap = BitmapFactory.decodeFile(image.absolutePath, options)
+      ?: throw IllegalArgumentException("vision_image_decode_failed")
+    require(bitmap.width in 1..4096 && bitmap.height in 1..4096) {
+      bitmap.recycle()
+      "vision_decoded_image_dimensions_invalid"
+    }
+    return bitmap
   }
 
   /** 768D normalized floating-point values only, not an identity match or
@@ -85,8 +111,7 @@ class PersaiVisionProbeModule : Module() {
       val ctx = appContext.reactContext ?: throw IllegalStateException("vision_context_unavailable")
       val model = checkedModel(ctx, modelName, modelSha256)
       val image = checkedImage(ctx, imageName)
-      val bitmap = BitmapFactory.decodeFile(image.absolutePath)
-        ?: throw IllegalArgumentException("vision_image_decode_failed")
+      val bitmap = decodeBounded(image)
       try {
         validatedVector(VisionProbeEngine.imageVector(ctx, model.absolutePath, bitmap))
       } finally {
@@ -104,8 +129,7 @@ class PersaiVisionProbeModule : Module() {
       val image = checkedImage(ctx, imageName)
       // The model is opened only for this single opt-in lab call and released
       // even after an inference failure. NEVER log the query, paths or image.
-      val bitmap = BitmapFactory.decodeFile(image.absolutePath)
-        ?: throw IllegalArgumentException("vision_image_decode_failed")
+      val bitmap = decodeBounded(image)
       val start = System.nanoTime()
       try {
         // Do not reference vendor Kotlin metadata here: the tested bridge

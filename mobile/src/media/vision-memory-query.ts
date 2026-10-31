@@ -1,0 +1,37 @@
+/** #83.2: a guarded adapter into the EXISTING searchMemory.
+ * A photo vector is optional. Existing MiniLM vector + FTS/OCR options are
+ * unchanged. No second SQL query, result model, or fallback index.
+ *
+ * This is deliberately not wired to the normal search UI until on-device
+ * native inference and real photo indexing have passed release acceptance.
+ */
+import { localMemorySessionUnlocked, withLocalMemoryDatabase } from "../local-memory/storage";
+import { SqliteMemoryRepository } from "../local-memory/repository";
+import type { MemoryHit } from "../local-memory/types";
+import { readyNativeVisionModel83 } from "./vision-native-model";
+import { embedVisionText83 } from "./vision-native-vectors";
+
+type ScopedSearch = {
+  collectionIds?:string[];sensitivities?:string[];limit?:number;
+  vector?:{model:string;values:Float32Array};
+};
+export async function searchWithVision83(
+  profile:string,query:string,options:ScopedSearch={},
+):Promise<MemoryHit[]> {
+  if (!profile || profile.length>160 ||
+      typeof query!=="string" || !query.trim() || query.length>256) {
+    throw new Error("vision_invalid_search_query");
+  }
+  if(!localMemorySessionUnlocked())throw new Error("application_locked");
+  const model=await readyNativeVisionModel83();
+  if(!localMemorySessionUnlocked())throw new Error("application_locked");
+  const imageVector=model?{
+    model:model.modelSpace,
+    values:await embedVisionText83({
+      modelName:model.modelName,modelSha256:model.modelSha256,
+    },query),
+  }:undefined;
+  if(!localMemorySessionUnlocked())throw new Error("application_locked");
+  return withLocalMemoryDatabase(profile, async db => new SqliteMemoryRepository(db)
+    .searchMemory(query,{...options,...(imageVector?{imageVector}:{})}));
+}

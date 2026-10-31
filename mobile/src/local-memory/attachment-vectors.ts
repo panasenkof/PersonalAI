@@ -35,10 +35,17 @@ export async function saveAttachmentImageVector(db: SQL, input: ModelSpace & {
   if (!/^[a-f0-9]{64}$/.test(input.sourceVersion)) throw new Error("invalid_vision_source_version");
   let stored = false;
   await withUnlockedTransaction(db, async tx => {
-    const row = await tx.getFirstAsync<{ mime: string; status: string; domain: string }>(
-      `SELECT a.mime,e.record_status AS status,e.domain FROM memory_attachments a
-       JOIN memory_entities e ON e.id=a.entity_id WHERE a.id=?`, [input.attachmentId]);
-    if (!row || !legalImage(row.mime) || row.status !== "active" || row.domain !== "notes") return;
+    const row = await tx.getFirstAsync<{ mime: string; status: string; domain: string;
+      sensitivity: string; collectionSensitivity: string }>(
+      `SELECT a.mime,e.record_status AS status,e.domain,e.sensitivity,
+              c.sensitivity AS collectionSensitivity
+         FROM memory_attachments a JOIN memory_entities e ON e.id=a.entity_id
+         JOIN memory_collections c ON c.id=e.collection_id WHERE a.id=?`, [input.attachmentId]);
+    // Match the source materializer and visual reader's standard-only ACL.
+    // Never create new visual vectors for sensitive or secret notes.
+    if (!row || !legalImage(row.mime) || row.status !== "active" ||
+        row.domain !== "notes" || !["standard","inherit"].includes(row.sensitivity) ||
+        row.collectionSensitivity !== "standard") return;
     const source = await fingerprintExtractionSource(tx, input.attachmentId);
     // Original might change after the model decoded it. Never stamp an old
     // embedding with the *new* source revision.
