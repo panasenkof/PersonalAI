@@ -226,15 +226,22 @@ export class DirectChatStore {
     }
   }
 
-  async send(settings: DirectAgentSettings) {
+  /** Explicit internet photo action reuses the existing model and web tools,
+   * without consuming the user's unrelated composer draft. */
+  async send(settings: DirectAgentSettings, internetPhotoId?:string) {
     const id = this.snapshot.activeId;
     const current = this.snapshot.conversations.find(c => c.id === id);
-    if (!id || !current || current.busy || current.deleting || (!current.question.trim() && !current.attachments?.length) || this.disposed) return;
-    const prompt = current.question.trim() || "Посмотри приложенные файлы.";
-    const attachments = checkedChatAttachments(current.attachments);
+    if (!id || !current || current.busy || current.deleting || this.disposed ||
+      (!internetPhotoId && !current.question.trim() && !current.attachments?.length)) return;
+    const selected=internetPhotoId ? current.attachments?.find(f=>f.id===internetPhotoId && f.kind==="image") : undefined;
+    if(internetPhotoId && (!selected || !settings.allowWeb))return;
+    const prompt = internetPhotoId
+      ? "Найди в интернете сведения о том, что изображено на приложенной фотографии. Определи объект по фото, затем воспользуйся разрешённым веб-поиском. Ответь по-русски, приведи проверяемые факты и ссылки на реальные источники. Если изображение или поиск недоступны, сообщи об этом, не выдумывай источники."
+      : current.question.trim() || "Посмотри приложенные файлы.";
+    const attachments = checkedChatAttachments(internetPhotoId ? [selected!] : current.attachments);
     // Explicit photo intent runs only against encrypted device memory.
     // Do not send user image bytes or photo search text to the remote LLM.
-    if (localPhotoIntent83(prompt,attachments)) {
+    if (!internetPhotoId && localPhotoIntent83(prompt,attachments)) {
       await this.searchPhotosLocally(); return;
     }
     if (prompt.length > MAX_USER_PROMPT_CHARS) {
@@ -251,7 +258,9 @@ export class DirectChatStore {
     const taskState = { ...beginTask(current.taskState, prompt), webPreference: webPreference({ prompt, history, taskState: current.taskState }) };
     this.publish({ error: "" });
     const pending = this.update(id, {
-      taskState, question: "", attachments: [], busy: true, progress: "Сохраняю вопрос…", updatedAt: new Date().toISOString(),
+      taskState, question: internetPhotoId ? current.question : "",
+      attachments: internetPhotoId ? current.attachments : [],
+      busy: true, progress: "Сохраняю вопрос…", updatedAt: new Date().toISOString(),
       title: current.rows.length ? current.title : prompt.slice(0, 60),
       rows: [...current.rows, { id: Crypto.randomUUID(), role: "user", text: prompt, ...(attachments.length ? {attachments} : {}) }],
     })!;
@@ -345,7 +354,7 @@ export class DirectChatStore {
       const c = this.snapshot.conversations.find(c => c.id === id);
       if (c && !this.disposed) this.update(id, {
         taskState: { ...(c.taskState || taskState), turnStatus: "interrupted" },
-        ...(!modelStarted && !aborter.signal.aborted ? { question: c.question || prompt, attachments } : {}),
+        ...(!internetPhotoId && !modelStarted && !aborter.signal.aborted ? { question: c.question || prompt, attachments } : {}),
         rows: [...c.rows, { id: Crypto.randomUUID(), role: "info",
           text: aborter.signal.aborted ? "Запрос остановлен" : !modelStarted ? beforeModelError : String((e as Error).message) }],
       });
