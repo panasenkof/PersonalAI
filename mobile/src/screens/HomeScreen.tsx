@@ -1,8 +1,13 @@
 import { ChatAttachmentList } from "../media/ChatAttachmentList";
 import { useChatAttachments } from "../media/useChatAttachments";
+import { capturePhotoForSearch83 } from "../media/vision-chat-camera";
+import { localPhotoIntent83 } from "../media/vision-chat-search";
+import { MemoryCover } from "../media/MemoryCover";
+import { memoryErrorMessage } from "../local-memory/errors";
+import { onLocalMemorySessionChange } from "../local-memory/storage";
 import { useFocusEffect, useIsFocused, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { StatusBar } from "expo-status-bar";
 import { ActivityIndicator, Alert, FlatList, Keyboard, KeyboardAvoidingView, Linking, Platform, Pressable, Text, useWindowDimensions, View } from "react-native";
 import { useProfile } from "../profile/ProfileContext";
@@ -42,6 +47,14 @@ function NebulaHomeContent() {
   const { store, ready, error, notice: historyNotice, conversations, active, sections } = useDirectChat();
   const [settings, setSettings] = useState<DirectAgentSettings | null>(null);
   const [notice, setNotice] = useState("");
+  const [cameraBusy,setCameraBusy] = useState(false);
+  const cameraController = useRef<AbortController|null>(null);
+  useEffect(() => {
+    const off=onLocalMemorySessionChange(unlocked => {
+      if(!unlocked)cameraController.current?.abort();
+    });
+    return () => {cameraController.current?.abort();off();};
+  },[profile]);
   const {picking: pickingAttachment, pick: pickAttachment} = useChatAttachments(store, active?.id, isFocused, setNotice);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [voiceReset, setVoiceReset] = useState(0);
@@ -93,8 +106,10 @@ function NebulaHomeContent() {
     // Changing focus does not own or abort an agent request.
     return () => { alive = false; };
   }, [profile, store]));
-  const canSend = Boolean(ready && !pickingAttachment && !active?.deleting && settings && (settings.apiKey || anonymousLocalAllowed(settings)));
+  const canSend = Boolean(ready && !pickingAttachment && !cameraBusy && !active?.deleting && settings && (settings.apiKey || anonymousLocalAllowed(settings)));
   const question = active?.question || "";
+  const localPhotoSearch = localPhotoIntent83(question,active?.attachments || []);
+  const canSearchLocal = Boolean(ready && !cameraBusy && !pickingAttachment && !active?.deleting && localPhotoSearch);
   const busy = active?.busy || false;
   const statusSignals = { voicePhase, busy, streamText: active?.streamText, progress: active?.progress, error, ready };
   const orbPhase = resolveNebulaHomePhase(statusSignals);
@@ -104,14 +119,32 @@ function NebulaHomeContent() {
     windowWidth: width, composerOccluded };
   const artworkSize = nebulaEmptyOrbSize(artLayout);
   const action = { minHeight: 44, minWidth: 44, justifyContent: "center" as const, alignItems: "center" as const };
+  async function captureAndSearch() {
+    if(cameraController.current || !ready || !active?.id || busy || pickingAttachment || dictating)return;
+    const conversationId=active.id;
+    const controller=new AbortController();
+    cameraController.current=controller;
+    setCameraBusy(true);setNotice("");
+    try {
+      const capture=await capturePhotoForSearch83(controller.signal);
+      if(!capture || controller.signal.aborted || store.getSnapshot().activeId!==conversationId)return;
+      await store.searchPhotosLocally(capture,conversationId);
+    } catch(e) {
+      if(!controller.signal.aborted)setNotice(memoryErrorMessage(e));
+    } finally {
+      cameraController.current=null;
+      setCameraBusy(false);
+    }
+  }
   const sendOrStop = () => {
     if (busy) { store.stop(); return; }
-    if (!settings) return;
+    if (!settings && !localPhotoSearch) return;
     // Only a deliberate Send closes Gboard (not a pause in typing).
     Keyboard?.dismiss?.();
     setComposerFocused(false);
     setVoiceReset(n => n + 1);
-    void store.send(settings);
+    if(localPhotoSearch)void store.searchPhotosLocally();
+    else if(settings)void store.send(settings);
   };
   const openConnections = (presetId?: string) => navigation.navigate("ModelConnections", presetId ? { presetId } : undefined);
   // First run: the active connection has neither a key nor a keyless local address.
@@ -171,6 +204,8 @@ function NebulaHomeContent() {
         {item.memory?.length ? <View style={{ gap: 4 }}><Text style={{ color: t.muted, fontSize: 12 }}>Из памяти</Text>
           {item.memory.map(m => <Pressable key={m.id} accessibilityRole="link" accessibilityLabel={"Открыть запись " + m.title}
             onPress={() => navigation.navigate("MemoryNote", { entityId: m.id })} style={{ minHeight: 40, justifyContent: "center" }}>
+            {m.photo ? <MemoryCover profile={profile} entityId={m.id} compact height={86}
+              label={"Найденная фотография: "+m.title} /> : null}
             <Text numberOfLines={1} style={{ color: t.accent }}>{m.title}<Text style={{ color: t.muted, fontSize: 12 }}>{(m.section ? " · " + m.section : "") + (m.via === "rewrite" ? " · найдено другими словами" : m.via === "assistant" ? " · нашёл помощник" : "")}</Text></Text>
           </Pressable>)}</View> : null}
         {item.sources?.length ? <View style={{ gap: 4 }}><Text style={{ color: t.muted, fontSize: 12 }}>Источники</Text>{item.sources.map(url => <Pressable key={url} accessibilityRole="link" onPress={() => void Linking.openURL(url).catch(() => setNotice("Не удалось открыть ссылку."))} style={{ minHeight: 44, justifyContent: "center" }}>
@@ -210,12 +245,15 @@ function NebulaHomeContent() {
     <View style={{ zIndex: 3, padding: 10, gap: 5, backgroundColor: t.panel, borderTopWidth: 1, borderColor: t.line }}>
       {active?.attachments?.length ? <>
         <ChatAttachmentList files={active.attachments} disabled={busy || pickingAttachment} onRemove={id => { try {store.setAttachments(active.id, active.attachments!.filter(f => f.id !== id));} catch(e) {setNotice((e as Error).message);} }}/>
-        <Text style={{color:t.muted,fontSize:12}}>Файлы отправятся выбранной модели вместе с сообщением. Для изображений нужна модель с поддержкой зрения.</Text>
+        <Text style={{color:t.muted,fontSize:12}}>Для запроса «Найди похожие фото» или «Найди фото по описанию» поиск выполняется локально в памяти. В остальных запросах вложения могут отправляться выбранной LLM.</Text>
       </> : null}
       <PromptInput value={question} onChange={value => store.setQuestion(value)} onClear={() => { normalization.reset(); setVoiceReset(n => n + 1); }} editable={ready} onFocusChange={setComposerFocused} />
       <View testID="composer-actions" style={{ zIndex: 1, flexDirection: "row", alignItems: "center", gap: 4 }}>
         <IconAction compact icon="paperclip" label="Файл" accessibilityLabel="Прикрепить файл к сообщению" hint="JPEG, PNG, WebP или текст UTF-8. До 3 файлов, каждый до 2 МБ; текст вместе до 24 000 символов. Файлы не сохраняются как заметки." hintAbove hintAlign="start" disabled={!ready || busy || pickingAttachment || dictating} onPress={() => void pickAttachment()} />
-        <IconAction compact icon="camera" label="Камера" accessibilityLabel="Сфотографировать и распознать" hint="Снять фото для заметки в памяти, а не отправить снимок в диалог." hintAbove onPress={() => navigation.navigate("MemoryImport", { camera: true })} />
+<IconAction compact icon="camera" label={cameraBusy?"Ищу фото":"Камера"} accessibilityLabel="Сфотографировать и найти похожее в памяти"
+          hint="Снять предмет и сразу найти похожие сохранённые фотографии. Без облачной LLM и без сохранения снимка в заметки."
+          hintAbove disabled={!ready || cameraBusy || busy || pickingAttachment || dictating}
+          onPress={() => void captureAndSearch()} />
         <VoiceInput key={`${active?.id}:${voiceReset}`} value={question} onChange={value => { if (store.getSnapshot().activeId === active?.id) store.setQuestion(value); }} disabled={!ready || busy} onError={setNotice} showLabel={false} onBegin={normalization.reset} onActiveChange={setDictating} onPhaseChange={setVoicePhase} />
         <IconAction compact icon={normalization.busy ? "x" : normalization.normalized ? "rotate-ccw" : "edit-3"}
           label={normalization.busy ? "Отмена" : normalization.normalized ? "Исходный" : "Улучшить"}
@@ -227,7 +265,7 @@ function NebulaHomeContent() {
         <View style={{ flex: 1, minWidth: 0 }} />
         <IconAction compact icon={busy ? "square" : "arrow-up"} label={busy ? "Стоп" : "Отправить"} accessibilityLabel={busy ? "Остановить запрос" : "Отправить запрос"}
           hint={busy ? "Остановить ответ ИИ в этом диалоге." : "Отправить написанное сообщение выбранной модели."} hintAbove emphasized={!busy}
-          disabled={!busy && (!canSend || (!question.trim() && !active?.attachments?.length))} onPress={sendOrStop} />
+          disabled={!busy && (!(canSend || canSearchLocal) || (!question.trim() && !active?.attachments?.length))} onPress={sendOrStop} />
       </View>
     </View>
     <ConversationHistorySheet visible={historyOpen} conversations={conversations} activeId={active?.id}
