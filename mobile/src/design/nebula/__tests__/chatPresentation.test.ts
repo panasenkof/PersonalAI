@@ -24,3 +24,13 @@ it("removes an ephemeral reply after cancellation without inventing persisted co
   expect(presentChatRows([user], false, "partial")).toHaveLength(1);
   expect(presentChatRows([], true, "partial")).toEqual([]);
 });
+
+it("legacy internal web-photo prompts render as a concise message without modifying saved history",()=>{
+  const legacy:ChatRow={id:"old",role:"user",
+    text:"Найди в интернете сведения о том, что изображено на приложенной фотографии. Определи объект по фото, затем воспользуйся разрешённым веб-поиском.",
+    attachments:[{id:"photo",name:"bike.jpg",mime:"image/jpeg",kind:"image",data:"/9j/2Q==",size:4}]};
+  const shown=presentChatRows([legacy],false);
+  expect(shown[0].text).toBe("Что изображено на фото? Найти информацию в интернете");
+  expect(legacy.text).toContain("Определи объект по фото");
+  expect(presentChatRows([{...legacy,attachments:undefined}],false)[0].text).toBe(legacy.text);
+});
