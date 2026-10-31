@@ -207,7 +207,7 @@ export class DirectChatStore {
       const latest=this.snapshot.conversations.find(c=>c.id===id);
       if(latest)this.update(id,{
         rows:[...latest.rows,{id:Crypto.randomUUID(),role:"assistant",
-          text:result.text,memory:result.memory}],updatedAt:new Date().toISOString(),
+          text:result.text,memory:result.memory,photoAction:result.photoAction}],updatedAt:new Date().toISOString(),
       });
     } catch(e) {
       if(this.disposed)return;

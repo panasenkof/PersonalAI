@@ -146,3 +146,28 @@ test("active model switch during already-current fingerprint does not advance cu
   expect(page.alreadyCurrent).toBe(0);
   expect(indexOne).not.toHaveBeenCalled();
 });
+
+import { photoSearchReadiness83 } from "../vision-index-pages";
+test.each([
+  [[],"empty"],
+  [[{attachmentId:"a",indexedVersion:null}],"unprepared"],
+  [[{attachmentId:"a",indexedVersion:"old"}],"unprepared"],
+  [[{attachmentId:"a",indexedVersion:"a-current"}],"ready"],
+  [[{attachmentId:"a",indexedVersion:"a-current"},{attachmentId:"b",indexedVersion:null}],"partial"],
+  [Array.from({length:5},(_,i)=>({attachmentId:String(i),indexedVersion:null})),"unknown"],
+])("readiness is bounded and source-aware",async (items,expected)=>{
+  db.getAllAsync.mockResolvedValue(items);
+  expect(await photoSearchReadiness83("guest")).toBe(expected);
+  expect(indexOne).not.toHaveBeenCalled();
+});
+test("readiness refuses missing model, model change, cancellation and lock",async()=>{
+  model.mockResolvedValueOnce(null);
+  expect(await photoSearchReadiness83("guest")).toBe("model_missing");
+  db.getAllAsync.mockResolvedValue([]);
+  model.mockResolvedValueOnce(info()).mockResolvedValueOnce(info(altSpace));
+  await expect(photoSearchReadiness83("guest")).rejects.toThrow("vision_model_changed");
+  const aborter=new AbortController();aborter.abort();
+  await expect(photoSearchReadiness83("guest",aborter.signal)).rejects.toThrow("vision_index_cancelled");
+  unlocked.mockReturnValue(false);
+  await expect(photoSearchReadiness83("guest")).rejects.toThrow("application_locked");
+});

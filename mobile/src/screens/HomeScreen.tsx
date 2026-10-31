@@ -204,6 +204,10 @@ function NebulaHomeContent() {
         borderWidth: item.role === "assistant" ? 1 : 0, borderColor: t.line, borderRadius: 20, padding: 15, gap: 10 }}>
         {item.role === "assistant" ? <MarkdownText text={item.text} style={{ color: t.text, lineHeight: 23 }} /> :
           <Text selectable style={{ color: item.role === "user" ? t.userText : item.role === "info" ? t.muted : t.text, lineHeight: 23 }}>{item.text}</Text>}
+        {item.photoAction ? <Pressable accessibilityRole="button" style={{minHeight:48,justifyContent:"center"}}
+          onPress={() => item.photoAction === "import" ? navigation.navigate("MemoryImport", {source:"photo"}) : navigation.navigate("PhotoSearchSettings")}>
+          <Text style={{color:t.secondary}}>{item.photoAction === "model" ? "Выбрать модель" : item.photoAction === "import" ? "Добавить фото в память" : "Подготовить фото"}</Text>
+        </Pressable> : null}
         {item.attachments?.length ? <ChatAttachmentList files={item.attachments}/> : null}
         {item.memory?.length ? <View style={{ gap: 4 }}><Text style={{ color: t.muted, fontSize: 12 }}>Из памяти</Text>
           {item.memory.every(m => m.photo) ? <PhotoSearchResults key={item.id} profile={profile} results={item.memory}

@@ -1,3 +1,4 @@
+import { photoSearchReadiness83 } from "../vision-index-pages";
 import { localPhotoIntent83, searchLocalPhotosFromChat83 } from "../vision-chat-search";
 import { searchWithVision83 } from "../vision-memory-query";
 import { preparePhotoMatchChatAttachment83 } from "../vision-photo-query";
@@ -5,6 +6,7 @@ import { withLocalMemoryDatabase,localMemorySessionUnlocked } from "../../local-
 import { SqliteMemoryRepository } from "../../local-memory/repository";
 import type { ChatAttachment } from "../../direct-agent/chat-attachments";
 
+jest.mock("../vision-index-pages",()=>({photoSearchReadiness83:jest.fn()}));
 jest.mock("../vision-memory-query",()=>({searchWithVision83:jest.fn()}));
 jest.mock("../vision-photo-query",()=>({preparePhotoMatchChatAttachment83:jest.fn()}));
 jest.mock("../../local-memory/storage",()=>({
@@ -22,6 +24,7 @@ const photo={entity:{id:"note-1",title:"Красный велосипед"},scor
   originals:[{attachmentId:"a",kind:"image"}]};
 beforeEach(()=>{
   jest.clearAllMocks();
+  (photoSearchReadiness83 as jest.Mock).mockResolvedValue("ready");
   unlocked.mockReturnValue(true);
   lease.mockImplementation(async (_:string,cb:(db:unknown)=>Promise<unknown>)=>cb({}));
   Repo.mockImplementation(()=>({searchMemory:search}));
@@ -73,4 +76,12 @@ test.each(["У меня есть фото красного велосипеда?
 });
 test.each(["Как найти фото в интернете?", "Что написано на этом фото?", "Как найти фото в памяти?"])("question about using or understanding photos stays a conversation: %s", prompt => {
   expect(localPhotoIntent83(prompt,[attachment])).toBeNull();
+});
+
+test.each([["model_missing","model"],["empty","import"],["unprepared","prepare"]])("readiness %s offers recovery without inference",async(state,action)=>{
+  (photoSearchReadiness83 as jest.Mock).mockResolvedValueOnce(state);
+  const result=await searchLocalPhotosFromChat83("guest",{mode:"text",description:"коробка"});
+  expect(result.photoAction).toBe(action);
+  expect(textSearch).not.toHaveBeenCalled();
+  expect(imageVector).not.toHaveBeenCalled();
 });
