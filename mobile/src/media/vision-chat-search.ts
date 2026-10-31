@@ -91,8 +91,9 @@ export async function searchLocalPhotosFromChat83(
     });
     const photoCount=memory.filter(item=>item.photo).length;
     const noteCount=memory.length-photoCount;
+    const noteNoun=noteCount===1?"запись":noteCount<5?"записи":"записей";
     return {memory,text:memory.length
-      ? `Нашёл в памяти: ${photoCount ? `${photoCount} фото` : ""}${photoCount && noteCount ? " и " : ""}${noteCount ? `${noteCount} записей` : ""}. Нажмите на результат, чтобы открыть его.`
+      ? `Нашёл в памяти: ${photoCount ? `${photoCount} фото` : ""}${photoCount && noteCount ? " и " : ""}${noteCount ? `${noteCount} ${noteNoun}` : ""}. Нажмите на результат, чтобы открыть его.`
       : "В доступной памяти совпадений не найдено. Если фотографии добавлены недавно, проверьте их подготовку в настройках."};
   }
   const readiness = await photoSearchReadiness83(profile, signal);
