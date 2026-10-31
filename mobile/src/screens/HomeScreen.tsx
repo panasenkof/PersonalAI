@@ -204,7 +204,7 @@ function NebulaHomeContent() {
         {item.memory?.length ? <View style={{ gap: 4 }}><Text style={{ color: t.muted, fontSize: 12 }}>Из памяти</Text>
           {item.memory.map(m => <Pressable key={m.id} accessibilityRole="link" accessibilityLabel={"Открыть запись " + m.title}
             onPress={() => navigation.navigate("MemoryNote", { entityId: m.id })} style={{ minHeight: 40, justifyContent: "center" }}>
-            {m.photo ? <MemoryCover profile={profile} entityId={m.id} compact height={86}
+            {m.photo ? <MemoryCover profile={profile} entityId={m.id} photoAttachmentId={m.photoAttachmentId} compact height={86}
               label={"Найденная фотография: "+m.title} /> : null}
             <Text numberOfLines={1} style={{ color: t.accent }}>{m.title}<Text style={{ color: t.muted, fontSize: 12 }}>{(m.section ? " · " + m.section : "") + (m.via === "rewrite" ? " · найдено другими словами" : m.via === "assistant" ? " · нашёл помощник" : "")}</Text></Text>
           </Pressable>)}</View> : null}
