@@ -121,3 +121,15 @@ test("generic lookup with no readable collections cannot disclose matches",async
    collectionIds:[],imageVector:{model:active.modelSpace,values:expect.any(Float32Array)},
  });
 });
+
+test("ordinary object lookup retains text evidence after vision-native failure",async()=>{
+ vector.mockRejectedValueOnce(new Error("native_failed"));
+ await searchWithVision83("guest","велосипед",{
+   includeTextVector:true,standardCollectionsOnly:true,sensitivities:["standard","inherit"],
+ });
+ expect(mockSearch).toHaveBeenCalledWith("велосипед",{
+   sensitivities:["standard","inherit"],collectionIds:["photos"],
+   vector:{model:"verified-minilm-space",values:expect.any(Float32Array)},
+ });
+ expect(withUnlockedTransaction).toHaveBeenCalledTimes(1);
+});
