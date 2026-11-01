@@ -15,10 +15,10 @@ const listeners = new Set<() => void>();
 const publish = (patch: Partial<VoiceEngineState>) => { state = { ...state, ...patch }; listeners.forEach(fn => fn()); };
 export const getVoiceEngine = () => state;
 
-/** Existing installations retain their automatic choice until the user makes
- * an explicit choice. Preferences are independent of the downloaded model. */
-export function resolveVoiceEngine(preference: Preference, whisperReady: boolean): VoiceEngine {
-  return preference === "auto" ? (whisperReady ? "whisper" : "system") : preference;
+/** Auto uses system Google online by default. Whisper is used only when
+ * explicitly selected; downloading a model cannot silently change ASR. */
+export function resolveVoiceEngine(preference: Preference, _whisperReady: boolean): VoiceEngine {
+  return preference === "whisper" ? "whisper" : "system";
 }
 export function initVoiceEngine(): Promise<void> {
   return initialized ??= (async () => {
