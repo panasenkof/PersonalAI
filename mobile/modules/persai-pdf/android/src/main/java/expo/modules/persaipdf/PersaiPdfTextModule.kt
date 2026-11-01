@@ -10,24 +10,34 @@ import java.net.URI
  * only inside this app's files/cache sandbox, never arbitrary external URIs.
  */
 class PersaiPdfTextModule : Module() {
+  private fun appLocalPdf(uri: String): File {
+    require(uri.startsWith("file://")) { "pdf_requires_local_file" }
+    val context = appContext.reactContext ?: throw IllegalStateException("pdf_context_unavailable")
+    val file = File(URI(uri)).canonicalFile
+    val roots = listOf(context.filesDir.canonicalFile, context.cacheDir.canonicalFile,
+      context.getExternalFilesDir(null)?.canonicalFile).filterNotNull()
+    require(roots.any { file.path.startsWith(it.path + File.separator) }) {
+      "pdf_outside_app_storage"
+    }
+    return file
+  }
+
   override fun definition() = ModuleDefinition {
     Name("PersaiPdfText")
 
     Function("isAvailable") { PdfTextPageReader.isSupported() }
 
+    Function("isPagePreviewAvailable") { PdfPageRasterizer.isSupported() }
+
     AsyncFunction("extractPages") { uri: String, pageLimit: Int ->
       require(pageLimit in 1..128) { "invalid_pdf_page_limit" }
-      require(uri.startsWith("file://")) { "pdf_requires_local_file" }
+      return@AsyncFunction PdfTextPageReader.read(appLocalPdf(uri), pageLimit)
+    }
 
-      val file = File(URI(uri)).canonicalFile
+    AsyncFunction("renderPage") { uri: String, pageNumber: Int, maxWidth: Int ->
       val context = appContext.reactContext ?: throw IllegalStateException("pdf_context_unavailable")
-      val roots = listOf(context.filesDir.canonicalFile, context.cacheDir.canonicalFile,
-        context.getExternalFilesDir(null)?.canonicalFile).filterNotNull()
-      require(roots.any { file.path.startsWith(it.path + File.separator) }) {
-        "pdf_outside_app_storage"
-      }
-
-      return@AsyncFunction PdfTextPageReader.read(file, pageLimit)
+      return@AsyncFunction PdfPageRasterizer.render(
+        appLocalPdf(uri), context.cacheDir, pageNumber, maxWidth)
     }
   }
 }
