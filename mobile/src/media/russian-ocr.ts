@@ -1,6 +1,7 @@
 import { Platform } from "react-native";
 import { requireOptionalNativeModule } from "expo-modules-core";
-import * as Blob from "react-native-blob-util";
+// Lazy native loading: browser/Jest previews must not instantiate a NativeEventEmitter.
+const blob = () => (require("react-native-blob-util") as typeof import("react-native-blob-util")).default;
 import { useSyncExternalStore } from "react";
 import type { ImportFile } from "./kinds";
 import { validateNativePdfPages, type PdfTextPages } from "./pdf-pages";
@@ -14,7 +15,7 @@ const native = () => requireOptionalNativeModule<NativePdf>("PersaiPdfText");
 const SHA = "e16e5e036cce1d9ec2b00063cf8b54472625b9e14d893a169e2b0dedeb4df225";
 const SIZE = 3_861_738;
 const MODEL_URL = "https://huggingface.co/lm-kit/tessdata-fast/resolve/83ff76b97461395f257255720bf7f3957606dbb5/rus.traineddata";
-const MODEL_DIR = () => Blob.default.fs.dirs.DocumentDir + "/tessdata";
+const MODEL_DIR = () => blob().fs.dirs.DocumentDir + "/tessdata";
 const MODEL = () => MODEL_DIR() + "/rus.traineddata";
 type Status = { checked: boolean; ready: boolean; busy: boolean; percent: number; error: string };
 let state: Status = { checked: false, ready: false, busy: false, percent: 0, error: "" };
@@ -28,10 +29,10 @@ export function useRussianOcrStatus() {
     getRussianOcrStatus, getRussianOcrStatus);
 }
 async function modelExistsAndVerified() {
-  if (!(await Blob.default.fs.exists(MODEL()))) return false;
-  const info = await Blob.default.fs.stat(MODEL());
+  if (!(await blob().fs.exists(MODEL()))) return false;
+  const info = await blob().fs.stat(MODEL());
   if (Number(info.size) !== SIZE) return false;
-  return (await Blob.default.fs.hash(MODEL(), "sha256")).toLowerCase() === SHA;
+  return (await blob().fs.hash(MODEL(), "sha256")).toLowerCase() === SHA;
 }
 export async function refreshRussianOcrStatus() {
   if (state.busy) return;
@@ -53,9 +54,9 @@ export async function installRussianOcr(): Promise<void> {
   emit({ ...state, busy: true, percent: 0, error: "" });
   let temporary = "";
   try {
-    if (!(await Blob.default.fs.exists(MODEL_DIR()))) await Blob.default.fs.mkdir(MODEL_DIR());
+    if (!(await blob().fs.exists(MODEL_DIR()))) await blob().fs.mkdir(MODEL_DIR());
     temporary = MODEL_DIR() + "/rus." + id + ".partial";
-    const responseTask = Blob.default.config({ path: temporary, overwrite: true }).fetch("GET", MODEL_URL);
+    const responseTask = blob().config({ path: temporary, overwrite: true }).fetch("GET", MODEL_URL);
     transfer = responseTask;
     const response = await responseTask.progress({ interval: 300 }, (received: number) => {
       if (counter === id) emit({ ...state, percent: Math.floor(Math.min(99, received * 100 / SIZE)) });
@@ -63,12 +64,12 @@ export async function installRussianOcr(): Promise<void> {
     if (counter === id) transfer = null;
     if (counter !== id) throw new Error("cancelled");
     if (response.info().status !== 200 ||
-        Number((await Blob.default.fs.stat(temporary)).size) !== SIZE ||
-        (await Blob.default.fs.hash(temporary, "sha256")).toLowerCase() !== SHA)
+        Number((await blob().fs.stat(temporary)).size) !== SIZE ||
+        (await blob().fs.hash(temporary, "sha256")).toLowerCase() !== SHA)
       throw new Error("integrity");
     // No unverified binary ever becomes the active runtime model.
-    if (await Blob.default.fs.exists(MODEL())) await Blob.default.fs.unlink(MODEL());
-    await Blob.default.fs.mv(temporary, MODEL());
+    if (await blob().fs.exists(MODEL())) await blob().fs.unlink(MODEL());
+    await blob().fs.mv(temporary, MODEL());
     temporary = "";
     if (!native()?.isRussianOcrInstalled()) throw new Error("native-check");
     emit({ ...state, checked: true, ready: true, percent: 100, error: "" });
@@ -76,7 +77,7 @@ export async function installRussianOcr(): Promise<void> {
     if (counter === id) emit({ ...state, ready: false, error: "Не удалось установить или проверить русскую модель OCR. Оригиналы не затронуты." });
   } finally {
     if (counter === id) transfer = null;
-    if (temporary) await Blob.default.fs.unlink(temporary).catch(() => {});
+    if (temporary) await blob().fs.unlink(temporary).catch(() => {});
     if (counter === id) emit({ ...state, busy: false, percent: 0 });
   }
 }
@@ -88,7 +89,7 @@ export function cancelRussianOcrDownload() {
 }
 export async function removeRussianOcrModel() {
   if (state.busy) return;
-  if (await Blob.default.fs.exists(MODEL())) await Blob.default.fs.unlink(MODEL());
+  if (await blob().fs.exists(MODEL())) await blob().fs.unlink(MODEL());
   emit({ ...state, checked: true, ready: false, error: "" });
 }
 function ensureReady() {
