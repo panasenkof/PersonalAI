@@ -190,9 +190,7 @@ export function VoiceInput({ value, onChange, disabled = false, onError, showLab
     if (selectedEngine === "whisper") return startWhisper(token);
     try {
       if (!Speech.isRecognitionAvailable()) throw new Error(NO_SERVICE_MESSAGE);
-      // Google uses its online-capable recognizer by default. Do not attempt
-      // on-device recognition first: Android may support offline in general
-      // but have no Russian offline speech pack (Vivo X200 Pro).
+      // Non-Android platforms retain the existing online-capable native recognizer.
       if (!(await hasOnlineSpeechConsent())) {
         if (generation.current === token) {
           onError("Подтвердите онлайн-распознавание в разделе Настройки → Голосовой ввод.");
@@ -229,7 +227,7 @@ export function VoiceInput({ value, onChange, disabled = false, onError, showLab
   const accessibilityLabel = phase === "starting" ? "Отменить подготовку диктовки" : phase === "finishing" ? "Прервать распознавание последней фразы" : active ? "Остановить диктовку" : "Голосовой ввод";
   return <View style={{ zIndex: 1 }}>
     {showLabel ? <IconAction icon={active ? "square" : "mic"} label={label} accessibilityLabel={accessibilityLabel}
-      hint={phase === "starting" ? "Отменить запуск диктовки." : phase === "finishing" ? "Не ждать последнюю фразу: уже распознанный текст останется." : active ? "Диктовка завершится после паузы в речи. Можно закончить раньше кнопкой «Стоп»." : (selectedEngine === "whisper" ? "Whisper на телефоне. " : "Системное распознавание. ") + "Надиктовать сообщение. Ввод завершится после паузы, отправка — отдельной кнопкой."}
+      hint={phase === "starting" ? "Отменить запуск диктовки." : phase === "finishing" ? "Не ждать последнюю фразу: уже распознанный текст останется." : active ? "Диктовка завершится после паузы в речи. Можно закончить раньше кнопкой «Стоп»." : (selectedEngine === "whisper" ? "Whisper на телефоне. " : Platform.OS === "android" ? "Откроется системное окно распознавания. " : "Системное распознавание. ") + "Надиктовать сообщение. Ввод завершится после паузы, отправка — отдельной кнопкой."}
       disabled={disabled || !voice.loaded || voice.saving} emphasized={active} hintAbove hintAlign="start" onPress={press} /> : <Pressable accessibilityRole="button" accessibilityLabel={accessibilityLabel}
       disabled={disabled || !voice.loaded || voice.saving} onPress={press}
       style={{ minWidth: 48, minHeight: 48, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: active ? t.accent : t.soft }}>
