@@ -4,6 +4,7 @@ import { AttachmentView } from "../AttachmentView";
 import { attachmentPreviewKind, readableAttachmentSize } from "../attachmentPresentation";
 import { attachmentsForEntity, materializeAttachment } from "../attachments";
 import { localExtractionEvidence } from "../../local-memory/extractions";
+import { renderPdfPage, deletePdfPagePreview } from "../pdf-page-preview";
 
 const mockDelete = jest.fn();
 let mockFocused = true;
@@ -33,6 +34,7 @@ jest.mock("../../theme", () => ({
 }));
 jest.mock("../../local-memory/errors", () => ({ memoryErrorMessage: (e: Error) => e.message }));
 jest.mock("../../local-memory/extractions", () => ({ localExtractionEvidence: jest.fn() }));
+jest.mock("../pdf-page-preview", () => ({ renderPdfPage: jest.fn(), deletePdfPagePreview: jest.fn(async () => {}) }));
 jest.mock("../attachments", () => ({
   attachmentsForEntity: jest.fn(),
   materializeAttachment: jest.fn(),
@@ -47,6 +49,7 @@ beforeEach(() => {
   mockFocused = true; mockAppVisible = true;
   (attachmentsForEntity as jest.Mock).mockResolvedValue(items);
   (localExtractionEvidence as jest.Mock).mockResolvedValue([]);
+  (renderPdfPage as jest.Mock).mockImplementation(async (_uri,page) => ({uri:"file:///cache/persai-pdf-page-previews/page-"+page+".jpg",page,pageCount:3}));
   (materializeAttachment as jest.Mock).mockImplementation(async (_profile, att) => "file:///preview/" + att.id);
 });
 
@@ -189,22 +192,54 @@ test("step 8 D: PDF text opens only on demand and stays bound to actual page evi
   await waitFor(()=>expect(ui.getByText("manual.pdf")).toBeTruthy());
   expect(materializeAttachment).not.toHaveBeenCalled();
   expect(localExtractionEvidence).not.toHaveBeenCalled();
-  fireEvent.press(ui.getByLabelText("Показать текст PDF manual.pdf"));
+  fireEvent.press(ui.getByLabelText("Открыть PDF manual.pdf"));
   await waitFor(()=>expect(ui.getByText("Страница 3 · текстовый слой")).toBeTruthy());
   expect(ui.getByText("Первая частьВторая часть")).toBeTruthy();
   expect(ui.getByText("Последняя фраза")).toBeTruthy();
   expect(ui.queryByText("Страница 2 · текстовый слой")).toBeNull();
-  expect(ui.getByText(/Переход к странице оригинала пока недоступен/)).toBeTruthy();
+  expect(ui.getByText(/Переход из результата поиска/)).toBeTruthy();
   expect(localExtractionEvidence).toHaveBeenCalledWith("guest","note","pdf",10);
-  fireEvent.press(ui.getByLabelText("Показать текст PDF manual.pdf"));
+  fireEvent.press(ui.getByLabelText("Открыть PDF manual.pdf"));
   await waitFor(()=>expect(mockDelete).toHaveBeenCalledWith("file:///preview/pdf"));
 });
 test("step 8 D: no fabricated PDF page if no saved source evidence",async()=>{
   const pdf={id:"pdf",entity_id:"note",name:"scan.pdf",mime:"application/pdf",size:400};
   (attachmentsForEntity as jest.Mock).mockResolvedValue([pdf]);
   const ui=render(<AttachmentView profile="guest" entityId="note" />);
-  await waitFor(()=>ui.getByLabelText("Показать текст PDF scan.pdf"));
-  fireEvent.press(ui.getByLabelText("Показать текст PDF scan.pdf"));
+  await waitFor(()=>ui.getByLabelText("Открыть PDF scan.pdf"));
+  fireEvent.press(ui.getByLabelText("Открыть PDF scan.pdf"));
   await waitFor(()=>expect(ui.getByText(/Постраничный текст не сохранён/)).toBeTruthy());
   expect(ui.queryByText("Страница 1 · текстовый слой")).toBeNull();
+});
+
+
+test("E2a original PDF pages are opened on demand, one at a time; closing deletes previews",async()=>{
+  const pdf={id:"pdf",entity_id:"note",name:"scan.pdf",mime:"application/pdf",size:3000};
+  (attachmentsForEntity as jest.Mock).mockResolvedValue([pdf]);
+  const ui=render(<AttachmentView profile="guest" entityId="note" />);
+  await waitFor(()=>ui.getByLabelText("Открыть PDF scan.pdf"));
+  expect(renderPdfPage).not.toHaveBeenCalled();
+  fireEvent.press(ui.getByLabelText("Открыть PDF scan.pdf"));
+  await waitFor(()=>expect(ui.getByLabelText("Исходная страница PDF 1")).toBeTruthy());
+  expect(ui.getByText("Страница 1 из 3")).toBeTruthy();
+  expect(renderPdfPage).toHaveBeenCalledWith("file:///preview/pdf",1,expect.anything());
+  fireEvent.press(ui.getByLabelText("Следующая страница PDF"));
+  await waitFor(()=>expect(ui.getByLabelText("Исходная страница PDF 2")).toBeTruthy());
+  await waitFor(()=>expect(deletePdfPagePreview).toHaveBeenCalledWith("file:///cache/persai-pdf-page-previews/page-1.jpg"));
+  expect(ui.getByText(/Сканы видны, но текст на них пока не найден поиском/)).toBeTruthy();
+  expect(ui.queryByText("Страница 2 · текстовый слой")).toBeNull();
+  fireEvent.press(ui.getByLabelText("Открыть PDF scan.pdf"));
+  await waitFor(()=>expect(deletePdfPagePreview).toHaveBeenCalledWith("file:///cache/persai-pdf-page-previews/page-2.jpg"));
+  expect(mockDelete).toHaveBeenCalledWith("file:///preview/pdf");
+});
+test("E2a PDF preview is discarded when the app loses focus",async()=>{
+  const pdf={id:"pdf",entity_id:"note",name:"manual.pdf",mime:"application/pdf",size:3000};
+  (attachmentsForEntity as jest.Mock).mockResolvedValue([pdf]);
+  const ui=render(<AttachmentView profile="guest" entityId="note" />);
+  await waitFor(()=>ui.getByLabelText("Открыть PDF manual.pdf"));
+  fireEvent.press(ui.getByLabelText("Открыть PDF manual.pdf"));
+  await waitFor(()=>ui.getByLabelText("Исходная страница PDF 1"));
+  mockFocused=false;
+  ui.rerender(<AttachmentView profile="guest" entityId="note" />);
+  await waitFor(()=>expect(deletePdfPagePreview).toHaveBeenCalledWith("file:///cache/persai-pdf-page-previews/page-1.jpg"));
 });
