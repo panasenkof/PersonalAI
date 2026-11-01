@@ -1,5 +1,5 @@
 import React from "react";
-import { AppState, Text } from "react-native";
+import { Alert, AppState, Text } from "react-native";
 import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 import { ExpoSpeechRecognitionModule as Speech } from "expo-speech-recognition";
 import { VoiceInput } from "../components/VoiceInput";
@@ -36,14 +36,23 @@ test("dictation updates a draft without duplicating interim/final text and abort
   expect(v.getByText("План купить молоко и хлеб")).toBeTruthy();
   v.unmount(); expect(Speech.abort).toHaveBeenCalledTimes(1);
 });
-test("missing permission never starts speech; offline-language failure offers an explicit service choice", async () => {
+test("missing permission never starts speech; unavailable offline Russian offers a visible consented online retry", async () => {
+  const modal = jest.spyOn(Alert, "alert").mockImplementation(() => {});
   const error = jest.fn(); (Speech.requestPermissionsAsync as jest.Mock).mockResolvedValueOnce({ granted: false });
   const v = render(<Draft error={error} />); fireEvent.press(v.getByLabelText("Голосовой ввод"));
   await waitFor(() => expect(error).toHaveBeenCalled()); expect(Speech.start).not.toHaveBeenCalled();
   fireEvent.press(v.getByLabelText("Голосовой ввод")); await waitFor(() => expect(Speech.start).toHaveBeenCalled());
-  act(() => mockEvents.error({ error: "language-unavailable" }));
-  expect(v.getByLabelText("Использовать системную диктовку")).toBeTruthy();
-  expect(Speech.start).toHaveBeenCalledTimes(1);
+  expect(Speech.start).toHaveBeenLastCalledWith(expect.objectContaining({ lang: "ru-RU", requiresOnDeviceRecognition: true }));
+  act(() => mockEvents.error({ error: "language-not-supported" }));
+  expect(modal).toHaveBeenCalledWith("Распознавание Google", expect.stringContaining("через интернет"), expect.any(Array));
+  expect(v.queryByLabelText("Использовать системную диктовку")).toBeNull();
+  const buttons = modal.mock.calls[modal.mock.calls.length - 1][2] || [];
+  const approve = buttons.find(button => button.text === "Использовать через интернет");
+  expect(approve).toBeDefined();
+  await act(async () => { approve?.onPress?.(); });
+  await waitFor(() => expect(Speech.start).toHaveBeenCalledTimes(2));
+  expect(Speech.start).toHaveBeenLastCalledWith(expect.objectContaining({ lang: "ru-RU", requiresOnDeviceRecognition: false }));
+  v.unmount(); modal.mockRestore();
 });
 
 test("native speech endpointing finishes without a tap and preserves the final phrase", async () => {
