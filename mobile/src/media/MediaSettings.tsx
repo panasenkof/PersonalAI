@@ -4,6 +4,7 @@ import type { DirectConnection } from "../direct-agent/settings";
 import { loadMediaPreferences, saveMediaPreferences, type MediaPreferences } from "./preferences";
 import { nebulaRadii, nebulaSpacing, nebulaTouch, nebulaTypography } from "../design/nebula/tokens";
 import { useTheme } from "../theme";
+import { RussianOcrControls } from "./RussianOcrControls";
 
 /** One owner for recognition routing: Settings → Multimedia.
  * Changes are committed immediately rather than leaving a second hidden Save
@@ -85,6 +86,9 @@ export function MediaSettings({ profile, connections }: { profile: string; conne
         })}
       </View>;
     })}
+    <View style={{ borderTopWidth: 1, borderColor: t.line, paddingTop: nebulaSpacing.md }}>
+      <RussianOcrControls/>
+    </View>
     {missing ? <Text accessibilityRole="alert" style={{ color: t.err }}>
       Одно из выбранных подключений удалено. Выберите актуальное подключение.
     </Text> : null}
