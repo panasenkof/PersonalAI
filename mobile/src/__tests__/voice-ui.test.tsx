@@ -14,7 +14,7 @@ jest.mock("../media/whisper", () => ({ useWhisperStatus: () => ({ state: "absent
 const mockEvents: Record<string, (v: any) => void> = {};
 jest.mock("expo-speech-recognition", () => ({
   useSpeechRecognitionEvent: (name: string, fn: any) => { mockEvents[name] = fn; },
-  ExpoSpeechRecognitionModule: { isRecognitionAvailable: jest.fn(), supportsOnDeviceRecognition: jest.fn(), getPermissionsAsync: jest.fn(), requestPermissionsAsync: jest.fn(), start: jest.fn(), stop: jest.fn(), abort: jest.fn() },
+  ExpoSpeechRecognitionModule: { isRecognitionAvailable: jest.fn(), supportsOnDeviceRecognition: jest.fn(), getSpeechRecognitionServices: jest.fn(), getDefaultRecognitionService: jest.fn(), getPermissionsAsync: jest.fn(), requestPermissionsAsync: jest.fn(), start: jest.fn(), stop: jest.fn(), abort: jest.fn() },
 }));
 beforeEach(() => {
   jest.clearAllMocks();
@@ -22,6 +22,8 @@ beforeEach(() => {
   Object.defineProperty(AppState, "currentState", { value: "active", configurable: true });
   (Speech.isRecognitionAvailable as jest.Mock).mockReturnValue(true);
   (Speech.supportsOnDeviceRecognition as jest.Mock).mockReturnValue(true);
+  (Speech.getSpeechRecognitionServices as jest.Mock).mockReturnValue(["com.google.android.tts", "com.google.android.googlequicksearchbox"]);
+  (Speech.getDefaultRecognitionService as jest.Mock).mockReturnValue({ packageName: "com.google.android.tts" });
   (Speech.requestPermissionsAsync as jest.Mock).mockResolvedValue({ granted: true });
 });
 function Draft({ error }: { error: (s: string) => void }) {
@@ -52,6 +54,19 @@ test("missing permission never starts speech; unavailable offline Russian offers
   await act(async () => { approve?.onPress?.(); });
   await waitFor(() => expect(Speech.start).toHaveBeenCalledTimes(2));
   expect(Speech.start).toHaveBeenLastCalledWith(expect.objectContaining({ lang: "ru-RU", requiresOnDeviceRecognition: false }));
+  act(() => mockEvents.error({ error: "language-not-supported" }));
+  expect(modal).toHaveBeenLastCalledWith("Другой сервис Google", expect.stringContaining("приложение «Google»"), expect.any(Array));
+  const retryButtons = modal.mock.calls[modal.mock.calls.length - 1][2] || [];
+  await act(async () => { retryButtons.find(button => button.text === "Попробовать")?.onPress?.(); });
+  await waitFor(() => expect(Speech.start).toHaveBeenCalledTimes(3));
+  expect(Speech.start).toHaveBeenLastCalledWith(expect.objectContaining({
+    lang: "ru-RU", requiresOnDeviceRecognition: false,
+    androidRecognitionServicePackage: "com.google.android.googlequicksearchbox",
+  }));
+  const dialogsBefore = modal.mock.calls.length;
+  act(() => mockEvents.error({ error: "language-not-supported" }));
+  expect(error).toHaveBeenLastCalledWith(expect.stringContaining("даже в сетевом режиме"));
+  expect(modal.mock.calls.length).toBe(dialogsBefore);
   v.unmount(); modal.mockRestore();
 });
 
