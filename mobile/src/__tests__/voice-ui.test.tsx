@@ -27,6 +27,8 @@ jest.mock("expo-speech-recognition", () => ({
 }));
 beforeEach(() => {
   jest.clearAllMocks();
+  (preferAndroidVoiceActivity as jest.Mock).mockReturnValue(false);
+  (launchAndroidVoiceActivity as jest.Mock).mockReset();
   (Speech.getPermissionsAsync as jest.Mock).mockResolvedValue({ granted: false });
   Object.defineProperty(AppState, "currentState", { value: "active", configurable: true });
   // Jest Expo defaults to iOS; Android service discovery is Android-only.
