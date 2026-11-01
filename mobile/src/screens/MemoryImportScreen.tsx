@@ -237,8 +237,29 @@ export function MemoryImportScreen() {
     else if (source === "gallery") void gallery();
     else void pick();
   }, [incoming, route.params]);
+  // A URL-only preview is a user decision, never an implicit save or network call.
+  function previewLinkOnly() {
+    if (busy || preparing) return;
+    try {
+      const source = publicImportUrl(linkDraft);
+      const domain = new URL(source).hostname;
+      setSourceUrl(source);
+      setLinkDraft(source);
+      setLinkOnly(true);
+      setFiles([]);
+      setRecognitionResults([]);
+      setRecognizingIndex(-1);
+      setExtractedText("");
+      setKeepOriginal(false);
+      setTitle(current => file || !current.trim() ? "Ссылка · " + domain : current);
+      setSourcePickerOpen(false);
+      setProcessingOptionsOpen(false);
+      setNotice("Сохранится только адрес и ваша заметка. Содержимое сайта не загружено.");
+      // body is the user's annotation and must survive failed and retried imports.
+    } catch (error) { setNotice(linkImportErrorMessage(error)); }
+  }
   async function readLink() {
-    if (busy) return;
+    if (busy || controller.current) return;
     const aborter = new AbortController(); controller.current = aborter; setBusy(true); setNotice("");
     try {
       const result = await importLink(linkDraft, aborter.signal);
@@ -246,9 +267,9 @@ export function MemoryImportScreen() {
       if (result.file) { ownedFiles.current.push(result.file.uri); setFiles([result.file]); setExtractedText(""); setKeepOriginal(true); setTitle(result.file.name); }
       else { setFiles([]); setExtractedText(result.text || ""); setKeepOriginal(false); setTitle("Материал по ссылке"); }
       setRecognitionResults([]);
-      setSourceUrl(result.source); setLinkDraft(result.source); setSourcePickerOpen(false); setProcessingOptionsOpen(false); setBody("");
+      setLinkOnly(false); setSourceUrl(result.source); setLinkDraft(result.source); setSourcePickerOpen(false); setProcessingOptionsOpen(false);
     } catch (e) { if (alive.current) setNotice(linkImportErrorMessage(e)); }
-    finally { if (alive.current) setBusy(false); }
+    finally { if (controller.current === aborter) controller.current = null; if (alive.current) setBusy(false); }
   }
   async function pick() {
     setPreparing(true);
@@ -274,7 +295,7 @@ export function MemoryImportScreen() {
     finally { if (alive.current) setPreparing(false); }
   }
   async function extract() {
-    if (!file || !canExtract || busy) return;
+    if (!file || !canExtract || busy || controller.current) return;
     const aborter = new AbortController(); controller.current = aborter; setBusy(true); setNotice("");
     try {
       const vision = selected || { ...defaultDirectPreferences, apiKey: "", webSearchKey: "" };
@@ -337,11 +358,11 @@ export function MemoryImportScreen() {
     finally { if (alive.current) { setBusy(false); setRecognizingIndex(-1); } if (controller.current === aborter) controller.current = null; }
   }
   async function save() {
-    if (!keepOriginal && !body.trim() && !extractedText.trim()) { setNotice("Добавьте текст или распознайте материал перед сохранением без оригинала."); return; }
-    if (!profile || (!file && !body.trim() && !extractedText.trim()) || busy || preparing) return;
+    if (!keepOriginal && !body.trim() && !extractedText.trim() && !linkOnly) { setNotice("Добавьте текст или распознайте материал перед сохранением без оригинала."); return; }
+    if (!profile || (!file && !body.trim() && !extractedText.trim() && !(linkOnly && sourceUrl)) || busy || preparing || controller.current) return;
+    const aborter = new AbortController(); controller.current = aborter;
     setBusy(true); setNotice("");
     try {
-      const aborter = new AbortController(); controller.current = aborter;
       const content = !extractedText.trim() && files.length === 1 && file && mediaKind(file) === "text"
         ? await extractMedia(file, selected || { ...defaultDirectPreferences, apiKey: "", webSearchKey: "" }, false, aborter.signal)
         : extractedText;
@@ -377,10 +398,10 @@ export function MemoryImportScreen() {
       if (!keepOriginal) for (const item of files) { await FileSystem.deleteAsync(item.uri, { idempotent: true }).catch(() => {}); }
       if (alive.current) { if (incoming && position + 1 < incoming.length) setPosition(p => p + 1); else setLeaving(true); }
     } catch (e) { if (alive.current) setNotice("Не удалось сохранить: " + memoryErrorMessage(e)); }
-    finally { if (alive.current) setBusy(false); }
+    finally { if (controller.current === aborter) controller.current = null; if (alive.current) setBusy(false); }
   }
-  const hasMaterial = Boolean(file || extractedText || (incoming && !preparing));
-  const saveDisabled = busy || preparing || (!body.trim() && !extractedText.trim() && !(file && keepOriginal));
+  const hasMaterial = Boolean(file || extractedText || linkOnly || (incoming && !preparing));
+  const saveDisabled = busy || preparing || (!body.trim() && !extractedText.trim() && !(file && keepOriginal) && !(linkOnly && sourceUrl));
   return <View style={{ flex: 1, backgroundColor: t.bg, paddingBottom: keyboardOpen ? 0 : insets.bottom }}>
   <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"} keyboardVerticalOffset={Platform.OS === "ios" ? header : 0}>
     <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentContainerStyle={{ padding: 18, gap: 15, paddingBottom: 24 }}>
