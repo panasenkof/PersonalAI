@@ -167,10 +167,11 @@ export async function saveMediaNote(profile: string, input: { file?: ImportFile;
       originalHashes.push(fingerprint);
     }
     const contentHash: string | string[] | null = originals.length > 1 ? originalHashes : originalHashes[0] || null;
-    const pdfCoverage = verified?.filter(x => x.status === 'success' && x.pdfCoverage)
-      .map(x => ({ index: x.index, total_page_count: x.pdfCoverage!.totalPageCount,
-        extracted_page_count: x.pdfCoverage!.extractedPageCount,
-        missing_pages: x.pdfCoverage!.missingPages }));
+    const pdfCoverage = verified?.flatMap(x => x.status === 'success' && x.pdfCoverage
+      ? [{ index: x.index, total_page_count: x.pdfCoverage.totalPageCount,
+        extracted_page_count: x.pdfCoverage.extractedPageCount,
+        missing_pages: x.pdfCoverage.missingPages }]
+      : []);
     const receipt = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, JSON.stringify([input.receipt || 'device-import', contentHash, input.title, input.body, input.extractedText || "", input.sensitivity, input.collectionId || "", input.sourceUrl || "", ...(verified ? [verified.filter(x => x.status === 'success').map(x => [x.index, x.text, x.segments || null, x.pdfCoverage || null])] : [])]));
     {
       const old = await db.getFirstAsync<{ entity_id: string }>('SELECT entity_id FROM memory_received_shares WHERE fingerprint=?', [receipt]);
