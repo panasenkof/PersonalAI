@@ -54,6 +54,7 @@ test("missing permission never starts speech; unavailable offline Russian offers
   await act(async () => { approve?.onPress?.(); });
   await waitFor(() => expect(Speech.start).toHaveBeenCalledTimes(2));
   expect(Speech.start).toHaveBeenLastCalledWith(expect.objectContaining({ lang: "ru-RU", requiresOnDeviceRecognition: false }));
+  act(() => mockEvents.start({}));
   act(() => mockEvents.error({ error: "language-not-supported" }));
   expect(modal).toHaveBeenLastCalledWith("Другой сервис Google", expect.stringContaining("приложение «Google»"), expect.any(Array));
   const retryButtons = modal.mock.calls[modal.mock.calls.length - 1][2] || [];
