@@ -17,7 +17,8 @@ const PART_BYTES = 256 * 1024;
 export type Attachment = { id: string; entity_id: string; name: string; mime: string; size: number };
 const previewDirectory = () => new Directory(Paths.cache, 'persai-previews');
 export function clearAttachmentPreviews() {
-  for (const dir of [previewDirectory(), new Directory(Paths.cache, 'persai-incoming')]) {
+  for (const dir of [previewDirectory(), new Directory(Paths.cache, 'persai-incoming'),
+    new Directory(Paths.cache, 'persai-pdf-page-previews')]) {
     if (dir.exists) dir.delete();
   }
 }

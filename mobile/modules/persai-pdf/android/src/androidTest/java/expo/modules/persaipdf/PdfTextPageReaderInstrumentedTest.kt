@@ -67,6 +67,48 @@ class PdfTextPageReaderInstrumentedTest {
     } finally { file.delete() }
   }
 
+  @Test fun rendersRealPagesIncludingBlankScanWithoutRecognizingText() {
+    assumeTrue(Build.VERSION.SDK_INT >= 35)
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val source = pdf("VISIBLE_FIRST", null, "VISIBLE_LAST")
+    val previews = mutableListOf<File>()
+    try {
+      for (number in listOf(1, 2, 3)) {
+        val result = PdfPageRasterizer.render(source, context.cacheDir, number, 900)
+        assertEquals(number, result["page"])
+        assertEquals(3, result["pageCount"])
+        val output = File(android.net.Uri.parse(result["uri"] as String).path!!)
+        previews.add(output)
+        assertTrue(output.isFile)
+        assertTrue(output.length() > 100)
+        output.inputStream().use { stream ->
+          assertEquals(0xff, stream.read())
+          assertEquals(0xd8, stream.read())
+        }
+        val options = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        android.graphics.BitmapFactory.decodeFile(output.path, options)
+        assertTrue(options.outWidth in 1..1600)
+        assertTrue(options.outHeight in 1..1800)
+        assertTrue(options.outWidth.toLong()*options.outHeight <= 3_000_000)
+      }
+      try {
+        PdfPageRasterizer.render(source, context.cacheDir, 4, 900)
+        fail("Out-of-range page must never return a fabricated preview")
+      } catch (e: IllegalArgumentException) {
+        assertTrue(e.message.orEmpty().contains("invalid_pdf_preview_page"))
+      }
+      try {
+        PdfPageRasterizer.render(source, context.cacheDir, 1, 5000)
+        fail("Unsafe raster dimensions must fail closed")
+      } catch (e: IllegalArgumentException) {
+        assertTrue(e.message.orEmpty().contains("invalid_pdf_preview_size"))
+      }
+    } finally {
+      previews.forEach { it.delete() }
+      source.delete()
+    }
+  }
+
   @Test fun scannedOrBlankPdfHasNoTextLayerAndNoPageEvidence() {
     assumeTrue(Build.VERSION.SDK_INT >= 35)
     val file = pdf(null)

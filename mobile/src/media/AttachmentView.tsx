@@ -9,6 +9,7 @@ import { useTheme } from "../theme";
 import { nebulaRadii, nebulaSpacing, nebulaTouch } from "../design/nebula/tokens";
 import { attachmentsForEntity, materializeAttachment } from "./attachments";
 import { localExtractionEvidence } from "../local-memory/extractions";
+import { renderPdfPage, deletePdfPagePreview } from "./pdf-page-preview";
 import type { ExtractionEvidence } from "../local-memory/extractions";
 import type { Attachment } from "./attachments";
 import type { VerifiedOriginalLocator } from "../local-memory/types";
@@ -33,6 +34,70 @@ function VideoPreview({ uri, onError }: { uri: string; onError: (message: string
     return () => { try { player.pause(); } catch { /* Native object already released. */ } finally { sub.remove(); } };
   }, [player, onError]);
   return <VideoView player={player} nativeControls style={{ width: "100%", height: 230 }} allowsPictureInPicture={false} />;
+}
+
+/** One real original page at a time. Image data stays in a temporary app cache;
+ * changing page, closing, backgrounding or locking deletes the raster. */
+function PdfOriginalPages({ uri }: { uri: string }) {
+  const t = useTheme();
+  const [page, setPage] = useState(1);
+  const [pageCount, setPageCount] = useState<number | null>(null);
+  const [imageUri, setImageUri] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => { setPage(1); setPageCount(null); }, [uri]);
+  useEffect(() => {
+    let alive = true;
+    let temporary = "";
+    const controller = new AbortController();
+    setImageUri(""); setError(""); setLoading(true);
+    void renderPdfPage(uri, page, controller.signal)
+      .then(result => {
+        temporary = result.uri;
+        if (alive && !controller.signal.aborted) {
+          setPageCount(result.pageCount);
+          setImageUri(result.uri);
+        } else void deletePdfPagePreview(result.uri);
+      })
+      .catch(e => { if (alive && !controller.signal.aborted) setError(e instanceof Error ? e.message : "Не удалось показать страницу PDF."); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => {
+      alive = false;
+      controller.abort();
+      if (temporary) void deletePdfPagePreview(temporary);
+    };
+  }, [uri, page, attempt]);
+
+  return <View style={{ gap: nebulaSpacing.sm }}>
+    <Text style={{ color: t.muted }}>
+      Страница оригинального PDF · локальный просмотр без распознавания. Сканы видны, но текст на них пока не найден поиском.
+    </Text>
+    {loading ? <Text accessibilityLiveRegion="polite" style={{ color: t.muted }}>Открываю страницу {page}…</Text> : null}
+    {error ? <Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text> : null}
+    {error ? <Pressable accessibilityRole="button" accessibilityLabel="Повторить просмотр страницы PDF"
+      onPress={() => setAttempt(v => v + 1)} style={{ minHeight: nebulaTouch.minimum, justifyContent: "center" }}>
+      <Text style={{ color: t.secondary, fontWeight: "700" }}>Повторить просмотр</Text>
+    </Pressable> : null}
+    {imageUri && !loading && !error ? <Image source={{ uri: imageUri }}
+      accessibilityLabel={"Исходная страница PDF " + page} resizeMode="contain"
+      onError={() => setError("Не удалось показать страницу PDF. Оригинал сохранён.")}
+      style={{ width: "100%", height: 390, borderRadius: nebulaRadii.field }} /> : null}
+    {pageCount !== null ? <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+      <Pressable accessibilityRole="button" accessibilityLabel="Предыдущая страница PDF"
+        disabled={page <= 1 || loading} onPress={() => setPage(p => Math.max(1, p - 1))}
+        style={{ minHeight: nebulaTouch.minimum, justifyContent: "center", opacity: page <= 1 || loading ? .4 : 1 }}>
+        <Text style={{ color: t.secondary }}>Назад</Text>
+      </Pressable>
+      <Text style={{ color: t.text, fontWeight: "700" }}>Страница {page} из {pageCount}</Text>
+      <Pressable accessibilityRole="button" accessibilityLabel="Следующая страница PDF"
+        disabled={page >= pageCount || loading} onPress={() => setPage(p => Math.min(pageCount, p + 1))}
+        style={{ minHeight: nebulaTouch.minimum, justifyContent: "center", opacity: page >= pageCount || loading ? .4 : 1 }}>
+        <Text style={{ color: t.secondary }}>Далее</Text>
+      </Pressable>
+    </View> : null}
+  </View>;
 }
 
 /** Source-bound, local SQLCipher evidence only. The original remains encrypted;
@@ -69,7 +134,7 @@ function PdfTextPreview({ profile, attachment, ready }: {
   }
   return <View style={{ gap: nebulaSpacing.sm }}>
     <Text style={{ color: t.muted }}>
-      Оригинал PDF сохранён зашифрованным. Ниже — только ранее извлечённый текст; изображения и страницы без текстового слоя не отображаются. Переход к странице оригинала пока недоступен.
+      Оригинал PDF сохранён зашифрованным. Ниже — только ранее извлечённый текст; изображения и страницы без текстового слоя не отображаются. Переход из результата поиска к конкретной исходной странице пока недоступен.
     </Text>
     {loading ? <Text style={{ color: t.muted }}>Загружаю текст документа…</Text> : null}
     {error ? <Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text> : null}
@@ -194,7 +259,7 @@ function OneAttachment({ profile, attachment, expanded, visible, onToggle, verif
     };
   }, [active, attachment, profile, attempt, verified]);
 
-  const action = kind === "image" ? "Открыть фото" : kind === "audio" ? "Прослушать аудио" : kind === "document" ? "Показать текст PDF" : "Открыть видео";
+  const action = kind === "image" ? "Открыть фото" : kind === "audio" ? "Прослушать аудио" : kind === "document" ? "Открыть PDF" : "Открыть видео";
   return <View style={{ padding: nebulaSpacing.md, gap: nebulaSpacing.sm, borderWidth: 1, borderColor: t.line,
     backgroundColor: t.panel, borderRadius: nebulaRadii.card }}>
     <Text style={{ color: t.text, fontWeight: "700" }} numberOfLines={3}>{attachment.name}</Text>
@@ -212,7 +277,7 @@ function OneAttachment({ profile, attachment, expanded, visible, onToggle, verif
       style={{ width: "100%", height: 280, borderRadius: nebulaRadii.field }} />
       : kind === "audio" ? <AudioPreview uri={uri} onError={setError} />
       : kind === "video" ? <VideoPreview uri={uri} onError={setError} />
-      : kind === "document" ? <PdfTextPreview profile={profile} attachment={attachment} ready={active && Boolean(uri)} /> : null : null}
+      : kind === "document" ? <View style={{ gap: nebulaSpacing.md }}><PdfOriginalPages uri={uri} /><PdfTextPreview profile={profile} attachment={attachment} ready={active && Boolean(uri)} /></View> : null : null}
     {active && error ? <><Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text><Text style={{ color: t.muted }}>Для повторной попытки нажмите «Повторить просмотр».</Text></> : null}
   </View>;
 }
