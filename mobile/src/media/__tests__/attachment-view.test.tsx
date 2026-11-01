@@ -3,6 +3,7 @@ import { fireEvent, render, waitFor } from "@testing-library/react-native";
 import { AttachmentView } from "../AttachmentView";
 import { attachmentPreviewKind, readableAttachmentSize } from "../attachmentPresentation";
 import { attachmentsForEntity, materializeAttachment } from "../attachments";
+import { localExtractionEvidence } from "../../local-memory/extractions";
 
 const mockDelete = jest.fn();
 let mockFocused = true;
@@ -31,6 +32,7 @@ jest.mock("../../theme", () => ({
     text: "#F6F8FF", muted: "#ABBAD8", secondary: "#30CAED", err: "#FF9FAF" }),
 }));
 jest.mock("../../local-memory/errors", () => ({ memoryErrorMessage: (e: Error) => e.message }));
+jest.mock("../../local-memory/extractions", () => ({ localExtractionEvidence: jest.fn() }));
 jest.mock("../attachments", () => ({
   attachmentsForEntity: jest.fn(),
   materializeAttachment: jest.fn(),
@@ -44,6 +46,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockFocused = true; mockAppVisible = true;
   (attachmentsForEntity as jest.Mock).mockResolvedValue(items);
+  (localExtractionEvidence as jest.Mock).mockResolvedValue([]);
   (materializeAttachment as jest.Mock).mockImplementation(async (_profile, att) => "file:///preview/" + att.id);
 });
 
@@ -51,7 +54,7 @@ test("labels types and sizes without accessing original bytes", () => {
   expect(attachmentPreviewKind({ name: "sound.mp3", mime: "application/octet-stream" })).toBe("audio");
   expect(attachmentPreviewKind({ name: "photo.png", mime: "image/png" })).toBe("image");
   expect(attachmentPreviewKind({ name: "video.mp4", mime: "video/mp4" })).toBe("video");
-  expect(attachmentPreviewKind({ name: "file.pdf", mime: "application/pdf" })).toBe("unsupported");
+  expect(attachmentPreviewKind({ name: "file.pdf", mime: "application/pdf" })).toBe("document");
   expect(readableAttachmentSize(512)).toBe("512 Б");
   expect(readableAttachmentSize(2048)).toBe("2.0 КБ");
 });
@@ -169,4 +172,39 @@ test("search photo opens the exact original immediately and never substitutes a 
   screen.rerender(<AttachmentView profile="guest" entityId="note" photoAttachmentId="deleted" />);
   await waitFor(() => expect(screen.getByText("Источник изменён или недоступен. Повторите поиск.")).toBeTruthy());
   expect(materializeAttachment).toHaveBeenCalledTimes(1);
+});
+
+
+test("step 8 D: PDF text opens only on demand and stays bound to actual page evidence", async () => {
+  const pdf={id:"pdf",entity_id:"note",name:"manual.pdf",mime:"application/pdf",size:12345};
+  (attachmentsForEntity as jest.Mock).mockResolvedValue([pdf]);
+  (localExtractionEvidence as jest.Mock).mockResolvedValue([{
+    producerKind:"pdf",segments:[
+      {text:"Первая часть",location:{kind:"page",page:1}},
+      {text:"Вторая часть",location:{kind:"page",page:1}},
+      {text:"Последняя фраза",location:{kind:"page",page:3}},
+    ],
+  }]);
+  const ui=render(<AttachmentView profile="guest" entityId="note" />);
+  await waitFor(()=>expect(ui.getByText("manual.pdf")).toBeTruthy());
+  expect(materializeAttachment).not.toHaveBeenCalled();
+  expect(localExtractionEvidence).not.toHaveBeenCalled();
+  fireEvent.press(ui.getByLabelText("Показать текст PDF manual.pdf"));
+  await waitFor(()=>expect(ui.getByText("Страница 3 · текстовый слой")).toBeTruthy());
+  expect(ui.getByText("Первая частьВторая часть")).toBeTruthy();
+  expect(ui.getByText("Последняя фраза")).toBeTruthy();
+  expect(ui.queryByText("Страница 2 · текстовый слой")).toBeNull();
+  expect(ui.getByText(/Переход к странице оригинала пока недоступен/)).toBeTruthy();
+  expect(localExtractionEvidence).toHaveBeenCalledWith("guest","note","pdf",10);
+  fireEvent.press(ui.getByLabelText("Показать текст PDF manual.pdf"));
+  await waitFor(()=>expect(mockDelete).toHaveBeenCalledWith("file:///preview/pdf"));
+});
+test("step 8 D: no fabricated PDF page if no saved source evidence",async()=>{
+  const pdf={id:"pdf",entity_id:"note",name:"scan.pdf",mime:"application/pdf",size:400};
+  (attachmentsForEntity as jest.Mock).mockResolvedValue([pdf]);
+  const ui=render(<AttachmentView profile="guest" entityId="note" />);
+  await waitFor(()=>ui.getByLabelText("Показать текст PDF scan.pdf"));
+  fireEvent.press(ui.getByLabelText("Показать текст PDF scan.pdf"));
+  await waitFor(()=>expect(ui.getByText(/Постраничный текст не сохранён/)).toBeTruthy());
+  expect(ui.queryByText("Страница 1 · текстовый слой")).toBeNull();
 });
