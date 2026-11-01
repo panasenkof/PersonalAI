@@ -44,7 +44,11 @@ export async function refreshRussianOcrStatus() {
   }
 }
 export async function installRussianOcr(): Promise<void> {
-  if (state.busy || Platform.OS !== "android" || !native()) throw new Error("Локальное OCR недоступно в этой версии приложения.");
+  if (state.busy) return;
+  if (Platform.OS !== "android" || !native()) {
+    emit({ ...state, checked: true, ready: false, error: "Локальное OCR недоступно в этой версии приложения." });
+    return;
+  }
   const id = ++counter;
   emit({ ...state, busy: true, percent: 0, error: "" });
   let temporary = "";
@@ -56,7 +60,7 @@ export async function installRussianOcr(): Promise<void> {
     const response = await responseTask.progress({ interval: 300 }, (received: number) => {
       if (counter === id) emit({ ...state, percent: Math.floor(Math.min(99, received * 100 / SIZE)) });
     });
-    transfer = null;
+    if (counter === id) transfer = null;
     if (counter !== id) throw new Error("cancelled");
     if (response.info().status !== 200 ||
         Number((await Blob.default.fs.stat(temporary)).size) !== SIZE ||
@@ -71,7 +75,7 @@ export async function installRussianOcr(): Promise<void> {
   } catch {
     if (counter === id) emit({ ...state, ready: false, error: "Не удалось установить или проверить русскую модель OCR. Оригиналы не затронуты." });
   } finally {
-    transfer = null;
+    if (counter === id) transfer = null;
     if (temporary) await Blob.default.fs.unlink(temporary).catch(() => {});
     if (counter === id) emit({ ...state, busy: false, percent: 0 });
   }
@@ -93,7 +97,9 @@ function ensureReady() {
 export async function recognizeRussianPhoto(file: ImportFile, signal?: AbortSignal): Promise<string> {
   ensureReady();
   if (signal?.aborted) throw new Error("Распознавание остановлено.");
-  const result = await native()!.recognizeRussianImage(file.uri);
+  let result: string;
+  try { result = await native()!.recognizeRussianImage(file.uri); }
+  catch { throw new Error("Не удалось локально прочитать фотографию. Проверьте модель и оригинал."); }
   if (signal?.aborted) throw new Error("Распознавание остановлено.");
   if (typeof result !== "string" || !result.trim()) throw new Error("На фото не удалось прочитать текст. Оригинал можно сохранить.");
   if (result.length > 60_000) throw new Error("OCR вернул больше 60 000 символов. Нельзя сохранять обрезанный текст.");
@@ -106,7 +112,10 @@ export async function recognizeRussianPdf(file: ImportFile, signal?: AbortSignal
   const accumulated = new Map<number, string>();
   for (let part = 0; part < 16; part++) {
     if (signal?.aborted) throw new Error("Распознавание остановлено.");
-    const obj = await native()!.recognizeRussianPdf(file.uri, start) as {
+    let nativeResult: unknown;
+    try { nativeResult = await native()!.recognizeRussianPdf(file.uri, start); }
+    catch { throw new Error("Локальное OCR не смогло прочитать страницу PDF. Оригинал сохранён."); }
+    const obj = nativeResult as {
       pageCount?: unknown; pages?: unknown; nextPage?: unknown;
     };
     if (signal?.aborted) throw new Error("Распознавание остановлено.");
