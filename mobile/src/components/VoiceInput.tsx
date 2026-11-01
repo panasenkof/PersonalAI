@@ -112,23 +112,31 @@ export function VoiceInput({ value, onChange, disabled = false, onError, showLab
   useSpeechRecognitionEvent("error", event => {
     if (!owns.current || viaWhisper.current) return;
     const languageFailure = ["language-not-supported", "language-unavailable"].includes(event.error);
-    // Online is the default system mode; only Whisper offers local offline ASR.
-    // Some Android ROMs advertise Google services that do not accept ru-RU.
-    const alternate = languageFailure
+    // Vivo/Android 16 can report no-speech in the Google TTS recognizer
+    // while the Google keyboard recognizer works. One explicitly authorized
+    // alternative is safer than retrying the same service indefinitely.
+    const noSpeech = event.error === "no-speech";
+    const offerAlternative = languageFailure || noSpeech;
+    const alternate = offerAlternative
       ? alternativeOnlineGoogleService(service.current, attemptedOnlineServices.current) : undefined;
-    if (!languageFailure && event.error !== "aborted")
+    if (!offerAlternative && event.error !== "aborted")
       report(voiceErrorMessage(event.error, event.message, service.current));
     stop();
-    if (!languageFailure) return;
+    if (!offerAlternative) return;
     const retryGeneration = generation.current;
     if (!alternate) {
-      onError("Google не смог распознать русский даже в сетевом режиме. Обновите приложения Google и «Распознавание и синтез речи», проверьте язык голосового ввода в настройках Android. Если Gboard распознаёт речь, можно использовать микрофон клавиатуры.");
+      onError(languageFailure
+        ? "Google не принимает русский в сетевом режиме. Проверьте голосовой ввод в приложении Google или используйте микрофон Gboard."
+        : "Google не услышал речь. Повторите диктовку; если Gboard работает, проверьте другую службу распознавания Google.");
       return;
     }
-    onError("Выбранная служба Google не принимает русский. Доступен другой установленный сервис Google.");
+    onError(noSpeech
+      ? "Google не услышал речь. Можно попробовать другую установленную службу Google."
+      : "Текущая служба Google не принимает русский. Можно выбрать другую службу.");
     Alert.alert(
       "Другой сервис Google",
-      "Текущая служба не распознаёт русский. Попробовать " + serviceName(alternate) + "? Речь может передаваться Google для распознавания.",
+      (noSpeech ? "Речь не была обнаружена. " : "Текущая служба не принимает русский. ") +
+        "Попробовать " + serviceName(alternate) + "? Голос может передаваться Google для обработки.",
       [
         { text: "Отмена", style: "cancel" },
         { text: "Попробовать", onPress: () => {

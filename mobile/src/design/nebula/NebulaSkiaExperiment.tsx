@@ -8,16 +8,21 @@ import {
 } from "react-native";
 import {
   Canvas,
+  Circle,
   Fill,
+  Image as SkiaImage,
   ImageShader,
+  Mask,
+  RadialGradient,
   Shader,
   Skia,
   useClock,
   useImage,
+  vec,
 } from "@shopify/react-native-skia";
 import { runOnJS, useAnimatedReaction, useDerivedValue } from "react-native-reanimated";
 import { resolveNebulaScene, type NebulaPhase } from "./motion";
-import { nebulaColors } from "./tokens";
+import { nebulaColors, nebulaHomeColors } from "./tokens";
 import { NEBULA_ENERGY, NEBULA_HYBRID_SKSL } from "./hybridShader";
 import { getFilamentUniforms, getNebulaMotionParameters, NEBULA_ORB_SPEED, type NebulaOrbSpeed } from "./phaseFilament";
 import { isNebulaLabForeground, nebulaRendererLabels, nebulaRendererReason } from "./rendererDiagnostics";
@@ -83,6 +88,27 @@ function SkiaClockMeter({ clock, onClockTick }: {
   return null;
 }
 
+/** Mask the source poster's opaque nearly-black background on Android GPUs
+ * that reject the SkSL effect; composite against the actual Home surface. */
+function PosterFallback({ size, homeCanvas }: { size: number; homeCanvas: boolean }) {
+  const image = useImage(poster);
+  if (!homeCanvas) return <Image testID="nebula-skia-static-fallback"
+    source={poster} accessibilityIgnoresInvertColors style={{ width: size, height: size }} />;
+  const surface = size < 96 ? nebulaHomeColors.panel : nebulaHomeColors.bg;
+  const center = vec(size / 2, size / 2);
+  const radius = size * 0.49;
+  return <Canvas testID="nebula-skia-static-fallback" style={{ width: size, height: size }}>
+    <Fill color={surface} />
+    {image ? <Mask mode="luminance"
+      mask={<Circle cx={size / 2} cy={size / 2} r={radius}>
+        <RadialGradient c={center} r={radius} colors={["white", "white", "black"]}
+          positions={[0, 0.70, 1]} />
+      </Circle>}>
+      <SkiaImage image={image} x={0} y={0} width={size} height={size} fit="cover" />
+    </Mask> : null}
+  </Canvas>;
+}
+
 function AnimatedSkiaOrb({ size, phase, speed, homeCanvas, onImageReady, onClockTick, showClockDiagnostics }: {
   size: number;
   phase: NebulaPhase;
@@ -120,8 +146,7 @@ function AnimatedSkiaOrb({ size, phase, speed, homeCanvas, onImageReady, onClock
 
   // Correct-art fallback when SkSL is not supported by the device.
   if (!nebulaEffect || !image) {
-    return <Image testID="nebula-skia-static-fallback" source={poster}
-      accessibilityIgnoresInvertColors style={{ width: size, height: size }} />;
+    return <PosterFallback size={size} homeCanvas={homeCanvas} />;
   }
 
   return (
@@ -163,8 +188,7 @@ function StaticSkiaOrb({ size, phase, homeCanvas, onImageReady }: {
     ...getFilamentUniforms(phase, false),
   }), [size, phase, homeCanvas]);
   if (!nebulaEffect || !image) {
-    return <Image testID="nebula-skia-static-fallback" source={poster}
-      accessibilityIgnoresInvertColors style={{ width: size, height: size }} />;
+    return <PosterFallback size={size} homeCanvas={homeCanvas} />;
   }
   return <Canvas testID="nebula-skia-static-canvas" style={{ width: size, height: size }}>
     <Fill>
@@ -255,9 +279,7 @@ export function NebulaSkiaExperiment({
               showClockDiagnostics={showDiagnostics} />
           : enableNativeShader && Boolean(nebulaEffect)
             ? <StaticSkiaOrb size={size} phase={phase} homeCanvas={homeCanvas} onImageReady={onImageReady} />
-            : <Image testID="nebula-skia-poster" source={poster}
-                resizeMode="cover" accessibilityIgnoresInvertColors
-                style={{ width: size, height: size }} />}
+            : <PosterFallback size={size} homeCanvas={homeCanvas} />}
       </View>
       {showDiagnostics ? <View style={{ alignItems: "center", gap: 3, paddingHorizontal: 8 }}>
         <Text testID="nebula-renderer-reason" accessibilityRole="text"

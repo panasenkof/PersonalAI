@@ -106,8 +106,14 @@ half4 main(float2 xy) {
   // Its gentle central glow vanishes into the surrounding Home background;
   // lab retains the reference's original background.
   float homeGlow = exp(-12.0 * radial * radial);
-  float3 homeBg = float3(.05490, .06275, .14118) +
-                   homeGlow * float3(.017, .010, .028);
+  // Home surfaces differ: the 44dp header orb sits on #191C39, while
+  // the large central orb sits on #0E1024. A fully opaque, edge-matched
+  // surface prevents the near-black source bitmap (or broken GPU alpha
+  // blending) from showing up as a square on some Vivo Android GPUs.
+  float isHeader = 1.0 - step(96.0, uSize);
+  float3 homeBase = mix(float3(.05490, .06275, .14118),
+                        float3(.09804, .10980, .22353), isHeader);
+  float3 homeBg = homeBase + homeGlow * float3(.017, .010, .028);
   bg = mix(bg, homeBg, clamp(uHomeCanvas, 0.0, 1.0));
   bg += halo * float3(.33, .23, .78);
   float2 cell = floor(xy / (uSize * .082));
@@ -157,13 +163,17 @@ half4 main(float2 xy) {
       filamentColor * (haloNear * .38 + haloFar * .125);
     outputColor += lineLight * brightness;
   }
-  // Home composites over the actual app theme instead of drawing an opaque
-  // square. Alpha is premultiplied, including the faint organic outer glow.
-  // Non-Home lab mode remains fully opaque for reference comparisons.
+  // On some Android GPU pipelines the transparent Canvas gets black
+  // rather than blending against the RN Home background. Composite the
+  // approved moving orb and glow against the *exact* Home panel color
+  // in SkSL, and return opaque pixels. The fade reaches the matching
+  // background at the edges, so the Canvas rectangle disappears.
+  // The separate lab renderer retains its original full-frame colors.
   float outerGlow = exp(-40.0 * pow(max(0.0, d - 1.0), 2.0)) * .22;
   float orbAlpha = clamp(mask + (1.0 - mask) * outerGlow, 0.0, 1.0);
-  float resultAlpha = mix(1.0, orbAlpha, clamp(uHomeCanvas, 0.0, 1.0));
-  return half4(half3(clamp(outputColor, 0.0, 1.0)) * resultAlpha, resultAlpha);
+  float3 homeComposited = mix(homeBase, outputColor, orbAlpha);
+  float3 finalColor = mix(outputColor, homeComposited, clamp(uHomeCanvas, 0.0, 1.0));
+  return half4(half3(clamp(finalColor, 0.0, 1.0)), 1.0);
 }
 `;
 
