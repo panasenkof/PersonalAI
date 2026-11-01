@@ -23,6 +23,17 @@ export function linkImportErrorMessage(error: unknown): string {
   return 'Не удалось загрузить ссылку: сетевая ошибка или ограничения сайта. Проверьте соединение, доступность адреса в браузере и попробуйте другой публичный файл.';
 }
 
+/** Only safe status codes and fixed explanations are exposed to the UI. */
+export function linkHttpError(status: number): string {
+  if (status === 401 || status === 403) return "Доступ к материалу закрыт (HTTP " + status + "). Возможно, требуется вход на сайт. Сохраните ссылку без текста.";
+  if (status === 404 || status === 410) return "Материал по адресу не найден (HTTP " + status + "). Проверьте ссылку или сохраните её без текста.";
+  if (status === 408 || status === 504) return "Сайт не ответил вовремя (HTTP " + status + "). Повторите загрузку позже или сохраните ссылку.";
+  if (status === 413) return "Сайт отклонил большой файл (HTTP 413). Сохраните ссылку без файла.";
+  if (status === 429) return "Сайт временно ограничил загрузки (HTTP 429). Повторите позже.";
+  if (status >= 500 && status <= 599) return "Ошибка на стороне сайта (HTTP " + status + "). Повторите позже или сохраните ссылку.";
+  return "Сайт отказал в загрузке (HTTP " + status + "). Проверьте доступ в браузере или сохраните ссылку.";
+}
+
 /** Offline best-effort HTML extraction. Do not invoke an LLM for cleaning, and
  * never discard a shorter non-article page solely for lacking semantic tags. */
 export function pageText(html: string): string {
@@ -70,7 +81,7 @@ export async function importLink(raw: string, signal?: AbortSignal): Promise<{ f
     stage = 'получение ответа';
     if (response.status >= 300 && response.status < 400 || response.status === 0)
       throw new Error('Сайт перенаправляет запрос на другой адрес. Автоматические перенаправления для импорта отключены.');
-    if (!response.ok) throw new Error('Сайт отказал в загрузке: HTTP ' + response.status + '. Проверьте доступ к файлу в браузере.');
+    if (!response.ok) throw new Error(linkHttpError(response.status));
     const mime = (response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
     const looksLikeMediaFile = /\.(mp3|m4a|wav|ogg|flac|aac|mp4|mov|webm|mkv)$/i.test(new URL(source).pathname);
     if (looksLikeMediaFile && (mime === 'text/html' || mime === 'application/xhtml+xml' || mime === 'text/plain'))
