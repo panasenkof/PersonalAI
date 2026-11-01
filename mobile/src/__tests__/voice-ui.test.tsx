@@ -68,6 +68,45 @@ test("missing permission blocks recording; Google starts online and retries a re
   v.unmount(); modal.mockRestore();
 });
 
+test("Vivo no-speech offers one alternative Google recognizer with consent, never loops", async () => {
+  const modal = jest.spyOn(Alert, "alert").mockImplementation(() => {});
+  const error = jest.fn(), v = render(<Draft error={error} />);
+  fireEvent.press(v.getByLabelText("Голосовой ввод"));
+  await waitFor(() => expect(Speech.start).toHaveBeenCalledTimes(1));
+  expect(Speech.start).toHaveBeenCalledWith(expect.objectContaining({
+    lang: "ru-RU", requiresOnDeviceRecognition: false,
+  }));
+  act(() => mockEvents.start({}));
+  act(() => mockEvents.error({ error: "no-speech" }));
+  expect(Speech.start).toHaveBeenCalledTimes(1);
+  expect(modal).toHaveBeenCalledWith("Другой сервис Google", expect.stringContaining("Речь не была обнаружена"), expect.any(Array));
+  const buttons = modal.mock.calls[modal.mock.calls.length - 1][2] || [];
+  await act(async () => { buttons.find(button => button.text === "Попробовать")?.onPress?.(); });
+  await waitFor(() => expect(Speech.start).toHaveBeenCalledTimes(2));
+  expect(Speech.start).toHaveBeenLastCalledWith(expect.objectContaining({
+    lang: "ru-RU", requiresOnDeviceRecognition: false,
+    androidRecognitionServicePackage: "com.google.android.googlequicksearchbox",
+  }));
+  const count = modal.mock.calls.length;
+  act(() => mockEvents.start({}));
+  act(() => mockEvents.error({ error: "no-speech" }));
+  expect(modal.mock.calls.length).toBe(count);
+  expect(error).toHaveBeenLastCalledWith(expect.stringContaining("Google не услышал речь"));
+  v.unmount(); modal.mockRestore();
+});
+
+test("no alternate service after no-speech shows a short error, never invents a service", async () => {
+  const error = jest.fn(), modal = jest.spyOn(Alert, "alert").mockImplementation(() => {});
+  (Speech.getSpeechRecognitionServices as jest.Mock).mockReturnValue(["com.google.android.tts"]);
+  const v = render(<Draft error={error} />);
+  fireEvent.press(v.getByLabelText("Голосовой ввод"));
+  await waitFor(() => expect(Speech.start).toHaveBeenCalled());
+  act(() => mockEvents.error({ error: "no-speech" }));
+  expect(modal).not.toHaveBeenCalled();
+  expect(error).toHaveBeenLastCalledWith(expect.stringContaining("Google не услышал речь"));
+  v.unmount(); modal.mockRestore();
+});
+
 test("first Google online dictation asks once for consent and cannot start recording before approval", async () => {
   const modal = jest.spyOn(Alert, "alert").mockImplementation(() => {});
   (hasOnlineSpeechConsent as jest.Mock).mockResolvedValueOnce(false).mockResolvedValue(true);
