@@ -1,4 +1,4 @@
-import { NO_SERVICE_MESSAGE, pickRecognitionService, startTimeoutMessage, voiceErrorMessage } from "../voice";
+import { alternativeOnlineGoogleService, NO_SERVICE_MESSAGE, pickRecognitionService, startTimeoutMessage, voiceErrorMessage } from "../voice";
 
 test("the phone's default recognition service is used when there is one", () => {
   expect(pickRecognitionService(["com.google.android.googlequicksearchbox"], "com.samsung.android.bixby").pkg).toBeUndefined();
@@ -22,6 +22,12 @@ test.each(["not-allowed", "network", "language-not-supported", "service-not-allo
   });
 test("missing Russian points to where to install it", () => {
   expect(voiceErrorMessage("language-not-supported")).toContain("режим распознавания не принимает русский");
+});
+test("online Google fallback chooses only an installed, untried network recognizer", () => {
+  const choice = pickRecognitionService(["com.google.android.as", "com.google.android.tts", "com.google.android.googlequicksearchbox"], "com.google.android.tts");
+  expect(alternativeOnlineGoogleService(choice, ["com.google.android.tts"])).toBe("com.google.android.googlequicksearchbox");
+  expect(alternativeOnlineGoogleService(choice, ["com.google.android.tts", "com.google.android.googlequicksearchbox"])).toBeUndefined();
+  expect(alternativeOnlineGoogleService({ pkg: "com.google.android.as", installed: ["com.google.android.as"], defaultPackage: "" }, [])).toBeUndefined();
 });
 test("a service that never starts and a phone without one are explained", () => {
   expect(startTimeoutMessage()).toContain("не начала запись за 6 с");

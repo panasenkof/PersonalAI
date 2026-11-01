@@ -12,6 +12,16 @@ export function pickRecognitionService(installed: string[], defaultPackage: stri
   const pkg = defaultPackage ? undefined : GOOGLE_SPEECH_PACKAGES.find(p => installed.includes(p));
   return { pkg, installed, defaultPackage };
 }
+
+/** Only recognizers capable of ordinary network speech. Android System
+ * Intelligence (com.google.android.as) is an on-device-only service, not a
+ * fallback when online recognition rejects a locale. Never guess packages:
+ * only offer a service enumerated by Android to this app. */
+export function alternativeOnlineGoogleService(choice: ServiceChoice | undefined, attempted: readonly string[]): string | undefined {
+  if (!choice) return undefined;
+  return ["com.google.android.googlequicksearchbox", "com.google.android.tts"].find(pkg =>
+    choice.installed.includes(pkg) && pkg !== choice.defaultPackage && !attempted.includes(pkg));
+}
 /** What the phone offers, for error messages the user can act on. */
 export function serviceDiagnosis(choice?: ServiceChoice): string {
   if (!choice) return "";

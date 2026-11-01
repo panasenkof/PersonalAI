@@ -4,12 +4,15 @@ import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 import { ExpoSpeechRecognitionModule as Speech } from "expo-speech-recognition";
 import { VoiceInput } from "../components/VoiceInput";
 import { startWhisperDictation } from "../media/whisper";
+const mockVoiceChoice: { current: "system" | "whisper" } = { current: "whisper" };
 jest.mock("@react-navigation/native", () => ({ useFocusEffect: (cb: any) => require("react").useEffect(cb, [cb]) }));
 jest.mock("../security/native-interaction", () => ({ withNativeInteraction: (fn: any) => fn(), nativeInteractionActive: () => false }));
 jest.mock("@expo/vector-icons/Feather", () => () => null);
 jest.mock("../media/voice-engine", () => ({
-  useVoiceEngine: () => ({ loaded: true, preference: "auto", saving: false, error: "" }),
-  resolveVoiceEngine: (preference: string, ready: boolean) => preference === "auto" ? (ready ? "whisper" : "system") : preference,
+  useVoiceEngine: () => ({ loaded: true, preference: mockVoiceChoice.current, saving: false, error: "" }),
+  resolveVoiceEngine: (preference: string) => preference === "whisper" ? "whisper" : "system",
+  hasOnlineSpeechConsent: jest.fn(async () => true),
+  grantOnlineSpeechConsent: jest.fn(async () => {}),
 }));
 jest.mock("expo-speech-recognition", () => ({
   useSpeechRecognitionEvent: () => {},
@@ -22,7 +25,7 @@ jest.mock("../media/whisper", () => ({
   useWhisperStatus: () => mockStatus.current,
   startWhisperDictation: jest.fn(async (onText: any, _onError: any, onEnd: any, options: any) => { mockCallbacks.finishing = options.onFinishing; mockCallbacks.text = onText; mockCallbacks.end = onEnd; return mockSession; }),
 }));
-beforeEach(() => { Object.defineProperty(AppState, "currentState", { value: "active", configurable: true }); jest.clearAllMocks(); mockStatus.current = { state: "ready", id: "base" }; });
+beforeEach(() => { Object.defineProperty(AppState, "currentState", { value: "active", configurable: true }); jest.clearAllMocks(); mockStatus.current = { state: "ready", id: "base" }; mockVoiceChoice.current = "whisper"; });
 function Draft({ error }: { error: (s: string) => void }) {
   const [value, setValue] = React.useState("План");
   return <><Text>{value}</Text><VoiceInput value={value} onChange={setValue} onError={error} /></>;
@@ -41,7 +44,7 @@ test("with the model downloaded, dictation goes through Whisper on the phone and
   expect(v.getByLabelText("Голосовой ввод")).toBeTruthy();
 });
 test("without Google and without the model the error points to the on-device model", async () => {
-  mockStatus.current = { state: "absent" };
+  mockStatus.current = { state: "absent" }; mockVoiceChoice.current = "system";
   (Speech.isRecognitionAvailable as jest.Mock).mockReturnValueOnce(false);
   const error = jest.fn();
   const v = render(<Draft error={error} />);

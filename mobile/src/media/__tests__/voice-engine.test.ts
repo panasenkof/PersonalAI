@@ -7,13 +7,29 @@ beforeEach(() => {
   mockRead.mockResolvedValue(null); mockWrite.mockResolvedValue(undefined);
   engine = require("../voice-engine");
 });
-test("existing users retain automatic selection until an explicit engine is saved", async () => {
+test("automatic selection defaults to system even if Whisper is downloaded", async () => {
   await engine.initVoiceEngine();
-  expect(engine.resolveVoiceEngine(engine.getVoiceEngine().preference, true)).toBe("whisper");
+  expect(engine.resolveVoiceEngine(engine.getVoiceEngine().preference, true)).toBe("system");
   expect(engine.resolveVoiceEngine(engine.getVoiceEngine().preference, false)).toBe("system");
   await engine.setVoiceEngine("system");
   expect(engine.resolveVoiceEngine(engine.getVoiceEngine().preference, true)).toBe("system");
   expect(mockWrite).toHaveBeenCalledWith("pia.voice.engine.v1", "system");
+});
+test("online Google consent is stored once and persists through a new engine instance", async () => {
+  await engine.initVoiceEngine();
+  expect(await engine.hasOnlineSpeechConsent()).toBe(false);
+  await engine.grantOnlineSpeechConsent();
+  expect(mockWrite).toHaveBeenCalledWith("pia.voice.system-online-consent.v1", "true");
+  expect(await engine.hasOnlineSpeechConsent()).toBe(true);
+  jest.resetModules();
+  mockRead.mockResolvedValue("true");
+  const fresh: typeof import("../voice-engine") = require("../voice-engine");
+  expect(await fresh.hasOnlineSpeechConsent()).toBe(true);
+});
+test("online consent is not granted when SecureStore refuses to persist it", async () => {
+  mockWrite.mockRejectedValueOnce(new Error("secure storage failed"));
+  await expect(engine.grantOnlineSpeechConsent()).rejects.toThrow("secure storage failed");
+  expect(await engine.hasOnlineSpeechConsent()).toBe(false);
 });
 test.each(["system", "whisper"] as const)("%s is restored after an app restart, independently of model availability", async value => {
   mockRead.mockResolvedValue(value);

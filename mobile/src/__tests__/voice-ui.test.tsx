@@ -1,27 +1,34 @@
 import React from "react";
-import { Alert, AppState, Text } from "react-native";
+import { Alert, AppState, Platform, Text } from "react-native";
 import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 import { ExpoSpeechRecognitionModule as Speech } from "expo-speech-recognition";
 import { VoiceInput } from "../components/VoiceInput";
+import { hasOnlineSpeechConsent, grantOnlineSpeechConsent } from "../media/voice-engine";
 jest.mock("@react-navigation/native", () => ({ useFocusEffect: (cb: any) => require("react").useEffect(cb, [cb]) }));
 jest.mock("../security/native-interaction", () => ({ withNativeInteraction: (fn: any) => fn(), nativeInteractionActive: () => false }));
 jest.mock("@expo/vector-icons/Feather", () => () => null);
 jest.mock("../media/voice-engine", () => ({
   useVoiceEngine: () => ({ loaded: true, preference: "auto", saving: false, error: "" }),
   resolveVoiceEngine: (preference: string, ready: boolean) => preference === "auto" ? (ready ? "whisper" : "system") : preference,
+  hasOnlineSpeechConsent: jest.fn(async () => true),
+  grantOnlineSpeechConsent: jest.fn(async () => {}),
 }));
 jest.mock("../media/whisper", () => ({ useWhisperStatus: () => ({ state: "absent" }) }));
 const mockEvents: Record<string, (v: any) => void> = {};
 jest.mock("expo-speech-recognition", () => ({
   useSpeechRecognitionEvent: (name: string, fn: any) => { mockEvents[name] = fn; },
-  ExpoSpeechRecognitionModule: { isRecognitionAvailable: jest.fn(), supportsOnDeviceRecognition: jest.fn(), getPermissionsAsync: jest.fn(), requestPermissionsAsync: jest.fn(), start: jest.fn(), stop: jest.fn(), abort: jest.fn() },
+  ExpoSpeechRecognitionModule: { isRecognitionAvailable: jest.fn(), supportsOnDeviceRecognition: jest.fn(), getSpeechRecognitionServices: jest.fn(), getDefaultRecognitionService: jest.fn(), getPermissionsAsync: jest.fn(), requestPermissionsAsync: jest.fn(), start: jest.fn(), stop: jest.fn(), abort: jest.fn() },
 }));
 beforeEach(() => {
   jest.clearAllMocks();
   (Speech.getPermissionsAsync as jest.Mock).mockResolvedValue({ granted: false });
   Object.defineProperty(AppState, "currentState", { value: "active", configurable: true });
+  // Jest Expo defaults to iOS; Android service discovery is Android-only.
+  Object.defineProperty(Platform, "OS", { value: "android", configurable: true });
   (Speech.isRecognitionAvailable as jest.Mock).mockReturnValue(true);
   (Speech.supportsOnDeviceRecognition as jest.Mock).mockReturnValue(true);
+  (Speech.getSpeechRecognitionServices as jest.Mock).mockReturnValue(["com.google.android.tts", "com.google.android.googlequicksearchbox"]);
+  (Speech.getDefaultRecognitionService as jest.Mock).mockReturnValue({ packageName: "com.google.android.tts" });
   (Speech.requestPermissionsAsync as jest.Mock).mockResolvedValue({ granted: true });
 });
 function Draft({ error }: { error: (s: string) => void }) {
@@ -36,22 +43,43 @@ test("dictation updates a draft without duplicating interim/final text and abort
   expect(v.getByText("План купить молоко и хлеб")).toBeTruthy();
   v.unmount(); expect(Speech.abort).toHaveBeenCalledTimes(1);
 });
-test("missing permission never starts speech; unavailable offline Russian offers a visible consented online retry", async () => {
+test("missing permission blocks recording; Google starts online and retries a registered alternative only if Russian is rejected", async () => {
   const modal = jest.spyOn(Alert, "alert").mockImplementation(() => {});
   const error = jest.fn(); (Speech.requestPermissionsAsync as jest.Mock).mockResolvedValueOnce({ granted: false });
   const v = render(<Draft error={error} />); fireEvent.press(v.getByLabelText("Голосовой ввод"));
   await waitFor(() => expect(error).toHaveBeenCalled()); expect(Speech.start).not.toHaveBeenCalled();
-  fireEvent.press(v.getByLabelText("Голосовой ввод")); await waitFor(() => expect(Speech.start).toHaveBeenCalled());
-  expect(Speech.start).toHaveBeenLastCalledWith(expect.objectContaining({ lang: "ru-RU", requiresOnDeviceRecognition: true }));
-  act(() => mockEvents.error({ error: "language-not-supported" }));
-  expect(modal).toHaveBeenCalledWith("Распознавание Google", expect.stringContaining("через интернет"), expect.any(Array));
-  expect(v.queryByLabelText("Использовать системную диктовку")).toBeNull();
-  const buttons = modal.mock.calls[modal.mock.calls.length - 1][2] || [];
-  const approve = buttons.find(button => button.text === "Использовать через интернет");
-  expect(approve).toBeDefined();
-  await act(async () => { approve?.onPress?.(); });
-  await waitFor(() => expect(Speech.start).toHaveBeenCalledTimes(2));
+  fireEvent.press(v.getByLabelText("Голосовой ввод")); await waitFor(() => expect(Speech.start).toHaveBeenCalledTimes(1));
   expect(Speech.start).toHaveBeenLastCalledWith(expect.objectContaining({ lang: "ru-RU", requiresOnDeviceRecognition: false }));
+  expect(modal).not.toHaveBeenCalled();
+  act(() => mockEvents.start({}));
+  act(() => mockEvents.error({ error: "language-not-supported" }));
+  expect(modal).toHaveBeenLastCalledWith("Другой сервис Google", expect.stringContaining("приложение «Google»"), expect.any(Array));
+  const retryButtons = modal.mock.calls[modal.mock.calls.length - 1][2] || [];
+  await act(async () => { retryButtons.find(button => button.text === "Попробовать")?.onPress?.(); });
+  await waitFor(() => expect(Speech.start).toHaveBeenCalledTimes(2));
+  expect(Speech.start).toHaveBeenLastCalledWith(expect.objectContaining({
+    lang: "ru-RU", requiresOnDeviceRecognition: false,
+    androidRecognitionServicePackage: "com.google.android.googlequicksearchbox",
+  }));
+  const dialogsBefore = modal.mock.calls.length;
+  act(() => mockEvents.error({ error: "language-not-supported" }));
+  expect(error).toHaveBeenLastCalledWith(expect.stringContaining("даже в сетевом режиме"));
+  expect(modal.mock.calls.length).toBe(dialogsBefore);
+  v.unmount(); modal.mockRestore();
+});
+
+test("first Google online dictation asks once for consent and cannot start recording before approval", async () => {
+  const modal = jest.spyOn(Alert, "alert").mockImplementation(() => {});
+  (hasOnlineSpeechConsent as jest.Mock).mockResolvedValueOnce(false).mockResolvedValue(true);
+  const v = render(<Draft error={jest.fn()} />);
+  fireEvent.press(v.getByLabelText("Голосовой ввод"));
+  await waitFor(() => expect(modal).toHaveBeenCalledWith("Голосовой ввод Google", expect.stringContaining("Голос может отправляться Google"), expect.any(Array)));
+  expect(Speech.start).not.toHaveBeenCalled();
+  const choices = modal.mock.calls[modal.mock.calls.length - 1][2] || [];
+  await act(async () => { choices.find(button => button.text === "Разрешить")?.onPress?.(); });
+  await waitFor(() => expect(Speech.start).toHaveBeenCalledTimes(1));
+  expect(grantOnlineSpeechConsent).toHaveBeenCalledTimes(1);
+  expect(Speech.start).toHaveBeenCalledWith(expect.objectContaining({ lang: "ru-RU", requiresOnDeviceRecognition: false }));
   v.unmount(); modal.mockRestore();
 });
 

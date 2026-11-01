@@ -15,10 +15,10 @@ const listeners = new Set<() => void>();
 const publish = (patch: Partial<VoiceEngineState>) => { state = { ...state, ...patch }; listeners.forEach(fn => fn()); };
 export const getVoiceEngine = () => state;
 
-/** Existing installations retain their automatic choice until the user makes
- * an explicit choice. Preferences are independent of the downloaded model. */
-export function resolveVoiceEngine(preference: Preference, whisperReady: boolean): VoiceEngine {
-  return preference === "auto" ? (whisperReady ? "whisper" : "system") : preference;
+/** Auto uses system Google online by default. Whisper is used only when
+ * explicitly selected; downloading a model cannot silently change ASR. */
+export function resolveVoiceEngine(preference: Preference, _whisperReady: boolean): VoiceEngine {
+  return preference === "whisper" ? "whisper" : "system";
 }
 export function initVoiceEngine(): Promise<void> {
   return initialized ??= (async () => {
@@ -49,4 +49,21 @@ export async function setVoiceEngine(engine: VoiceEngine): Promise<void> {
     if (request === revision) publish({ saving: false, error: message, pending: undefined });
     throw new Error(message);
   }
+}
+
+/** Approval for sending speech to the selected system recognizer's online
+ * service. Stored separately from ASR engine choice and never auto-granted. */
+const ONLINE_CONSENT_KEY = "pia.voice.system-online-consent.v1";
+let onlineConsent: boolean | null = null;
+let onlineConsentRead: Promise<boolean> | null = null;
+export async function hasOnlineSpeechConsent(): Promise<boolean> {
+  if (onlineConsent !== null) return onlineConsent;
+  onlineConsentRead ??= SecureStore.getItemAsync(ONLINE_CONSENT_KEY)
+    .then(saved => (onlineConsent = saved === "true"))
+    .catch(() => false);
+  return onlineConsentRead;
+}
+export async function grantOnlineSpeechConsent(): Promise<void> {
+  await SecureStore.setItemAsync(ONLINE_CONSENT_KEY, "true");
+  onlineConsent = true;
 }

@@ -5,14 +5,13 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, AppState, Platform, Pressable, Text, View } from "react-native";
 import { nativeInteractionActive, withNativeInteraction } from "../security/native-interaction";
 import type { ServiceChoice } from "../media/voice";
-import { appendDictation, NO_SERVICE_MESSAGE, START_TIMEOUT_MS, pickRecognitionService, startTimeoutMessage, voiceErrorMessage } from "../media/voice";
+import { alternativeOnlineGoogleService, appendDictation, NO_SERVICE_MESSAGE, START_TIMEOUT_MS, pickRecognitionService, serviceName, startTimeoutMessage, voiceErrorMessage } from "../media/voice";
 import { startWhisperDictation, useWhisperStatus } from "../media/whisper";
 import type { DictationSession } from "../media/whisper";
-import { resolveVoiceEngine, useVoiceEngine } from "../media/voice-engine";
+import { grantOnlineSpeechConsent, hasOnlineSpeechConsent, resolveVoiceEngine, useVoiceEngine } from "../media/voice-engine";
 import { useTheme } from "../theme";
 import { IconAction } from "./IconAction";
 
-let networkConsent = false;
 const FINAL_RESULT_TIMEOUT_MS = 12_000;
 function recognitionService(): ServiceChoice | undefined {
   if (Platform.OS !== "android") return undefined;
@@ -43,8 +42,8 @@ export function VoiceInput({ value, onChange, disabled = false, onError, showLab
   const started = useRef(false);
   const finishing = useRef(false);
   const base = useRef("");
-  const offline = useRef(true);
   const service = useRef<ServiceChoice | undefined>(undefined);
+  const attemptedOnlineServices = useRef<string[]>([]);
   const [phase, setPhase] = useState<"idle" | "starting" | "listening" | "finishing">("idle");
   useEffect(() => { onActiveChange?.(phase !== "idle"); onPhaseChange?.(phase); }, [phase, onActiveChange, onPhaseChange]);
   useEffect(() => () => { onActiveChange?.(false); onPhaseChange?.("idle"); }, [onActiveChange, onPhaseChange]);
@@ -112,27 +111,29 @@ export function VoiceInput({ value, onChange, disabled = false, onError, showLab
   });
   useSpeechRecognitionEvent("error", event => {
     if (!owns.current || viaWhisper.current) return;
-    // Android can report general on-device support even when Russian is not
-    // available offline. A full-width native dialog avoids an invisible action
-    // below the microphone inside the chat composer.
-    const offlineLanguageFailure = offline.current &&
-      ["language-not-supported", "language-unavailable"].includes(event.error);
-    if (!offlineLanguageFailure && event.error !== "aborted")
+    const languageFailure = ["language-not-supported", "language-unavailable"].includes(event.error);
+    // Online is the default system mode; only Whisper offers local offline ASR.
+    // Some Android ROMs advertise Google services that do not accept ru-RU.
+    const alternate = languageFailure
+      ? alternativeOnlineGoogleService(service.current, attemptedOnlineServices.current) : undefined;
+    if (!languageFailure && event.error !== "aborted")
       report(voiceErrorMessage(event.error, event.message, service.current));
     stop();
-    if (!offlineLanguageFailure) return;
+    if (!languageFailure) return;
     const retryGeneration = generation.current;
-    onError("Русский язык недоступен для офлайн-распознавания Google. Можно попробовать распознавание через интернет.");
+    if (!alternate) {
+      onError("Google не смог распознать русский даже в сетевом режиме. Обновите приложения Google и «Распознавание и синтез речи», проверьте язык голосового ввода в настройках Android. Если Gboard распознаёт речь, можно использовать микрофон клавиатуры.");
+      return;
+    }
+    onError("Выбранная служба Google не принимает русский. Доступен другой установленный сервис Google.");
     Alert.alert(
-      "Распознавание Google",
-      "Офлайн-распознавание русского недоступно. Попробовать через интернет? Системная служба (Google) может передать голос для распознавания на свой сервер.",
+      "Другой сервис Google",
+      "Текущая служба не распознаёт русский. Попробовать " + serviceName(alternate) + "? Речь может передаваться Google для распознавания.",
       [
         { text: "Отмена", style: "cancel" },
-        { text: "Использовать через интернет", onPress: () => {
-          // A navigated-away or replaced draft must never start recording.
+        { text: "Попробовать", onPress: () => {
           if (generation.current !== retryGeneration || AppState.currentState !== "active") return;
-          networkConsent = true;
-          void start(true);
+          void start(alternate);
         } },
       ],
     );
@@ -164,30 +165,45 @@ export function VoiceInput({ value, onChange, disabled = false, onError, showLab
       if (generation.current === token && !aborter.signal.aborted) { onError((e as Error).message || "Голос на телефоне: не удалось начать диктовку."); stop(); }
     } finally { if (generation.current === token) starting.current = false; }
   }
-  async function start(network = false) {
+  async function start(recognitionPackage?: string) {
     if (disabled || !voice.loaded || voice.saving || owns.current || starting.current) return;
     if (value.length >= maxLength) { onError("Текст слишком длинный для диктовки. Существующий текст сохранён; добавьте отдельную запись."); return; }
     if (voice.error) { onError(voice.error); return; }
-    if (selectedEngine === "whisper" && !network && whisper.state !== "ready") {
+    if (selectedEngine === "whisper" && !recognitionPackage && whisper.state !== "ready") {
       onError(whisper.state === "unsupported" ? "Whisper недоступен на этом телефоне. Выберите системное распознавание: Настройки → Голосовой ввод." :
         whisper.state === "downloading" ? `Модель Whisper ещё скачивается (${whisper.progress}%). Дождитесь завершения или выберите системное распознавание в настройках.` :
         "Выбран Whisper. Скачайте модель: Настройки → Голосовой ввод → Голос без интернета. Или выберите системное распознавание.");
       return;
     }
     onBegin?.();
+    if (!recognitionPackage) attemptedOnlineServices.current = [];
     const token = ++generation.current;
     starting.current = true; setPhase("starting");
-    if (selectedEngine === "whisper" && !network) return startWhisper(token);
+    if (selectedEngine === "whisper" && !recognitionPackage) return startWhisper(token);
     try {
       if (!Speech.isRecognitionAvailable()) throw new Error(NO_SERVICE_MESSAGE);
-      const useNetwork = network || networkConsent || !Speech.supportsOnDeviceRecognition();
-      if (useNetwork && !network && !networkConsent) {
+      // Google uses its online-capable recognizer by default. Do not attempt
+      // on-device recognition first: Android may support offline in general
+      // but have no Russian offline speech pack (Vivo X200 Pro).
+      if (!(await hasOnlineSpeechConsent())) {
+        if (generation.current !== token) return;
         starting.current = false; setPhase("idle");
-        Alert.alert("Голосовой ввод", "Распознавание без интернета на этом телефоне недоступно. Системная служба телефона (обычно Google) может отправлять речь своему серверу; регистрация в PersAI не нужна.", [
-          { text: "Отмена", style: "cancel" },
-          { text: "Использовать системную службу", onPress: () => { if (generation.current !== token) return; networkConsent = true; void start(true); } },
-        ]); return;
+        Alert.alert("Голосовой ввод Google",
+          "PersAI будет распознавать речь через системную службу Google с интернетом. Голос может отправляться Google для обработки. Разрешить и запомнить выбор?",
+          [
+            { text: "Отмена", style: "cancel" },
+            { text: "Разрешить", onPress: () => {
+              if (generation.current !== token || AppState.currentState !== "active") return;
+              void grantOnlineSpeechConsent().then(() => {
+                if (generation.current === token && AppState.currentState === "active") void start(recognitionPackage);
+              }).catch(() => {
+                if (generation.current === token) onError("Не удалось сохранить разрешение на онлайн-распознавание. Повторите попытку.");
+              });
+            } },
+          ]);
+        return;
       }
+      if (generation.current !== token) return;
       const currentPermission = await Speech.getPermissionsAsync?.();
       if (generation.current !== token) return;
       const permission = currentPermission?.granted ? currentPermission :
@@ -195,13 +211,16 @@ export function VoiceInput({ value, onChange, disabled = false, onError, showLab
       if (generation.current !== token) return;
       if (!permission.granted) throw new Error("Голосовой ввод: нет разрешения на микрофон. Разрешите микрофон для PersAI в настройках телефона.");
       service.current = recognitionService();
-      base.current = value; offline.current = !useNetwork;
+      base.current = value;
       owns.current = true; started.current = finishing.current = false;
+      const selectedPackage = recognitionPackage || service.current?.pkg || service.current?.defaultPackage;
+      if (selectedPackage && !attemptedOnlineServices.current.includes(selectedPackage))
+        attemptedOnlineServices.current.push(selectedPackage);
       // Native endpointing remains authoritative. Android documents that
       // custom silence extras may be ignored or cause unexpected results.
       Speech.start({
-        lang: "ru-RU", interimResults: true, continuous: false, requiresOnDeviceRecognition: !useNetwork, addsPunctuation: true,
-        ...(service.current?.pkg ? { androidRecognitionServicePackage: service.current.pkg } : {}),
+        lang: "ru-RU", interimResults: true, continuous: false, requiresOnDeviceRecognition: false, addsPunctuation: true,
+        ...((recognitionPackage || service.current?.pkg) ? { androidRecognitionServicePackage: recognitionPackage || service.current?.pkg } : {}),
       });
       if (!owns.current) return;
       if (!started.current) watchdog.current = setTimeout(() => {
