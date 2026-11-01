@@ -134,7 +134,7 @@ function PdfTextPreview({ profile, attachment, ready }: {
   }
   return <View style={{ gap: nebulaSpacing.sm }}>
     <Text style={{ color: t.muted }}>
-      Оригинал PDF сохранён зашифрованным. Ниже — только ранее извлечённый текст; изображения и страницы без текстового слоя не отображаются. Переход к странице оригинала пока недоступен.
+      Оригинал PDF сохранён зашифрованным. Ниже — только ранее извлечённый текст; изображения и страницы без текстового слоя не отображаются. Переход из результата поиска к конкретной исходной странице пока недоступен.
     </Text>
     {loading ? <Text style={{ color: t.muted }}>Загружаю текст документа…</Text> : null}
     {error ? <Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text> : null}
@@ -259,7 +259,7 @@ function OneAttachment({ profile, attachment, expanded, visible, onToggle, verif
     };
   }, [active, attachment, profile, attempt, verified]);
 
-  const action = kind === "image" ? "Открыть фото" : kind === "audio" ? "Прослушать аудио" : kind === "document" ? "Показать текст PDF" : "Открыть видео";
+  const action = kind === "image" ? "Открыть фото" : kind === "audio" ? "Прослушать аудио" : kind === "document" ? "Открыть PDF" : "Открыть видео";
   return <View style={{ padding: nebulaSpacing.md, gap: nebulaSpacing.sm, borderWidth: 1, borderColor: t.line,
     backgroundColor: t.panel, borderRadius: nebulaRadii.card }}>
     <Text style={{ color: t.text, fontWeight: "700" }} numberOfLines={3}>{attachment.name}</Text>
