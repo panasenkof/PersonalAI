@@ -517,3 +517,28 @@ test("step 8 D: forged PDF coverage or wrong missing-page list cannot enter SQLC
   }
   expect(sqlite.prepare("SELECT COUNT(*) n FROM memory_entities").get().n).toBe(0);
 });
+
+
+test("step 8 E: image document text saves as source-bound, partial machine extraction",async()=>{
+  const id=await saveMediaNote("guest",{
+    ...input,body:"Моя ручная пометка о рецепте",extractedText:"Фото: Мука 250 г",
+    recognitions:[{index:0,name:input.file.name,status:"success",text:"Мука 250 г",imageMode:"document-text"}],
+  });
+  const note=sqlite.prepare("SELECT payload_json FROM memory_entities WHERE id=?").get(id);
+  const payload=JSON.parse(note.payload_json);
+  expect(payload.body).toBe("Моя ручная пометка о рецепте");
+  const run=sqlite.prepare("SELECT producer_kind,producer_revision,status,coverage FROM memory_extractions").get();
+  expect(run).toEqual({producer_kind:"vision",producer_revision:"provider-photo-document-text-v1",status:"partial",coverage:"unknown"});
+  const seg=sqlite.prepare("SELECT text,location_kind,page FROM memory_extraction_segments").get();
+  expect(seg).toEqual({text:"Мука 250 г",location_kind:"unknown",page:null});
+  expect(sqlite.prepare("SELECT COUNT(*) AS n FROM memory_extraction_fts WHERE memory_extraction_fts MATCH ?").get('"мука"').n).toBe(1);
+});
+test("step 8 E: image-only mode rejected on PDF/audio and no partial note is created",async()=>{
+  const pdf={uri:"file:///document.pdf",name:"document.pdf",mimeType:"application/pdf"};
+  mockFiles.set(pdf.uri,new Uint8Array([37,80,68,70,45,49]));
+  await expect(saveMediaNote("guest",{
+    file:pdf,title:"No",body:"",sensitivity:"standard",
+    recognitions:[{index:0,name:pdf.name,status:"success",text:"fake",imageMode:"document-text"}],
+  })).rejects.toThrow("invalid_image_recognition_mode");
+  expect(sqlite.prepare("SELECT COUNT(*) AS n FROM memory_entities").get().n).toBe(0);
+});

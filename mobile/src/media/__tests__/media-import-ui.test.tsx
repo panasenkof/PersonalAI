@@ -5,6 +5,8 @@ import { saveMediaNote } from '../attachments';
 import { extractMedia } from '../extract';
 import { importLink } from '../link-import';
 import { analyzeFilesTogether } from '../joint-recognition';
+import { ensureSections } from '../../local-memory/sections';
+import { Alert } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 jest.mock('../../components/BottomSheet', () => ({ BottomSheet: ({ visible, children }: any) => visible ? children : null }));
 const mockBack = jest.fn();
@@ -18,7 +20,7 @@ jest.mock('../link-import', () => ({
 const mockSessionListeners=new Set<(unlocked:boolean)=>void>();
 jest.mock("../../local-memory/storage", () => ({ onLocalMemorySessionChange: (fn:any) => {mockSessionListeners.add(fn);return ()=>mockSessionListeners.delete(fn);} }));
 jest.mock('../../local-memory/repository', () => ({ localMemoryRepository: async () => ({}) }));
-jest.mock('../../local-memory/sections', () => ({ ensureSections: async () => [{ id: 'notes', name: 'Заметки', slug: 'notes', sensitivity: 'standard' }] }));
+jest.mock('../../local-memory/sections', () => ({ ensureSections: jest.fn(async () => [{ id: 'notes', name: 'Заметки', slug: 'notes', sensitivity: 'standard' }]) }));
 jest.mock('@react-navigation/native', () => ({ useNavigation: () => ({ goBack: mockBack }), useRoute: () => ({ params: mockParams }), usePreventRemove: jest.fn() }));
 jest.mock('@react-navigation/elements', () => ({ useHeaderHeight: () => 56 }));
 jest.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ bottom: 24 }) }));
@@ -34,7 +36,9 @@ jest.mock('../joint-recognition', () => ({ analyzeFilesTogether: jest.fn() }));
 jest.mock('expo-document-picker', () => ({ getDocumentAsync: jest.fn(async () => ({ canceled: false, assets: [{ uri: 'file:///cache/photo.png', name: 'photo.png', mimeType: 'image/png' }] })) }));
 jest.mock('expo-image-picker', () => ({ launchImageLibraryAsync: jest.fn(), requestCameraPermissionsAsync: jest.fn(), launchCameraAsync: jest.fn() }));
 jest.mock('expo-file-system/legacy', () => ({ copyAsync: jest.fn(async () => {}), cacheDirectory: 'file:///cache/', deleteAsync: jest.fn(async () => {}) }));
-beforeEach(() => { jest.clearAllMocks(); mockParams = undefined; mockSessionListeners.clear(); });
+beforeEach(() => { jest.clearAllMocks(); mockParams = undefined; mockSessionListeners.clear();
+  (ensureSections as jest.Mock).mockResolvedValue([{ id: 'notes', name: 'Заметки', slug: 'notes', sensitivity: 'standard' }]);
+});
 test('picker lets user save original without transcript, provider or network; user text stays separate', async () => {
   const screen = render(<MemoryImportScreen />);
   fireEvent.press(screen.getByLabelText('Выбрать файл для памяти'));
@@ -423,4 +427,85 @@ test('step 8 D: PDF coverage preview identifies missing pages and retains author
     extractedText:expect.stringContaining('Страница 3'),
     recognitions:[expect.objectContaining({pdfCoverage:coverage,segments})],
   }),expect.anything()));
+});
+
+
+test('step 8 E photo document-text action is opt-in and keeps user annotation',async()=>{
+  (extractMedia as jest.Mock).mockResolvedValueOnce('Счёт № 17\nСумма: 2 050 ₽');
+  const ui=render(<MemoryImportScreen/>);
+  fireEvent.press(ui.getByLabelText('Выбрать файл для памяти'));
+  await waitFor(()=>expect(ui.getByText('photo.png')).toBeTruthy());
+  fireEvent.changeText(ui.getByLabelText('Сведения из файла'),'Сохранить в бухгалтерию');
+  if(!ui.queryByLabelText('Извлечь сведения из файла'))fireEvent.press(ui.getByLabelText('Распознавание'));
+  fireEvent.press(ui.getByLabelText('Прочитать текст фотографии через ИИ'));
+  expect(ui.getByText(/Это не локальное OCR/)).toBeTruthy();
+  expect(ui.getByText('Отправить фото модели и прочитать текст')).toBeTruthy();
+  expect(extractMedia).not.toHaveBeenCalled();
+  fireEvent.press(ui.getByLabelText('Извлечь сведения из файла'));
+  await waitFor(()=>expect(ui.getByLabelText('Распознанное содержимое файла').props.value).toBe('Счёт № 17\nСумма: 2 050 ₽'));
+  expect((extractMedia as jest.Mock).mock.calls[0][8]).toBe('document-text');
+  expect((extractMedia as jest.Mock).mock.calls[0][2]).toBe(true);
+  expect(ui.getByText(/не подтвердил точность/)).toBeTruthy();
+  expect(ui.getByLabelText('Сведения из файла').props.value).toBe('Сохранить в бухгалтерию');
+  fireEvent.press(ui.getByLabelText('Сохранить сведения в память'));
+  await waitFor(()=>expect(saveMediaNote).toHaveBeenCalledWith('guest',expect.objectContaining({
+    body:'Сохранить в бухгалтерию',extractedText:'Счёт № 17\nСумма: 2 050 ₽',
+  }),expect.anything()));
+});
+test('step 8 E personal photo remains local-only with no provider call',async()=>{
+  const ui=render(<MemoryImportScreen/>);
+  fireEvent.press(ui.getByLabelText('Выбрать файл для памяти'));
+  await waitFor(()=>expect(ui.getByText('photo.png')).toBeTruthy());
+  if(!ui.queryByLabelText('Прочитать текст фотографии через ИИ'))fireEvent.press(ui.getByLabelText('Распознавание'));
+  fireEvent.press(ui.getByLabelText('Прочитать текст фотографии через ИИ'));
+  fireEvent.press(ui.getByLabelText('Личные — только на телефоне'));
+  const read=ui.getByLabelText('Извлечь сведения из файла');
+  expect(read.props.accessibilityState?.disabled ?? read.props.disabled).toBe(true);
+  expect(extractMedia).not.toHaveBeenCalled();
+  fireEvent.press(ui.getByLabelText('Сохранить сведения в память'));
+  await waitFor(()=>expect(saveMediaNote).toHaveBeenCalledWith('guest',expect.objectContaining({
+    sensitivity:'sensitive',file:expect.objectContaining({name:'photo.png'}),extractedText:'',
+  }),expect.anything()));
+});
+
+
+test('step 8 E protected collection blocks external OCR even when record is standard',async()=>{
+  (ensureSections as jest.Mock).mockResolvedValueOnce([{id:'secure',name:'Личные документы',slug:'notes',sensitivity:'sensitive'}]);
+  const ui=render(<MemoryImportScreen/>);
+  fireEvent.press(ui.getByLabelText('Выбрать файл для памяти'));
+  await waitFor(()=>expect(ui.getByText('photo.png')).toBeTruthy());
+  if(!ui.queryByLabelText('Прочитать текст фотографии через ИИ'))fireEvent.press(ui.getByLabelText('Распознавание'));
+  fireEvent.press(ui.getByLabelText('Прочитать текст фотографии через ИИ'));
+  await waitFor(()=>expect(ui.getByText(/Выбранная коллекция закрыта для агента/)).toBeTruthy());
+  expect(ui.getByLabelText('Извлечь сведения из файла').props.accessibilityState?.disabled ?? ui.getByLabelText('Извлечь сведения из файла').props.disabled).toBe(true);
+  expect(extractMedia).not.toHaveBeenCalled();
+  fireEvent.press(ui.getByLabelText('Сохранить сведения в память'));
+  await waitFor(()=>expect(saveMediaNote).toHaveBeenCalledWith('guest',expect.objectContaining({
+    sensitivity:'standard',collectionId:'secure',extractedText:'',file:expect.objectContaining({name:'photo.png'}),
+  }),expect.anything()));
+});
+
+
+test('step 8 E re-recognition never overwrites edited photographed text without confirmation',async()=>{
+  const confirm=jest.spyOn(Alert,'alert').mockImplementation(()=>undefined);
+  try{
+    (extractMedia as jest.Mock).mockResolvedValueOnce('Продукт: масло').mockResolvedValueOnce('Продукт: масло 200 г');
+    const ui=render(<MemoryImportScreen/>);
+    fireEvent.press(ui.getByLabelText('Выбрать файл для памяти'));
+    await waitFor(()=>expect(ui.getByText('photo.png')).toBeTruthy());
+    if(!ui.queryByLabelText('Прочитать текст фотографии через ИИ'))fireEvent.press(ui.getByLabelText('Распознавание'));
+    fireEvent.press(ui.getByLabelText('Прочитать текст фотографии через ИИ'));
+    fireEvent.press(ui.getByLabelText('Извлечь сведения из файла'));
+    await waitFor(()=>expect(ui.getByLabelText('Распознанное содержимое файла').props.value).toBe('Продукт: масло'));
+    fireEvent.changeText(ui.getByLabelText('Распознанное содержимое файла'),'Продукт: масло — исправлено пользователем');
+    fireEvent.press(ui.getByLabelText('Извлечь сведения из файла'));
+    expect(confirm).toHaveBeenCalledWith('Заменить полученный текст?',expect.any(String),expect.any(Array));
+    expect(extractMedia).toHaveBeenCalledTimes(1);
+    expect(ui.getByLabelText('Распознанное содержимое файла').props.value).toContain('исправлено пользователем');
+    const buttons=confirm.mock.calls.at(-1)?.[2] as Array<{text:string;onPress?:()=>void}>;
+    expect(buttons[0].text).toBe('Оставить текущий');
+    buttons[1].onPress?.();
+    await waitFor(()=>expect(extractMedia).toHaveBeenCalledTimes(2));
+    await waitFor(()=>expect(ui.getByLabelText('Распознанное содержимое файла').props.value).toBe('Продукт: масло 200 г'));
+  }finally{confirm.mockRestore();}
 });

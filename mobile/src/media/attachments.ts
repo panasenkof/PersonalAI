@@ -85,6 +85,10 @@ function checkedRecognitions(originals: ImportFile[], values?: FileRecognition[]
     }
     if (typeof item.text !== 'string' || !item.text.trim()) throw new Error('invalid_recognition_sources');
     const text = item.text.trim();
+    // An image-only transcription mode cannot be forged for audio/PDF sources.
+    if (item.imageMode !== undefined &&
+      (mediaKind(originals[item.index]) !== 'image' ||
+       !['describe', 'document-text'].includes(item.imageMode))) throw new Error('invalid_image_recognition_mode');
     total += text.length;
     if (total > 60_000) throw new Error('recognition_source_text_too_large');
     // Timestamp ranges are accepted only for audio and only when a processor
@@ -138,7 +142,8 @@ function checkedRecognitions(originals: ImportFile[], values?: FileRecognition[]
     }
     return { index: item.index, status: 'success' as const, text,
       ...(segments ? { segments } : {}),
-      ...(pdf ? { pdfCoverage: pdf } : {}) };
+      ...(pdf ? { pdfCoverage: pdf } : {}),
+      ...(item.imageMode ? { imageMode: item.imageMode } : {}) };
   });
 }
 /** Note + original + receipt commit together. Cancellation never leaves a partial note. */
@@ -172,7 +177,7 @@ export async function saveMediaNote(profile: string, input: { file?: ImportFile;
         extracted_page_count: x.pdfCoverage.extractedPageCount,
         missing_pages: x.pdfCoverage.missingPages }]
       : []);
-    const receipt = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, JSON.stringify([input.receipt || 'device-import', contentHash, input.title, input.body, input.extractedText || "", input.sensitivity, input.collectionId || "", input.sourceUrl || "", ...(verified ? [verified.filter(x => x.status === 'success').map(x => [x.index, x.text, x.segments || null, x.pdfCoverage || null])] : [])]));
+    const receipt = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, JSON.stringify([input.receipt || 'device-import', contentHash, input.title, input.body, input.extractedText || "", input.sensitivity, input.collectionId || "", input.sourceUrl || "", ...(verified ? [verified.filter(x => x.status === 'success').map(x => [x.index, x.text, x.segments || null, x.pdfCoverage || null, x.imageMode || null])] : [])]));
     {
       const old = await db.getFirstAsync<{ entity_id: string }>('SELECT entity_id FROM memory_received_shares WHERE fingerprint=?', [receipt]);
       if (old) return old.entity_id;
@@ -204,7 +209,8 @@ export async function saveMediaNote(profile: string, input: { file?: ImportFile;
             producerId: run.segments && kind === 'document' ? 'android-pdf-text' :
               run.segments ? 'openai-whisper-1' : 'persai-media-extract',
             producerRevision: run.segments && kind === 'document' ? 'native-page-v1' :
-              run.segments ? 'official-segment-time-v1' : 'source-text-v1',
+              run.segments ? 'official-segment-time-v1' :
+              kind === 'image' && run.imageMode === 'document-text' ? 'provider-photo-document-text-v1' : 'source-text-v1',
             status: 'partial', coverage: run.pdfCoverage ? 'partial' : 'unknown',
             segments: run.segments || unknownSegments(run.text),
           });

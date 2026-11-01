@@ -25,6 +25,7 @@ import { MAX_ORIGINALS_PER_NOTE, MAX_TOTAL_ORIGINAL_BYTES, saveMediaNote } from 
 import { combinedRecognitionText, recognizeFilesSequentially, type FileRecognition } from "../media/batch-recognition";
 import { analyzeFilesTogether } from "../media/joint-recognition";
 import { extractMedia, mediaKind } from "../media/extract";
+import type { ImageExtractionMode } from "../media/extract";
 import type { ImportFile } from "../media/extract";
 import type { RootStackParams } from "../navigation";
 import { withNativeInteraction } from "../security/native-interaction";
@@ -74,6 +75,7 @@ export function MemoryImportScreen() {
   const [recognitionResults, setRecognitionResults] = useState<FileRecognition[]>([]);
   const [recognizingIndex, setRecognizingIndex] = useState(-1);
   const [recognitionMode, setRecognitionMode] = useState<"sequential" | "joint">("sequential");
+  const [imageExtractionMode, setImageExtractionMode] = useState<ImageExtractionMode>("describe");
   const [jointAnalyzing, setJointAnalyzing] = useState(false);
   const [connections, setConnections] = useState<DirectConnection[]>([]);
   const [connectionId, setConnectionId] = useState("");
@@ -132,6 +134,9 @@ export function MemoryImportScreen() {
   });
   useEffect(() => { if (leaving) navigation.goBack(); }, [leaving, navigation]);
   useEffect(() => onLocalMemorySessionChange(unlocked => { if (!unlocked) controller.current?.abort(); }), []);
+  // Both target record AND collection must permit provider egress.
+  const collectionAllowsProvider = collections.find(c => c.id === collectionId)?.sensitivity === "standard";
+  const providerApproved = classification === "standard" && collectionAllowsProvider;
   const selected = connections.find(c => c.id === connectionId);
   const kind = file ? mediaKind(file) : null;
   const localAudio = kind === "audio" && whisper.state === "ready";
@@ -143,7 +148,7 @@ export function MemoryImportScreen() {
     return currentKind === "text" || currentKind === "document" ||
       (currentKind === "audio" && whisper.state === "ready") ||
       (currentKind === "video" && whisper.state === "ready") ||
-      Boolean(currentProcessor && classification === "standard" && (currentProcessor.apiKey || anonymousLocalAllowed(currentProcessor)) &&
+      Boolean(currentProcessor && providerApproved && (currentProcessor.apiKey || anonymousLocalAllowed(currentProcessor)) &&
         !(currentKind === "audio" && currentProcessor.provider === "anthropic"));
   });
   const field = { color: t.text, backgroundColor: t.panel, borderWidth: 1, borderColor: t.line, borderRadius: 16, padding: 14, minHeight: 50 };
@@ -299,8 +304,17 @@ export function MemoryImportScreen() {
     } catch (e) { if (alive.current) setNotice((e as Error).message); }
     finally { if (alive.current) setPreparing(false); }
   }
-  async function extract() {
+  async function extract(confirmedReplacement = false) {
     if (!file || !canExtract || busy || controller.current) return;
+    // Reprocessing a corrected document must not silently erase user edits.
+    // Full versioned candidate comparison is implemented in package G.
+    if (imageExtractionMode === "document-text" && extractedText.trim() && !confirmedReplacement) {
+      Alert.alert("Заменить полученный текст?",
+        "Текущий распознанный текст мог быть исправлен вручную. Новый результат заменит его только после вашего подтверждения; подпись к заметке не изменится.",
+        [{ text: "Оставить текущий", style: "cancel" },
+         { text: "Заменить после разбора", onPress: () => void extract(true) }]);
+      return;
+    }
     const aborter = new AbortController(); controller.current = aborter; setBusy(true); setNotice("");
     try {
       const vision = selected || { ...defaultDirectPreferences, apiKey: "", webSearchKey: "" };
@@ -308,23 +322,26 @@ export function MemoryImportScreen() {
       if (files.length === 1) {
         let timedSegments: FileRecognition["segments"];
         let pdfCoverage: PdfPageCoverage | undefined;
-        const text = await extractMedia(file, vision, classification === "standard", aborter.signal, undefined, speech,
-          segments => { timedSegments = segments; }, coverage => { pdfCoverage = coverage; });
+        const text = await extractMedia(file, vision, providerApproved, aborter.signal, undefined, speech,
+          segments => { timedSegments = segments; }, coverage => { pdfCoverage = coverage; }, imageExtractionMode);
         if (alive.current && !aborter.signal.aborted) {
           setRecognitionResults([{ index: 0, name: file.name, status: "success", text,
             ...(timedSegments ? { segments: timedSegments } : {}),
-            ...(pdfCoverage ? { pdfCoverage } : {}) }]);
+            ...(pdfCoverage ? { pdfCoverage } : {}),
+            ...(kind === "image" ? { imageMode: imageExtractionMode } : {}) }]);
           setExtractedText(text);
           setNotice(pdfCoverage ? pdfCoverageMessage(pdfCoverage) :
-            "Проверьте и отредактируйте текст. В памяти он появится после сохранения.");
+            kind === "image" && imageExtractionMode === "document-text"
+              ? "ИИ предложил текст фотографии, но не подтвердил точность. Проверьте все числа и исправьте ошибки перед сохранением."
+              : "Проверьте и отредактируйте текст. В памяти он появится после сохранения.");
         }
       } else {
         const segmentsByFile = new Map<number, NonNullable<FileRecognition["segments"]>>();
         const pdfByFile = new Map<number, PdfPageCoverage>();
         const rawResults = await recognizeFilesSequentially(files,
-          async (item, index) => extractMedia(item, vision, classification === "standard",
+          async (item, index) => extractMedia(item, vision, providerApproved,
             aborter.signal, undefined, speech, segments => { segmentsByFile.set(index, segments); },
-            coverage => { pdfByFile.set(index, coverage); }),
+            coverage => { pdfByFile.set(index, coverage); }, imageExtractionMode),
           aborter.signal, (done, current) => {
             if (alive.current) {
               setRecognitionResults(done);
@@ -334,7 +351,8 @@ export function MemoryImportScreen() {
           });
         const results = rawResults.map(item => item.status === "success"
           ? { ...item, ...(segmentsByFile.has(item.index) ? { segments: segmentsByFile.get(item.index)! } : {}),
-              ...(pdfByFile.has(item.index) ? { pdfCoverage: pdfByFile.get(item.index)! } : {}) } : item);
+              ...(pdfByFile.has(item.index) ? { pdfCoverage: pdfByFile.get(item.index)! } : {}),
+              ...(mediaKind(files[item.index]) === "image" ? { imageMode: imageExtractionMode } : {}) } : item);
         if (alive.current && !aborter.signal.aborted) {
           setRecognitionResults(results);
           const text = combinedRecognitionText(results, files.length);
@@ -343,11 +361,11 @@ export function MemoryImportScreen() {
           setExtractedText(text);
           const errors = results.filter(r => r.status === "error").length;
           if (recognitionMode === "joint" && results.some(r => r.status === "success")) {
-            if (classification !== "standard") throw new Error("Для совместного анализа разрешите обработку обычных записей выбранным подключением.");
+            if (!providerApproved) throw new Error("Для совместного анализа нужны обычная запись и обычная коллекция с разрешённым подключением.");
             setJointAnalyzing(true);
             try {
               const analysis = await analyzeFilesTogether(results.filter(r => r.status === "success" && r.text).map(r => ({ index: r.index, name: r.name, text: r.text! })),
-                vision, true, aborter.signal);
+                vision, providerApproved, aborter.signal);
               if (alive.current && !aborter.signal.aborted) {
                 const merged = text + "\n\nСовместный анализ материалов:\n" + analysis;
                 if (merged.length > 60_000) throw new Error("Результат совместного анализа превышает 60 000 символов.");
@@ -476,6 +494,20 @@ export function MemoryImportScreen() {
           </Pressable>)}
         {file ? <NoteEditorSection title="Распознавание" summary={extractedText ? "Текст получен · можно повторить" : "Необязательно · для поиска по содержимому"} expanded={recognitionOpen} onToggle={() => setRecognitionOpen(v => !v)}>
         <Text style={{ color: t.muted, fontSize: 12 }}>{kind === "video" ? "Речь и пять выборочных кадров обрабатываются отдельно. Максимум 10 минут; частичные результаты явно отмечены." : kind === "audio" ? (localAudio ? "Речь распознаётся на телефоне моделью Whisper; файл никуда не отправляется." : "Речь преобразуется в текст сервисом подключения. Чтобы распознавать на телефоне, скачайте модель: Настройки → Голосовой ввод → Голос без интернета.") : kind === "text" ? "Текстовый файл читается на телефоне, без отправки в интернет." : kind === "document" ? "PDF читается локально: Android 15+ или Android 12–14 с расширением S v13+. У сканов без текстового слоя страницы останутся непрочитанными; оригинал сохранится." : "Выбранная модель должна поддерживать изображения."}</Text>
+        {files.some(item => mediaKind(item) === "image") ? <View style={{ gap: 6 }}>
+          <Text style={{ color: t.text, fontWeight: "700" }}>Что сделать с фотографией</Text>
+          <Pressable accessibilityRole="button" accessibilityLabel="Описать фотографию" accessibilityState={{ selected: imageExtractionMode === "describe" }} disabled={busy}
+            onPress={() => setImageExtractionMode("describe")} style={{ minHeight: 48, justifyContent: "center" }}>
+            <Text style={{ color: imageExtractionMode === "describe" ? t.secondary : t.text }}>{imageExtractionMode === "describe" ? "● " : "○ "}Описать содержание фото</Text>
+          </Pressable>
+          <Pressable accessibilityRole="button" accessibilityLabel="Прочитать текст фотографии через ИИ" accessibilityState={{ selected: imageExtractionMode === "document-text" }} disabled={busy}
+            onPress={() => setImageExtractionMode("document-text")} style={{ minHeight: 48, justifyContent: "center" }}>
+            <Text style={{ color: imageExtractionMode === "document-text" ? t.secondary : t.text }}>{imageExtractionMode === "document-text" ? "● " : "○ "}Прочитать текст документа (ИИ)</Text>
+          </Pressable>
+          {imageExtractionMode === "document-text" ? <Text accessibilityRole="text" style={{ color: t.muted, fontSize: 13, lineHeight: 19 }}>
+            Фото отправится выбранной модели по вашему нажатию на кнопку разбора. Это не локальное OCR: возможны ошибки в буквах и цифрах; проверьте результат. Для личной записи или закрытой коллекции отправка запрещена: сохраните оригинал без распознавания.
+          </Text> : null}
+        </View> : null}
         {files.length > 1 ? <View style={{ gap: 6 }}>
           <Text style={{ color: t.text, fontWeight: "700" }}>Режим распознавания</Text>
           <Pressable disabled={busy} accessibilityRole="button" accessibilityLabel="Распознавать по очереди"
@@ -483,13 +515,13 @@ export function MemoryImportScreen() {
             style={{ minHeight: 44, justifyContent: "center" }}>
             <Text style={{ color: recognitionMode === "sequential" ? t.secondary : t.text }}>{recognitionMode === "sequential" ? "● " : "○ "}По очереди — результат каждого файла отдельно</Text>
           </Pressable>
-          <Pressable disabled={busy || classification !== "standard"} accessibilityRole="button" accessibilityLabel="Распознавать вместе"
-            accessibilityState={{ selected: recognitionMode === "joint", disabled: classification !== "standard" }} onPress={() => setRecognitionMode("joint")}
-            style={{ minHeight: 44, justifyContent: "center", opacity: classification === "standard" ? 1 : .5 }}>
+          <Pressable disabled={busy || !providerApproved} accessibilityRole="button" accessibilityLabel="Распознавать вместе"
+            accessibilityState={{ selected: recognitionMode === "joint", disabled: !providerApproved }} onPress={() => setRecognitionMode("joint")}
+            style={{ minHeight: 44, justifyContent: "center", opacity: providerApproved ? 1 : .5 }}>
             <Text style={{ color: recognitionMode === "joint" ? t.secondary : t.text }}>{recognitionMode === "joint" ? "● " : "○ "}Вместе — дополнительно сопоставить все материалы</Text>
           </Pressable>
           <Text style={{ color: t.muted, fontSize: 12 }}>
-            В режиме «Вместе» сначала распознаём каждый файл, затем отправляем полученный текст выбранной LLM для общего анализа. Это дополнительный запрос, время и возможные расходы. Для личных записей этот режим недоступен.
+            В режиме «Вместе» сначала распознаём каждый файл, затем отправляем полученный текст выбранной LLM для общего анализа. Это дополнительный запрос, время и возможные расходы. Для личных записей и закрытых коллекций этот режим недоступен.
           </Text>
         </View> : null}
         {(files.length > 1 || (kind !== "text" && kind !== "document" && !localAudio)) ? <NoteEditorSection testID="import-processing-options" title="Параметры распознавания" summary="Модель и подключение" expanded={processingOptionsOpen} onToggle={() => setProcessingOptionsOpen(v => !v)}>
@@ -502,7 +534,7 @@ export function MemoryImportScreen() {
         </NoteEditorSection> : null}
         {files.some(item => ["audio", "video"].includes(mediaKind(item))) ? <View><Text style={{ color: t.text }}>Подключение для речи (локальный Whisper имеет приоритет)</Text>{connections.map(c => <Pressable key={c.id} disabled={busy} onPress={() => setSpeechConnectionId(c.id)} style={{ minHeight: 44 }}><Text style={{ color: c.id === speechConnectionId ? t.secondary : t.text }}>{c.id === speechConnectionId ? "● " : "○ "}{c.name} · {c.transcriptionModel || "whisper-1"}</Text></Pressable>)}</View> : null}
         <Pressable disabled={busy || !canExtract} accessibilityRole="button" accessibilityLabel="Извлечь сведения из файла" style={[button, { opacity: canExtract ? 1 : .5 }]} onPress={() => void extract()}>
-          <Text style={{ color: "#fff", fontWeight: "700" }}>{files.length > 1 ? recognitionMode === "joint" ? "Распознать и сопоставить" : "Распознать все по очереди" : kind === "text" ? "Прочитать текст на телефоне" : kind === "document" ? "Прочитать страницы PDF на телефоне" : localAudio ? "Распознать речь на телефоне" : "Передать файл провайдеру и разобрать"}</Text>
+          <Text style={{ color: "#fff", fontWeight: "700" }}>{files.length > 1 ? recognitionMode === "joint" ? "Распознать и сопоставить" : "Распознать все по очереди" : kind === "text" ? "Прочитать текст на телефоне" : kind === "image" && imageExtractionMode === "document-text" ? "Отправить фото модели и прочитать текст" : kind === "document" ? "Прочитать страницы PDF на телефоне" : localAudio ? "Распознать речь на телефоне" : "Передать файл провайдеру и разобрать"}</Text>
         </Pressable>
         {jointAnalyzing ? <Text accessibilityLiveRegion="polite" style={{ color: t.secondary }}>Сопоставляю результаты всех файлов…</Text> : null}
         {recognizingIndex >= 0 ? <Text accessibilityLiveRegion="polite" style={{ color: t.secondary }}>
