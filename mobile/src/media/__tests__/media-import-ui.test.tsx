@@ -442,8 +442,8 @@ test('step 8 E photo document-text action is opt-in and keeps user annotation',a
   expect(extractMedia).not.toHaveBeenCalled();
   fireEvent.press(ui.getByLabelText('Извлечь сведения из файла'));
   await waitFor(()=>expect(ui.getByLabelText('Распознанное содержимое файла').props.value).toBe('Счёт № 17\nСумма: 2 050 ₽'));
-  expect(extractMedia.mock.calls[0][8]).toBe('document-text');
-  expect(extractMedia.mock.calls[0][2]).toBe(true);
+  expect((extractMedia as jest.Mock).mock.calls[0][8]).toBe('document-text');
+  expect((extractMedia as jest.Mock).mock.calls[0][2]).toBe(true);
   expect(ui.getByText(/не подтвердил точность/)).toBeTruthy();
   expect(ui.getByLabelText('Сведения из файла').props.value).toBe('Сохранить в бухгалтерию');
   fireEvent.press(ui.getByLabelText('Сохранить сведения в память'));
