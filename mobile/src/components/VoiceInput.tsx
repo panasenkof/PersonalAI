@@ -7,6 +7,7 @@ import { nativeInteractionActive, withNativeInteraction } from "../security/nati
 import type { ServiceChoice } from "../media/voice";
 import { alternativeOnlineGoogleService, appendDictation, NO_SERVICE_MESSAGE, START_TIMEOUT_MS, pickRecognitionService, serviceName, startTimeoutMessage, voiceErrorMessage } from "../media/voice";
 import { startWhisperDictation, useWhisperStatus } from "../media/whisper";
+import { launchAndroidVoiceActivity, preferAndroidVoiceActivity, recordAndroidVoiceActivitySuccess } from "../media/android-voice-activity";
 import type { DictationSession } from "../media/whisper";
 import { grantOnlineSpeechConsent, hasOnlineSpeechConsent, resolveVoiceEngine, useVoiceEngine } from "../media/voice-engine";
 import { useTheme } from "../theme";
@@ -111,32 +112,45 @@ export function VoiceInput({ value, onChange, disabled = false, onError, showLab
   });
   useSpeechRecognitionEvent("error", event => {
     if (!owns.current || viaWhisper.current) return;
+    // ERROR_NO_MATCH may mean the bound Google RecognitionService failed,
+    // not that the user was silent. The system recognizer Activity is a
+    // separate Android API; offer it even if no second bound service exists.
+    const noSpeech = event.error === "no-speech" || event.error === "speech-timeout";
     const languageFailure = ["language-not-supported", "language-unavailable"].includes(event.error);
-    // Vivo/Android 16 can report no-speech in the Google TTS recognizer
-    // while the Google keyboard recognizer works. One explicitly authorized
-    // alternative is safer than retrying the same service indefinitely.
-    const noSpeech = event.error === "no-speech";
-    const offerAlternative = languageFailure || noSpeech;
-    const alternate = offerAlternative
+    const alternate = (noSpeech || languageFailure)
       ? alternativeOnlineGoogleService(service.current, attemptedOnlineServices.current) : undefined;
-    if (!offerAlternative && event.error !== "aborted")
+    if (!noSpeech && !languageFailure && event.error !== "aborted")
       report(voiceErrorMessage(event.error, event.message, service.current));
     stop();
-    if (!offerAlternative) return;
+    if (!noSpeech && !languageFailure) return;
     const retryGeneration = generation.current;
-    if (!alternate) {
-      onError(languageFailure
-        ? "Google не принимает русский в сетевом режиме. Проверьте голосовой ввод в приложении Google или используйте микрофон Gboard."
-        : "Google не услышал речь. Повторите диктовку; если Gboard работает, проверьте другую службу распознавания Google.");
+    if (noSpeech && Platform.OS === "android") {
+      onError("Google не распознал речь напрямую. Попробуйте системное окно диктовки Android — оно использует другой способ запуска распознавания.");
+      Alert.alert(
+        "Системная диктовка",
+        "Открыть системное окно распознавания речи? Голос может передаваться Google для обработки. Текст вернётся в этот черновик.",
+        [
+          { text: "Отмена", style: "cancel" },
+          ...(alternate ? [{ text: "Другая служба", onPress: () => {
+            if (generation.current !== retryGeneration || AppState.currentState !== "active") return;
+            void start(alternate);
+          } }] : []),
+          { text: "Открыть", onPress: () => {
+            if (generation.current !== retryGeneration || AppState.currentState !== "active") return;
+            void startAndroidActivity();
+          } },
+        ],
+      );
       return;
     }
-    onError(noSpeech
-      ? "Google не услышал речь. Можно попробовать другую установленную службу Google."
-      : "Текущая служба Google не принимает русский. Можно выбрать другую службу.");
+    if (!alternate) {
+      onError("Google не принимает русский в сетевом режиме. Проверьте голосовой ввод в приложении Google или используйте микрофон Gboard.");
+      return;
+    }
+    onError("Текущая служба Google не принимает русский. Можно выбрать другую службу.");
     Alert.alert(
       "Другой сервис Google",
-      (noSpeech ? "Речь не была обнаружена. " : "Текущая служба не принимает русский. ") +
-        "Попробовать " + serviceName(alternate) + "? Голос может передаваться Google для обработки.",
+      "Текущая служба не принимает русский. Попробовать " + serviceName(alternate) + "? Голос может передаваться Google для обработки.",
       [
         { text: "Отмена", style: "cancel" },
         { text: "Попробовать", onPress: () => {
@@ -153,6 +167,43 @@ export function VoiceInput({ value, onChange, disabled = false, onError, showLab
   }, [stop]);
   useEffect(() => { if (disabled) stop(); }, [disabled, stop]);
   useEffect(() => stop, [voice.preference, stop]);
+
+  async function startAndroidActivity() {
+    // No second capture/recording engine: this is the OS speech UI and its
+    // Activity result, returned into the same draft through appendDictation.
+    if (Platform.OS !== "android" || disabled || !voice.loaded || voice.saving || owns.current || starting.current) return;
+    if (value.length >= maxLength) { onError("Текст слишком длинный для диктовки. Существующий текст сохранён."); return; }
+    const token = ++generation.current;
+    starting.current = true;
+    setPhase("starting");
+    try {
+      if (!(await hasOnlineSpeechConsent())) {
+        throw new Error("Сначала разрешите онлайн-распознавание Google через обычную кнопку микрофона.");
+      }
+      if (token !== generation.current) return;
+      onBegin?.();
+      const result = await withNativeInteraction(() => launchAndroidVoiceActivity());
+      if (token !== generation.current) return; // canceled, unmounted, locked or switched engine
+      if (result.status === "recognized") {
+        onChange(appendDictation(value, result.transcript, maxLength));
+        recordAndroidVoiceActivitySuccess();
+      } else if (result.status === "empty") {
+        onError("Системная служба не вернула текст. Попробуйте ещё раз или используйте микрофон Gboard.");
+      }
+      // A canceled system dialog is not a speech failure; the draft is intact.
+    } catch (e) {
+      if (token === generation.current) {
+        onError("Системная диктовка недоступна или завершилась с ошибкой. " +
+          "Проверьте наличие приложения Google; при необходимости используйте микрофон Gboard. " +
+          ((e as Error).message || "").slice(0, 120));
+      }
+    } finally {
+      if (token === generation.current) {
+        starting.current = false;
+        setPhase("idle");
+      }
+    }
+  }
 
   async function startWhisper(token: number) {
     const aborter = new AbortController(); controller.current = aborter;
@@ -177,6 +228,8 @@ export function VoiceInput({ value, onChange, disabled = false, onError, showLab
     if (disabled || !voice.loaded || voice.saving || owns.current || starting.current) return;
     if (value.length >= maxLength) { onError("Текст слишком длинный для диктовки. Существующий текст сохранён; добавьте отдельную запись."); return; }
     if (voice.error) { onError(voice.error); return; }
+    if (selectedEngine === "system" && !recognitionPackage && Platform.OS === "android" && preferAndroidVoiceActivity())
+      return startAndroidActivity();
     if (selectedEngine === "whisper" && !recognitionPackage && whisper.state !== "ready") {
       onError(whisper.state === "unsupported" ? "Whisper недоступен на этом телефоне. Выберите системное распознавание: Настройки → Голосовой ввод." :
         whisper.state === "downloading" ? `Модель Whisper ещё скачивается (${whisper.progress}%). Дождитесь завершения или выберите системное распознавание в настройках.` :
