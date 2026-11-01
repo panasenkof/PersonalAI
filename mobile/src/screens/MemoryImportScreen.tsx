@@ -333,7 +333,7 @@ export function MemoryImportScreen() {
           setRecognitionResults([{ index: 0, name: file.name, status: "success", text,
             ...(timedSegments ? { segments: timedSegments } : {}),
             ...(pdfCoverage ? { pdfCoverage } : {}),
-            ...((kind === "image" || kind === "document") ? { imageMode: imageExtractionMode } : {}) }]);
+            ...((kind === "image" || (kind === "document" && imageExtractionMode === "offline-ocr")) ? { imageMode: imageExtractionMode } : {}) }]);
           setExtractedText(text);
           setNotice(pdfCoverage ? (imageExtractionMode === "offline-ocr" ? pdfCoverageMessage(pdfCoverage).replace("OCR пока не выполнялся.", "Остались страницы без прочитанного текста.") : pdfCoverageMessage(pdfCoverage)) :
             kind === "image" && imageExtractionMode === "document-text"
@@ -357,7 +357,7 @@ export function MemoryImportScreen() {
         const results = rawResults.map(item => item.status === "success"
           ? { ...item, ...(segmentsByFile.has(item.index) ? { segments: segmentsByFile.get(item.index)! } : {}),
               ...(pdfByFile.has(item.index) ? { pdfCoverage: pdfByFile.get(item.index)! } : {}),
-              ...(["image","document"].includes(mediaKind(files[item.index])) ? { imageMode: imageExtractionMode } : {}) } : item);
+              ...((mediaKind(files[item.index]) === "image" || (mediaKind(files[item.index]) === "document" && imageExtractionMode === "offline-ocr")) ? { imageMode: imageExtractionMode } : {}) } : item);
         if (alive.current && !aborter.signal.aborted) {
           setRecognitionResults(results);
           const text = combinedRecognitionText(results, files.length);
