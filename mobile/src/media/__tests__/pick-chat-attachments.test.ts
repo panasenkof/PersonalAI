@@ -1,7 +1,9 @@
 import { pickChatAttachments } from '../pickChatAttachments';
 import { getDocumentAsync } from 'expo-document-picker';
 import { readAsStringAsync } from 'expo-file-system/legacy';
+import { manipulateAsync } from 'expo-image-manipulator';
 let mockUnlocked=true;let mockSize=100;const mockDelete=jest.fn();
+jest.mock('expo-image-manipulator',()=>({manipulateAsync:jest.fn(),SaveFormat:{JPEG:'jpeg'}}));
 jest.mock('expo-crypto',()=>({randomUUID:()=> 'file-id'}));
 jest.mock('expo-document-picker',()=>({getDocumentAsync:jest.fn()}));
 jest.mock('expo-file-system/legacy',()=>({cacheDirectory:'file:///cache/',EncodingType:{Base64:'base64',UTF8:'utf8'},readAsStringAsync:jest.fn()}));
@@ -11,7 +13,19 @@ jest.mock('../../security/native-interaction',()=>({withNativeInteraction:async 
 const asset={uri:'file:///cache/a.txt',name:'a.txt',mimeType:'text/plain',size:100};
 beforeEach(()=>{jest.resetAllMocks();mockUnlocked=true;mockSize=100;(getDocumentAsync as jest.Mock).mockResolvedValue({canceled:false,assets:[asset]});(readAsStringAsync as jest.Mock).mockResolvedValue('Text');});
 test('stages actual text and removes only picker cache copies',async()=>{const files=await pickChatAttachments(new AbortController().signal);expect(files[0]).toMatchObject({data:'Text',kind:'text',name:'a.txt'});expect(mockDelete).toHaveBeenCalledWith(asset.uri);});
-test('cancellation and oversized files never read content',async()=>{(getDocumentAsync as jest.Mock).mockResolvedValueOnce({canceled:true});expect(await pickChatAttachments(new AbortController().signal)).toEqual([]);mockSize=3*1024*1024;await expect(pickChatAttachments(new AbortController().signal)).rejects.toThrow('2 МБ');expect(readAsStringAsync).not.toHaveBeenCalled();expect(mockDelete).toHaveBeenCalledWith(asset.uri);});
+test('cancellation and oversized files never read content',async()=>{(getDocumentAsync as jest.Mock).mockResolvedValueOnce({canceled:true});expect(await pickChatAttachments(new AbortController().signal)).toEqual([]);mockSize=3*1024*1024;await expect(pickChatAttachments(new AbortController().signal)).rejects.toThrow('24 000 символов');expect(readAsStringAsync).not.toHaveBeenCalled();expect(mockDelete).toHaveBeenCalledWith(asset.uri);});
 test('lock during reading rejects late result and clears the plaintext cache',async()=>{(readAsStringAsync as jest.Mock).mockImplementation(async()=>{mockUnlocked=false;return 'Text';});await expect(pickChatAttachments(new AbortController().signal)).rejects.toThrow('прерван');expect(mockDelete).toHaveBeenCalledWith(asset.uri);});
 test('abort while picker open discards its result before reading',async()=>{const controller=new AbortController();(getDocumentAsync as jest.Mock).mockImplementation(async()=>{controller.abort();return {canceled:false,assets:[asset]};});await expect(pickChatAttachments(controller.signal)).rejects.toThrow('прерван');expect(readAsStringAsync).not.toHaveBeenCalled();expect(mockDelete).toHaveBeenCalledWith(asset.uri);});
 test('unsupported binary is rejected; non-cache source is not deleted',async()=>{(getDocumentAsync as jest.Mock).mockResolvedValue({canceled:false,assets:[{uri:'content://provider/document',name:'x.pdf',mimeType:'application/pdf'}]});await expect(pickChatAttachments(new AbortController().signal)).rejects.toThrow('PDF');expect(mockDelete).not.toHaveBeenCalled();});
+
+test('oversized photo is resized locally before any base64 read; both copies are cleaned',async()=>{
+  mockSize=7*1024*1024;
+  (getDocumentAsync as jest.Mock).mockResolvedValue({canceled:false,assets:[{uri:'file:///cache/pic.jpg',name:'pic.jpg',mimeType:'image/jpeg'}]});
+  (manipulateAsync as jest.Mock).mockImplementation(async()=>{mockSize=1024;return {uri:'file:///cache/resized.jpg'};});
+  (readAsStringAsync as jest.Mock).mockResolvedValue('/9j/2Q==');
+  const files=await pickChatAttachments(new AbortController().signal);
+  expect(manipulateAsync).toHaveBeenCalledTimes(1);
+  expect(files[0]).toMatchObject({mime:'image/jpeg',kind:'image',size:4});
+  expect(mockDelete).toHaveBeenCalledWith('file:///cache/resized.jpg');
+  expect(mockDelete).toHaveBeenCalledWith('file:///cache/pic.jpg');
+});

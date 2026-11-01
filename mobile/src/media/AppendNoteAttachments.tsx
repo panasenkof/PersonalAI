@@ -12,6 +12,7 @@ import { useTheme } from "../theme";
 import { nebulaRadii, nebulaSpacing, nebulaTouch } from "../design/nebula/tokens";
 import { appendNoteAttachments, MAX_ORIGINALS_PER_NOTE } from "./attachments";
 import { readableAttachmentSize } from "./attachmentPresentation";
+import { autoIndexNotePhotos83 } from "./auto-index-note-photos";
 import type { ImportFile } from "./kinds";
 
 export function AppendNoteAttachments({ profile, note, disabled, onBusyChange, onDraftChange, onSaved }: {
@@ -68,8 +69,17 @@ export function AppendNoteAttachments({ profile, note, disabled, onBusyChange, o
     const controller = new AbortController(); abort.current = controller;
     try {
       const updated = await appendNoteAttachments(profile, note.id, note.record_version, files, controller.signal);
+      // The attachment commit has already succeeded. Inference is independent:
+      // its failure must not claim that saved originals were lost.
+      let indexNotice = "";
+      try {
+        const result = await autoIndexNotePhotos83(profile, note.id, controller.signal);
+        if (result.pending || result.failed) indexNotice = " · Не все фото подготовлены для поиска; повторите в настройках";
+      } catch {
+        indexNotice = " · Индексация не завершена, оригиналы сохранены";
+      }
       if (alive.current && request === generation.current) {
-        callbacks.current.onSaved(updated); setNotice(`Добавлено файлов: ${files.length}`); discard();
+        callbacks.current.onSaved(updated); setNotice(`Добавлено файлов: ${files.length}${indexNotice}`); discard();
       }
     } catch (e) {
       if (controller.signal.aborted) discard();

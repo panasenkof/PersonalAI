@@ -2,7 +2,9 @@ import { byteLength, toByteArray } from 'base64-js';
 
 export type ChatAttachment = { id: string; name: string; mime: string; kind: 'image' | 'text'; data: string; size: number };
 export const MAX_CHAT_FILES = 3;
-export const MAX_CHAT_FILE_BYTES = 2 * 1024 * 1024;
+export const MAX_CHAT_FILE_BYTES = 6 * 1024 * 1024;
+/** An original may be larger than the safe chat payload; resize locally first. */
+export const MAX_CHAT_IMAGE_SOURCE_BYTES = 80 * 1024 * 1024;
 export const MAX_CHAT_TEXT_CHARS = 24000;
 export const MAX_CONVERSATION_FILE_BYTES = 24 * 1024 * 1024;
 export type AttachmentProtocol = 'responses' | 'chat' | 'anthropic';
@@ -15,9 +17,9 @@ export function checkedChatAttachments(value: unknown): ChatAttachment[] {
   return value.map((item: any) => {
     if (!item || typeof item.id !== 'string' || !item.id || item.id.length > 100 || typeof item.name !== 'string' || !item.name || item.name.length > 240 || typeof item.data !== 'string') throw new Error('Повреждено вложение сообщения.');
     if (item.kind === 'image') {
-      if (!['image/jpeg','image/png','image/webp'].includes(item.mime) || item.data.length > Math.ceil(MAX_CHAT_FILE_BYTES / 3) * 4 || (item.data.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(item.data))) throw new Error('Выберите JPEG, PNG или WebP до 2 МБ.');
+      if (!['image/jpeg','image/png','image/webp'].includes(item.mime) || item.data.length > Math.ceil(MAX_CHAT_FILE_BYTES / 3) * 4 || (item.data.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(item.data))) throw new Error('Выберите JPEG, PNG или WebP до 6 МБ после подготовки.');
       const size = byteLength(item.data);
-      if (!size || size > MAX_CHAT_FILE_BYTES) throw new Error('Изображение должно быть непустым и не больше 2 МБ.');
+      if (!size || size > MAX_CHAT_FILE_BYTES) throw new Error('Изображение должно быть непустым и не больше 6 МБ после подготовки.');
       const head = toByteArray(item.data.slice(0, 32));
       const signature = item.mime === 'image/png' ? [137,80,78,71,13,10,26,10].every((b,i) => head[i] === b)
         : item.mime === 'image/jpeg' ? head[0] === 255 && head[1] === 216 && head[2] === 255

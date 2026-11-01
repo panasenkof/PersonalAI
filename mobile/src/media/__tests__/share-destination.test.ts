@@ -22,7 +22,7 @@ test.each(['audio/mpeg','video/mp4'])('unsupported chat %s remains available for
 });
 test('count, sizes and actual read limits are checked before chat is offered',async()=>{
   expect(inspectSharedMaterial(Array(4).fill(file)).chatError).toContain('3');mockSize=3*1024*1024;
-  expect(inspectSharedMaterial([file]).chatError).toContain('2 МБ');mockSize=81*1024*1024;expect(inspectSharedMaterial([file]).memoryError).toContain('80 МБ');
+  expect(inspectSharedMaterial([file]).chatError).toContain('24 000');mockSize=81*1024*1024;expect(inspectSharedMaterial([file]).memoryError).toContain('80 МБ');
   mockSize=100;(readAsStringAsync as jest.Mock).mockResolvedValue('x'.repeat(24001));const result=await prepareSharedMaterial([file],new AbortController().signal);expect(result.chatError).toBeTruthy();expect(result.attachments).toEqual([]);expect(mockDelete).toHaveBeenCalled();
 });
 test.each(['abort','lock'])('%s during copy discards the late result and cleans cache',async mode=>{
@@ -36,4 +36,15 @@ test('copy failure does not expose provider path and leaves recovery through mem
 test('remote binary and empty inputs rejected, PDF can be saved as an original but not sent to chat',()=>{
   expect(()=>inspectSharedMaterial([{...file,value:'https://example.org/file'}])).toThrow('локальный');expect(()=>inspectSharedMaterial([])).toThrow();
   const pdf=inspectSharedMaterial([{...file,value:'content://provider/file.pdf',mimeType:'application/pdf'}]);expect(pdf.chatError).toBeTruthy();expect(pdf.memoryError).toBe('');
+});
+
+
+test('shared photos of 3 MB are allowed for local resizing, but photos over 80 MB are rejected',()=>{
+  const photo={shareType:'image' as const,value:'content://provider/bike.jpg',mimeType:'image/jpeg'};
+  mockSize=3*1024*1024;
+  expect(inspectSharedMaterial([photo]).chatError).toBe('');
+  expect(inspectSharedMaterial([photo]).memoryError).toBe('');
+  mockSize=81*1024*1024;
+  expect(inspectSharedMaterial([photo]).chatError).toContain('80 МБ');
+  expect(inspectSharedMaterial([photo]).memoryError).toContain('80 МБ');
 });
