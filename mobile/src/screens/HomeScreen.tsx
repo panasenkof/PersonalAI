@@ -32,7 +32,7 @@ import { presentChatRows, type PresentedChatRow } from "../design/nebula/chatPre
 import { nebulaSpacing, nebulaTouch } from "../design/nebula/tokens";
 import { useChatBottomFollow } from "../design/nebula/useChatBottomFollow";
 import { VoiceInput } from "../components/VoiceInput";
-import { resolveVoiceEngine, useVoiceEngine } from "../media/voice-engine";
+import { showDraftImprove, useVoiceEngine } from "../media/voice-engine";
 import { IconAction } from "../components/IconAction";
 import { PromptInput } from "../components/PromptInput";
 import { NebulaHomeThemeProvider, useTheme } from "../theme";
@@ -82,7 +82,7 @@ function NebulaHomeContent() {
   },[active?.id,active?.attachments]);
   const [historyOpen, setHistoryOpen] = useState(false);
   const voicePreference = useVoiceEngine();
-  const showWhisperImprove = resolveVoiceEngine(voicePreference.pending ?? voicePreference.preference, false) === "whisper";
+  const showWhisperImprove = showDraftImprove(voicePreference.pending ?? voicePreference.preference);
   const [voiceReset, setVoiceReset] = useState(0);
   const [dictating, setDictating] = useState(false);
   const [voicePhase, setVoicePhase] = useState<NebulaVoicePhase>("idle");
