@@ -318,7 +318,8 @@ export function MemoryImportScreen() {
         if (alive.current && !aborter.signal.aborted) {
           setRecognitionResults([{ index: 0, name: file.name, status: "success", text,
             ...(timedSegments ? { segments: timedSegments } : {}),
-            ...(pdfCoverage ? { pdfCoverage } : {}) }]);
+            ...(pdfCoverage ? { pdfCoverage } : {}),
+            ...(kind === "image" ? { imageMode: imageExtractionMode } : {}) }]);
           setExtractedText(text);
           setNotice(pdfCoverage ? pdfCoverageMessage(pdfCoverage) :
             kind === "image" && imageExtractionMode === "document-text"
@@ -341,7 +342,8 @@ export function MemoryImportScreen() {
           });
         const results = rawResults.map(item => item.status === "success"
           ? { ...item, ...(segmentsByFile.has(item.index) ? { segments: segmentsByFile.get(item.index)! } : {}),
-              ...(pdfByFile.has(item.index) ? { pdfCoverage: pdfByFile.get(item.index)! } : {}) } : item);
+              ...(pdfByFile.has(item.index) ? { pdfCoverage: pdfByFile.get(item.index)! } : {}),
+              ...(mediaKind(files[item.index]) === "image" ? { imageMode: imageExtractionMode } : {}) } : item);
         if (alive.current && !aborter.signal.aborted) {
           setRecognitionResults(results);
           const text = combinedRecognitionText(results, files.length);
