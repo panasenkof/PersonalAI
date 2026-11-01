@@ -1,4 +1,5 @@
 import type { ImportFile } from "./kinds";
+import type { ImageExtractionMode } from "./extract";
 import type { ExtractionSegmentInput } from "../local-memory/extractions";
 import type { PdfPageCoverage } from "./pdf-pages";
 
@@ -11,6 +12,8 @@ export type FileRecognition = {
   segments?: ExtractionSegmentInput[];
   /** Native-reported page count, never inferred from flattened text. */
   pdfCoverage?: PdfPageCoverage;
+  /** Explicit image intent, not evidence that the provider read every character. */
+  imageMode?: ImageExtractionMode;
   error?: string;
 };
 
