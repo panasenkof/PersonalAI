@@ -15,10 +15,11 @@ export type AndroidVoiceActivityResult =
 
 export function parseAndroidVoiceActivityResult(result: {
   resultCode: number;
-  extra?: Record<string, unknown>;
+  extra?: object;
 }): AndroidVoiceActivityResult {
   if (result.resultCode !== -1) return { status: "canceled" };
-  const raw = result.extra?.["android.speech.extra.RESULTS"];
+  const raw = result.extra && "android.speech.extra.RESULTS" in result.extra
+    ? result.extra["android.speech.extra.RESULTS"] : undefined;
   const transcript = Array.isArray(raw)
     ? raw.find((item): item is string => typeof item === "string" && item.trim().length > 0)?.trim()
     : undefined;
