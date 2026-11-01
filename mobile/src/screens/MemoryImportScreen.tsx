@@ -134,6 +134,9 @@ export function MemoryImportScreen() {
   });
   useEffect(() => { if (leaving) navigation.goBack(); }, [leaving, navigation]);
   useEffect(() => onLocalMemorySessionChange(unlocked => { if (!unlocked) controller.current?.abort(); }), []);
+  // Both target record AND collection must permit provider egress.
+  const collectionAllowsProvider = collections.find(c => c.id === collectionId)?.sensitivity === "standard";
+  const providerApproved = classification === "standard" && collectionAllowsProvider;
   const selected = connections.find(c => c.id === connectionId);
   const kind = file ? mediaKind(file) : null;
   const localAudio = kind === "audio" && whisper.state === "ready";
@@ -145,7 +148,7 @@ export function MemoryImportScreen() {
     return currentKind === "text" || currentKind === "document" ||
       (currentKind === "audio" && whisper.state === "ready") ||
       (currentKind === "video" && whisper.state === "ready") ||
-      Boolean(currentProcessor && classification === "standard" && (currentProcessor.apiKey || anonymousLocalAllowed(currentProcessor)) &&
+      Boolean(currentProcessor && providerApproved && (currentProcessor.apiKey || anonymousLocalAllowed(currentProcessor)) &&
         !(currentKind === "audio" && currentProcessor.provider === "anthropic"));
   });
   const field = { color: t.text, backgroundColor: t.panel, borderWidth: 1, borderColor: t.line, borderRadius: 16, padding: 14, minHeight: 50 };
@@ -310,7 +313,7 @@ export function MemoryImportScreen() {
       if (files.length === 1) {
         let timedSegments: FileRecognition["segments"];
         let pdfCoverage: PdfPageCoverage | undefined;
-        const text = await extractMedia(file, vision, classification === "standard", aborter.signal, undefined, speech,
+        const text = await extractMedia(file, vision, providerApproved, aborter.signal, undefined, speech,
           segments => { timedSegments = segments; }, coverage => { pdfCoverage = coverage; }, imageExtractionMode);
         if (alive.current && !aborter.signal.aborted) {
           setRecognitionResults([{ index: 0, name: file.name, status: "success", text,
@@ -326,7 +329,7 @@ export function MemoryImportScreen() {
         const segmentsByFile = new Map<number, NonNullable<FileRecognition["segments"]>>();
         const pdfByFile = new Map<number, PdfPageCoverage>();
         const rawResults = await recognizeFilesSequentially(files,
-          async (item, index) => extractMedia(item, vision, classification === "standard",
+          async (item, index) => extractMedia(item, vision, providerApproved,
             aborter.signal, undefined, speech, segments => { segmentsByFile.set(index, segments); },
             coverage => { pdfByFile.set(index, coverage); }, imageExtractionMode),
           aborter.signal, (done, current) => {
@@ -347,11 +350,11 @@ export function MemoryImportScreen() {
           setExtractedText(text);
           const errors = results.filter(r => r.status === "error").length;
           if (recognitionMode === "joint" && results.some(r => r.status === "success")) {
-            if (classification !== "standard") throw new Error("Для совместного анализа разрешите обработку обычных записей выбранным подключением.");
+            if (!providerApproved) throw new Error("Для совместного анализа нужны обычная запись и обычная коллекция с разрешённым подключением.");
             setJointAnalyzing(true);
             try {
               const analysis = await analyzeFilesTogether(results.filter(r => r.status === "success" && r.text).map(r => ({ index: r.index, name: r.name, text: r.text! })),
-                vision, true, aborter.signal);
+                vision, providerApproved, aborter.signal);
               if (alive.current && !aborter.signal.aborted) {
                 const merged = text + "\n\nСовместный анализ материалов:\n" + analysis;
                 if (merged.length > 60_000) throw new Error("Результат совместного анализа превышает 60 000 символов.");
@@ -491,7 +494,7 @@ export function MemoryImportScreen() {
             <Text style={{ color: imageExtractionMode === "document-text" ? t.secondary : t.text }}>{imageExtractionMode === "document-text" ? "● " : "○ "}Прочитать текст документа (ИИ)</Text>
           </Pressable>
           {imageExtractionMode === "document-text" ? <Text accessibilityRole="text" style={{ color: t.muted, fontSize: 13, lineHeight: 19 }}>
-            Фото отправится выбранной модели по вашему нажатию на кнопку разбора. Это не локальное OCR: возможны ошибки в буквах и цифрах; проверьте результат. Для личной записи внешняя отправка запрещена, можно сохранить оригинал без распознавания.
+            Фото отправится выбранной модели по вашему нажатию на кнопку разбора. Это не локальное OCR: возможны ошибки в буквах и цифрах; проверьте результат. Для личной записи или закрытой коллекции отправка запрещена: сохраните оригинал без распознавания.
           </Text> : null}
         </View> : null}
         {files.length > 1 ? <View style={{ gap: 6 }}>
@@ -501,13 +504,13 @@ export function MemoryImportScreen() {
             style={{ minHeight: 44, justifyContent: "center" }}>
             <Text style={{ color: recognitionMode === "sequential" ? t.secondary : t.text }}>{recognitionMode === "sequential" ? "● " : "○ "}По очереди — результат каждого файла отдельно</Text>
           </Pressable>
-          <Pressable disabled={busy || classification !== "standard"} accessibilityRole="button" accessibilityLabel="Распознавать вместе"
-            accessibilityState={{ selected: recognitionMode === "joint", disabled: classification !== "standard" }} onPress={() => setRecognitionMode("joint")}
-            style={{ minHeight: 44, justifyContent: "center", opacity: classification === "standard" ? 1 : .5 }}>
+          <Pressable disabled={busy || !providerApproved} accessibilityRole="button" accessibilityLabel="Распознавать вместе"
+            accessibilityState={{ selected: recognitionMode === "joint", disabled: !providerApproved }} onPress={() => setRecognitionMode("joint")}
+            style={{ minHeight: 44, justifyContent: "center", opacity: providerApproved ? 1 : .5 }}>
             <Text style={{ color: recognitionMode === "joint" ? t.secondary : t.text }}>{recognitionMode === "joint" ? "● " : "○ "}Вместе — дополнительно сопоставить все материалы</Text>
           </Pressable>
           <Text style={{ color: t.muted, fontSize: 12 }}>
-            В режиме «Вместе» сначала распознаём каждый файл, затем отправляем полученный текст выбранной LLM для общего анализа. Это дополнительный запрос, время и возможные расходы. Для личных записей этот режим недоступен.
+            В режиме «Вместе» сначала распознаём каждый файл, затем отправляем полученный текст выбранной LLM для общего анализа. Это дополнительный запрос, время и возможные расходы. Для личных записей и закрытых коллекций этот режим недоступен.
           </Text>
         </View> : null}
         {(files.length > 1 || (kind !== "text" && kind !== "document" && !localAudio)) ? <NoteEditorSection testID="import-processing-options" title="Параметры распознавания" summary="Модель и подключение" expanded={processingOptionsOpen} onToggle={() => setProcessingOptionsOpen(v => !v)}>
