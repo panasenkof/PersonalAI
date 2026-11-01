@@ -57,7 +57,11 @@ export function VoiceInput({ value, onChange, disabled = false, onError, showLab
     if (finalTimer.current) clearTimeout(finalTimer.current);
     timer.current = watchdog.current = finalTimer.current = null;
   };
-  const report = (message: string) => onError(message);
+  const report = (message: string) => onError(message + (
+    message.includes(NO_SERVICE_MESSAGE) && (whisper.state === "absent" || whisper.state === "error")
+      ? " Или скачайте распознавание на телефон: Настройки → Голосовой ввод → Голос без интернета."
+      : ""
+  ));
   const stop = useCallback(() => {
     generation.current++;
     clearTimers();
