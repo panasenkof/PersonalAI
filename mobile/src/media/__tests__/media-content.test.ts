@@ -1,5 +1,5 @@
 import { monoWav } from '../video-audio';
-import { importLink, linkImportErrorMessage, linkHttpError, pageText, publicImportUrl } from '../link-import';
+import { importLink, linkImportErrorMessage, linkHttpError, pageText, articleText, articleReadError, publicImportUrl } from '../link-import';
 import { mediaKind } from '../kinds';
 import { fetch as nativeFetch } from 'expo/fetch';
 jest.mock('expo/fetch', () => ({ fetch: jest.fn() }));
@@ -74,4 +74,60 @@ test('step 8 URL statuses are actionable without exposing network diagnostics', 
   expect(linkHttpError(429)).toContain('ограничил');
   expect(linkHttpError(502)).toContain('стороне сайта');
   expect(linkHttpError(415)).toContain('HTTP 415');
+});
+
+describe('step 8 C: local main-content HTML extraction', () => {
+  test('preserves Russian recipe quantities, fractions, ordered steps and ingredient table in reading order', () => {
+    const html = '<html><head><title>Шарлотка — пример</title></head><body><nav>Каталог разделов</nav>' +
+      '<main><article><h1>Шарлотка с яблоками</h1><div class="cookie-banner"><p>Cookie policy</p></div>' +
+      '<h2>Ингредиенты</h2><table><tr><th>Продукт</th><th>Количество</th></tr>' +
+      '<tr><td>Мука</td><td>200 г</td></tr><tr><td>Сахар</td><td>½ стакана</td></tr></table>' +
+      '<h2>Приготовление</h2><ol><li>Взбить 2 яйца.</li><li>Добавить &frac12; стакана воды и 200&nbsp;г муки.</li>' +
+      '<li>Выпекать 30 мин при 180&deg;C.</li></ol></article></main>' +
+      '<footer>Читайте также: подписка</footer></body></html>';
+    const result = articleText(html);
+    expect(result.title).toBe('Шарлотка с яблоками');
+    expect(result.scope).toBe('article');
+    expect(result.partial).toBe(false);
+    expect(result.text).toContain('Мука | 200 г');
+    expect(result.text).toContain('Сахар | ½ стакана');
+    expect(result.text).toContain('1. Взбить 2 яйца.');
+    expect(result.text).toContain('2. Добавить ½ стакана воды и 200 г муки.');
+    expect(result.text).toContain('3. Выпекать 30 мин при 180°C.');
+    expect(result.text.indexOf('Ингредиенты')).toBeLessThan(result.text.indexOf('Приготовление'));
+    expect(result.text).not.toMatch(/Cookie policy|Каталог разделов|Читайте также/);
+  });
+  test('nested hidden navigation, recommendations and script content cannot contaminate a short article', () => {
+    const html = '<header><h1>Купить рекламу</h1></header><main><article><h1>Нейросети в школе</h1>' +
+      '<p>Первый полезный абзац про обучение.</p>' +
+      '<div class="related-posts"><div><p>Рекомендуем: реклама</p></div></div>' +
+      '<p>Второй полезный абзац с выводом.</p></article></main>' +
+      '<script>document.write("Вредная команда")</script>';
+    expect(pageText(html)).toContain('Нейросети в школе');
+    expect(pageText(html)).toContain('Второй полезный');
+    expect(pageText(html)).not.toMatch(/Купить рекламу|Рекомендуем|Вредная команда/);
+  });
+  test('handles missing closing article and reports unverified partial markup', () => {
+    const result = articleText('<body><main><article><h1>Тест</h1><p>Незаконченная статья содержит важную информацию.');
+    expect(result.scope).toBe('article');
+    expect(result.partial).toBe(true);
+    expect(result.text).toContain('Незаконченная статья');
+  });
+  test('does not turn protected login forms or empty JS shells into successful text', () => {
+    const login = '<html><body><main><h1>Только для подписчиков</h1>' +
+      '<p>Войдите в аккаунт для чтения.</p><form><input type="password"/></form></main></body></html>';
+    const loginResult = articleText(login);
+    expect(articleReadError(login, loginResult)).toMatch(/требует входа/);
+    const shell = '<html><body><div id="root"></div><script>window.runApp()</script></body></html>';
+    expect(articleReadError(shell, articleText(shell))).toMatch(/не содержит читаемого текста/);
+  });
+  test('keeps readable short non-article pages and does not fabricate author/publication time', () => {
+    const html = '<html><head><title>Короткая заметка</title></head>' +
+      '<body><p>Хлеб</p><p>Соль и вода</p></body></html>';
+    const result = articleText(html);
+    expect(result.scope).toBe('fallback');
+    expect(result.title).toBe('Короткая заметка');
+    expect(result.text).toBe('Хлеб\nСоль и вода');
+    expect(Object.keys(result).sort()).toEqual(['partial','scope','text','title']);
+  });
 });
