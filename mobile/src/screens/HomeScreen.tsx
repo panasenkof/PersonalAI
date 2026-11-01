@@ -388,7 +388,7 @@ function NebulaHomeContent() {
           hint="Камера откроется сразу. После съёмки можно спросить ИИ, найти в интернете или памяти, сохранить заметку."
           hintAbove disabled={!ready || cameraBusy || busy || pickingAttachment || dictating}
           onPress={() => void captureToDraft()} />
-        <VoiceInput key={`${active?.id}:${voiceReset}`} value={question} onChange={value => { if (store.getSnapshot().activeId === active?.id) store.setQuestion(value); }} disabled={!ready || busy} onError={setNotice} showLabel={false} onBegin={normalization.reset} onActiveChange={setDictating} onPhaseChange={setVoicePhase} />
+        <VoiceInput key={`${active?.id}:${voiceReset}`} value={question} onChange={value => { if (store.getSnapshot().activeId === active?.id) store.setQuestion(value); }} disabled={!ready || busy} onError={setNotice} showLabel={false} onBegin={() => { normalization.reset(); setNotice(""); }} onActiveChange={setDictating} onPhaseChange={setVoicePhase} />
         <IconAction compact icon={normalization.busy ? "x" : normalization.normalized ? "rotate-ccw" : "edit-3"}
           label={normalization.busy ? "Отмена" : normalization.normalized ? "Исходный" : "Улучшить"}
           accessibilityLabel={normalization.busy ? "Отменить улучшение текста" : normalization.normalized ? "Вернуть исходный текст" : "Улучшить текст"}
