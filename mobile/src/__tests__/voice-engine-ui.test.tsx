@@ -5,7 +5,7 @@ import { ExpoSpeechRecognitionModule as Speech } from "expo-speech-recognition";
 import * as SecureStore from "expo-secure-store";
 import { VoiceInput } from "../components/VoiceInput";
 import { VoiceModelCard } from "../components/VoiceModelCard";
-import { setVoiceEngine } from "../media/voice-engine";
+import { grantOnlineSpeechConsent, setVoiceEngine } from "../media/voice-engine";
 import { deleteWhisper, downloadWhisper, startWhisperDictation } from "../media/whisper";
 jest.mock("@react-navigation/native", () => ({ useFocusEffect: (cb: any) => require("react").useEffect(cb, [cb]) }));
 jest.mock("../security/native-interaction", () => ({ withNativeInteraction: (fn: any) => fn(), nativeInteractionActive: () => false }));
@@ -26,7 +26,7 @@ jest.mock("expo-speech-recognition", () => ({
 }));
 beforeEach(async () => {
   Object.defineProperty(AppState, "currentState", { value: "active", configurable: true });
-  await setVoiceEngine("whisper"); jest.clearAllMocks(); mockStatus.current = { state: "ready", id: "base" };
+  await setVoiceEngine("whisper"); await grantOnlineSpeechConsent(); jest.clearAllMocks(); mockStatus.current = { state: "ready", id: "base" };
 });
 function Inputs({ onChange = jest.fn(), error = jest.fn() }) {
   return <><VoiceModelCard defaultOpen /><VoiceInput value="План" onChange={onChange} onError={error} /></>;
