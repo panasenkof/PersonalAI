@@ -24,13 +24,13 @@ export function VoiceModelCard({ defaultOpen = false }: { defaultOpen?: boolean 
   const confirmDelete = () => Alert.alert("Удалить модель распознавания?", "Освободится место на телефоне. Чтобы диктовать без скачанной модели, выберите системное распознавание.", [
     { text: "Отмена", style: "cancel" }, { text: "Удалить", style: "destructive", onPress: () => void deleteWhisper() }]);
 
-  const summary = (selected === "whisper" ? "Whisper на телефоне" : "Системное распознавание") +
+  const summary = (selected === "whisper" ? "Whisper на телефоне" : "Google / системное · через интернет") +
     (status.state === "ready" ? " · модель " + (WHISPER_CHOICES.find(c => c.id === status.id)?.name || "") + " скачана" : status.state === "downloading" ? ` · скачивается ${status.progress}%` : "");
   return <Collapsible icon="mic" id="settings.voice" title="Голосовой ввод" summary={summary} defaultOpen={defaultOpen}>
     <Text style={{ color: t.muted, lineHeight: 20 }}>Выберите способ диктовки для чата и заметок. Выбор сохраняется; скачанную модель Whisper можно использовать снова в любой момент.</Text>
     <View accessibilityRole="radiogroup" accessibilityLabel="Способ распознавания речи" style={{ gap: 8 }}>
       {([
-        { id: "system", name: "Системное распознавание", detail: "Служба телефона. Использование интернета зависит от её возможностей." },
+        { id: "system", name: "Системное распознавание", detail: "По умолчанию через интернет. Речь может передаваться Google; разрешение запрашивается один раз." },
         { id: "whisper", name: "Whisper на телефоне", detail: "Без интернета. Нужна скачанная модель ниже." },
       ] as const).map(option => {
         const checked = voice.loaded && selected === option.id;
