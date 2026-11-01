@@ -67,6 +67,18 @@ export function validateNativePdfPages(value: unknown): PdfTextPages {
     extractedPageCount: pages.length, missingPages };
 }
 
+/** Plain-language coverage, never treating pages without a text layer as read. */
+export function pdfCoverageMessage(info: PdfPageCoverage): string {
+  if (info.totalPageCount === null)
+    return "Текст PDF получен с " + info.extractedPageCount + " стр. Общее число страниц неизвестно — полноту нельзя подтвердить.";
+  const prefix = "Текст PDF: " + info.extractedPageCount + " из " + info.totalPageCount + " стр.";
+  if (!info.missingPages.length) return prefix + " На каждой странице найден текстовый слой, но не гарантирована полнота текста.";
+  const listed = info.missingPages.slice(0, 12).join(", ");
+  return prefix + " Без извлечённого текста: стр. " + listed +
+    (info.missingPages.length > 12 ? " и ещё " + (info.missingPages.length - 12) : "") +
+    ". Это могут быть сканы; OCR пока не выполнялся.";
+}
+
 /** Bound OS errors are translated into fixed UI text. Never display a native
  * exception that might include the original's cache path or sensitive contents.
  */
