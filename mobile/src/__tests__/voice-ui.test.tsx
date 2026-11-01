@@ -133,6 +133,22 @@ test("changing the engine while OS dictation is open discards its late result", 
   v.unmount();
 });
 
+test("non-Android system recognition keeps its native SpeechRecognizer path without chat approval", async () => {
+  Object.defineProperty(Platform, "OS", { value: "ios", configurable: true });
+  (Speech.isRecognitionAvailable as jest.Mock).mockReturnValue(true);
+  (Speech.getPermissionsAsync as jest.Mock).mockResolvedValue({ granted: true });
+  const alert = jest.spyOn(Alert, "alert").mockImplementation(() => {});
+  const v = render(<Draft error={jest.fn()} />);
+  fireEvent.press(v.getByLabelText("Голосовой ввод"));
+  await waitFor(() => expect(Speech.start).toHaveBeenCalledWith(expect.objectContaining({
+    lang: "ru-RU", requiresOnDeviceRecognition: false,
+  })));
+  expect(launchAndroidVoiceActivity).not.toHaveBeenCalled();
+  expect(alert).not.toHaveBeenCalled();
+  act(() => mockEvents.end({}));
+  v.unmount(); alert.mockRestore();
+});
+
 test("max-length guard does not launch system window or mutate an existing draft", () => {
   const error = jest.fn(), changed = jest.fn();
   const v = render(<VoiceInput value="полный" maxLength={6} onChange={changed} onError={error} />);
