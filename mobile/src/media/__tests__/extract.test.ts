@@ -3,11 +3,13 @@ import { createVideoPlayer } from "expo-video";
 import { ImageManipulator } from "expo-image-manipulator";
 import { extractMedia, parseProviderTimeSegments } from "../extract";
 import { getWhisperStatus, transcribeAudioFile } from "../whisper";
+import { recognizeRussianPhoto, recognizeRussianPdf } from "../russian-ocr";
 import { defaultDirectPreferences } from "../../direct-agent/settings";
 jest.mock("expo-file-system/legacy", () => ({ getInfoAsync: jest.fn(), readAsStringAsync: jest.fn(), deleteAsync: jest.fn(), EncodingType: { Base64: "base64" } }));
 jest.mock("expo-video", () => ({ createVideoPlayer: jest.fn() }));
 jest.mock("../video-audio", () => ({ videoAudio: jest.fn(async () => { throw new Error("Нет звуковой дорожки"); }) }));
 jest.mock("../whisper", () => ({ getWhisperStatus: jest.fn(() => ({ state: "absent" })), transcribeAudioFile: jest.fn() }));
+jest.mock("../russian-ocr", () => ({ recognizeRussianPhoto: jest.fn(), recognizeRussianPdf: jest.fn() }));
 jest.mock("expo-image-manipulator", () => ({ ImageManipulator: { manipulate: jest.fn() }, SaveFormat: { JPEG: "jpeg" } }));
 const mockPlayer = { muted: false, release: jest.fn(), generateThumbnailsAsync: jest.fn(), replaceAsync: jest.fn(),
   listeners: {} as Record<string, (e: any) => void>,
@@ -174,4 +176,27 @@ test("step 8 E cancellation prevents paid image upload and preserves local-only 
   const transport=jest.fn();
   await expect(extractMedia(photo,settings,true,aborted.signal,transport as unknown as typeof fetch,undefined,undefined,undefined,"document-text")).rejects.toThrow("остановлен");
   expect(transport).not.toHaveBeenCalled();
+});
+
+
+test("step 8 E2b: offline Russian OCR of a personal photo calls no external provider",async()=>{
+  (recognizeRussianPhoto as jest.Mock).mockResolvedValueOnce("Продукт: 200 г");
+  const provider=jest.fn();
+  const text=await extractMedia({uri:"file:///cache/photo.png",name:"photo.png",mimeType:"image/png"},
+    settings,false,undefined,provider as unknown as typeof fetch,undefined,undefined,undefined,"offline-ocr");
+  expect(text).toBe("Продукт: 200 г");
+  expect(recognizeRussianPhoto).toHaveBeenCalledTimes(1);
+  expect(provider).not.toHaveBeenCalled();
+});
+test("step 8 E2b: offline Russian PDF OCR passes real page evidence without provider access",async()=>{
+  const coverage={totalPageCount:3,extractedPageCount:2,missingPages:[2],coverage:"partial"};
+  const pages={...coverage,text:"Страница 1:\\nЛимон\\n\\nСтраница 3:\\nмёд",
+    segments:[{text:"Лимон",location:{kind:"page",page:1}},{text:"мёд",location:{kind:"page",page:3}}]};
+  (recognizeRussianPdf as jest.Mock).mockResolvedValueOnce(pages);
+  const provider=jest.fn(), segments=jest.fn(), notified=jest.fn();
+  expect(await extractMedia({uri:"file:///cache/scanned.pdf",name:"scanned.pdf",mimeType:"application/pdf"},
+    settings,false,undefined,provider as unknown as typeof fetch,undefined,segments,notified,"offline-ocr")).toContain("Лимон");
+  expect(segments).toHaveBeenCalledWith(pages.segments);
+  expect(notified).toHaveBeenCalledWith(pages);
+  expect(provider).not.toHaveBeenCalled();
 });
