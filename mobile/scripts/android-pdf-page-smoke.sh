@@ -24,7 +24,7 @@ if [[ -f "modules/persai-pdf/android/src/androidTest/java/expo/modules/persaipdf
   mkdir -p "$(dirname "$MODEL_ASSET")"
   trap 'rm -f "$MODEL_ASSET" "$MODEL_ASSET.partial"' EXIT
   curl --fail --location --retry 3 --connect-timeout 20 --max-time 120 --silent --show-error "$MODEL_URL" -o "$MODEL_ASSET.partial"
-  printf '%s  %s\\n' "$MODEL_SHA" "$MODEL_ASSET.partial" | sha256sum --check --status
+  printf '%s  %s\n' "$MODEL_SHA" "$MODEL_ASSET.partial" | sha256sum --check --status
   [[ "$(wc -c < "$MODEL_ASSET.partial" | tr -d '[:space:]')" == "3861738" ]]
   mv "$MODEL_ASSET.partial" "$MODEL_ASSET"
   echo "Pinned Russian OCR test-only model verified, 3861738 bytes"
