@@ -1,5 +1,6 @@
 import React from "react";
-import { AppState } from "react-native";
+import { AppState, Platform } from "react-native";
+import { launchAndroidVoiceActivity } from "../media/android-voice-activity";
 import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 import { ExpoSpeechRecognitionModule as Speech } from "expo-speech-recognition";
 import * as SecureStore from "expo-secure-store";
@@ -10,6 +11,7 @@ import { deleteWhisper, downloadWhisper, startWhisperDictation } from "../media/
 jest.mock("@react-navigation/native", () => ({ useFocusEffect: (cb: any) => require("react").useEffect(cb, [cb]) }));
 jest.mock("../security/native-interaction", () => ({ withNativeInteraction: (fn: any) => fn(), nativeInteractionActive: () => false }));
 jest.mock("@expo/vector-icons/Feather", () => () => null);
+jest.mock("../media/android-voice-activity", () => ({ launchAndroidVoiceActivity: jest.fn(async () => ({ status: "canceled" })) }));
 jest.mock("expo-secure-store", () => ({ getItemAsync: jest.fn(async () => null), setItemAsync: jest.fn(async () => {}) }));
 const mockStatus: { current: any } = { current: { state: "ready", id: "base" } };
 const mockSession = { stop: jest.fn(async () => {}) };
@@ -26,29 +28,32 @@ jest.mock("expo-speech-recognition", () => ({
 }));
 beforeEach(async () => {
   Object.defineProperty(AppState, "currentState", { value: "active", configurable: true });
+  Object.defineProperty(Platform, "OS", { value: "android", configurable: true });
   await setVoiceEngine("whisper"); await grantOnlineSpeechConsent(); jest.clearAllMocks(); mockStatus.current = { state: "ready", id: "base" };
+  (launchAndroidVoiceActivity as jest.Mock).mockResolvedValue({ status: "canceled" });
 });
 function Inputs({ onChange = jest.fn(), error = jest.fn() }) {
   return <><VoiceModelCard defaultOpen /><VoiceInput value="План" onChange={onChange} onError={error} /></>;
 }
-test("the settings switch uses the system service even with Whisper downloaded, then switches back without downloading or deleting", async () => {
+test("Google settings opens the Android system speech UI directly, then returns to Whisper without changing its model", async () => {
   const v = render(<Inputs />);
-  fireEvent.press(v.getByLabelText("Системное распознавание"));
-  await waitFor(() => expect(v.getByLabelText("Системное распознавание").props.accessibilityState.checked).toBe(true));
+  fireEvent.press(v.getByLabelText("Google — системное окно"));
+  await waitFor(() => expect(v.getByLabelText("Google — системное окно").props.accessibilityState.checked).toBe(true));
   expect(SecureStore.setItemAsync).toHaveBeenLastCalledWith("pia.voice.engine.v1", "system");
   // Whisper settings are hidden for the system engine; the model stays downloaded.
   expect(v.queryByText("Скачано: Whisper base.")).toBeNull();
   expect(v.queryByLabelText("Удалить модель распознавания")).toBeNull();
   fireEvent.press(v.getByLabelText("Голосовой ввод"));
-  await waitFor(() => expect(Speech.start).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(launchAndroidVoiceActivity).toHaveBeenCalledTimes(1));
+  expect(Speech.start).not.toHaveBeenCalled();
   expect(startWhisperDictation).not.toHaveBeenCalled();
-  act(() => mockEvents.end({}));
+
   fireEvent.press(v.getByLabelText("Whisper на телефоне"));
   await waitFor(() => expect(v.getByLabelText("Whisper на телефоне").props.accessibilityState.checked).toBe(true));
   expect(v.getByText("Скачано: Whisper base.")).toBeTruthy();
   fireEvent.press(v.getByLabelText("Голосовой ввод"));
   await waitFor(() => expect(startWhisperDictation).toHaveBeenCalledTimes(1));
-  expect(Speech.start).toHaveBeenCalledTimes(1);
+  expect(launchAndroidVoiceActivity).toHaveBeenCalledTimes(1);
   expect(downloadWhisper).not.toHaveBeenCalled(); expect(deleteWhisper).not.toHaveBeenCalled();
   act(() => mockCallbacks.end!());
 });
@@ -56,7 +61,7 @@ test("switching during dictation cancels the old engine and ignores its late res
   const changed = jest.fn(); const v = render(<Inputs onChange={changed} />);
   fireEvent.press(v.getByLabelText("Голосовой ввод"));
   await waitFor(() => expect(startWhisperDictation).toHaveBeenCalled());
-  fireEvent.press(v.getByLabelText("Системное распознавание"));
+  fireEvent.press(v.getByLabelText("Google — системное окно"));
   await waitFor(() => expect(mockSession.stop).toHaveBeenCalledTimes(1));
   act(() => mockCallbacks.text!("Запоздалый текст"));
   expect(changed).not.toHaveBeenCalled();
@@ -71,16 +76,17 @@ test("an explicitly selected missing Whisper asks for its model without silently
   expect(Speech.start).not.toHaveBeenCalled(); expect(startWhisperDictation).not.toHaveBeenCalled();
   expect(v.getByLabelText("Скачать модель распознавания")).toBeTruthy();
 });
-test("switching away while system permission is pending cancels the old startup", async () => {
+test("switching away while Android speech dialog is pending drops its late result", async () => {
   await setVoiceEngine("system");
-  let grant!: (p: { granted: boolean }) => void;
-  (Speech.requestPermissionsAsync as jest.Mock).mockReturnValueOnce(new Promise(resolve => { grant = resolve; }));
-  const v = render(<Inputs />);
+  let complete!: (result: any) => void;
+  (launchAndroidVoiceActivity as jest.Mock).mockReturnValue(new Promise(resolve => { complete = resolve; }));
+  const changed = jest.fn(), v = render(<Inputs onChange={changed} />);
   fireEvent.press(v.getByLabelText("Голосовой ввод"));
-  await waitFor(() => expect(Speech.requestPermissionsAsync).toHaveBeenCalled());
+  await waitFor(() => expect(launchAndroidVoiceActivity).toHaveBeenCalled());
   fireEvent.press(v.getByLabelText("Whisper на телефоне"));
   await waitFor(() => expect(v.getByLabelText("Whisper на телефоне").props.accessibilityState.checked).toBe(true));
-  await act(async () => grant({ granted: true }));
+  await act(async () => complete({ status: "recognized", transcript: "запоздалый" }));
+  expect(changed).not.toHaveBeenCalled();
   expect(Speech.start).not.toHaveBeenCalled();
 });
 
@@ -96,11 +102,11 @@ test("the new choice shows at once while it is being saved, without flicker back
   let finish!: () => void;
   (SecureStore.setItemAsync as jest.Mock).mockReturnValueOnce(new Promise<void>(resolve => { finish = resolve; }));
   const v = render(<Inputs />);
-  fireEvent.press(v.getByLabelText("Системное распознавание"));
-  await waitFor(() => expect(v.getByLabelText("Системное распознавание").props.accessibilityState.checked).toBe(true));
+  fireEvent.press(v.getByLabelText("Google — системное окно"));
+  await waitFor(() => expect(v.getByLabelText("Google — системное окно").props.accessibilityState.checked).toBe(true));
   expect(v.queryByText("Голос без интернета")).toBeNull();
   expect(v.queryByText("Сохраняю выбор…")).toBeNull();
   await act(async () => finish());
-  expect(v.getByLabelText("Системное распознавание").props.accessibilityState.checked).toBe(true);
+  expect(v.getByLabelText("Google — системное окно").props.accessibilityState.checked).toBe(true);
   expect(v.queryByText("Голос без интернета")).toBeNull();
 });

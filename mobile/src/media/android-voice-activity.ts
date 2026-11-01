@@ -1,10 +1,9 @@
 import * as IntentLauncher from "expo-intent-launcher";
 
 /**
- * Alternative to a bound SpeechRecognizer service. Android resolves a
- * recognizer Activity itself and returns the text through an Activity result.
- * This can work on OEM builds where the directly bound service reports
- * ERROR_NO_MATCH even though keyboard dictation is available.
+ * Primary Google/system route on Android: Android resolves a speech Activity
+ * and returns recognized text through its result. Avoids direct binding to
+ * an OEM RecognitionService that may report ERROR_NO_MATCH.
  *
  * Does not grant any new consent, choose a private package, or use Whisper.
  */
@@ -39,7 +38,3 @@ export async function launchAndroidVoiceActivity(): Promise<AndroidVoiceActivity
   return parseAndroidVoiceActivityResult(result);
 }
 
-/** Learn only from a real success; never persist a broken route on the phone. */
-let preferredUntilRestart = false;
-export function preferAndroidVoiceActivity() { return preferredUntilRestart; }
-export function recordAndroidVoiceActivitySuccess() { preferredUntilRestart = true; }

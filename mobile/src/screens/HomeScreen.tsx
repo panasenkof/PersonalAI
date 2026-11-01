@@ -32,6 +32,7 @@ import { presentChatRows, type PresentedChatRow } from "../design/nebula/chatPre
 import { nebulaSpacing, nebulaTouch } from "../design/nebula/tokens";
 import { useChatBottomFollow } from "../design/nebula/useChatBottomFollow";
 import { VoiceInput } from "../components/VoiceInput";
+import { showDraftImprove, useVoiceEngine } from "../media/voice-engine";
 import { IconAction } from "../components/IconAction";
 import { PromptInput } from "../components/PromptInput";
 import { NebulaHomeThemeProvider, useTheme } from "../theme";
@@ -80,6 +81,8 @@ function NebulaHomeContent() {
     }
   },[active?.id,active?.attachments]);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const voicePreference = useVoiceEngine();
+  const showWhisperImprove = showDraftImprove(voicePreference.pending ?? voicePreference.preference);
   const [voiceReset, setVoiceReset] = useState(0);
   const [dictating, setDictating] = useState(false);
   const [voicePhase, setVoicePhase] = useState<NebulaVoicePhase>("idle");
@@ -389,13 +392,13 @@ function NebulaHomeContent() {
           hintAbove disabled={!ready || cameraBusy || busy || pickingAttachment || dictating}
           onPress={() => void captureToDraft()} />
         <VoiceInput key={`${active?.id}:${voiceReset}`} value={question} onChange={value => { if (store.getSnapshot().activeId === active?.id) store.setQuestion(value); }} disabled={!ready || busy} onError={setNotice} showLabel={false} onBegin={() => { normalization.reset(); setNotice(""); }} onActiveChange={setDictating} onPhaseChange={setVoicePhase} />
-        <IconAction compact icon={normalization.busy ? "x" : normalization.normalized ? "rotate-ccw" : "edit-3"}
+        {showWhisperImprove ? <IconAction compact icon={normalization.busy ? "x" : normalization.normalized ? "rotate-ccw" : "edit-3"}
           label={normalization.busy ? "Отмена" : normalization.normalized ? "Исходный" : "Улучшить"}
           accessibilityLabel={normalization.busy ? "Отменить улучшение текста" : normalization.normalized ? "Вернуть исходный текст" : "Улучшить текст"}
           hint={normalization.busy ? "Отменить улучшение: исходный текст останется." : normalization.normalized ? "Вернуть текст до улучшения. Повторное нажатие снова покажет исправленный вариант без запроса к LLM." : normalization.alternate ? "Показать исправленный вариант без нового запроса к LLM." : "Исправить ошибки и пунктуацию всего черновика через выбранное подключение LLM. Один дополнительный запрос; сообщение не отправляется."}
           hintAbove hintAlign="center" emphasized={normalization.normalized}
           disabled={!ready || dictating || (!normalization.busy && (!question.trim() || (!normalization.alternate && !canSend)))}
-          onPress={() => void normalization.toggle(settings)} />
+          onPress={() => void normalization.toggle(settings)} /> : null}
         <View style={{ flex: 1, minWidth: 0 }} />
         <IconAction compact icon={busy ? "square" : "arrow-up"} label={busy ? "Стоп" : localPhotoSearch ? "Найти" : "Отправить"} accessibilityLabel={busy ? "Остановить запрос" : localPhotoSearch ? "Найти фотографии в памяти" : "Отправить запрос"}
           hint={busy ? "Остановить ответ ИИ в этом диалоге." : localPhotoSearch ? "Найти фотографии на телефоне." : "Отправить написанное сообщение выбранной модели."} hintAbove emphasized={!busy}

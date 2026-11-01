@@ -72,3 +72,9 @@ test("if the last queued selection fails, the previous successful write remains 
   await first; await expect(second).rejects.toThrow("сохранить");
   expect(engine.getVoiceEngine()).toMatchObject({ preference: "system", saving: false });
 });
+
+test("improve button is available for Whisper only, not Google or automatic system recognition", () => {
+  expect(engine.showDraftImprove("whisper")).toBe(true);
+  expect(engine.showDraftImprove("system")).toBe(false);
+  expect(engine.showDraftImprove("auto")).toBe(false);
+});

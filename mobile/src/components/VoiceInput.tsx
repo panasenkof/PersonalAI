@@ -2,25 +2,17 @@ import { useFocusEffect } from "@react-navigation/native";
 import { ExpoSpeechRecognitionModule as Speech, useSpeechRecognitionEvent } from "expo-speech-recognition";
 import Feather from "@expo/vector-icons/Feather";
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, AppState, Platform, Pressable, Text, View } from "react-native";
+import { AppState, Platform, Pressable, Text, View } from "react-native";
 import { nativeInteractionActive, withNativeInteraction } from "../security/native-interaction";
-import type { ServiceChoice } from "../media/voice";
-import { alternativeOnlineGoogleService, appendDictation, NO_SERVICE_MESSAGE, START_TIMEOUT_MS, pickRecognitionService, serviceName, startTimeoutMessage, voiceErrorMessage } from "../media/voice";
+import { appendDictation, NO_SERVICE_MESSAGE, START_TIMEOUT_MS, startTimeoutMessage, voiceErrorMessage } from "../media/voice";
 import { startWhisperDictation, useWhisperStatus } from "../media/whisper";
-import { launchAndroidVoiceActivity, preferAndroidVoiceActivity, recordAndroidVoiceActivitySuccess } from "../media/android-voice-activity";
+import { launchAndroidVoiceActivity } from "../media/android-voice-activity";
 import type { DictationSession } from "../media/whisper";
-import { grantOnlineSpeechConsent, hasOnlineSpeechConsent, resolveVoiceEngine, useVoiceEngine } from "../media/voice-engine";
+import { hasOnlineSpeechConsent, resolveVoiceEngine, useVoiceEngine } from "../media/voice-engine";
 import { useTheme } from "../theme";
 import { IconAction } from "./IconAction";
 
 const FINAL_RESULT_TIMEOUT_MS = 12_000;
-function recognitionService(): ServiceChoice | undefined {
-  if (Platform.OS !== "android") return undefined;
-  try {
-    return pickRecognitionService(Speech.getSpeechRecognitionServices?.() ?? [], Speech.getDefaultRecognitionService?.()?.packageName ?? "");
-  } catch { return undefined; }
-}
-
 /** Each mounted input owns one draft. Unmounting (including clearing the draft
  * or changing conversations) invalidates permission requests and late results. */
 export function VoiceInput({ value, onChange, disabled = false, onError, showLabel = false, onBegin, onActiveChange, onPhaseChange, maxLength = 4000 }: {
@@ -43,8 +35,6 @@ export function VoiceInput({ value, onChange, disabled = false, onError, showLab
   const started = useRef(false);
   const finishing = useRef(false);
   const base = useRef("");
-  const service = useRef<ServiceChoice | undefined>(undefined);
-  const attemptedOnlineServices = useRef<string[]>([]);
   const [phase, setPhase] = useState<"idle" | "starting" | "listening" | "finishing">("idle");
   useEffect(() => { onActiveChange?.(phase !== "idle"); onPhaseChange?.(phase); }, [phase, onActiveChange, onPhaseChange]);
   useEffect(() => () => { onActiveChange?.(false); onPhaseChange?.("idle"); }, [onActiveChange, onPhaseChange]);
@@ -111,54 +101,10 @@ export function VoiceInput({ value, onChange, disabled = false, onError, showLab
     clearTimers(); setPhase("idle");
   });
   useSpeechRecognitionEvent("error", event => {
+    // Android Google uses its own Activity, not these iOS SpeechRecognizer callbacks.
     if (!owns.current || viaWhisper.current) return;
-    // ERROR_NO_MATCH may mean the bound Google RecognitionService failed,
-    // not that the user was silent. The system recognizer Activity is a
-    // separate Android API; offer it even if no second bound service exists.
-    const noSpeech = event.error === "no-speech" || event.error === "speech-timeout";
-    const languageFailure = ["language-not-supported", "language-unavailable"].includes(event.error);
-    const alternate = (noSpeech || languageFailure)
-      ? alternativeOnlineGoogleService(service.current, attemptedOnlineServices.current) : undefined;
-    if (!noSpeech && !languageFailure && event.error !== "aborted")
-      report(voiceErrorMessage(event.error, event.message, service.current));
+    if (event.error !== "aborted") report(voiceErrorMessage(event.error, event.message));
     stop();
-    if (!noSpeech && !languageFailure) return;
-    const retryGeneration = generation.current;
-    if (noSpeech && Platform.OS === "android") {
-      onError("Google не распознал речь напрямую. Попробуйте системное окно диктовки Android — оно использует другой способ запуска распознавания.");
-      Alert.alert(
-        "Системная диктовка",
-        "Открыть системное окно распознавания речи? Голос может передаваться Google для обработки. Текст вернётся в этот черновик.",
-        [
-          { text: "Отмена", style: "cancel" },
-          ...(alternate ? [{ text: "Другая служба", onPress: () => {
-            if (generation.current !== retryGeneration || AppState.currentState !== "active") return;
-            void start(alternate);
-          } }] : []),
-          { text: "Открыть", onPress: () => {
-            if (generation.current !== retryGeneration || AppState.currentState !== "active") return;
-            void startAndroidActivity();
-          } },
-        ],
-      );
-      return;
-    }
-    if (!alternate) {
-      onError("Google не принимает русский в сетевом режиме. Проверьте голосовой ввод в приложении Google или используйте микрофон Gboard.");
-      return;
-    }
-    onError("Текущая служба Google не принимает русский. Можно выбрать другую службу.");
-    Alert.alert(
-      "Другой сервис Google",
-      "Текущая служба не принимает русский. Попробовать " + serviceName(alternate) + "? Голос может передаваться Google для обработки.",
-      [
-        { text: "Отмена", style: "cancel" },
-        { text: "Попробовать", onPress: () => {
-          if (generation.current !== retryGeneration || AppState.currentState !== "active") return;
-          void start(alternate);
-        } },
-      ],
-    );
   });
   useFocusEffect(useCallback(() => stop, [stop]));
   useEffect(() => {
@@ -178,7 +124,8 @@ export function VoiceInput({ value, onChange, disabled = false, onError, showLab
     setPhase("starting");
     try {
       if (!(await hasOnlineSpeechConsent())) {
-        throw new Error("Сначала разрешите онлайн-распознавание Google через обычную кнопку микрофона.");
+        onError("Подтвердите использование Google через интернет в разделе Настройки → Голосовой ввод. После этого микрофон будет сразу открывать системное окно.");
+        return;
       }
       if (token !== generation.current) return;
       onBegin?.();
@@ -186,7 +133,6 @@ export function VoiceInput({ value, onChange, disabled = false, onError, showLab
       if (token !== generation.current) return; // canceled, unmounted, locked or switched engine
       if (result.status === "recognized") {
         onChange(appendDictation(value, result.transcript, maxLength));
-        recordAndroidVoiceActivitySuccess();
       } else if (result.status === "empty") {
         onError("Системная служба не вернула текст. Попробуйте ещё раз или используйте микрофон Gboard.");
       }
@@ -224,44 +170,32 @@ export function VoiceInput({ value, onChange, disabled = false, onError, showLab
       if (generation.current === token && !aborter.signal.aborted) { onError((e as Error).message || "Голос на телефоне: не удалось начать диктовку."); stop(); }
     } finally { if (generation.current === token) starting.current = false; }
   }
-  async function start(recognitionPackage?: string) {
+  async function start() {
     if (disabled || !voice.loaded || voice.saving || owns.current || starting.current) return;
     if (value.length >= maxLength) { onError("Текст слишком длинный для диктовки. Существующий текст сохранён; добавьте отдельную запись."); return; }
     if (voice.error) { onError(voice.error); return; }
-    if (selectedEngine === "system" && !recognitionPackage && Platform.OS === "android" && preferAndroidVoiceActivity())
+    // On Android the Google option always opens the OS recognition UI directly.
+    // Do not first invoke a bound SpeechRecognizer or prompt for an alternate route.
+    if (selectedEngine === "system" && Platform.OS === "android")
       return startAndroidActivity();
-    if (selectedEngine === "whisper" && !recognitionPackage && whisper.state !== "ready") {
+    if (selectedEngine === "whisper" && whisper.state !== "ready") {
       onError(whisper.state === "unsupported" ? "Whisper недоступен на этом телефоне. Выберите системное распознавание: Настройки → Голосовой ввод." :
         whisper.state === "downloading" ? `Модель Whisper ещё скачивается (${whisper.progress}%). Дождитесь завершения или выберите системное распознавание в настройках.` :
         "Выбран Whisper. Скачайте модель: Настройки → Голосовой ввод → Голос без интернета. Или выберите системное распознавание.");
       return;
     }
     onBegin?.();
-    if (!recognitionPackage) attemptedOnlineServices.current = [];
     const token = ++generation.current;
     starting.current = true; setPhase("starting");
-    if (selectedEngine === "whisper" && !recognitionPackage) return startWhisper(token);
+    if (selectedEngine === "whisper") return startWhisper(token);
     try {
       if (!Speech.isRecognitionAvailable()) throw new Error(NO_SERVICE_MESSAGE);
-      // Google uses its online-capable recognizer by default. Do not attempt
-      // on-device recognition first: Android may support offline in general
-      // but have no Russian offline speech pack (Vivo X200 Pro).
+      // Non-Android platforms retain the existing online-capable native recognizer.
       if (!(await hasOnlineSpeechConsent())) {
-        if (generation.current !== token) return;
-        starting.current = false; setPhase("idle");
-        Alert.alert("Голосовой ввод Google",
-          "PersAI будет распознавать речь через системную службу Google с интернетом. Голос может отправляться Google для обработки. Разрешить и запомнить выбор?",
-          [
-            { text: "Отмена", style: "cancel" },
-            { text: "Разрешить", onPress: () => {
-              if (generation.current !== token || AppState.currentState !== "active") return;
-              void grantOnlineSpeechConsent().then(() => {
-                if (generation.current === token && AppState.currentState === "active") void start(recognitionPackage);
-              }).catch(() => {
-                if (generation.current === token) onError("Не удалось сохранить разрешение на онлайн-распознавание. Повторите попытку.");
-              });
-            } },
-          ]);
+        if (generation.current === token) {
+          onError("Подтвердите онлайн-распознавание в разделе Настройки → Голосовой ввод.");
+          setPhase("idle");
+        }
         return;
       }
       if (generation.current !== token) return;
@@ -271,21 +205,14 @@ export function VoiceInput({ value, onChange, disabled = false, onError, showLab
         await withNativeInteraction(() => Speech.requestPermissionsAsync(), { permissionPrompt: true });
       if (generation.current !== token) return;
       if (!permission.granted) throw new Error("Голосовой ввод: нет разрешения на микрофон. Разрешите микрофон для PersAI в настройках телефона.");
-      service.current = recognitionService();
       base.current = value;
       owns.current = true; started.current = finishing.current = false;
-      const selectedPackage = recognitionPackage || service.current?.pkg || service.current?.defaultPackage;
-      if (selectedPackage && !attemptedOnlineServices.current.includes(selectedPackage))
-        attemptedOnlineServices.current.push(selectedPackage);
-      // Native endpointing remains authoritative. Android documents that
-      // custom silence extras may be ignored or cause unexpected results.
       Speech.start({
         lang: "ru-RU", interimResults: true, continuous: false, requiresOnDeviceRecognition: false, addsPunctuation: true,
-        ...((recognitionPackage || service.current?.pkg) ? { androidRecognitionServicePackage: recognitionPackage || service.current?.pkg } : {}),
       });
       if (!owns.current) return;
       if (!started.current) watchdog.current = setTimeout(() => {
-        if (owns.current && !started.current) { report(startTimeoutMessage(service.current)); stop(); }
+        if (owns.current && !started.current) { report(startTimeoutMessage()); stop(); }
       }, START_TIMEOUT_MS);
       if (!finishing.current) timer.current = setTimeout(finish, 60_000);
     } catch (e) { if (generation.current === token) { report((e as Error).message || "Голосовой ввод: не удалось начать распознавание."); stop(); } }
@@ -300,7 +227,7 @@ export function VoiceInput({ value, onChange, disabled = false, onError, showLab
   const accessibilityLabel = phase === "starting" ? "Отменить подготовку диктовки" : phase === "finishing" ? "Прервать распознавание последней фразы" : active ? "Остановить диктовку" : "Голосовой ввод";
   return <View style={{ zIndex: 1 }}>
     {showLabel ? <IconAction icon={active ? "square" : "mic"} label={label} accessibilityLabel={accessibilityLabel}
-      hint={phase === "starting" ? "Отменить запуск диктовки." : phase === "finishing" ? "Не ждать последнюю фразу: уже распознанный текст останется." : active ? "Диктовка завершится после паузы в речи. Можно закончить раньше кнопкой «Стоп»." : (selectedEngine === "whisper" ? "Whisper на телефоне. " : "Системное распознавание. ") + "Надиктовать сообщение. Ввод завершится после паузы, отправка — отдельной кнопкой."}
+      hint={phase === "starting" ? "Отменить запуск диктовки." : phase === "finishing" ? "Не ждать последнюю фразу: уже распознанный текст останется." : active ? "Диктовка завершится после паузы в речи. Можно закончить раньше кнопкой «Стоп»." : (selectedEngine === "whisper" ? "Whisper на телефоне. " : Platform.OS === "android" ? "Откроется системное окно распознавания. " : "Системное распознавание. ") + "Надиктовать сообщение. Ввод завершится после паузы, отправка — отдельной кнопкой."}
       disabled={disabled || !voice.loaded || voice.saving} emphasized={active} hintAbove hintAlign="start" onPress={press} /> : <Pressable accessibilityRole="button" accessibilityLabel={accessibilityLabel}
       disabled={disabled || !voice.loaded || voice.saving} onPress={press}
       style={{ minWidth: 48, minHeight: 48, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: active ? t.accent : t.soft }}>
