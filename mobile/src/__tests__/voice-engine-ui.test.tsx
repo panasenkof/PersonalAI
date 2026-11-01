@@ -1,5 +1,5 @@
 import React from "react";
-import { AppState } from "react-native";
+import { AppState, Platform } from "react-native";
 import { launchAndroidVoiceActivity } from "../media/android-voice-activity";
 import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 import { ExpoSpeechRecognitionModule as Speech } from "expo-speech-recognition";
@@ -28,6 +28,7 @@ jest.mock("expo-speech-recognition", () => ({
 }));
 beforeEach(async () => {
   Object.defineProperty(AppState, "currentState", { value: "active", configurable: true });
+  Object.defineProperty(Platform, "OS", { value: "android", configurable: true });
   await setVoiceEngine("whisper"); await grantOnlineSpeechConsent(); jest.clearAllMocks(); mockStatus.current = { state: "ready", id: "base" };
   (launchAndroidVoiceActivity as jest.Mock).mockResolvedValue({ status: "canceled" });
 });
