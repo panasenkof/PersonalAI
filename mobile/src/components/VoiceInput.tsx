@@ -115,22 +115,31 @@ export function VoiceInput({ value, onChange, disabled = false, onError, showLab
     if (!owns.current || viaWhisper.current) return;
     const languageFailure = ["language-not-supported", "language-unavailable"].includes(event.error);
     const offlineLanguageFailure = offline.current && languageFailure;
+    // Some Vivo devices report "no-speech" while using the on-device
+    // recognizer, despite the mic working in Google's Gboard. Offer a
+    // permission-gated online try without treating ordinary silence as a
+    // missing language pack.
+    const offlineNoSpeech = offline.current && event.error === "no-speech";
     // A network retry can fail on some Android 16 ROMs even when the Google
     // speech package is installed. Offer *another registered service*, once,
     // instead of repeatedly claiming that Russian has not been downloaded.
     const onlineLanguageFailure = !offline.current && languageFailure;
     const alternate = onlineLanguageFailure
       ? alternativeOnlineGoogleService(service.current, attemptedOnlineServices.current) : undefined;
-    if (!languageFailure && event.error !== "aborted")
+    if (!languageFailure && event.error !== "aborted" && !offlineNoSpeech)
       report(voiceErrorMessage(event.error, event.message, service.current));
     stop();
-    if (!offlineLanguageFailure && !onlineLanguageFailure) return;
+    if (!offlineLanguageFailure && !onlineLanguageFailure && !offlineNoSpeech) return;
     const retryGeneration = generation.current;
-    if (offlineLanguageFailure) {
-      onError("Google не поддерживает русский в офлайн-режиме. Можно попробовать через интернет.");
+    if (offlineLanguageFailure || offlineNoSpeech) {
+      onError(offlineNoSpeech
+        ? "Google не услышал речь в офлайн-режиме. Можно попробовать распознавание через интернет."
+        : "Google не поддерживает русский в офлайн-режиме. Можно попробовать через интернет.");
       Alert.alert(
         "Распознавание Google",
-        "Офлайн-распознавание русского недоступно. Попробовать через интернет? Системная служба Google может передать голос для распознавания на свой сервер.",
+        offlineNoSpeech
+          ? "Офлайн-служба Google не услышала речь. Попробовать распознавание через интернет? Голос может передаваться Google для обработки."
+          : "Офлайн-распознавание русского недоступно. Попробовать через интернет? Системная служба Google может передать голос для распознавания на свой сервер.",
         [
           { text: "Отмена", style: "cancel" },
           { text: "Использовать через интернет", onPress: () => {
