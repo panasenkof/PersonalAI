@@ -1,5 +1,6 @@
 import React from "react";
-import { AppState, Text } from "react-native";
+import { AppState, Platform, Text } from "react-native";
+import { launchAndroidVoiceActivity } from "../media/android-voice-activity";
 import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 import { ExpoSpeechRecognitionModule as Speech } from "expo-speech-recognition";
 import { VoiceInput } from "../components/VoiceInput";
@@ -8,6 +9,7 @@ const mockVoiceChoice: { current: "system" | "whisper" } = { current: "whisper" 
 jest.mock("@react-navigation/native", () => ({ useFocusEffect: (cb: any) => require("react").useEffect(cb, [cb]) }));
 jest.mock("../security/native-interaction", () => ({ withNativeInteraction: (fn: any) => fn(), nativeInteractionActive: () => false }));
 jest.mock("@expo/vector-icons/Feather", () => () => null);
+jest.mock("../media/android-voice-activity", () => ({ launchAndroidVoiceActivity: jest.fn(async () => ({ status: "canceled" })) }));
 jest.mock("../media/voice-engine", () => ({
   useVoiceEngine: () => ({ loaded: true, preference: mockVoiceChoice.current, saving: false, error: "" }),
   resolveVoiceEngine: (preference: string) => preference === "whisper" ? "whisper" : "system",
@@ -25,7 +27,7 @@ jest.mock("../media/whisper", () => ({
   useWhisperStatus: () => mockStatus.current,
   startWhisperDictation: jest.fn(async (onText: any, _onError: any, onEnd: any, options: any) => { mockCallbacks.finishing = options.onFinishing; mockCallbacks.text = onText; mockCallbacks.end = onEnd; return mockSession; }),
 }));
-beforeEach(() => { Object.defineProperty(AppState, "currentState", { value: "active", configurable: true }); jest.clearAllMocks(); mockStatus.current = { state: "ready", id: "base" }; mockVoiceChoice.current = "whisper"; });
+beforeEach(() => { Object.defineProperty(AppState, "currentState", { value: "active", configurable: true }); Object.defineProperty(Platform, "OS", { value: "android", configurable: true }); jest.clearAllMocks(); mockStatus.current = { state: "ready", id: "base" }; mockVoiceChoice.current = "whisper"; });
 function Draft({ error }: { error: (s: string) => void }) {
   const [value, setValue] = React.useState("План");
   return <><Text>{value}</Text><VoiceInput value={value} onChange={setValue} onError={error} /></>;
@@ -43,15 +45,15 @@ test("with the model downloaded, dictation goes through Whisper on the phone and
   act(() => mockCallbacks.end!());
   expect(v.getByLabelText("Голосовой ввод")).toBeTruthy();
 });
-test("without Google and without the model the error points to the on-device model", async () => {
-  mockStatus.current = { state: "absent" }; mockVoiceChoice.current = "system";
-  (Speech.isRecognitionAvailable as jest.Mock).mockReturnValueOnce(false);
-  const error = jest.fn();
-  const v = render(<Draft error={error} />);
+test("when Google system dialog is unavailable, it never silently switches to Whisper", async () => {
+  mockVoiceChoice.current = "system";
+  (launchAndroidVoiceActivity as jest.Mock).mockRejectedValueOnce(new Error("ActivityNotFoundException"));
+  const error = jest.fn(), v = render(<Draft error={error} />);
   fireEvent.press(v.getByLabelText("Голосовой ввод"));
-  await waitFor(() => expect(error).toHaveBeenCalled());
-  expect(error.mock.calls[0][0]).toContain("Настройки → Голосовой ввод → Голос без интернета");
+  await waitFor(() => expect(error).toHaveBeenCalledWith(expect.stringContaining("Системная диктовка недоступна")));
   expect(startWhisperDictation).not.toHaveBeenCalled();
+  expect(Speech.start).not.toHaveBeenCalled();
+  v.unmount();
 });
 
 test("Whisper automatically finalizes after silence; clearing the input ignores late transcripts", async () => {
