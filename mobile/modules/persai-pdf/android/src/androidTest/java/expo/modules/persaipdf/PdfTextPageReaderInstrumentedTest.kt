@@ -43,7 +43,10 @@ class PdfTextPageReaderInstrumentedTest {
     assumeTrue(Build.VERSION.SDK_INT >= 35)
     val file = pdf("PERSAI_FIRST_PAGE_123", null, "PERSAI_THIRD_PAGE_987")
     try {
-      val pages = PdfTextPageReader.read(file, 128)
+      val result = PdfTextPageReader.read(file, 128)
+      assertEquals(3, result["pageCount"])
+      @Suppress("UNCHECKED_CAST")
+      val pages = result["pages"] as List<Map<String, Any>>
       assertEquals(listOf(1, 3), pages.map { it["page"] as Int })
       assertTrue((pages[0]["text"] as String).contains("PERSAI_FIRST_PAGE_123"))
       assertTrue((pages[1]["text"] as String).contains("PERSAI_THIRD_PAGE_987"))
@@ -68,7 +71,9 @@ class PdfTextPageReaderInstrumentedTest {
     assumeTrue(Build.VERSION.SDK_INT >= 35)
     val file = pdf(null)
     try {
-      assertTrue(PdfTextPageReader.read(file, 128).isEmpty())
+      val result = PdfTextPageReader.read(file, 128)
+      assertEquals(1, result["pageCount"])
+      assertEquals(emptyList<Any>(), result["pages"])
     } finally { file.delete() }
   }
 }
