@@ -39,7 +39,3 @@ export async function launchAndroidVoiceActivity(): Promise<AndroidVoiceActivity
   return parseAndroidVoiceActivityResult(result);
 }
 
-/** Learn only from a real success; never persist a broken route on the phone. */
-let preferredUntilRestart = false;
-export function preferAndroidVoiceActivity() { return preferredUntilRestart; }
-export function recordAndroidVoiceActivitySuccess() { preferredUntilRestart = true; }
