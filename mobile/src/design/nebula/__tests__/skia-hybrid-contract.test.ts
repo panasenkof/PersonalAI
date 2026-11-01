@@ -10,10 +10,15 @@ describe("approved B + C Skia visual contract", () => {
       expect(NEBULA_HYBRID_SKSL).toContain(name);
     }
     expect(NEBULA_HYBRID_SKSL).not.toContain("makeImageFromView");
-    expect(NEBULA_HYBRID_SKSL).toContain("float resultAlpha = mix(1.0, orbAlpha");
-    expect(NEBULA_HYBRID_SKSL).toContain("outputColor, 0.0, 1.0)) * resultAlpha");
+    expect(NEBULA_HYBRID_SKSL).toContain("float isHeader = 1.0 - step(96.0, uSize)");
+    expect(NEBULA_HYBRID_SKSL).toContain("float3 homeComposited = mix(homeBase, outputColor, orbAlpha)");
+    expect(NEBULA_HYBRID_SKSL).toContain("return half4(half3(clamp(finalColor, 0.0, 1.0)), 1.0)");
     const experiment = require("node:fs").readFileSync(require("node:path").join(__dirname, "..", "NebulaSkiaExperiment.tsx"), "utf8");
     expect(experiment).toContain('backgroundColor: homeCanvas ? "transparent" : colors.canvas');
+    expect(experiment).toContain('const surface = size < 96 ? nebulaHomeColors.panel : nebulaHomeColors.bg');
+    expect(experiment).toContain('mask={<Circle');
+    expect(experiment).toContain('colors={["white", "white", "black"]}');
+    expect(experiment).not.toContain('testID="nebula-skia-poster"');
   });
   it("maps all supported phases to dynamic intensity without inventing mic progress", () => {
     const states: NebulaPhase[] = ["idle", "listening", "transcribing", "thinking", "responding", "offline", "error"];
