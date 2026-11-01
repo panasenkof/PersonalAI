@@ -1,5 +1,5 @@
 import { monoWav } from '../video-audio';
-import { importLink, linkImportErrorMessage, pageText, publicImportUrl } from '../link-import';
+import { importLink, linkImportErrorMessage, linkHttpError, pageText, publicImportUrl } from '../link-import';
 import { mediaKind } from '../kinds';
 import { fetch as nativeFetch } from 'expo/fetch';
 jest.mock('expo/fetch', () => ({ fetch: jest.fn() }));
@@ -64,4 +64,14 @@ test('HTML article import strips navigation/ads and decodes numeric entities wit
 });
 test('HTML import still falls back for short pages without article or main', () => {
   expect(pageText('<p>Хлеб</p><p>Соль &amp; вода</p>')).toBe('Хлеб\nСоль & вода');
+});
+
+test('step 8 URL statuses are actionable without exposing network diagnostics', () => {
+  expect(linkHttpError(401)).toMatch(/HTTP 401.*вход на сайт/);
+  expect(linkHttpError(403)).toMatch(/HTTP 403.*Сохраните ссылку/);
+  expect(linkHttpError(404)).toMatch(/HTTP 404.*не найден|не найден.*HTTP 404/);
+  expect(linkHttpError(504)).toContain('вовремя');
+  expect(linkHttpError(429)).toContain('ограничил');
+  expect(linkHttpError(502)).toContain('стороне сайта');
+  expect(linkHttpError(415)).toContain('HTTP 415');
 });

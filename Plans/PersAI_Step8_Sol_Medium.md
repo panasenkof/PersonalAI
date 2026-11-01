@@ -313,3 +313,41 @@ PDF: в рамках существующего viewer две локальные
 «Реализуй только пакет A подплана шага 8 PersAI. Сначала прочитай актуальные AGENTS.md, PLAN.md §2, Plans/ROADMAP_STATUS.md, docs/DEVELOPMENT_GATES.md и относящиеся OpenSpec. Проверь main и открытые PR. Найди реальные пути URL/Share, extraction, source-reader, PDF/ASR/OCR, chat attachments и поисковый writer. Составь карту переиспользования, матрицу форматов/провайдеров/лимитов и конкретные точки изменения для пакета B. Сохрани требования в каноническом подплане без второго реестра статусов. Код приложения и миграции не менять. Заверши C0-A/C3-B и PLAN CONFORMANCE с честными статусами. После этого приступай к B только в рамках поручения на реализацию».
 
 Источники: https://github.com/panasenkof/PersonalAI/blob/main/PLAN.md ; https://github.com/panasenkof/PersonalAI/blob/main/Plans/ROADMAP_STATUS.md ; https://github.com/panasenkof/PersonalAI/blob/main/docs/DEVELOPMENT_GATES.md ; https://github.com/panasenkof/PersonalAI/blob/main/Plans/MEMORY_CONTENT_COVERAGE.md ; https://github.com/panasenkof/PersonalAI/blob/main/Plans/ASSISTANT_FEATURES.md
+
+
+## 9. Пакет A: карта фактической реализации и рамки пакета B (01.11.2026)
+
+Инвентаризация сделана по `main` `58984797035d4220288d8cbbf8d63d70b45b1250` перед первым runtime-изменением. Это **C0-A**, не утверждение о тестировании на физическом устройстве. Действующий канонический подплан — этот файл: второй `Plans/IMPORT_MEDIA.md` не создаётся.
+
+### Один источник истины и связи (C0-A)
+
+| Точка входа / слой | Текущая реализация и контракт | Решение / открытый GAP |
+|---|---|---|
+| Ручной HTTPS URL | `screens/MemoryImportScreen.tsx::readLink` → `media/link-import.ts::publicImportUrl/importLink` → черновик | **EXTEND B/C:** ссылка без скачивания ранее не сохранялась ручным маршрутом; ошибки и preview из этого экрана, без второй формы импорта |
+| Android «Поделиться» | `screens/ShareDestinationScreen.tsx` → выбор «В чат/В память»; `media/share-destination.ts` проверяет формат; `MemoryImportScreen` создаёт черновик | **REUSE:** не сохранять автоматически и не скачивать URL из Share; `IncomingShares.tsx::receiveShares` — отдельный существующий legacy-клиент writer, не развивать параллельный UX |
+| Локальный файл и оригинал | `MemoryImportScreen::pick/gallery/camera` → `media/attachments.ts::saveMediaNote/writeOriginal` | **REUSE:** SQLCipher, максимум 10 оригиналов, 80 MiB на один и на все, оригиналы только при подтверждении, временные копии после lock/cancel очищать |
+| Источник, ручной текст, извлечение | `saveMediaNote` → `SqliteMemoryRepository.createEntity` и атомарное `appendExtractionInTransaction` из `local-memory/extractions.ts` | **REUSE/EXTEND:** `payload.source_url`, `body`, `extracted_text` различаются; сведения о первичном файле и сегменты не приписывать ссылке без текста; комментарий пользователя не заменять результатом загрузки |
+| Чтение и подтверждение | `local-memory/source-retrieval.ts`, `media/AttachmentView.tsx`, `media/attachments.ts::materializeAttachment` | **REUSE:** единый source reader и один дешифратор; проверка профиля/прав/версии при выдаче оригинала; ссылки без файла не обещают точный page/seek |
+| Индексация/поиск | Существующие `scheduleIndexTerms` / `scheduleVectors`, SQLCipher search и source evidence | **REUSE:** после Save индекс планируется автоматически; для link-only пригодны введённое название и комментарий. Индексируемость произвольного URL отдельно не заявлять без теста |
+| Обработка файла | `media/extract.ts::extractMedia`, `media/pdf-pages.ts`, `media/whisper.ts`, `media/batch-recognition.ts` | **EXTEND D–G:** локальный PDF text-layer и Whisper уже есть; OCR сканов, повтор с выбором версии и гарантированный seek — GAP |
+| Вложение чата | `media/pickChatAttachments.ts` → `direct-agent/chat-attachments.ts` → transport | **EXTEND H:** только JPEG/PNG/WebP/UTF-8; оригинальный PDF/аудио/видео в чат сейчас не проходят; прикрепление не сохраняет в память |
+| Резервные копии | Действующее SQLCipher backup/restore исходных entity/attachments/extractions | **REUSE:** пакет B не вводит схему/таблицу/миграцию; изменения последующих пакетов сверять с manifest и восстановлением |
+
+### Фактическая матрица ограничений до B
+
+| Материал | Фактически поддерживается | Численные ограничения / обоснованный GAP |
+|---|---|---|
+| HTTPS (текст или прямой файл) | Только публичный HTTPS URL, без credentials и literal-private-host; network `credentials: omit`, редиректы запрещены (0 переходов), чтение чанками | 60 с таймаут, `text/*`/JSON до 1 MiB, двоичный оригинал до 80 MiB, текст заметки до 60 000 символов. Нет offline-копии веб-сайта и обхода login/403; возможно сохранение адреса отдельно |
+| HTML-страница | `pageText` удаляет базовые script/style/navigation и пытается извлечь article/main | Плоский текст, 60 000 символов; семантическая структура рецепта и полноценная проверка JS-shell — **C GAP** |
+| PDF | Нативные страницы при доступном `PersaiPdfText`; Android 15+ либо Android 12–14 с S Extensions 13+ | До 128 страниц, 60 000 символов и 128 сегментов; 1-based `location.page`, частичное покрытие; Android 9–11 не извлекает текст; OCR сканов — **E GAP**. Реальный просмотр точной страницы требует проверки viewer |
+| Фото | Оригинал JPEG/PNG/WebP/GIF; описание через выбранную vision-модель только при разрешённой обработке | 8 MiB для cloud image extraction в `extract.ts`; не путать с 80 MiB оригинала. Нет универсального локального OCR и доказанной полноты |
+| Аудио/видео | Локальный Whisper для поддержанного файла либо разрешённое OpenAI-совместимое ASR; выборочные кадры видео | Диктовка через системный Google **не** является file ASR; качество, длинная запись, provider offsets и точный seek требуют **F**. Live платные тесты не запускать |
+| Чат | До 3 вложений: JPEG/PNG/WebP или UTF-8 text; изображения локально уменьшаются по необходимости | После уменьшения до 6 MiB на файл; текст до 24 000 символов, 24 MiB суммарный budget; PDF/audio/video/DOCX/XLSX — **H GAP** |
+
+### C0-A / C3-B для пакета B
+
+- **C0-A PASS с локальным GAP:** выбор источника и чата уже существуют; единственный допустимый writer — `saveMediaNote`; link-only может использовать `source_url`, `title`, `body` без фиктивного вложения или machine extraction. Для безопасности не разрешать внутренние URL и не переходить по редиректам. Текущая проверка публичности URL не является доказательством DNS-level защиты: отдельное транспортное усиление при необходимости, не ценой отключения запретов.
+- **B фактический срез в ветке:** явное «Продолжить только со ссылкой» создаёт черновик после проверки URL и закрывает выбор; «Сохранить ссылку» записывает только после подтверждения внизу. Ошибка загрузки оставляет редактируемый URL, доступна повторная попытка. Комментарий `body` не очищается при успешной повторной загрузке. Двойной `readLink/save` защищён текущим контроллером. Переключение из файла в ссылку — пользовательское действие; незаписанный источник в `linkDraft` не отравляет `sourceUrl`.
+- **C3-B ожидается после CI и diff-review:** нет нового writer, таблиц, индекса, fetch-адаптера или расшифровщика; старые поля и записи сохраняют совместимость. Провал запроса не равно испорченной БД; частичная обработка не выдаётся за прочитанную статью.
+- **Проверить на exact SHA:** `cd mobile && npm ci && npm run typecheck && npm test -- --runInBand src/media/__tests__/media-import-ui.test.tsx src/media/__tests__/media-content.test.ts` плюс обязательный CI PR; профили/lock, Android Back/IME и физическое устройство отдельно, без фиктивного PASS.
+- **План-сверка:** A — документальная карта и идентификация пробелов; B — узкий runtime link-only и ошибки; C–I **NOT IMPLEMENTED в этом PR**. Не закрывать весь этап 8 или №85 по этому срезу.

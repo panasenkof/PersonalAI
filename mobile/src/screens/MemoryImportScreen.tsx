@@ -6,7 +6,7 @@ import type { CollectionRecord } from "../local-memory/types";
 import { loadMediaPreferences } from "../media/preferences";
 import { onLocalMemorySessionChange } from "../local-memory/storage";
 import * as ImagePicker from "expo-image-picker";
-import { importLink, linkImportErrorMessage } from "../media/link-import";
+import { importLink, linkImportErrorMessage, publicImportUrl } from "../media/link-import";
 import * as Crypto from "expo-crypto";
 import { File, Directory, Paths } from "expo-file-system";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
@@ -42,6 +42,7 @@ export function MemoryImportScreen() {
   const [keepOriginal, setKeepOriginal] = useState(true);
   const [sourceUrl, setSourceUrl] = useState(""); // Confirmed provenance only.
   const [linkDraft, setLinkDraft] = useState(""); // Unconfirmed URL never changes saved provenance.
+  const [linkOnly, setLinkOnly] = useState(false); // Confirmed draft without fetched content.
   const [sourceChoice, setSourceChoice] = useState(route.params?.source);
   const [sourcePickerOpen, setSourcePickerOpen] = useState(true);
   const [processingOptionsOpen, setProcessingOptionsOpen] = useState(false);
@@ -106,12 +107,12 @@ export function MemoryImportScreen() {
       cancelled = true; cleanup(); setFiles([]); setPreparing(false);
       setNotice("Подготовка прервана блокировкой. Повторите приём после разблокировки.");
     });
-    setPreparing(true); setTitle(""); setFiles([]); setRecognitionResults([]); setRecognizingIndex(-1); setBody(""); setExtractedText(""); setNotice(""); setSourceUrl(""); setLinkDraft(""); setSourcePickerOpen(false); setProcessingOptionsOpen(false); setKeepOriginal(true);
+    setPreparing(true); setTitle(""); setFiles([]); setRecognitionResults([]); setRecognizingIndex(-1); setBody(""); setExtractedText(""); setNotice(""); setSourceUrl(""); setLinkDraft(""); setLinkOnly(false); setSourcePickerOpen(false); setProcessingOptionsOpen(false); setKeepOriginal(true);
     void (async () => {
       if (incoming!.length > 30) throw new Error("Отправляйте не более 30 файлов за один раз.");
       const text = payload.shareType === "text" || payload.shareType === "url";
       if (!payload.value || (text && payload.value.length > 60_000)) throw new Error("Пустой или слишком длинный материал.");
-      if (text) { if (!cancelled) { if (payload.shareType === "url") { setSourceUrl(payload.value); setLinkDraft(payload.value); } setTitle(payload.shareType === "url" ? "Ссылка" : payload.value.split("\n")[0].slice(0, 160)); setBody(payload.value); } return; }
+      if (text) { if (!cancelled) { if (payload.shareType === "url") { setSourceUrl(payload.value); setLinkDraft(payload.value); setLinkOnly(true); } setTitle(payload.shareType === "url" ? "Ссылка" : payload.value.split("\n")[0].slice(0, 160)); setBody(payload.value); } return; }
       const source = new File(payload.value);
       const dir = new Directory(Paths.cache, "persai-incoming"); dir.create({ intermediates: true, idempotent: true });
       const target = new File(dir, Crypto.randomUUID()); staged = target;
@@ -172,7 +173,7 @@ export function MemoryImportScreen() {
       }
       if (!alive.current) { for (const copy of copies) await FileSystem.deleteAsync(copy.uri, { idempotent: true }); return; }
       ownedFiles.current.push(...copies.map(copy => copy.uri));
-      setFiles(copies); setRecognitionResults([]); setTitle(""); setSourceUrl(""); setLinkDraft(""); setSourcePickerOpen(false); setProcessingOptionsOpen(false); setKeepOriginal(true); setExtractedText(""); setBody("");
+      setFiles(copies); setRecognitionResults([]); setTitle(""); setSourceUrl(""); setLinkDraft(""); setLinkOnly(false); setSourcePickerOpen(false); setProcessingOptionsOpen(false); setKeepOriginal(true); setExtractedText(""); setBody("");
     } catch (e) {
       for (const copy of copies) await FileSystem.deleteAsync(copy.uri, { idempotent: true }).catch(() => {});
       if (alive.current) setNotice(memoryErrorMessage(e));
@@ -195,7 +196,7 @@ export function MemoryImportScreen() {
       if (!alive.current) { if (target.exists) target.delete(); return; }
       ownedFiles.current.push(target.uri);
       setFiles([{ uri: target.uri, name: asset.fileName || "camera.jpg", mimeType: asset.mimeType || "image/jpeg" }]); setRecognitionResults([]);
-      setTitle("Снимок"); setSourceUrl(""); setLinkDraft(""); setSourcePickerOpen(false); setProcessingOptionsOpen(false); setKeepOriginal(true); setExtractedText(""); setBody("");
+      setTitle("Снимок"); setSourceUrl(""); setLinkDraft(""); setLinkOnly(false); setSourcePickerOpen(false); setProcessingOptionsOpen(false); setKeepOriginal(true); setExtractedText(""); setBody("");
     } catch (e) { if (alive.current) setNotice(memoryErrorMessage(e)); }
     finally { if (alive.current) setPreparing(false); }
   }
@@ -236,8 +237,29 @@ export function MemoryImportScreen() {
     else if (source === "gallery") void gallery();
     else void pick();
   }, [incoming, route.params]);
+  // A URL-only preview is a user decision, never an implicit save or network call.
+  function previewLinkOnly() {
+    if (busy || preparing || controller.current) return;
+    try {
+      const source = publicImportUrl(linkDraft);
+      const domain = new URL(source).hostname;
+      setSourceUrl(source);
+      setLinkDraft(source);
+      setLinkOnly(true);
+      setFiles([]);
+      setRecognitionResults([]);
+      setRecognizingIndex(-1);
+      setExtractedText("");
+      setKeepOriginal(false);
+      setTitle(current => file || !current.trim() ? "Ссылка · " + domain : current);
+      setSourcePickerOpen(false);
+      setProcessingOptionsOpen(false);
+      setNotice("Сохранится только адрес и ваша заметка. Содержимое сайта не загружено.");
+      // body is the user's annotation and must survive failed and retried imports.
+    } catch (error) { setNotice(linkImportErrorMessage(error)); }
+  }
   async function readLink() {
-    if (busy) return;
+    if (busy || controller.current) return;
     const aborter = new AbortController(); controller.current = aborter; setBusy(true); setNotice("");
     try {
       const result = await importLink(linkDraft, aborter.signal);
@@ -245,9 +267,9 @@ export function MemoryImportScreen() {
       if (result.file) { ownedFiles.current.push(result.file.uri); setFiles([result.file]); setExtractedText(""); setKeepOriginal(true); setTitle(result.file.name); }
       else { setFiles([]); setExtractedText(result.text || ""); setKeepOriginal(false); setTitle("Материал по ссылке"); }
       setRecognitionResults([]);
-      setSourceUrl(result.source); setLinkDraft(result.source); setSourcePickerOpen(false); setProcessingOptionsOpen(false); setBody("");
+      setLinkOnly(false); setSourceUrl(result.source); setLinkDraft(result.source); setSourcePickerOpen(false); setProcessingOptionsOpen(false);
     } catch (e) { if (alive.current) setNotice(linkImportErrorMessage(e)); }
-    finally { if (alive.current) setBusy(false); }
+    finally { if (controller.current === aborter) controller.current = null; if (alive.current) setBusy(false); }
   }
   async function pick() {
     setPreparing(true);
@@ -267,13 +289,13 @@ export function MemoryImportScreen() {
         if (FileSystem.cacheDirectory && asset.uri.startsWith(FileSystem.cacheDirectory)) ownedFiles.current.push(asset.uri);
       }
       setFiles(chosen); setRecognitionResults([]); setRecognizingIndex(-1);
-      setSourceUrl(""); setLinkDraft(""); setSourcePickerOpen(false); setProcessingOptionsOpen(false);
+      setSourceUrl(""); setLinkDraft(""); setLinkOnly(false); setSourcePickerOpen(false); setProcessingOptionsOpen(false);
       setKeepOriginal(true); setTitle(chosen[0].name.slice(0, 160)); setBody(""); setExtractedText(""); setClassification("standard");
     } catch (e) { if (alive.current) setNotice((e as Error).message); }
     finally { if (alive.current) setPreparing(false); }
   }
   async function extract() {
-    if (!file || !canExtract || busy) return;
+    if (!file || !canExtract || busy || controller.current) return;
     const aborter = new AbortController(); controller.current = aborter; setBusy(true); setNotice("");
     try {
       const vision = selected || { ...defaultDirectPreferences, apiKey: "", webSearchKey: "" };
@@ -336,11 +358,11 @@ export function MemoryImportScreen() {
     finally { if (alive.current) { setBusy(false); setRecognizingIndex(-1); } if (controller.current === aborter) controller.current = null; }
   }
   async function save() {
-    if (!keepOriginal && !body.trim() && !extractedText.trim()) { setNotice("Добавьте текст или распознайте материал перед сохранением без оригинала."); return; }
-    if (!profile || (!file && !body.trim() && !extractedText.trim()) || busy || preparing) return;
+    if (!keepOriginal && !body.trim() && !extractedText.trim() && !linkOnly) { setNotice("Добавьте текст или распознайте материал перед сохранением без оригинала."); return; }
+    if (!profile || (!file && !body.trim() && !extractedText.trim() && !(linkOnly && sourceUrl)) || busy || preparing || controller.current) return;
+    const aborter = new AbortController(); controller.current = aborter;
     setBusy(true); setNotice("");
     try {
-      const aborter = new AbortController(); controller.current = aborter;
       const content = !extractedText.trim() && files.length === 1 && file && mediaKind(file) === "text"
         ? await extractMedia(file, selected || { ...defaultDirectPreferences, apiKey: "", webSearchKey: "" }, false, aborter.signal)
         : extractedText;
@@ -376,10 +398,10 @@ export function MemoryImportScreen() {
       if (!keepOriginal) for (const item of files) { await FileSystem.deleteAsync(item.uri, { idempotent: true }).catch(() => {}); }
       if (alive.current) { if (incoming && position + 1 < incoming.length) setPosition(p => p + 1); else setLeaving(true); }
     } catch (e) { if (alive.current) setNotice("Не удалось сохранить: " + memoryErrorMessage(e)); }
-    finally { if (alive.current) setBusy(false); }
+    finally { if (controller.current === aborter) controller.current = null; if (alive.current) setBusy(false); }
   }
-  const hasMaterial = Boolean(file || extractedText || (incoming && !preparing));
-  const saveDisabled = busy || preparing || (!body.trim() && !extractedText.trim() && !(file && keepOriginal));
+  const hasMaterial = Boolean(file || extractedText || linkOnly || (incoming && !preparing));
+  const saveDisabled = busy || preparing || (!body.trim() && !extractedText.trim() && !(file && keepOriginal) && !(linkOnly && sourceUrl));
   return <View style={{ flex: 1, backgroundColor: t.bg, paddingBottom: keyboardOpen ? 0 : insets.bottom }}>
   <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"} keyboardVerticalOffset={Platform.OS === "ios" ? header : 0}>
     <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentContainerStyle={{ padding: 18, gap: 15, paddingBottom: 24 }}>
@@ -387,11 +409,11 @@ export function MemoryImportScreen() {
       {!hasMaterial && !sourceChoice ? <Text style={{ color: t.muted, lineHeight: 21 }}>Фото, документы и ссылки сохраняются в заметку. Распознавание — по вашему выбору.</Text> : null}
 
       {incoming ? <Text style={{ color: t.muted }}>Получено через «Поделиться». Сохранение — только после подтверждения.</Text> : null}
-      {!incoming && (file || extractedText) && !sourcePickerOpen ? <Pressable disabled={busy || preparing} accessibilityRole="button" accessibilityLabel="Заменить вложение" onPress={() => { setSourceChoice(undefined); setSourcePickerOpen(true); }}
+      {!incoming && (file || extractedText || linkOnly) && !sourcePickerOpen ? <Pressable disabled={busy || preparing} accessibilityRole="button" accessibilityLabel="Заменить вложение" onPress={() => { setSourceChoice(undefined); setSourcePickerOpen(true); }}
         style={{ minHeight: 48, justifyContent: "center", padding: 12, backgroundColor: t.panel, borderColor: t.line, borderWidth: 1, borderRadius: 14 }}>
         <Text style={{ color: t.secondary, fontWeight: "700" }}>Заменить вложение</Text>
       </Pressable> : null}
-      {!incoming && (sourcePickerOpen || (!file && !extractedText)) ? <View testID="import-source-choices" style={{ gap: 12, padding: 14, borderRadius: 18, borderWidth: 1, borderColor: t.line, backgroundColor: t.panel }}>
+      {!incoming && (sourcePickerOpen || (!file && !extractedText && !linkOnly)) ? <View testID="import-source-choices" style={{ gap: 12, padding: 14, borderRadius: 18, borderWidth: 1, borderColor: t.line, backgroundColor: t.panel }}>
         {(!sourceChoice || sourceChoice === "file") ? <Pressable disabled={busy || preparing} accessibilityRole="button" accessibilityLabel="Выбрать файл для памяти" style={{ ...button, backgroundColor: t.soft, alignItems: "flex-start" }} onPress={() => void pick()}><Text style={{ color: t.text, fontSize: 16, fontWeight: "700" }}>Выбрать файл с телефона</Text><Text style={{ color: t.muted }}>Документ, аудио или видео</Text></Pressable> : null}
         {(!sourceChoice || sourceChoice === "photo" || sourceChoice === "gallery") ? <>
         <Pressable disabled={busy || preparing} accessibilityRole="button" accessibilityLabel="Выбрать фото из галереи" style={{ ...button, backgroundColor: t.soft, alignItems: "flex-start" }} onPress={() => void gallery()}><Text style={{ color: t.text, fontSize: 16 }}>Выбрать фото из галереи</Text></Pressable>
@@ -404,9 +426,17 @@ export function MemoryImportScreen() {
         <Text style={{ color: t.text, fontWeight: "600" }}>Ссылка на статью или файл</Text>
         <TextInput autoFocus accessibilityLabel="Ссылка для импорта" value={linkDraft} onChangeText={setLinkDraft} editable={!busy} autoCapitalize="none" autoCorrect={false} keyboardType="url" placeholder="https://…" placeholderTextColor={t.muted} style={field} />
         <Pressable disabled={busy || !linkDraft.trim()} accessibilityRole="button" style={[button, { opacity: busy || !linkDraft.trim() ? .5 : 1 }]} onPress={() => void readLink()}><Text style={{ color: t.userText }}>Загрузить по ссылке</Text></Pressable>
-        <Text style={{ color: t.muted, fontSize: 13, lineHeight: 20 }}>Ссылка должна открываться без входа на сайт.</Text>
+        <Pressable disabled={busy || !linkDraft.trim()} accessibilityRole="button" accessibilityLabel="Продолжить только со ссылкой"
+          style={{ minHeight: 48, justifyContent: "center", alignItems: "center", borderWidth: 1, borderColor: t.line, borderRadius: 16, opacity: busy || !linkDraft.trim() ? .5 : 1 }}
+          onPress={previewLinkOnly}><Text style={{ color: t.secondary, fontWeight: "700" }}>Продолжить только со ссылкой</Text></Pressable>
+        <Text style={{ color: t.muted, fontSize: 13, lineHeight: 20 }}>Загрузка требует публичную HTTPS-ссылку. Если сайт недоступен, можно сохранить адрес без текста.</Text>
         </> : null}
         {hasMaterial ? <Pressable accessibilityRole="button" disabled={busy || preparing} style={button} onPress={cancelPicker}><Text style={{color:t.userText}}>Оставить текущее</Text></Pressable> : null}
+      </View> : null}
+      {sourceUrl ? <View style={{ padding: 14, borderWidth: 1, borderColor: t.line, borderRadius: 20, backgroundColor: t.panel, gap: 6 }}>
+        <Text style={{ color: t.text, fontWeight: "700" }}>{linkOnly ? "Ссылка · без текста страницы" : "Источник · загружен"}</Text>
+        <Text numberOfLines={2} selectable style={{ color: t.secondary, fontSize: 14 }}>{sourceUrl}</Text>
+        {linkOnly ? <Text style={{ color: t.muted, fontSize: 13 }}>Содержание сайта не получено. Поиск сможет учитывать название и вашу заметку, но не текст статьи.</Text> : null}
       </View> : null}
       {!file && extractedText ? <Text style={{ color: t.muted, fontSize: 12 }}>Выбранный источник: текст по ссылке</Text> : null}
       {preparing ? <ActivityIndicator accessibilityLabel="Подготовка входящего файла" /> : null}
@@ -425,7 +455,7 @@ export function MemoryImportScreen() {
       </View> : null}
       {notice ? <Text accessibilityRole="alert" style={{ color: t.muted }}>{notice}</Text> : null}
       {hasMaterial ? <>
-        <TextInput accessibilityLabel="Сведения из файла" editable={!busy} multiline value={body} onChangeText={setBody} maxLength={60_000} style={[field, { minHeight: 96, textAlignVertical: "top" }]} placeholder="Добавьте подпись — необязательно" placeholderTextColor={t.muted} />
+        <TextInput accessibilityLabel="Сведения из файла" editable={!busy} multiline value={body} onChangeText={setBody} maxLength={60_000} style={[field, { minHeight: 96, textAlignVertical: "top" }]} placeholder={linkOnly ? "Моя заметка — что важно сохранить? (необязательно)" : "Добавьте подпись — необязательно"} placeholderTextColor={t.muted} />
         <Pressable accessibilityRole="button" accessibilityLabel="Выбрать коллекцию" disabled={busy} onPress={() => { Keyboard.dismiss(); setSectionOpen(true); }} style={{ ...button, backgroundColor: t.panel, alignItems: "flex-start" }}><Text style={{ color: t.text }}>Коллекция: {collections.find(c => c.id === collectionId)?.name || "Заметки"} · Изменить</Text></Pressable>
         {collections.find(c => c.id === collectionId)?.sensitivity !== "standard" ? <Text style={{ color: t.muted }}>Выбранная коллекция закрыта для агента независимо от настройки записи.</Text> : null}
         <Text style={{ color: t.text, fontWeight: "600" }}>Доступ к записи</Text>
@@ -487,7 +517,7 @@ export function MemoryImportScreen() {
     </ScrollView>
     {hasMaterial ? <View testID="import-save-bar" style={{ padding: 12, backgroundColor: t.bg, borderTopWidth: 1, borderTopColor: t.line }}>
       <Pressable disabled={saveDisabled} accessibilityRole="button" accessibilityState={{ disabled: saveDisabled }} accessibilityLabel="Сохранить сведения в память" style={[button, { opacity: saveDisabled ? .45 : 1 }]} onPress={() => { Keyboard.dismiss(); void save(); }}>
-        <Text style={{ color: t.userText, fontWeight: "700" }}>{busy ? "Подождите…" : "Сохранить в память"}</Text>
+        <Text style={{ color: t.userText, fontWeight: "700" }}>{busy ? "Подождите…" : linkOnly ? "Сохранить ссылку" : "Сохранить в память"}</Text>
       </Pressable>
     </View> : null}
   </KeyboardAvoidingView>

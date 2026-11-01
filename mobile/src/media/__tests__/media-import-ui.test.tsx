@@ -10,7 +10,11 @@ jest.mock('../../components/BottomSheet', () => ({ BottomSheet: ({ visible, chil
 const mockBack = jest.fn();
 let mockParams: any = undefined;
 jest.mock("../preferences", () => ({ loadMediaPreferences: async () => ({ visionId: "", speechId: "" }) }));
-jest.mock('../link-import', () => ({ importLink: jest.fn(), linkImportErrorMessage: (error: Error) => error.message }));
+jest.mock('../link-import', () => ({
+  importLink: jest.fn(),
+  publicImportUrl: jest.requireActual('../link-import').publicImportUrl,
+  linkImportErrorMessage: (error: Error) => error.message,
+}));
 const mockSessionListeners=new Set<(unlocked:boolean)=>void>();
 jest.mock("../../local-memory/storage", () => ({ onLocalMemorySessionChange: (fn:any) => {mockSessionListeners.add(fn);return ()=>mockSessionListeners.delete(fn);} }));
 jest.mock('../../local-memory/repository', () => ({ localMemoryRepository: async () => ({}) }));
@@ -91,6 +95,71 @@ test('URL download network error is not shown as a local-memory failure', async 
   expect(screen.queryByText(/Не удалось выполнить операцию с памятью/)).toBeNull();
 });
 
+
+test('step 8 saves link-only without a network request, and only on explicit confirmation', async () => {
+  const screen = render(<MemoryImportScreen />);
+  fireEvent.press(screen.getByText('Ссылка'));
+  fireEvent.changeText(screen.getByLabelText('Ссылка для импорта'), 'https://example.org/articles/ai');
+  fireEvent.press(screen.getByLabelText('Продолжить только со ссылкой'));
+  expect(importLink).not.toHaveBeenCalled();
+  expect(saveMediaNote).not.toHaveBeenCalled();
+  expect(screen.getByText('Ссылка · без текста страницы')).toBeTruthy();
+  expect(screen.getByText(/не текст статьи/)).toBeTruthy();
+  fireEvent.changeText(screen.getByLabelText('Сведения из файла'), 'Прочитать позже про ИИ');
+  fireEvent.press(screen.getByLabelText('Сохранить сведения в память'));
+  await waitFor(() => expect(saveMediaNote).toHaveBeenCalledTimes(1));
+  expect(saveMediaNote).toHaveBeenCalledWith('guest', expect.objectContaining({
+    file: undefined, sourceUrl: 'https://example.org/articles/ai',
+    body: 'Прочитать позже про ИИ', extractedText: '',
+    title: 'Ссылка · example.org',
+  }), expect.anything());
+  await waitFor(() => expect(mockBack).toHaveBeenCalled());
+});
+
+test('step 8 keeps the link-only fallback available after a failed fetch', async () => {
+  (importLink as jest.Mock).mockRejectedValueOnce(new Error('Сайт отказал в загрузке: HTTP 403.'));
+  const screen = render(<MemoryImportScreen />);
+  fireEvent.press(screen.getByText('Ссылка'));
+  fireEvent.changeText(screen.getByLabelText('Ссылка для импорта'), 'https://example.org/private-article');
+  fireEvent.press(screen.getByText('Загрузить по ссылке'));
+  await waitFor(() => expect(screen.getByText(/HTTP 403/)).toBeTruthy());
+  expect(saveMediaNote).not.toHaveBeenCalled();
+  fireEvent.press(screen.getByLabelText('Продолжить только со ссылкой'));
+  expect(screen.getByText('Ссылка · без текста страницы')).toBeTruthy();
+  fireEvent.press(screen.getByLabelText('Сохранить сведения в память'));
+  await waitFor(() => expect(saveMediaNote).toHaveBeenCalledWith('guest', expect.objectContaining({
+    sourceUrl: 'https://example.org/private-article', extractedText: '',
+  }), expect.anything()));
+});
+
+test('step 8 refuses invalid or private links before building a link-only draft', () => {
+  const screen = render(<MemoryImportScreen />);
+  fireEvent.press(screen.getByText('Ссылка'));
+  fireEvent.changeText(screen.getByLabelText('Ссылка для импорта'), 'http://127.0.0.1/data');
+  fireEvent.press(screen.getByLabelText('Продолжить только со ссылкой'));
+  expect(screen.queryByText('Ссылка · без текста страницы')).toBeNull();
+  expect(screen.queryByLabelText('Сохранить сведения в память')).toBeNull();
+  expect(importLink).not.toHaveBeenCalled();
+  expect(saveMediaNote).not.toHaveBeenCalled();
+});
+
+test('step 8 network retry retains user annotation rather than replacing it with extracted page text', async () => {
+  (importLink as jest.Mock).mockResolvedValueOnce({ source:'https://example.org/article', text:'Содержание статьи' });
+  const screen = render(<MemoryImportScreen />);
+  fireEvent.press(screen.getByText('Ссылка'));
+  fireEvent.changeText(screen.getByLabelText('Ссылка для импорта'), 'https://example.org/article');
+  fireEvent.press(screen.getByLabelText('Продолжить только со ссылкой'));
+  fireEvent.changeText(screen.getByLabelText('Сведения из файла'), 'Моя важная пометка');
+  fireEvent.press(screen.getByLabelText('Заменить вложение'));
+  fireEvent.press(screen.getByText('Ссылка'));
+  fireEvent.press(screen.getByText('Загрузить по ссылке'));
+  await waitFor(() => expect(screen.getByLabelText('Распознанное содержимое файла').props.value).toBe('Содержание статьи'));
+  expect(screen.getByLabelText('Сведения из файла').props.value).toBe('Моя важная пометка');
+  fireEvent.press(screen.getByLabelText('Сохранить сведения в память'));
+  await waitFor(() => expect(saveMediaNote).toHaveBeenCalledWith('guest', expect.objectContaining({
+    sourceUrl:'https://example.org/article', body:'Моя важная пометка', extractedText:'Содержание статьи',
+  }), expect.anything()));
+});
 
 test('U3 presents one source step and preserves the file when a replacement URL is only drafted', async () => {
   const screen = render(<MemoryImportScreen />);
