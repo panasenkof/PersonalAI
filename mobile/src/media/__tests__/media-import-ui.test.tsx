@@ -393,3 +393,34 @@ test('cancelled replacement keeps caption and original in preview', async () => 
   expect(ui.getByLabelText('Сведения из файла').props.value).toBe('Моя подпись');
   expect(mockBack).not.toHaveBeenCalled();
 });
+
+
+test('step 8 D: PDF coverage preview identifies missing pages and retains author comment on save',async()=>{
+  (DocumentPicker.getDocumentAsync as jest.Mock).mockResolvedValueOnce({
+    canceled:false,assets:[{uri:'file:///cache/manual.pdf',name:'manual.pdf',mimeType:'application/pdf'}],
+  });
+  const coverage={totalPageCount:3,extractedPageCount:2,missingPages:[2],coverage:'partial'};
+  const segments=[
+    {text:'Начало',location:{kind:'page',page:1}},
+    {text:'Конец',location:{kind:'page',page:3}},
+  ];
+  (extractMedia as jest.Mock).mockImplementationOnce(async (...args:any[])=>{
+    args[6](segments);
+    args[7](coverage);
+    return 'Страница 1:\nНачало\n\nСтраница 3:\nКонец';
+  });
+  const ui=render(<MemoryImportScreen/>);
+  fireEvent.press(ui.getByLabelText('Выбрать файл для памяти'));
+  await waitFor(()=>expect(ui.getByText('manual.pdf')).toBeTruthy());
+  fireEvent.changeText(ui.getByLabelText('Сведения из файла'),'Это мой договор');
+  fireEvent.press(ui.getByLabelText('Распознавание'));
+  fireEvent.press(ui.getByLabelText('Извлечь сведения из файла'));
+  await waitFor(()=>expect(ui.getByText(/2 из 3 стр.*2.*OCR пока не выполнялся/)).toBeTruthy());
+  expect(ui.getByLabelText('Сведения из файла').props.value).toBe('Это мой договор');
+  fireEvent.press(ui.getByLabelText('Сохранить сведения в память'));
+  await waitFor(()=>expect(saveMediaNote).toHaveBeenCalledWith('guest',expect.objectContaining({
+    body:'Это мой договор',
+    extractedText:expect.stringContaining('Страница 3'),
+    recognitions:[expect.objectContaining({pdfCoverage:coverage,segments})],
+  }),expect.anything()));
+});

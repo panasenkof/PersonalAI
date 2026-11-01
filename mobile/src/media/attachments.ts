@@ -115,8 +115,30 @@ function checkedRecognitions(originals: ImportFile[], values?: FileRecognition[]
       }
       if (totalSegmentChars > 60_000) throw new Error('invalid_recognition_segments');
     }
+    // Source page count is metadata, not authority to invent a locator.
+    // Only the trusted document extraction's reported pages may be persisted.
+    const pdf = item.pdfCoverage;
+    if (pdf !== undefined) {
+      const sourceKind = mediaKind(originals[item.index]);
+      const actualPages = new Set(segments?.filter(part => part.location.kind === 'page')
+        .map(part => part.location.kind === 'page' ? part.location.page : 0));
+      const reported = pdf.totalPageCount;
+      if (sourceKind !== 'document' || !segments?.length ||
+          !actualPages.size || pdf.coverage !== 'partial' ||
+          !Number.isSafeInteger(pdf.extractedPageCount) ||
+          pdf.extractedPageCount !== actualPages.size ||
+          (reported !== null && (!Number.isSafeInteger(reported) || reported < 1 || reported > 128)) ||
+          (reported !== null && [...actualPages].some(page => page > reported)) ||
+          !Array.isArray(pdf.missingPages) ||
+          (reported === null && pdf.missingPages.length !== 0)) throw new Error('invalid_pdf_page_coverage');
+      const expectedMissing = reported === null ? [] : Array.from({length:reported},(_,i)=>i+1)
+        .filter(page=>!actualPages.has(page));
+      if (pdf.missingPages.length !== expectedMissing.length ||
+          pdf.missingPages.some((page,i)=>page !== expectedMissing[i])) throw new Error('invalid_pdf_page_coverage');
+    }
     return { index: item.index, status: 'success' as const, text,
-      ...(segments ? { segments } : {}) };
+      ...(segments ? { segments } : {}),
+      ...(pdf ? { pdfCoverage: pdf } : {}) };
   });
 }
 /** Note + original + receipt commit together. Cancellation never leaves a partial note. */
@@ -145,7 +167,12 @@ export async function saveMediaNote(profile: string, input: { file?: ImportFile;
       originalHashes.push(fingerprint);
     }
     const contentHash: string | string[] | null = originals.length > 1 ? originalHashes : originalHashes[0] || null;
-    const receipt = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, JSON.stringify([input.receipt || 'device-import', contentHash, input.title, input.body, input.extractedText || "", input.sensitivity, input.collectionId || "", input.sourceUrl || "", ...(verified ? [verified.filter(x => x.status === 'success').map(x => [x.index, x.text, x.segments || null])] : [])]));
+    const pdfCoverage = verified?.flatMap(x => x.status === 'success' && x.pdfCoverage
+      ? [{ index: x.index, total_page_count: x.pdfCoverage.totalPageCount,
+        extracted_page_count: x.pdfCoverage.extractedPageCount,
+        missing_pages: x.pdfCoverage.missingPages }]
+      : []);
+    const receipt = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, JSON.stringify([input.receipt || 'device-import', contentHash, input.title, input.body, input.extractedText || "", input.sensitivity, input.collectionId || "", input.sourceUrl || "", ...(verified ? [verified.filter(x => x.status === 'success').map(x => [x.index, x.text, x.segments || null, x.pdfCoverage || null])] : [])]));
     {
       const old = await db.getFirstAsync<{ entity_id: string }>('SELECT entity_id FROM memory_received_shares WHERE fingerprint=?', [receipt]);
       if (old) return old.entity_id;
@@ -157,7 +184,7 @@ export async function saveMediaNote(profile: string, input: { file?: ImportFile;
     if (!col) col = await repo.createCollection({ name: input.receipt ? 'Входящие' : 'Заметки', slug, sensitivity: input.receipt ? 'sensitive' : 'standard' });
     const title = input.title.trim().slice(0, 160) || originals[0]?.name || 'Входящая запись';
     const entity = await repo.createEntity({ collection_id: col.id, domain: 'notes', title,
-      payload: { type: 'note', title, ...(input.sourceUrl ? { source_url: input.sourceUrl } : {}), body: input.body.trim(), ...(input.extractedText ? { extracted_text: input.extractedText.trim() } : {}), ...(originals.length ? { source_file: originals[0].name, source_media: mediaKind(originals[0]),
+      payload: { type: 'note', title, ...(input.sourceUrl ? { source_url: input.sourceUrl } : {}), ...(pdfCoverage?.length ? { source_pdf_coverage: pdfCoverage } : {}), body: input.body.trim(), ...(input.extractedText ? { extracted_text: input.extractedText.trim() } : {}), ...(originals.length ? { source_file: originals[0].name, source_media: mediaKind(originals[0]),
         ...(originals.length > 1 ? { source_files: originals.map(f => f.name), source_media_types: originals.map(mediaKind) } : {}) } : {}) },
       sensitivity: input.sensitivity, source_kind: 'user', source_ref: input.receipt ? 'android-share' : 'device-import',
     }, async (tx, entityId) => {
@@ -178,7 +205,7 @@ export async function saveMediaNote(profile: string, input: { file?: ImportFile;
               run.segments ? 'openai-whisper-1' : 'persai-media-extract',
             producerRevision: run.segments && kind === 'document' ? 'native-page-v1' :
               run.segments ? 'official-segment-time-v1' : 'source-text-v1',
-            status: 'partial', coverage: 'unknown',
+            status: 'partial', coverage: run.pdfCoverage ? 'partial' : 'unknown',
             segments: run.segments || unknownSegments(run.text),
           });
         }

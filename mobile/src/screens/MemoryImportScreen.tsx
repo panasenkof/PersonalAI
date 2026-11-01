@@ -7,6 +7,8 @@ import { loadMediaPreferences } from "../media/preferences";
 import { onLocalMemorySessionChange } from "../local-memory/storage";
 import * as ImagePicker from "expo-image-picker";
 import { importLink, linkImportErrorMessage, publicImportUrl } from "../media/link-import";
+import { pdfCoverageMessage } from "../media/pdf-pages";
+import type { PdfPageCoverage } from "../media/pdf-pages";
 import * as Crypto from "expo-crypto";
 import { File, Directory, Paths } from "expo-file-system";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
@@ -305,19 +307,24 @@ export function MemoryImportScreen() {
       const speech = connections.find(c => c.id === speechConnectionId) || selected;
       if (files.length === 1) {
         let timedSegments: FileRecognition["segments"];
+        let pdfCoverage: PdfPageCoverage | undefined;
         const text = await extractMedia(file, vision, classification === "standard", aborter.signal, undefined, speech,
-          segments => { timedSegments = segments; });
+          segments => { timedSegments = segments; }, coverage => { pdfCoverage = coverage; });
         if (alive.current && !aborter.signal.aborted) {
           setRecognitionResults([{ index: 0, name: file.name, status: "success", text,
-            ...(timedSegments ? { segments: timedSegments } : {}) }]);
+            ...(timedSegments ? { segments: timedSegments } : {}),
+            ...(pdfCoverage ? { pdfCoverage } : {}) }]);
           setExtractedText(text);
-          setNotice("Проверьте и отредактируйте текст. В памяти он появится после сохранения.");
+          setNotice(pdfCoverage ? pdfCoverageMessage(pdfCoverage) :
+            "Проверьте и отредактируйте текст. В памяти он появится после сохранения.");
         }
       } else {
         const segmentsByFile = new Map<number, NonNullable<FileRecognition["segments"]>>();
+        const pdfByFile = new Map<number, PdfPageCoverage>();
         const rawResults = await recognizeFilesSequentially(files,
           async (item, index) => extractMedia(item, vision, classification === "standard",
-            aborter.signal, undefined, speech, segments => { segmentsByFile.set(index, segments); }),
+            aborter.signal, undefined, speech, segments => { segmentsByFile.set(index, segments); },
+            coverage => { pdfByFile.set(index, coverage); }),
           aborter.signal, (done, current) => {
             if (alive.current) {
               setRecognitionResults(done);
@@ -325,8 +332,9 @@ export function MemoryImportScreen() {
               try { setExtractedText(combinedRecognitionText(done, files.length)); } catch { /* final length check reports failure */ }
             }
           });
-        const results = rawResults.map(item => item.status === "success" && segmentsByFile.has(item.index)
-          ? { ...item, segments: segmentsByFile.get(item.index)! } : item);
+        const results = rawResults.map(item => item.status === "success"
+          ? { ...item, ...(segmentsByFile.has(item.index) ? { segments: segmentsByFile.get(item.index)! } : {}),
+              ...(pdfByFile.has(item.index) ? { pdfCoverage: pdfByFile.get(item.index)! } : {}) } : item);
         if (alive.current && !aborter.signal.aborted) {
           setRecognitionResults(results);
           const text = combinedRecognitionText(results, files.length);
@@ -467,7 +475,7 @@ export function MemoryImportScreen() {
             <Text style={{ color: classification === id ? t.secondary : t.text }}>{classification === id ? "● " : "○ "}{label}</Text>
           </Pressable>)}
         {file ? <NoteEditorSection title="Распознавание" summary={extractedText ? "Текст получен · можно повторить" : "Необязательно · для поиска по содержимому"} expanded={recognitionOpen} onToggle={() => setRecognitionOpen(v => !v)}>
-        <Text style={{ color: t.muted, fontSize: 12 }}>{kind === "video" ? "Речь и пять выборочных кадров обрабатываются отдельно. Максимум 10 минут; частичные результаты явно отмечены." : kind === "audio" ? (localAudio ? "Речь распознаётся на телефоне моделью Whisper; файл никуда не отправляется." : "Речь преобразуется в текст сервисом подключения. Чтобы распознавать на телефоне, скачайте модель: Настройки → Голосовой ввод → Голос без интернета.") : kind === "text" ? "Текстовый файл читается на телефоне, без отправки в интернет." : kind === "document" ? "PDF читается локально на Android 15+ при наличии текстового слоя. Скан без текста можно сохранить как оригинал." : "Выбранная модель должна поддерживать изображения."}</Text>
+        <Text style={{ color: t.muted, fontSize: 12 }}>{kind === "video" ? "Речь и пять выборочных кадров обрабатываются отдельно. Максимум 10 минут; частичные результаты явно отмечены." : kind === "audio" ? (localAudio ? "Речь распознаётся на телефоне моделью Whisper; файл никуда не отправляется." : "Речь преобразуется в текст сервисом подключения. Чтобы распознавать на телефоне, скачайте модель: Настройки → Голосовой ввод → Голос без интернета.") : kind === "text" ? "Текстовый файл читается на телефоне, без отправки в интернет." : kind === "document" ? "PDF читается локально: Android 15+ или Android 12–14 с расширением S v13+. У сканов без текстового слоя страницы останутся непрочитанными; оригинал сохранится." : "Выбранная модель должна поддерживать изображения."}</Text>
         {files.length > 1 ? <View style={{ gap: 6 }}>
           <Text style={{ color: t.text, fontWeight: "700" }}>Режим распознавания</Text>
           <Pressable disabled={busy} accessibilityRole="button" accessibilityLabel="Распознавать по очереди"
@@ -502,7 +510,8 @@ export function MemoryImportScreen() {
         </Text> : null}
         {recognitionResults.length > 0 && files.length > 1 ? recognitionResults.map(item =>
           <Text key={item.index} style={{ color: item.status === "error" ? t.err : t.muted }}>
-            {item.index + 1}. {item.name}: {item.status === "success" ? "Распознано" : "Не распознано — " + item.error}
+            {item.index + 1}. {item.name}: {item.status === "success"
+              ? item.pdfCoverage ? pdfCoverageMessage(item.pdfCoverage) : "Распознано" : "Не распознано — " + item.error}
           </Text>) : null}
         </NoteEditorSection> : null}
         {extractedText ? <>

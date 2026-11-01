@@ -8,6 +8,8 @@ import { useApplicationVisible } from "../security/visibility";
 import { useTheme } from "../theme";
 import { nebulaRadii, nebulaSpacing, nebulaTouch } from "../design/nebula/tokens";
 import { attachmentsForEntity, materializeAttachment } from "./attachments";
+import { localExtractionEvidence } from "../local-memory/extractions";
+import type { ExtractionEvidence } from "../local-memory/extractions";
 import type { Attachment } from "./attachments";
 import type { VerifiedOriginalLocator } from "../local-memory/types";
 import { attachmentKindLabel, attachmentPreviewKind, readableAttachmentSize } from "./attachmentPresentation";
@@ -31,6 +33,54 @@ function VideoPreview({ uri, onError }: { uri: string; onError: (message: string
     return () => { try { player.pause(); } catch { /* Native object already released. */ } finally { sub.remove(); } };
   }, [player, onError]);
   return <VideoView player={player} nativeControls style={{ width: "100%", height: 230 }} allowsPictureInPicture={false} />;
+}
+
+/** Source-bound, local SQLCipher evidence only. The original remains encrypted;
+ * system PDF rendering and exact page jumping are not claimed by this screen.
+ * The parent performs the existing version/ACL-aware materialization first.
+ */
+function PdfTextPreview({ profile, attachment, ready }: {
+  profile: string; attachment: Attachment; ready: boolean;
+}) {
+  const t = useTheme();
+  const [run, setRun] = useState<ExtractionEvidence | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let alive = true;
+    setRun(null); setError(""); setLoading(ready);
+    if (ready) {
+      void localExtractionEvidence(profile, attachment.entity_id, attachment.id, 10)
+        .then(runs => {
+          if (alive) setRun(runs.find(item =>
+            item.producerKind === "pdf" && item.segments.some(seg => seg.location.kind === "page")) || null);
+        })
+        .catch(e => { if (alive) setError(memoryErrorMessage(e)); })
+        .finally(() => { if (alive) setLoading(false); });
+    }
+    return () => { alive = false; };
+  }, [profile, attachment.entity_id, attachment.id, ready]);
+
+  const pages = new Map<number, string[]>();
+  for (const segment of run?.segments || []) {
+    if (segment.location.kind !== "page") continue;
+    const page = segment.location.page;
+    pages.set(page, [...(pages.get(page) || []), segment.text]);
+  }
+  return <View style={{ gap: nebulaSpacing.sm }}>
+    <Text style={{ color: t.muted }}>
+      Оригинал PDF сохранён зашифрованным. Ниже — только ранее извлечённый текст; изображения и страницы без текстового слоя не отображаются. Переход к странице оригинала пока недоступен.
+    </Text>
+    {loading ? <Text style={{ color: t.muted }}>Загружаю текст документа…</Text> : null}
+    {error ? <Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text> : null}
+    {!loading && !error && !pages.size ? <Text style={{ color: t.muted }}>
+      Постраничный текст не сохранён. Оригинал доступен в зашифрованной памяти; извлечение текста можно выполнить при новом импорте.
+    </Text> : null}
+    {[...pages].map(([page, texts]) => <View key={page} style={{ gap: 4, paddingVertical: 8, borderTopWidth: 1, borderTopColor: t.line }}>
+      <Text accessibilityRole="header" style={{ color: t.secondary, fontWeight: "700" }}>Страница {page} · текстовый слой</Text>
+      <Text selectable style={{ color: t.text, lineHeight: 21 }}>{texts.join("")}</Text>
+    </View>)}
+  </View>;
 }
 
 /** Audio does not need an empty black video surface. Playback starts only on a
@@ -144,7 +194,7 @@ function OneAttachment({ profile, attachment, expanded, visible, onToggle, verif
     };
   }, [active, attachment, profile, attempt, verified]);
 
-  const action = kind === "image" ? "Открыть фото" : kind === "audio" ? "Прослушать аудио" : "Открыть видео";
+  const action = kind === "image" ? "Открыть фото" : kind === "audio" ? "Прослушать аудио" : kind === "document" ? "Показать текст PDF" : "Открыть видео";
   return <View style={{ padding: nebulaSpacing.md, gap: nebulaSpacing.sm, borderWidth: 1, borderColor: t.line,
     backgroundColor: t.panel, borderRadius: nebulaRadii.card }}>
     <Text style={{ color: t.text, fontWeight: "700" }} numberOfLines={3}>{attachment.name}</Text>
@@ -161,7 +211,8 @@ function OneAttachment({ profile, attachment, expanded, visible, onToggle, verif
       source={{ uri }} resizeMode="contain" onError={() => setError("Не удалось показать изображение. Оригинал сохранён.")}
       style={{ width: "100%", height: 280, borderRadius: nebulaRadii.field }} />
       : kind === "audio" ? <AudioPreview uri={uri} onError={setError} />
-      : kind === "video" ? <VideoPreview uri={uri} onError={setError} /> : null : null}
+      : kind === "video" ? <VideoPreview uri={uri} onError={setError} />
+      : kind === "document" ? <PdfTextPreview profile={profile} attachment={attachment} ready={active && Boolean(uri)} /> : null : null}
     {active && error ? <><Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text><Text style={{ color: t.muted }}>Для повторной попытки нажмите «Повторить просмотр».</Text></> : null}
   </View>;
 }

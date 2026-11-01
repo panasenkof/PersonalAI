@@ -1,5 +1,6 @@
 import { videoAudio } from "./video-audio";
 import { extractPdfPages } from "./pdf-pages";
+import type { PdfPageCoverage } from "./pdf-pages";
 import * as FileSystem from "expo-file-system/legacy";
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import { createVideoPlayer } from "expo-video";
@@ -110,7 +111,8 @@ export function parseProviderTimeSegments(value: unknown, duration?: number): Ex
  */
 async function extractMediaCore(file: ImportFile, settings: DirectAgentSettings, approved: boolean,
   signal?: AbortSignal, transport: typeof fetch = fetch,
-  onTimedSegments?: (segments: ExtractionSegmentInput[]) => void): Promise<string> {
+  onTimedSegments?: (segments: ExtractionSegmentInput[]) => void,
+  onPdfCoverage?: (coverage: PdfPageCoverage) => void): Promise<string> {
   const kind = mediaKind(file);
   check(signal);
   await fileSize(file, (kind === "video" || kind === "document" ? 80 : kind === "text" ? 1 : kind === "image" ? 8 : 20) * 1024 * 1024);
@@ -118,6 +120,7 @@ async function extractMediaCore(file: ImportFile, settings: DirectAgentSettings,
     const pages=await extractPdfPages(file,signal);
     check(signal);
     if(onTimedSegments)onTimedSegments(pages.segments);
+    onPdfCoverage?.(pages);
     return pages.text;
   }
   if (kind === "text") {
@@ -201,8 +204,9 @@ async function extractMediaCore(file: ImportFile, settings: DirectAgentSettings,
 /** Video stages fail independently; never call a partial representation complete. */
 export async function extractMedia(file: ImportFile, settings: DirectAgentSettings, approved: boolean,
   signal?: AbortSignal, transport: typeof fetch = fetch, speechSettings = settings,
-  onTimedSegments?: (segments: ExtractionSegmentInput[]) => void): Promise<string> {
-  if (mediaKind(file) !== "video") return extractMediaCore(file, mediaKind(file) === "audio" ? speechSettings : settings, approved, signal, transport, onTimedSegments);
+  onTimedSegments?: (segments: ExtractionSegmentInput[]) => void,
+  onPdfCoverage?: (coverage: PdfPageCoverage) => void): Promise<string> {
+  if (mediaKind(file) !== "video") return extractMediaCore(file, mediaKind(file) === "audio" ? speechSettings : settings, approved, signal, transport, onTimedSegments, onPdfCoverage);
   check(signal);
   if (!approved && getWhisperStatus().state !== "ready") throw new Error("Разрешите передачу этого файла выбранному провайдеру для разбора.");
   await fileSize(file, 80 * 1024 * 1024);

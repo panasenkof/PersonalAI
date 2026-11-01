@@ -6,6 +6,7 @@ import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.os.ext.SdkExtensions
 import java.io.File
+import java.io.IOException
 
 /**
  * Android's own PDF text layer; there is no bundled PDF parser or network
@@ -18,7 +19,7 @@ internal object PdfTextPageReader {
       (Build.VERSION.SDK_INT >= 31 &&
         SdkExtensions.getExtensionVersion(Build.VERSION_CODES.S) >= 13)
 
-  fun read(file: File, pageLimit: Int): List<Map<String, Any>> {
+  fun read(file: File, pageLimit: Int): Map<String, Any> {
     require(isSupported()) { "pdf_text_layer_unavailable_on_device" }
     require(pageLimit in 1..128) { "invalid_pdf_page_limit" }
     require(file.isFile && file.length() in 1..(80L * 1024L * 1024L)) {
@@ -27,6 +28,7 @@ internal object PdfTextPageReader {
 
     // Read from a seekable file descriptor. Both platform renderers release
     // pages and descriptors even when a PDF is malformed or over the limit.
+    try {
     ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { fd ->
       if (Build.VERSION.SDK_INT >= 35) {
         PdfRenderer(fd).use { pdf ->
@@ -45,13 +47,18 @@ internal object PdfTextPageReader {
         }
       }
     }
+    } catch (e: SecurityException) {
+      throw IllegalArgumentException("pdf_password_or_permission_required", e)
+    } catch (e: IOException) {
+      throw IllegalArgumentException("pdf_corrupt_or_unreadable", e)
+    }
   }
 
   private fun collect(
     count: Int,
     pageLimit: Int,
     textAt: (index: Int) -> String,
-  ): List<Map<String, Any>> {
+  ): Map<String, Any> {
     require(count in 1..pageLimit) { "pdf_page_limit_exceeded" }
     var total = 0
     val pages = mutableListOf<Map<String, Any>>()
@@ -63,6 +70,6 @@ internal object PdfTextPageReader {
         pages.add(mapOf("page" to (index + 1), "text" to text))
       }
     }
-    return pages
+    return mapOf("pages" to pages, "pageCount" to count)
   }
 }

@@ -1,5 +1,6 @@
 import type { ImportFile } from "./kinds";
 import type { ExtractionSegmentInput } from "../local-memory/extractions";
+import type { PdfPageCoverage } from "./pdf-pages";
 
 export type FileRecognition = {
   index: number;
@@ -8,6 +9,8 @@ export type FileRecognition = {
   text?: string;
   /** Source-provided audio intervals only; absent for local Whisper. */
   segments?: ExtractionSegmentInput[];
+  /** Native-reported page count, never inferred from flattened text. */
+  pdfCoverage?: PdfPageCoverage;
   error?: string;
 };
 
