@@ -20,6 +20,10 @@ export const getVoiceEngine = () => state;
 export function resolveVoiceEngine(preference: Preference, _whisperReady: boolean): VoiceEngine {
   return preference === "whisper" ? "whisper" : "system";
 }
+/** LLM cleanup is useful for rough offline Whisper transcripts, not Google dictation. */
+export function showDraftImprove(preference: Preference): boolean {
+  return resolveVoiceEngine(preference, false) === "whisper";
+}
 export function initVoiceEngine(): Promise<void> {
   return initialized ??= (async () => {
     try {
