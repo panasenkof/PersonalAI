@@ -13,7 +13,7 @@ const withTesseractMaven = (expoConfig) => require('expo/config-plugins').withPr
   // at run time; language model is user-downloaded and SHA256 pinned.
   const source = mod.modResults.contents;
   if (!source.includes("https://jitpack.io")) {
-    mod.modResults.contents += "\\nallprojects { repositories { maven { url 'https://jitpack.io' } } }\\n";
+    mod.modResults.contents += "\nallprojects { repositories { maven { url 'https://jitpack.io' } } }\n";
   }
   return mod;
 });
