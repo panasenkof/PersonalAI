@@ -8,6 +8,15 @@
 // encrypted on-device database from future upgrades.
 const PERSAI_ANDROID_PACKAGE = 'com.persai.app';
 
+const withTesseractMaven = (expoConfig) => require('expo/config-plugins').withProjectBuildGradle(expoConfig, mod => {
+  // One vetted JitPack dependency. No other repository or binary is fetched
+  // at run time; language model is user-downloaded and SHA256 pinned.
+  const source = mod.modResults.contents;
+  if (!source.includes("https://jitpack.io")) {
+    mod.modResults.contents += "\\nallprojects { repositories { maven { url 'https://jitpack.io' } } }\\n";
+  }
+  return mod;
+});
 const withLocalModelCleartext = (expoConfig) => require('expo/config-plugins').withAndroidManifest(expoConfig, mod => {
   const application = mod.modResults.manifest.application?.[0];
   if (application) application.$['android:usesCleartextTraffic'] = 'true';
@@ -34,7 +43,7 @@ module.exports = ({ config }) => {
   }
   return {
     ...config,
-    plugins: [...(config.plugins || []), withLocalModelCleartext],
+    plugins: [...(config.plugins || []), withLocalModelCleartext, withTesseractMaven],
     ...(androidCiRelease && versionCode ? { version: `${config.version}-test.${versionCode}` } : {}),
     ios: { ...config.ios, ...(process.env.PIA_IOS_BUNDLE_ID ? { bundleIdentifier: process.env.PIA_IOS_BUNDLE_ID } : {}) },
     android: { ...config.android, package: PERSAI_ANDROID_PACKAGE, softwareKeyboardLayoutMode: 'resize', ...(versionCode ? { versionCode } : {}) },
