@@ -409,7 +409,7 @@ export function MemoryImportScreen() {
       {!hasMaterial && !sourceChoice ? <Text style={{ color: t.muted, lineHeight: 21 }}>Фото, документы и ссылки сохраняются в заметку. Распознавание — по вашему выбору.</Text> : null}
 
       {incoming ? <Text style={{ color: t.muted }}>Получено через «Поделиться». Сохранение — только после подтверждения.</Text> : null}
-      {!incoming && (file || extractedText) && !sourcePickerOpen ? <Pressable disabled={busy || preparing} accessibilityRole="button" accessibilityLabel="Заменить вложение" onPress={() => { setSourceChoice(undefined); setSourcePickerOpen(true); }}
+      {!incoming && (file || extractedText || linkOnly) && !sourcePickerOpen ? <Pressable disabled={busy || preparing} accessibilityRole="button" accessibilityLabel="Заменить вложение" onPress={() => { setSourceChoice(undefined); setSourcePickerOpen(true); }}
         style={{ minHeight: 48, justifyContent: "center", padding: 12, backgroundColor: t.panel, borderColor: t.line, borderWidth: 1, borderRadius: 14 }}>
         <Text style={{ color: t.secondary, fontWeight: "700" }}>Заменить вложение</Text>
       </Pressable> : null}
@@ -426,9 +426,17 @@ export function MemoryImportScreen() {
         <Text style={{ color: t.text, fontWeight: "600" }}>Ссылка на статью или файл</Text>
         <TextInput autoFocus accessibilityLabel="Ссылка для импорта" value={linkDraft} onChangeText={setLinkDraft} editable={!busy} autoCapitalize="none" autoCorrect={false} keyboardType="url" placeholder="https://…" placeholderTextColor={t.muted} style={field} />
         <Pressable disabled={busy || !linkDraft.trim()} accessibilityRole="button" style={[button, { opacity: busy || !linkDraft.trim() ? .5 : 1 }]} onPress={() => void readLink()}><Text style={{ color: t.userText }}>Загрузить по ссылке</Text></Pressable>
-        <Text style={{ color: t.muted, fontSize: 13, lineHeight: 20 }}>Ссылка должна открываться без входа на сайт.</Text>
+        <Pressable disabled={busy || !linkDraft.trim()} accessibilityRole="button" accessibilityLabel="Продолжить только со ссылкой"
+          style={{ minHeight: 48, justifyContent: "center", alignItems: "center", borderWidth: 1, borderColor: t.line, borderRadius: 16, opacity: busy || !linkDraft.trim() ? .5 : 1 }}
+          onPress={previewLinkOnly}><Text style={{ color: t.secondary, fontWeight: "700" }}>Продолжить только со ссылкой</Text></Pressable>
+        <Text style={{ color: t.muted, fontSize: 13, lineHeight: 20 }}>Загрузка требует публичную HTTPS-ссылку. Если сайт недоступен, можно сохранить адрес без текста.</Text>
         </> : null}
         {hasMaterial ? <Pressable accessibilityRole="button" disabled={busy || preparing} style={button} onPress={cancelPicker}><Text style={{color:t.userText}}>Оставить текущее</Text></Pressable> : null}
+      </View> : null}
+      {sourceUrl ? <View style={{ padding: 14, borderWidth: 1, borderColor: t.line, borderRadius: 20, backgroundColor: t.panel, gap: 6 }}>
+        <Text style={{ color: t.text, fontWeight: "700" }}>{linkOnly ? "Ссылка · без текста страницы" : "Источник · загружен"}</Text>
+        <Text numberOfLines={2} selectable style={{ color: t.secondary, fontSize: 14 }}>{sourceUrl}</Text>
+        {linkOnly ? <Text style={{ color: t.muted, fontSize: 13 }}>Содержание сайта не получено. Поиск сможет учитывать название и вашу заметку, но не текст статьи.</Text> : null}
       </View> : null}
       {!file && extractedText ? <Text style={{ color: t.muted, fontSize: 12 }}>Выбранный источник: текст по ссылке</Text> : null}
       {preparing ? <ActivityIndicator accessibilityLabel="Подготовка входящего файла" /> : null}
@@ -447,7 +455,7 @@ export function MemoryImportScreen() {
       </View> : null}
       {notice ? <Text accessibilityRole="alert" style={{ color: t.muted }}>{notice}</Text> : null}
       {hasMaterial ? <>
-        <TextInput accessibilityLabel="Сведения из файла" editable={!busy} multiline value={body} onChangeText={setBody} maxLength={60_000} style={[field, { minHeight: 96, textAlignVertical: "top" }]} placeholder="Добавьте подпись — необязательно" placeholderTextColor={t.muted} />
+        <TextInput accessibilityLabel="Сведения из файла" editable={!busy} multiline value={body} onChangeText={setBody} maxLength={60_000} style={[field, { minHeight: 96, textAlignVertical: "top" }]} placeholder={linkOnly ? "Моя заметка — что важно сохранить? (необязательно)" : "Добавьте подпись — необязательно"} placeholderTextColor={t.muted} />
         <Pressable accessibilityRole="button" accessibilityLabel="Выбрать коллекцию" disabled={busy} onPress={() => { Keyboard.dismiss(); setSectionOpen(true); }} style={{ ...button, backgroundColor: t.panel, alignItems: "flex-start" }}><Text style={{ color: t.text }}>Коллекция: {collections.find(c => c.id === collectionId)?.name || "Заметки"} · Изменить</Text></Pressable>
         {collections.find(c => c.id === collectionId)?.sensitivity !== "standard" ? <Text style={{ color: t.muted }}>Выбранная коллекция закрыта для агента независимо от настройки записи.</Text> : null}
         <Text style={{ color: t.text, fontWeight: "600" }}>Доступ к записи</Text>
@@ -509,7 +517,7 @@ export function MemoryImportScreen() {
     </ScrollView>
     {hasMaterial ? <View testID="import-save-bar" style={{ padding: 12, backgroundColor: t.bg, borderTopWidth: 1, borderTopColor: t.line }}>
       <Pressable disabled={saveDisabled} accessibilityRole="button" accessibilityState={{ disabled: saveDisabled }} accessibilityLabel="Сохранить сведения в память" style={[button, { opacity: saveDisabled ? .45 : 1 }]} onPress={() => { Keyboard.dismiss(); void save(); }}>
-        <Text style={{ color: t.userText, fontWeight: "700" }}>{busy ? "Подождите…" : "Сохранить в память"}</Text>
+        <Text style={{ color: t.userText, fontWeight: "700" }}>{busy ? "Подождите…" : linkOnly ? "Сохранить ссылку" : "Сохранить в память"}</Text>
       </Pressable>
     </View> : null}
   </KeyboardAvoidingView>
