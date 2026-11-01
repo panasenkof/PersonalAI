@@ -217,6 +217,26 @@ test('U3 uses the confirmed URL returned by a successful text download', async (
 });
 
 
+
+test('step 8 C uses the extracted article title and warns when page markup is incomplete', async () => {
+  (importLink as jest.Mock).mockResolvedValueOnce({
+    source: 'https://example.org/recipe',
+    text: 'Пирог\nМука 200 г\n1. Смешать\n2. Выпекать',
+    title: 'Пирог с яблоками', partial: true,
+  });
+  const screen = render(<MemoryImportScreen />);
+  fireEvent.press(screen.getByText('Ссылка'));
+  fireEvent.changeText(screen.getByLabelText('Ссылка для импорта'), 'https://example.org/recipe');
+  fireEvent.press(screen.getByText('Загрузить по ссылке'));
+  await waitFor(() => expect(screen.getByText(/разметка обрывается/)).toBeTruthy());
+  fireEvent.changeText(screen.getByLabelText('Сведения из файла'), 'Моя пометка');
+  fireEvent.press(screen.getByLabelText('Сохранить сведения в память'));
+  await waitFor(() => expect(saveMediaNote).toHaveBeenCalledWith('guest', expect.objectContaining({
+    sourceUrl: 'https://example.org/recipe', title: 'Пирог с яблоками',
+    body: 'Моя пометка', extractedText: expect.stringContaining('Мука 200 г'),
+  }), expect.anything()));
+});
+
 const multiple = [
   { uri: "file:///cache/a.png", name: "a.png", mimeType: "image/png", size: 1200 },
   { uri: "file:///cache/b.txt", name: "b.txt", mimeType: "text/plain", size: 2400 },

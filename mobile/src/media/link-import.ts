@@ -34,38 +34,132 @@ export function linkHttpError(status: number): string {
   return "Сайт отказал в загрузке (HTTP " + status + "). Проверьте доступ в браузере или сохраните ссылку.";
 }
 
-/** Offline best-effort HTML extraction. Do not invoke an LLM for cleaning, and
- * never discard a shorter non-article page solely for lacking semantic tags. */
-export function pageText(html: string): string {
+/** HTML is untrusted text, never executed. All output stays bounded by importLink.
+ * The lightweight token walk is shared by preview and persistence; it preserves
+ * text/list/table order while skipping nested page chrome. No DOM/WebView/LLM.
+ */
+function htmlEntities(text: string): string {
+  const named: Record<string, string> = {
+    nbsp: " ", amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", laquo: "«", raquo: "»",
+    mdash: "—", ndash: "–", hellip: "…", bull: "•", thinsp: " ", copy: "©",
+    frac12: "½", frac14: "¼", frac34: "¾", times: "×", deg: "°", rsquo: "’", lsquo: "‘",
+  };
+  return text.replace(/&(#x[0-9a-f]+|#\d+|[a-z][a-z0-9]+);/gi, (entity, value: string) => {
+    if (value.startsWith("#")) {
+      const n = value[1].toLowerCase() === "x" ? parseInt(value.slice(2), 16) : parseInt(value.slice(1), 10);
+      return Number.isSafeInteger(n) && n > 0 && n <= 0x10ffff && !(n >= 0xd800 && n <= 0xdfff)
+        ? String.fromCodePoint(n) : "";
+    }
+    return named[value.toLowerCase()] ?? entity;
+  });
+}
+type HtmlCandidate = { tag: "article" | "main"; parts: string[]; active: boolean };
+type HtmlNode = { tag: string; suppressed: boolean; candidate?: HtmlCandidate; listIndex?: number; cells?: number };
+export type ArticleText = { text: string; title?: string; partial: boolean; scope: "article" | "main" | "fallback" };
+function cleanArticleText(parts: string[]): string {
+  return parts.join("").replace(/\r/g, "").replace(/\u00a0/g, " ")
+    .replace(/[ \t]+/g, " ").replace(/[ \t]*\n[ \t]*/g, "\n")
+    .replace(/\n{3,}/g, "\n\n").trim();
+}
+const BLOCK_TAG = /^(article|main|section|div|p|h[1-6]|ul|ol|li|blockquote|tr|table|pre)$/;
+const VOID_TAG = /^(br|hr|img|input|meta|link|source|wbr|area|base)$/;
+export function articleText(html: string): ArticleText {
+  // Strip raw script/style content first; otherwise "<" inside scripts can
+  // masquerade as markup or break the lightweight tokenizer.
   const safe = html
-    .replace(/<!--[\s\S]*?-->/g, '')
-    .replace(/<(script|style|noscript|template|svg|iframe|nav|header|footer|aside|form)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '')
-    .replace(/<(div|section)\b(?=[^>]*(?:id|class)\s*=\s*["'][^"']*(?:cookie|advert|banner|sidebar|breadcrumbs|newsletter|popup)[^"']*["'])[^>]*>[\s\S]*?<\/\1\s*>/gi, '');
-  // Prefer article/main text when meaningful; retain the rest as fallback.
-  const blocks = [...safe.matchAll(/<(article|main)\b[^>]*>([\s\S]*?)<\/\1\s*>/gi)].map(m => m[2]);
-  function clean(markup: string): string {
-    const entities: Record<string, string> = { nbsp: ' ', amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", laquo: '«', raquo: '»', mdash: '—', ndash: '–', hellip: '…' };
-    return markup.replace(/<\/(p|div|h[1-6]|li|section|article|main|blockquote|tr)>/gi, '\n')
-      .replace(/<br\s*\/?\s*>/gi, '\n')
-      .replace(/<[^>]*>/g, '')
-      .replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (entity, value: string) => {
-        if (value.startsWith('#')) {
-          const n = value[1].toLowerCase() === 'x' ? parseInt(value.slice(2), 16) : parseInt(value.slice(1), 10);
-          return n > 0 && n <= 0x10ffff && !(n >= 0xd800 && n <= 0xdfff) ? String.fromCodePoint(n) : '';
-        }
-        return entities[value.toLowerCase()] ?? entity;
-      })
-      .replace(/\r/g, '')
-      .replace(/[ \t]+/g, ' ')
-      .replace(/\n[ \t]*/g, '\n')
-      .replace(/\n{3,}/g, '\n\n').trim();
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/<![^>]*>/g, "")
+    .replace(/<(script|style|noscript|template|svg|iframe)\b[^>]*>[\s\S]*?(?:<\/\1\s*>|$)/gi, "");
+  const stack: HtmlNode[] = [], candidates: HtmlCandidate[] = [], all: string[] = [];
+  const emit = (text: string) => {
+    all.push(text);
+    for (const candidate of candidates) if (candidate.active) candidate.parts.push(text);
+  };
+  const hidden = (tag: string, attrs: string, withinArticle: boolean) =>
+    /^(nav|footer|aside|form|title|button|select|textarea|input|meta|link|canvas)$/.test(tag) ||
+    (tag === "header" && !withinArticle) ||
+    /\s(?:hidden\b|aria-hidden\s*=\s*["']?true\b)/i.test(attrs) ||
+    /\bstyle\s*=\s*["'][^"']*(?:display\s*:\s*none|visibility\s*:\s*hidden)/i.test(attrs) ||
+    /^(div|section|ul|ol)$/.test(tag) && /\b(?:id|class)\s*=\s*["'][^"']*(?:cookie|advert|ads-|banner|sidebar|breadcrumb|newsletter|popup|subscribe|social|related-posts|recommend|navigation|masthead|comments)[^"']*["']/i.test(attrs);
+  const tokens = safe.match(/<\/?[a-z][^>]*>|[^<]+|</gi) || [];
+  for (const token of tokens) {
+    if (token[0] !== "<" || token === "<") {
+      if (!stack.some(node => node.suppressed)) emit(htmlEntities(token));
+      continue;
+    }
+    const match = /^<(\/?)\s*([a-z][a-z0-9:-]*)\b/i.exec(token);
+    if (!match) continue;
+    const tag = match[2].toLowerCase();
+    if (match[1]) {
+      const index = stack.map(node => node.tag).lastIndexOf(tag);
+      if (index < 0) continue; // A malformed unmatched closing tag is harmless.
+      for (const node of stack.splice(index).reverse()) {
+        if (!node.suppressed && BLOCK_TAG.test(node.tag)) emit("\n");
+        if (node.candidate) node.candidate.active = false;
+      }
+      continue;
+    }
+    const attrs = token.slice(match[0].length, token.length - 1);
+    const parentHidden = stack.some(node => node.suppressed);
+    const withinArticle = stack.some(node => node.tag === "article" && !node.suppressed);
+    const suppressed = parentHidden || hidden(tag, attrs, withinArticle);
+    const node: HtmlNode = { tag, suppressed };
+    if (!suppressed) {
+      if (tag === "article" || tag === "main") {
+        const candidate: HtmlCandidate = { tag, parts: [], active: true };
+        node.candidate = candidate; candidates.push(candidate);
+      }
+      if (tag === "li") {
+        const list = [...stack].reverse().find(item => item.tag === "ol" || item.tag === "ul");
+        if (list?.tag === "ol") { list.listIndex = (list.listIndex || 0) + 1; emit("\n" + list.listIndex + ". "); }
+        else emit("\n• ");
+      } else if (tag === "td" || tag === "th") {
+        const row = [...stack].reverse().find(item => item.tag === "tr");
+        if (row) { emit((row.cells || 0) ? " | " : ""); row.cells = (row.cells || 0) + 1; }
+      } else if (tag === "br" || tag === "hr" || BLOCK_TAG.test(tag)) emit("\n");
+      if (tag === "ol") {
+        const start = /\bstart\s*=\s*["']?(\d+)/i.exec(attrs);
+        node.listIndex = start ? Math.max(0, Number(start[1]) - 1) : 0;
+      }
+      if (tag === "tr") node.cells = 0;
+    }
+    if (!VOID_TAG.test(tag) && !/\/\s*>$/.test(token)) stack.push(node);
   }
-  const candidates = blocks.map(clean).filter(text => text.length >= 24).sort((a, b) => b.length - a.length);
-  return candidates[0] || clean(safe);
+  const best = (tag: "article" | "main") => candidates
+    .filter(item => item.tag === tag).map(item => ({ candidate: item, text: cleanArticleText(item.parts) }))
+    .filter(item => item.text.length >= 24).sort((a, b) => b.text.length - a.text.length)[0];
+  const selected = best("article") || best("main");
+  const text = selected?.text || cleanArticleText(all);
+  // Extract a title only when the heading is part of the selected content.
+  const h1 = /<h1\b[^>]*>([\s\S]{0,600}?)<\/h1\s*>/i.exec(safe);
+  const heading = h1 && htmlEntities(h1[1].replace(/<[^>]*>/g, "")).trim();
+  const documentTitle = /<title\b[^>]*>([\s\S]{0,600}?)<\/title\s*>/i.exec(html);
+  const rawTitle = documentTitle && htmlEntities(documentTitle[1].replace(/<[^>]*>/g, "")).trim();
+  const title = (heading && text.includes(heading) ? heading : rawTitle || "")?.slice(0, 160) || undefined;
+  // A closed <article> does not prove the network response included the full
+  // article; this flag only indicates a concrete incomplete markup signal.
+  const partial = selected ? selected.candidate.active :
+    /<body\b/i.test(html) && !/<\/body\s*>/i.test(html);
+  return { text, title, partial, scope: selected?.candidate.tag || "fallback" };
+}
+
+/** Backwards-compatible text-only entry point for existing callers/tests. */
+export function pageText(html: string): string {
+  return articleText(html).text;
+}
+
+/** An access gate or client-rendered shell is not successful extraction. */
+export function articleReadError(html: string, result: ArticleText): string | null {
+  const substantive = result.scope === "article" && result.text.length >= 200;
+  if (/<input\b[^>]*\btype\s*=\s*["']?password\b/i.test(html) && !substantive)
+    return "Страница требует входа. Содержимое не получено — сохраните ссылку без текста.";
+  if (!result.text.trim() || result.text.length < 12 && /<body\b/i.test(html))
+    return "Страница не содержит читаемого текста (возможно, загружает статью через JavaScript). Сохраните ссылку без текста.";
+  return null;
 }
 
 /** Explicit user action only; no cookies/keys; streaming bound before allocation. */
-export async function importLink(raw: string, signal?: AbortSignal): Promise<{ file?: ImportFile; text?: string; source: string }> {
+export async function importLink(raw: string, signal?: AbortSignal): Promise<{ file?: ImportFile; text?: string; source: string; title?: string; partial?: boolean }> {
   const source = publicImportUrl(raw);
   const controller = new AbortController();
   const cancel = () => controller.abort(); signal?.addEventListener('abort', cancel);
@@ -86,7 +180,8 @@ export async function importLink(raw: string, signal?: AbortSignal): Promise<{ f
     const looksLikeMediaFile = /\.(mp3|m4a|wav|ogg|flac|aac|mp4|mov|webm|mkv)$/i.test(new URL(source).pathname);
     if (looksLikeMediaFile && (mime === 'text/html' || mime === 'application/xhtml+xml' || mime === 'text/plain'))
       throw new Error('Вместо медиафайла сайт вернул страницу или текст. Возможна проверка VPN, авторизация или недействительная прямая ссылка.');
-    const text = mime === 'text/html' || mime.startsWith('text/') || mime === 'application/json';
+    const html = mime === 'text/html' || mime === 'application/xhtml+xml';
+    const text = html || mime.startsWith('text/') || mime === 'application/json';
     const limit = text ? 1024 * 1024 : 80 * 1024 * 1024;
     if (Number(response.headers.get('content-length')) > limit) throw new Error('Слишком большой материал по ссылке.');
     const name = decodeURIComponent(new URL(source).pathname.split('/').pop() || 'download');
@@ -110,9 +205,14 @@ export async function importLink(raw: string, signal?: AbortSignal): Promise<{ f
     if (text) {
       stage = 'обработка содержимого';
       const rawText = await file.text();
-      const content = mime === 'text/html' ? pageText(rawText) : rawText;
+      const page = html ? articleText(rawText) : null;
+      if (page) {
+        const failure = articleReadError(rawText, page);
+        if (failure) throw new Error(failure);
+      }
+      const content = page ? page.text : rawText;
       if (!content.trim() || content.length > 60_000) throw new Error('Текст пуст или длиннее 60 000 символов. Сохраните нужный фрагмент вручную.');
-      file.delete(); return { text: content, source };
+      file.delete(); return { text: content, source, ...(page?.title ? { title: page.title } : {}), ...(page ? { partial: page.partial } : {}) };
     }
     return { file: { uri: file.uri, name, mimeType: mime }, source };
   } catch (error) {
