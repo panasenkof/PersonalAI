@@ -113,7 +113,7 @@ test('step 8 saves link-only without a network request, and only on explicit con
     body: 'Прочитать позже про ИИ', extractedText: '',
     title: 'Ссылка · example.org',
   }), expect.anything());
-  expect(mockBack).toHaveBeenCalled();
+  await waitFor(() => expect(mockBack).toHaveBeenCalled());
 });
 
 test('step 8 keeps the link-only fallback available after a failed fetch', async () => {
