@@ -1,6 +1,6 @@
 import type { Attachment } from "./attachments";
 
-export type AttachmentPreviewKind = "image" | "audio" | "video" | "unsupported";
+export type AttachmentPreviewKind = "image" | "audio" | "video" | "document" | "unsupported";
 
 /** Metadata only: listing an attachment never decrypts or copies it. */
 export function attachmentPreviewKind(attachment: Pick<Attachment, "mime" | "name">): AttachmentPreviewKind {
@@ -9,6 +9,7 @@ export function attachmentPreviewKind(attachment: Pick<Attachment, "mime" | "nam
   if (mime.startsWith("image/") || ["jpg", "jpeg", "png", "webp", "gif", "heic"].includes(extension)) return "image";
   if (mime.startsWith("audio/") || ["mp3", "m4a", "wav", "ogg", "flac", "aac"].includes(extension)) return "audio";
   if (mime.startsWith("video/") || ["mp4", "mov", "webm", "mkv"].includes(extension)) return "video";
+  if (mime === "application/pdf" || extension === "pdf") return "document";
   return "unsupported";
 }
 
@@ -20,5 +21,5 @@ export function readableAttachmentSize(size: number): string {
 }
 
 export const attachmentKindLabel = (kind: AttachmentPreviewKind) => ({
-  image: "Фото", audio: "Аудио", video: "Видео", unsupported: "Файл",
+  image: "Фото", audio: "Аудио", video: "Видео", document: "PDF", unsupported: "Файл",
 }[kind]);
