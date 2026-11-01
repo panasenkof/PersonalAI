@@ -21,7 +21,7 @@ test.each(["not-allowed", "network", "language-not-supported", "service-not-allo
     expect(text).toContain("Код: «" + code + ": native detail»");
   });
 test("missing Russian points to where to install it", () => {
-  expect(voiceErrorMessage("language-not-supported")).toContain("русский язык не установлен");
+  expect(voiceErrorMessage("language-not-supported")).toContain("режим распознавания не принимает русский");
 });
 test("a service that never starts and a phone without one are explained", () => {
   expect(startTimeoutMessage()).toContain("не начала запись за 6 с");
