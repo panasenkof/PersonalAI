@@ -25,6 +25,7 @@ import { MAX_ORIGINALS_PER_NOTE, MAX_TOTAL_ORIGINAL_BYTES, saveMediaNote } from 
 import { combinedRecognitionText, recognizeFilesSequentially, type FileRecognition } from "../media/batch-recognition";
 import { analyzeFilesTogether } from "../media/joint-recognition";
 import { extractMedia, mediaKind } from "../media/extract";
+import type { ImageExtractionMode } from "../media/extract";
 import type { ImportFile } from "../media/extract";
 import type { RootStackParams } from "../navigation";
 import { withNativeInteraction } from "../security/native-interaction";
@@ -74,6 +75,7 @@ export function MemoryImportScreen() {
   const [recognitionResults, setRecognitionResults] = useState<FileRecognition[]>([]);
   const [recognizingIndex, setRecognizingIndex] = useState(-1);
   const [recognitionMode, setRecognitionMode] = useState<"sequential" | "joint">("sequential");
+  const [imageExtractionMode, setImageExtractionMode] = useState<ImageExtractionMode>("describe");
   const [jointAnalyzing, setJointAnalyzing] = useState(false);
   const [connections, setConnections] = useState<DirectConnection[]>([]);
   const [connectionId, setConnectionId] = useState("");
@@ -309,14 +311,16 @@ export function MemoryImportScreen() {
         let timedSegments: FileRecognition["segments"];
         let pdfCoverage: PdfPageCoverage | undefined;
         const text = await extractMedia(file, vision, classification === "standard", aborter.signal, undefined, speech,
-          segments => { timedSegments = segments; }, coverage => { pdfCoverage = coverage; });
+          segments => { timedSegments = segments; }, coverage => { pdfCoverage = coverage; }, imageExtractionMode);
         if (alive.current && !aborter.signal.aborted) {
           setRecognitionResults([{ index: 0, name: file.name, status: "success", text,
             ...(timedSegments ? { segments: timedSegments } : {}),
             ...(pdfCoverage ? { pdfCoverage } : {}) }]);
           setExtractedText(text);
           setNotice(pdfCoverage ? pdfCoverageMessage(pdfCoverage) :
-            "Проверьте и отредактируйте текст. В памяти он появится после сохранения.");
+            kind === "image" && imageExtractionMode === "document-text"
+              ? "ИИ предложил текст фотографии, но не подтвердил точность. Проверьте все числа и исправьте ошибки перед сохранением."
+              : "Проверьте и отредактируйте текст. В памяти он появится после сохранения.");
         }
       } else {
         const segmentsByFile = new Map<number, NonNullable<FileRecognition["segments"]>>();
@@ -324,7 +328,7 @@ export function MemoryImportScreen() {
         const rawResults = await recognizeFilesSequentially(files,
           async (item, index) => extractMedia(item, vision, classification === "standard",
             aborter.signal, undefined, speech, segments => { segmentsByFile.set(index, segments); },
-            coverage => { pdfByFile.set(index, coverage); }),
+            coverage => { pdfByFile.set(index, coverage); }, imageExtractionMode),
           aborter.signal, (done, current) => {
             if (alive.current) {
               setRecognitionResults(done);
@@ -476,6 +480,20 @@ export function MemoryImportScreen() {
           </Pressable>)}
         {file ? <NoteEditorSection title="Распознавание" summary={extractedText ? "Текст получен · можно повторить" : "Необязательно · для поиска по содержимому"} expanded={recognitionOpen} onToggle={() => setRecognitionOpen(v => !v)}>
         <Text style={{ color: t.muted, fontSize: 12 }}>{kind === "video" ? "Речь и пять выборочных кадров обрабатываются отдельно. Максимум 10 минут; частичные результаты явно отмечены." : kind === "audio" ? (localAudio ? "Речь распознаётся на телефоне моделью Whisper; файл никуда не отправляется." : "Речь преобразуется в текст сервисом подключения. Чтобы распознавать на телефоне, скачайте модель: Настройки → Голосовой ввод → Голос без интернета.") : kind === "text" ? "Текстовый файл читается на телефоне, без отправки в интернет." : kind === "document" ? "PDF читается локально: Android 15+ или Android 12–14 с расширением S v13+. У сканов без текстового слоя страницы останутся непрочитанными; оригинал сохранится." : "Выбранная модель должна поддерживать изображения."}</Text>
+        {files.some(item => mediaKind(item) === "image") ? <View style={{ gap: 6 }}>
+          <Text style={{ color: t.text, fontWeight: "700" }}>Что сделать с фотографией</Text>
+          <Pressable accessibilityRole="button" accessibilityLabel="Описать фотографию" accessibilityState={{ selected: imageExtractionMode === "describe" }} disabled={busy}
+            onPress={() => setImageExtractionMode("describe")} style={{ minHeight: 48, justifyContent: "center" }}>
+            <Text style={{ color: imageExtractionMode === "describe" ? t.secondary : t.text }}>{imageExtractionMode === "describe" ? "● " : "○ "}Описать содержание фото</Text>
+          </Pressable>
+          <Pressable accessibilityRole="button" accessibilityLabel="Прочитать текст фотографии через ИИ" accessibilityState={{ selected: imageExtractionMode === "document-text" }} disabled={busy}
+            onPress={() => setImageExtractionMode("document-text")} style={{ minHeight: 48, justifyContent: "center" }}>
+            <Text style={{ color: imageExtractionMode === "document-text" ? t.secondary : t.text }}>{imageExtractionMode === "document-text" ? "● " : "○ "}Прочитать текст документа (ИИ)</Text>
+          </Pressable>
+          {imageExtractionMode === "document-text" ? <Text accessibilityRole="text" style={{ color: t.muted, fontSize: 13, lineHeight: 19 }}>
+            Фото отправится выбранной модели по вашему нажатию на кнопку разбора. Это не локальное OCR: возможны ошибки в буквах и цифрах; проверьте результат. Для личной записи внешняя отправка запрещена, можно сохранить оригинал без распознавания.
+          </Text> : null}
+        </View> : null}
         {files.length > 1 ? <View style={{ gap: 6 }}>
           <Text style={{ color: t.text, fontWeight: "700" }}>Режим распознавания</Text>
           <Pressable disabled={busy} accessibilityRole="button" accessibilityLabel="Распознавать по очереди"
@@ -502,7 +520,7 @@ export function MemoryImportScreen() {
         </NoteEditorSection> : null}
         {files.some(item => ["audio", "video"].includes(mediaKind(item))) ? <View><Text style={{ color: t.text }}>Подключение для речи (локальный Whisper имеет приоритет)</Text>{connections.map(c => <Pressable key={c.id} disabled={busy} onPress={() => setSpeechConnectionId(c.id)} style={{ minHeight: 44 }}><Text style={{ color: c.id === speechConnectionId ? t.secondary : t.text }}>{c.id === speechConnectionId ? "● " : "○ "}{c.name} · {c.transcriptionModel || "whisper-1"}</Text></Pressable>)}</View> : null}
         <Pressable disabled={busy || !canExtract} accessibilityRole="button" accessibilityLabel="Извлечь сведения из файла" style={[button, { opacity: canExtract ? 1 : .5 }]} onPress={() => void extract()}>
-          <Text style={{ color: "#fff", fontWeight: "700" }}>{files.length > 1 ? recognitionMode === "joint" ? "Распознать и сопоставить" : "Распознать все по очереди" : kind === "text" ? "Прочитать текст на телефоне" : kind === "document" ? "Прочитать страницы PDF на телефоне" : localAudio ? "Распознать речь на телефоне" : "Передать файл провайдеру и разобрать"}</Text>
+          <Text style={{ color: "#fff", fontWeight: "700" }}>{files.length > 1 ? recognitionMode === "joint" ? "Распознать и сопоставить" : "Распознать все по очереди" : kind === "text" ? "Прочитать текст на телефоне" : kind === "image" && imageExtractionMode === "document-text" ? "Отправить фото модели и прочитать текст" : kind === "document" ? "Прочитать страницы PDF на телефоне" : localAudio ? "Распознать речь на телефоне" : "Передать файл провайдеру и разобрать"}</Text>
         </Pressable>
         {jointAnalyzing ? <Text accessibilityLiveRegion="polite" style={{ color: t.secondary }}>Сопоставляю результаты всех файлов…</Text> : null}
         {recognizingIndex >= 0 ? <Text accessibilityLiveRegion="polite" style={{ color: t.secondary }}>
