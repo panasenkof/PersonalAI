@@ -239,7 +239,7 @@ export function MemoryImportScreen() {
   }, [incoming, route.params]);
   // A URL-only preview is a user decision, never an implicit save or network call.
   function previewLinkOnly() {
-    if (busy || preparing) return;
+    if (busy || preparing || controller.current) return;
     try {
       const source = publicImportUrl(linkDraft);
       const domain = new URL(source).hostname;
@@ -413,7 +413,7 @@ export function MemoryImportScreen() {
         style={{ minHeight: 48, justifyContent: "center", padding: 12, backgroundColor: t.panel, borderColor: t.line, borderWidth: 1, borderRadius: 14 }}>
         <Text style={{ color: t.secondary, fontWeight: "700" }}>Заменить вложение</Text>
       </Pressable> : null}
-      {!incoming && (sourcePickerOpen || (!file && !extractedText)) ? <View testID="import-source-choices" style={{ gap: 12, padding: 14, borderRadius: 18, borderWidth: 1, borderColor: t.line, backgroundColor: t.panel }}>
+      {!incoming && (sourcePickerOpen || (!file && !extractedText && !linkOnly)) ? <View testID="import-source-choices" style={{ gap: 12, padding: 14, borderRadius: 18, borderWidth: 1, borderColor: t.line, backgroundColor: t.panel }}>
         {(!sourceChoice || sourceChoice === "file") ? <Pressable disabled={busy || preparing} accessibilityRole="button" accessibilityLabel="Выбрать файл для памяти" style={{ ...button, backgroundColor: t.soft, alignItems: "flex-start" }} onPress={() => void pick()}><Text style={{ color: t.text, fontSize: 16, fontWeight: "700" }}>Выбрать файл с телефона</Text><Text style={{ color: t.muted }}>Документ, аудио или видео</Text></Pressable> : null}
         {(!sourceChoice || sourceChoice === "photo" || sourceChoice === "gallery") ? <>
         <Pressable disabled={busy || preparing} accessibilityRole="button" accessibilityLabel="Выбрать фото из галереи" style={{ ...button, backgroundColor: t.soft, alignItems: "flex-start" }} onPress={() => void gallery()}><Text style={{ color: t.text, fontSize: 16 }}>Выбрать фото из галереи</Text></Pressable>
