@@ -45,7 +45,6 @@ export function VoiceInput({ value, onChange, disabled = false, onError, showLab
   const base = useRef("");
   const offline = useRef(true);
   const service = useRef<ServiceChoice | undefined>(undefined);
-  const [offerNetwork, setOfferNetwork] = useState(false);
   const [phase, setPhase] = useState<"idle" | "starting" | "listening" | "finishing">("idle");
   useEffect(() => { onActiveChange?.(phase !== "idle"); onPhaseChange?.(phase); }, [phase, onActiveChange, onPhaseChange]);
   useEffect(() => () => { onActiveChange?.(false); onPhaseChange?.("idle"); }, [onActiveChange, onPhaseChange]);
@@ -58,8 +57,11 @@ export function VoiceInput({ value, onChange, disabled = false, onError, showLab
     if (finalTimer.current) clearTimeout(finalTimer.current);
     timer.current = watchdog.current = finalTimer.current = null;
   };
-  const report = (message: string) => onError(message + (whisper.state === "absent" || whisper.state === "error" ?
-    " Или скачайте распознавание на телефон: Настройки → Голосовой ввод → Голос без интернета." : ""));
+  const report = (message: string) => onError(message + (
+    message.includes(NO_SERVICE_MESSAGE) && (whisper.state === "absent" || whisper.state === "error")
+      ? " Или скачайте распознавание на телефон: Настройки → Голосовой ввод → Голос без интернета."
+      : ""
+  ));
   const stop = useCallback(() => {
     generation.current++;
     clearTimers();
@@ -110,9 +112,30 @@ export function VoiceInput({ value, onChange, disabled = false, onError, showLab
   });
   useSpeechRecognitionEvent("error", event => {
     if (!owns.current || viaWhisper.current) return;
-    if (offline.current && !["aborted", "not-allowed", "no-speech", "speech-timeout"].includes(event.error)) setOfferNetwork(true);
-    if (event.error !== "aborted") report(voiceErrorMessage(event.error, event.message, service.current));
+    // Android can report general on-device support even when Russian is not
+    // available offline. A full-width native dialog avoids an invisible action
+    // below the microphone inside the chat composer.
+    const offlineLanguageFailure = offline.current &&
+      ["language-not-supported", "language-unavailable"].includes(event.error);
+    if (!offlineLanguageFailure && event.error !== "aborted")
+      report(voiceErrorMessage(event.error, event.message, service.current));
     stop();
+    if (!offlineLanguageFailure) return;
+    const retryGeneration = generation.current;
+    onError("Русский язык недоступен для офлайн-распознавания Google. Можно попробовать распознавание через интернет.");
+    Alert.alert(
+      "Распознавание Google",
+      "Офлайн-распознавание русского недоступно. Попробовать через интернет? Системная служба (Google) может передать голос для распознавания на свой сервер.",
+      [
+        { text: "Отмена", style: "cancel" },
+        { text: "Использовать через интернет", onPress: () => {
+          // A navigated-away or replaced draft must never start recording.
+          if (generation.current !== retryGeneration || AppState.currentState !== "active") return;
+          networkConsent = true;
+          void start(true);
+        } },
+      ],
+    );
   });
   useFocusEffect(useCallback(() => stop, [stop]));
   useEffect(() => {
@@ -120,7 +143,7 @@ export function VoiceInput({ value, onChange, disabled = false, onError, showLab
     return () => { sub.remove(); stop(); };
   }, [stop]);
   useEffect(() => { if (disabled) stop(); }, [disabled, stop]);
-  useEffect(() => { setOfferNetwork(false); return stop; }, [voice.preference, stop]);
+  useEffect(() => stop, [voice.preference, stop]);
 
   async function startWhisper(token: number) {
     const aborter = new AbortController(); controller.current = aborter;
@@ -172,7 +195,7 @@ export function VoiceInput({ value, onChange, disabled = false, onError, showLab
       if (generation.current !== token) return;
       if (!permission.granted) throw new Error("Голосовой ввод: нет разрешения на микрофон. Разрешите микрофон для PersAI в настройках телефона.");
       service.current = recognitionService();
-      base.current = value; offline.current = !useNetwork; setOfferNetwork(false);
+      base.current = value; offline.current = !useNetwork;
       owns.current = true; started.current = finishing.current = false;
       // Native endpointing remains authoritative. Android documents that
       // custom silence extras may be ignored or cause unexpected results.
@@ -188,11 +211,6 @@ export function VoiceInput({ value, onChange, disabled = false, onError, showLab
     } catch (e) { if (generation.current === token) { report((e as Error).message || "Голосовой ввод: не удалось начать распознавание."); stop(); } }
     finally { if (generation.current === token) starting.current = false; }
   }
-  const offerConsent = () => {
-    const token = generation.current;
-    Alert.alert("Системная диктовка", "Служба телефона может отправлять речь своему серверу. Разрешить её?",
-      [{ text: "Отмена", style: "cancel" }, { text: "Разрешить", onPress: () => { if (generation.current !== token) return; networkConsent = true; void start(true); } }]);
-  };
   const active = phase !== "idle";
   // While the model loads or the last phrase is decoded, the button cancels:
   // the user is never locked out. Text already in the draft stays there.
@@ -208,7 +226,6 @@ export function VoiceInput({ value, onChange, disabled = false, onError, showLab
       style={{ minWidth: 48, minHeight: 48, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: active ? t.accent : t.soft }}>
       <Feather name={active ? "square" : "mic"} size={21} color={active ? "#fff" : t.accent} />
     </Pressable>}
-    {offerNetwork && !active && !networkConsent ? <Pressable accessibilityRole="button" accessibilityLabel="Использовать системную диктовку" disabled={disabled} style={{ minHeight: 44, width: 46, justifyContent: "center" }} onPress={offerConsent}><Text style={{ color: t.accent, fontSize: 10, textAlign: "center" }}>Через сервис</Text></Pressable> : null}
     {active && showLabel ? <Text accessibilityLiveRegion="polite" style={{ color: t.accent, fontSize: 10, textAlign: "center" }}>{phase === "starting" ? "Готовлю микрофон" : phase === "finishing" ? "Распознаю…" : "Слушаю…"}</Text> : null}
   </View>;
 }
