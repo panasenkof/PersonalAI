@@ -59,7 +59,7 @@ export type ArticleText = { text: string; title?: string; partial: boolean; scop
 function cleanArticleText(parts: string[]): string {
   return parts.join("").replace(/\r/g, "").replace(/\u00a0/g, " ")
     .replace(/[ \t]+/g, " ").replace(/[ \t]*\n[ \t]*/g, "\n")
-    .replace(/\n{3,}/g, "\n\n").trim();
+    .replace(/\n{2,}/g, "\n").trim();
 }
 const BLOCK_TAG = /^(article|main|section|div|p|h[1-6]|ul|ol|li|blockquote|tr|table|pre)$/;
 const VOID_TAG = /^(br|hr|img|input|meta|link|source|wbr|area|base)$/;
