@@ -110,13 +110,20 @@ export async function recognizeRussianPdf(file: ImportFile, signal?: AbortSignal
       pageCount?: unknown; pages?: unknown; nextPage?: unknown;
     };
     if (signal?.aborted) throw new Error("Распознавание остановлено.");
-    const checked = obj && validateNativePdfPages({pageCount:obj.pageCount,pages:obj.pages});
-    if (!checked || checked.totalPageCount === null) throw new Error("Некорректный ответ локального OCR.");
-    if (totalPages && checked.totalPageCount !== totalPages) throw new Error("PDF изменился во время чтения. Повторите импорт.");
-    totalPages = checked.totalPageCount;
-    for (const segment of checked.segments) {
-      if (segment.location.kind !== "page") throw new Error("Отсутствует настоящий номер страницы PDF.");
-      accumulated.set(segment.location.page, (accumulated.get(segment.location.page) || "") + segment.text);
+    if (!obj || !Number.isSafeInteger(obj.pageCount) || (obj.pageCount as number) < 1 ||
+      (obj.pageCount as number) > 128 || !Array.isArray(obj.pages)) throw new Error("Некорректный ответ локального OCR.");
+    if (totalPages && obj.pageCount !== totalPages) throw new Error("PDF изменился во время чтения. Повторите импорт.");
+    totalPages = obj.pageCount as number;
+    if (obj.pages.length) {
+      const checked = validateNativePdfPages({pageCount:totalPages,pages:obj.pages});
+      const partPages = new Map<number,string>();
+      for (const segment of checked.segments) {
+        if (segment.location.kind !== "page") throw new Error("Отсутствует настоящий номер страницы PDF.");
+        partPages.set(segment.location.page, (partPages.get(segment.location.page) || "") + segment.text);
+      }
+      for(const [page,text] of partPages) {
+        if (!accumulated.has(page)) accumulated.set(page,text);
+      }
     }
     onProgress?.(Math.min(totalPages, start + 7), totalPages);
     if (!Number.isSafeInteger(obj.nextPage) || (obj.nextPage as number) <= start ||
