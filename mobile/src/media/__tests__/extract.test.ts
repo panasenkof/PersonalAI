@@ -138,3 +138,40 @@ test("custom OpenAI-compatible provider keeps old JSON request and never invents
   expect(captured).not.toHaveBeenCalled();
   expect(JSON.stringify(transport.mock.calls[0][1].body)).not.toContain("verbose_json");
 });
+
+
+test("step 8 E photo text mode is an explicit approved provider request, not automatic OCR",async()=>{
+  const transport=jest.fn(async()=>({ok:true,json:async()=>({output_text:"Квитанция\nИтого: 125,50 ₽"})}));
+  const photo={uri:"file:///cache/receipt.png",name:"receipt.png",mimeType:"image/png"};
+  await expect(extractMedia(photo,settings,false,undefined,transport as unknown as typeof fetch,undefined,undefined,undefined,"document-text")).rejects.toThrow("Разрешите передачу");
+  expect(transport).not.toHaveBeenCalled();
+  const text=await extractMedia(photo,settings,true,undefined,transport as unknown as typeof fetch,undefined,undefined,undefined,"document-text");
+  expect(text).toBe("Квитанция\nИтого: 125,50 ₽");
+  const payload=JSON.parse(transport.mock.calls[0][1].body);
+  expect(payload.store).toBe(false);
+  expect(payload.input[0].content[0].text).toMatch(/дословно.*русский/);
+  expect(payload.input[0].content[0].text).toMatch(/не додумывай неразборчивые/i);
+  expect(payload.input[0].content[1].detail).toBe("high");
+  expect(transport).toHaveBeenCalledTimes(1);
+});
+test("step 8 E default photo analysis stays unchanged and low-detail",async()=>{
+  const transport=jest.fn(async()=>({ok:true,json:async()=>({output_text:"На фото коробка"})}));
+  await extractMedia({uri:"file:///cache/photo.png",name:"photo.png",mimeType:"image/png"},settings,true,undefined,transport as unknown as typeof fetch);
+  const payload=JSON.parse(transport.mock.calls[0][1].body);
+  expect(payload.input[0].content[0].text).toMatch(/Описание изображения/);
+  expect(payload.input[0].content[1].detail).toBe("low");
+});
+test("step 8 E unreadable photo and overlong provider response never become a fabricated/truncated transcript",async()=>{
+  const photo={uri:"file:///cache/scan.png",name:"scan.png",mimeType:"image/png"};
+  const unreadable=jest.fn(async()=>({ok:true,json:async()=>({output_text:"НЕРАЗБОРЧИВО"})}));
+  await expect(extractMedia(photo,settings,true,undefined,unreadable as unknown as typeof fetch,undefined,undefined,undefined,"document-text")).rejects.toThrow("не смогла прочитать");
+  const long=jest.fn(async()=>({ok:true,json:async()=>({output_text:"A".repeat(60_001)})}));
+  await expect(extractMedia(photo,settings,true,undefined,long as unknown as typeof fetch,undefined,undefined,undefined,"document-text")).rejects.toThrow("60 000");
+});
+test("step 8 E cancellation prevents paid image upload and preserves local-only fallback",async()=>{
+  const photo={uri:"file:///cache/photo.png",name:"photo.png",mimeType:"image/png"};
+  const aborted=new AbortController(); aborted.abort();
+  const transport=jest.fn();
+  await expect(extractMedia(photo,settings,true,aborted.signal,transport as unknown as typeof fetch,undefined,undefined,undefined,"document-text")).rejects.toThrow("остановлен");
+  expect(transport).not.toHaveBeenCalled();
+});
