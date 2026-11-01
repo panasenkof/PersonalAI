@@ -86,10 +86,13 @@ function checkedRecognitions(originals: ImportFile[], values?: FileRecognition[]
     }
     if (typeof item.text !== 'string' || !item.text.trim()) throw new Error('invalid_recognition_sources');
     const text = item.text.trim();
-    // An image-only transcription mode cannot be forged for audio/PDF sources.
+    // Only offline OCR is allowed to produce PDF page evidence; image-only
+    // modes cannot be forged for audio/documents.
     if (item.imageMode !== undefined &&
-      (mediaKind(originals[item.index]) !== 'image' ||
-       !['describe', 'document-text'].includes(item.imageMode))) throw new Error('invalid_image_recognition_mode');
+      !((mediaKind(originals[item.index]) === 'image' &&
+         ['describe','document-text','offline-ocr'].includes(item.imageMode)) ||
+        (mediaKind(originals[item.index]) === 'document' && item.imageMode === 'offline-ocr')))
+      throw new Error('invalid_image_recognition_mode');
     total += text.length;
     if (total > 60_000) throw new Error('recognition_source_text_too_large');
     // Timestamp ranges are accepted only for audio and only when a processor
@@ -207,9 +210,13 @@ export async function saveMediaNote(profile: string, input: { file?: ImportFile;
             attachmentId: attachmentIds[run.index],
             producerKind: kind === 'audio' ? 'asr' : kind === 'document' ? 'pdf' :
               kind === 'image' ? 'vision' : kind === 'text' ? 'text' : 'unknown',
-            producerId: run.segments && kind === 'document' ? 'android-pdf-text' :
+            producerId: kind === 'document' && run.imageMode === 'offline-ocr' ? 'android-tesseract-5-rus' :
+              kind === 'image' && run.imageMode === 'offline-ocr' ? 'android-tesseract-5-rus' :
+              run.segments && kind === 'document' ? 'android-pdf-text' :
               run.segments ? 'openai-whisper-1' : 'persai-media-extract',
-            producerRevision: run.segments && kind === 'document' ? 'native-page-v1' :
+            producerRevision: kind === 'document' && run.imageMode === 'offline-ocr' ? 'native-page-and-russian-ocr-v1' :
+              kind === 'image' && run.imageMode === 'offline-ocr' ? 'local-tesseract-rus-v1' :
+              run.segments && kind === 'document' ? 'native-page-v1' :
               run.segments ? 'official-segment-time-v1' :
               kind === 'image' && run.imageMode === 'document-text' ? 'provider-photo-document-text-v1' : 'source-text-v1',
             status: 'partial', coverage: run.pdfCoverage ? 'partial' : 'unknown',
