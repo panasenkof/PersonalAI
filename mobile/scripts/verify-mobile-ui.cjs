@@ -80,6 +80,9 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
         await new Promise(resolve => { releaseReply = resolve; });
         await route.fulfill({ json: { output: [{ type: 'message', content: [{ type: 'output_text', text: 'Ответ ' + replyNumber }] }] } });
       });
+      // Browser speech fixture simulates a prior explicit Settings consent.
+      // Consent UI/denial paths have separate Jest tests; never grant in app code.
+      await page.addInitScript(() => localStorage.setItem('pia.voice.system-online-consent.v1', 'true'));
       await page.clock.install();
       await page.goto(`http://127.0.0.1:${server.address().port}`);
       await page.getByLabel('Сообщение ассистенту', { exact: true }).waitFor({timeout:10000}).catch(async error => { console.error(await page.locator('body').innerText()); throw error; });
