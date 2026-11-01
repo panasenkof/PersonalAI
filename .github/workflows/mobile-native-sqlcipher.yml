@@ -37,6 +37,23 @@ jobs:
         working-directory: mobile
     steps:
       - uses: actions/checkout@v4
+      # A fresh GitHub Ubuntu image contains multiple large, unrelated
+      # toolchains. Free space BEFORE the native build, so both Gradle and the
+      # later emulator can run without deleting Android test dependencies.
+      - name: Reclaim unused hosted runner toolchains
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Disk before unused-toolchain cleanup:"
+          df -h "$RUNNER_TEMP"
+          for unused in /usr/share/dotnet /usr/share/swift /opt/ghc /usr/local/.ghcup; do
+            if [ -d "$unused" ]; then
+              echo "Removing unused CI toolchain: $unused"
+              sudo rm -rf -- "$unused"
+            fi
+          done
+          echo "Disk after unused-toolchain cleanup:"
+          df -h "$RUNNER_TEMP"
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -216,6 +233,32 @@ jobs:
           name: android-ui-apk-${{ github.sha }}
           path: mobile/android/app/build/outputs/apk/release/app-release.apk
           retention-days: 3
+      # Release APK is already signed, validated and uploaded.
+      # Only remove the release build's intermediate outputs (not the APK).
+      # The subsequent real PDF instrumentation test invokes Gradle again:
+      # therefore keep Android NDK, module/native build inputs and Gradle
+      # dependency caches intact until BOTH emulator tests have passed.
+      - name: Reclaim release intermediates before Android emulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="android/app/build/outputs/apk/release/app-release.apk"
+          test -s "$apk"
+          echo "Disk before post-build cleanup:"
+          df -h "$RUNNER_TEMP"
+          rm -rf android/app/build/intermediates \
+            android/app/build/generated \
+            android/app/.cxx \
+            android/.gradle \
+            ../spikes/photo-83-1-android/build
+          echo "Disk after post-build cleanup:"
+          df -h "$RUNNER_TEMP"
+          test -s "$apk"
+          available_kib="$(df -Pk "$RUNNER_TEMP" | awk 'NR==2 {print $4}')"
+          if [ "$available_kib" -lt 5242880 ]; then
+            echo "::error::Insufficient disk for Android emulator + PDF Gradle test (5 GiB required)"
+            exit 1
+          fi
       - name: Install pinned Maestro CLI
         run: |
           curl --fail --location --retry 3 -o "$RUNNER_TEMP/maestro.zip" "https://github.com/mobile-dev-inc/maestro/releases/download/cli-${MAESTRO_VERSION}/maestro.zip"

@@ -1,0 +1,30 @@
+'use strict';
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+
+test('CI cleans unused host toolchains before native build and preserves Android PDF build dependencies', () => {
+  const yaml = fs.readFileSync(path.resolve(__dirname, '../../.github/workflows/mobile-native-sqlcipher.yml'), 'utf8');
+  const host = yaml.indexOf('- name: Reclaim unused hosted runner toolchains');
+  const native = yaml.indexOf('- name: Compile standalone release APK');
+  const saved = yaml.indexOf('- name: Save standalone emulator APK');
+  const reclaim = yaml.indexOf('- name: Reclaim release intermediates before Android emulator');
+  const maestro = yaml.indexOf('- name: Install pinned Maestro CLI');
+  const smoke = yaml.indexOf('- name: Run real Android UI smoke');
+  assert(host >= 0 && host < native && native < saved && saved < reclaim && reclaim < maestro && maestro < smoke);
+  const hostStep = yaml.slice(host, native);
+  assert.match(hostStep, /\/usr\/share\/dotnet/);
+  assert.match(hostStep, /\/usr\/share\/swift/);
+  const clean = yaml.slice(reclaim, maestro);
+  assert.match(clean, /test -s "\$apk"/);
+  assert.match(clean, /android\/app\/build\/intermediates/);
+  assert.match(clean, /df -Pk/);
+  assert.match(clean, /Insufficient disk/);
+  assert.doesNotMatch(clean, /rm -rf .*outputs/);
+  assert.doesNotMatch(clean, /rm -rf .*ccache/);
+  assert.doesNotMatch(clean, /rm -rf .*ndk/);
+  assert.doesNotMatch(clean, /find "\$HOME\/\.gradle\/caches"/);
+  assert.match(yaml.slice(smoke), /android-pdf-page-smoke\.sh/);
+  assert.match(yaml.slice(smoke), /Require successful Android smoke/);
+});
