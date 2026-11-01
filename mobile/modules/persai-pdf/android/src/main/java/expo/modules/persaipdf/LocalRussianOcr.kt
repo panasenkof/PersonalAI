@@ -76,7 +76,7 @@ internal object LocalRussianOcr {
     boundedImage(image).let { bitmap ->
       try {
         tess.setImage(bitmap)
-        val text = tess.utF8Text?.trim().orEmpty()
+        val text = tess.getUTF8Text()?.trim().orEmpty()
         require(text.length <= MAX_CHARS) { "russian_ocr_text_limit" }
         text
       } finally { bitmap.recycle() }
@@ -128,7 +128,7 @@ internal object LocalRussianOcr {
               val bitmap = renderPage(page)
               try {
                 tess.setImage(bitmap)
-                val read = tess.utF8Text?.trim().orEmpty()
+                val read = tess.getUTF8Text()?.trim().orEmpty()
                 if (read.isNotEmpty()) {
                   total += read.length
                   require(total <= MAX_CHARS) { "russian_ocr_text_limit" }
