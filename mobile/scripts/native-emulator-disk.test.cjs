@@ -4,21 +4,27 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
-test('native CI frees disk after uploading APK, before installing Maestro and AVD', () => {
+test('CI cleans unused host toolchains before native build and preserves Android PDF build dependencies', () => {
   const yaml = fs.readFileSync(path.resolve(__dirname, '../../.github/workflows/mobile-native-sqlcipher.yml'), 'utf8');
+  const host = yaml.indexOf('- name: Reclaim unused hosted runner toolchains');
+  const native = yaml.indexOf('- name: Compile standalone release APK');
   const saved = yaml.indexOf('- name: Save standalone emulator APK');
-  const reclaim = yaml.indexOf('- name: Reclaim native build disk space before Android emulator');
+  const reclaim = yaml.indexOf('- name: Reclaim release intermediates before Android emulator');
   const maestro = yaml.indexOf('- name: Install pinned Maestro CLI');
   const smoke = yaml.indexOf('- name: Run real Android UI smoke');
-  assert(saved >= 0 && saved < reclaim && reclaim < maestro && maestro < smoke);
-  const step = yaml.slice(reclaim, maestro);
-  assert.match(step, /test -s "\$apk"/);
-  assert.match(step, /ndk\/27\.0\.12077973/);
-  assert.match(step, /android\/app\/build\/intermediates/);
-  assert.match(step, /df -Pk/);
-  assert.match(step, /Insufficient runner disk/);
-  assert.doesNotMatch(step, /rm -rf .*outputs/);
-  assert.doesNotMatch(step, /rm -rf .*ccache/);
-  // A low-space preflight must fail CI, never silently skip emulator QA.
+  assert(host >= 0 && host < native && native < saved && saved < reclaim && reclaim < maestro && maestro < smoke);
+  const hostStep = yaml.slice(host, native);
+  assert.match(hostStep, /\/usr\/share\/dotnet/);
+  assert.match(hostStep, /\/usr\/share\/swift/);
+  const clean = yaml.slice(reclaim, maestro);
+  assert.match(clean, /test -s "\$apk"/);
+  assert.match(clean, /android\/app\/build\/intermediates/);
+  assert.match(clean, /df -Pk/);
+  assert.match(clean, /Insufficient disk/);
+  assert.doesNotMatch(clean, /rm -rf .*outputs/);
+  assert.doesNotMatch(clean, /rm -rf .*ccache/);
+  assert.doesNotMatch(clean, /rm -rf .*ndk/);
+  assert.doesNotMatch(clean, /find "\$HOME\/\.gradle\/caches"/);
+  assert.match(yaml.slice(smoke), /android-pdf-page-smoke\.sh/);
   assert.match(yaml.slice(smoke), /Require successful Android smoke/);
 });
