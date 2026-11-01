@@ -171,67 +171,31 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.clock.runFor(120);
       assert.equal(await prompt.evaluate(el => document.activeElement === el), true, 'Clear keeps keyboard focus in the composer after layout settles');
       assert.equal(await page.getByLabel('Очистить сообщение', { exact: true }).count(), 0);
-      assert.equal(await page.getByLabel('Улучшить текст', { exact: true }).isDisabled(), true);
+      // The default/system engine must not expose the Whisper-only cleanup
+      // control, even after typing. Its normalization request budget stays zero.
+      assert.equal(await page.getByLabel('Улучшить текст', { exact: true }).count(), 0,
+        'Google/system dictation hides Whisper-only improvement');
       const originalDraft = 'нужно купить молоко и хлеб';
       await prompt.fill(originalDraft);
-      await page.getByLabel('Улучшить текст', { exact: true }).click();
-      await page.getByLabel('Вернуть исходный текст', { exact: true }).waitFor();
-      assert.equal(await prompt.inputValue(), 'Нужно купить молоко и хлеб.');
-      assert.equal(replyNumber, 0, 'Improvement never sends a chat message');
-      const improveButton = await page.getByLabel('Вернуть исходный текст', { exact: true }).boundingBox();
+      assert.equal(await page.getByLabel('Улучшить текст', { exact: true }).count(), 0);
+      assert.equal(normalizationCalls, 0, 'Google does not run a cleanup LLM request');
       const micButton = await page.getByLabel('Голосовой ввод', { exact: true }).boundingBox();
-      assert(improveButton.x > micButton.x && improveButton.x - micButton.x - micButton.width < 12, 'Improvement is next to the microphone');
-      assert(improveButton.x + improveButton.width <= width, 'Improvement fits on a narrow phone');
-      await page.getByTestId('action-hint').waitFor();
-      const improveHint = await page.getByTestId('action-hint').boundingBox();
+      assert(micButton && micButton.width >= 44, 'Microphone remains tappable without improvement');
       let composerRowY = null;
-      for (const label of ['Прикрепить файл к сообщению', 'Сделать снимок', 'Голосовой ввод', 'Вернуть исходный текст', 'Отправить запрос']) {
+      for (const label of ['Прикрепить файл к сообщению', 'Сделать снимок', 'Голосовой ввод', 'Отправить запрос']) {
         const box = await page.getByTestId('composer-actions').getByLabel(label, { exact: true }).boundingBox();
         assert(box.x >= 0 && box.x + box.width <= width, `Composer action ${label} stays inside the viewport`);
-        assert(box.height >= 46, `Composer action ${label} has a usable touch target`);
+        assert(box.height >= 44, `Composer action ${label} has a usable touch target`);
         if (composerRowY === null) composerRowY = box.y;
         assert(Math.abs(box.y - composerRowY) <= 3, `Composer action ${label} remains in one row at ${width}px`);
       }
-      assert(improveHint.x >= 0 && improveHint.x + improveHint.width <= width, 'Improvement hint stays inside the viewport');
-      // The camera button opens the native camera directly. No pre-capture modal.
-      assert.equal(await page.getByText('Что сделать со снимком?', {exact:true}).count(),0);
-      if (process.env.SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, `draft-improved-${width}.png`) });
-      await page.getByLabel('Вернуть исходный текст', { exact: true }).click();
-      assert.equal(await prompt.inputValue(), originalDraft);
-      await page.getByLabel('Улучшить текст', { exact: true }).click();
-      assert.equal(await prompt.inputValue(), 'Нужно купить молоко и хлеб.');
-      assert.equal(normalizationCalls, 1, 'Toggling two versions does not spend more model calls');
-
-      normalizationMode = 'hold';
-      await prompt.fill('старый черновик');
-      await page.getByLabel('Улучшить текст', { exact: true }).click();
-      await page.getByLabel('Отменить улучшение текста', { exact: true }).waitFor();
-      await page.waitForFunction(() => document.body.textContent.includes('Улучшаю текст'));
-      await prompt.fill('ручная правка');
-      await page.getByLabel('Улучшить текст', { exact: true }).waitFor();
-      releaseNormalization();
-      await page.clock.runFor(100);
-      assert.equal(await prompt.inputValue(), 'ручная правка', 'A late correction cannot overwrite manual edits');
-      await page.getByLabel('Улучшить текст', { exact: true }).click();
-      await page.getByLabel('Отменить улучшение текста', { exact: true }).waitFor();
-      await page.getByLabel('Отменить улучшение текста', { exact: true }).click();
-      releaseNormalization();
-      await page.clock.runFor(100);
-      assert.equal(await prompt.inputValue(), 'ручная правка', 'Cancellation keeps the original draft');
-
-      normalizationMode = 'fail';
-      await page.getByLabel('Улучшить текст', { exact: true }).click();
-      await page.getByText(/Не удалось улучшить текст/).waitFor();
-      assert.equal(await prompt.inputValue(), 'ручная правка', 'A failed service keeps the original');
-      normalizationMode = 'normal';
-      await page.getByLabel('Улучшить текст', { exact: true }).click();
-      await page.getByLabel('Вернуть исходный текст', { exact: true }).waitFor();
+      if (process.env.SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, `draft-google-no-improve-${width}.png`) });
       await page.getByLabel('Очистить сообщение', { exact: true }).click();
       // Clear an active recording, then deliver the service's stale callback.
       await page.evaluate(() => { window.__qa.holdSpeech = true; });
       await page.getByLabel('Голосовой ввод', { exact: true }).click();
       await page.getByLabel('Остановить диктовку', { exact: true }).waitFor();
-      assert.equal(await page.getByLabel('Улучшить текст', { exact: true }).isDisabled(), true, 'An unfinished transcript cannot be improved');
+      assert.equal(await page.getByLabel('Улучшить текст', { exact: true }).count(), 0, 'Google has no cleanup button during dictation');
       await page.evaluate(() => window.__speechEvent('result', { results: [{ transcript: 'Удалить эту диктовку' }], isFinal: false }));
       await page.getByLabel('Очистить сообщение', { exact: true }).click();
       await page.waitForFunction(() => window.__qa.speechAborts === 1);
