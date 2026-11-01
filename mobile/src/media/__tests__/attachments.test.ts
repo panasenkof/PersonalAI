@@ -474,3 +474,46 @@ test("SEC-08: verified original rejects an ACL change during decryption and disc
   const after=[...mockFiles.keys()].filter(uri=>uri.includes("persai-previews")).length;
   expect(after).toBe(before);
 });
+
+
+test("step 8 D: PDF coverage is saved atomically with 1-based source evidence and original", async () => {
+  const pdf={uri:"file:///coverage.pdf",name:"coverage.pdf",mimeType:"application/pdf"};
+  mockFiles.set(pdf.uri,new Uint8Array([37,80,68,70,45,49]));
+  const request={
+    file:pdf,title:"Руководство",body:"Моя правка не потеряна",sensitivity:"standard" as const,
+    extractedText:"Страница 1: Начало\n\nСтраница 3: Искомая фраза",
+    recognitions:[{index:0,name:pdf.name,status:"success" as const,text:"Начало Искомая фраза",
+      segments:[{text:"Начало",location:{kind:"page" as const,page:1}},
+        {text:"Искомая фраза",location:{kind:"page" as const,page:3}}],
+      pdfCoverage:{totalPageCount:4,extractedPageCount:2,missingPages:[2,4],coverage:"partial" as const}}],
+  };
+  const id=await saveMediaNote("guest",request);
+  const e=sqlite.prepare("SELECT payload_json FROM memory_entities WHERE id=?").get(id);
+  const payload=JSON.parse(e.payload_json);
+  expect(payload.body).toBe("Моя правка не потеряна");
+  expect(payload.source_pdf_coverage).toEqual([
+    {index:0,total_page_count:4,extracted_page_count:2,missing_pages:[2,4]},
+  ]);
+  const record=sqlite.prepare("SELECT coverage,source_version FROM memory_extractions").get();
+  expect(record.coverage).toBe("partial");
+  expect(record.source_version).toMatch(/^[a-f0-9]{64}$/);
+  expect(sqlite.prepare("SELECT page,text FROM memory_extraction_segments ORDER BY ord").all())
+    .toEqual([{page:1,text:"Начало"},{page:3,text:"Искомая фраза"}]);
+  expect(await saveMediaNote("guest",request)).toBe(id);
+  expect(sqlite.prepare("SELECT count(*) n FROM memory_extractions").get().n).toBe(1);
+});
+test("step 8 D: forged PDF coverage or wrong missing-page list cannot enter SQLCipher",async()=>{
+  const pdf={uri:"file:///coverage.pdf",name:"coverage.pdf",mimeType:"application/pdf"};
+  mockFiles.set(pdf.uri,new Uint8Array([37,80,68,70]));
+  const base={file:pdf,title:"Bad",body:"",sensitivity:"standard" as const};
+  for(const coverage of [
+    {totalPageCount:2,extractedPageCount:1,missingPages:[],coverage:"partial" as const},
+    {totalPageCount:2,extractedPageCount:2,missingPages:[2],coverage:"partial" as const},
+    {totalPageCount:1,extractedPageCount:1,missingPages:[],coverage:"partial" as const},
+  ]){
+    await expect(saveMediaNote("guest",{...base,recognitions:[
+      {index:0,name:pdf.name,status:"success",text:"page",segments:[{text:"page",location:{kind:"page",page:2}}],pdfCoverage:coverage}
+    ]})).rejects.toThrow("invalid_pdf_page_coverage");
+  }
+  expect(sqlite.prepare("SELECT COUNT(*) n FROM memory_entities").get().n).toBe(0);
+});
