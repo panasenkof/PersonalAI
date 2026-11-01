@@ -424,3 +424,42 @@ test('step 8 D: PDF coverage preview identifies missing pages and retains author
     recognitions:[expect.objectContaining({pdfCoverage:coverage,segments})],
   }),expect.anything()));
 });
+
+
+test('step 8 E photo document-text action is opt-in and keeps user annotation',async()=>{
+  (extractMedia as jest.Mock).mockResolvedValueOnce('Счёт № 17\nСумма: 2 050 ₽');
+  const ui=render(<MemoryImportScreen/>);
+  fireEvent.press(ui.getByLabelText('Выбрать файл для памяти'));
+  await waitFor(()=>expect(ui.getByText('photo.png')).toBeTruthy());
+  fireEvent.changeText(ui.getByLabelText('Сведения из файла'),'Сохранить в бухгалтерию');
+  if(!ui.queryByLabelText('Извлечь сведения из файла'))fireEvent.press(ui.getByLabelText('Распознавание'));
+  fireEvent.press(ui.getByLabelText('Прочитать текст фотографии через ИИ'));
+  expect(ui.getByText(/Это не локальное OCR/)).toBeTruthy();
+  expect(ui.getByText('Отправить фото модели и прочитать текст')).toBeTruthy();
+  expect(extractMedia).not.toHaveBeenCalled();
+  fireEvent.press(ui.getByLabelText('Извлечь сведения из файла'));
+  await waitFor(()=>expect(ui.getByLabelText('Распознанное содержимое файла').props.value).toBe('Счёт № 17\nСумма: 2 050 ₽'));
+  expect(extractMedia.mock.calls[0][8]).toBe('document-text');
+  expect(extractMedia.mock.calls[0][2]).toBe(true);
+  expect(ui.getByText(/не подтвердил точность/)).toBeTruthy();
+  expect(ui.getByLabelText('Сведения из файла').props.value).toBe('Сохранить в бухгалтерию');
+  fireEvent.press(ui.getByLabelText('Сохранить сведения в память'));
+  await waitFor(()=>expect(saveMediaNote).toHaveBeenCalledWith('guest',expect.objectContaining({
+    body:'Сохранить в бухгалтерию',extractedText:'Счёт № 17\nСумма: 2 050 ₽',
+  }),expect.anything()));
+});
+test('step 8 E personal photo remains local-only with no provider call',async()=>{
+  const ui=render(<MemoryImportScreen/>);
+  fireEvent.press(ui.getByLabelText('Выбрать файл для памяти'));
+  await waitFor(()=>expect(ui.getByText('photo.png')).toBeTruthy());
+  if(!ui.queryByLabelText('Прочитать текст фотографии через ИИ'))fireEvent.press(ui.getByLabelText('Распознавание'));
+  fireEvent.press(ui.getByLabelText('Прочитать текст фотографии через ИИ'));
+  fireEvent.press(ui.getByLabelText('Личные — только на телефоне'));
+  const read=ui.getByLabelText('Извлечь сведения из файла');
+  expect(read.props.accessibilityState?.disabled ?? read.props.disabled).toBe(true);
+  expect(extractMedia).not.toHaveBeenCalled();
+  fireEvent.press(ui.getByLabelText('Сохранить сведения в память'));
+  await waitFor(()=>expect(saveMediaNote).toHaveBeenCalledWith('guest',expect.objectContaining({
+    sensitivity:'sensitive',file:expect.objectContaining({name:'photo.png'}),extractedText:'',
+  }),expect.anything()));
+});
