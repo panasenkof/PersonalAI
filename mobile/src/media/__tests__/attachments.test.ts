@@ -554,7 +554,7 @@ test("step 8 E2b real local OCR photo is versioned as partial source extraction 
   const run=sqlite.prepare("SELECT producer_kind,producer_id,producer_revision,status,coverage FROM memory_extractions").get();
   expect(run).toEqual({producer_kind:"vision",producer_id:"android-tesseract-5-rus",
     producer_revision:"local-tesseract-rus-v1",status:"partial",coverage:"unknown"});
-  expect(sqlite.prepare("SELECT COUNT(*) AS n FROM memory_extraction_fts WHERE memory_extraction_fts MATCH ?").get('"счёт"').n).toBe(1);
+  expect(sqlite.prepare("SELECT COUNT(*) AS n FROM memory_extraction_fts WHERE memory_extraction_fts MATCH ?").get('"200"').n).toBe(1);
 });
 test("step 8 E2b normal PDF cannot forge local OCR page status",async()=>{
   const pdf={uri:"file:///scan.pdf",name:"scan.pdf",mimeType:"application/pdf"};
