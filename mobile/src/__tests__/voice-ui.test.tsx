@@ -1,5 +1,5 @@
 import React from "react";
-import { Alert, AppState, Text } from "react-native";
+import { Alert, AppState, Platform, Text } from "react-native";
 import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 import { ExpoSpeechRecognitionModule as Speech } from "expo-speech-recognition";
 import { VoiceInput } from "../components/VoiceInput";
@@ -20,6 +20,8 @@ beforeEach(() => {
   jest.clearAllMocks();
   (Speech.getPermissionsAsync as jest.Mock).mockResolvedValue({ granted: false });
   Object.defineProperty(AppState, "currentState", { value: "active", configurable: true });
+  // Jest Expo defaults to iOS; Android service discovery is Android-only.
+  Object.defineProperty(Platform, "OS", { value: "android", configurable: true });
   (Speech.isRecognitionAvailable as jest.Mock).mockReturnValue(true);
   (Speech.supportsOnDeviceRecognition as jest.Mock).mockReturnValue(true);
   (Speech.getSpeechRecognitionServices as jest.Mock).mockReturnValue(["com.google.android.tts", "com.google.android.googlequicksearchbox"]);
