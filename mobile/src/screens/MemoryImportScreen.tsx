@@ -6,7 +6,7 @@ import type { CollectionRecord } from "../local-memory/types";
 import { loadMediaPreferences } from "../media/preferences";
 import { onLocalMemorySessionChange } from "../local-memory/storage";
 import * as ImagePicker from "expo-image-picker";
-import { importLink, linkImportErrorMessage } from "../media/link-import";
+import { importLink, linkImportErrorMessage, publicImportUrl } from "../media/link-import";
 import * as Crypto from "expo-crypto";
 import { File, Directory, Paths } from "expo-file-system";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
@@ -42,6 +42,7 @@ export function MemoryImportScreen() {
   const [keepOriginal, setKeepOriginal] = useState(true);
   const [sourceUrl, setSourceUrl] = useState(""); // Confirmed provenance only.
   const [linkDraft, setLinkDraft] = useState(""); // Unconfirmed URL never changes saved provenance.
+  const [linkOnly, setLinkOnly] = useState(false); // Confirmed draft without fetched content.
   const [sourceChoice, setSourceChoice] = useState(route.params?.source);
   const [sourcePickerOpen, setSourcePickerOpen] = useState(true);
   const [processingOptionsOpen, setProcessingOptionsOpen] = useState(false);
@@ -106,12 +107,12 @@ export function MemoryImportScreen() {
       cancelled = true; cleanup(); setFiles([]); setPreparing(false);
       setNotice("Подготовка прервана блокировкой. Повторите приём после разблокировки.");
     });
-    setPreparing(true); setTitle(""); setFiles([]); setRecognitionResults([]); setRecognizingIndex(-1); setBody(""); setExtractedText(""); setNotice(""); setSourceUrl(""); setLinkDraft(""); setSourcePickerOpen(false); setProcessingOptionsOpen(false); setKeepOriginal(true);
+    setPreparing(true); setTitle(""); setFiles([]); setRecognitionResults([]); setRecognizingIndex(-1); setBody(""); setExtractedText(""); setNotice(""); setSourceUrl(""); setLinkDraft(""); setLinkOnly(false); setSourcePickerOpen(false); setProcessingOptionsOpen(false); setKeepOriginal(true);
     void (async () => {
       if (incoming!.length > 30) throw new Error("Отправляйте не более 30 файлов за один раз.");
       const text = payload.shareType === "text" || payload.shareType === "url";
       if (!payload.value || (text && payload.value.length > 60_000)) throw new Error("Пустой или слишком длинный материал.");
-      if (text) { if (!cancelled) { if (payload.shareType === "url") { setSourceUrl(payload.value); setLinkDraft(payload.value); } setTitle(payload.shareType === "url" ? "Ссылка" : payload.value.split("\n")[0].slice(0, 160)); setBody(payload.value); } return; }
+      if (text) { if (!cancelled) { if (payload.shareType === "url") { setSourceUrl(payload.value); setLinkDraft(payload.value); setLinkOnly(true); } setTitle(payload.shareType === "url" ? "Ссылка" : payload.value.split("\n")[0].slice(0, 160)); setBody(payload.value); } return; }
       const source = new File(payload.value);
       const dir = new Directory(Paths.cache, "persai-incoming"); dir.create({ intermediates: true, idempotent: true });
       const target = new File(dir, Crypto.randomUUID()); staged = target;
@@ -172,7 +173,7 @@ export function MemoryImportScreen() {
       }
       if (!alive.current) { for (const copy of copies) await FileSystem.deleteAsync(copy.uri, { idempotent: true }); return; }
       ownedFiles.current.push(...copies.map(copy => copy.uri));
-      setFiles(copies); setRecognitionResults([]); setTitle(""); setSourceUrl(""); setLinkDraft(""); setSourcePickerOpen(false); setProcessingOptionsOpen(false); setKeepOriginal(true); setExtractedText(""); setBody("");
+      setFiles(copies); setRecognitionResults([]); setTitle(""); setSourceUrl(""); setLinkDraft(""); setLinkOnly(false); setSourcePickerOpen(false); setProcessingOptionsOpen(false); setKeepOriginal(true); setExtractedText(""); setBody("");
     } catch (e) {
       for (const copy of copies) await FileSystem.deleteAsync(copy.uri, { idempotent: true }).catch(() => {});
       if (alive.current) setNotice(memoryErrorMessage(e));
@@ -195,7 +196,7 @@ export function MemoryImportScreen() {
       if (!alive.current) { if (target.exists) target.delete(); return; }
       ownedFiles.current.push(target.uri);
       setFiles([{ uri: target.uri, name: asset.fileName || "camera.jpg", mimeType: asset.mimeType || "image/jpeg" }]); setRecognitionResults([]);
-      setTitle("Снимок"); setSourceUrl(""); setLinkDraft(""); setSourcePickerOpen(false); setProcessingOptionsOpen(false); setKeepOriginal(true); setExtractedText(""); setBody("");
+      setTitle("Снимок"); setSourceUrl(""); setLinkDraft(""); setLinkOnly(false); setSourcePickerOpen(false); setProcessingOptionsOpen(false); setKeepOriginal(true); setExtractedText(""); setBody("");
     } catch (e) { if (alive.current) setNotice(memoryErrorMessage(e)); }
     finally { if (alive.current) setPreparing(false); }
   }
@@ -267,7 +268,7 @@ export function MemoryImportScreen() {
         if (FileSystem.cacheDirectory && asset.uri.startsWith(FileSystem.cacheDirectory)) ownedFiles.current.push(asset.uri);
       }
       setFiles(chosen); setRecognitionResults([]); setRecognizingIndex(-1);
-      setSourceUrl(""); setLinkDraft(""); setSourcePickerOpen(false); setProcessingOptionsOpen(false);
+      setSourceUrl(""); setLinkDraft(""); setLinkOnly(false); setSourcePickerOpen(false); setProcessingOptionsOpen(false);
       setKeepOriginal(true); setTitle(chosen[0].name.slice(0, 160)); setBody(""); setExtractedText(""); setClassification("standard");
     } catch (e) { if (alive.current) setNotice((e as Error).message); }
     finally { if (alive.current) setPreparing(false); }
