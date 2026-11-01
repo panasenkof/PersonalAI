@@ -50,3 +50,20 @@ export async function setVoiceEngine(engine: VoiceEngine): Promise<void> {
     throw new Error(message);
   }
 }
+
+/** Approval for sending speech to the selected system recognizer's online
+ * service. Stored separately from ASR engine choice and never auto-granted. */
+const ONLINE_CONSENT_KEY = "pia.voice.system-online-consent.v1";
+let onlineConsent: boolean | null = null;
+let onlineConsentRead: Promise<boolean> | null = null;
+export async function hasOnlineSpeechConsent(): Promise<boolean> {
+  if (onlineConsent !== null) return onlineConsent;
+  onlineConsentRead ??= SecureStore.getItemAsync(ONLINE_CONSENT_KEY)
+    .then(saved => (onlineConsent = saved === "true"))
+    .catch(() => false);
+  return onlineConsentRead;
+}
+export async function grantOnlineSpeechConsent(): Promise<void> {
+  await SecureStore.setItemAsync(ONLINE_CONSENT_KEY, "true");
+  onlineConsent = true;
+}
