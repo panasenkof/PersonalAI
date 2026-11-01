@@ -63,7 +63,7 @@ test("missing permission blocks recording; Google starts online and retries a re
   }));
   const dialogsBefore = modal.mock.calls.length;
   act(() => mockEvents.error({ error: "language-not-supported" }));
-  expect(error).toHaveBeenLastCalledWith(expect.stringContaining("даже в сетевом режиме"));
+  expect(error).toHaveBeenLastCalledWith(expect.stringContaining("не принимает русский в сетевом режиме"));
   expect(modal.mock.calls.length).toBe(dialogsBefore);
   v.unmount(); modal.mockRestore();
 });
