@@ -1,5 +1,6 @@
 import { videoAudio } from "./video-audio";
 import { extractPdfPages } from "./pdf-pages";
+import { recognizeRussianPhoto, recognizeRussianPdf } from "./russian-ocr";
 import type { PdfPageCoverage } from "./pdf-pages";
 import * as FileSystem from "expo-file-system/legacy";
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
@@ -75,7 +76,7 @@ async function videoFrames(uri: string, fractions: number[], signal?: AbortSigna
     return frames;
   } finally { player.release(); }
 }
-export type ImageExtractionMode = "describe" | "document-text";
+export type ImageExtractionMode = "describe" | "document-text" | "offline-ocr";
 /** Explicit provider-only transcription of a photographed document, not a local
  * OCR engine. Do not change the default general image analysis contract.
  */
@@ -123,11 +124,14 @@ async function extractMediaCore(file: ImportFile, settings: DirectAgentSettings,
   check(signal);
   await fileSize(file, (kind === "video" || kind === "document" ? 80 : kind === "text" ? 1 : kind === "image" ? 8 : 20) * 1024 * 1024);
   if (kind === "document") {
-    const pages=await extractPdfPages(file,signal);
+    const pages= imageMode === "offline-ocr" ? await recognizeRussianPdf(file,signal) : await extractPdfPages(file,signal);
     check(signal);
     if(onTimedSegments)onTimedSegments(pages.segments);
     onPdfCoverage?.(pages);
     return pages.text;
+  }
+  if (kind === "image" && imageMode === "offline-ocr") {
+    return recognizeRussianPhoto(file,signal);
   }
   if (kind === "text") {
     const text = await FileSystem.readAsStringAsync(file.uri);
