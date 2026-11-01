@@ -13,7 +13,7 @@ const mockEngine = {
     start === 1 ? {pageCount:4,pages:[{page:1,text:"Текстовый слой",source:"text"},{page:3,text:"Рецепт 200 г",source:"ocr"}],nextPage:4} :
       {pageCount:4,pages:[{page:1,text:"Текстовый слой",source:"text"},{page:4,text:"№ 314",source:"ocr"}],nextPage:5}),
 };
-jest.mock("expo-modules-core", () => ({ requireOptionalNativeModule: jest.fn(() => mockEngine) }));
+jest.mock("expo-modules-core", () => ({ ...jest.requireActual("expo-modules-core"), requireOptionalNativeModule: jest.fn(() => mockEngine) }));
 jest.mock("react-native-blob-util", () => {
   const fs = {
     dirs: { DocumentDir: "/app-private" },
