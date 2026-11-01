@@ -114,6 +114,7 @@ internal object LocalRussianOcr {
         val output = mutableListOf<Map<String, Any>>()
         var total = 0
         var ocrDone = 0
+        var nextPage = pageCount + 1
         for (index in 0 until pageCount) {
           pdf.openPage(index).use { page ->
             // A later chunk may omit all earlier scanned pages, but still
@@ -123,7 +124,9 @@ internal object LocalRussianOcr {
               total += layer.length
               require(total <= MAX_CHARS) { "russian_ocr_text_limit" }
               output.add(mapOf("page" to index + 1, "text" to layer, "source" to "text"))
-            } else if (index + 1 >= fromPage && ocrDone < OCR_PAGES_PER_ACTION) {
+            } else if (index + 1 >= fromPage && ocrDone >= OCR_PAGES_PER_ACTION) {
+              if (nextPage == pageCount + 1) nextPage = index + 1
+            } else if (index + 1 >= fromPage) {
               ocrDone++
               val bitmap = renderPage(page)
               try {
@@ -139,7 +142,7 @@ internal object LocalRussianOcr {
           }
         }
         mapOf("pageCount" to pageCount, "pages" to output,
-          "ocrPagesAttempted" to ocrDone, "nextPage" to min(pageCount + 1, fromPage + ocrDone))
+          "ocrPagesAttempted" to ocrDone, "nextPage" to nextPage)
       }
     }
   }
