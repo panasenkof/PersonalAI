@@ -1,5 +1,5 @@
 import React from "react";
-import { Alert } from "react-native";
+import { Alert, Platform } from "react-native";
 import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 import { VoiceModelCard } from "../components/VoiceModelCard";
 import { grantOnlineSpeechConsent, setVoiceEngine } from "../media/voice-engine";
@@ -16,7 +16,10 @@ jest.mock("../media/whisper", () => ({
   useWhisperStatus: () => ({ state: "ready", id: "base" }),
   downloadWhisper: jest.fn(), deleteWhisper: jest.fn(), cancelWhisperDownload: jest.fn(),
 }));
-beforeEach(() => { jest.clearAllMocks(); mockConsent.allowed = false; });
+beforeEach(() => {
+  Object.defineProperty(Platform, "OS", { value: "android", configurable: true });
+  jest.clearAllMocks(); mockConsent.allowed = false;
+});
 
 test("Google online permission is requested once in settings, not silently granted", async () => {
   const alert = jest.spyOn(Alert, "alert").mockImplementation(() => {});
@@ -58,4 +61,12 @@ test("stored Google approval switches the engine without another prompt", async 
   expect(alert).not.toHaveBeenCalled();
   expect(grantOnlineSpeechConsent).not.toHaveBeenCalled();
   v.unmount(); alert.mockRestore();
+});
+
+test("on iOS the settings name the system recognizer without claiming it is Google Android", () => {
+  Object.defineProperty(Platform, "OS", { value: "ios", configurable: true });
+  const v = render(<VoiceModelCard defaultOpen />);
+  expect(v.getByLabelText("Системное распознавание")).toBeTruthy();
+  expect(v.queryByLabelText("Google — системное окно")).toBeNull();
+  v.unmount();
 });
