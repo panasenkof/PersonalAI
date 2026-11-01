@@ -304,8 +304,17 @@ export function MemoryImportScreen() {
     } catch (e) { if (alive.current) setNotice((e as Error).message); }
     finally { if (alive.current) setPreparing(false); }
   }
-  async function extract() {
+  async function extract(confirmedReplacement = false) {
     if (!file || !canExtract || busy || controller.current) return;
+    // Reprocessing a corrected document must not silently erase user edits.
+    // Full versioned candidate comparison is implemented in package G.
+    if (imageExtractionMode === "document-text" && extractedText.trim() && !confirmedReplacement) {
+      Alert.alert("Заменить полученный текст?",
+        "Текущий распознанный текст мог быть исправлен вручную. Новый результат заменит его только после вашего подтверждения; подпись к заметке не изменится.",
+        [{ text: "Оставить текущий", style: "cancel" },
+         { text: "Заменить после разбора", onPress: () => void extract(true) }]);
+      return;
+    }
     const aborter = new AbortController(); controller.current = aborter; setBusy(true); setNotice("");
     try {
       const vision = selected || { ...defaultDirectPreferences, apiKey: "", webSearchKey: "" };
