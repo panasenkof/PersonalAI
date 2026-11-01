@@ -7,7 +7,7 @@ import { nativeInteractionActive, withNativeInteraction } from "../security/nati
 import type { ServiceChoice } from "../media/voice";
 import { alternativeOnlineGoogleService, appendDictation, NO_SERVICE_MESSAGE, START_TIMEOUT_MS, pickRecognitionService, serviceName, startTimeoutMessage, voiceErrorMessage } from "../media/voice";
 import { startWhisperDictation, useWhisperStatus } from "../media/whisper";
-import { launchAndroidVoiceActivity, preferAndroidVoiceActivity, recordAndroidVoiceActivitySuccess } from "../media/android-voice-activity";
+import { launchAndroidVoiceActivity } from "../media/android-voice-activity";
 import type { DictationSession } from "../media/whisper";
 import { grantOnlineSpeechConsent, hasOnlineSpeechConsent, resolveVoiceEngine, useVoiceEngine } from "../media/voice-engine";
 import { useTheme } from "../theme";
@@ -178,7 +178,8 @@ export function VoiceInput({ value, onChange, disabled = false, onError, showLab
     setPhase("starting");
     try {
       if (!(await hasOnlineSpeechConsent())) {
-        throw new Error("Сначала разрешите онлайн-распознавание Google через обычную кнопку микрофона.");
+        onError("Подтвердите использование Google через интернет в разделе Настройки → Голосовой ввод. После этого микрофон будет сразу открывать системное окно.");
+        return;
       }
       if (token !== generation.current) return;
       onBegin?.();
@@ -186,7 +187,6 @@ export function VoiceInput({ value, onChange, disabled = false, onError, showLab
       if (token !== generation.current) return; // canceled, unmounted, locked or switched engine
       if (result.status === "recognized") {
         onChange(appendDictation(value, result.transcript, maxLength));
-        recordAndroidVoiceActivitySuccess();
       } else if (result.status === "empty") {
         onError("Системная служба не вернула текст. Попробуйте ещё раз или используйте микрофон Gboard.");
       }
@@ -228,7 +228,9 @@ export function VoiceInput({ value, onChange, disabled = false, onError, showLab
     if (disabled || !voice.loaded || voice.saving || owns.current || starting.current) return;
     if (value.length >= maxLength) { onError("Текст слишком длинный для диктовки. Существующий текст сохранён; добавьте отдельную запись."); return; }
     if (voice.error) { onError(voice.error); return; }
-    if (selectedEngine === "system" && !recognitionPackage && Platform.OS === "android" && preferAndroidVoiceActivity())
+    // On Android the Google option always opens the OS recognition UI directly.
+    // Do not first invoke a bound SpeechRecognizer or prompt for an alternate route.
+    if (selectedEngine === "system" && Platform.OS === "android")
       return startAndroidActivity();
     if (selectedEngine === "whisper" && !recognitionPackage && whisper.state !== "ready") {
       onError(whisper.state === "unsupported" ? "Whisper недоступен на этом телефоне. Выберите системное распознавание: Настройки → Голосовой ввод." :
