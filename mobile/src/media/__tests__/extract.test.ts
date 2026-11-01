@@ -147,7 +147,7 @@ test("step 8 E photo text mode is an explicit approved provider request, not aut
   expect(transport).not.toHaveBeenCalled();
   const text=await extractMedia(photo,settings,true,undefined,transport as unknown as typeof fetch,undefined,undefined,undefined,"document-text");
   expect(text).toBe("Квитанция\nИтого: 125,50 ₽");
-  const payload=JSON.parse(transport.mock.calls[0][1].body);
+  const payload=JSON.parse((transport as jest.Mock).mock.calls[0][1].body);
   expect(payload.store).toBe(false);
   expect(payload.input[0].content[0].text).toMatch(/дословно.*русский/);
   expect(payload.input[0].content[0].text).toMatch(/не додумывай неразборчивые/i);
@@ -157,7 +157,7 @@ test("step 8 E photo text mode is an explicit approved provider request, not aut
 test("step 8 E default photo analysis stays unchanged and low-detail",async()=>{
   const transport=jest.fn(async()=>({ok:true,json:async()=>({output_text:"На фото коробка"})}));
   await extractMedia({uri:"file:///cache/photo.png",name:"photo.png",mimeType:"image/png"},settings,true,undefined,transport as unknown as typeof fetch);
-  const payload=JSON.parse(transport.mock.calls[0][1].body);
+  const payload=JSON.parse((transport as jest.Mock).mock.calls[0][1].body);
   expect(payload.input[0].content[0].text).toMatch(/Описание изображения/);
   expect(payload.input[0].content[1].detail).toBe("low");
 });
