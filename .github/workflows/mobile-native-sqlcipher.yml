@@ -216,6 +216,42 @@ jobs:
           name: android-ui-apk-${{ github.sha }}
           path: mobile/android/app/build/outputs/apk/release/app-release.apk
           retention-days: 3
+      # A native x86_64 build, the NDK and Gradle intermediates can exhaust the
+      # runner disk AFTER the signed APK is ready. The Android system image
+      # needs several GiB more. Reclaim only build-time artifacts; do not
+      # remove the APK, its uploaded artifact, ccache or any test evidence.
+      - name: Reclaim native build disk space before Android emulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="android/app/build/outputs/apk/release/app-release.apk"
+          test -s "$apk"
+          sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          test -n "$sdk_root"
+          echo "Available disk before cleanup:"
+          df -h "$RUNNER_TEMP"
+          # NDK and Gradle intermediates are not needed to run the signed APK.
+          rm -rf "$sdk_root/ndk/27.0.12077973" \
+            android/app/build/intermediates \
+            android/app/build/generated \
+            android/app/.cxx \
+            android/.gradle
+          # Keep Gradle caches when there is room; delete regenerable
+          # transformed dependencies only if the emulator would lack space.
+          available_kib="$(df -Pk "$RUNNER_TEMP" | awk 'NR==2 {print $4}')"
+          if [ "$available_kib" -lt 5242880 ]; then
+            echo "Reclaiming regenerable Gradle transforms before AVD install"
+            find "$HOME/.gradle/caches" -maxdepth 2 -type d -name 'transforms*' -prune -exec rm -rf {} + 2>/dev/null || true
+            rm -rf "$sdk_root/cmake"
+          fi
+          echo "Available disk after cleanup:"
+          df -h "$RUNNER_TEMP"
+          test -s "$apk"
+          available_kib="$(df -Pk "$RUNNER_TEMP" | awk 'NR==2 {print $4}')"
+          if [ "$available_kib" -lt 3145728 ]; then
+            echo "::error::Insufficient runner disk for Android emulator after reclaiming native build files"
+            exit 1
+          fi
       - name: Install pinned Maestro CLI
         run: |
           curl --fail --location --retry 3 -o "$RUNNER_TEMP/maestro.zip" "https://github.com/mobile-dev-inc/maestro/releases/download/cli-${MAESTRO_VERSION}/maestro.zip"
