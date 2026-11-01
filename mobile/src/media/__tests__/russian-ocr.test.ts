@@ -88,7 +88,7 @@ test("mixed PDF merges 8-page batches by native 1-based page without duplicating
 });
 test("false page numbers, misleading continuation, abort are not saved",async()=>{
   await installRussianOcr();
-  engine.recognizeRussianPdf.mockResolvedValueOnce({pageCount:2,pages:[{page:3,text:"BAD"}],nextPage:3});
+  engine.recognizeRussianPdf.mockResolvedValueOnce({pageCount:2,pages:[{page:3,text:"BAD",source:"ocr"}],nextPage:3});
   await expect(recognizeRussianPdf(pdf)).rejects.toThrow();
   const c=new AbortController();c.abort();
   await expect(recognizeRussianPhoto(photo,c.signal)).rejects.toThrow("остановлено");
