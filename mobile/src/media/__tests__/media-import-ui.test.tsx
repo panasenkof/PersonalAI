@@ -5,6 +5,7 @@ import { saveMediaNote } from '../attachments';
 import { extractMedia } from '../extract';
 import { importLink } from '../link-import';
 import { analyzeFilesTogether } from '../joint-recognition';
+import { ensureSections } from '../../local-memory/sections';
 import * as DocumentPicker from 'expo-document-picker';
 jest.mock('../../components/BottomSheet', () => ({ BottomSheet: ({ visible, children }: any) => visible ? children : null }));
 const mockBack = jest.fn();
@@ -18,7 +19,7 @@ jest.mock('../link-import', () => ({
 const mockSessionListeners=new Set<(unlocked:boolean)=>void>();
 jest.mock("../../local-memory/storage", () => ({ onLocalMemorySessionChange: (fn:any) => {mockSessionListeners.add(fn);return ()=>mockSessionListeners.delete(fn);} }));
 jest.mock('../../local-memory/repository', () => ({ localMemoryRepository: async () => ({}) }));
-jest.mock('../../local-memory/sections', () => ({ ensureSections: async () => [{ id: 'notes', name: 'Заметки', slug: 'notes', sensitivity: 'standard' }] }));
+jest.mock('../../local-memory/sections', () => ({ ensureSections: jest.fn(async () => [{ id: 'notes', name: 'Заметки', slug: 'notes', sensitivity: 'standard' }]) }));
 jest.mock('@react-navigation/native', () => ({ useNavigation: () => ({ goBack: mockBack }), useRoute: () => ({ params: mockParams }), usePreventRemove: jest.fn() }));
 jest.mock('@react-navigation/elements', () => ({ useHeaderHeight: () => 56 }));
 jest.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ bottom: 24 }) }));
@@ -34,7 +35,9 @@ jest.mock('../joint-recognition', () => ({ analyzeFilesTogether: jest.fn() }));
 jest.mock('expo-document-picker', () => ({ getDocumentAsync: jest.fn(async () => ({ canceled: false, assets: [{ uri: 'file:///cache/photo.png', name: 'photo.png', mimeType: 'image/png' }] })) }));
 jest.mock('expo-image-picker', () => ({ launchImageLibraryAsync: jest.fn(), requestCameraPermissionsAsync: jest.fn(), launchCameraAsync: jest.fn() }));
 jest.mock('expo-file-system/legacy', () => ({ copyAsync: jest.fn(async () => {}), cacheDirectory: 'file:///cache/', deleteAsync: jest.fn(async () => {}) }));
-beforeEach(() => { jest.clearAllMocks(); mockParams = undefined; mockSessionListeners.clear(); });
+beforeEach(() => { jest.clearAllMocks(); mockParams = undefined; mockSessionListeners.clear();
+  (ensureSections as jest.Mock).mockResolvedValue([{ id: 'notes', name: 'Заметки', slug: 'notes', sensitivity: 'standard' }]);
+});
 test('picker lets user save original without transcript, provider or network; user text stays separate', async () => {
   const screen = render(<MemoryImportScreen />);
   fireEvent.press(screen.getByLabelText('Выбрать файл для памяти'));
@@ -461,5 +464,22 @@ test('step 8 E personal photo remains local-only with no provider call',async()=
   fireEvent.press(ui.getByLabelText('Сохранить сведения в память'));
   await waitFor(()=>expect(saveMediaNote).toHaveBeenCalledWith('guest',expect.objectContaining({
     sensitivity:'sensitive',file:expect.objectContaining({name:'photo.png'}),extractedText:'',
+  }),expect.anything()));
+});
+
+
+test('step 8 E protected collection blocks external OCR even when record is standard',async()=>{
+  (ensureSections as jest.Mock).mockResolvedValueOnce([{id:'secure',name:'Личные документы',slug:'notes',sensitivity:'sensitive'}]);
+  const ui=render(<MemoryImportScreen/>);
+  fireEvent.press(ui.getByLabelText('Выбрать файл для памяти'));
+  await waitFor(()=>expect(ui.getByText('photo.png')).toBeTruthy());
+  if(!ui.queryByLabelText('Прочитать текст фотографии через ИИ'))fireEvent.press(ui.getByLabelText('Распознавание'));
+  fireEvent.press(ui.getByLabelText('Прочитать текст фотографии через ИИ'));
+  await waitFor(()=>expect(ui.getByText(/Выбранная коллекция закрыта для агента/)).toBeTruthy());
+  expect(ui.getByLabelText('Извлечь сведения из файла').props.accessibilityState?.disabled ?? ui.getByLabelText('Извлечь сведения из файла').props.disabled).toBe(true);
+  expect(extractMedia).not.toHaveBeenCalled();
+  fireEvent.press(ui.getByLabelText('Сохранить сведения в память'));
+  await waitFor(()=>expect(saveMediaNote).toHaveBeenCalledWith('guest',expect.objectContaining({
+    sensitivity:'standard',collectionId:'secure',extractedText:'',file:expect.objectContaining({name:'photo.png'}),
   }),expect.anything()));
 });
