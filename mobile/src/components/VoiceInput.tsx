@@ -112,7 +112,6 @@ export function VoiceInput({ value, onChange, disabled = false, onError, showLab
   });
   useSpeechRecognitionEvent("error", event => {
     if (!owns.current || viaWhisper.current) return;
-    const languageFailure = ["language-not-supported", "language-unavailable"].includes(event.error);
     // ERROR_NO_MATCH may mean the bound Google RecognitionService failed,
     // not that the user was silent. The system recognizer Activity is a
     // separate Android API; offer it even if no second bound service exists.
