@@ -20,7 +20,7 @@ const connections: any[] = [
 ];
 beforeEach(() => {
   jest.clearAllMocks();
-  (loadMediaPreferences as jest.Mock).mockResolvedValue({ visionId: "", speechId: "" });
+  (loadMediaPreferences as jest.Mock).mockResolvedValue({ visionId: "", speechId: "", fileAsrMode: "device" });
   (saveMediaPreferences as jest.Mock).mockResolvedValue(undefined);
 });
 
@@ -30,12 +30,12 @@ test("media settings have one immediate Save per choice, not a second hidden sav
   await waitFor(() => expect(photo.props.accessibilityState.disabled).toBe(false));
   expect(screen.queryByText("Сохранить выбор для медиа")).toBeNull();
   fireEvent.press(photo);
-  await waitFor(() => expect(saveMediaPreferences).toHaveBeenCalledWith("guest", { visionId: "anthropic", speechId: "" }));
+  await waitFor(() => expect(saveMediaPreferences).toHaveBeenCalledWith("guest", { visionId: "anthropic", speechId: "", fileAsrMode: "device" }));
   await waitFor(() => expect(screen.getByLabelText("Изображения и кадры видео: Anthropic").props.accessibilityState.checked).toBe(true));
   expect(screen.getByText("Выбор для медиа сохранён.")).toBeTruthy();
 
   fireEvent.press(screen.getByLabelText("Речь из аудио и видео: OpenAI"));
-  await waitFor(() => expect(saveMediaPreferences).toHaveBeenCalledWith("guest", { visionId: "anthropic", speechId: "openai" }));
+  await waitFor(() => expect(saveMediaPreferences).toHaveBeenCalledWith("guest", { visionId: "anthropic", speechId: "openai", fileAsrMode: "device" }));
   expect(saveMediaPreferences).toHaveBeenCalledTimes(2);
 });
 
@@ -51,18 +51,29 @@ test("a failed write does not pretend the unsaved provider is selected", async (
 });
 
 test("a removed connection is flagged and the user can repair the routing", async () => {
-  (loadMediaPreferences as jest.Mock).mockResolvedValueOnce({ visionId: "removed", speechId: "" });
+  (loadMediaPreferences as jest.Mock).mockResolvedValueOnce({ visionId: "removed", speechId: "", fileAsrMode: "device" });
   const screen = render(<MediaSettings profile="guest" connections={connections as any} />);
   await waitFor(() => screen.getByText("Одно из выбранных подключений удалено. Выберите актуальное подключение."));
   fireEvent.press(screen.getByLabelText("Изображения и кадры видео: OpenAI"));
-  await waitFor(() => expect(saveMediaPreferences).toHaveBeenCalledWith("guest", { visionId: "openai", speechId: "" }));
+  await waitFor(() => expect(saveMediaPreferences).toHaveBeenCalledWith("guest", { visionId: "openai", speechId: "", fileAsrMode: "device" }));
   await waitFor(() => expect(screen.queryByText("Одно из выбранных подключений удалено. Выберите актуальное подключение.")).toBeNull());
 });
 
 test("reloading a profile shows the persisted choice, not an unsaved draft", async () => {
-  (loadMediaPreferences as jest.Mock).mockResolvedValueOnce({ visionId: "anthropic", speechId: "openai" });
+  (loadMediaPreferences as jest.Mock).mockResolvedValueOnce({ visionId: "anthropic", speechId: "openai", fileAsrMode: "device" });
   const screen = render(<MediaSettings profile="guest" connections={connections as any} />);
   await waitFor(() => expect(screen.getByLabelText("Речь из аудио и видео: OpenAI").props.accessibilityState.checked).toBe(true));
   expect(screen.getByLabelText("Изображения и кадры видео: Anthropic").props.accessibilityState.checked).toBe(true);
   expect(saveMediaPreferences).not.toHaveBeenCalled();
+});
+
+test("online file ASR is an explicit saved choice, distinct from speech connection", async () => {
+  const screen = render(<MediaSettings profile="guest" connections={connections as any} />);
+  const choice = screen.getByLabelText("Распознавание файла: Онлайн · OpenAI (gpt-transcribe)");
+  await waitFor(() => expect(choice.props.accessibilityState.disabled).toBe(false));
+  fireEvent.press(choice);
+  await waitFor(() => expect(saveMediaPreferences).toHaveBeenCalledWith("guest", {
+    visionId: "", speechId: "", fileAsrMode: "online",
+  }));
+  expect(screen.getByLabelText("Распознавание файла: На телефоне · Whisper").props.accessibilityState.checked).toBe(false);
 });
