@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { onLocalMemorySessionChange } from '../local-memory/storage';
 import type { DirectChatStore } from '../direct-agent/chat-store';
 import { pickChatAttachmentsWithResults } from './pickChatAttachments';
-import { MAX_CHAT_FILES } from '../direct-agent/chat-attachments';
+import { MAX_CHAT_FILES, checkedChatAttachments, type ChatAttachment } from '../direct-agent/chat-attachments';
 export function useChatAttachments(store: DirectChatStore, conversationId: string | undefined, focused: boolean, onError: (message:string)=>void, onPhotoPicked?: (id:string)=>void) {
   const [picking,setPicking]=useState(false);
   const controller=useRef<AbortController|null>(null);
@@ -21,15 +21,27 @@ export function useChatAttachments(store: DirectChatStore, conversationId: strin
       const result=await pickChatAttachmentsWithResults(aborter.signal);
       if(aborter.signal.aborted || !alive.current || store.getSnapshot().activeId!==conversationId)return;
       const draft=store.getSnapshot().conversations.find(c=>c.id===conversationId);
-      const capacity=Math.max(0,MAX_CHAT_FILES-(draft?.attachments?.length || 0));
-      const accepted=result.files.slice(0,capacity);
+      const existing=draft?.attachments || [];
+      const accepted:ChatAttachment[]=[];
+      const failed=result.failures.map(f=>`${f.name}: ${f.reason}`);
+      for(const file of result.files){
+        if(existing.length+accepted.length>=MAX_CHAT_FILES){
+          failed.push(`${file.name}: до ${MAX_CHAT_FILES} файлов в сообщении.`);
+          continue;
+        }
+        try{
+          // Count the already staged text as well, not just this picker batch.
+          checkedChatAttachments([...existing,...accepted,file]);
+          accepted.push(file);
+        }catch{
+          failed.push(`${file.name}: общий лимит текста 24 000 символов или файла превышен.`);
+        }
+      }
       if(accepted.length) {
-        store.setAttachments(conversationId,[...(draft?.attachments || []),...accepted]);
+        store.setAttachments(conversationId,[...existing,...accepted]);
         const photo=[...accepted].reverse().find(file=>file.kind==="image");
         if(photo)onPhotoPicked?.(photo.id);
       }
-      const failed=result.failures.map(f=>`${f.name}: ${f.reason}`);
-      if(result.files.length>capacity)failed.push(`Превышен лимит: до ${MAX_CHAT_FILES} файлов в сообщении.`);
       // Accepted files remain available for Send even when another fails;
       // no automatic send, no silent truncation or hidden background retry.
       onError(failed.length ? `Не все файлы добавлены. ${failed.join(' ')} Повторно выберите только неудавшиеся.` : "");
