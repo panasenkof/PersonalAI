@@ -43,7 +43,7 @@ export function useChatAttachments(store: DirectChatStore, conversationId: strin
       const failed:ChatFileFailure[]=[...result.failures];
       for(const file of result.files){
         if(existing.length+accepted.length>=MAX_CHAT_FILES){
-          failed.push({name:file.name.replace(/[\\r\\n\\t]/g," ").slice(0,90),
+          failed.push({name:file.name.replace(/[\r\n\t]/g," ").slice(0,90),
             reason:`Можно прикрепить не более ${MAX_CHAT_FILES} файлов в одном сообщении.`});
           continue;
         }
@@ -52,7 +52,7 @@ export function useChatAttachments(store: DirectChatStore, conversationId: strin
           checkedChatAttachments([...existing,...accepted,file]);
           accepted.push(file);
         }catch{
-          failed.push({name:file.name.replace(/[\\r\\n\\t]/g," ").slice(0,90),
+          failed.push({name:file.name.replace(/[\r\n\t]/g," ").slice(0,90),
             reason:"Превышен общий лимит текста 24 000 символов или размер вложений."});
         }
       }
