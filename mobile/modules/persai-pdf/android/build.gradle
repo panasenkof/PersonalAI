@@ -16,6 +16,8 @@ android {
 }
 
 dependencies {
+  // Only one ABI-native OCR engine; russian language model is NOT bundled.
+  implementation 'cz.adaptech.tesseract4android:tesseract4android:4.9.0'
   androidTestImplementation 'androidx.test.ext:junit:1.2.1'
   androidTestImplementation 'androidx.test:runner:1.6.2'
 }

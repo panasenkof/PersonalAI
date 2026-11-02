@@ -15,6 +15,20 @@ export PIA_ANDROID_KEY_ALIAS="pia-ci-only"
 export PIA_ANDROID_STORE_PASSWORD="ephemeral-ci-password-only"
 export PIA_ANDROID_KEY_PASSWORD="ephemeral-ci-password-only"
 test -s "$PIA_ANDROID_KEYSTORE_PATH"
+# Gate actual Russian OCR on the emulator, never with mocked model output.
+# Language data exists ONLY under androidTest/assets, hence never inflates release APK.
+MODEL_ASSET="modules/persai-pdf/android/src/androidTest/assets/rus.traineddata"
+MODEL_SHA="e16e5e036cce1d9ec2b00063cf8b54472625b9e14d893a169e2b0dedeb4df225"
+MODEL_URL="https://huggingface.co/lm-kit/tessdata-fast/resolve/83ff76b97461395f257255720bf7f3957606dbb5/rus.traineddata"
+if [[ -f "modules/persai-pdf/android/src/androidTest/java/expo/modules/persaipdf/LocalRussianOcrInstrumentedTest.kt" ]]; then
+  mkdir -p "$(dirname "$MODEL_ASSET")"
+  trap 'rm -f "$MODEL_ASSET" "$MODEL_ASSET.partial"' EXIT
+  curl --fail --location --retry 3 --connect-timeout 20 --max-time 120 --silent --show-error "$MODEL_URL" -o "$MODEL_ASSET.partial"
+  printf '%s  %s\n' "$MODEL_SHA" "$MODEL_ASSET.partial" | sha256sum --check --status
+  [[ "$(wc -c < "$MODEL_ASSET.partial" | tr -d '[:space:]')" == "3861738" ]]
+  mv "$MODEL_ASSET.partial" "$MODEL_ASSET"
+  echo "Pinned Russian OCR test-only model verified, 3861738 bytes"
+fi
 # No second VM boot or additional release APK; only the test-only module APK.
 set +e
 (cd android && ./gradlew :persai-pdf:connectedDebugAndroidTest --build-cache --no-configuration-cache --no-daemon --stacktrace) >"$OUT/gradle.log" 2>&1

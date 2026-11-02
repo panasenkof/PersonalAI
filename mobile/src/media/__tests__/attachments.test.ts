@@ -542,3 +542,26 @@ test("step 8 E: image-only mode rejected on PDF/audio and no partial note is cre
   })).rejects.toThrow("invalid_image_recognition_mode");
   expect(sqlite.prepare("SELECT COUNT(*) AS n FROM memory_entities").get().n).toBe(0);
 });
+
+
+test("step 8 E2b real local OCR photo is versioned as partial source extraction in the same SQLCipher writer", async()=>{
+  const id=await saveMediaNote("guest",{
+    ...input,body:"Комментарий пользователя",extractedText:"Счёт на 200 г",
+    recognitions:[{index:0,name:input.file.name,status:"success",text:"Счёт на 200 г",imageMode:"offline-ocr"}],
+  });
+  const entity=sqlite.prepare("SELECT payload_json FROM memory_entities WHERE id=?").get(id);
+  expect(JSON.parse(entity.payload_json).body).toBe("Комментарий пользователя");
+  const run=sqlite.prepare("SELECT producer_kind,producer_id,producer_revision,status,coverage FROM memory_extractions").get();
+  expect(run).toEqual({producer_kind:"vision",producer_id:"android-tesseract-5-rus",
+    producer_revision:"local-tesseract-rus-v1",status:"partial",coverage:"unknown"});
+  expect(sqlite.prepare("SELECT COUNT(*) AS n FROM memory_extraction_fts WHERE memory_extraction_fts MATCH ?").get('"200"').n).toBe(1);
+});
+test("step 8 E2b normal PDF cannot forge local OCR page status",async()=>{
+  const pdf={uri:"file:///scan.pdf",name:"scan.pdf",mimeType:"application/pdf"};
+  mockFiles.set(pdf.uri,new Uint8Array([37,80,68,70,45]));
+  await expect(saveMediaNote("guest",{
+    file:pdf,title:"Scan",body:"",sensitivity:"sensitive",
+    recognitions:[{index:0,name:pdf.name,status:"success",text:"Fake scanned text",imageMode:"document-text"}],
+  })).rejects.toThrow("invalid_image_recognition_mode");
+  expect(sqlite.prepare("SELECT COUNT(*) AS n FROM memory_entities").get().n).toBe(0);
+});

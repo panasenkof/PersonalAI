@@ -39,6 +39,25 @@ class PdfTextPageReaderInstrumentedTest {
     return file
   }
 
+  @Test fun russianOcrNeverProcessesPersonalOriginalWithoutVerifiedModel() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val root = File(context.cacheDir, "ocr-empty-model-directory")
+    root.mkdirs()
+    val original = pdf("ТЕКСТ", null)
+    try {
+      assertFalse(LocalRussianOcr.installed(root))
+      try {
+        LocalRussianOcr.document(root, original, 1)
+        fail("OCR must reject missing/untrusted model before reading the PDF")
+      } catch (e: IllegalArgumentException) {
+        assertTrue(e.message.orEmpty().contains("russian_ocr_model_missing_or_invalid"))
+      }
+    } finally {
+      original.delete()
+      root.deleteRecursively()
+    }
+  }
+
   @Test fun readsTwoRealPdfTextPagesWithOriginalPageNumbers() {
     assumeTrue(Build.VERSION.SDK_INT >= 35)
     val file = pdf("PERSAI_FIRST_PAGE_123", null, "PERSAI_THIRD_PAGE_987")

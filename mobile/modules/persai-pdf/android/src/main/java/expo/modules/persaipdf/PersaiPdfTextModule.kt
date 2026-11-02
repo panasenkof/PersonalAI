@@ -27,6 +27,21 @@ class PersaiPdfTextModule : Module() {
 
     Function("isAvailable") { PdfTextPageReader.isSupported() }
 
+    Function("isRussianOcrInstalled") {
+      val ctx = appContext.reactContext ?: throw IllegalStateException("pdf_context_unavailable")
+      LocalRussianOcr.installed(ctx.filesDir)
+    }
+
+    AsyncFunction("recognizeRussianImage") { uri: String ->
+      val ctx = appContext.reactContext ?: throw IllegalStateException("pdf_context_unavailable")
+      return@AsyncFunction LocalRussianOcr.photo(ctx.filesDir, appLocalPdf(uri))
+    }
+
+    AsyncFunction("recognizeRussianPdf") { uri: String, fromPage: Int ->
+      val ctx = appContext.reactContext ?: throw IllegalStateException("pdf_context_unavailable")
+      return@AsyncFunction LocalRussianOcr.document(ctx.filesDir, appLocalPdf(uri), fromPage)
+    }
+
     Function("isPagePreviewAvailable") { PdfPageRasterizer.isSupported() }
 
     AsyncFunction("extractPages") { uri: String, pageLimit: Int ->

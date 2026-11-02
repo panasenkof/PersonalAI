@@ -8,6 +8,8 @@ import { onLocalMemorySessionChange } from "../local-memory/storage";
 import * as ImagePicker from "expo-image-picker";
 import { importLink, linkImportErrorMessage, publicImportUrl } from "../media/link-import";
 import { pdfCoverageMessage } from "../media/pdf-pages";
+import { useRussianOcrStatus } from "../media/russian-ocr";
+import { RussianOcrControls } from "../media/RussianOcrControls";
 import type { PdfPageCoverage } from "../media/pdf-pages";
 import * as Crypto from "expo-crypto";
 import { File, Directory, Paths } from "expo-file-system";
@@ -66,6 +68,7 @@ export function MemoryImportScreen() {
   const [prepareAttempt, setPrepareAttempt] = useState(0);
   const [preparing, setPreparing] = useState(false);
   const whisper = useWhisperStatus();
+  const russianOcr = useRussianOcrStatus();
   const t = useTheme();
   const header = useHeaderHeight(); const insets = useSafeAreaInsets();
   const profile = useProfile();
@@ -145,6 +148,8 @@ export function MemoryImportScreen() {
   const canExtract = files.some(item => {
     const currentKind = mediaKind(item);
     const currentProcessor = currentKind === "audio" ? speechSelected : selected;
+    if (imageExtractionMode === "offline-ocr" && (currentKind === "document" || currentKind === "image"))
+      return russianOcr.ready;
     return currentKind === "text" || currentKind === "document" ||
       (currentKind === "audio" && whisper.state === "ready") ||
       (currentKind === "video" && whisper.state === "ready") ||
@@ -308,7 +313,7 @@ export function MemoryImportScreen() {
     if (!file || !canExtract || busy || controller.current) return;
     // Reprocessing a corrected document must not silently erase user edits.
     // Full versioned candidate comparison is implemented in package G.
-    if (imageExtractionMode === "document-text" && extractedText.trim() && !confirmedReplacement) {
+    if ((imageExtractionMode === "document-text" || imageExtractionMode === "offline-ocr") && extractedText.trim() && !confirmedReplacement) {
       Alert.alert("Заменить полученный текст?",
         "Текущий распознанный текст мог быть исправлен вручную. Новый результат заменит его только после вашего подтверждения; подпись к заметке не изменится.",
         [{ text: "Оставить текущий", style: "cancel" },
@@ -328,9 +333,9 @@ export function MemoryImportScreen() {
           setRecognitionResults([{ index: 0, name: file.name, status: "success", text,
             ...(timedSegments ? { segments: timedSegments } : {}),
             ...(pdfCoverage ? { pdfCoverage } : {}),
-            ...(kind === "image" ? { imageMode: imageExtractionMode } : {}) }]);
+            ...((kind === "image" || (kind === "document" && imageExtractionMode === "offline-ocr")) ? { imageMode: imageExtractionMode } : {}) }]);
           setExtractedText(text);
-          setNotice(pdfCoverage ? pdfCoverageMessage(pdfCoverage) :
+          setNotice(pdfCoverage ? (imageExtractionMode === "offline-ocr" ? pdfCoverageMessage(pdfCoverage).replace("OCR пока не выполнялся.", "Остались страницы без прочитанного текста.") : pdfCoverageMessage(pdfCoverage)) :
             kind === "image" && imageExtractionMode === "document-text"
               ? "ИИ предложил текст фотографии, но не подтвердил точность. Проверьте все числа и исправьте ошибки перед сохранением."
               : "Проверьте и отредактируйте текст. В памяти он появится после сохранения.");
@@ -352,7 +357,7 @@ export function MemoryImportScreen() {
         const results = rawResults.map(item => item.status === "success"
           ? { ...item, ...(segmentsByFile.has(item.index) ? { segments: segmentsByFile.get(item.index)! } : {}),
               ...(pdfByFile.has(item.index) ? { pdfCoverage: pdfByFile.get(item.index)! } : {}),
-              ...(mediaKind(files[item.index]) === "image" ? { imageMode: imageExtractionMode } : {}) } : item);
+              ...((mediaKind(files[item.index]) === "image" || (mediaKind(files[item.index]) === "document" && imageExtractionMode === "offline-ocr")) ? { imageMode: imageExtractionMode } : {}) } : item);
         if (alive.current && !aborter.signal.aborted) {
           setRecognitionResults(results);
           const text = combinedRecognitionText(results, files.length);
@@ -504,10 +509,32 @@ export function MemoryImportScreen() {
             onPress={() => setImageExtractionMode("document-text")} style={{ minHeight: 48, justifyContent: "center" }}>
             <Text style={{ color: imageExtractionMode === "document-text" ? t.secondary : t.text }}>{imageExtractionMode === "document-text" ? "● " : "○ "}Прочитать текст документа (ИИ)</Text>
           </Pressable>
+          <Pressable accessibilityRole="button" accessibilityLabel="Прочитать фотографию на телефоне" accessibilityState={{ selected: imageExtractionMode === "offline-ocr" }} disabled={busy}
+            onPress={() => setImageExtractionMode("offline-ocr")} style={{ minHeight: 48, justifyContent: "center" }}>
+            <Text style={{ color: imageExtractionMode === "offline-ocr" ? t.secondary : t.text }}>{imageExtractionMode === "offline-ocr" ? "● " : "○ "}Прочитать русский текст на телефоне (OCR)</Text>
+          </Pressable>
           {imageExtractionMode === "document-text" ? <Text accessibilityRole="text" style={{ color: t.muted, fontSize: 13, lineHeight: 19 }}>
             Фото отправится выбранной модели по вашему нажатию на кнопку разбора. Это не локальное OCR: возможны ошибки в буквах и цифрах; проверьте результат. Для личной записи или закрытой коллекции отправка запрещена: сохраните оригинал без распознавания.
           </Text> : null}
         </View> : null}
+        {kind === "document" ? <View style={{ gap: 6 }}>
+          <Text style={{ color: t.text, fontWeight: "700" }}>Чтение PDF</Text>
+          <Pressable accessibilityRole="button" accessibilityLabel="Только текстовый слой PDF"
+            accessibilityState={{ selected: imageExtractionMode !== "offline-ocr" }} disabled={busy}
+            onPress={() => setImageExtractionMode("describe")} style={{ minHeight: 44, justifyContent: "center" }}>
+            <Text style={{ color: imageExtractionMode !== "offline-ocr" ? t.secondary : t.text }}>○ Текстовый слой — быстро, без OCR</Text>
+          </Pressable>
+          <Pressable accessibilityRole="button" accessibilityLabel="Распознать сканы PDF на телефоне"
+            accessibilityState={{ selected: imageExtractionMode === "offline-ocr" }} disabled={busy}
+            onPress={() => setImageExtractionMode("offline-ocr")} style={{ minHeight: 44, justifyContent: "center" }}>
+            <Text style={{ color: imageExtractionMode === "offline-ocr" ? t.secondary : t.text }}>○ Добавить локальное OCR отсутствующих страниц</Text>
+          </Pressable>
+          <Text style={{ color: t.muted, fontSize: 12 }}>
+            До 8 сканированных страниц за порцию; текстовый слой не повторяется. Русский OCR не гарантирует точность чисел. Сканы не отправляются провайдеру.
+          </Text>
+        </View> : null}
+        {imageExtractionMode === "offline-ocr" && (kind === "image" || kind === "document")
+          ? <RussianOcrControls /> : null}
         {files.length > 1 ? <View style={{ gap: 6 }}>
           <Text style={{ color: t.text, fontWeight: "700" }}>Режим распознавания</Text>
           <Pressable disabled={busy} accessibilityRole="button" accessibilityLabel="Распознавать по очереди"
@@ -525,7 +552,7 @@ export function MemoryImportScreen() {
           </Text>
         </View> : null}
         {(files.length > 1 || (kind !== "text" && kind !== "document" && !localAudio)) ? <NoteEditorSection testID="import-processing-options" title="Параметры распознавания" summary="Модель и подключение" expanded={processingOptionsOpen} onToggle={() => setProcessingOptionsOpen(v => !v)}>
-          <Text style={{ color: t.muted, fontSize: 12 }}>При разборе файл или кадры отправляются выбранному сервису.</Text>
+          <Text style={{ color: t.muted, fontSize: 12 }}>Для локального OCR файлы не отправляются. Для прочих режимов выбранная модель может получить файл или кадры.</Text>
           <Text style={{ color: t.text, fontWeight: "600" }}>Подключение для разбора</Text>
           {connections.map(c => <Pressable disabled={busy} key={c.id} accessibilityRole="button" accessibilityLabel={"Разобрать через " + c.name} style={{ minHeight: 44, justifyContent: "center" }} onPress={() => setConnectionId(c.id)}>
             <Text style={{ color: connectionId === c.id ? t.secondary : t.text }}>{connectionId === c.id ? "● " : "○ "}{c.name} · {c.model}</Text>
@@ -534,7 +561,7 @@ export function MemoryImportScreen() {
         </NoteEditorSection> : null}
         {files.some(item => ["audio", "video"].includes(mediaKind(item))) ? <View><Text style={{ color: t.text }}>Подключение для речи (локальный Whisper имеет приоритет)</Text>{connections.map(c => <Pressable key={c.id} disabled={busy} onPress={() => setSpeechConnectionId(c.id)} style={{ minHeight: 44 }}><Text style={{ color: c.id === speechConnectionId ? t.secondary : t.text }}>{c.id === speechConnectionId ? "● " : "○ "}{c.name} · {c.transcriptionModel || "whisper-1"}</Text></Pressable>)}</View> : null}
         <Pressable disabled={busy || !canExtract} accessibilityRole="button" accessibilityLabel="Извлечь сведения из файла" style={[button, { opacity: canExtract ? 1 : .5 }]} onPress={() => void extract()}>
-          <Text style={{ color: "#fff", fontWeight: "700" }}>{files.length > 1 ? recognitionMode === "joint" ? "Распознать и сопоставить" : "Распознать все по очереди" : kind === "text" ? "Прочитать текст на телефоне" : kind === "image" && imageExtractionMode === "document-text" ? "Отправить фото модели и прочитать текст" : kind === "document" ? "Прочитать страницы PDF на телефоне" : localAudio ? "Распознать речь на телефоне" : "Передать файл провайдеру и разобрать"}</Text>
+          <Text style={{ color: "#fff", fontWeight: "700" }}>{files.length > 1 ? recognitionMode === "joint" ? "Распознать и сопоставить" : "Распознать все по очереди" : kind === "text" ? "Прочитать текст на телефоне" : kind === "image" && imageExtractionMode === "offline-ocr" ? "Прочитать фото без интернета" : kind === "image" && imageExtractionMode === "document-text" ? "Отправить фото модели и прочитать текст" : kind === "document" && imageExtractionMode === "offline-ocr" ? "Распознать сканы PDF на телефоне" : kind === "document" ? "Прочитать страницы PDF на телефоне" : localAudio ? "Распознать речь на телефоне" : "Передать файл провайдеру и разобрать"}</Text>
         </Pressable>
         {jointAnalyzing ? <Text accessibilityLiveRegion="polite" style={{ color: t.secondary }}>Сопоставляю результаты всех файлов…</Text> : null}
         {recognizingIndex >= 0 ? <Text accessibilityLiveRegion="polite" style={{ color: t.secondary }}>
