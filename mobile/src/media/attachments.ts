@@ -1,11 +1,12 @@
 import * as Crypto from 'expo-crypto';
 import { Directory, File, FileMode, Paths } from 'expo-file-system';
 import type { SQLiteDatabase } from 'expo-sqlite';
-import type { VerifiedOriginalLocator } from '../local-memory/types';
+import type { VerifiedOriginalLocator, EntityRecord } from '../local-memory/types';
 import { localMemorySessionUnlocked, withLocalMemoryDatabase } from '../local-memory/storage';
 import { MemoryConflictError } from '../local-memory/types';
 import { SqliteMemoryRepository } from '../local-memory/repository';
-import { appendExtractionInTransaction } from '../local-memory/extractions';
+import { appendExtractionInTransaction, fingerprintExtractionSource } from '../local-memory/extractions';
+import type { ExtractionSegmentInput } from '../local-memory/extractions';
 import type { ImportFile } from './kinds';
 import type { FileRecognition } from './batch-recognition';
 import { mediaKind } from './kinds';
@@ -344,4 +345,52 @@ export async function appendNoteAttachments(profile: string, entityId: string, e
       check(signal);
     });
   });
+}
+
+/** Re-recognition reuses the existing entity writer and extraction evidence.
+ * A candidate is volatile UI state until a separate explicit acceptance.
+ * NEVER overwrite an original, user body/comment, or other attachments.
+ */
+export async function savedOriginalRevision(profile: string, attachment: Attachment): Promise<string> {
+  return withLocalMemoryDatabase(profile, async db => {
+    const current = await db.getFirstAsync<{id:string}>(
+      "SELECT a.id FROM memory_attachments a JOIN memory_entities e ON e.id=a.entity_id "+
+      "WHERE a.id=? AND a.entity_id=? AND e.record_status='active'",
+      [attachment.id,attachment.entity_id]);
+    if (!current) throw new MemoryConflictError('stale_memory_version');
+    return fingerprintExtractionSource(db, attachment.id);
+  });
+}
+
+export async function applyRecognitionCandidate(repo: SqliteMemoryRepository, input: {
+  note: EntityRecord; attachment: Attachment; expectedSourceVersion: string;
+  text: string; producerId: string; producerRevision: string;
+  segments?: ExtractionSegmentInput[];
+}): Promise<EntityRecord> {
+  const { note, attachment } = input;
+  if (note.domain !== "notes" || note.record_status !== "active" ||
+      attachment.entity_id !== note.id || !input.expectedSourceVersion ||
+      !input.text.trim() || input.text.length > 60_000) throw new Error("invalid_recognition_candidate");
+  const kind = mediaKind({uri:"file:///original",name:attachment.name,mimeType:attachment.mime});
+  const segments = input.segments ?? unknownSegments(input.text);
+  if (segments.length > 128 || !segments.length) throw new Error("invalid_recognition_segments");
+  const payload = {...note.payload, extracted_text:input.text.trim()};
+  return repo.reviseEntity(note.id,note.record_version,payload,"Повторное распознавание оригинала",
+    undefined,false,async (tx,entityId) => {
+      const current = await tx.getFirstAsync<{id:string;record_status:string}>(
+        "SELECT a.id,e.record_status FROM memory_attachments a "+
+        "JOIN memory_entities e ON e.id=a.entity_id "+
+        "WHERE a.id=? AND a.entity_id=? AND e.id=?",
+        [attachment.id,entityId,note.id]);
+      if (!current || current.record_status !== "active" ||
+          await fingerprintExtractionSource(tx,attachment.id) !== input.expectedSourceVersion)
+        throw new MemoryConflictError("stale_memory_version");
+      await appendExtractionInTransaction(tx,{
+        attachmentId:attachment.id,
+        producerKind:kind === "audio"?"asr":kind==="document"?"pdf":
+          kind==="image"?"ocr":kind==="text"?"text":"vision",
+        producerId:input.producerId,producerRevision:input.producerRevision,
+        status:"partial",coverage:"unknown",segments,
+      });
+    });
 }
