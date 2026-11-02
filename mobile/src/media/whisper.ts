@@ -3,7 +3,7 @@ import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
 import { useSyncExternalStore } from "react";
 import type { FsmnVoiceActivityDetector, WhisperSpeechToText, WhisperSttModel } from "react-native-executorch";
-import { WHISPER_RATE, isWhisperId, joinTranscript, resampleTo16k, whisperErrorMessage, whisperSupported } from "./whisper-core";
+import { WHISPER_RATE, MAX_WHISPER_FILE_SECONDS, isWhisperId, joinTranscript, resampleTo16k, whisperFileChunks, whisperErrorMessage, whisperSupported } from "./whisper-core";
 import type { WhisperId } from "./whisper-core";
 
 /** On-device dictation: the model is downloaded once, only when the user asks,
@@ -249,26 +249,63 @@ async function beginWhisperDictation(onText: (text: string) => void, onError: (m
   }
 }
 
-/** Transcribes an audio file on the phone: decoded to 16 kHz mono and passed
- * to Whisper. The file never leaves the device. */
+/** Pre-recorded file transcription uses the already downloaded local model.
+ * Each consecutive window is <=26 seconds (Whisper's single-pass ceiling is
+ * 30 seconds); no overlaps to de-duplicate heuristically and no synthesized
+ * word/segment timestamps. A failure aborts the entire result instead of
+ * silently saving an incomplete transcript as if it were finished.
+ */
 export async function transcribeAudioFile(uri: string, signal?: AbortSignal): Promise<string> {
+  if (signal?.aborted) throw new Error("Разбор файла остановлен");
   await drainPrevious(dictationDrain, dictationStopping);
+  if (signal?.aborted) throw new Error("Разбор файла остановлен");
   const model = await loadEngine();
-  const FileSystem = require("expo-file-system/legacy") as typeof import("expo-file-system/legacy");
-  const { toByteArray } = require("base64-js") as typeof import("base64-js");
+  if (signal?.aborted) throw new Error("Разбор файла остановлен");
   const { decodeAudioData } = require("react-native-audio-api") as typeof import("react-native-audio-api");
   let samples: Float32Array;
   try {
     const audio = await decodeAudioData(uri, WHISPER_RATE);
+    if (!Number.isFinite(audio.sampleRate) || audio.sampleRate <= 0 ||
+        audio.length > audio.sampleRate * MAX_WHISPER_FILE_SECONDS) {
+      throw new Error("Длительность записи превышает 20 минут или не определена.");
+    }
+    if (audio.numberOfChannels < 1 || audio.length < 1) throw new Error("Пустая аудиодорожка.");
     // Stereo files are mixed down to mono.
     const channels = Array.from({ length: audio.numberOfChannels }, (_, i) => audio.getChannelData(i));
-    samples = channels.length === 1 ? new Float32Array(channels[0]) : new Float32Array(audio.length).map((_, i) => channels.reduce((sum, ch) => sum + ch[i], 0) / channels.length);
+    samples = channels.length === 1 ? new Float32Array(channels[0]) :
+      new Float32Array(audio.length).map((_, i) => channels.reduce((sum, ch) => sum + ch[i], 0) / channels.length);
     samples = resampleTo16k(samples, audio.sampleRate);
-  } catch (e) { throw new Error("Голос на телефоне: не удалось прочитать аудиофайл — поддерживаются MP3, M4A, WAV, OGG, FLAC, AAC. Код: «" + String((e as Error)?.message || e).slice(0, 120) + "»."); }
+  } catch (e) {
+    if (signal?.aborted) throw new Error("Разбор файла остановлен");
+    throw new Error("Голос на телефоне: не удалось прочитать аудиофайл — поддерживаются MP3, M4A, WAV, OGG, FLAC, AAC. " +
+      String((e as Error)?.message || e).slice(0, 180));
+  }
   if (signal?.aborted) throw new Error("Разбор файла остановлен");
+  const windows = whisperFileChunks(samples.length);
   const stop = () => model.transcribeStop();
   signal?.addEventListener("abort", stop, { once: true });
-  try { return (await model.transcribe(samples, { language: "ru" })).trim(); }
-  catch (e) { if (signal?.aborted) throw new Error("Разбор файла остановлен"); throw new Error(whisperErrorMessage(e, "recognize")); }
-  finally { signal?.removeEventListener("abort", stop); }
+  try {
+    const pieces: string[] = [];
+    let chars = 0;
+    for (let i = 0; i < windows.length; i++) {
+      if (signal?.aborted) throw new Error("Разбор файла остановлен");
+      const { start, end } = windows[i];
+      let text: string;
+      try { text = (await model.transcribe(samples.subarray(start, end), { language: "ru" })).trim(); }
+      catch (e) {
+        if (signal?.aborted) throw new Error("Разбор файла остановлен");
+        throw new Error("Не удалось распознать часть " + (i + 1) + " из " + windows.length +
+          ". Исходный файл не изменён. " + whisperErrorMessage(e, "recognize"));
+      }
+      if (signal?.aborted) throw new Error("Разбор файла остановлен");
+      if (text) {
+        chars += text.length + (pieces.length ? 2 : 0);
+        if (chars > 60_000) throw new Error("Текст записи превышает 60 000 символов. Ничего не обрезано — разделите аудио на файлы.");
+        pieces.push(text);
+      }
+    }
+    return pieces.join("\n\n");
+  } finally {
+    signal?.removeEventListener("abort", stop);
+  }
 }
