@@ -6,7 +6,7 @@ jest.mock("expo-file-system",()=>({
   FileMode:{ReadOnly:"r"},
   File:class {
     exists=true;
-    constructor(readonly uri:string){}
+    constructor(_uri:string){}
     get size(){return mockBytes.length;}
     open(){mockOffset=0;return {
       readBytes:jest.fn(async(n:number)=>{
