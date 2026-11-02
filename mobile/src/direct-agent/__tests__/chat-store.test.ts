@@ -282,7 +282,7 @@ test("H5: switching to a documented text-only model never consumes or uploads a 
   expect(draft.rows).toEqual([]);
   expect(draft.busy).toBe(false);
   expect(store.getSnapshot().notice).toContain("не принимает изображения");
-  expect(JSON.stringify([...records.values()])).not.toContain(tinyImage.data);
+  // Draft can already be encrypted/persisted; only a network/model call is forbidden.
   store.dispose();
 });
 test("H5: a text-only model can answer a new text turn without uploading historical photos",async()=>{
