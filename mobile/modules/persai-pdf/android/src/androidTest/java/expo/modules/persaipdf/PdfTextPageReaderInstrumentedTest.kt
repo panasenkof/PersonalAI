@@ -86,6 +86,51 @@ class PdfTextPageReaderInstrumentedTest {
     } finally { file.delete() }
   }
 
+  @Test fun boundedPdfPageWindowKeepsRealScanGapsAndPageIndices() {
+    assumeTrue(Build.VERSION.SDK_INT >= 35)
+    val file = pdf("FIRST_TEXT", null, "THIRD_TEXT", "FOURTH_TEXT")
+    try {
+      val second = PdfTextPageReader.readRange(file, 2, 2)
+      assertEquals(4, second["pageCount"])
+      assertEquals(2, second["firstPage"])
+      assertEquals(2, second["processedPageCount"])
+      @Suppress("UNCHECKED_CAST")
+      val pages = second["pages"] as List<Map<String, Any>>
+      assertEquals(listOf(3), pages.map { it["page"] as Int })
+      assertTrue((pages[0]["text"] as String).contains("THIRD_TEXT"))
+      val last = PdfTextPageReader.readRange(file, 4, 16)
+      assertEquals(1, last["processedPageCount"])
+      try {
+        PdfTextPageReader.readRange(file, 5, 1)
+        fail("Range past the real PDF length must not fabricate pages")
+      } catch (e: IllegalArgumentException) {
+        assertTrue(e.message.orEmpty().contains("invalid_pdf_page_window"))
+      }
+    } finally { file.delete() }
+  }
+
+  @Test fun largePdfReadRangeCanContinuePastLegacy128PageLimit() {
+    assumeTrue(Build.VERSION.SDK_INT >= 35)
+    val texts=Array<String?>(130) { i -> when(i) {
+      0 -> "START_PAGE"; 128 -> "TEXT_ON_PAGE_129"; 129 -> "LAST_PAGE_130"; else -> null
+    } }
+    val file=pdf(*texts)
+    try {
+      val last=PdfTextPageReader.readRange(file, 129, 16)
+      assertEquals(130,last["pageCount"])
+      assertEquals(2,last["processedPageCount"])
+      @Suppress("UNCHECKED_CAST")
+      val pages=last["pages"] as List<Map<String, Any>>
+      assertEquals(listOf(129,130),pages.map { it["page"] as Int })
+      try {
+        PdfTextPageReader.read(file, 128)
+        fail("Legacy extraction must preserve its previous explicit guard")
+      } catch (e: IllegalArgumentException) {
+        assertTrue(e.message.orEmpty().contains("pdf_page_limit_exceeded"))
+      }
+    } finally { file.delete() }
+  }
+
   @Test fun rendersRealPagesIncludingBlankScanWithoutRecognizingText() {
     assumeTrue(Build.VERSION.SDK_INT >= 35)
     val context = InstrumentationRegistry.getInstrumentation().targetContext
