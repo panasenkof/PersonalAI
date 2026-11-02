@@ -169,8 +169,13 @@ async function extractMediaCore(file: ImportFile, settings: SpeechExtractionSett
   const base = validateBaseUrl(settings.baseUrl, settings.provider);
   if (kind === "audio") {
     const transcriptionModel = officialAudioModel(settings);
+    // Do not send files of unknown format to a paid external endpoint.
+    // Exact codec validation remains the server's responsibility.
+    const extension = file.name.split(".").pop()?.toLowerCase() || "";
+    if (!["mp3", "mp4", "mpeg", "mpga", "m4a", "wav", "webm", "ogg", "flac"].includes(extension))
+      throw new Error("Формат аудиофайла не поддерживается онлайн-распознаванием. Используйте MP3, M4A, WAV, OGG, FLAC или WEBM.");
     const data = new FormData();
-    const audioMime = ({ m4a: "audio/mp4", wav: "audio/wav", ogg: "audio/ogg", flac: "audio/flac", aac: "audio/aac" } as Record<string, string>)[file.name.split(".").pop()?.toLowerCase() || ""] || "audio/mpeg";
+    const audioMime = ({ m4a: "audio/mp4", mp4: "audio/mp4", wav: "audio/wav", ogg: "audio/ogg", flac: "audio/flac", webm: "audio/webm" } as Record<string, string>)[extension] || "audio/mpeg";
     data.append("file", { uri: file.uri, name: file.name, type: file.mimeType || audioMime } as any);
     data.append("model", transcriptionModel);
     // Same user-approved upload; official Whisper can supply real segment
