@@ -345,6 +345,35 @@ test("real provider-reported ASR time intervals survive save and source FTS",asy
     .get('"привет"').n).toBe(1);
 });
 
+test("H-ASR1: official online audio producer persists in existing SQLCipher extraction without invented timestamps",async()=>{
+  mockFiles.set("file:///voice.mp3",new Uint8Array([1,2,3]));
+  const id=await saveMediaNote("guest",{
+    file:{uri:"file:///voice.mp3",name:"voice.mp3",mimeType:"audio/mpeg"},
+    title:"Голосовая заметка",body:"",sensitivity:"standard",
+    recognitions:[{index:0,name:"voice.mp3",status:"success",text:"Купить молоко",asrProducerId:"openai:gpt-transcribe"}],
+  });
+  const rows=sqlite.prepare(`SELECT r.producer_kind,r.producer_id,r.producer_revision,s.location_kind,s.text
+    FROM memory_extraction_segments s JOIN memory_extractions r ON r.id=s.extraction_id
+    JOIN memory_attachments a ON a.id=r.attachment_id WHERE a.entity_id=?`).all(id);
+  expect(rows).toEqual([expect.objectContaining({
+    producer_kind:"asr",producer_id:"openai:gpt-transcribe",
+    producer_revision:"file-asr-v1",location_kind:"unknown",text:"Купить молоко",
+  })]);
+});
+
+test("H-ASR1: forged ASR provenance on a photo or unknown provider never persists",async()=>{
+  const audio={uri:"file:///voice.mp3",name:"voice.mp3",mimeType:"audio/mpeg"};
+  mockFiles.set(audio.uri,new Uint8Array([1,2,3]));
+  await expect(saveMediaNote("guest",{
+    file:audio,title:"Подмена",body:"",sensitivity:"standard",
+    recognitions:[{index:0,name:"voice.mp3",status:"success",text:"Текст",asrProducerId:"evil:spyware"}],
+  })).rejects.toThrow("invalid_asr_producer");
+  await expect(saveMediaNote("guest",{
+    ...input,recognitions:[{index:0,name:input.file.name,status:"success",text:"Текст",asrProducerId:"openai:gpt-transcribe"}],
+  })).rejects.toThrow("invalid_asr_producer");
+  expect(sqlite.prepare("SELECT count(*) n FROM memory_extractions").get().n).toBe(0);
+});
+
 test("forged ASR interval on image, overlapping or unbounded times fail before any writes",async()=>{
   mockFiles.set("file:///voice.mp3",new Uint8Array([1,2,3]));
   const voice={uri:"file:///voice.mp3",name:"voice.mp3",mimeType:"audio/mpeg"};

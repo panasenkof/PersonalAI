@@ -17,6 +17,7 @@ const mockPlayer = { muted: false, release: jest.fn(), generateThumbnailsAsync: 
 const settings = { ...defaultDirectPreferences, apiKey: "secret", webSearchKey: "" };
 beforeEach(() => {
   jest.clearAllMocks();
+  (getWhisperStatus as jest.Mock).mockReturnValue({ state: "absent" });
   (FileSystem.getInfoAsync as jest.Mock).mockResolvedValue({ exists: true, isDirectory: false, size: 1000 });
   (FileSystem.readAsStringAsync as jest.Mock).mockResolvedValue("dGVzdA==");
   (createVideoPlayer as jest.Mock).mockReturnValue(mockPlayer);
@@ -28,7 +29,7 @@ beforeEach(() => {
 test("unapproved images, audio and video never reach a provider", async () => {
   const transport = jest.fn();
   for (const [name, mimeType] of [["image.png", "image/png"], ["audio.mp3", "audio/mpeg"], ["video.mp4", "video/mp4"]]) {
-    await expect(extractMedia({ uri: "file:///cache/" + name, name, mimeType }, settings, false, undefined, transport as unknown as typeof fetch)).rejects.toThrow("Разрешите");
+    await expect(extractMedia({ uri: "file:///cache/" + name, name, mimeType }, settings, false, undefined, transport as unknown as typeof fetch)).rejects.toThrow(name === "audio.mp3" ? "Локальный Whisper" : "Разрешите");
   }
   expect(transport).not.toHaveBeenCalled(); expect(createVideoPlayer).not.toHaveBeenCalled();
 });
@@ -68,10 +69,12 @@ test("with Whisper downloaded, audio is transcribed on the phone without approva
   expect(await extractMedia({ uri: "file:///cache/voice.m4a", name: "voice.m4a", mimeType: "audio/mp4" }, settings, false, undefined, transport as unknown as typeof fetch)).toBe("Купить молоко");
   expect(transport).not.toHaveBeenCalled();
 });
-test("without Whisper a service that cannot transcribe points to the on-device model", async () => {
-  const transport = jest.fn(async () => ({ ok: false, status: 404 }));
-  await expect(extractMedia({ uri: "file:///cache/voice.m4a", name: "voice.m4a" }, { ...settings, provider: "openai-compatible", baseUrl: "https://api.deepseek.com" }, true, undefined, transport as unknown as typeof fetch))
-    .rejects.toThrow("Голос без интернета");
+test("unsupported online DeepSeek host is rejected before audio upload", async () => {
+  const transport = jest.fn();
+  const selected = { ...settings, provider: "openai-compatible" as const, baseUrl: "https://api.deepseek.com", fileAsrMode: "online" as const };
+  await expect(extractMedia({ uri: "file:///cache/voice.m4a", name: "voice.m4a" }, selected, true, undefined, transport as unknown as typeof fetch, selected))
+    .rejects.toThrow("не подтверждает распознавание");
+  expect(transport).not.toHaveBeenCalled();
 });
 
 test("video retains visual result when audio fails and labels missing speech", async () => {
@@ -92,7 +95,8 @@ test("official Whisper-1 requests real segment timestamps in one approved upload
   const captured=jest.fn();
   const text=await extractMedia({uri:"file:///cache/audio.mp3",name:"audio.mp3",mimeType:"audio/mpeg"},
     { ...settings, provider:"openai",baseUrl:"https://api.openai.com/v1",transcriptionModel:"whisper-1" },
-    true,undefined,transport as unknown as typeof fetch,undefined,captured);
+    true,undefined,transport as unknown as typeof fetch,
+      {...settings,transcriptionModel:"whisper-1",fileAsrMode:"online"},captured);
   expect(text).toBe("Привет Как дела?");
   expect(captured).toHaveBeenCalledTimes(1);
   expect(captured).toHaveBeenCalledWith([
@@ -122,7 +126,8 @@ test("broken vendor time positions are never passed to memory, but full plain te
   const captured=jest.fn();
   expect(await extractMedia({uri:"file:///cache/audio.mp3",name:"audio.mp3"},
     {...settings,provider:"openai",baseUrl:"https://api.openai.com/v1",transcriptionModel:"whisper-1"},
-    true,undefined,transport as unknown as typeof fetch,undefined,captured)).toBe("Слова остаются");
+    true,undefined,transport as unknown as typeof fetch,
+      {...settings,transcriptionModel:"whisper-1",fileAsrMode:"online"},captured)).toBe("Слова остаются");
   expect(captured).not.toHaveBeenCalled();
   expect(parseProviderTimeSegments([{start:0,end:0.1,text:"A"},{start:0.05,end:1,text:"B"}])).toBeNull();
   expect(parseProviderTimeSegments([{start:0,end:1,text:"A"}],0.2)).toBeNull();
@@ -130,15 +135,45 @@ test("broken vendor time positions are never passed to memory, but full plain te
   expect(parseProviderTimeSegments([{start:0,end:1,text:"A"},{start:1,end:2,text:"B"}])).toHaveLength(2);
 });
 
-test("custom OpenAI-compatible provider keeps old JSON request and never invents timestamps", async()=>{
-  const transport=jest.fn(async (..._args:any[])=>({ok:true,json:async()=>({text:"Совместимый сервис"})}));
-  const captured=jest.fn();
-  const text=await extractMedia({uri:"file:///cache/audio.mp3",name:"audio.mp3"},
-    {...settings,provider:"openai-compatible",baseUrl:"https://api.example.org/v1",transcriptionModel:"whisper-1"},
-    true,undefined,transport as unknown as typeof fetch,undefined,captured);
-  expect(text).toBe("Совместимый сервис");
-  expect(captured).not.toHaveBeenCalled();
-  expect(JSON.stringify(transport.mock.calls[0][1].body)).not.toContain("verbose_json");
+test("unknown OpenAI-compatible host cannot receive a file without documented capability", async()=>{
+  const transport=jest.fn();
+  const custom={...settings,provider:"openai-compatible" as const,baseUrl:"https://api.example.org/v1",fileAsrMode:"online" as const};
+  await expect(extractMedia({uri:"file:///cache/audio.mp3",name:"audio.mp3"},
+    custom,true,undefined,transport as unknown as typeof fetch,custom)).rejects.toThrow("не подтверждает распознавание");
+  expect(transport).not.toHaveBeenCalled();
+});
+
+test("explicit OpenAI online overrides already installed Whisper; no guessed timestamps",async()=>{
+  (getWhisperStatus as jest.Mock).mockReturnValue({state:"ready",id:"base"});
+  const transport=jest.fn(async (..._args:any[])=>({ok:true,json:async()=>({text:"Онлайн запись"})}));
+  const online={...settings,fileAsrMode:"online" as const};
+  const segments=jest.fn();
+  expect(await extractMedia({uri:"file:///cache/voice.m4a",name:"voice.m4a"},
+    settings,true,undefined,transport as unknown as typeof fetch,online,segments)).toBe("Онлайн запись");
+  expect(transcribeAudioFile).not.toHaveBeenCalled();
+  expect(transport).toHaveBeenCalledTimes(1);
+  expect(segments).not.toHaveBeenCalled();
+  const form=(transport.mock.calls[0][1] as any).body;
+  const model=form.get?.("model") ?? form.getParts?.().find((p:any)=>p.fieldName==="model")?.string;
+  expect(model).toBe("gpt-transcribe");
+});
+
+test("unsupported file extension is rejected before paid audio upload",async()=>{
+  const transport=jest.fn();
+  const online={...settings,fileAsrMode:"online" as const};
+  await expect(extractMedia({uri:"file:///cache/voice.aac",name:"voice.aac",mimeType:"audio/aac"},
+    settings,true,undefined,transport as unknown as typeof fetch,online)).rejects.toThrow("Формат аудиофайла");
+  expect(transport).not.toHaveBeenCalled();
+});
+
+test("online audio never uploads without consent, key, or recognized model",async()=>{
+  const transport=jest.fn();
+  const online={...settings,fileAsrMode:"online" as const};
+  const audio={uri:"file:///cache/voice.m4a",name:"voice.m4a"};
+  await expect(extractMedia(audio,settings,false,undefined,transport as unknown as typeof fetch,online)).rejects.toThrow("Разрешите");
+  await expect(extractMedia(audio,settings,true,undefined,transport as unknown as typeof fetch,{...online,apiKey:""})).rejects.toThrow("ключ");
+  await expect(extractMedia(audio,settings,true,undefined,transport as unknown as typeof fetch,{...online,transcriptionModel:"gpt-4.1-mini"})).rejects.toThrow("не предназначена");
+  expect(transport).not.toHaveBeenCalled();
 });
 
 

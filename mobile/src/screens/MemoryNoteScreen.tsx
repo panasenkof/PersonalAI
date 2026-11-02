@@ -38,7 +38,7 @@ import type { ExtractionSegmentInput } from "../local-memory/extractions";
 import { getRussianOcrStatus } from "../media/russian-ocr";
 import { getWhisperStatus } from "../media/whisper";
 import { mediaKind } from "../media/kinds";
-import { extractMedia } from "../media/extract";
+import { extractMedia, officialAudioProvider } from "../media/extract";
 import type { ImageExtractionMode } from "../media/extract";
 import { maySendOriginalToProvider } from "../media/recognitionPolicy";
 import { mediaConnections } from "../media/preferences";
@@ -182,25 +182,31 @@ export function MemoryNoteScreen() {
     const note = selected;
     const kind = mediaKind({uri:"file:///original",name:attachment.name,mimeType:attachment.mime});
     const localOcr = getRussianOcrStatus().ready;
-    const localSpeech = getWhisperStatus().state === "ready";
     const remoteAllowed = maySendOriginalToProvider(note.sensitivity,
       collections.find(c => c.id === note.collection_id)?.sensitivity);
     const mode: ImageExtractionMode = (kind === "document" || kind === "image") && localOcr ? "offline-ocr" :
       kind === "image" ? "document-text" : "describe";
-    if (!remoteAllowed && (kind === "video" || (kind === "image" && !localOcr) ||
-        (kind === "audio" && !localSpeech))) {
-      setError("Закрытая запись: требуется локальная модель OCR или Whisper. Оригинал не отправлен внешнему сервису.");
-      return;
-    }
-    const destination = kind === "audio" ? localSpeech ? "Локальный Whisper" : "внешний сервис речи" :
-      (kind === "image" || kind === "document") && localOcr ? "локальное русское OCR" :
-      kind === "document" || kind === "text" ? "локальный текстовый разбор" : "внешняя модель";
     void mediaConnections(profile).then(settings => {
       if (!alive.current || activeProfile.current !== profile) return;
+      const localSpeech = settings.fileAsrMode === "device" && getWhisperStatus().state === "ready";
+      if (!remoteAllowed && (kind === "video" || (kind === "image" && !localOcr) ||
+          (kind === "audio" && !localSpeech))) {
+        setError("Закрытая запись: требуется локальная модель OCR или Whisper. Оригинал не отправлен внешнему сервису."); return;
+      }
+      if (kind === "audio" && settings.fileAsrMode === "device" && !localSpeech) {
+        setError("Локальный Whisper не установлен. Выберите онлайн или скачайте модель."); return;
+      }
+      if (kind === "audio" && settings.fileAsrMode === "online" && !officialAudioProvider(settings.speech)) {
+        setError("Это подключение не поддерживает онлайн-распознавание файлов. Выберите официальный OpenAI."); return;
+      }
+      const destination = kind === "audio" ? localSpeech ? "Локальный Whisper" :
+        settings.fileAsrMode === "device" ? "Локальный Whisper" : "внешний сервис речи" :
+        (kind === "image" || kind === "document") && localOcr ? "локальное русское OCR" :
+        kind === "document" || kind === "text" ? "локальный текстовый разбор" : "внешняя модель";
       const remote = destination.startsWith("внешн");
       const provider = kind === "audio" ? settings.speech : settings.vision;
       const name = remote ? "Провайдер: " + provider.provider + ", модель: " +
-        String(kind === "audio" ? provider.transcriptionModel || "whisper-1" : provider.model) :
+        String(kind === "audio" ? provider.transcriptionModel || "gpt-transcribe" : provider.model) :
         "Выполняется на телефоне";
       const message = "Файл: " + attachment.name + "\nОбработка: " + destination + "\n" + name +
         (remote ? "\nФайл будет передан указанному провайдеру только после подтверждения." :
@@ -234,13 +240,13 @@ export function MemoryNoteScreen() {
             const approveUpload = remote && remoteAllowed && allowedNow;
             const segments: ExtractionSegmentInput[] = [];
             const recognition = await extractMedia({uri,name:attachment.name,mimeType:attachment.mime},
-              settings.vision,approveUpload,aborter.signal,undefined,settings.speech,
+              settings.vision,approveUpload,aborter.signal,undefined,{...settings.speech,fileAsrMode:settings.fileAsrMode},
               received => { segments.splice(0,segments.length,...received); },undefined,mode);
             if (aborter.signal.aborted || !alive.current || activeProfile.current !== profile) return;
             const providerId = destination === "Локальный Whisper" ? "local-whisper" :
               destination === "локальное русское OCR" ? "android-tesseract-5-rus" :
               destination === "локальный текстовый разбор" ? "local-document-text" :
-              kind === "audio" ? String(settings.speech.transcriptionModel || "whisper-1") :
+              kind === "audio" ? "openai:" + String(settings.speech.transcriptionModel || "gpt-transcribe") :
               String(settings.vision.model || settings.vision.provider);
             setCandidate({
               text:recognition,attachment,sourceVersion,recordVersion:note.record_version,

@@ -3,7 +3,7 @@ import type { RouteProp } from "@react-navigation/native";
 import { localMemoryRepository } from "../local-memory/repository";
 import { ensureSections } from "../local-memory/sections";
 import type { CollectionRecord } from "../local-memory/types";
-import { loadMediaPreferences } from "../media/preferences";
+import { loadMediaPreferences, type FileAsrMode } from "../media/preferences";
 import { onLocalMemorySessionChange } from "../local-memory/storage";
 import * as ImagePicker from "expo-image-picker";
 import { importLink, linkImportErrorMessage, publicImportUrl } from "../media/link-import";
@@ -26,7 +26,7 @@ import type { DirectConnection } from "../direct-agent/settings";
 import { MAX_ORIGINALS_PER_NOTE, MAX_TOTAL_ORIGINAL_BYTES, saveMediaNote } from "../media/attachments";
 import { combinedRecognitionText, recognizeFilesSequentially, type FileRecognition } from "../media/batch-recognition";
 import { analyzeFilesTogether } from "../media/joint-recognition";
-import { extractMedia, mediaKind } from "../media/extract";
+import { extractMedia, mediaKind, officialAudioProvider } from "../media/extract";
 import type { ImageExtractionMode } from "../media/extract";
 import type { ImportFile } from "../media/extract";
 import type { RootStackParams } from "../navigation";
@@ -83,6 +83,7 @@ export function MemoryImportScreen() {
   const [connections, setConnections] = useState<DirectConnection[]>([]);
   const [connectionId, setConnectionId] = useState("");
   const [speechConnectionId, setSpeechConnectionId] = useState("");
+  const [fileAsrMode, setFileAsrMode] = useState<FileAsrMode>("device");
   const [classification, setClassification] = useState<"sensitive" | "standard">("standard");
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
@@ -95,7 +96,7 @@ export function MemoryImportScreen() {
   useEffect(() => {
     alive.current = true;
     if (profile) void Promise.all([loadDirectConnections(profile), loadMediaPreferences(profile)]).then(([v, prefs]) => {
-      if (alive.current) { setConnections(v.connections); setConnectionId(prefs.visionId || v.activeId); setSpeechConnectionId(prefs.speechId || v.activeId); }
+      if (alive.current) { setConnections(v.connections); setConnectionId(prefs.visionId || v.activeId); setSpeechConnectionId(prefs.speechId || v.activeId); setFileAsrMode(prefs.fileAsrMode); }
     }).catch(() => { if (alive.current) setNotice("Не удалось прочитать подключения. Откройте настройки модели."); });
     return () => {
       alive.current = false; controller.current?.abort();
@@ -142,7 +143,7 @@ export function MemoryImportScreen() {
   const providerApproved = classification === "standard" && collectionAllowsProvider;
   const selected = connections.find(c => c.id === connectionId);
   const kind = file ? mediaKind(file) : null;
-  const localAudio = kind === "audio" && whisper.state === "ready";
+  const localAudio = kind === "audio" && fileAsrMode === "device" && whisper.state === "ready";
   const speechSelected = connections.find(c => c.id === speechConnectionId);
   const processor = kind === "audio" ? speechSelected : selected;
   const canExtract = files.some(item => {
@@ -151,10 +152,10 @@ export function MemoryImportScreen() {
     if (imageExtractionMode === "offline-ocr" && (currentKind === "document" || currentKind === "image"))
       return russianOcr.ready;
     return currentKind === "text" || currentKind === "document" ||
-      (currentKind === "audio" && whisper.state === "ready") ||
-      (currentKind === "video" && whisper.state === "ready") ||
+      (currentKind === "audio" && fileAsrMode === "device" && whisper.state === "ready") ||
+      (currentKind === "video" && fileAsrMode === "device" && whisper.state === "ready") ||
       Boolean(currentProcessor && providerApproved && (currentProcessor.apiKey || anonymousLocalAllowed(currentProcessor)) &&
-        !(currentKind === "audio" && currentProcessor.provider === "anthropic"));
+        (currentKind !== "audio" || (fileAsrMode === "online" && officialAudioProvider(currentProcessor))));
   });
   const field = { color: t.text, backgroundColor: t.panel, borderWidth: 1, borderColor: t.line, borderRadius: 16, padding: 14, minHeight: 50 };
   const button = { backgroundColor: t.accent, padding: 14, borderRadius: 17, minHeight: 50, justifyContent: "center" as const, alignItems: "center" as const };
@@ -309,7 +310,7 @@ export function MemoryImportScreen() {
     } catch (e) { if (alive.current) setNotice((e as Error).message); }
     finally { if (alive.current) setPreparing(false); }
   }
-  async function extract(confirmedReplacement = false) {
+  async function extract(confirmedReplacement = false, onlineConsent = false) {
     if (!file || !canExtract || busy || controller.current) return;
     // Reprocessing a corrected document must not silently erase user edits.
     // Full versioned candidate comparison is implemented in package G.
@@ -320,10 +321,22 @@ export function MemoryImportScreen() {
          { text: "Заменить после разбора", onPress: () => void extract(true) }]);
       return;
     }
+    // Explicit permission is required for *each* upload of original audio.
+    if (fileAsrMode === "online" && files.some(item => ["audio", "video"].includes(mediaKind(item))) && !onlineConsent) {
+      if (!speechSelected || !officialAudioProvider(speechSelected)) {
+        setNotice("Для онлайн-распознавания аудиофайла выберите официальное подключение OpenAI."); return;
+      }
+      Alert.alert("Передать оригинал аудио в OpenAI?",
+        "Будет отправлен звук из выбранных файлов через " + speechSelected.name +
+        " (модель " + (speechSelected.transcriptionModel || "gpt-transcribe") + "). Возможна оплата и расход мобильного трафика (до 20 МБ на аудиофайл).",
+        [{ text: "Отмена", style: "cancel" }, { text: "Отправить и распознать", onPress: () => void extract(confirmedReplacement, true) }]);
+      return;
+    }
     const aborter = new AbortController(); controller.current = aborter; setBusy(true); setNotice("");
     try {
       const vision = selected || { ...defaultDirectPreferences, apiKey: "", webSearchKey: "" };
-      const speech = connections.find(c => c.id === speechConnectionId) || selected;
+      const speechBase = connections.find(c => c.id === speechConnectionId) || selected;
+      const speech = speechBase ? { ...speechBase, fileAsrMode } : { ...vision, fileAsrMode };
       if (files.length === 1) {
         let timedSegments: FileRecognition["segments"];
         let pdfCoverage: PdfPageCoverage | undefined;
@@ -331,6 +344,7 @@ export function MemoryImportScreen() {
           segments => { timedSegments = segments; }, coverage => { pdfCoverage = coverage; }, imageExtractionMode);
         if (alive.current && !aborter.signal.aborted) {
           setRecognitionResults([{ index: 0, name: file.name, status: "success", text,
+            ...(kind === "audio" ? { asrProducerId: fileAsrMode === "device" ? "local-whisper" : "openai:" + (speech.transcriptionModel || "gpt-transcribe") } : {}),
             ...(timedSegments ? { segments: timedSegments } : {}),
             ...(pdfCoverage ? { pdfCoverage } : {}),
             ...((kind === "image" || (kind === "document" && imageExtractionMode === "offline-ocr")) ? { imageMode: imageExtractionMode } : {}) }]);
@@ -355,7 +369,8 @@ export function MemoryImportScreen() {
             }
           });
         const results = rawResults.map(item => item.status === "success"
-          ? { ...item, ...(segmentsByFile.has(item.index) ? { segments: segmentsByFile.get(item.index)! } : {}),
+          ? { ...item,
+              ...(mediaKind(files[item.index]) === "audio" ? { asrProducerId: fileAsrMode === "device" ? "local-whisper" : "openai:" + (speech.transcriptionModel || "gpt-transcribe") } : {}), ...(segmentsByFile.has(item.index) ? { segments: segmentsByFile.get(item.index)! } : {}),
               ...(pdfByFile.has(item.index) ? { pdfCoverage: pdfByFile.get(item.index)! } : {}),
               ...((mediaKind(files[item.index]) === "image" || (mediaKind(files[item.index]) === "document" && imageExtractionMode === "offline-ocr")) ? { imageMode: imageExtractionMode } : {}) } : item);
         if (alive.current && !aborter.signal.aborted) {
@@ -498,7 +513,7 @@ export function MemoryImportScreen() {
             <Text style={{ color: classification === id ? t.secondary : t.text }}>{classification === id ? "● " : "○ "}{label}</Text>
           </Pressable>)}
         {file ? <NoteEditorSection title="Распознавание" summary={extractedText ? "Текст получен · можно повторить" : "Необязательно · для поиска по содержимому"} expanded={recognitionOpen} onToggle={() => setRecognitionOpen(v => !v)}>
-        <Text style={{ color: t.muted, fontSize: 12 }}>{kind === "video" ? "Речь и пять выборочных кадров обрабатываются отдельно. Максимум 10 минут; частичные результаты явно отмечены." : kind === "audio" ? (localAudio ? "Речь распознаётся на телефоне моделью Whisper; файл никуда не отправляется." : "Речь преобразуется в текст сервисом подключения. Чтобы распознавать на телефоне, скачайте модель: Настройки → Голосовой ввод → Голос без интернета.") : kind === "text" ? "Текстовый файл читается на телефоне, без отправки в интернет." : kind === "document" ? "PDF читается локально: Android 15+ или Android 12–14 с расширением S v13+. У сканов без текстового слоя страницы останутся непрочитанными; оригинал сохранится." : "Выбранная модель должна поддерживать изображения."}</Text>
+        <Text style={{ color: t.muted, fontSize: 12 }}>{kind === "video" ? "Речь и пять выборочных кадров обрабатываются отдельно. Максимум 10 минут; частичные результаты явно отмечены." : kind === "audio" ? (fileAsrMode === "device" ? "На телефоне · Whisper. Без сети и без автоматического переключения. Если модель не скачана, установите её в настройках голоса." : "Онлайн · только официальный OpenAI. Оригинал звука уйдёт провайдеру после подтверждения, возможна оплата.") : kind === "text" ? "Текстовый файл читается на телефоне, без отправки в интернет." : kind === "document" ? "PDF читается локально: Android 15+ или Android 12–14 с расширением S v13+. У сканов без текстового слоя страницы останутся непрочитанными; оригинал сохранится." : "Выбранная модель должна поддерживать изображения."}</Text>
         {files.some(item => mediaKind(item) === "image") ? <View style={{ gap: 6 }}>
           <Text style={{ color: t.text, fontWeight: "700" }}>Что сделать с фотографией</Text>
           <Pressable accessibilityRole="button" accessibilityLabel="Описать фотографию" accessibilityState={{ selected: imageExtractionMode === "describe" }} disabled={busy}
@@ -557,9 +572,23 @@ export function MemoryImportScreen() {
           {connections.map(c => <Pressable disabled={busy} key={c.id} accessibilityRole="button" accessibilityLabel={"Разобрать через " + c.name} style={{ minHeight: 44, justifyContent: "center" }} onPress={() => setConnectionId(c.id)}>
             <Text style={{ color: connectionId === c.id ? t.secondary : t.text }}>{connectionId === c.id ? "● " : "○ "}{c.name} · {c.model}</Text>
           </Pressable>)}
-          {kind === "audio" && selected?.provider === "anthropic" ? <Text style={{ color: t.err }}>Для аудио выберите OpenAI-совместимое подключение с распознаванием речи.</Text> : null}
         </NoteEditorSection> : null}
-        {files.some(item => ["audio", "video"].includes(mediaKind(item))) ? <View><Text style={{ color: t.text }}>Подключение для речи (локальный Whisper имеет приоритет)</Text>{connections.map(c => <Pressable key={c.id} disabled={busy} onPress={() => setSpeechConnectionId(c.id)} style={{ minHeight: 44 }}><Text style={{ color: c.id === speechConnectionId ? t.secondary : t.text }}>{c.id === speechConnectionId ? "● " : "○ "}{c.name} · {c.transcriptionModel || "whisper-1"}</Text></Pressable>)}</View> : null}
+        {files.some(item => ["audio", "video"].includes(mediaKind(item))) ? <View style={{ gap: 6 }}>
+          <Text style={{ color: t.text, fontWeight: "700" }}>Распознавание речи из файла</Text>
+          {([ ["device", "На телефоне · Whisper"], ["online", "Онлайн · OpenAI" ] ] as const).map(([id, label]) => <Pressable key={id} accessibilityRole="radio" accessibilityLabel={"Способ распознавания аудиофайла: " + label}
+            accessibilityState={{ checked: fileAsrMode === id, disabled: busy }} disabled={busy} onPress={() => setFileAsrMode(id)}
+            style={{ minHeight: 48, justifyContent: "center" }}><Text style={{ color: fileAsrMode === id ? t.secondary : t.text }}>{fileAsrMode === id ? "● " : "○ "}{label}</Text></Pressable>)}
+          {fileAsrMode === "online" ? <>
+            <Text style={{ color: t.muted, fontSize: 12 }}>Будет отправлен исходный звук; требуется разрешение на каждый запрос. Для личных и закрытых записей отправка запрещена.</Text>
+            <Text style={{ color: t.text }}>Подключение для распознавания</Text>
+            {connections.filter(c => officialAudioProvider(c)).map(c => <Pressable key={c.id} accessibilityRole="radio" accessibilityLabel={"Аудио через " + c.name}
+              accessibilityState={{ checked: c.id === speechConnectionId, disabled: busy }} disabled={busy}
+              onPress={() => setSpeechConnectionId(c.id)} style={{ minHeight: 48, justifyContent: "center" }}>
+              <Text style={{ color: c.id === speechConnectionId ? t.secondary : t.text }}>{c.id === speechConnectionId ? "● " : "○ "}{c.name} · {c.transcriptionModel || "gpt-transcribe"}</Text>
+            </Pressable>)}
+            {!speechSelected || !officialAudioProvider(speechSelected) ? <Text style={{ color: t.err }}>Выберите подключение OpenAI с поддержкой аудиофайлов. Произвольный LLM/DeepSeek не подходит.</Text> : null}
+          </> : whisper.state !== "ready" ? <Text style={{ color: t.muted, fontSize: 12 }}>Whisper пока не установлен. Скачайте его в настройках голосового ввода либо выберите онлайн.</Text> : null}
+        </View> : null}
         <Pressable disabled={busy || !canExtract} accessibilityRole="button" accessibilityLabel="Извлечь сведения из файла" style={[button, { opacity: canExtract ? 1 : .5 }]} onPress={() => void extract()}>
           <Text style={{ color: "#fff", fontWeight: "700" }}>{files.length > 1 ? recognitionMode === "joint" ? "Распознать и сопоставить" : "Распознать все по очереди" : kind === "text" ? "Прочитать текст на телефоне" : kind === "image" && imageExtractionMode === "offline-ocr" ? "Прочитать фото без интернета" : kind === "image" && imageExtractionMode === "document-text" ? "Отправить фото модели и прочитать текст" : kind === "document" && imageExtractionMode === "offline-ocr" ? "Распознать сканы PDF на телефоне" : kind === "document" ? "Прочитать страницы PDF на телефоне" : localAudio ? "Распознать речь на телефоне" : "Передать файл провайдеру и разобрать"}</Text>
         </Pressable>
