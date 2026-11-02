@@ -17,6 +17,7 @@ const mockPlayer = { muted: false, release: jest.fn(), generateThumbnailsAsync: 
 const settings = { ...defaultDirectPreferences, apiKey: "secret", webSearchKey: "" };
 beforeEach(() => {
   jest.clearAllMocks();
+  (getWhisperStatus as jest.Mock).mockReturnValue({ state: "absent" });
   (FileSystem.getInfoAsync as jest.Mock).mockResolvedValue({ exists: true, isDirectory: false, size: 1000 });
   (FileSystem.readAsStringAsync as jest.Mock).mockResolvedValue("dGVzdA==");
   (createVideoPlayer as jest.Mock).mockReturnValue(mockPlayer);
@@ -144,7 +145,7 @@ test("unknown OpenAI-compatible host cannot receive a file without documented ca
 
 test("explicit OpenAI online overrides already installed Whisper; no guessed timestamps",async()=>{
   (getWhisperStatus as jest.Mock).mockReturnValue({state:"ready",id:"base"});
-  const transport=jest.fn(async()=>({ok:true,json:async()=>({text:"Онлайн запись"})}));
+  const transport=jest.fn(async (..._args:any[])=>({ok:true,json:async()=>({text:"Онлайн запись"})}));
   const online={...settings,fileAsrMode:"online" as const};
   const segments=jest.fn();
   expect(await extractMedia({uri:"file:///cache/voice.m4a",name:"voice.m4a"},
