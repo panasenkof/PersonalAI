@@ -37,6 +37,9 @@ export function ChatAttachmentList({files, onRemove, onSearch, onSelectImage, se
       <Text numberOfLines={1} ellipsizeMode="middle" style={{color:t.text,fontSize:12}}>
         {interactive ? file.name : file.kind==="image" ? `Фотография ${index+1}` : file.name}
       </Text>
+      {file.kind === "text" && file.name.startsWith("Текст PDF: ") ? <Text style={{color:t.muted,fontSize:12,lineHeight:17}}>
+        Только текст PDF · оригинал не отправится
+      </Text> : null}
       {onSearch && file.kind==="image" ? <Pressable accessibilityRole="button"
         accessibilityLabel={"Найти похожие в памяти по фото "+file.name} disabled={disabled}
         onPress={()=>onSearch(file)} style={{minHeight:nebulaTouch.minimum,justifyContent:"center"}}>
