@@ -1,5 +1,5 @@
 import React from "react";
-import { fireEvent, render, waitFor } from "@testing-library/react-native";
+import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 import { AttachmentView } from "../AttachmentView";
 import { attachmentPreviewKind, readableAttachmentSize } from "../attachmentPresentation";
 import { attachmentsForEntity, materializeAttachment } from "../attachments";
@@ -11,6 +11,11 @@ let mockFocused = true;
 let mockAppVisible = true;
 const mockPause = jest.fn();
 const mockPlay = jest.fn();
+const mockAudioPlayer = {
+  currentTime: 0, duration: 10,
+  addListener: () => ({ remove: jest.fn() }),
+  pause: mockPause, play: mockPlay,
+};
 jest.mock("expo-file-system", () => ({
   File: class {
     uri: string;
@@ -20,10 +25,7 @@ jest.mock("expo-file-system", () => ({
   },
 }));
 jest.mock("expo-video", () => ({
-  useVideoPlayer: () => ({
-    addListener: () => ({ remove: jest.fn() }),
-    pause: mockPause, play: mockPlay,
-  }),
+  useVideoPlayer: () => mockAudioPlayer,
   VideoView: () => null,
 }));
 jest.mock("@react-navigation/native", () => ({ useIsFocused: () => mockFocused }));
@@ -46,6 +48,7 @@ const items = [
 ];
 beforeEach(() => {
   jest.clearAllMocks();
+  mockAudioPlayer.currentTime = 0; mockAudioPlayer.duration = 10;
   mockFocused = true; mockAppVisible = true;
   (attachmentsForEntity as jest.Mock).mockResolvedValue(items);
   (localExtractionEvidence as jest.Mock).mockResolvedValue([]);
@@ -127,6 +130,89 @@ test("a released native player cannot throw from cleanup", async () => {
   mockPause.mockImplementationOnce(() => { throw new Error("Shared object released"); });
   expect(() => screen.unmount()).not.toThrow();
   expect(mockDelete).toHaveBeenCalledWith("file:///preview/audio");
+});
+
+test("F1: transcript stays local until the original is opened; a verified time seeks the same player", async () => {
+  (localExtractionEvidence as jest.Mock).mockResolvedValueOnce([{
+    producerKind: "asr", status: "partial", coverage: "unknown",
+    segments: [
+      { id: "first", text: "Привет", location: { kind: "time", startMs: 1250, endMs: 2450 } },
+      { id: "second", text: "Это аудиозаметка", location: { kind: "time", startMs: 2450, endMs: 3900 } },
+    ],
+  }]);
+  const ui = render(<AttachmentView profile="guest" entityId="note" />);
+  await waitFor(() => expect(ui.getByText("Вложения · 3")).toBeTruthy());
+  expect(localExtractionEvidence).not.toHaveBeenCalled();
+  expect(materializeAttachment).not.toHaveBeenCalled();
+  fireEvent.press(ui.getByLabelText("Прослушать аудио голос.mp3"));
+  await waitFor(() => expect(ui.getByLabelText("Перейти к 0:01 · Привет")).toBeTruthy());
+  expect(localExtractionEvidence).toHaveBeenCalledWith("guest", "note", "audio", 10);
+  expect(mockPlay).not.toHaveBeenCalled();
+  fireEvent.press(ui.getByLabelText("Перейти к 0:01 · Привет"));
+  expect(mockAudioPlayer.currentTime).toBe(1.25);
+  expect(mockPlay).toHaveBeenCalledTimes(1);
+  fireEvent.press(ui.getByLabelText("Прослушать аудио голос.mp3"));
+  await waitFor(() => expect(mockDelete).toHaveBeenCalledWith("file:///preview/audio"));
+  expect(mockPause).toHaveBeenCalled();
+});
+
+test("F1: unknown positions show searchable transcript as text without a fake seek", async () => {
+  (localExtractionEvidence as jest.Mock).mockResolvedValueOnce([{
+    producerKind: "asr", status: "partial", coverage: "unknown",
+    segments: [
+      { id: "unknown", text: "Запись без таймкодов", location: { kind: "unknown" } },
+      { id: "invalid", text: "Некорректный таймкод", location: { kind: "time", startMs: 0, endMs: 90_000_000 } },
+    ],
+  }]);
+  const ui = render(<AttachmentView profile="guest" entityId="note" />);
+  await waitFor(() => ui.getByLabelText("Прослушать аудио голос.mp3"));
+  fireEvent.press(ui.getByLabelText("Прослушать аудио голос.mp3"));
+  await waitFor(() => expect(ui.getByText("Запись без таймкодов")).toBeTruthy());
+  expect(ui.getByText("Некорректный таймкод")).toBeTruthy();
+  expect(ui.queryByLabelText(/Перейти к/)).toBeNull();
+  expect(mockPlay).not.toHaveBeenCalled();
+});
+
+test("F1: a reported time beyond actual duration never seeks or plays", async () => {
+  mockAudioPlayer.duration = 2;
+  (localExtractionEvidence as jest.Mock).mockResolvedValueOnce([{
+    producerKind: "asr", status: "partial", coverage: "unknown",
+    segments: [{ id: "future", text: "Дальше конца", location: { kind: "time", startMs: 5000, endMs: 6000 } }],
+  }]);
+  const ui = render(<AttachmentView profile="guest" entityId="note" />);
+  await waitFor(() => ui.getByLabelText("Прослушать аудио голос.mp3"));
+  fireEvent.press(ui.getByLabelText("Прослушать аудио голос.mp3"));
+  await waitFor(() => ui.getByLabelText("Перейти к 0:05 · Дальше конца"));
+  fireEvent.press(ui.getByLabelText("Перейти к 0:05 · Дальше конца"));
+  expect(mockPlay).not.toHaveBeenCalled();
+  expect(mockAudioPlayer.currentTime).toBe(0);
+  expect(ui.getByText("Временная отметка выходит за пределы записи.")).toBeTruthy();
+});
+
+test("F1: a late transcript read cannot re-open a closed audio preview", async () => {
+  let resolveEvidence!: (runs: any[]) => void;
+  (localExtractionEvidence as jest.Mock).mockImplementationOnce(() =>
+    new Promise(resolve => { resolveEvidence = resolve; }));
+  const ui = render(<AttachmentView profile="guest" entityId="note" />);
+  await waitFor(() => ui.getByLabelText("Прослушать аудио голос.mp3"));
+  fireEvent.press(ui.getByLabelText("Прослушать аудио голос.mp3"));
+  await waitFor(() => expect(localExtractionEvidence).toHaveBeenCalledWith("guest", "note", "audio", 10));
+  fireEvent.press(ui.getByLabelText("Прослушать аудио голос.mp3"));
+  await waitFor(() => expect(mockDelete).toHaveBeenCalledWith("file:///preview/audio"));
+  await act(async () => resolveEvidence([{
+    producerKind: "asr", status: "complete", coverage: "unknown",
+    segments: [{ id: "late", text: "Текст уже закрыт", location: { kind: "time", startMs: 0, endMs: 1000 } }],
+  }]));
+  expect(ui.queryByText("Текст уже закрыт")).toBeNull();
+  expect(mockPlay).not.toHaveBeenCalled();
+});
+
+test("F1: absent ASR evidence never claims that a transcript exists", async () => {
+  const ui = render(<AttachmentView profile="guest" entityId="note" />);
+  await waitFor(() => ui.getByLabelText("Прослушать аудио голос.mp3"));
+  fireEvent.press(ui.getByLabelText("Прослушать аудио голос.mp3"));
+  await waitFor(() => expect(ui.getByText(/пока нет сохранённого транскрипта/)).toBeTruthy());
+  expect(ui.queryByLabelText(/Перейти к/)).toBeNull();
 });
 
 const proofOriginal = {
