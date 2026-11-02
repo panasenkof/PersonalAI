@@ -52,6 +52,8 @@ export async function runDocumentSynthesis(
   run:(options:DirectAgentOptions)=>Promise<DirectResult>,
 ):Promise<DirectResult> {
   const budget=options.maxRequests??5;
+  if(options.prompt.length+400>DIRECT_INLINE_TEXT_CHARS)
+    throw new Error("Вопрос слишком длинный для объединения документов. Сократите текст вопроса, не файлы.");
   if(!Number.isSafeInteger(budget)||budget<1||plan.calls>budget)
     throw new Error("Для полного разбора нужно "+plan.calls+" обращений к ИИ, а разрешено "+
       budget+". Увеличьте лимит вызовов модели в настройках или выберите меньший документ. Ничего не отправлено.");
@@ -90,7 +92,7 @@ export async function runDocumentSynthesis(
       sourceChars:[p.startChar,p.endChar],summary:response.text}));
   }
   const notes=findings.join("\n");
-  if(notes.length>22_000)throw new Error(
+  if(notes.length+options.prompt.length+1050>DIRECT_INLINE_TEXT_CHARS)throw new Error(
     "Промежуточные выводы превышают безопасный размер объединения. Итог не создан — ничего не обрезано.");
   check(options.signal);
   options.status?.("Документы: общий итог (обращение "+(requests+1)+"/"+budget+")");
@@ -117,7 +119,8 @@ export function historyWithoutLargeDocuments<T extends {content:string;attachmen
   history:T[],
 ):T[] {
   return history.map(row=>{
-    const long=row.attachments?.filter(f=>f.kind==="text"&&f.data.length>DIRECT_INLINE_TEXT_CHARS)||[];
+    const chars=(row.attachments||[]).filter(f=>f.kind==="text").reduce((n,f)=>n+f.data.length,0);
+    const long=chars>DIRECT_INLINE_TEXT_CHARS ? row.attachments?.filter(f=>f.kind==="text")||[] : [];
     if(!long.length)return row;
     return {...row,content:row.content+"\n[Длинные документы предыдущего сообщения не передаются повторно: "+
       long.map(f=>f.name).join(", ")+". Для повторного анализа прикрепите источник снова.]",
