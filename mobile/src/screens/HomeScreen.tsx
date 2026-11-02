@@ -1,4 +1,5 @@
 import { ChatAttachmentList } from "../media/ChatAttachmentList";
+import { ChatAttachmentIssues } from "../media/ChatAttachmentIssues";
 import Feather from "@expo/vector-icons/Feather";
 import { useChatAttachments } from "../media/useChatAttachments";
 import { capturePhotoDraft83, discardCameraPhotoDraft83, stageChatImageForNote83 } from "../media/vision-chat-camera";
@@ -73,7 +74,7 @@ function NebulaHomeContent() {
     });
     return () => {cameraController.current?.abort();releaseCameraOriginal();off();};
   },[profile]);
-  const {picking: pickingAttachment, pick: pickAttachment, audioPreparing, cancel: cancelAttachmentPreparation} = useChatAttachments(store, active?.id, isFocused, setNotice, setSelectedPhotoId);
+  const {picking: pickingAttachment, pick: pickAttachment, audioPreparing, cancel: cancelAttachmentPreparation, failedFiles, dismissFailure} = useChatAttachments(store, active?.id, isFocused, setNotice, setSelectedPhotoId);
   useEffect(()=>{
     for(const [id,original] of cameraOriginal.current){
       if(original.conversationId!==active?.id || !active?.attachments?.some(f=>f.id===id))
@@ -370,6 +371,9 @@ function NebulaHomeContent() {
           <Text style={{color:t.accent}}>Отмена</Text>
         </Pressable>
       </View> : null}
+      {failedFiles.length ? <ChatAttachmentIssues issues={failedFiles}
+        disabled={!ready || busy || pickingAttachment || dictating}
+        onReselect={()=>void pickAttachment()} onDismiss={dismissFailure}/> : null}
       {active?.attachments?.length ? <>
         <ChatAttachmentList files={active.attachments} disabled={busy || cameraBusy || pickingAttachment}
           selectedImageId={selectedPhoto?.id} onSelectImage={setSelectedPhotoId}
