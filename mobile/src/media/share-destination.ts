@@ -41,8 +41,8 @@ export function inspectSharedMaterial(payloads: SharePayload[]): SharedMaterial 
       const size=source.size;
       if (chatKind === "image" && size > MAX_CHAT_IMAGE_SOURCE_BYTES)
         chatError='Фото для чата должно быть не больше 80 МБ.';
-      if (chatKind === "text" && size > 96_000)
-        chatError='Текстовый файл для чата слишком большой: до 24 000 символов.';
+      if (chatKind === "text" && size > MAX_CHAT_FILE_BYTES)
+        chatError='Текстовый файл для чата превышает ресурсный предел 6 МБ.';
       if (chatKind === "audio")
         chatError='Аудио можно расшифровать только при явном выборе файла в чате с установленным Whisper.';
       if (chatKind === "pdf" && size > MAX_CHAT_FILE_BYTES)
@@ -53,7 +53,7 @@ export function inspectSharedMaterial(payloads: SharePayload[]): SharedMaterial 
   }
   const text=texts.join('\n\n');
   if (files.length>MAX_CHAT_FILES)chatError='В чат можно прикрепить до 3 файлов за один раз.';
-  if (text.length>MAX_CHAT_TEXT_CHARS)chatError='Для чата входящий текст должен быть не длиннее 24 000 символов.';
+  if (text.length>MAX_CHAT_TEXT_CHARS)chatError='Ресурсный предел входящего текста для защищённого черновика — 240 000 символов, не предел ИИ-модели.';
   return {text,names,files,memoryError,chatError};
 }
 
@@ -66,7 +66,7 @@ export async function prepareSharedMaterial(payloads:SharePayload[],signal:Abort
   check();
   const material=inspectSharedMaterial(payloads);
   // A Share may contain more items for the Memory path. The chat contract
-  // still permits no more than three files and 24k of separately shared text.
+  // still permits no more than three files and bounded separately shared text.
   if(material.files.length>MAX_CHAT_FILES || material.text.length>MAX_CHAT_TEXT_CHARS)
     return {...material,attachments:[],chatStatuses:[]};
   // Global preflight used to reject all files if any one was unsupported.
@@ -91,7 +91,7 @@ export async function prepareSharedMaterial(payloads:SharePayload[],signal:Abort
         // Memory Import or other attachments in this same Share.
         const size=new File(file.uri).size;
         if(kind==='image' && size>MAX_CHAT_IMAGE_SOURCE_BYTES)error='Фото превышает 80 МБ.';
-        if(kind==='text' && size>96_000)error='Текстовый файл превышает 24 000 символов.';
+        if(kind==='text' && size>MAX_CHAT_FILE_BYTES)error='Текстовый файл превышает 6 МБ.';
         if(kind==='pdf' && size>MAX_CHAT_FILE_BYTES)error='PDF превышает 6 МБ.';
         if(error){
           chatStatuses.push({name:label,state:'error',reason:error});
