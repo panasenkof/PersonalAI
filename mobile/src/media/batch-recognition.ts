@@ -8,6 +8,8 @@ export type FileRecognition = {
   name: string;
   status: "success" | "error";
   text?: string;
+  /** Explicit verified ASR producer; never inferred from absent time intervals. */
+  asrProducerId?: string;
   /** Source-provided audio intervals only; absent for local Whisper. */
   segments?: ExtractionSegmentInput[];
   /** Native-reported page count, never inferred from flattened text. */
