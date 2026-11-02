@@ -7,7 +7,7 @@ import { extractPdfPages, pdfCoverageMessage } from './pdf-pages';
 import { getWhisperStatus, initWhisper, transcribeAudioFile } from './whisper';
 import { localMemorySessionUnlocked } from '../local-memory/storage';
 import { withNativeInteraction } from '../security/native-interaction';
-import { checkedChatAttachments, MAX_CHAT_FILE_BYTES, MAX_CHAT_IMAGE_SOURCE_BYTES, MAX_CHAT_FILES, type ChatAttachment } from '../direct-agent/chat-attachments';
+import { chatAttachmentAdmissionIssue, checkedChatAttachments, MAX_CHAT_FILE_BYTES, MAX_CHAT_IMAGE_SOURCE_BYTES, MAX_CHAT_FILES, type ChatAttachment } from '../direct-agent/chat-attachments';
 
 /** Per-file picker failures never become chat attachments. The user can
  * select only failed files again; already accepted ones remain in the draft.
@@ -25,14 +25,14 @@ export function safeChatFileFailure(error:unknown):string {
   if (message.includes("Whisper") || message.includes("Модель распознавания")) return "Для аудио скачайте локальную модель Whisper в настройках голосового ввода.";
   if (message.includes("20 МБ")) return "Аудиофайл превышает 20 МБ.";
   if (message.includes("Нет распознанной речи")) return "В аудио не удалось распознать речь.";
-  if (message.includes("Текст записи превышает") || message.includes("24 000")) return "Расшифровка длиннее 24 000 символов для чата.";
+  if (message.includes("Текст записи превышает")) return "Расшифровка превышает временный лимит чата 24 000 символов, а не предел выбранной ИИ-модели. Расшифровка не добавлена.";
   if (message.includes("Длительность записи")) return "Запись длиннее 20 минут или длительность неизвестна.";
   if (message.includes("не удалось прочитать аудиофайл")) return "Не удалось прочитать аудио или кодек не поддерживается.";
   if (message.includes("не является PDF")) return "Файл не является настоящим PDF.";
   if (message.includes("текстовый слой")) return "В PDF нет читаемого текстового слоя.";
   if (message.includes("защищён паролем")) return "PDF защищён паролем.";
   if (message.includes("6 МБ")) return "PDF превышает 6 МБ.";
-  if (message.includes("24 000")) return "Слишком много текста (вместе не более 24 000 символов).";
+  if (message.includes("24 000")) return "Временный лимит текущего режима чата — 24 000 символов; это не лимит ИИ-модели. Файл не прикреплён.";
   if (message.includes("80 МБ")) return "Фотография превышает 80 МБ.";
   // The unsupported-format diagnostic mentions UTF-8 as an allowed format;
   // classify the full error before looking for a true text decoding failure.
@@ -79,7 +79,8 @@ async function pickChatAttachmentsInternal(signal:AbortSignal, isolated:boolean,
         if(chatFileFormat(asset).kind==='audio')onAudioPreparing?.();
         const [file]=await readChatAttachments([asset],signal,true);
         check();
-        checkedChatAttachments([...files,file]);
+        const reason=chatAttachmentAdmissionIssue(files,file);
+        if(reason) { failures.push({name:asset.name.replace(/[\r\n\t]/g,' ').slice(0,90),reason}); continue; }
         files.push(file);
       } catch(error) {
         check(); // Lock/abort is global; never report it as an item error.
