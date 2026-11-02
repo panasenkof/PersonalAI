@@ -1,4 +1,5 @@
 import { checkedChatAttachments, MAX_CONVERSATION_FILE_BYTES, type ChatAttachment } from "./chat-attachments";
+import { historyForImageCapability, imageCapability } from "./attachment-capabilities";
 import * as Crypto from "expo-crypto";
 import { beginTask, mergeTaskReceipts, recordEvidence } from "./task-state";
 import { webPreference } from "./dialogue";
@@ -253,6 +254,14 @@ export class DirectChatStore {
     if (!internetPhotoId && localPhotoIntent83(prompt,attachments)) {
       await this.searchPhotosLocally(); return;
     }
+    // Recheck the ACTIVE model at the moment of Send (not the model selected
+    // when a draft photo was picked). Refuse known text-only routes before
+    // consuming the draft, persisting a user turn, or making a network call.
+    if (imageCapability(settings,attachments) === "unsupported") {
+      this.publish({ notice:"Выбранная модель «" + settings.model +
+        "» не принимает изображения. Фото осталось в черновике; выберите модель с поддержкой фото или уберите вложение." });
+      return;
+    }
     if (prompt.length > MAX_USER_PROMPT_CHARS) {
       this.publish({ error: "Сообщение длиннее 24 000 символов. Разделите его на части: текст не отправлен и не обрезан." });
       return;
@@ -264,8 +273,12 @@ export class DirectChatStore {
     // A one-tap image-to-web query is a standalone purpose. Never transmit
     // unrelated history images, private drafts or prior conversation selections.
     const previousSources = internetPhotoId ? [] : [...current.rows].reverse().filter(r => r.role === "assistant" && r.sources?.length).slice(0, 3).flatMap(r => r.sources!).slice(0, 15);
-    const history = internetPhotoId ? [] : current.rows.filter(r => r.role !== "info").slice(-8)
+    const previousHistory = internetPhotoId ? [] : current.rows.filter(r => r.role !== "info").slice(-8)
       .map(r => ({ role: r.role as "user" | "assistant", content: r.text, ...(r.attachments?.length ? {attachments:r.attachments} : {}) }));
+    // After switching to a model known to be text-only, historical photo
+    // originals stay encrypted in prior turns but are not uploaded again.
+    const history = historyForImageCapability(previousHistory,
+      imageCapability(settings,previousHistory.flatMap(r => r.attachments || [])));
     const previousTaskState = internetPhotoId ? undefined : current.taskState;
     const taskState = { ...beginTask(previousTaskState, prompt), webPreference: webPreference({ prompt, history, taskState: previousTaskState }) };
     this.publish({ error: "" });

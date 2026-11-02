@@ -265,3 +265,47 @@ test("internet photo action needs the exact selected image and enabled web, neve
   expect(store.getSnapshot().conversations[0].rows).toHaveLength(0);
   store.dispose();
 });
+
+const tinyImage={id:"i",name:"bike.png",mime:"image/png" as const,kind:"image" as const,
+  data:"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aVz8AAAAASUVORK5CYII=",size:68};
+const deepseekPro={...settings,provider:"openai-compatible" as const,baseUrl:"https://api.deepseek.com",model:"deepseek-v4-pro"};
+test("H5: switching to a documented text-only model never consumes or uploads a pending photo",async()=>{
+  const {repo,records}=repository(),runner=jest.fn();
+  const store=new DirectChatStore("guest",repo,runner);await store.initialize();
+  const id=store.getSnapshot().activeId!;
+  store.setQuestion("Посмотри фото");store.setAttachments(id,[tinyImage]);
+  await store.send(deepseekPro);
+  expect(runner).not.toHaveBeenCalled();
+  const draft=store.getSnapshot().conversations[0];
+  expect(draft.question).toBe("Посмотри фото");
+  expect(draft.attachments).toEqual([tinyImage]);
+  expect(draft.rows).toEqual([]);
+  expect(draft.busy).toBe(false);
+  expect(store.getSnapshot().notice).toContain("не принимает изображения");
+  // Draft can already be encrypted/persisted; only a network/model call is forbidden.
+  store.dispose();
+});
+test("H5: a text-only model can answer a new text turn without uploading historical photos",async()=>{
+  const {repo,records}=repository(),runner=jest.fn(async(_opts:any)=>({text:"Без фото ответить нельзя",sources:[],requests:1}));
+  records.set("old",{id:"old",title:"Фото",createdAt:"2026-11-02",updatedAt:"2026-11-02",
+    rows:[{id:"oldphoto",role:"user",text:"Найди велосипед",attachments:[tinyImage]}],
+    drafts:[],question:"",interrupted:false});
+  const store=new DirectChatStore("guest",repo,runner);await store.initialize();
+  store.setQuestion("О чём говорили?");await store.send(deepseekPro);
+  expect(runner).toHaveBeenCalledTimes(1);
+  const history=runner.mock.calls[0][0].history;
+  expect(history[0].content).toContain("Изображения из этого старого сообщения не переданы");
+  expect(JSON.stringify(history)).not.toContain(tinyImage.data);
+  expect(records.get("old")!.rows[0].attachments).toEqual([tinyImage]);
+  store.dispose();
+});
+test("H5: explicit supported Flash model can pass a photo to the existing runner",async()=>{
+  const {repo}=repository(),runner=jest.fn(async(_opts:any)=>({text:"Велосипед",sources:[],requests:1}));
+  const store=new DirectChatStore("guest",repo,runner);await store.initialize();
+  const id=store.getSnapshot().activeId!;
+  store.setQuestion("Что на фото?");store.setAttachments(id,[tinyImage]);
+  await store.send({...deepseekPro,model:"deepseek-flash"});
+  expect(runner).toHaveBeenCalledTimes(1);
+  expect(runner.mock.calls[0][0].attachments).toEqual([tinyImage]);
+  store.dispose();
+});

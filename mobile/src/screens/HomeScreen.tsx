@@ -4,6 +4,7 @@ import Feather from "@expo/vector-icons/Feather";
 import { useChatAttachments } from "../media/useChatAttachments";
 import { capturePhotoDraft83, discardCameraPhotoDraft83, stageChatImageForNote83 } from "../media/vision-chat-camera";
 import { MAX_CHAT_FILES } from "../direct-agent/chat-attachments";
+import { imageCapability } from "../direct-agent/attachment-capabilities";
 import type { ChatAttachment } from "../direct-agent/chat-attachments";
 import { localPhotoIntent83, localPhotoSuggestion83 } from "../media/vision-chat-search";
 import { PhotoSearchResults } from "../media/PhotoSearchResults";
@@ -135,6 +136,7 @@ function NebulaHomeContent() {
     return () => { alive = false; };
   }, [profile, store]));
   const canSend = Boolean(ready && !pickingAttachment && !cameraBusy && !active?.deleting && settings && (settings.apiKey || anonymousLocalAllowed(settings)));
+  const draftImageSupport = settings ? imageCapability(settings,active?.attachments || []) : "no-images";
   const question = active?.question || "";
   const localPhotoSearch = localPhotoIntent83(question,active?.attachments || []);
   const suggestedPhotoSearch = localPhotoSuggestion83(question, active?.attachments || []);
@@ -371,6 +373,13 @@ function NebulaHomeContent() {
           <Text style={{color:t.accent}}>Отмена</Text>
         </Pressable>
       </View> : null}
+      {draftImageSupport === "unsupported" ? <Text accessibilityRole="alert"
+        style={{color:t.accent,fontSize:13,lineHeight:19,paddingHorizontal:6}}>
+        Выбранная модель не принимает фотографии. Фото останется в черновике: выберите другую модель или уберите вложение.
+      </Text> : draftImageSupport === "unverified" ? <Text
+        style={{color:t.muted,fontSize:12,lineHeight:18,paddingHorizontal:6}}>
+        Поддержка фото моделью «{settings?.model}» не подтверждена. Если она не принимает изображения, выберите другую модель. Текстовые вложения продолжат работать.
+      </Text> : null}
       {failedFiles.length ? <ChatAttachmentIssues issues={failedFiles}
         disabled={!ready || busy || pickingAttachment || dictating}
         onReselect={()=>void pickAttachment()} onDismiss={dismissFailure}/> : null}
