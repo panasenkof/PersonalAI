@@ -62,7 +62,7 @@ test('H3a: unsupported audio does not discard a ready text file from the same Sh
   expect(result.attachments[0].data).toBe('Рецепт');
   expect(result.chatStatuses).toEqual([
     {name:'recipe.txt',state:'ready'},
-    {name:'voice.mp3',state:'error',reason:expect.stringContaining('не поддерживается')},
+    {name:'voice.mp3',state:'error',reason:expect.stringContaining('Whisper')},
   ]);
   expect(result.memoryError).toBe('');
   expect(mockCopy).toHaveBeenCalledTimes(1);
@@ -112,4 +112,14 @@ test('H3a: memory can still import an otherwise unsupported chat file',async()=>
   expect(result.memoryError).toBe('');
   expect(result.chatStatuses).toEqual([{name:'voice.mp3',state:'error',reason:expect.any(String)}]);
   expect(mockCopy).not.toHaveBeenCalled();
+});
+
+test("H3b: incoming audio Share is never silently transcribed; local picker action is required",async()=>{
+  const incoming={shareType:'audio' as const,value:'content://provider/recording.m4a',mimeType:'audio/mp4'};
+  const result=await prepareSharedMaterial([file,incoming],new AbortController().signal);
+  expect(result.chatError).toBe('');
+  expect(result.attachments.map(x=>x.name)).toEqual(['recipe.txt']);
+  expect(result.chatStatuses[1]).toMatchObject({name:'recording.m4a',state:'error',reason:expect.stringContaining('Whisper')});
+  expect(mockCopy).toHaveBeenCalledTimes(1);
+  expect(mockDelete).not.toHaveBeenCalledWith(incoming.value);
 });
