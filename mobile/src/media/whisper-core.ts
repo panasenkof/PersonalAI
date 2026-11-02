@@ -9,6 +9,29 @@ export const WHISPER_CHOICES: WhisperChoice[] = [
 ];
 export const isWhisperId = (value: unknown): value is WhisperId => value === "base" || value === "tiny";
 export const WHISPER_RATE = 16000;
+export const WHISPER_FILE_CHUNK_SECONDS = 25;
+export const MAX_WHISPER_FILE_SECONDS = 20 * 60;
+/** Whisper's pre-recorded inference uses a <=30 s window. Return *exact*
+ * nonoverlapping 16 kHz sample intervals: no missing tail and no invented
+ * source timestamps. Very short trailing audio joins the preceding chunk.
+ * Files beyond the bounded decoded-memory budget fail explicitly.
+ */
+export function whisperFileChunks(sampleCount: number): Array<{ start: number; end: number }> {
+  if (!Number.isSafeInteger(sampleCount) || sampleCount < 0) throw new Error("invalid_whisper_sample_count");
+  if (sampleCount > MAX_WHISPER_FILE_SECONDS * WHISPER_RATE) {
+    throw new Error("Локальное распознавание поддерживает записи до 20 минут. Длинную запись разделите на файлы; ни одна часть не будет обрезана автоматически.");
+  }
+  const size = WHISPER_FILE_CHUNK_SECONDS * WHISPER_RATE;
+  const ranges: Array<{ start: number; end: number }> = [];
+  for (let start = 0; start < sampleCount;) {
+    let end = Math.min(sampleCount, start + size);
+    if (sampleCount - end > 0 && sampleCount - end < WHISPER_RATE) end = sampleCount;
+    ranges.push({ start, end });
+    start = end;
+  }
+  return ranges;
+}
+
 
 /** react-native-executorch needs Android 13+ (API 33) or iOS 17+. */
 export function whisperSupported(os: string, version: string | number): boolean {

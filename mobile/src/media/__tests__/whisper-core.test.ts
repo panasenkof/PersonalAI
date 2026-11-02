@@ -1,4 +1,4 @@
-import { joinTranscript, resampleTo16k, whisperErrorMessage, whisperSupported, WHISPER_CHOICES } from "../whisper-core";
+import { joinTranscript, resampleTo16k, whisperErrorMessage, whisperSupported, WHISPER_CHOICES, whisperFileChunks, WHISPER_RATE, MAX_WHISPER_FILE_SECONDS } from "../whisper-core";
 
 test("only multilingual models are offered, base first", () => {
   expect(WHISPER_CHOICES.map(c => c.id)).toEqual(["base", "tiny"]);
@@ -27,4 +27,23 @@ test("errors name the stage, the reason and the code", () => {
   expect(whisperErrorMessage(new Error("ENOSPC: no space left"), "download")).toContain("не хватает места");
   expect(whisperErrorMessage(Object.assign(new Error("busy"), { code: "RESOURCE_BUSY" }), "recognize")).toContain("Код: «RESOURCE_BUSY: busy»");
   expect(whisperErrorMessage(new Error("failed to allocate memory"), "load")).toContain("не хватает памяти");
+});
+
+test("F2a: chunk boundaries cover all audio exactly once without a lost tail", () => {
+  const samples = 52 * WHISPER_RATE + 5;
+  expect(whisperFileChunks(samples)).toEqual([
+    { start: 0, end: 25 * WHISPER_RATE },
+    { start: 25 * WHISPER_RATE, end: 50 * WHISPER_RATE },
+    { start: 50 * WHISPER_RATE, end: samples },
+  ]);
+  const shortTail = 25 * WHISPER_RATE + 123;
+  expect(whisperFileChunks(shortTail)).toEqual([{ start: 0, end: shortTail }]);
+  expect(whisperFileChunks(0)).toEqual([]);
+  expect(whisperFileChunks(MAX_WHISPER_FILE_SECONDS * WHISPER_RATE).at(-1)?.end)
+    .toBe(MAX_WHISPER_FILE_SECONDS * WHISPER_RATE);
+});
+test("F2a: refuse oversized or invalid waveform lengths without truncating samples", () => {
+  expect(() => whisperFileChunks(MAX_WHISPER_FILE_SECONDS * WHISPER_RATE + 1)).toThrow("20 минут");
+  expect(() => whisperFileChunks(-1)).toThrow("invalid_whisper_sample_count");
+  expect(() => whisperFileChunks(NaN)).toThrow("invalid_whisper_sample_count");
 });
