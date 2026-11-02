@@ -3,7 +3,7 @@ import { onLocalMemorySessionChange } from '../local-memory/storage';
 import type { DirectChatStore } from '../direct-agent/chat-store';
 import { pickChatAttachmentsWithResults } from './pickChatAttachments';
 import type { ChatFileFailure } from './pickChatAttachments';
-import { MAX_CHAT_FILES, checkedChatAttachments, type ChatAttachment } from '../direct-agent/chat-attachments';
+import { MAX_CHAT_FILES, chatAttachmentAdmissionIssue, type ChatAttachment } from '../direct-agent/chat-attachments';
 export function useChatAttachments(store: DirectChatStore, conversationId: string | undefined, focused: boolean, onError: (message:string)=>void, onPhotoPicked?: (id:string)=>void) {
   const [picking,setPicking]=useState(false);
   const [audioPreparing,setAudioPreparing]=useState(false);
@@ -47,14 +47,11 @@ export function useChatAttachments(store: DirectChatStore, conversationId: strin
             reason:`Можно прикрепить не более ${MAX_CHAT_FILES} файлов в одном сообщении.`});
           continue;
         }
-        try{
-          // Count the already staged text as well, not just this picker batch.
-          checkedChatAttachments([...existing,...accepted,file]);
-          accepted.push(file);
-        }catch{
-          failed.push({name:file.name.replace(/[\r\n\t]/g," ").slice(0,90),
-            reason:"Превышен общий лимит текста 24 000 символов или размер вложений."});
-        }
+        // Preserve previously staged files: report which candidate breaches
+        // the temporary transport limit without misrepresenting the LLM context.
+        const reason=chatAttachmentAdmissionIssue([...existing,...accepted],file);
+        if(reason) failed.push({name:file.name.replace(/[\r\n\t]/g," ").slice(0,90),reason});
+        else accepted.push(file);
       }
       if(accepted.length) {
         store.setAttachments(conversationId,[...existing,...accepted]);

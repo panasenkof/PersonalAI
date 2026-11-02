@@ -1,4 +1,4 @@
-import { checkedChatAttachments, chatContent, type ChatAttachment } from '../chat-attachments';
+import { chatAttachmentAdmissionIssue, checkedChatAttachments, chatContent, type ChatAttachment } from '../chat-attachments';
 import { parseConversation } from '../conversations';
 const image: ChatAttachment = {id:'image',name:'test.png',mime:'image/png',kind:'image',data:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aVz8AAAAASUVORK5CYII=',size:68};
 const text: ChatAttachment = {id:'text',name:'recipe.txt',mime:'text/plain',kind:'text',data:'Индейка, чеснок',size:32};
@@ -22,4 +22,21 @@ test('encrypted conversation JSON round-trips attachments; corrupt file cannot s
   expect(restored.rows[0].attachments?.[0].data).toBe(image.data);
   value.rows[0].attachments[0]={...image,data:'corrupt'};
   expect(parseConversation(JSON.stringify(value))).toBeNull();
+});
+
+test('H-DOC1a: exact per-file and aggregate errors never claim that 24k is a model limit',()=>{
+  const long:ChatAttachment={...text,id:'long',data:'Я'.repeat(24_001),size:72_003};
+  const alone=chatAttachmentAdmissionIssue([],long);
+  expect(alone?.replace(/\s+/g,' ')).toContain('24 001');
+  expect(alone).toContain('не предел модели');
+  expect(alone).toContain('не отправлен');
+  const first:ChatAttachment={...text,id:'first',data:'a'.repeat(23_500),size:23_500};
+  const next:ChatAttachment={...text,id:'next',data:'b'.repeat(600),size:600};
+  const combined=chatAttachmentAdmissionIssue([first],next);
+  expect(combined?.replace(/\s+/g,' ')).toContain('24 100');
+  expect(combined).toContain('не предел ИИ-модели');
+  expect(chatAttachmentAdmissionIssue([first],{...text,id:'fits',data:'z'.repeat(500)})).toBe(null);
+  expect(chatAttachmentAdmissionIssue([image,text,image],{...text,id:'fourth'})).toContain('3 файла');
+  // This deliberately preserves the secure 24k wire gate until H-DOC1b.
+  expect(()=>checkedChatAttachments([long])).toThrow();
 });
