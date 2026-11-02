@@ -49,6 +49,11 @@ class PersaiPdfTextModule : Module() {
       return@AsyncFunction PdfTextPageReader.read(appLocalPdf(uri), pageLimit)
     }
 
+    AsyncFunction("extractPageRange") { uri: String, firstPage: Int, count: Int ->
+      require(firstPage >= 1 && count in 1..16) { "invalid_pdf_page_window" }
+      return@AsyncFunction PdfTextPageReader.readRange(appLocalPdf(uri), firstPage, count)
+    }
+
     AsyncFunction("renderPage") { uri: String, pageNumber: Int, maxWidth: Int ->
       val context = appContext.reactContext ?: throw IllegalStateException("pdf_context_unavailable")
       return@AsyncFunction PdfPageRasterizer.render(
