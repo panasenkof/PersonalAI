@@ -70,7 +70,7 @@ internal object PdfTextPageReader {
           PdfRenderer(fd).use { pdf ->
             return collectRange(pdf.pageCount, firstPage, count) { index ->
               pdf.openPage(index).use { page ->
-                page.textContents.joinToString("\\n") { it.text }
+                page.textContents.joinToString("\n") { it.text }
               }
             }
           }
@@ -78,7 +78,7 @@ internal object PdfTextPageReader {
         PdfRendererPreV(fd).use { pdf ->
           return collectRange(pdf.pageCount, firstPage, count) { index ->
             pdf.openPage(index).use { page ->
-              page.textContents.joinToString("\\n") { it.text }
+              page.textContents.joinToString("\n") { it.text }
             }
           }
         }
