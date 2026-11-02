@@ -1,6 +1,7 @@
 import { pickChatAttachments, pickChatAttachmentsWithResults, safeChatFileFailure } from '../pickChatAttachments';
 import { chatContent } from "../../direct-agent/chat-attachments";
 import { extractPdfPages } from "../pdf-pages";
+import { getWhisperStatus, initWhisper, transcribeAudioFile } from "../whisper";
 import { getDocumentAsync } from 'expo-document-picker';
 import { readAsStringAsync } from 'expo-file-system/legacy';
 import { manipulateAsync } from 'expo-image-manipulator';
@@ -21,6 +22,7 @@ jest.mock('expo-file-system',()=>({
   }
 }));
 jest.mock('../../local-memory/storage',()=>({localMemorySessionUnlocked:()=>mockUnlocked}));
+jest.mock('../whisper',()=>({getWhisperStatus:jest.fn(),initWhisper:jest.fn(),transcribeAudioFile:jest.fn()}));
 jest.mock('../pdf-pages',()=>({
   extractPdfPages:jest.fn(),
   pdfCoverageMessage:jest.fn(()=> 'Текст PDF: 1 из 1 стр.'),
@@ -31,6 +33,9 @@ beforeEach(()=>{jest.resetAllMocks();mockUnlocked=true;mockSize=100;
   mockPdfHeader=new Uint8Array([37,80,68,70,45]);
   (getDocumentAsync as jest.Mock).mockResolvedValue({canceled:false,assets:[asset]});
   (readAsStringAsync as jest.Mock).mockResolvedValue('Text');
+  (getWhisperStatus as jest.Mock).mockReturnValue({state:'ready',id:'base'});
+  (initWhisper as jest.Mock).mockResolvedValue(undefined);
+  (transcribeAudioFile as jest.Mock).mockResolvedValue('Привет, проверь договор.');
   (extractPdfPages as jest.Mock).mockResolvedValue({text:"Страница 1:\\nДоговор",totalPageCount:1,
     extractedPageCount:1,missingPages:[],coverage:"partial",segments:[]});
 });
@@ -157,4 +162,68 @@ test('H3a: unsupported MIME diagnostic mentioning UTF-8 is never mislabeled a te
   const unsupported=new Error('В чат можно прикрепить фото JPEG/PNG/WebP, текст UTF-8 или PDF с текстовым слоем. Аудио и видео пока доступны в памяти.');
   expect(safeChatFileFailure(unsupported)).toBe('Формат файла не поддерживается в чате.');
   expect(safeChatFileFailure(new Error('Ошибка текстового файла UTF-8'))).toContain('UTF-8');
+});
+
+test("H3b: explicit picker MP3 becomes offline Whisper text, no audio bytes in any adapter",async()=>{
+  const audio={uri:"file:///cache/meeting.mp3",name:"meeting.mp3",mimeType:"audio/mpeg"};
+  (getDocumentAsync as jest.Mock).mockResolvedValue({canceled:false,assets:[audio]});
+  const onPreparing=jest.fn();
+  const result=await pickChatAttachmentsWithResults(new AbortController().signal,onPreparing);
+  expect(onPreparing).toHaveBeenCalledTimes(1);
+  expect(transcribeAudioFile).toHaveBeenCalledWith(audio.uri,expect.anything());
+  expect(result.failures).toEqual([]);
+  expect(result.files).toHaveLength(1);
+  expect(result.files[0]).toMatchObject({kind:'text',mime:'text/plain',name:'Транскрипт аудио: meeting.mp3'});
+  expect(result.files[0].data).toContain('Привет, проверь договор.');
+  expect(result.files[0].data).toContain('Оригинальное аудио не отправляется');
+  for(const protocol of ['chat','responses','anthropic'] as const){
+    const blocks=JSON.stringify(chatContent('Обобщи',result.files,protocol));
+    expect(blocks).toContain('Локальная расшифровка Whisper');
+    expect(blocks).not.toContain('data:audio');
+    expect(blocks).not.toContain('file:///cache/');
+  }
+  expect(readAsStringAsync).not.toHaveBeenCalled();
+  expect(mockDelete).toHaveBeenCalledWith(audio.uri);
+});
+
+test("H3b: absent Whisper leaves other text ready without any network fallback",async()=>{
+  const audio={uri:"file:///cache/meeting.m4a",name:"meeting.m4a",mimeType:"audio/mp4"};
+  (getDocumentAsync as jest.Mock).mockResolvedValue({canceled:false,assets:[audio,asset]});
+  (getWhisperStatus as jest.Mock).mockReturnValue({state:'absent'});
+  const result=await pickChatAttachmentsWithResults(new AbortController().signal);
+  expect(result.files.map(x=>x.name)).toEqual(['a.txt']);
+  expect(result.failures).toMatchObject([{name:'meeting.m4a',reason:expect.stringContaining('Whisper')}]);
+  expect(transcribeAudioFile).not.toHaveBeenCalled();
+  expect(mockDelete).toHaveBeenCalledWith(audio.uri);
+});
+
+test("H3b: silence and excessive transcript cannot be treated as valid chat attachment",async()=>{
+  const audio={uri:"file:///cache/silent.wav",name:"silent.wav",mimeType:"audio/wav"};
+  (getDocumentAsync as jest.Mock).mockResolvedValue({canceled:false,assets:[audio]});
+  (transcribeAudioFile as jest.Mock).mockResolvedValueOnce('  ');
+  const silence=await pickChatAttachmentsWithResults(new AbortController().signal);
+  expect(silence.files).toEqual([]);
+  expect(silence.failures[0].reason).toContain('не удалось распознать');
+  (transcribeAudioFile as jest.Mock).mockResolvedValueOnce('а'.repeat(24_000));
+  const big=await pickChatAttachmentsWithResults(new AbortController().signal);
+  expect(big.files).toEqual([]);
+  expect(big.failures[0].reason).toContain('24 000');
+});
+
+test("H3b: abort or profile lock while decoding stops late result and clears picker copy",async()=>{
+  const audio={uri:"file:///cache/late.ogg",name:"late.ogg",mimeType:"audio/ogg"};
+  (getDocumentAsync as jest.Mock).mockResolvedValue({canceled:false,assets:[audio]});
+  const controller=new AbortController();
+  (transcribeAudioFile as jest.Mock).mockImplementationOnce(async()=>{controller.abort();return 'Поздний текст';});
+  await expect(pickChatAttachmentsWithResults(controller.signal)).rejects.toThrow('прерван');
+  expect(mockDelete).toHaveBeenCalledWith(audio.uri);
+  (transcribeAudioFile as jest.Mock).mockImplementationOnce(async()=>{mockUnlocked=false;return 'Поздний текст';});
+  await expect(pickChatAttachmentsWithResults(new AbortController().signal)).rejects.toThrow('прерван');
+});
+
+test("H3b: Share/non-picker reader never starts local ASR without explicit picker action",async()=>{
+  const audio={uri:"file:///cache/incoming.mp3",name:"incoming.mp3",mimeType:"audio/mpeg"};
+  const {readChatAttachments}=require('../pickChatAttachments') as typeof import('../pickChatAttachments');
+  await expect(readChatAttachments([audio],new AbortController().signal)).rejects.toThrow('Share');
+  expect(transcribeAudioFile).not.toHaveBeenCalled();
 });

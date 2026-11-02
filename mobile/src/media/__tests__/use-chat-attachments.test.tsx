@@ -56,3 +56,29 @@ test("H2: no new files after picker cancellation never modifies an existing draf
   await act(async()=>{fireEvent.press(ui.getByLabelText("Выбрать файлы"));});
   expect(setAttachments).not.toHaveBeenCalled();
 });
+
+test("H3b: cancel while local Whisper is preparing prevents committing a late transcript",async()=>{
+  const setAttachments=jest.fn(),onError=jest.fn();
+  const state={activeId:"chat1",conversations:[{id:"chat1",attachments:[]}]};
+  const store={getSnapshot:()=>state,setAttachments};
+  let resume!:(files:any)=>void;
+  (pickChatAttachmentsWithResults as jest.Mock).mockImplementation(async(signal:AbortSignal,onAudioPreparing:()=>void)=>{
+    onAudioPreparing();
+    await new Promise(resolve=>{resume=resolve;});
+    if(signal.aborted)throw new Error("Выбор файлов прерван.");
+    return {files:[textFile("late",16)],failures:[]};
+  });
+  function Picker(){
+    const {pick,cancel,audioPreparing}=useChatAttachments(store as any,"chat1",true,onError);
+    return <>
+      <Pressable accessibilityLabel="Select" onPress={()=>void pick()}><Text>Select</Text></Pressable>
+      {audioPreparing?<Pressable accessibilityLabel="Cancel ASR" onPress={cancel}><Text>Cancel</Text></Pressable>:null}
+    </>;
+  }
+  const ui=render(<Picker/>);
+  await act(async()=>{fireEvent.press(ui.getByLabelText("Select"));});
+  expect(ui.getByLabelText("Cancel ASR")).toBeTruthy();
+  fireEvent.press(ui.getByLabelText("Cancel ASR"));
+  await act(async()=>resume(null));
+  expect(setAttachments).not.toHaveBeenCalled();
+});

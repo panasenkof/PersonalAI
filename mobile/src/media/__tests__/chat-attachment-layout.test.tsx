@@ -33,3 +33,12 @@ test("H1: PDF attachment is visibly labeled as extracted text, not an original P
   expect(screen.getByText(/Только текст PDF/)).toBeTruthy();
   expect(screen.getByLabelText("Убрать вложение Текст PDF: report.pdf")).toBeTruthy();
 });
+
+test("H3b: a transcript card explains that only text, not original audio, is sent",()=>{
+  const audio:any={id:'a1',name:'Транскрипт аудио: lecture.mp3',kind:'text',
+    mime:'text/plain',data:'Локальная расшифровка Whisper. Текст записи',size:300};
+  const screen=render(<ChatAttachmentList files={[audio]} onRemove={jest.fn()}/>);
+  expect(screen.getByText(/Текст Whisper/)).toBeTruthy();
+  expect(screen.getByText(/аудио не отправится/)).toBeTruthy();
+  expect(screen.getByLabelText('Убрать вложение Транскрипт аудио: lecture.mp3')).toBeTruthy();
+});

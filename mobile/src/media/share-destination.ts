@@ -30,9 +30,9 @@ export function inspectSharedMaterial(payloads: SharePayload[]): SharedMaterial 
     const file={uri:p.value, name:source.name || 'Входящий файл', mimeType:p.mimeType};
     files.push(file);names.push(file.name);
     try { mediaKind(file); } catch { memoryError='Этот формат пока нельзя импортировать в память. Выберите изображение, PDF, аудио, видео или текстовый файл.'; }
-    let chatKind: "image" | "text" | "pdf" | undefined;
+    let chatKind: "image" | "text" | "pdf" | "audio" | undefined;
     try { chatKind = chatFileFormat(file).kind; }
-    catch { chatError='В чат доступны JPEG, PNG, WebP, текст UTF-8 и PDF с текстовым слоем. Этот формат не поддерживается.'; }
+    catch { chatError='В чат доступны JPEG, PNG, WebP, текст UTF-8 и PDF с текстовым слоем. Для аудио выберите файл в чате после открытия приложения.'; }
     // Preflight mirrors the native picker: an oversized image is resized on
     // device before chat, whereas text must fit the bounded UTF-8 read.
     // ContentResolver metadata can be unavailable; readChatAttachments checks
@@ -43,6 +43,8 @@ export function inspectSharedMaterial(payloads: SharePayload[]): SharedMaterial 
         chatError='Фото для чата должно быть не больше 80 МБ.';
       if (chatKind === "text" && size > 96_000)
         chatError='Текстовый файл для чата слишком большой: до 24 000 символов.';
+      if (chatKind === "audio")
+        chatError='Аудио можно расшифровать только при явном выборе файла в чате с установленным Whisper.';
       if (chatKind === "pdf" && size > MAX_CHAT_FILE_BYTES)
         chatError='Для чата выберите PDF до 6 МБ; в модель отправится только извлечённый текст.';
       if (size > 80*1024*1024)
@@ -81,6 +83,10 @@ export async function prepareSharedMaterial(payloads:SharePayload[],signal:Abort
       let error='';
       try{
         const {kind}=chatFileFormat(file);
+        if(kind==='audio'){
+          chatStatuses.push({name:label,state:'error',reason:'Откройте чат и выберите аудиофайл для локальной расшифровки Whisper. Автоматического распознавания Share нет.'});
+          continue;
+        }
         // Reject known unsupported sources before copying, without affecting
         // Memory Import or other attachments in this same Share.
         const size=new File(file.uri).size;
