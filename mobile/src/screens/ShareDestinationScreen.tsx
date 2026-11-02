@@ -49,11 +49,32 @@ export function ShareDestinationScreen(){
     {material ? <View style={{...button,backgroundColor:t.panel}}>
       <Text style={{color:t.text}}>Материалов: {route.params.incoming.length}</Text>
       {material.text ? <Text numberOfLines={4} style={{color:t.muted}}>{material.text}</Text> : null}
-      {material.attachments.length ? <ChatAttachmentList files={material.attachments}/> : material.files.map((f,i)=><Text key={i} style={{color:t.text}}>{f.name}</Text>)}
+      {material.attachments.length ? <ChatAttachmentList files={material.attachments}/> : null}
+      {material.chatStatuses?.length ? <View style={{gap:nebulaSpacing.xs}}>
+        <Text style={{color:t.secondary,fontWeight:'700'}}>
+          Для чата готово: {material.attachments.length} из {material.files.length}
+        </Text>
+        {material.chatStatuses.map((item,i)=><View key={i} style={{gap:2,paddingVertical:nebulaSpacing.xs}}>
+          <Text style={{color:item.state==='ready'?t.secondary:t.err}}
+            accessibilityLabel={item.state==='ready' ? 'Готово для чата: '+item.name : 'Не удалось подготовить: '+item.name}>
+            {item.state==='ready'?'✓ Готово · ':'! Ошибка · '}{item.name}
+          </Text>
+          {item.state==='error' ? <Text style={{color:t.muted,fontSize:13}}>{item.reason}</Text> : null}
+        </View>)}
+      </View> : !material.attachments.length ? material.files.map((f,i)=><Text key={i} style={{color:t.text}}>{f.name}</Text>) : null}
+      {material.chatStatuses?.some(item=>item.state==='error') ? <>
+        <Text style={{color:t.muted}}>В чат попадут только готовые материалы. Неудавшиеся файлы можно проверить повторно или сохранить оригиналы в память.</Text>
+        <Pressable accessibilityRole="button" accessibilityLabel="Повторить подготовку файлов"
+          disabled={!available || handled.current} accessibilityState={{disabled:!available || handled.current}}
+          onPress={()=>setAttempt(n=>n+1)}
+          style={{minHeight:nebulaTouch.minimum,justifyContent:'center'}}>
+          <Text style={{color:t.accent,fontWeight:'600'}}>Повторить подготовку</Text>
+        </Pressable>
+      </> : null}
     </View> : null}
     <Pressable accessibilityRole="button" accessibilityLabel="Добавить входящее в чат" accessibilityState={{disabled:!available || Boolean(chatError)}} disabled={!available || Boolean(chatError)} onPress={toChat} style={{...button,backgroundColor:t.soft,opacity:available&&!chatError?1:.5}}>
       <Text style={{color:t.secondary,fontSize:18,fontWeight:'700'}}>В чат</Text>
-      <Text style={{color:t.muted}}>Дополнить черновик{active?.title ? ` «${active.title}»` : ''}. Отправка модели — только кнопкой отправки.</Text>
+      <Text style={{color:t.muted}}>Дополнить черновик{active?.title ? ` «${active.title}»` : ''} только готовыми материалами. Отправка модели — отдельной кнопкой.</Text>
     </Pressable>
     {chatError ? <Text accessibilityLiveRegion="polite" style={{color:t.muted}}>{chatError}</Text> : null}
     <Pressable accessibilityRole="button" accessibilityLabel="Добавить входящее в память" accessibilityState={{disabled:!available || Boolean(material?.memoryError)}} disabled={!available || Boolean(material?.memoryError)} onPress={toMemory} style={{...button,backgroundColor:t.soft,opacity:available&&!material?.memoryError?1:.5}}>
