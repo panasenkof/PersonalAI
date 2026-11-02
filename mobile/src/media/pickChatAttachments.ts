@@ -2,7 +2,8 @@ import * as Crypto from 'expo-crypto';
 import * as DocumentPicker from 'expo-document-picker';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import * as FileSystem from 'expo-file-system/legacy';
-import { File } from 'expo-file-system';
+import { File, FileMode } from 'expo-file-system';
+import { extractPdfPages, pdfCoverageMessage } from './pdf-pages';
 import { localMemorySessionUnlocked } from '../local-memory/storage';
 import { withNativeInteraction } from '../security/native-interaction';
 import { checkedChatAttachments, MAX_CHAT_FILE_BYTES, MAX_CHAT_IMAGE_SOURCE_BYTES, MAX_CHAT_FILES, type ChatAttachment } from '../direct-agent/chat-attachments';
@@ -13,7 +14,7 @@ export async function pickChatAttachments(signal: AbortSignal): Promise<ChatAtta
   try {
     check();
     await withNativeInteraction(async () => {
-      const result = await DocumentPicker.getDocumentAsync({ type:['image/jpeg','image/png','image/webp','text/*','application/json'], multiple:true, copyToCacheDirectory:true });
+      const result = await DocumentPicker.getDocumentAsync({ type:['image/jpeg','image/png','image/webp','text/*','application/json','application/pdf'], multiple:true, copyToCacheDirectory:true });
       if (!result.canceled) assets = result.assets;
     });
     check();
@@ -74,6 +75,8 @@ export async function readChatAttachments(assets: Array<{uri:string; name:string
       const {kind,mime} = chatFileFormat(asset);
       if (!size || (kind === 'image' && size > MAX_CHAT_IMAGE_SOURCE_BYTES))
         throw new Error('Фото для чата должно быть непустым и не больше 80 МБ.');
+      if (kind === 'pdf' && size > MAX_CHAT_FILE_BYTES)
+        throw new Error('Для чата выберите PDF до 6 МБ. Большой документ сохраните в память.');
       // Bound text reads as well as image reads before bringing bytes into JS.
       if (kind === 'text' && size > 96000) throw new Error('Текстовый файл слишком большой: до 24 000 символов.');
       const prepared = kind === 'image'
@@ -81,11 +84,15 @@ export async function readChatAttachments(assets: Array<{uri:string; name:string
         : {uri:asset.uri,mime:"",temporary:false};
       try {
         check();
-        const data = await FileSystem.readAsStringAsync(prepared.uri, {encoding:kind === 'image' ? FileSystem.EncodingType.Base64 : FileSystem.EncodingType.UTF8});
+        const data = kind === 'pdf'
+          ? await pdfChatText(asset.uri, asset.name, signal)
+          : await FileSystem.readAsStringAsync(prepared.uri, {encoding:kind === 'image' ? FileSystem.EncodingType.Base64 : FileSystem.EncodingType.UTF8});
         check();
-        files.push({id:Crypto.randomUUID(), name:asset.name.slice(0,240), kind,
-          mime:kind === 'text' ? 'text/plain' : prepared.mime || mime, data,
-          size:kind === 'image' ? new File(prepared.uri).size : size});
+        files.push({id:Crypto.randomUUID(), name:kind === 'pdf'
+            ? ('Текст PDF: ' + asset.name).slice(0,240) : asset.name.slice(0,240),
+          kind:kind === 'pdf' ? 'text' : kind,
+          mime:kind === 'text' || kind === 'pdf' ? 'text/plain' : prepared.mime || mime, data,
+          size:kind === 'image' ? new File(prepared.uri).size : kind === 'pdf' ? data.length * 3 : size});
       } finally {
         if(prepared.temporary)try {const f=new File(prepared.uri);if(f.exists)f.delete();}catch {}
       }
@@ -93,11 +100,35 @@ export async function readChatAttachments(assets: Array<{uri:string; name:string
     return checkedChatAttachments(files);
 }
 
-export function chatFileFormat(asset: {name:string; mimeType?:string|null}): {kind:'image'|'text';mime:string} {
+/** A PDF is sent only as explicit extracted text. The original file is NEVER
+ * embedded in a chat block and the user must still press Send.
+ */
+async function pdfChatText(uri: string, name: string, signal: AbortSignal): Promise<string> {
+  const file = new File(uri);
+  const handle = file.open(FileMode.ReadOnly);
+  try {
+    const head = handle.readBytes(5);
+    if (head.length !== 5 || String.fromCharCode(...head) !== '%PDF-')
+      throw new Error('Выбранный файл не является PDF. Проверьте формат и повторите выбор.');
+  } finally { handle.close(); }
+  if (signal.aborted || !localMemorySessionUnlocked()) throw new Error('Выбор файлов прерван.');
+  const pages = await extractPdfPages({uri,name,mimeType:'application/pdf'},signal);
+  if (signal.aborted || !localMemorySessionUnlocked()) throw new Error('Выбор файлов прерван.');
+  const text = 'Только извлечённый текст PDF. Исходный файл в модель не отправляется.\n' +
+    pdfCoverageMessage(pages) + '\n\n' + pages.text;
+  if (text.length > 24_000)
+    throw new Error('Извлечённый текст PDF превышает общий лимит чата 24 000 символов. Разделите документ; текст не обрезан.');
+  return text;
+}
+
+export function chatFileFormat(asset: {name:string; mimeType?:string|null}): {kind:'image'|'text'|'pdf';mime:string} {
   const ext=asset.name.split('.').pop()?.toLowerCase();
   const declared=asset.mimeType || '';
-  const mime=(!declared || declared==='application/octet-stream') ? ({jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',webp:'image/webp'} as Record<string,string>)[ext || ''] || declared : declared;
+  const mime=(!declared || declared==='application/octet-stream') ? ({jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',webp:'image/webp',pdf:'application/pdf'} as Record<string,string>)[ext || ''] || declared : declared;
+  // An extension or declared PDF MIME never passes through the UTF-8 reader:
+  // the actual magic bytes and native parser must both accept the original.
+  if (ext === 'pdf' || declared === 'application/pdf') return {kind:'pdf',mime:'application/pdf'};
   if (['image/jpeg','image/png','image/webp'].includes(mime)) return {kind:'image',mime};
   if (mime.startsWith('text/') || mime==='application/json' || ['txt','md','csv','json','log','srt','vtt'].includes(ext || '')) return {kind:'text',mime:'text/plain'};
-  throw new Error('В чат можно прикрепить JPEG, PNG, WebP или текст UTF-8. PDF, аудио и видео пока доступны в памяти.');
+  throw new Error('В чат можно прикрепить фото JPEG/PNG/WebP, текст UTF-8 или PDF с текстовым слоем. Аудио и видео пока доступны в памяти.');
 }

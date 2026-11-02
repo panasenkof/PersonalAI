@@ -24,3 +24,12 @@ test("draft image actions stay accessible and do not stretch the message",()=>{
   fireEvent.press(screen.getByLabelText("Убрать вложение "+file.name));
   expect(onRemove).toHaveBeenCalledWith("photo");
 });
+
+test("H1: PDF attachment is visibly labeled as extracted text, not an original PDF upload",()=>{
+  const pdf:any={id:"pdf",name:"Текст PDF: report.pdf",kind:"text",mime:"text/plain",
+    data:"Извлечённые страницы",size:55};
+  const screen=render(<ChatAttachmentList files={[pdf]} onRemove={jest.fn()}/>);
+  expect(screen.getByText("Текст PDF: report.pdf")).toBeTruthy();
+  expect(screen.getByText(/Только текст PDF/)).toBeTruthy();
+  expect(screen.getByLabelText("Убрать вложение Текст PDF: report.pdf")).toBeTruthy();
+});
