@@ -35,16 +35,15 @@ export async function runAndroidFileProbe(uri: string, signal?: AbortSignal): Pr
   if (!__DEV__ || Platform.OS !== "android" || Number(Platform.Version) < 33)
     return { status: "unsupported", reason: "Эксперимент доступен только в отладочной Android 13+ сборке." };
   if (signal?.aborted) return { status: "error", reason: "Проверка отменена." };
-  const info = await FileSystem.getInfoAsync(uri);
-  if (!androidFileProbeEligible(Platform.OS, Number(Platform.Version), uri, info.exists && !info.isDirectory ? info.size ?? 0 : 0))
-    return { status: "unsupported", reason: "Выберите небольшой аудиофайл из локального кэша (не более 1 МБ)." };
-
   let temporary: File | undefined;
   try {
+    const info = await FileSystem.getInfoAsync(uri);
+    if (!androidFileProbeEligible(Platform.OS, Number(Platform.Version), uri, info.exists && !info.isDirectory ? info.size ?? 0 : 0))
+      return { status: "unsupported", reason: "Выберите небольшой аудиофайл из локального кэша (не более 1 МБ)." };
     const { decodeAudioData } = require("react-native-audio-api") as typeof import("react-native-audio-api");
     const decoded = await decodeAudioData(uri, 16_000);
     if (signal?.aborted) return { status: "error", reason: "Проверка отменена." };
-    if (!decoded.numberOfChannels || decoded.duration < 1 || decoded.duration > PROBE_MAX_SECONDS)
+    if (!decoded.numberOfChannels || !Number.isFinite(decoded.duration) || decoded.duration < 1 || decoded.duration > PROBE_MAX_SECONDS)
       return { status: "unsupported", reason: "Для проверки требуется запись речи длительностью от 1 до 12 секунд." };
     const pcm = monoWav(Array.from({ length: decoded.numberOfChannels }, (_, i) => decoded.getChannelData(i)), 16_000);
     const dir = new Directory(Paths.cache, "persai-asr-probe");
