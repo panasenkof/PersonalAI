@@ -5,6 +5,7 @@ import { pickChatAttachmentsWithResults } from './pickChatAttachments';
 import { MAX_CHAT_FILES, checkedChatAttachments, type ChatAttachment } from '../direct-agent/chat-attachments';
 export function useChatAttachments(store: DirectChatStore, conversationId: string | undefined, focused: boolean, onError: (message:string)=>void, onPhotoPicked?: (id:string)=>void) {
   const [picking,setPicking]=useState(false);
+  const [audioPreparing,setAudioPreparing]=useState(false);
   const controller=useRef<AbortController|null>(null);
   const alive=useRef(true);
   useEffect(()=>{
@@ -16,9 +17,12 @@ export function useChatAttachments(store: DirectChatStore, conversationId: strin
   async function pick() {
     if(controller.current || !conversationId) return;
     const aborter=new AbortController();controller.current=aborter;setPicking(true);
+    setAudioPreparing(false);
     onError(""); // Dismiss a stale file-size or picker error before retry.
     try {
-      const result=await pickChatAttachmentsWithResults(aborter.signal);
+      const result=await pickChatAttachmentsWithResults(aborter.signal,()=>{
+        if(alive.current && !aborter.signal.aborted)setAudioPreparing(true);
+      });
       if(aborter.signal.aborted || !alive.current || store.getSnapshot().activeId!==conversationId)return;
       const draft=store.getSnapshot().conversations.find(c=>c.id===conversationId);
       const existing=draft?.attachments || [];
@@ -47,7 +51,8 @@ export function useChatAttachments(store: DirectChatStore, conversationId: strin
       onError(failed.length ? `Не все файлы добавлены. ${failed.join(' ')} Повторно выберите только неудавшиеся.` : "");
 
     } catch(e) {if(alive.current && !aborter.signal.aborted)onError((e as Error).message);}
-    finally {controller.current=null;if(alive.current)setPicking(false);}
+    finally {controller.current=null;if(alive.current){setPicking(false);setAudioPreparing(false);}}
   }
-  return {picking,pick};
+  function cancel(){controller.current?.abort();}
+  return {picking,pick,audioPreparing,cancel};
 }
