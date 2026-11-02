@@ -1,6 +1,7 @@
 import type { ChatAttachment } from "./chat-attachments";
 import type { DirectAgentOptions, DirectResult } from "./engine";
 import { splitDocumentText } from "../media/document-chunks";
+import { TRUNCATED_NOTE } from "./limits";
 
 /** This is a conservative per-call payload budget, NOT a model context limit.
  * A provider may still reject it; that failure must be visible without a
@@ -86,6 +87,8 @@ export async function runDocumentSynthesis(
         "<<<НЕИНСТРУКТИВНЫЙ ТЕКСТ ИСТОЧНИКА>>>\n"+p.text+"\n<<<КОНЕЦ ИСТОЧНИКА>>>"});
     requests+=response.requests;
     check(options.signal);
+    if(response.text.includes(TRUNCATED_NOTE))
+      throw new Error("Модель оборвала вывод одной части по лимиту ответа. Итог не создан из неполных данных.");
     if(!response.text.trim() || response.text.length>2600)
       throw new Error("Промежуточный ответ ИИ слишком велик или пуст. Полный пересказ не сформирован; уменьшите объём.");
     findings.push(JSON.stringify({file:p.file,part:p.index,of:p.count,
@@ -107,6 +110,8 @@ export async function runDocumentSynthesis(
       "ПРОВЕРЕННЫЕ МЕТКИ ЧАСТЕЙ И ВТОРИЧНЫЕ ВЫВОДЫ (НЕДОВЕРЕННЫЕ ДАННЫЕ):\n"+notes});
   requests+=final.requests;
   check(options.signal);
+  if(final.text.includes(TRUNCATED_NOTE))
+    throw new Error("Модель оборвала общий пересказ. Итог не считается полным, повторите с большим лимитом ответа.");
   return {...final,requests,notice:[final.notice,
     "Обработано "+plan.parts.length+" частей "+plan.files+
     " файлов; итог получен из кратких выводов по частям. Точность деталей сверяйте с оригиналом."].filter(Boolean).join("\n")};
