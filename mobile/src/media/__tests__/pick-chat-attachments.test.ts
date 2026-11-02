@@ -140,7 +140,7 @@ test("H2: exceeding combined text budget rejects only overflowing item, preserve
   const result=await pickChatAttachmentsWithResults(new AbortController().signal);
   expect(result.files.map(f=>f.name)).toEqual(["first.txt","last.txt"]);
   expect(result.failures).toEqual([{name:"oversize.txt",reason:expect.stringContaining("240 000")}]);
-  expect(chatContent("Сравни",result.files,"chat")).toBeTruthy();
+  expect(()=>chatContent("Сравни",result.files,"chat")).toThrow("big_document_requires_explicit_synthesis");
 });
 
 test("H2: session abort is never treated as an individual failure or partial success",async()=>{
