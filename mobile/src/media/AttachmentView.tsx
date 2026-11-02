@@ -148,12 +148,21 @@ function PdfTextPreview({ profile, attachment, ready }: {
   </View>;
 }
 
-/** Audio does not need an empty black video surface. Playback starts only on a
- * second, explicit user action after decrypting the selected attachment. */
-function AudioPreview({ uri, onError }: { uri: string; onError: (message: string) => void }) {
+/** Audio is decrypted only after opening this original. Previously saved ASR
+ * evidence is read through the same profile/source-version-aware reader as PDF.
+ * Only producer-reported, valid time positions can seek the native player.
+ */
+function AudioPreview({ uri, profile, attachment, onError }: {
+  uri: string; profile: string; attachment: Attachment; onError: (message: string) => void;
+}) {
   const t = useTheme();
   const player = useVideoPlayer(uri);
   const [playing, setPlaying] = useState(false);
+  const [transcript, setTranscript] = useState<ExtractionEvidence | null>(null);
+  const [transcriptLoading, setTranscriptLoading] = useState(true);
+  const [transcriptError, setTranscriptError] = useState("");
+  const [showAllSegments, setShowAllSegments] = useState(false);
+
   useEffect(() => {
     const status = player.addListener("statusChange", event => {
       if (event.status === "error") onError("Не удалось воспроизвести аудио. Оригинал сохранён.");
@@ -161,13 +170,92 @@ function AudioPreview({ uri, onError }: { uri: string; onError: (message: string
     const playback = player.addListener("playingChange", event => setPlaying(event.isPlaying));
     return () => { try { player.pause(); } catch { /* Native object already released. */ } finally { status.remove(); playback.remove(); } };
   }, [player, onError]);
-  return <Pressable accessibilityRole="button" accessibilityLabel={playing ? "Приостановить аудио" : "Воспроизвести аудио"}
-    onPress={() => { try { if (playing) player.pause(); else player.play(); } catch { onError("Не удалось воспроизвести аудио. Закройте просмотр и повторите."); } }}
-    style={{ minHeight: nebulaTouch.minimum, justifyContent: "center", alignItems: "center", borderRadius: nebulaRadii.field, backgroundColor: t.soft }}>
-    <Text style={{ color: t.secondary, fontWeight: "700" }}>{playing ? "Пауза" : "Воспроизвести"} · аудио</Text>
-  </Pressable>;
-}
 
+  useEffect(() => {
+    let alive = true;
+    setTranscript(null); setTranscriptError(""); setTranscriptLoading(true); setShowAllSegments(false);
+    void localExtractionEvidence(profile, attachment.entity_id, attachment.id, 10)
+      .then(runs => {
+        if (alive) setTranscript(runs.find(run =>
+          run.producerKind === "asr" && (run.status === "complete" || run.status === "partial") &&
+          run.segments.length > 0) || null);
+      })
+      .catch(error => { if (alive) setTranscriptError(memoryErrorMessage(error)); })
+      .finally(() => { if (alive) setTranscriptLoading(false); });
+    return () => { alive = false; };
+  }, [uri, profile, attachment.entity_id, attachment.id]);
+
+  function seekTo(startMs: number) {
+    try {
+      const seconds = startMs / 1000;
+      if (Number.isFinite(player.duration) && player.duration > 0 && seconds > player.duration + 0.5) {
+        setTranscriptError("Временная отметка выходит за пределы записи.");
+        return;
+      }
+      player.currentTime = seconds;
+      player.play();
+    } catch {
+      onError("Не удалось перейти к фрагменту аудио. Оригинал сохранён.");
+    }
+  }
+
+  const segments = (transcript?.segments || []).filter(seg => typeof seg.text === "string" && Boolean(seg.text.trim()));
+  const displayed = showAllSegments ? segments : segments.slice(0, 5);
+  const formatTime = (ms: number) => {
+    const seconds = Math.floor(ms / 1000);
+    const minutes = Math.floor(seconds / 60);
+    return (minutes >= 60 ? Math.floor(minutes / 60) + ":" + String(minutes % 60).padStart(2, "0") :
+      String(minutes)) + ":" + String(seconds % 60).padStart(2, "0");
+  };
+
+  return <View style={{ gap: nebulaSpacing.md }}>
+    <Pressable accessibilityRole="button" accessibilityLabel={playing ? "Приостановить аудио" : "Воспроизвести аудио"}
+      onPress={() => { try { if (playing) player.pause(); else player.play(); } catch { onError("Не удалось воспроизвести аудио. Закройте просмотр и повторите."); } }}
+      style={{ minHeight: nebulaTouch.minimum, justifyContent: "center", alignItems: "center", borderRadius: nebulaRadii.field, backgroundColor: t.soft }}>
+      <Text style={{ color: t.secondary, fontWeight: "700" }}>{playing ? "Пауза" : "Воспроизвести"} · аудио</Text>
+    </Pressable>
+    <View style={{ gap: nebulaSpacing.sm }}>
+      <Text accessibilityRole="header" style={{ color: t.text, fontWeight: "700", fontSize: 16 }}>Расшифровка</Text>
+      {transcriptLoading ? <Text style={{ color: t.muted }}>Загружаю сохранённый текст…</Text> : null}
+      {transcriptError ? <Text accessibilityRole="alert" style={{ color: t.err }}>{transcriptError}</Text> : null}
+      {!transcriptLoading && !transcriptError && !transcript ?
+        <Text style={{ color: t.muted }}>Для этой записи пока нет сохранённого транскрипта. Можно распознать её при импорте.</Text> : null}
+      {transcript && !transcriptLoading ? <>
+        <Text style={{ color: t.muted, fontSize: 13 }}>
+          {transcript.coverage === "complete" ? "Текст получен при распознавании." :
+            "Текст распознавания может быть неполным."} Переход доступен только для подтверждённых таймкодов.
+        </Text>
+        {displayed.map((segment, index) => {
+          const location = segment.location;
+          const startMs = location.kind === "time" &&
+            Number.isSafeInteger(location.startMs) && Number.isSafeInteger(location.endMs) &&
+            location.startMs >= 0 && location.endMs > location.startMs &&
+            location.endMs <= 86_400_000 ? location.startMs : null;
+          return startMs === null ?
+            <Text key={segment.id || index} selectable style={{ color: t.text, lineHeight: 23, paddingVertical: 4 }}>
+              {segment.text}
+            </Text> :
+            <Pressable key={segment.id || index} accessibilityRole="button"
+              accessibilityLabel={"Перейти к " + formatTime(startMs) + " · " + segment.text}
+              onPress={() => seekTo(startMs)}
+              style={{ minHeight: nebulaTouch.minimum, padding: nebulaSpacing.sm, justifyContent: "center",
+                borderRadius: nebulaRadii.field, backgroundColor: t.soft, gap: 4 }}>
+              <Text style={{ color: t.secondary, fontSize: 13, fontWeight: "700" }}>{formatTime(startMs)}</Text>
+              <Text style={{ color: t.text, lineHeight: 22 }}>{segment.text}</Text>
+            </Pressable>;
+        })}
+        {segments.length > 5 ? <Pressable accessibilityRole="button"
+          accessibilityLabel={showAllSegments ? "Свернуть транскрипт" : "Показать весь транскрипт"}
+          onPress={() => setShowAllSegments(value => !value)}
+          style={{ minHeight: nebulaTouch.minimum, justifyContent: "center" }}>
+          <Text style={{ color: t.secondary, fontWeight: "700" }}>
+            {showAllSegments ? "Свернуть" : "Показать все фрагменты · " + segments.length}
+          </Text>
+        </Pressable> : null}
+      </> : null}
+    </View>
+  </View>;
+}
 export function AttachmentView({ profile, entityId, verifiedOriginal, photoAttachmentId }: { profile: string; entityId: string; verifiedOriginal?: VerifiedOriginalLocator; photoAttachmentId?: string }) {
   const t = useTheme();
   const focused = useIsFocused();
@@ -275,7 +363,7 @@ function OneAttachment({ profile, attachment, expanded, visible, onToggle, verif
     {active && uri && !loading && !error ? kind === "image" ? <Image accessibilityLabel={"Просмотр изображения " + attachment.name}
       source={{ uri }} resizeMode="contain" onError={() => setError("Не удалось показать изображение. Оригинал сохранён.")}
       style={{ width: "100%", height: 280, borderRadius: nebulaRadii.field }} />
-      : kind === "audio" ? <AudioPreview uri={uri} onError={setError} />
+      : kind === "audio" ? <AudioPreview uri={uri} profile={profile} attachment={attachment} onError={setError} />
       : kind === "video" ? <VideoPreview uri={uri} onError={setError} />
       : kind === "document" ? <View style={{ gap: nebulaSpacing.md }}><PdfOriginalPages uri={uri} /><PdfTextPreview profile={profile} attachment={attachment} ready={active && Boolean(uri)} /></View> : null : null}
     {active && error ? <><Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text><Text style={{ color: t.muted }}>Для повторной попытки нажмите «Повторить просмотр».</Text></> : null}
