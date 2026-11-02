@@ -187,7 +187,7 @@ export async function saveMediaNote(profile: string, input: { file?: ImportFile;
         extracted_page_count: x.pdfCoverage.extractedPageCount,
         missing_pages: x.pdfCoverage.missingPages }]
       : []);
-    const receipt = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, JSON.stringify([input.receipt || 'device-import', contentHash, input.title, input.body, input.extractedText || "", input.sensitivity, input.collectionId || "", input.sourceUrl || "", ...(verified ? [verified.filter(x => x.status === 'success').map(x => [x.index, x.text, x.segments || null, x.pdfCoverage || null, x.imageMode || null, x.asrProducerId || null])] : [])]));
+    const receipt = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, JSON.stringify([input.receipt || 'device-import', contentHash, input.title, input.body, input.extractedText || "", input.sensitivity, input.collectionId || "", input.sourceUrl || "", ...(verified ? [verified.filter(x => x.status === 'success').map(x => [x.index, x.text, x.segments || null, x.pdfCoverage || null, x.imageMode || null, ...(x.asrProducerId ? [x.asrProducerId] : [])])] : [])]));
     {
       const old = await db.getFirstAsync<{ entity_id: string }>('SELECT entity_id FROM memory_received_shares WHERE fingerprint=?', [receipt]);
       if (old) return old.entity_id;
