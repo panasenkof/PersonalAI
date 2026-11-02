@@ -344,6 +344,7 @@ export function MemoryImportScreen() {
           segments => { timedSegments = segments; }, coverage => { pdfCoverage = coverage; }, imageExtractionMode);
         if (alive.current && !aborter.signal.aborted) {
           setRecognitionResults([{ index: 0, name: file.name, status: "success", text,
+            ...(kind === "audio" ? { asrProducerId: fileAsrMode === "device" ? "local-whisper" : "openai:" + (speech.transcriptionModel || "gpt-transcribe") } : {}),
             ...(timedSegments ? { segments: timedSegments } : {}),
             ...(pdfCoverage ? { pdfCoverage } : {}),
             ...((kind === "image" || (kind === "document" && imageExtractionMode === "offline-ocr")) ? { imageMode: imageExtractionMode } : {}) }]);
@@ -368,7 +369,8 @@ export function MemoryImportScreen() {
             }
           });
         const results = rawResults.map(item => item.status === "success"
-          ? { ...item, ...(segmentsByFile.has(item.index) ? { segments: segmentsByFile.get(item.index)! } : {}),
+          ? { ...item,
+              ...(mediaKind(files[item.index]) === "audio" ? { asrProducerId: fileAsrMode === "device" ? "local-whisper" : "openai:" + (speech.transcriptionModel || "gpt-transcribe") } : {}), ...(segmentsByFile.has(item.index) ? { segments: segmentsByFile.get(item.index)! } : {}),
               ...(pdfByFile.has(item.index) ? { pdfCoverage: pdfByFile.get(item.index)! } : {}),
               ...((mediaKind(files[item.index]) === "image" || (mediaKind(files[item.index]) === "document" && imageExtractionMode === "offline-ocr")) ? { imageMode: imageExtractionMode } : {}) } : item);
         if (alive.current && !aborter.signal.aborted) {
