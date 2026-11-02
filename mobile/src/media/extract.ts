@@ -7,6 +7,21 @@ import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import { createVideoPlayer } from "expo-video";
 import type { VideoPlayer } from "expo-video";
 import type { DirectAgentSettings } from "../direct-agent/settings";
+import type { FileAsrMode } from "./preferences";
+export type SpeechExtractionSettings = DirectAgentSettings & { fileAsrMode?: FileAsrMode };
+/** File transcription is supported only by the official, tested API endpoint. */
+export function officialAudioProvider(settings: DirectAgentSettings): boolean {
+  try { return settings.provider === "openai" && validateBaseUrl(settings.baseUrl, settings.provider) === "https://api.openai.com/v1"; }
+  catch { return false; }
+}
+export function officialAudioModel(settings: DirectAgentSettings): string {
+  if (!officialAudioProvider(settings)) throw new Error("Подключение не подтверждает распознавание аудиофайлов. Выберите официальный OpenAI или Whisper на телефоне.");
+  const model = validateModel(settings.transcriptionModel || "gpt-transcribe");
+  if (!["gpt-transcribe", "whisper-1", "gpt-4o-transcribe", "gpt-4o-mini-transcribe"].includes(model))
+    throw new Error("Выбранная модель не предназначена для распознавания аудиофайлов. Укажите gpt-transcribe.");
+  return model;
+}
+
 import { anonymousLocalAllowed, validateBaseUrl, validateModel } from "../direct-agent/settings";
 import { MAX_DIRECT_REPLY_TOKENS, MAX_REASONING_REPLY_TOKENS, isReasoningModel } from "../direct-agent/limits";
 import { fetchWithTimeout } from "../direct-agent/net";
@@ -115,7 +130,7 @@ export function parseProviderTimeSegments(value: unknown, duration?: number): Ex
 /** External extraction is a separate per-file explicit action, independent of
  * the chat's permission to read stored notes. It does not save anything itself.
  */
-async function extractMediaCore(file: ImportFile, settings: DirectAgentSettings, approved: boolean,
+async function extractMediaCore(file: ImportFile, settings: SpeechExtractionSettings, approved: boolean,
   signal?: AbortSignal, transport: typeof fetch = fetch,
   onTimedSegments?: (segments: ExtractionSegmentInput[]) => void,
   onPdfCoverage?: (coverage: PdfPageCoverage) => void,
@@ -140,8 +155,9 @@ async function extractMediaCore(file: ImportFile, settings: DirectAgentSettings,
     if (text.length > 60_000) throw new Error("Текст длиннее 60 000 символов. Разделите его на части.");
     return text;
   }
-  // With Whisper downloaded, audio is transcribed on the phone and sent nowhere.
-  if (kind === "audio" && getWhisperStatus().state === "ready") {
+  // Explicit method wins even when Whisper is already installed. No fallback.
+  if (kind === "audio" && (settings.fileAsrMode || "device") === "device") {
+    if (getWhisperStatus().state !== "ready") throw new Error("Локальный Whisper не установлен. Скачайте модель или явно выберите онлайн-распознавание в настройках медиа.");
     const text = await transcribeAudioFile(file.uri, signal);
     check(signal);
     if (!text) throw new Error("В аудио не удалось распознать речь.");
@@ -152,23 +168,21 @@ async function extractMediaCore(file: ImportFile, settings: DirectAgentSettings,
   if (!settings.apiKey && !anonymousLocalAllowed(settings)) throw new Error("Настройте ключ подключения для разбора файлов.");
   const base = validateBaseUrl(settings.baseUrl, settings.provider);
   if (kind === "audio") {
-    if (settings.provider === "anthropic") throw new Error("Для аудио выберите подключение с OpenAI-совместимым распознаванием речи.");
+    const transcriptionModel = officialAudioModel(settings);
     const data = new FormData();
     const audioMime = ({ m4a: "audio/mp4", wav: "audio/wav", ogg: "audio/ogg", flac: "audio/flac", aac: "audio/aac" } as Record<string, string>)[file.name.split(".").pop()?.toLowerCase() || ""] || "audio/mpeg";
     data.append("file", { uri: file.uri, name: file.name, type: file.mimeType || audioMime } as any);
-    const transcriptionModel = validateModel(settings.transcriptionModel || "whisper-1");
     data.append("model", transcriptionModel);
     // Same user-approved upload; official Whisper can supply real segment
     // intervals in one response. Compatible/custom hosts retain old JSON mode.
-    const timed = Boolean(onTimedSegments) && settings.provider === "openai" &&
-      new URL(base).hostname === "api.openai.com" && transcriptionModel === "whisper-1";
+    const timed = Boolean(onTimedSegments) && transcriptionModel === "whisper-1";
     if (timed) {
       data.append("response_format", "verbose_json");
       data.append("timestamp_granularities[]", "segment");
     }
     const response = await fetchWithTimeout(transport, base + "/audio/transcriptions", { method: "POST", body: data,
       headers: settings.apiKey ? { Authorization: "Bearer " + settings.apiKey } : {}, signal }, LONG_TIMEOUTS, [settings.apiKey]);
-    if (!response.ok) throw new Error("Распознавание аудио у сервиса подключения: HTTP " + response.status + ". Этот сервис, похоже, не распознаёт речь (у DeepSeek такого нет). Скачайте распознавание на телефон: Настройки → Голосовой ввод → Голос без интернета — тогда аудио распознаётся без отправки куда-либо.");
+    if (!response.ok) throw new Error("OpenAI не распознал аудиофайл: HTTP " + response.status + ". Проверьте ключ, модель, формат и лимиты. Автопереключения на другой сервис нет.");
     const result = await response.json() as { text?: string; duration?: number; segments?: unknown };
     check(signal);
     if (!result.text?.trim()) throw new Error("В аудио не удалось распознать речь.");
@@ -220,13 +234,13 @@ async function extractMediaCore(file: ImportFile, settings: DirectAgentSettings,
 
 /** Video stages fail independently; never call a partial representation complete. */
 export async function extractMedia(file: ImportFile, settings: DirectAgentSettings, approved: boolean,
-  signal?: AbortSignal, transport: typeof fetch = fetch, speechSettings = settings,
+  signal?: AbortSignal, transport: typeof fetch = fetch, speechSettings: SpeechExtractionSettings = settings,
   onTimedSegments?: (segments: ExtractionSegmentInput[]) => void,
   onPdfCoverage?: (coverage: PdfPageCoverage) => void,
   imageMode: ImageExtractionMode = "describe"): Promise<string> {
   if (mediaKind(file) !== "video") return extractMediaCore(file, mediaKind(file) === "audio" ? speechSettings : settings, approved, signal, transport, onTimedSegments, onPdfCoverage, imageMode);
   check(signal);
-  if (!approved && getWhisperStatus().state !== "ready") throw new Error("Разрешите передачу этого файла выбранному провайдеру для разбора.");
+  if (!approved && ((speechSettings.fileAsrMode || "device") === "online" || getWhisperStatus().state !== "ready")) throw new Error("Разрешите передачу этого файла выбранному провайдеру для разбора.");
   await fileSize(file, 80 * 1024 * 1024);
   const player = createVideoPlayer(null);
   try { if (await openVideo(player, file.uri, signal) > 600) throw new Error("Разбор видео со звуком: максимум 10 минут. Оригинал можно сохранить без разбора."); }
@@ -234,7 +248,7 @@ export async function extractMedia(file: ImportFile, settings: DirectAgentSettin
   const parts: string[] = []; let successes = 0;
   let audioUri = "";
   try {
-    if (!approved && getWhisperStatus().state !== "ready") throw new Error("Облачное распознавание речи не разрешено.");
+    if (!approved && ((speechSettings.fileAsrMode || "device") === "online" || getWhisperStatus().state !== "ready")) throw new Error("Облачное распознавание речи не разрешено.");
     audioUri = await videoAudio(file.uri, signal);
     parts.push("Речь из видео:\n" + await extractMediaCore({ uri: audioUri, name: "audio.wav", mimeType: "audio/wav" }, speechSettings, approved, signal, transport)); successes++;
   } catch (e) { check(signal); parts.push("Речь не распознана: " + String((e as Error).message)); }
