@@ -75,3 +75,11 @@ test("H-DOC1b2: encrypted history keeps originals, but does not silently resend 
   expect(safe.content).toContain("alpha.txt");
   expect(row.attachments).toHaveLength(2);
 });
+
+test("H-DOC1b2: truncated intermediate response must never be promoted to full final synthesis",async()=>{
+  const files=[text("one","A".repeat(25_000))];
+  const plan=planDocumentSynthesis(files,settings.model)!;
+  const runner=jest.fn(async()=>({text:"Частичный текст\n\n(Ответ обрезан по лимиту длины. Попросите продолжить, если нужно.)",sources:[],requests:1}));
+  await expect(runDocumentSynthesis(options(files,5),plan,runner)).rejects.toThrow("оборвала");
+  expect(runner).toHaveBeenCalledTimes(1);
+});
