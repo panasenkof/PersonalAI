@@ -158,6 +158,14 @@ test("explicit OpenAI online overrides already installed Whisper; no guessed tim
   expect(model).toBe("gpt-transcribe");
 });
 
+test("unsupported file extension is rejected before paid audio upload",async()=>{
+  const transport=jest.fn();
+  const online={...settings,fileAsrMode:"online" as const};
+  await expect(extractMedia({uri:"file:///cache/voice.aac",name:"voice.aac",mimeType:"audio/aac"},
+    settings,true,undefined,transport as unknown as typeof fetch,online)).rejects.toThrow("Формат аудиофайла");
+  expect(transport).not.toHaveBeenCalled();
+});
+
 test("online audio never uploads without consent, key, or recognized model",async()=>{
   const transport=jest.fn();
   const online={...settings,fileAsrMode:"online" as const};
