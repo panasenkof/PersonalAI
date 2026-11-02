@@ -102,6 +102,9 @@ export async function prepareSharedMaterial(payloads:SharePayload[],signal:Abort
         copies.push(target);
         await copyAsync({from:file.uri,to:target.uri});
         check();
+        // An Android provider can omit/underreport ContentResolver size. The
+        // original-to-Memory limit must not be weakened by partial Chat mode.
+        if(target.size>80*1024*1024)material.memoryError='Оригинал для памяти должен быть не больше 80 МБ.';
         const [ready]=await readChatAttachments([{...file,uri:target.uri}],signal);
         check();
         // This also rechecks cumulative text and all the actual media bytes,
