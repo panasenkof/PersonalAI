@@ -12,7 +12,7 @@ import { RussianOcrControls } from "./RussianOcrControls";
  */
 export function MediaSettings({ profile, connections }: { profile: string; connections: DirectConnection[] }) {
   const t = useTheme();
-  const [prefs, setPrefs] = useState<MediaPreferences>({ visionId: "", speechId: "" });
+  const [prefs, setPrefs] = useState<MediaPreferences>({ visionId: "", speechId: "", fileAsrMode: "device" });
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -35,7 +35,7 @@ export function MediaSettings({ profile, connections }: { profile: string; conne
 
   async function choose(field: keyof MediaPreferences, id: string) {
     if (!loaded || savingNow.current || prefs[field] === id) return;
-    if (id && !connections.some(c => c.id === id)) { setError("Подключение больше не существует. Выберите доступное."); return; }
+    if (field !== "fileAsrMode" && id && !connections.some(c => c.id === id)) { setError("Подключение больше не существует. Выберите доступное."); return; }
     const next = { ...prefs, [field]: id };
     const currentGeneration = generation.current;
     savingNow.current = true;
@@ -86,6 +86,19 @@ export function MediaSettings({ profile, connections }: { profile: string; conne
         })}
       </View>;
     })}
+    <View style={{ gap: nebulaSpacing.xs }}>
+      <Text style={{ color: t.text, ...nebulaTypography.body, fontWeight: "600" }}>Готовые аудиофайлы</Text>
+      <Text style={{ color: t.muted, ...nebulaTypography.label }}>Отдельно от микрофона. Онлайн требует официальное подключение OpenAI, передачу звука и подтверждение перед каждым запросом; возможна оплата.</Text>
+      {([ ["device", "На телефоне · Whisper"], ["online", "Онлайн · OpenAI (gpt-transcribe)" ] ] as const).map(([id, label]) => <Pressable key={id}
+        accessibilityRole="radio" accessibilityLabel={"Распознавание файла: " + label}
+        accessibilityState={{ checked: prefs.fileAsrMode === id, disabled: !loaded || saving }}
+        disabled={!loaded || saving} onPress={() => void choose("fileAsrMode", id)}
+        style={{ minHeight: nebulaTouch.minimum, justifyContent: "center", borderWidth: 1,
+          borderColor: prefs.fileAsrMode === id ? t.secondary : t.line, borderRadius: nebulaRadii.field,
+          paddingHorizontal: nebulaSpacing.md, backgroundColor: prefs.fileAsrMode === id ? t.soft : t.panel }}>
+        <Text style={{ color: prefs.fileAsrMode === id ? t.secondary : t.text, ...nebulaTypography.label }}>{prefs.fileAsrMode === id ? "● " : "○ "}{label}</Text>
+      </Pressable>)}
+    </View>
     <View style={{ borderTopWidth: 1, borderColor: t.line, paddingTop: nebulaSpacing.md }}>
       <RussianOcrControls/>
     </View>
