@@ -238,6 +238,8 @@ function NebulaHomeContent() {
   }
   const sendOrStop = () => {
     if (busy) { store.stop(); return; }
+    // Never send a partial draft while a selected file is being decoded/ASR.
+    if (pickingAttachment) return;
     if (!settings && !localPhotoSearch) return;
     // Only a deliberate Send closes Gboard (not a pause in typing).
     Keyboard?.dismiss?.();
@@ -410,7 +412,7 @@ function NebulaHomeContent() {
         <View style={{ flex: 1, minWidth: 0 }} />
         <IconAction compact icon={busy ? "square" : "arrow-up"} label={busy ? "Стоп" : localPhotoSearch ? "Найти" : "Отправить"} accessibilityLabel={busy ? "Остановить запрос" : localPhotoSearch ? "Найти фотографии в памяти" : "Отправить запрос"}
           hint={busy ? "Остановить ответ ИИ в этом диалоге." : localPhotoSearch ? "Найти фотографии на телефоне." : "Отправить написанное сообщение выбранной модели."} hintAbove emphasized={!busy}
-          disabled={!busy && (!(canSend || canSearchLocal) || (!question.trim() && !active?.attachments?.length))} onPress={sendOrStop} />
+          disabled={!busy && (pickingAttachment || !(canSend || canSearchLocal) || (!question.trim() && !active?.attachments?.length))} onPress={sendOrStop} />
       </View>
     </View>
     <Modal visible={Boolean(previewPhoto)} transparent animationType="fade" onRequestClose={()=>setPreviewPhotoId(null)}>
