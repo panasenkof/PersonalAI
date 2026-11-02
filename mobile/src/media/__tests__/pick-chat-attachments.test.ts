@@ -40,7 +40,7 @@ beforeEach(()=>{jest.resetAllMocks();mockUnlocked=true;mockSize=100;
     extractedPageCount:1,missingPages:[],coverage:"partial",segments:[]});
 });
 test('stages actual text and removes only picker cache copies',async()=>{const files=await pickChatAttachments(new AbortController().signal);expect(files[0]).toMatchObject({data:'Text',kind:'text',name:'a.txt'});expect(mockDelete).toHaveBeenCalledWith(asset.uri);});
-test('cancellation and oversized files never read content',async()=>{(getDocumentAsync as jest.Mock).mockResolvedValueOnce({canceled:true});expect(await pickChatAttachments(new AbortController().signal)).toEqual([]);mockSize=3*1024*1024;await expect(pickChatAttachments(new AbortController().signal)).rejects.toThrow('24 000 символов');expect(readAsStringAsync).not.toHaveBeenCalled();expect(mockDelete).toHaveBeenCalledWith(asset.uri);});
+test('cancellation and oversized files never read content',async()=>{(getDocumentAsync as jest.Mock).mockResolvedValueOnce({canceled:true});expect(await pickChatAttachments(new AbortController().signal)).toEqual([]);mockSize=7*1024*1024;await expect(pickChatAttachments(new AbortController().signal)).rejects.toThrow('6 МБ');expect(readAsStringAsync).not.toHaveBeenCalled();expect(mockDelete).toHaveBeenCalledWith(asset.uri);});
 test('lock during reading rejects late result and clears the plaintext cache',async()=>{(readAsStringAsync as jest.Mock).mockImplementation(async()=>{mockUnlocked=false;return 'Text';});await expect(pickChatAttachments(new AbortController().signal)).rejects.toThrow('прерван');expect(mockDelete).toHaveBeenCalledWith(asset.uri);});
 test('abort while picker open discards its result before reading',async()=>{const controller=new AbortController();(getDocumentAsync as jest.Mock).mockImplementation(async()=>{controller.abort();return {canceled:false,assets:[asset]};});await expect(pickChatAttachments(controller.signal)).rejects.toThrow('прерван');expect(readAsStringAsync).not.toHaveBeenCalled();expect(mockDelete).toHaveBeenCalledWith(asset.uri);});
 test('unsupported binary is rejected; non-cache source is not deleted',async()=>{
@@ -95,7 +95,8 @@ test("H1: empty/scanned or overlong PDF refuses upload and cleans cache, never t
   expect(mockDelete).toHaveBeenCalledWith(pdf.uri);
   (extractPdfPages as jest.Mock).mockResolvedValueOnce({text:"Л".repeat(24_000),totalPageCount:1,
     extractedPageCount:1,missingPages:[],coverage:"partial",segments:[]});
-  await expect(pickChatAttachments(new AbortController().signal)).rejects.toThrow("24 000");
+  const long=await pickChatAttachments(new AbortController().signal);
+  expect(long[0].data).toContain("Л".repeat(24_000));
   mockSize=6*1024*1024+1;
   await expect(pickChatAttachments(new AbortController().signal)).rejects.toThrow("6 МБ");
 });
@@ -130,11 +131,11 @@ test("H2: exceeding combined text budget rejects only overflowing item, preserve
     {uri:"file:///cache/oversize.txt",name:"oversize.txt",mimeType:"text/plain"},
     {uri:"file:///cache/last.txt",name:"last.txt",mimeType:"text/plain"}];
   (getDocumentAsync as jest.Mock).mockResolvedValue({canceled:false,assets:files});
-  (readAsStringAsync as jest.Mock).mockResolvedValueOnce("А".repeat(20_000))
-    .mockResolvedValueOnce("Б".repeat(5_000)).mockResolvedValueOnce("В".repeat(1_000));
+  (readAsStringAsync as jest.Mock).mockResolvedValueOnce("А".repeat(200_000))
+    .mockResolvedValueOnce("Б".repeat(50_000)).mockResolvedValueOnce("В".repeat(1_000));
   const result=await pickChatAttachmentsWithResults(new AbortController().signal);
   expect(result.files.map(f=>f.name)).toEqual(["first.txt","last.txt"]);
-  expect(result.failures).toEqual([{name:"oversize.txt",reason:expect.stringContaining("24 000")}]);
+  expect(result.failures).toEqual([{name:"oversize.txt",reason:expect.stringContaining("240 000")}]);
   expect(chatContent("Сравни",result.files,"chat")).toBeTruthy();
 });
 
