@@ -1,4 +1,4 @@
-import { pickChatAttachments } from '../pickChatAttachments';
+import { pickChatAttachments, pickChatAttachmentsWithResults } from '../pickChatAttachments';
 import { chatContent } from "../../direct-agent/chat-attachments";
 import { extractPdfPages } from "../pdf-pages";
 import { getDocumentAsync } from 'expo-document-picker';
@@ -104,4 +104,51 @@ test("H1: cancelled native PDF read cannot commit a late attachment",async()=>{
   await expect(pickChatAttachments(controller.signal)).rejects.toThrow("прерван");
   expect(readAsStringAsync).not.toHaveBeenCalled();
   expect(mockDelete).toHaveBeenCalledWith(pdf.uri);
+});
+
+test("H2: invalid PDF in the middle does not discard valid earlier and later text",async()=>{
+  const first={uri:"file:///cache/first.txt",name:"first.txt",mimeType:"text/plain"};
+  const bad={uri:"file:///cache/broken.pdf",name:"broken.pdf",mimeType:"application/pdf"};
+  const last={uri:"file:///cache/last.txt",name:"last.txt",mimeType:"text/plain"};
+  (getDocumentAsync as jest.Mock).mockResolvedValue({canceled:false,assets:[first,bad,last]});
+  mockPdfHeader=new Uint8Array([60,104,116,109,108]);
+  (readAsStringAsync as jest.Mock).mockResolvedValue("Полезный текст");
+  const result=await pickChatAttachmentsWithResults(new AbortController().signal);
+  expect(result.files.map(f=>f.name)).toEqual(["first.txt","last.txt"]);
+  expect(result.failures).toEqual([{name:"broken.pdf",reason:"Файл не является настоящим PDF."}]);
+  expect(extractPdfPages).not.toHaveBeenCalled();
+  for(const asset of [first,bad,last])expect(mockDelete).toHaveBeenCalledWith(asset.uri);
+});
+
+test("H2: exceeding combined text budget rejects only overflowing item, preserves earlier texts",async()=>{
+  const files=[{uri:"file:///cache/first.txt",name:"first.txt",mimeType:"text/plain"},
+    {uri:"file:///cache/oversize.txt",name:"oversize.txt",mimeType:"text/plain"},
+    {uri:"file:///cache/last.txt",name:"last.txt",mimeType:"text/plain"}];
+  (getDocumentAsync as jest.Mock).mockResolvedValue({canceled:false,assets:files});
+  (readAsStringAsync as jest.Mock).mockResolvedValueOnce("А".repeat(20_000))
+    .mockResolvedValueOnce("Б".repeat(5_000)).mockResolvedValueOnce("В".repeat(1_000));
+  const result=await pickChatAttachmentsWithResults(new AbortController().signal);
+  expect(result.files.map(f=>f.name)).toEqual(["first.txt","last.txt"]);
+  expect(result.failures).toEqual([{name:"oversize.txt",reason:expect.stringContaining("24 000")}]);
+  expect(chatContent("Сравни",result.files,"chat")).toBeTruthy();
+});
+
+test("H2: session abort is never treated as an individual failure or partial success",async()=>{
+  const controller=new AbortController();
+  const files=[{uri:"file:///cache/first.txt",name:"first.txt",mimeType:"text/plain"},
+    {uri:"file:///cache/second.txt",name:"second.txt",mimeType:"text/plain"}];
+  (getDocumentAsync as jest.Mock).mockResolvedValue({canceled:false,assets:files});
+  (readAsStringAsync as jest.Mock).mockImplementationOnce(async()=>{controller.abort();return "Первый";});
+  await expect(pickChatAttachmentsWithResults(controller.signal)).rejects.toThrow("прерван");
+  expect(mockDelete).toHaveBeenCalledWith(files[0].uri);
+  expect(mockDelete).toHaveBeenCalledWith(files[1].uri);
+});
+
+test("H2: native reader errors cannot leak provider paths into per-file messages",async()=>{
+  (getDocumentAsync as jest.Mock).mockResolvedValue({canceled:false,assets:[asset]});
+  (readAsStringAsync as jest.Mock).mockRejectedValue(new Error("failed at content://private/documents/secret"));
+  const result=await pickChatAttachmentsWithResults(new AbortController().signal);
+  expect(result.files).toEqual([]);
+  expect(result.failures[0].reason).toMatch(/Проверьте формат и доступ/);
+  expect(JSON.stringify(result.failures)).not.toContain("content://");
 });
