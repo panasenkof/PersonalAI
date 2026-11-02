@@ -3,7 +3,7 @@ import * as Crypto from 'expo-crypto';
 import { Directory, File, Paths } from 'expo-file-system';
 import { copyAsync } from 'expo-file-system/legacy';
 import { localMemorySessionUnlocked } from '../local-memory/storage';
-import { MAX_CHAT_FILES, MAX_CHAT_TEXT_CHARS, MAX_CHAT_IMAGE_SOURCE_BYTES, type ChatAttachment } from '../direct-agent/chat-attachments';
+import { MAX_CHAT_FILES, MAX_CHAT_FILE_BYTES, MAX_CHAT_TEXT_CHARS, MAX_CHAT_IMAGE_SOURCE_BYTES, type ChatAttachment } from '../direct-agent/chat-attachments';
 import { readChatAttachments, chatFileFormat } from './pickChatAttachments';
 import { mediaKind, type ImportFile } from './kinds';
 
@@ -29,9 +29,9 @@ export function inspectSharedMaterial(payloads: SharePayload[]): SharedMaterial 
     const file={uri:p.value, name:source.name || 'Входящий файл', mimeType:p.mimeType};
     files.push(file);names.push(file.name);
     try { mediaKind(file); } catch { memoryError='Этот формат пока нельзя импортировать в память. Выберите изображение, PDF, аудио, видео или текстовый файл.'; }
-    let chatKind: "image" | "text" | undefined;
+    let chatKind: "image" | "text" | "pdf" | undefined;
     try { chatKind = chatFileFormat(file).kind; }
-    catch { chatError='В чат доступны JPEG, PNG, WebP и текст UTF-8. Этот формат не поддерживается.'; }
+    catch { chatError='В чат доступны JPEG, PNG, WebP, текст UTF-8 и PDF с текстовым слоем. Этот формат не поддерживается.'; }
     // Preflight mirrors the native picker: an oversized image is resized on
     // device before chat, whereas text must fit the bounded UTF-8 read.
     // ContentResolver metadata can be unavailable; readChatAttachments checks
@@ -42,6 +42,8 @@ export function inspectSharedMaterial(payloads: SharePayload[]): SharedMaterial 
         chatError='Фото для чата должно быть не больше 80 МБ.';
       if (chatKind === "text" && size > 96_000)
         chatError='Текстовый файл для чата слишком большой: до 24 000 символов.';
+      if (chatKind === "pdf" && size > MAX_CHAT_FILE_BYTES)
+        chatError='Для чата выберите PDF до 6 МБ; в модель отправится только извлечённый текст.';
       if (size > 80*1024*1024)
         memoryError='Оригинал для памяти должен быть не больше 80 МБ.';
     } catch { /* Copy/read gives a recoverable access error. */ }
@@ -72,7 +74,7 @@ export async function prepareSharedMaterial(payloads:SharePayload[], signal:Abor
   } catch(e) {
     check();
     // Native error text may contain a private provider URI; do not display it.
-    return {...material,attachments:[],chatError:'Не удалось подготовить файлы для чата. Проверьте доступ, формат и лимиты: до 3 файлов, фото-оригиналы до 80 МБ с локальным уменьшением для чата; текст UTF-8 до 24 000 символов.'};
+    return {...material,attachments:[],chatError:'Не удалось подготовить файлы для чата. Проверьте доступ, формат и лимиты: до 3 файлов, фото-оригиналы до 80 МБ с локальным уменьшением; PDF с текстом до 6 МБ; текст до 24 000 символов.'};
   } finally {
     for(const copy of copies)try{if(copy.exists)copy.delete();}catch{/* App lock may already have removed it. */}
   }
