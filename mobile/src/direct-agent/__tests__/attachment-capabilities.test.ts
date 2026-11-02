@@ -33,5 +33,5 @@ test("H5: incompatible historical images are omitted from outbound history witho
   expect(JSON.stringify(safe)).not.toContain(img.data);
   expect(JSON.stringify(history)).toContain(img.data);
   expect(historyForImageCapability(history,"supported")).toEqual(history);
-  expect(historyForImageCapability(history,"unverified")).toEqual(history);
+  expect(historyForImageCapability(history,"unverified")[0].attachments).toEqual([txt]);
 });
