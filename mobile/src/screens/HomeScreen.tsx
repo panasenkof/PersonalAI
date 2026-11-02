@@ -73,7 +73,7 @@ function NebulaHomeContent() {
     });
     return () => {cameraController.current?.abort();releaseCameraOriginal();off();};
   },[profile]);
-  const {picking: pickingAttachment, pick: pickAttachment} = useChatAttachments(store, active?.id, isFocused, setNotice, setSelectedPhotoId);
+  const {picking: pickingAttachment, pick: pickAttachment, audioPreparing, cancel: cancelAttachmentPreparation} = useChatAttachments(store, active?.id, isFocused, setNotice, setSelectedPhotoId);
   useEffect(()=>{
     for(const [id,original] of cameraOriginal.current){
       if(original.conversationId!==active?.id || !active?.attachments?.some(f=>f.id===id))
@@ -360,6 +360,14 @@ function NebulaHomeContent() {
       {error && ready ? <Pressable accessibilityRole="button" onPress={() => void store.checkpoint().catch(() => {})} style={{ minHeight: 44, justifyContent: "center" }}><Text style={{ color: t.accent }}>Повторить сохранение истории</Text></Pressable> : null}</View> : null}
     {!canSend && ready && !(needsSetup && !active?.rows.length) ? <Pressable accessibilityRole="button" onPress={() => openConnections()} style={{ paddingHorizontal: 16, minHeight: 44, justifyContent: "center" }}><Text style={{ color: t.accent }}>Добавьте модель в настройках подключений →</Text></Pressable> : null}
     <View style={{ zIndex: 3, padding: 10, gap: 5, backgroundColor: t.panel, borderTopWidth: 1, borderColor: t.line }}>
+      {pickingAttachment && audioPreparing ? <View style={{flexDirection:'row',alignItems:'center',gap:12,minHeight:48,paddingHorizontal:6}}>
+        <ActivityIndicator accessibilityLabel="Локальное распознавание аудио"/>
+        <Text accessibilityLiveRegion="polite" style={{color:t.secondary,flex:1}}>Распознаю аудио на телефоне…</Text>
+        <Pressable accessibilityRole="button" accessibilityLabel="Отменить распознавание аудио"
+          onPress={cancelAttachmentPreparation} style={{minHeight:48,minWidth:48,justifyContent:'center'}}>
+          <Text style={{color:t.accent}}>Отмена</Text>
+        </Pressable>
+      </View> : null}
       {active?.attachments?.length ? <>
         <ChatAttachmentList files={active.attachments} disabled={busy || cameraBusy || pickingAttachment}
           selectedImageId={selectedPhoto?.id} onSelectImage={setSelectedPhotoId}
@@ -386,7 +394,7 @@ function NebulaHomeContent() {
       </Pressable> : null}
       <PromptInput value={question} onChange={value => store.setQuestion(value)} onClear={() => { normalization.reset(); setVoiceReset(n => n + 1); }} editable={ready} onFocusChange={setComposerFocused} />
       <View testID="composer-actions" style={{ zIndex: 1, flexDirection: "row", alignItems: "center", gap: 4 }}>
-        <IconAction compact explainOnTap={false} icon="paperclip" label="Файл" accessibilityLabel="Прикрепить файл к сообщению" hint="JPEG, PNG, WebP, текст UTF-8 и PDF с текстовым слоем. До 3 файлов: фото до 80 МБ уменьшится до 6 МБ; PDF до 6 МБ пойдёт только как текст. Всего до 24 000 символов текста. Если один файл не прочитается, остальные останутся в черновике. Файлы не сохраняются в память." hintAbove hintAlign="start" disabled={!ready || busy || pickingAttachment || dictating} onPress={() => void pickAttachment()} />
+        <IconAction compact explainOnTap={false} icon="paperclip" label="Файл" accessibilityLabel="Прикрепить файл к сообщению" hint="JPEG/PNG/WebP, текст, PDF с текстовым слоем и аудио MP3/M4A/WAV/OGG/FLAC/AAC до 20 МБ через скачанный Whisper. Аудио распознаётся только на телефоне; в чат попадёт текст без оригинала. До 3 файлов, PDF до 6 МБ, совокупный текст до 24 000 символов. Файлы не сохраняются как заметки." hintAbove hintAlign="start" disabled={!ready || busy || pickingAttachment || dictating} onPress={() => void pickAttachment()} />
 <IconAction compact icon="camera" label={cameraBusy?"Съёмка…":"Камера"} accessibilityLabel="Сделать снимок"
           hint="Камера откроется сразу. После съёмки можно спросить ИИ, найти в интернете или памяти, сохранить заметку."
           hintAbove disabled={!ready || cameraBusy || busy || pickingAttachment || dictating}
