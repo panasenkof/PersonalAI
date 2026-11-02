@@ -268,8 +268,8 @@ function NebulaHomeContent() {
           return;
         }
         Alert.alert("Обработка больших документов",
-          "Модель: "+selectedSettings.model+" · "+selectedSettings.provider+".\\n"+
-          "Файлов: "+approvedPlan.files+", символов: "+approvedPlan.textChars.toLocaleString("ru-RU")+".\\n"+
+          "Модель: "+selectedSettings.model+" · "+selectedSettings.provider+".\n"+
+          "Файлов: "+approvedPlan.files+", символов: "+approvedPlan.textChars.toLocaleString("ru-RU")+".\n"+
           "План: "+approvedPlan.parts.length+" частей + итог, до "+approvedPlan.calls+
           " вызовов ИИ. Текст каждой части отправится выбранному провайдеру через сеть; "+
           "услуга может быть платной, точная стоимость зависит от его тарифов. "+
