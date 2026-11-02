@@ -227,3 +227,16 @@ test("H3b: Share/non-picker reader never starts local ASR without explicit picke
   await expect(readChatAttachments([audio],new AbortController().signal)).rejects.toThrow('Share');
   expect(transcribeAudioFile).not.toHaveBeenCalled();
 });
+
+test("H-DOC1a: four selected valid files keep three attached and report fourth separately",async()=>{
+  const selected=Array.from({length:4},(_,i)=>({
+    uri:"file:///cache/file"+i+".txt",name:"file"+i+".txt",mimeType:"text/plain",
+  }));
+  (getDocumentAsync as jest.Mock).mockResolvedValue({canceled:false,assets:selected});
+  (readAsStringAsync as jest.Mock).mockResolvedValue("Короткий текст");
+  const result=await pickChatAttachmentsWithResults(new AbortController().signal);
+  expect(result.files.map(x=>x.name)).toEqual(["file0.txt","file1.txt","file2.txt"]);
+  expect(result.failures).toEqual([{name:"file3.txt",reason:expect.stringContaining("до 3 файлов")}]);
+  expect(readAsStringAsync).toHaveBeenCalledTimes(3);
+  for(const file of selected)expect(mockDelete).toHaveBeenCalledWith(file.uri);
+});
