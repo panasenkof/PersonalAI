@@ -55,6 +55,7 @@ export function MemoryNoteScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParams>>();
   const route = useRoute<RouteProp<RootStackParams, "MemoryNote">>();
   const profile = useProfile();
+  const activeProfile = useRef(profile); activeProfile.current = profile;
   const extraction = useRef<AbortController | null>(null);
   useEffect(() => { const off = onLocalMemorySessionChange(unlocked => { if (!unlocked) { extraction.current?.abort(); setCandidate(null); setRepeatFiles([]); } }); return () => { off(); extraction.current?.abort(); }; }, []);
   const repository = useRef<SqliteMemoryRepository | null>(null); const alive = useRef(true); const pending = useRef(false);
@@ -177,7 +178,7 @@ export function MemoryNoteScreen() {
     if (alive.current) setLeaving(true);
   });
   const rerunAttachment = (attachment: Attachment) => {
-    if (!selected || !profile || busy || dirty || selected.record_status !== "active") return;
+    if (!selected || !profile || activeProfile.current !== profile || busy || dirty || selected.record_status !== "active") return;
     const note = selected;
     const kind = mediaKind({uri:"file:///original",name:attachment.name,mimeType:attachment.mime});
     const localOcr = getRussianOcrStatus().ready;
@@ -195,7 +196,7 @@ export function MemoryNoteScreen() {
       (kind === "image" || kind === "document") && localOcr ? "локальное русское OCR" :
       kind === "document" || kind === "text" ? "локальный текстовый разбор" : "внешняя модель";
     void mediaConnections(profile).then(settings => {
-      if (!alive.current) return;
+      if (!alive.current || activeProfile.current !== profile) return;
       const remote = destination.startsWith("внешн");
       const provider = kind === "audio" ? settings.speech : settings.vision;
       const name = remote ? "Провайдер: " + provider.provider + ", модель: " +
@@ -208,7 +209,7 @@ export function MemoryNoteScreen() {
       Alert.alert("Распознать заново?",message,[
         {text:"Отмена",style:"cancel"},
         {text:"Распознать",onPress:()=>void run(async db => {
-          if (!profile) throw new Error("profile_missing");
+          if (!profile || activeProfile.current !== profile) throw new Error("profile_missing");
           setCandidate(null); setRepeatFiles([]);
           const current = await db.entity(note.id);
           if (!current || current.record_version !== note.record_version ||
@@ -235,7 +236,7 @@ export function MemoryNoteScreen() {
             const recognition = await extractMedia({uri,name:attachment.name,mimeType:attachment.mime},
               settings.vision,approveUpload,aborter.signal,undefined,settings.speech,
               received => { segments.splice(0,segments.length,...received); },undefined,mode);
-            if (aborter.signal.aborted || !alive.current) return;
+            if (aborter.signal.aborted || !alive.current || activeProfile.current !== profile) return;
             const providerId = destination === "Локальный Whisper" ? "local-whisper" :
               destination === "локальное русское OCR" ? "android-tesseract-5-rus" :
               destination === "локальный текстовый разбор" ? "local-document-text" :
@@ -248,14 +249,14 @@ export function MemoryNoteScreen() {
             });
           } finally {
             if (extraction.current === aborter) extraction.current = null;
-            if (uri) { const file = new File(uri); if (file.exists) file.delete(); }
+            if (uri) { try { const file = new File(uri); if (file.exists) file.delete(); } catch { /* Lock may purge cache first. */ } }
           }
         })}
       ]);
     }).catch(e => { if (alive.current) setError(memoryErrorMessage(e)); });
   };
   const acceptCandidate = () => void run(async db => {
-    if (!profile || !selected || !candidate) return;
+    if (!profile || activeProfile.current !== profile || !selected || !candidate) return;
     if (dirty || candidate.recordVersion !== selected.record_version)
       throw new MemoryConflictError("stale_memory_version");
     const updated = await applyRecognitionCandidate(db,{
@@ -355,7 +356,7 @@ export function MemoryNoteScreen() {
               if (!profile) return;
               setError("");
               void attachmentsForEntity(profile,selected.id).then(files => {
-                if (!alive.current) return;
+                if (!alive.current || activeProfile.current !== profile) return;
                 if (!files.length) setError("Оригиналы не найдены.");
                 else if (files.length === 1) rerunAttachment(files[0]);
                 else setRepeatFiles(files);
