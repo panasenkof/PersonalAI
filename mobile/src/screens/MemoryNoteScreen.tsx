@@ -193,6 +193,9 @@ export function MemoryNoteScreen() {
           (kind === "audio" && !localSpeech))) {
         setError("Закрытая запись: требуется локальная модель OCR или Whisper. Оригинал не отправлен внешнему сервису."); return;
       }
+      if (kind === "audio" && settings.fileAsrMode === "device" && !localSpeech) {
+        setError("Локальный Whisper не установлен. Выберите онлайн или скачайте модель."); return;
+      }
       if (kind === "audio" && settings.fileAsrMode === "online" && !officialAudioProvider(settings.speech)) {
         setError("Это подключение не поддерживает онлайн-распознавание файлов. Выберите официальный OpenAI."); return;
       }
@@ -243,7 +246,7 @@ export function MemoryNoteScreen() {
             const providerId = destination === "Локальный Whisper" ? "local-whisper" :
               destination === "локальное русское OCR" ? "android-tesseract-5-rus" :
               destination === "локальный текстовый разбор" ? "local-document-text" :
-              kind === "audio" ? String(settings.speech.transcriptionModel || "gpt-transcribe") :
+              kind === "audio" ? "openai:" + String(settings.speech.transcriptionModel || "gpt-transcribe") :
               String(settings.vision.model || settings.vision.provider);
             setCandidate({
               text:recognition,attachment,sourceVersion,recordVersion:note.record_version,
