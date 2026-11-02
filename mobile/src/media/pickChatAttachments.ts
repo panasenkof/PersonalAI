@@ -68,10 +68,14 @@ async function pickChatAttachmentsInternal(signal:AbortSignal, isolated:boolean,
     });
     check();
     if(!isolated) return {files:await readChatAttachments(assets,signal,true),failures:[]};
-    if(assets.length>MAX_CHAT_FILES) throw new Error('К сообщению можно прикрепить до 3 файлов.');
     const files:ChatAttachment[] = [], failures:ChatFileFailure[] = [];
     for(const asset of assets){
       check();
+      if(files.length>=MAX_CHAT_FILES) {
+        failures.push({name:asset.name.replace(/[\r\n\t]/g,' ').slice(0,90),
+          reason:'К одному сообщению можно прикрепить до 3 файлов. Этот файл не был прочитан и отправлен.'});
+        continue;
+      }
       try {
         // Use the SAME validation, format reader, and transport budget as the
         // strict path. Checking the aggregate here prevents a later invalid
