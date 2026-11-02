@@ -388,7 +388,7 @@ export async function applyRecognitionCandidate(repo: SqliteMemoryRepository, in
       await appendExtractionInTransaction(tx,{
         attachmentId:attachment.id,
         producerKind:kind === "audio"?"asr":kind==="document"?"pdf":
-          kind==="image"?"ocr":kind==="text"?"text":"vision",
+          kind==="image"?(input.producerId === "android-tesseract-5-rus"?"ocr":"vision"):kind==="text"?"text":"vision",
         producerId:input.producerId,producerRevision:input.producerRevision,
         status:"partial",coverage:"unknown",segments,
       });
