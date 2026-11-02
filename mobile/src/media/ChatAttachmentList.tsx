@@ -40,6 +40,9 @@ export function ChatAttachmentList({files, onRemove, onSearch, onSelectImage, se
       {file.kind === "text" && file.name.startsWith("Текст PDF: ") ? <Text style={{color:t.muted,fontSize:12,lineHeight:17}}>
         Только текст PDF · оригинал не отправится
       </Text> : null}
+      {file.kind === "text" && file.name.startsWith("Транскрипт аудио: ") ? <Text style={{color:t.muted,fontSize:12,lineHeight:17}}>
+        Текст Whisper · аудио не отправится
+      </Text> : null}
       {onSearch && file.kind==="image" ? <Pressable accessibilityRole="button"
         accessibilityLabel={"Найти похожие в памяти по фото "+file.name} disabled={disabled}
         onPress={()=>onSearch(file)} style={{minHeight:nebulaTouch.minimum,justifyContent:"center"}}>
