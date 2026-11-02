@@ -31,9 +31,9 @@ function mountWith(initial:ChatAttachment[]){
 beforeEach(()=>jest.clearAllMocks());
 
 test("H2: earlier draft is preserved and per-item aggregate text overflow does not discard later fitting file",async()=>{
-  const initial=[textFile("old",20_000)];
+  const initial=[textFile("old",200_000)];
   (pickChatAttachmentsWithResults as jest.Mock).mockResolvedValue({
-    files:[textFile("too-big",5_000),textFile("fits",1_000)],failures:[],
+    files:[textFile("too-big",50_000),textFile("fits",1_000)],failures:[],
   });
   const {ui,setAttachments,onError}=mountWith(initial);
   await act(async()=>{fireEvent.press(ui.getByLabelText("Выбрать файлы"));});
