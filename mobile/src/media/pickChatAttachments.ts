@@ -230,8 +230,8 @@ async function pdfChatText(uri: string, name: string, signal: AbortSignal): Prom
     // Fast legacy path remains unchanged for small PDFs.
     const pages = await extractPdfPages({uri,name,mimeType:'application/pdf'},signal);
     check();
-    const text = 'Только извлечённый текст PDF. Исходный файл в модель не отправляется.\\n' +
-      pdfCoverageMessage(pages) + '\\n\\n' + pages.text;
+    const text = 'Только извлечённый текст PDF. Исходный файл в модель не отправляется.\n' +
+      pdfCoverageMessage(pages) + '\n\n' + pages.text;
     if(text.length>MAX_CHAT_TEXT_CHARS)throw new Error("doc_text_memory_bound");
     return text;
   } catch(error){
@@ -240,13 +240,13 @@ async function pdfChatText(uri: string, name: string, signal: AbortSignal): Prom
     if(!/128 страниц|60 000 символов|pdf_page_limit_exceeded|pdf_text_limit_exceeded|pdf_segment_limit_exceeded/.test(message))
       throw error;
   }
-  let result="Только извлечённый текст PDF. Исходный файл в модель не отправляется.\\n";
+  let result="Только извлечённый текст PDF. Исходный файл в модель не отправляется.\n";
   let seen=0, missing=0, total=0, listed:number[]=[];
   for await(const window of readPdfTextWindows({uri,name,mimeType:'application/pdf'},check)){
     total=window.pageCount;seen+=window.pages.length;missing+=window.missingPages.length;
     if(listed.length<12)listed.push(...window.missingPages.slice(0,12-listed.length));
     for(const page of window.pages){
-      const entry="\\n\\nСтраница "+page.page+":\\n"+page.text;
+      const entry="\n\nСтраница "+page.page+":\n"+page.text;
       if(result.length+entry.length>MAX_CHAT_TEXT_CHARS)throw new Error("doc_text_memory_bound");
       result+=entry;
     }
@@ -258,7 +258,7 @@ async function pdfChatText(uri: string, name: string, signal: AbortSignal): Prom
       (missing>listed.length?" и ещё "+(missing-listed.length):"")+
       ". OCR не проводился." :
       "На всех страницах найден текстовый слой, но полнота символов не гарантирована.");
-  const complete=result+"\\n\\n"+cover;
+  const complete=result+"\n\n"+cover;
   if(complete.length>MAX_CHAT_TEXT_CHARS)throw new Error("doc_text_memory_bound");
   return complete;
 }
