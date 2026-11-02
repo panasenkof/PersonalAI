@@ -1,4 +1,4 @@
-import { pickChatAttachments, pickChatAttachmentsWithResults } from '../pickChatAttachments';
+import { pickChatAttachments, pickChatAttachmentsWithResults, safeChatFileFailure } from '../pickChatAttachments';
 import { chatContent } from "../../direct-agent/chat-attachments";
 import { extractPdfPages } from "../pdf-pages";
 import { getDocumentAsync } from 'expo-document-picker';
@@ -151,4 +151,10 @@ test("H2: native reader errors cannot leak provider paths into per-file messages
   expect(result.files).toEqual([]);
   expect(result.failures[0].reason).toMatch(/Проверьте формат и доступ/);
   expect(JSON.stringify(result.failures)).not.toContain("content://");
+});
+
+test('H3a: unsupported MIME diagnostic mentioning UTF-8 is never mislabeled a text decoding failure',()=>{
+  const unsupported=new Error('В чат можно прикрепить фото JPEG/PNG/WebP, текст UTF-8 или PDF с текстовым слоем. Аудио и видео пока доступны в памяти.');
+  expect(safeChatFileFailure(unsupported)).toBe('Формат файла не поддерживается в чате.');
+  expect(safeChatFileFailure(new Error('Ошибка текстового файла UTF-8'))).toContain('UTF-8');
 });
