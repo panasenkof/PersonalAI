@@ -45,6 +45,8 @@ export async function runAndroidFileProbe(uri: string, signal?: AbortSignal): Pr
     if (signal?.aborted) return { status: "error", reason: "Проверка отменена." };
     if (!decoded.numberOfChannels || !Number.isFinite(decoded.duration) || decoded.duration < 1 || decoded.duration > PROBE_MAX_SECONDS)
       return { status: "unsupported", reason: "Для проверки требуется запись речи длительностью от 1 до 12 секунд." };
+    if (decoded.sampleRate !== 16_000)
+      return { status: "unsupported", reason: "Аудиодекодер не подготовил 16 кГц PCM; передача некорректных данных в системную службу запрещена." };
     const pcm = monoWav(Array.from({ length: decoded.numberOfChannels }, (_, i) => decoded.getChannelData(i)), 16_000);
     const dir = new Directory(Paths.cache, "persai-asr-probe");
     dir.create({ intermediates: true, idempotent: true });
