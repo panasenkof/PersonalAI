@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Alert, Platform, Pressable, Text, View } from "react-native";
 import * as DocumentPicker from "expo-document-picker";
+import * as FileSystem from "expo-file-system/legacy";
 import { onLocalMemorySessionChange } from "../local-memory/storage";
 import { nebulaRadii, nebulaSpacing, nebulaTouch, nebulaTypography } from "../design/nebula/tokens";
 import { useTheme } from "../theme";
@@ -38,7 +39,12 @@ export function AndroidFileAsrProbe() {
     try {
       const checked = await runAndroidFileProbe(uri, controller.signal);
       if (mounted.current && active.current === controller) setResult(checked);
+    } catch {
+      if (mounted.current && active.current === controller) setResult({ status: "error", reason: "Эксперимент завершился с ошибкой." });
     } finally {
+      if (/^file:\/\//.test(uri) && uri.includes("/cache/")) {
+        await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => undefined);
+      }
       if (active.current === controller) active.current = null;
       if (mounted.current) setRunning(false);
     }
@@ -53,7 +59,9 @@ export function AndroidFileAsrProbe() {
       Alert.alert(
         "Проверка Android file-ASR",
         "Выберите только не конфиденциальную тестовую запись речи до 12 секунд. Системная служба может игнорировать файл, включить МИКРОФОН или обращаться в интернет, несмотря на запрос локального режима. Ничего не будет записано в заметки. Наблюдайте индикатор микрофона на устройстве.",
-        [{ text: "Отмена", style: "cancel" }, { text: "Разрешить эксперимент", onPress: () => void start(uri) }],
+        [{ text: "Отмена", style: "cancel", onPress: () => {
+          if (/^file:\/\//.test(uri) && uri.includes("/cache/")) void FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => undefined);
+        } }, { text: "Разрешить эксперимент", onPress: () => void start(uri) }],
       );
     } catch {
       if (mounted.current) setResult({ status: "error", reason: "Не удалось выбрать тестовый файл." });
