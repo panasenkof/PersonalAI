@@ -4,6 +4,8 @@ import Feather from "@expo/vector-icons/Feather";
 import { useChatAttachments } from "../media/useChatAttachments";
 import { capturePhotoDraft83, discardCameraPhotoDraft83, stageChatImageForNote83 } from "../media/vision-chat-camera";
 import { MAX_CHAT_FILES } from "../direct-agent/chat-attachments";
+import { planDocumentSynthesis } from "../direct-agent/document-synthesis";
+import { loadModelCallLimit } from "../direct-agent/agent-preferences";
 import { imageCapability } from "../direct-agent/attachment-capabilities";
 import type { ChatAttachment } from "../direct-agent/chat-attachments";
 import { localPhotoIntent83, localPhotoSuggestion83 } from "../media/vision-chat-search";
@@ -249,7 +251,35 @@ function NebulaHomeContent() {
     setComposerFocused(false);
     setVoiceReset(n => n + 1);
     if(localPhotoSearch)void store.searchPhotosLocally();
-    else if(settings)void store.send(settings);
+    else if(settings) {
+      let plan;
+      try {plan=planDocumentSynthesis(active?.attachments||[],settings.model);}
+      catch(e){setNotice((e as Error).message);return;}
+      if(!plan){void store.send(settings);return;}
+      if(!profile || !active?.id){setNotice("Диалог недоступен.");return;}
+      const conversationId=active.id;
+      const selectedSettings=settings;
+      const approvedPlan=plan;
+      void loadModelCallLimit(profile).then(limit=>{
+        if(store.getSnapshot().activeId!==conversationId)return;
+        if(approvedPlan.calls>limit){
+          setNotice("Для анализа всех частей потребуется "+approvedPlan.calls+
+            " обращений к модели; сейчас разрешено "+limit+". Измените лимит в Настройки → Работа ИИ. Файлы остались в черновике.");
+          return;
+        }
+        Alert.alert("Обработка больших документов",
+          "Модель: "+selectedSettings.model+" · "+selectedSettings.provider+".\\n"+
+          "Файлов: "+approvedPlan.files+", символов: "+approvedPlan.textChars.toLocaleString("ru-RU")+".\\n"+
+          "План: "+approvedPlan.parts.length+" частей + итог, до "+approvedPlan.calls+
+          " вызовов ИИ. Текст каждой части отправится выбранному провайдеру через сеть; "+
+          "услуга может быть платной, точная стоимость зависит от его тарифов. "+
+          "Оригинальные PDF/аудиофайлы не отправляются. Без согласия сеть не используется.",
+          [{text:"Отмена",style:"cancel"},{text:"Разрешить и обработать",onPress:()=>{
+            if(store.getSnapshot().activeId===conversationId)
+              void store.send(selectedSettings,undefined,approvedPlan.approvalKey);
+          }}]);
+      }).catch(()=>setNotice("Не удалось проверить лимит обращений к ИИ; документы не отправлены."));
+    }
   };
   const openConnections = (presetId?: string) => navigation.navigate("ModelConnections", presetId ? { presetId } : undefined);
   // First run: the active connection has neither a key nor a keyless local address.
@@ -409,7 +439,7 @@ function NebulaHomeContent() {
       </Pressable> : null}
       <PromptInput value={question} onChange={value => store.setQuestion(value)} onClear={() => { normalization.reset(); setVoiceReset(n => n + 1); }} editable={ready} onFocusChange={setComposerFocused} />
       <View testID="composer-actions" style={{ zIndex: 1, flexDirection: "row", alignItems: "center", gap: 4 }}>
-        <IconAction compact explainOnTap={false} icon="paperclip" label="Файл" accessibilityLabel="Прикрепить файл к сообщению" hint="JPEG/PNG/WebP, текст, PDF с текстовым слоем и аудио MP3/M4A/WAV/OGG/FLAC/AAC до 20 МБ через скачанный Whisper. Аудио распознаётся только на телефоне; в чат попадёт текст без оригинала. До 3 файлов, PDF до 6 МБ, совокупный текст до 24 000 символов. Файлы не сохраняются как заметки." hintAbove hintAlign="start" disabled={!ready || busy || pickingAttachment || dictating} onPress={() => void pickAttachment()} />
+        <IconAction compact explainOnTap={false} icon="paperclip" label="Файл" accessibilityLabel="Прикрепить файл к сообщению" hint="JPEG/PNG/WebP, текст, PDF с текстовым слоем и аудио MP3/M4A/WAV/OGG/FLAC/AAC до 20 МБ через скачанный Whisper. Аудио распознаётся только на телефоне; в чат попадёт текст без оригинала. До 3 файлов, PDF до 6 МБ, совокупный текст до 240 000 символов (защита памяти телефона, не предел ИИ). Большие документы анализируются по частям после подтверждения расходов. Файлы не сохраняются как заметки." hintAbove hintAlign="start" disabled={!ready || busy || pickingAttachment || dictating} onPress={() => void pickAttachment()} />
 <IconAction compact icon="camera" label={cameraBusy?"Съёмка…":"Камера"} accessibilityLabel="Сделать снимок"
           hint="Камера откроется сразу. После съёмки можно спросить ИИ, найти в интернете или памяти, сохранить заметку."
           hintAbove disabled={!ready || cameraBusy || busy || pickingAttachment || dictating}
