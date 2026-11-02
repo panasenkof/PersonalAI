@@ -8,7 +8,46 @@ import { localMemorySessionUnlocked } from '../local-memory/storage';
 import { withNativeInteraction } from '../security/native-interaction';
 import { checkedChatAttachments, MAX_CHAT_FILE_BYTES, MAX_CHAT_IMAGE_SOURCE_BYTES, MAX_CHAT_FILES, type ChatAttachment } from '../direct-agent/chat-attachments';
 
+/** Per-file picker failures never become chat attachments. The user can
+ * select only failed files again; already accepted ones remain in the draft.
+ * Share uses the existing strict readChatAttachments path until its own UI
+ * can display failures per material (H3).
+ */
+export type ChatFileFailure = {name:string; reason:string};
+export type ChatFilePickResult = {files:ChatAttachment[]; failures:ChatFileFailure[]};
+
+function safeFileFailure(error:unknown):string {
+  const message=error instanceof Error ? error.message : "";
+  // Only fixed human-readable phrases reach the UI. Never leak a provider URI,
+  // a local cache path or an arbitrary native exception.
+  if (message.includes("не является PDF")) return "Файл не является настоящим PDF.";
+  if (message.includes("текстовый слой")) return "В PDF нет читаемого текстового слоя.";
+  if (message.includes("защищён паролем")) return "PDF защищён паролем.";
+  if (message.includes("6 МБ")) return "PDF превышает 6 МБ.";
+  if (message.includes("24 000")) return "Слишком много текста (вместе не более 24 000 символов).";
+  if (message.includes("80 МБ")) return "Фотография превышает 80 МБ.";
+  if (message.includes("UTF-8")) return "Не удалось прочитать текстовый файл UTF-8.";
+  if (message.includes("Чтение страниц PDF") || message.includes("системным средством") ||
+      message.includes("системного извлечения текста PDF"))
+    return "Чтение PDF недоступно на этом устройстве.";
+  if (message.includes("не поддерживается") || message.includes("В чат можно прикрепить"))
+    return "Формат файла не поддерживается в чате.";
+  return "Не удалось подготовить файл. Проверьте формат и доступ.";
+}
+
+/** Strict legacy picker: unchanged contract for existing callers and tests. */
 export async function pickChatAttachments(signal: AbortSignal): Promise<ChatAttachment[]> {
+  return (await pickChatAttachmentsInternal(signal, false)).files;
+}
+
+/** H2: tolerate an invalid item without losing other selected files.
+ * Nothing is sent to an LLM until the normal chat Send action.
+ */
+export async function pickChatAttachmentsWithResults(signal:AbortSignal):Promise<ChatFilePickResult> {
+  return pickChatAttachmentsInternal(signal,true);
+}
+
+async function pickChatAttachmentsInternal(signal:AbortSignal, isolated:boolean):Promise<ChatFilePickResult> {
   let assets: DocumentPicker.DocumentPickerAsset[] = [];
   const check = () => { if (signal.aborted || !localMemorySessionUnlocked()) throw new Error('Выбор файлов прерван.'); };
   try {
@@ -18,7 +57,25 @@ export async function pickChatAttachments(signal: AbortSignal): Promise<ChatAtta
       if (!result.canceled) assets = result.assets;
     });
     check();
-    return await readChatAttachments(assets, signal);
+    if(!isolated) return {files:await readChatAttachments(assets,signal),failures:[]};
+    if(assets.length>MAX_CHAT_FILES) throw new Error('К сообщению можно прикрепить до 3 файлов.');
+    const files:ChatAttachment[] = [], failures:ChatFileFailure[] = [];
+    for(const asset of assets){
+      check();
+      try {
+        // Use the SAME validation, format reader, and transport budget as the
+        // strict path. Checking the aggregate here prevents a later invalid
+        // item from discarding earlier valid selections.
+        const [file]=await readChatAttachments([asset],signal);
+        check();
+        checkedChatAttachments([...files,file]);
+        files.push(file);
+      } catch(error) {
+        check(); // Lock/abort is global; never report it as an item error.
+        failures.push({name:asset.name.replace(/[\r\n\t]/g,' ').slice(0,90),reason:safeFileFailure(error)});
+      }
+    }
+    return {files,failures};
   } finally {
     for (const asset of assets) if (FileSystem.cacheDirectory && asset.uri.startsWith(FileSystem.cacheDirectory)) {
       try { const file = new File(asset.uri); if (file.exists) file.delete(); } catch { /* Picker copy only. */ }
