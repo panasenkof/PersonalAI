@@ -63,6 +63,8 @@ export function chatAttachmentAdmissionIssue(
 
 export function chatContent(text: string, attachments: ChatAttachment[] | undefined, protocol: AttachmentProtocol): string | Array<Record<string, unknown>> {
   const files = checkedChatAttachments(attachments);
+  if(files.filter(f=>f.kind==='text').reduce((n,f)=>n+f.data.length,0)>24_000)
+    throw new Error('big_document_requires_explicit_synthesis');
   if (!files.length) return text;
   const textType = protocol === 'responses' ? 'input_text' : 'text';
   const blocks: Array<Record<string, unknown>> = [];
