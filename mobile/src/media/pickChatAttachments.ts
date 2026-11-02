@@ -16,7 +16,8 @@ import { checkedChatAttachments, MAX_CHAT_FILE_BYTES, MAX_CHAT_IMAGE_SOURCE_BYTE
 export type ChatFileFailure = {name:string; reason:string};
 export type ChatFilePickResult = {files:ChatAttachment[]; failures:ChatFileFailure[]};
 
-function safeFileFailure(error:unknown):string {
+/** Stable, privacy-safe diagnostics for picker and Android Share. */
+export function safeChatFileFailure(error:unknown):string {
   const message=error instanceof Error ? error.message : "";
   // Only fixed human-readable phrases reach the UI. Never leak a provider URI,
   // a local cache path or an arbitrary native exception.
@@ -26,12 +27,14 @@ function safeFileFailure(error:unknown):string {
   if (message.includes("6 МБ")) return "PDF превышает 6 МБ.";
   if (message.includes("24 000")) return "Слишком много текста (вместе не более 24 000 символов).";
   if (message.includes("80 МБ")) return "Фотография превышает 80 МБ.";
+  // The unsupported-format diagnostic mentions UTF-8 as an allowed format;
+  // classify the full error before looking for a true text decoding failure.
+  if (message.includes("В чат можно прикрепить") || message.includes("не поддерживается"))
+    return "Формат файла не поддерживается в чате.";
   if (message.includes("UTF-8")) return "Не удалось прочитать текстовый файл UTF-8.";
   if (message.includes("Чтение страниц PDF") || message.includes("системным средством") ||
       message.includes("системного извлечения текста PDF"))
     return "Чтение PDF недоступно на этом устройстве.";
-  if (message.includes("не поддерживается") || message.includes("В чат можно прикрепить"))
-    return "Формат файла не поддерживается в чате.";
   return "Не удалось подготовить файл. Проверьте формат и доступ.";
 }
 
@@ -72,7 +75,7 @@ async function pickChatAttachmentsInternal(signal:AbortSignal, isolated:boolean)
         files.push(file);
       } catch(error) {
         check(); // Lock/abort is global; never report it as an item error.
-        failures.push({name:asset.name.replace(/[\r\n\t]/g,' ').slice(0,90),reason:safeFileFailure(error)});
+        failures.push({name:asset.name.replace(/[\r\n\t]/g,' ').slice(0,90),reason:safeChatFileFailure(error)});
       }
     }
     return {files,failures};

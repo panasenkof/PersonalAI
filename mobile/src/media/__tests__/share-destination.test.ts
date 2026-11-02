@@ -53,3 +53,63 @@ test('shared photos of 3 MB are allowed for local resizing, but photos over 80 M
   expect(inspectSharedMaterial([photo]).chatError).toContain('80 МБ');
   expect(inspectSharedMaterial([photo]).memoryError).toContain('80 МБ');
 });
+
+test('H3a: unsupported audio does not discard a ready text file from the same Share',async()=>{
+  const audio={shareType:'audio' as const,value:'content://provider/voice.mp3',mimeType:'audio/mpeg'};
+  const result=await prepareSharedMaterial([file,audio],new AbortController().signal);
+  expect(result.chatError).toBe('');
+  expect(result.attachments).toHaveLength(1);
+  expect(result.attachments[0].data).toBe('Рецепт');
+  expect(result.chatStatuses).toEqual([
+    {name:'recipe.txt',state:'ready'},
+    {name:'voice.mp3',state:'error',reason:expect.stringContaining('не поддерживается')},
+  ]);
+  expect(result.memoryError).toBe('');
+  expect(mockCopy).toHaveBeenCalledTimes(1);
+  expect(mockDelete).not.toHaveBeenCalledWith(audio.value);
+});
+
+test('H3a: one provider copy error leaves following valid text available without leaking a URI',async()=>{
+  const second={...file,value:'content://provider/second.txt'};
+  mockCopy.mockRejectedValueOnce(new Error('private content://provider/secret'));
+  const result=await prepareSharedMaterial([file,second],new AbortController().signal);
+  expect(result.chatError).toBe('');
+  expect(result.attachments).toHaveLength(1);
+  expect(result.chatStatuses[0]).toMatchObject({name:'recipe.txt',state:'error'});
+  expect(result.chatStatuses[1]).toMatchObject({name:'second.txt',state:'ready'});
+  expect(JSON.stringify(result.chatStatuses)).not.toContain('content://');
+  expect(mockDelete).toHaveBeenCalledWith('file:///cache/persai-incoming/1');
+  expect(mockDelete).toHaveBeenCalledWith('file:///cache/persai-incoming/2');
+});
+
+test('H3a: aggregate 24k limit rejects only overflow, not a later smaller file',async()=>{
+  const second={...file,value:'content://provider/second.txt'};
+  const third={...file,value:'content://provider/third.txt'};
+  (readAsStringAsync as jest.Mock).mockResolvedValueOnce('А'.repeat(20_000))
+    .mockResolvedValueOnce('Б'.repeat(5_000)).mockResolvedValueOnce('В'.repeat(1000));
+  const result=await prepareSharedMaterial([file,second,third],new AbortController().signal);
+  expect(result.chatError).toBe('');
+  expect(result.attachments.map(x=>x.name)).toEqual(['recipe.txt','third.txt']);
+  expect(result.chatStatuses.map(x=>x.state)).toEqual(['ready','error','ready']);
+  expect(result.chatStatuses[1].reason).toContain('24 000');
+});
+
+test('H3a: session lock during second file aborts entire Share and cleans all copies',async()=>{
+  const second={...file,value:'content://provider/second.txt'};
+  let calls=0;
+  mockCopy.mockImplementation(async()=>{
+    if(++calls===2)mockUnlocked=false;
+  });
+  await expect(prepareSharedMaterial([file,second],new AbortController().signal)).rejects.toThrow('прерван');
+  expect(mockDelete).toHaveBeenCalledWith('file:///cache/persai-incoming/1');
+  expect(mockDelete).toHaveBeenCalledWith('file:///cache/persai-incoming/3');
+});
+
+test('H3a: memory can still import an otherwise unsupported chat file',async()=>{
+  const audio={shareType:'audio' as const,value:'content://provider/voice.mp3',mimeType:'audio/mpeg'};
+  const result=await prepareSharedMaterial([audio],new AbortController().signal);
+  expect(result.chatError).toContain('Нет готовых');
+  expect(result.memoryError).toBe('');
+  expect(result.chatStatuses).toEqual([{name:'voice.mp3',state:'error',reason:expect.any(String)}]);
+  expect(mockCopy).not.toHaveBeenCalled();
+});

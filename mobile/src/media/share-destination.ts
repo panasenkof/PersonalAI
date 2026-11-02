@@ -3,12 +3,13 @@ import * as Crypto from 'expo-crypto';
 import { Directory, File, Paths } from 'expo-file-system';
 import { copyAsync } from 'expo-file-system/legacy';
 import { localMemorySessionUnlocked } from '../local-memory/storage';
-import { MAX_CHAT_FILES, MAX_CHAT_FILE_BYTES, MAX_CHAT_TEXT_CHARS, MAX_CHAT_IMAGE_SOURCE_BYTES, type ChatAttachment } from '../direct-agent/chat-attachments';
-import { readChatAttachments, chatFileFormat } from './pickChatAttachments';
+import { MAX_CHAT_FILES, MAX_CHAT_FILE_BYTES, MAX_CHAT_TEXT_CHARS, MAX_CHAT_IMAGE_SOURCE_BYTES, checkedChatAttachments, type ChatAttachment } from '../direct-agent/chat-attachments';
+import { readChatAttachments, chatFileFormat, safeChatFileFailure } from './pickChatAttachments';
 import { mediaKind, type ImportFile } from './kinds';
 
 export type SharedMaterial = {text:string; names:string[]; files:ImportFile[]; memoryError:string; chatError:string};
-export type PreparedShare = SharedMaterial & {attachments:ChatAttachment[]};
+export type SharedChatStatus = { name:string; state:'ready'|'error'; reason?:string };
+export type PreparedShare = SharedMaterial & { attachments:ChatAttachment[]; chatStatuses:SharedChatStatus[] };
 const isText = (p: SharePayload) => p.shareType === 'text' || p.shareType === 'url';
 
 /** No URL resolution, networking, model invocation or note creation. */
@@ -54,28 +55,73 @@ export function inspectSharedMaterial(payloads: SharePayload[]): SharedMaterial 
   return {text,names,files,memoryError,chatError};
 }
 
-/** Own only our temporary copies. Original provider URIs are never deleted. */
-export async function prepareSharedMaterial(payloads:SharePayload[], signal:AbortSignal):Promise<PreparedShare> {
+/** The same actual chat reader as picker H2, but Share owns temporary copies
+ * of foreign content URIs. A broken file is not permitted to erase valid ones.
+ * Memory-import eligibility refers to the originals and remains independent.
+ */
+export async function prepareSharedMaterial(payloads:SharePayload[],signal:AbortSignal):Promise<PreparedShare>{
   const check=()=>{if(signal.aborted || !localMemorySessionUnlocked())throw new Error('Приём прерван. Поделитесь материалом ещё раз после разблокировки.');};
-  check();const material=inspectSharedMaterial(payloads);
-  if(material.chatError)return {...material,attachments:[]};
+  check();
+  const material=inspectSharedMaterial(payloads);
+  // A Share may contain more items for the Memory path. The chat contract
+  // still permits no more than three files and 24k of separately shared text.
+  if(material.files.length>MAX_CHAT_FILES || material.text.length>MAX_CHAT_TEXT_CHARS)
+    return {...material,attachments:[],chatStatuses:[]};
+  // Global preflight used to reject all files if any one was unsupported.
+  // Preserve its Memory result but compute chat availability per item below.
+  material.chatError='';
   const copies:File[]=[];
-  try {
-    const files:ImportFile[]=[];
+  const attachments:ChatAttachment[]=[];
+  const chatStatuses:SharedChatStatus[]=[];
+  try{
     for(const file of material.files){
-      check();const dir=new Directory(Paths.cache,'persai-incoming');dir.create({intermediates:true,idempotent:true});
-      const target=new File(dir,Crypto.randomUUID());copies.push(target);
-      await copyAsync({from:file.uri,to:target.uri});check();
-      if (target.size > 80*1024*1024) material.memoryError="Оригинал для памяти должен быть не больше 80 МБ.";
-      files.push({...file,uri:target.uri});
+      check();
+      const label=(file.name.includes('://') ? 'Входящий файл' : file.name)
+        .replace(/[\r\n\t]/g,' ').slice(0,90);
+      let error='';
+      try{
+        const {kind}=chatFileFormat(file);
+        // Reject known unsupported sources before copying, without affecting
+        // Memory Import or other attachments in this same Share.
+        const size=new File(file.uri).size;
+        if(kind==='image' && size>MAX_CHAT_IMAGE_SOURCE_BYTES)error='Фото превышает 80 МБ.';
+        if(kind==='text' && size>96_000)error='Текстовый файл превышает 24 000 символов.';
+        if(kind==='pdf' && size>MAX_CHAT_FILE_BYTES)error='PDF превышает 6 МБ.';
+        if(error){
+          chatStatuses.push({name:label,state:'error',reason:error});
+          continue;
+        }
+      }catch(e){
+        chatStatuses.push({name:label,state:'error',reason:safeChatFileFailure(e)});
+        continue;
+      }
+      try{
+        const dir=new Directory(Paths.cache,'persai-incoming');
+        dir.create({intermediates:true,idempotent:true});
+        const target=new File(dir,Crypto.randomUUID());
+        copies.push(target);
+        await copyAsync({from:file.uri,to:target.uri});
+        check();
+        // An Android provider can omit/underreport ContentResolver size. The
+        // original-to-Memory limit must not be weakened by partial Chat mode.
+        if(target.size>80*1024*1024)material.memoryError='Оригинал для памяти должен быть не больше 80 МБ.';
+        const [ready]=await readChatAttachments([{...file,uri:target.uri}],signal);
+        check();
+        // This also rechecks cumulative text and all the actual media bytes,
+        // not only the size reported by Android ContentResolver.
+        checkedChatAttachments([...attachments,ready]);
+        attachments.push(ready);
+        chatStatuses.push({name:label,state:'ready'});
+      }catch(e){
+        check();
+        chatStatuses.push({name:label,state:'error',reason:safeChatFileFailure(e)});
+      }
     }
-    const attachments=await readChatAttachments(files,signal);check();
-    return {...material,attachments};
-  } catch(e) {
     check();
-    // Native error text may contain a private provider URI; do not display it.
-    return {...material,attachments:[],chatError:'Не удалось подготовить файлы для чата. Проверьте доступ, формат и лимиты: до 3 файлов, фото-оригиналы до 80 МБ с локальным уменьшением; PDF с текстом до 6 МБ; текст до 24 000 символов.'};
-  } finally {
-    for(const copy of copies)try{if(copy.exists)copy.delete();}catch{/* App lock may already have removed it. */}
+    if(!attachments.length && !material.text.trim() && material.files.length)
+      material.chatError='Нет готовых файлов для чата. Можно сохранить оригинал в память.';
+    return {...material,attachments,chatStatuses};
+  }finally{
+    for(const copy of copies)try{if(copy.exists)copy.delete();}catch{/* Private cache only; never delete external provider source. */}
   }
 }
