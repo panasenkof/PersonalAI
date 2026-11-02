@@ -32,6 +32,34 @@ export function checkedChatAttachments(value: unknown): ChatAttachment[] {
   });
 }
 
+/** H-DOC1a: deterministic admission check for a single file. Keep this
+ * separate from the secure wire validator so a user sees why *this* file
+ * failed rather than a generic mixed attachment error.
+ * A document rejected here has NOT been supplied to any LLM.
+ */
+export function chatAttachmentAdmissionIssue(
+  existing: readonly ChatAttachment[], file: ChatAttachment,
+): string | null {
+  if (existing.length >= MAX_CHAT_FILES)
+    return "В сообщении уже 3 файла. Уберите одно из вложений или выберите другое сообщение.";
+  if (file.kind === "text") {
+    if (file.data.length > MAX_CHAT_TEXT_CHARS)
+      return "Этот файл содержит " + file.data.length.toLocaleString("ru-RU") +
+        " символов. Текущий технический предел вложений чата — 24 000 символов, это не предел модели. Файл не добавлен и не отправлен.";
+    const already = existing.filter(x => x.kind === "text").reduce((n, x) => n + x.data.length, 0);
+    if (already + file.data.length > MAX_CHAT_TEXT_CHARS)
+      return "Суммарно с уже выбранными файлами получается " +
+        (already + file.data.length).toLocaleString("ru-RU") +
+        " символов; временный технический предел чата — 24 000, а не предел ИИ-модели. Остальные вложения сохранены, этот файл не отправлен.";
+  }
+  try {
+    checkedChatAttachments([...existing, file]);
+    return null;
+  } catch {
+    return "Вложение не прошло проверку размера или формата. Файл не добавлен и не отправлен.";
+  }
+}
+
 export function chatContent(text: string, attachments: ChatAttachment[] | undefined, protocol: AttachmentProtocol): string | Array<Record<string, unknown>> {
   const files = checkedChatAttachments(attachments);
   if (!files.length) return text;
