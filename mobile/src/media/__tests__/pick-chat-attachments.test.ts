@@ -5,6 +5,10 @@ import { getWhisperStatus, initWhisper, transcribeAudioFile } from "../whisper";
 import { getDocumentAsync } from 'expo-document-picker';
 import { readAsStringAsync } from 'expo-file-system/legacy';
 import { manipulateAsync } from 'expo-image-manipulator';
+const mockLargeUtf8Slices=jest.fn();
+const mockPdfWindows=jest.fn();
+jest.mock('../document-chunks',()=>({readUtf8SourceSlices:(...args:any[])=>mockLargeUtf8Slices(...args)}));
+jest.mock('../pdf-window-reader',()=>({readPdfTextWindows:(...args:any[])=>mockPdfWindows(...args)}));
 let mockUnlocked=true;let mockSize=100;const mockDelete=jest.fn();
 let mockPdfHeader = new Uint8Array([37,80,68,70,45]);
 jest.mock('expo-image-manipulator',()=>({manipulateAsync:jest.fn(),SaveFormat:{JPEG:'jpeg'}}));
@@ -240,4 +244,48 @@ test("H-DOC1a: four selected valid files keep three attached and report fourth s
   expect(result.failures).toEqual([{name:"file3.txt",reason:expect.stringContaining("до 3 файлов")}]);
   expect(readAsStringAsync).toHaveBeenCalledTimes(3);
   for(const file of selected)expect(mockDelete).toHaveBeenCalledWith(file.uri);
+});
+
+test("H-DOC1b2: >96KB TXT uses incremental UTF-8 reader, not a giant legacy read",async()=>{
+  mockSize=110_000;
+  const source="Русский текст ".repeat(10_000);
+  mockLargeUtf8Slices.mockImplementationOnce(async function*(){
+    yield {text:source.slice(0,65_000),startChar:0,endChar:65_000};
+    yield {text:source.slice(65_000),startChar:65_000,endChar:source.length};
+  });
+  const result=await pickChatAttachmentsWithResults(new AbortController().signal);
+  expect(result.failures).toEqual([]);
+  expect(result.files[0].data).toBe(source);
+  expect(readAsStringAsync).not.toHaveBeenCalled();
+  expect(mockLargeUtf8Slices).toHaveBeenCalledTimes(1);
+  expect(mockDelete).toHaveBeenCalledWith(asset.uri);
+});
+
+test("H-DOC1b2: 130-page PDF falls back to exact native windows and reports scan gaps",async()=>{
+  const pdf={uri:"file:///cache/large.pdf",name:"large.pdf",mimeType:"application/pdf"};
+  (getDocumentAsync as jest.Mock).mockResolvedValue({canceled:false,assets:[pdf]});
+  (extractPdfPages as jest.Mock).mockRejectedValueOnce(new Error("В PDF больше 128 страниц."));
+  mockPdfWindows.mockImplementationOnce(async function*(){
+    yield {pageCount:130,firstPage:1,processedPageCount:16,pages:[{page:1,text:"Начало"}],missingPages:[2,3]};
+    yield {pageCount:130,firstPage:17,processedPageCount:16,pages:[{page:129,text:"Конец"}],missingPages:[17]};
+  });
+  const result=await pickChatAttachmentsWithResults(new AbortController().signal);
+  expect(result.failures).toEqual([]);
+  expect(result.files[0].data).toContain("Страница 129:\nКонец");
+  expect(result.files[0].data).toContain("OCR не проводился");
+  expect(result.files[0].data).toContain("из 130 стр.");
+  expect(mockPdfWindows).toHaveBeenCalledTimes(1);
+  expect(mockDelete).toHaveBeenCalledWith(pdf.uri);
+});
+
+test("H-DOC1b2: source > memory safety budget is rejected without a partial attachment",async()=>{
+  mockSize=110_000;
+  mockLargeUtf8Slices.mockImplementationOnce(async function*(){
+    yield {text:"Я".repeat(240_001),startChar:0,endChar:240_001};
+  });
+  const result=await pickChatAttachmentsWithResults(new AbortController().signal);
+  expect(result.files).toEqual([]);
+  expect(result.failures).toHaveLength(1);
+  expect(result.failures[0].reason).toContain("240 000");
+  expect(mockDelete).toHaveBeenCalledWith(asset.uri);
 });
