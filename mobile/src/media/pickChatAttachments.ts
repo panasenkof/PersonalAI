@@ -16,7 +16,8 @@ import { checkedChatAttachments, MAX_CHAT_FILE_BYTES, MAX_CHAT_IMAGE_SOURCE_BYTE
 export type ChatFileFailure = {name:string; reason:string};
 export type ChatFilePickResult = {files:ChatAttachment[]; failures:ChatFileFailure[]};
 
-function safeFileFailure(error:unknown):string {
+/** Stable, privacy-safe diagnostics for picker and Android Share. */
+export function safeChatFileFailure(error:unknown):string {
   const message=error instanceof Error ? error.message : "";
   // Only fixed human-readable phrases reach the UI. Never leak a provider URI,
   // a local cache path or an arbitrary native exception.
@@ -72,7 +73,7 @@ async function pickChatAttachmentsInternal(signal:AbortSignal, isolated:boolean)
         files.push(file);
       } catch(error) {
         check(); // Lock/abort is global; never report it as an item error.
-        failures.push({name:asset.name.replace(/[\r\n\t]/g,' ').slice(0,90),reason:safeFileFailure(error)});
+        failures.push({name:asset.name.replace(/[\r\n\t]/g,' ').slice(0,90),reason:safeChatFileFailure(error)});
       }
     }
     return {files,failures};
