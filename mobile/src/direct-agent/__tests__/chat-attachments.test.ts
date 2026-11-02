@@ -27,13 +27,13 @@ test('encrypted conversation JSON round-trips attachments; corrupt file cannot s
 test('H-DOC1a: exact per-file and aggregate errors never claim that 24k is a model limit',()=>{
   const long:ChatAttachment={...text,id:'long',data:'Я'.repeat(24_001),size:72_003};
   const alone=chatAttachmentAdmissionIssue([],long);
-  expect(alone).toContain('24 001');
+  expect(alone?.replace(/\s+/g,' ')).toContain('24 001');
   expect(alone).toContain('не предел модели');
   expect(alone).toContain('не отправлен');
   const first:ChatAttachment={...text,id:'first',data:'a'.repeat(23_500),size:23_500};
   const next:ChatAttachment={...text,id:'next',data:'b'.repeat(600),size:600};
   const combined=chatAttachmentAdmissionIssue([first],next);
-  expect(combined).toContain('24 100');
+  expect(combined?.replace(/\s+/g,' ')).toContain('24 100');
   expect(combined).toContain('не предел ИИ-модели');
   expect(chatAttachmentAdmissionIssue([first],{...text,id:'fits',data:'z'.repeat(500)})).toBe(null);
   expect(chatAttachmentAdmissionIssue([image,text,image],{...text,id:'fourth'})).toContain('3 файла');
