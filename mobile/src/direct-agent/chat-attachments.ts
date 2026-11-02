@@ -5,7 +5,8 @@ export const MAX_CHAT_FILES = 3;
 export const MAX_CHAT_FILE_BYTES = 6 * 1024 * 1024;
 /** An original may be larger than the safe chat payload; resize locally first. */
 export const MAX_CHAT_IMAGE_SOURCE_BYTES = 80 * 1024 * 1024;
-export const MAX_CHAT_TEXT_CHARS = 24000;
+/** Resource cap for encrypted chat draft/snapshot, NOT LLM context. */
+export const MAX_CHAT_TEXT_CHARS = 240_000;
 export const MAX_CONVERSATION_FILE_BYTES = 24 * 1024 * 1024;
 export type AttachmentProtocol = 'responses' | 'chat' | 'anthropic';
 
@@ -27,7 +28,7 @@ export function checkedChatAttachments(value: unknown): ChatAttachment[] {
       if (!signature) throw new Error('Формат изображения не совпадает с содержимым файла.');
       return {id:item.id, name:item.name, mime:item.mime, kind:'image', data:item.data, size};
     }
-    if (item.kind !== 'text' || item.mime !== 'text/plain' || !item.data.trim() || item.data.includes('\0') || item.data.includes('\uFFFD') || (textChars += item.data.length) > MAX_CHAT_TEXT_CHARS) throw new Error('Выберите непустой текст UTF-8: до 24 000 символов вместе.');
+    if (item.kind !== 'text' || item.mime !== 'text/plain' || !item.data.trim() || item.data.includes('\0') || item.data.includes('\uFFFD') || (textChars += item.data.length) > MAX_CHAT_TEXT_CHARS) throw new Error('Превышен ресурсный предел текста вложений 240 000 символов. Это не предел контекста модели.');
     return {id:item.id, name:item.name, mime:'text/plain', kind:'text', data:item.data, size:item.data.length * 3};
   });
 }
@@ -45,12 +46,12 @@ export function chatAttachmentAdmissionIssue(
   if (file.kind === "text") {
     if (file.data.length > MAX_CHAT_TEXT_CHARS)
       return "Этот файл содержит " + file.data.length.toLocaleString("ru-RU") +
-        " символов. Текущий технический предел вложений чата — 24 000 символов, это не предел модели. Файл не добавлен и не отправлен.";
+        " символов. Ресурсный предел защищённого черновика — 240 000 символов, это не предел модели. Файл не добавлен и не отправлен.";
     const already = existing.filter(x => x.kind === "text").reduce((n, x) => n + x.data.length, 0);
     if (already + file.data.length > MAX_CHAT_TEXT_CHARS)
       return "Суммарно с уже выбранными файлами получается " +
         (already + file.data.length).toLocaleString("ru-RU") +
-        " символов; временный технический предел чата — 24 000, а не предел ИИ-модели. Остальные вложения сохранены, этот файл не отправлен.";
+        " символов; ресурсный предел черновика — 240 000, а не предел ИИ-модели. Остальные вложения сохранены, этот файл не отправлен.";
   }
   try {
     checkedChatAttachments([...existing, file]);
