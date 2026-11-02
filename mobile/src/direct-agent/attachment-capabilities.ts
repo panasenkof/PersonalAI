@@ -38,11 +38,11 @@ export function imageCapability(settings: Pick<DirectAgentSettings,"provider"|"b
 export function historyForImageCapability<T extends {content:string;attachments?:ChatAttachment[]}>(
   rows: T[], capability: ImageCapability,
 ): T[] {
-  if (capability !== "unsupported") return rows;
+  if (capability !== "unsupported" && capability !== "unverified") return rows;
   return rows.map(row => {
     if (!row.attachments?.some(f => f.kind === "image")) return row;
     return {...row,
-      content:row.content + "\n[Изображения из этого старого сообщения не переданы: выбранная модель не поддерживает фото.]",
+      content:row.content + "\n[Изображения из этого старого сообщения не переданы: поддержка фото выбранной моделью не подтверждена.]",
       attachments:row.attachments.filter(f => f.kind === "text"),
     };
   });
