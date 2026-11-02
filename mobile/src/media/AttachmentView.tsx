@@ -222,7 +222,7 @@ function AudioPreview({ uri, profile, attachment, onError }: {
         <Text style={{ color: t.muted }}>Для этой записи пока нет сохранённого транскрипта. Можно распознать её при импорте.</Text> : null}
       {transcript && !transcriptLoading ? <>
         <Text style={{ color: t.muted, fontSize: 13 }}>
-          {transcript.coverage === "complete" ? "Текст получен при распознавании." :
+          {transcript.coverage === "full" ? "Текст получен при распознавании." :
             "Текст распознавания может быть неполным."} Переход доступен только для подтверждённых таймкодов.
         </Text>
         {displayed.map((segment, index) => {
