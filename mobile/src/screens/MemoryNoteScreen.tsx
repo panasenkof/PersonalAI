@@ -32,7 +32,12 @@ import { scheduleVectors } from "../media/vector-runner";
 const splitNames = (text: string) => text.split(/[,;\n]/).map(n => n.trim()).filter(Boolean);
 import type { RootStackParams } from "../navigation";
 import { File } from "expo-file-system";
-import { attachmentForEntity, materializeAttachment } from "../media/attachments";
+import { attachmentsForEntity, materializeAttachment, savedOriginalRevision, applyRecognitionCandidate } from "../media/attachments";
+import type { Attachment } from "../media/attachments";
+import type { ExtractionSegmentInput } from "../local-memory/extractions";
+import { getRussianOcrStatus } from "../media/russian-ocr";
+import { getWhisperStatus } from "../media/whisper";
+import { mediaKind } from "../media/kinds";
 import { extractMedia } from "../media/extract";
 import { maySendOriginalToProvider } from "../media/recognitionPolicy";
 import { mediaConnections } from "../media/preferences";
@@ -50,7 +55,7 @@ export function MemoryNoteScreen() {
   const route = useRoute<RouteProp<RootStackParams, "MemoryNote">>();
   const profile = useProfile();
   const extraction = useRef<AbortController | null>(null);
-  useEffect(() => { const off = onLocalMemorySessionChange(unlocked => { if (!unlocked) extraction.current?.abort(); }); return () => { off(); extraction.current?.abort(); }; }, []);
+  useEffect(() => { const off = onLocalMemorySessionChange(unlocked => { if (!unlocked) { extraction.current?.abort(); setCandidate(null); setRepeatFiles([]); } }); return () => { off(); extraction.current?.abort(); }; }, []);
   const repository = useRef<SqliteMemoryRepository | null>(null); const alive = useRef(true); const pending = useRef(false);
   const [editing, setEditing] = useState(!route.params?.entityId);
   const [aiOpen, setAiOpen] = useState(false);
@@ -63,6 +68,13 @@ export function MemoryNoteScreen() {
   const [collectionId, setCollectionId] = useState(route.params?.collectionId);
   const [title, setTitle] = useState(""); const [body, setBody] = useState("");
   const [extractedText, setExtractedText] = useState("");
+  // Temporary candidate only: no new persisted version/table or duplicate original.
+  const [candidate, setCandidate] = useState<{
+    text: string; attachment: Attachment; sourceVersion: string;
+    recordVersion: number; producerId: string; producerRevision: string;
+    segments?: ExtractionSegmentInput[];
+  } | null>(null);
+  const [repeatFiles, setRepeatFiles] = useState<Attachment[]>([]);
   const [allowAgent, setAllowAgent] = useState(false);
   const [kind, setKind] = useState<MemoryKind>("note"); const [names, setNames] = useState("");
   // Capture TextInput changes synchronously: Save may run before React commits
@@ -98,7 +110,7 @@ export function MemoryNoteScreen() {
   });
   useEffect(() => { if (leaving) navigation.goBack(); }, [leaving, navigation]);
   useEffect(() => {
-    alive.current = true; setLoading(true); setError(""); setMetadataOpen(false); setFileContentOpen(false);
+    alive.current = true; setLoading(true); setError(""); setMetadataOpen(false); setFileContentOpen(false); setCandidate(null); setRepeatFiles([]);
     void (async () => {
       if (!profile) throw new Error("profile_missing");
       const db = await localMemoryRepository(profile);
@@ -162,6 +174,86 @@ export function MemoryNoteScreen() {
     }
     if (profile) { scheduleIndexTerms(profile); scheduleVectors(profile); }
     if (alive.current) setLeaving(true);
+  });
+  const rerunAttachment = (attachment: Attachment) => {
+    if (!selected || !profile || busy || dirty || selected.record_status !== "active") return;
+    const note = selected;
+    const kind = mediaKind({uri:"file:///original",name:attachment.name,mimeType:attachment.mime});
+    const localOcr = getRussianOcrStatus().ready;
+    const localSpeech = getWhisperStatus().state === "ready";
+    const remoteAllowed = maySendOriginalToProvider(note.sensitivity,
+      collections.find(c => c.id === note.collection_id)?.sensitivity);
+    const mode = (kind === "document" || kind === "image") && localOcr ? "offline-ocr" :
+      kind === "image" ? "document-text" : "describe";
+    if (!remoteAllowed && (kind === "video" || (kind === "image" && !localOcr) ||
+        (kind === "audio" && !localSpeech))) {
+      setError("Закрытая запись: требуется локальная модель OCR или Whisper. Оригинал не отправлен внешнему сервису.");
+      return;
+    }
+    const destination = kind === "audio" ? localSpeech ? "Локальный Whisper" : "внешний сервис речи" :
+      (kind === "image" || kind === "document") && localOcr ? "локальное русское OCR" :
+      kind === "document" || kind === "text" ? "локальный текстовый разбор" : "внешняя модель";
+    const message = "Файл: " + attachment.name + "\nОбработка: " + destination +
+      (destination.startsWith("внешн") ? ". Содержимое файла будет передано выбранному провайдеру «Обработка медиа»." : ". Без отправки файла провайдеру.") +
+      "\nПрежний текст не изменится до вашего подтверждения.";
+    Alert.alert("Распознать заново?",message,[
+      {text:"Отмена",style:"cancel"},
+      {text:"Распознать",onPress:()=>void run(async db => {
+        if (!profile) throw new Error("profile_missing");
+        setCandidate(null); setRepeatFiles([]);
+        const current = await db.entity(note.id);
+        if (!current || current.record_version !== note.record_version ||
+            current.record_status !== "active") throw new MemoryConflictError("stale_memory_version");
+        const aborter = new AbortController();
+        extraction.current = aborter;
+        let uri = "";
+        try {
+          uri = await materializeAttachment(profile,attachment,aborter.signal);
+          const sourceVersion = await savedOriginalRevision(profile,attachment);
+          const settings = await mediaConnections(profile);
+          const beforeUpload = await db.entity(note.id);
+          const permissions = await db.listCollections();
+          const allowedNow = maySendOriginalToProvider(beforeUpload?.sensitivity,
+            permissions.find(c => c.id === beforeUpload?.collection_id)?.sensitivity);
+          if (!beforeUpload || beforeUpload.record_version !== note.record_version ||
+              beforeUpload.record_status !== "active" || beforeUpload.collection_id !== note.collection_id ||
+              (remoteAllowed && !allowedNow)) throw new MemoryConflictError("stale_memory_version");
+          const segments: ExtractionSegmentInput[] = [];
+          const recognition = await extractMedia({uri,name:attachment.name,mimeType:attachment.mime},
+            settings.vision,remoteAllowed && allowedNow,aborter.signal,undefined,settings.speech,
+            received => { segments.splice(0,segments.length,...received); },undefined,mode);
+          if (aborter.signal.aborted || !alive.current) return;
+          const providerId = destination === "Локальный Whisper" ? "local-whisper" :
+            destination === "локальное русское OCR" ? "android-tesseract-5-rus" :
+            destination === "локальный текстовый разбор" ? "local-document-text" :
+            kind === "audio" ? String(settings.speech.transcriptionModel || "whisper-1") :
+            String(settings.vision.model || settings.vision.provider);
+          setCandidate({
+            text:recognition,attachment,sourceVersion,recordVersion:note.record_version,
+            producerId:providerId,producerRevision:"user-repeat-v1",
+            ...(segments.length ? {segments} : {}),
+          });
+        } finally {
+          if (extraction.current === aborter) extraction.current = null;
+          if (uri) { const file = new File(uri); if (file.exists) file.delete(); }
+        }
+      })}
+    ]);
+  };
+  const acceptCandidate = () => void run(async db => {
+    if (!profile || !selected || !candidate) return;
+    if (dirty || candidate.recordVersion !== selected.record_version)
+      throw new MemoryConflictError("stale_memory_version");
+    const updated = await applyRecognitionCandidate(db,{
+      note:selected,attachment:candidate.attachment,
+      expectedSourceVersion:candidate.sourceVersion,text:candidate.text,
+      producerId:candidate.producerId,producerRevision:candidate.producerRevision,
+      segments:candidate.segments,
+    });
+    if (alive.current) {
+      setSelected(updated); setExtractedText(candidate.text); setCandidate(null);
+      scheduleIndexTerms(profile); scheduleVectors(profile);
+    }
   });
   const loadDetails = () => run(async db => {
     if (!selected) return;
@@ -243,25 +335,52 @@ export function MemoryNoteScreen() {
           expanded={fileContentOpen} onToggle={() => { Keyboard.dismiss(); setFileContentOpen(open => !open); }}>
           <Text style={{ color: t.muted, ...nebulaTypography.label }}>Проверьте распознанный текст. Он индексируется вместе с записью.</Text>
           <TextInput accessibilityLabel="Распознанное содержимое файла" multiline editable={!busy} value={extractedText} onChangeText={setExtractedText} maxLength={60_000} style={field} />
-          <Pressable disabled={busy} accessibilityRole="button" style={button} onPress={() => Alert.alert("Распознать оригинал?", maySendOriginalToProvider(selected.sensitivity, collections.find(c => c.id === selected.collection_id)?.sensitivity)
-            ? "Будут использованы подключения из раздела «Обработка медиа». Фото и кадры видео отправляются сервису; аудио обрабатывается локально установленным Whisper либо внешним сервисом. Проверьте результат до сохранения."
-            : "Это закрытая запись. Допускается только локальное чтение текстового файла или распознавание аудио установленным Whisper. Фото, видео и аудио без локального Whisper нельзя передавать внешнему провайдеру. Оригинал останется зашифрованным.", [
-            { text: "Отмена", style: "cancel" },
-            { text: "Распознать", onPress: () => void run(async () => {
+          <Pressable disabled={busy || dirty || selected.record_status !== "active"} accessibilityRole="button"
+            accessibilityLabel="Распознать сохранённый файл заново" style={button}
+            onPress={() => {
               if (!profile) return;
-              const attachment = await attachmentForEntity(profile, selected.id);
-              if (!attachment) throw new Error("Оригинал не найден.");
-              const aborter = new AbortController(); extraction.current = aborter;
-              let uri = "";
-              try {
-                uri = await materializeAttachment(profile, attachment, aborter.signal);
-                const settings = await mediaConnections(profile);
-                const allowRemote = maySendOriginalToProvider(selected.sensitivity, collections.find(c => c.id === selected.collection_id)?.sensitivity);
-                const text = await extractMedia({ uri, name: attachment.name, mimeType: attachment.mime }, settings.vision, allowRemote, aborter.signal, undefined, settings.speech);
-                if (alive.current && !aborter.signal.aborted) setExtractedText(text);
-              } finally { extraction.current = null; if (uri) { const file = new File(uri); if (file.exists) file.delete(); } }
-            }) },
-          ])}><Text style={{ color: t.secondary }}>Распознать сохранённый файл</Text></Pressable>
+              setError("");
+              void attachmentsForEntity(profile,selected.id).then(files => {
+                if (!alive.current) return;
+                if (!files.length) setError("Оригиналы не найдены.");
+                else if (files.length === 1) rerunAttachment(files[0]);
+                else setRepeatFiles(files);
+              }).catch(e => { if (alive.current) setError(memoryErrorMessage(e)); });
+            }}>
+            <Text style={{color:t.secondary,fontWeight:"700"}}>Распознать заново</Text>
+          </Pressable>
+          {dirty ? <Text style={{color:t.muted}}>Сначала сохраните несохранённые изменения, чтобы не потерять ручные правки.</Text> : null}
+          {repeatFiles.length > 1 ? <View style={{gap:nebulaSpacing.xs}}>
+            <Text style={{color:t.muted}}>Выберите конкретный оригинал:</Text>
+            {repeatFiles.map(file => <Pressable key={file.id} accessibilityRole="button"
+              accessibilityLabel={"Распознать заново " + file.name}
+              onPress={() => rerunAttachment(file)}
+              style={{...button,backgroundColor:t.soft}}>
+              <Text numberOfLines={2} style={{color:t.secondary}}>{file.name}</Text>
+            </Pressable>)}
+            <Pressable accessibilityRole="button" onPress={()=>setRepeatFiles([])} style={button}>
+              <Text style={{color:t.muted}}>Отмена выбора</Text>
+            </Pressable>
+          </View> : null}
+          {candidate ? <View testID="re-recognition-review" style={{borderColor:t.line,borderWidth:1,
+            borderRadius:nebulaRadii.card,padding:nebulaSpacing.md,gap:nebulaSpacing.sm,backgroundColor:t.panel}}>
+            <Text accessibilityRole="header" style={{color:t.text,fontWeight:"700"}}>Новый результат · {candidate.attachment.name}</Text>
+            <Text style={{color:t.muted}}>Текущий текст выше остаётся без изменений. Применение заменит только распознанный текст; ваш комментарий сохранится.</Text>
+            <ScrollView nestedScrollEnabled style={{maxHeight:240}}>
+              <Text selectable style={{color:t.text,lineHeight:23}}>{candidate.text}</Text>
+            </ScrollView>
+            <View style={{flexDirection:"row",flexWrap:"wrap",gap:nebulaSpacing.sm}}>
+              <Pressable accessibilityRole="button" accessibilityLabel="Оставить текущий текст"
+                onPress={()=>setCandidate(null)} style={{...button,backgroundColor:t.soft}}>
+                <Text style={{color:t.secondary}}>Оставить текущий</Text>
+              </Pressable>
+              <Pressable accessibilityRole="button" accessibilityLabel="Применить новый текст"
+                disabled={busy || dirty} onPress={acceptCandidate}
+                style={{...button,backgroundColor:t.soft,opacity:busy||dirty?.5:1}}>
+                <Text style={{color:t.secondary,fontWeight:"700"}}>Применить новый</Text>
+              </Pressable>
+            </View>
+          </View> : null}
         </NoteEditorSection> : null}
         {selected && (selected.sensitivity === "sensitive" || collections.find(c => c.id === selected.collection_id)?.sensitivity !== "standard") ? <>
           <Text style={{ color: t.muted }}>Запись закрыта для агента. Локальная векторизация доступна, но текст не передаётся модели.</Text>
