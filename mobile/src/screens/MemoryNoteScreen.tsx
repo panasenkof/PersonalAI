@@ -39,6 +39,7 @@ import { getRussianOcrStatus } from "../media/russian-ocr";
 import { getWhisperStatus } from "../media/whisper";
 import { mediaKind } from "../media/kinds";
 import { extractMedia } from "../media/extract";
+import type { ImageExtractionMode } from "../media/extract";
 import { maySendOriginalToProvider } from "../media/recognitionPolicy";
 import { mediaConnections } from "../media/preferences";
 import { AttachmentView } from "../media/AttachmentView";
@@ -183,7 +184,7 @@ export function MemoryNoteScreen() {
     const localSpeech = getWhisperStatus().state === "ready";
     const remoteAllowed = maySendOriginalToProvider(note.sensitivity,
       collections.find(c => c.id === note.collection_id)?.sensitivity);
-    const mode = (kind === "document" || kind === "image") && localOcr ? "offline-ocr" :
+    const mode: ImageExtractionMode = (kind === "document" || kind === "image") && localOcr ? "offline-ocr" :
       kind === "image" ? "document-text" : "describe";
     if (!remoteAllowed && (kind === "video" || (kind === "image" && !localOcr) ||
         (kind === "audio" && !localSpeech))) {
@@ -193,52 +194,65 @@ export function MemoryNoteScreen() {
     const destination = kind === "audio" ? localSpeech ? "Локальный Whisper" : "внешний сервис речи" :
       (kind === "image" || kind === "document") && localOcr ? "локальное русское OCR" :
       kind === "document" || kind === "text" ? "локальный текстовый разбор" : "внешняя модель";
-    const message = "Файл: " + attachment.name + "\nОбработка: " + destination +
-      (destination.startsWith("внешн") ? ". Содержимое файла будет передано выбранному провайдеру «Обработка медиа»." : ". Без отправки файла провайдеру.") +
-      "\nПрежний текст не изменится до вашего подтверждения.";
-    Alert.alert("Распознать заново?",message,[
-      {text:"Отмена",style:"cancel"},
-      {text:"Распознать",onPress:()=>void run(async db => {
-        if (!profile) throw new Error("profile_missing");
-        setCandidate(null); setRepeatFiles([]);
-        const current = await db.entity(note.id);
-        if (!current || current.record_version !== note.record_version ||
-            current.record_status !== "active") throw new MemoryConflictError("stale_memory_version");
-        const aborter = new AbortController();
-        extraction.current = aborter;
-        let uri = "";
-        try {
-          uri = await materializeAttachment(profile,attachment,aborter.signal);
-          const sourceVersion = await savedOriginalRevision(profile,attachment);
-          const settings = await mediaConnections(profile);
-          const beforeUpload = await db.entity(note.id);
-          const permissions = await db.listCollections();
-          const allowedNow = maySendOriginalToProvider(beforeUpload?.sensitivity,
-            permissions.find(c => c.id === beforeUpload?.collection_id)?.sensitivity);
-          if (!beforeUpload || beforeUpload.record_version !== note.record_version ||
-              beforeUpload.record_status !== "active" || beforeUpload.collection_id !== note.collection_id ||
-              (remoteAllowed && !allowedNow)) throw new MemoryConflictError("stale_memory_version");
-          const segments: ExtractionSegmentInput[] = [];
-          const recognition = await extractMedia({uri,name:attachment.name,mimeType:attachment.mime},
-            settings.vision,remoteAllowed && allowedNow,aborter.signal,undefined,settings.speech,
-            received => { segments.splice(0,segments.length,...received); },undefined,mode);
-          if (aborter.signal.aborted || !alive.current) return;
-          const providerId = destination === "Локальный Whisper" ? "local-whisper" :
-            destination === "локальное русское OCR" ? "android-tesseract-5-rus" :
-            destination === "локальный текстовый разбор" ? "local-document-text" :
-            kind === "audio" ? String(settings.speech.transcriptionModel || "whisper-1") :
-            String(settings.vision.model || settings.vision.provider);
-          setCandidate({
-            text:recognition,attachment,sourceVersion,recordVersion:note.record_version,
-            producerId:providerId,producerRevision:"user-repeat-v1",
-            ...(segments.length ? {segments} : {}),
-          });
-        } finally {
-          if (extraction.current === aborter) extraction.current = null;
-          if (uri) { const file = new File(uri); if (file.exists) file.delete(); }
-        }
-      })}
-    ]);
+    void mediaConnections(profile).then(settings => {
+      if (!alive.current) return;
+      const remote = destination.startsWith("внешн");
+      const provider = kind === "audio" ? settings.speech : settings.vision;
+      const name = remote ? "Провайдер: " + provider.provider + ", модель: " +
+        String(kind === "audio" ? provider.transcriptionModel || "whisper-1" : provider.model) :
+        "Выполняется на телефоне";
+      const message = "Файл: " + attachment.name + "\nОбработка: " + destination + "\n" + name +
+        (remote ? "\nФайл будет передан указанному провайдеру только после подтверждения." :
+          "\nОригинал не будет отправлен провайдеру.") +
+        "\nПрежний текст не изменится до вашего подтверждения.";
+      Alert.alert("Распознать заново?",message,[
+        {text:"Отмена",style:"cancel"},
+        {text:"Распознать",onPress:()=>void run(async db => {
+          if (!profile) throw new Error("profile_missing");
+          setCandidate(null); setRepeatFiles([]);
+          const current = await db.entity(note.id);
+          if (!current || current.record_version !== note.record_version ||
+              current.record_status !== "active") throw new MemoryConflictError("stale_memory_version");
+          const aborter = new AbortController();
+          extraction.current = aborter;
+          let uri = "";
+          try {
+            uri = await materializeAttachment(profile,attachment,aborter.signal);
+            const sourceVersion = await savedOriginalRevision(profile,attachment);
+            const beforeUpload = await db.entity(note.id);
+            const permissions = await db.listCollections();
+            const allowedNow = maySendOriginalToProvider(beforeUpload?.sensitivity,
+              permissions.find(c => c.id === beforeUpload?.collection_id)?.sensitivity);
+            if (!beforeUpload || beforeUpload.record_version !== note.record_version ||
+                beforeUpload.record_status !== "active" || beforeUpload.collection_id !== note.collection_id ||
+                (remoteAllowed && !allowedNow)) throw new MemoryConflictError("stale_memory_version");
+            if (kind === "audio" && localSpeech && getWhisperStatus().state !== "ready") {
+              throw new Error("Локальный Whisper больше не готов. Повторите действие после проверки модели.");
+            }
+            // Local paths never receive automatic cloud fallback on a race.
+            const approveUpload = remote && remoteAllowed && allowedNow;
+            const segments: ExtractionSegmentInput[] = [];
+            const recognition = await extractMedia({uri,name:attachment.name,mimeType:attachment.mime},
+              settings.vision,approveUpload,aborter.signal,undefined,settings.speech,
+              received => { segments.splice(0,segments.length,...received); },undefined,mode);
+            if (aborter.signal.aborted || !alive.current) return;
+            const providerId = destination === "Локальный Whisper" ? "local-whisper" :
+              destination === "локальное русское OCR" ? "android-tesseract-5-rus" :
+              destination === "локальный текстовый разбор" ? "local-document-text" :
+              kind === "audio" ? String(settings.speech.transcriptionModel || "whisper-1") :
+              String(settings.vision.model || settings.vision.provider);
+            setCandidate({
+              text:recognition,attachment,sourceVersion,recordVersion:note.record_version,
+              producerId:providerId,producerRevision:"user-repeat-v1",
+              ...(segments.length ? {segments} : {}),
+            });
+          } finally {
+            if (extraction.current === aborter) extraction.current = null;
+            if (uri) { const file = new File(uri); if (file.exists) file.delete(); }
+          }
+        })}
+      ]);
+    }).catch(e => { if (alive.current) setError(memoryErrorMessage(e)); });
   };
   const acceptCandidate = () => void run(async db => {
     if (!profile || !selected || !candidate) return;
