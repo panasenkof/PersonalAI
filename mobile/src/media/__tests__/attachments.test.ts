@@ -620,7 +620,7 @@ test("G: source fingerprint mismatch and a failed segment insert rollback all ed
   const candidate={note,attachment,expectedSourceVersion:revision,text:"Новая версия",
     producerId:"offline",producerRevision:"v1"};
   sqlite.prepare("UPDATE memory_attachment_parts SET sha256=? WHERE attachment_id=? AND ord=0").run("bad",attachment.id);
-  await expect(applyRecognitionCandidate(repo,candidate)).rejects.toThrow("stale_memory_version");
+  await expect(applyRecognitionCandidate(repo,candidate)).rejects.toThrow("extraction_original_parts_invalid");
   sqlite.prepare("UPDATE memory_attachment_parts SET sha256=? WHERE attachment_id=? AND ord=0").run(
     require("node:crypto").createHash("sha256").update(mockFiles.get(input.file.uri)!.subarray(0,256*1024)).digest("hex"),
     attachment.id);
