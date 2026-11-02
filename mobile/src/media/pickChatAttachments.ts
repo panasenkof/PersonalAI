@@ -4,6 +4,7 @@ import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import * as FileSystem from 'expo-file-system/legacy';
 import { File, FileMode } from 'expo-file-system';
 import { extractPdfPages, pdfCoverageMessage } from './pdf-pages';
+import { getWhisperStatus, initWhisper, transcribeAudioFile } from './whisper';
 import { localMemorySessionUnlocked } from '../local-memory/storage';
 import { withNativeInteraction } from '../security/native-interaction';
 import { checkedChatAttachments, MAX_CHAT_FILE_BYTES, MAX_CHAT_IMAGE_SOURCE_BYTES, MAX_CHAT_FILES, type ChatAttachment } from '../direct-agent/chat-attachments';
@@ -21,6 +22,12 @@ export function safeChatFileFailure(error:unknown):string {
   const message=error instanceof Error ? error.message : "";
   // Only fixed human-readable phrases reach the UI. Never leak a provider URI,
   // a local cache path or an arbitrary native exception.
+  if (message.includes("Whisper") || message.includes("Модель распознавания")) return "Для аудио скачайте локальную модель Whisper в настройках голосового ввода.";
+  if (message.includes("20 МБ")) return "Аудиофайл превышает 20 МБ.";
+  if (message.includes("Нет распознанной речи")) return "В аудио не удалось распознать речь.";
+  if (message.includes("Текст записи превышает") || message.includes("24 000")) return "Расшифровка длиннее 24 000 символов для чата.";
+  if (message.includes("Длительность записи")) return "Запись длиннее 20 минут или длительность неизвестна.";
+  if (message.includes("не удалось прочитать аудиофайл")) return "Не удалось прочитать аудио или кодек не поддерживается.";
   if (message.includes("не является PDF")) return "Файл не является настоящим PDF.";
   if (message.includes("текстовый слой")) return "В PDF нет читаемого текстового слоя.";
   if (message.includes("защищён паролем")) return "PDF защищён паролем.";
@@ -46,21 +53,21 @@ export async function pickChatAttachments(signal: AbortSignal): Promise<ChatAtta
 /** H2: tolerate an invalid item without losing other selected files.
  * Nothing is sent to an LLM until the normal chat Send action.
  */
-export async function pickChatAttachmentsWithResults(signal:AbortSignal):Promise<ChatFilePickResult> {
-  return pickChatAttachmentsInternal(signal,true);
+export async function pickChatAttachmentsWithResults(signal:AbortSignal, onAudioPreparing?:()=>void):Promise<ChatFilePickResult> {
+  return pickChatAttachmentsInternal(signal,true,onAudioPreparing);
 }
 
-async function pickChatAttachmentsInternal(signal:AbortSignal, isolated:boolean):Promise<ChatFilePickResult> {
+async function pickChatAttachmentsInternal(signal:AbortSignal, isolated:boolean,onAudioPreparing?:()=>void):Promise<ChatFilePickResult> {
   let assets: DocumentPicker.DocumentPickerAsset[] = [];
   const check = () => { if (signal.aborted || !localMemorySessionUnlocked()) throw new Error('Выбор файлов прерван.'); };
   try {
     check();
     await withNativeInteraction(async () => {
-      const result = await DocumentPicker.getDocumentAsync({ type:['image/jpeg','image/png','image/webp','text/*','application/json','application/pdf'], multiple:true, copyToCacheDirectory:true });
+      const result = await DocumentPicker.getDocumentAsync({ type:['image/jpeg','image/png','image/webp','text/*','application/json','application/pdf','audio/mpeg','audio/mp4','audio/wav','audio/ogg','audio/flac','audio/aac'], multiple:true, copyToCacheDirectory:true });
       if (!result.canceled) assets = result.assets;
     });
     check();
-    if(!isolated) return {files:await readChatAttachments(assets,signal),failures:[]};
+    if(!isolated) return {files:await readChatAttachments(assets,signal,true),failures:[]};
     if(assets.length>MAX_CHAT_FILES) throw new Error('К сообщению можно прикрепить до 3 файлов.');
     const files:ChatAttachment[] = [], failures:ChatFileFailure[] = [];
     for(const asset of assets){
@@ -69,7 +76,8 @@ async function pickChatAttachmentsInternal(signal:AbortSignal, isolated:boolean)
         // Use the SAME validation, format reader, and transport budget as the
         // strict path. Checking the aggregate here prevents a later invalid
         // item from discarding earlier valid selections.
-        const [file]=await readChatAttachments([asset],signal);
+        if(chatFileFormat(asset).kind==='audio')onAudioPreparing?.();
+        const [file]=await readChatAttachments([asset],signal,true);
         check();
         checkedChatAttachments([...files,file]);
         files.push(file);
@@ -123,7 +131,7 @@ async function prepareChatPhoto(uri:string, size:number, signal:AbortSignal):Pro
 }
 
 /** Read already-owned local files; the caller owns their cleanup. Shared by picker and Android Share. */
-export async function readChatAttachments(assets: Array<{uri:string; name:string; mimeType?:string|null}>, signal: AbortSignal): Promise<ChatAttachment[]> {
+export async function readChatAttachments(assets: Array<{uri:string; name:string; mimeType?:string|null}>, signal: AbortSignal, allowLocalAudio=false): Promise<ChatAttachment[]> {
   const check = () => { if (signal.aborted || !localMemorySessionUnlocked()) throw new Error('Выбор файлов прерван.'); };
   check();
     if (assets.length > MAX_CHAT_FILES) throw new Error('К сообщению можно прикрепить до 3 файлов.');
@@ -135,6 +143,10 @@ export async function readChatAttachments(assets: Array<{uri:string; name:string
       const {kind,mime} = chatFileFormat(asset);
       if (!size || (kind === 'image' && size > MAX_CHAT_IMAGE_SOURCE_BYTES))
         throw new Error('Фото для чата должно быть непустым и не больше 80 МБ.');
+      if (kind === 'audio' && !allowLocalAudio)
+        throw new Error('Аудио из Android Share нельзя распознавать автоматически. Выберите файл в чате после открытия PersAI.');
+      if (kind === 'audio' && size > 20*1024*1024)
+        throw new Error('Аудиофайл превышает 20 МБ. Оригинал можно сохранить в память.');
       if (kind === 'pdf' && size > MAX_CHAT_FILE_BYTES)
         throw new Error('Для чата выберите PDF до 6 МБ. Большой документ сохраните в память.');
       // Bound text reads as well as image reads before bringing bytes into JS.
@@ -146,18 +158,36 @@ export async function readChatAttachments(assets: Array<{uri:string; name:string
         check();
         const data = kind === 'pdf'
           ? await pdfChatText(asset.uri, asset.name, signal)
+          : kind === 'audio' ? await localAudioChatText(asset.uri, signal)
           : await FileSystem.readAsStringAsync(prepared.uri, {encoding:kind === 'image' ? FileSystem.EncodingType.Base64 : FileSystem.EncodingType.UTF8});
         check();
-        files.push({id:Crypto.randomUUID(), name:kind === 'pdf'
-            ? ('Текст PDF: ' + asset.name).slice(0,240) : asset.name.slice(0,240),
-          kind:kind === 'pdf' ? 'text' : kind,
-          mime:kind === 'text' || kind === 'pdf' ? 'text/plain' : prepared.mime || mime, data,
-          size:kind === 'image' ? new File(prepared.uri).size : kind === 'pdf' ? data.length * 3 : size});
+        files.push({id:Crypto.randomUUID(), name:kind === 'pdf' ? ('Текст PDF: ' + asset.name).slice(0,240)
+            : kind === 'audio' ? ('Транскрипт аудио: '+asset.name).slice(0,240) : asset.name.slice(0,240),
+          kind:kind === 'pdf' || kind === 'audio' ? 'text' : kind,
+          mime:kind === 'text' || kind === 'pdf' || kind === 'audio' ? 'text/plain' : prepared.mime || mime, data,
+          size:kind === 'image' ? new File(prepared.uri).size : kind === 'pdf' || kind === 'audio' ? data.length * 3 : size});
       } finally {
         if(prepared.temporary)try {const f=new File(prepared.uri);if(f.exists)f.delete();}catch {}
       }
     }
     return checkedChatAttachments(files);
+}
+
+/** Audio is decoded and transcribed only on the phone after explicit file selection.
+ * No network, no original file in a chat snapshot, no inferred timestamps.
+ * Android Share does not call this path without its own opt-in flow.
+ */
+async function localAudioChatText(uri:string, signal:AbortSignal):Promise<string> {
+  if (signal.aborted || !localMemorySessionUnlocked())throw new Error('Выбор файлов прерван.');
+  await initWhisper();
+  if (signal.aborted || !localMemorySessionUnlocked())throw new Error('Выбор файлов прерван.');
+  if (getWhisperStatus().state!=='ready')throw new Error('Модель распознавания Whisper не скачана. Скачайте её в настройках.');
+  const recognized=await transcribeAudioFile(uri,signal);
+  if (signal.aborted || !localMemorySessionUnlocked())throw new Error('Выбор файлов прерван.');
+  if (!recognized.trim())throw new Error('Нет распознанной речи.');
+  const text='Локальная расшифровка Whisper. Возможны ошибки распознавания. Оригинальное аудио не отправляется модели.\n\n'+recognized;
+  if (text.length>24_000)throw new Error('Текст записи превышает 24 000 символов для чата. Разделите аудио на части.');
+  return text;
 }
 
 /** A PDF is sent only as explicit extracted text. The original file is NEVER
@@ -181,14 +211,17 @@ async function pdfChatText(uri: string, name: string, signal: AbortSignal): Prom
   return text;
 }
 
-export function chatFileFormat(asset: {name:string; mimeType?:string|null}): {kind:'image'|'text'|'pdf';mime:string} {
+export function chatFileFormat(asset: {name:string; mimeType?:string|null}): {kind:'image'|'text'|'pdf'|'audio';mime:string} {
   const ext=asset.name.split('.').pop()?.toLowerCase();
   const declared=asset.mimeType || '';
   const mime=(!declared || declared==='application/octet-stream') ? ({jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',webp:'image/webp',pdf:'application/pdf'} as Record<string,string>)[ext || ''] || declared : declared;
   // An extension or declared PDF MIME never passes through the UTF-8 reader:
   // the actual magic bytes and native parser must both accept the original.
   if (ext === 'pdf' || declared === 'application/pdf') return {kind:'pdf',mime:'application/pdf'};
+  const audioExts=['mp3','m4a','wav','ogg','flac','aac'];
+  const audioMime=['audio/mpeg','audio/mp3','audio/mp4','audio/x-m4a','audio/wav','audio/x-wav','audio/ogg','audio/flac','audio/aac','audio/x-aac'];
+  if(audioExts.includes(ext || '') || audioMime.includes(declared))return {kind:'audio',mime:declared||'audio/mpeg'};
   if (['image/jpeg','image/png','image/webp'].includes(mime)) return {kind:'image',mime};
   if (mime.startsWith('text/') || mime==='application/json' || ['txt','md','csv','json','log','srt','vtt'].includes(ext || '')) return {kind:'text',mime:'text/plain'};
-  throw new Error('В чат можно прикрепить фото JPEG/PNG/WebP, текст UTF-8 или PDF с текстовым слоем. Аудио и видео пока доступны в памяти.');
+  throw new Error('В чат можно прикрепить фото JPEG/PNG/WebP, текст UTF-8, PDF с текстовым слоем или аудио через локальный Whisper. Видео пока доступно в памяти.');
 }
