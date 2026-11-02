@@ -1,5 +1,5 @@
 import React from "react";
-import { fireEvent, render, waitFor } from "@testing-library/react-native";
+import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 import { AttachmentView } from "../AttachmentView";
 import { attachmentPreviewKind, readableAttachmentSize } from "../attachmentPresentation";
 import { attachmentsForEntity, materializeAttachment } from "../attachments";
@@ -187,6 +187,24 @@ test("F1: a reported time beyond actual duration never seeks or plays", async ()
   expect(mockPlay).not.toHaveBeenCalled();
   expect(mockAudioPlayer.currentTime).toBe(0);
   expect(ui.getByText("Временная отметка выходит за пределы записи.")).toBeTruthy();
+});
+
+test("F1: a late transcript read cannot re-open a closed audio preview", async () => {
+  let resolveEvidence!: (runs: any[]) => void;
+  (localExtractionEvidence as jest.Mock).mockImplementationOnce(() =>
+    new Promise(resolve => { resolveEvidence = resolve; }));
+  const ui = render(<AttachmentView profile="guest" entityId="note" />);
+  await waitFor(() => ui.getByLabelText("Прослушать аудио голос.mp3"));
+  fireEvent.press(ui.getByLabelText("Прослушать аудио голос.mp3"));
+  await waitFor(() => expect(localExtractionEvidence).toHaveBeenCalledWith("guest", "note", "audio", 10));
+  fireEvent.press(ui.getByLabelText("Прослушать аудио голос.mp3"));
+  await waitFor(() => expect(mockDelete).toHaveBeenCalledWith("file:///preview/audio"));
+  await act(async () => resolveEvidence([{
+    producerKind: "asr", status: "complete", coverage: "unknown",
+    segments: [{ id: "late", text: "Текст уже закрыт", location: { kind: "time", startMs: 0, endMs: 1000 } }],
+  }]));
+  expect(ui.queryByText("Текст уже закрыт")).toBeNull();
+  expect(mockPlay).not.toHaveBeenCalled();
 });
 
 test("F1: absent ASR evidence never claims that a transcript exists", async () => {
