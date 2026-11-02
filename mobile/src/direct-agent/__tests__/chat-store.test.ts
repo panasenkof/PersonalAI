@@ -286,7 +286,7 @@ test("H5: switching to a documented text-only model never consumes or uploads a 
   store.dispose();
 });
 test("H5: a text-only model can answer a new text turn without uploading historical photos",async()=>{
-  const {repo,records}=repository(),runner=jest.fn(async()=>({text:"Без фото ответить нельзя",sources:[],requests:1}));
+  const {repo,records}=repository(),runner=jest.fn(async(_opts:any)=>({text:"Без фото ответить нельзя",sources:[],requests:1}));
   records.set("old",{id:"old",title:"Фото",createdAt:"2026-11-02",updatedAt:"2026-11-02",
     rows:[{id:"oldphoto",role:"user",text:"Найди велосипед",attachments:[tinyImage]}],
     drafts:[],question:"",interrupted:false});
@@ -300,7 +300,7 @@ test("H5: a text-only model can answer a new text turn without uploading histori
   store.dispose();
 });
 test("H5: explicit supported Flash model can pass a photo to the existing runner",async()=>{
-  const {repo}=repository(),runner=jest.fn(async()=>({text:"Велосипед",sources:[],requests:1}));
+  const {repo}=repository(),runner=jest.fn(async(_opts:any)=>({text:"Велосипед",sources:[],requests:1}));
   const store=new DirectChatStore("guest",repo,runner);await store.initialize();
   const id=store.getSnapshot().activeId!;
   store.setQuestion("Что на фото?");store.setAttachments(id,[tinyImage]);
