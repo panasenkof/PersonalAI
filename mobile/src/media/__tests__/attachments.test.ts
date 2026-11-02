@@ -1,5 +1,5 @@
 import { SqliteMemoryRepository } from '../../local-memory/repository';
-import { appendNoteAttachments, writeOriginal, materializeAttachment, saveMediaNote, MAX_ORIGINAL_BYTES, MAX_ORIGINALS_PER_NOTE } from '../attachments';
+import { appendNoteAttachments, writeOriginal, materializeAttachment, saveMediaNote, savedOriginalRevision, applyRecognitionCandidate, MAX_ORIGINAL_BYTES, MAX_ORIGINALS_PER_NOTE } from '../attachments';
 import { SCHEMA_SQL } from '../../local-memory/storage';
 const { DatabaseSync } = require('node:sqlite');
 const crypto = require('node:crypto');
@@ -564,4 +564,86 @@ test("step 8 E2b normal PDF cannot forge local OCR page status",async()=>{
     recognitions:[{index:0,name:pdf.name,status:"success",text:"Fake scanned text",imageMode:"document-text"}],
   })).rejects.toThrow("invalid_image_recognition_mode");
   expect(sqlite.prepare("SELECT COUNT(*) AS n FROM memory_entities").get().n).toBe(0);
+});
+
+test("G: confirmed re-recognition revises the same note and extraction atomically without changing manual body or original",async()=>{
+  const id=await saveMediaNote("guest",{...input,body:"Мой комментарий не менять",extractedText:"Старая расшифровка"});
+  const repo=new SqliteMemoryRepository(mockDb);
+  const note=(await repo.entity(id))!;
+  const attachment=sqlite.prepare("SELECT * FROM memory_attachments WHERE entity_id=?").get(id);
+  const sourceVersion=await savedOriginalRevision("guest",attachment);
+  const updated=await applyRecognitionCandidate(repo,{
+    note,attachment,expectedSourceVersion:sourceVersion,text:"Новое распознавание",
+    producerId:"android-tesseract-5-rus",producerRevision:"user-repeat-v1",
+  });
+  expect(updated.record_version).toBe(note.record_version+1);
+  expect(updated.payload.body).toBe("Мой комментарий не менять");
+  expect(updated.payload.extracted_text).toBe("Новое распознавание");
+  expect(sqlite.prepare("SELECT COUNT(*) AS n FROM memory_attachments").get().n).toBe(1);
+  expect(sqlite.prepare("SELECT COUNT(*) AS n FROM memory_attachment_parts").get().n)
+    .toBeGreaterThan(0);
+  expect(sqlite.prepare("SELECT COUNT(*) AS n FROM memory_extractions").get().n).toBe(2);
+  const extraction=sqlite.prepare("SELECT * FROM memory_extractions ORDER BY created_at DESC,id DESC LIMIT 1").get();
+  expect(extraction.source_version).toBe(sourceVersion);
+  expect(extraction.producer_id).toBe("android-tesseract-5-rus");
+  const indexed=sqlite.prepare("SELECT COUNT(*) AS n FROM memory_search_fts WHERE memory_search_fts MATCH ?").get('"распознавание"');
+  expect(indexed.n).toBeGreaterThan(0);
+  await expect(applyRecognitionCandidate(repo,{
+    note,attachment,expectedSourceVersion:sourceVersion,text:"Дубль",
+    producerId:"local",producerRevision:"v1",
+  })).rejects.toThrow("stale_memory_version");
+  expect(sqlite.prepare("SELECT COUNT(*) AS n FROM memory_extractions").get().n).toBe(2);
+});
+
+test("G: a manual edit made during recognition makes a pending candidate stale",async()=>{
+  const id=await saveMediaNote("guest",{...input,body:"Мой комментарий",extractedText:"Ручная коррекция"});
+  const repo=new SqliteMemoryRepository(mockDb), note=(await repo.entity(id))!;
+  const attachment=sqlite.prepare("SELECT * FROM memory_attachments WHERE entity_id=?").get(id);
+  const sourceVersion=await savedOriginalRevision("guest",attachment);
+  const edited=await repo.reviseEntity(id,note.record_version,
+    {...note.payload,extracted_text:"Исправлено после запуска"},"Ручная правка");
+  const beforeRuns=sqlite.prepare("SELECT COUNT(*) AS n FROM memory_extractions").get().n;
+  await expect(applyRecognitionCandidate(repo,{
+    note,attachment,expectedSourceVersion:sourceVersion,text:"Устаревший результат",
+    producerId:"local",producerRevision:"v1",
+  })).rejects.toThrow("stale_memory_version");
+  expect((await repo.entity(id))!.payload.extracted_text).toBe("Исправлено после запуска");
+  expect((await repo.entity(id))!.record_version).toBe(edited.record_version);
+  expect(sqlite.prepare("SELECT COUNT(*) AS n FROM memory_extractions").get().n).toBe(beforeRuns);
+});
+
+test("G: source fingerprint mismatch and a failed segment insert rollback all edits",async()=>{
+  const id=await saveMediaNote("guest",{...input,body:"Комментарий",extractedText:"Исходный текст"});
+  const repo=new SqliteMemoryRepository(mockDb), note=(await repo.entity(id))!;
+  const attachment=sqlite.prepare("SELECT * FROM memory_attachments WHERE entity_id=?").get(id);
+  const revision=await savedOriginalRevision("guest",attachment);
+  const candidate={note,attachment,expectedSourceVersion:revision,text:"Новая версия",
+    producerId:"offline",producerRevision:"v1"};
+  sqlite.prepare("UPDATE memory_attachment_parts SET sha256=? WHERE attachment_id=? AND ord=0").run("a".repeat(64),attachment.id);
+  await expect(applyRecognitionCandidate(repo,candidate)).rejects.toThrow("stale_memory_version");
+  sqlite.prepare("UPDATE memory_attachment_parts SET sha256=? WHERE attachment_id=? AND ord=0").run(
+    require("node:crypto").createHash("sha256").update(mockFiles.get(input.file.uri)!.subarray(0,256*1024)).digest("hex"),
+    attachment.id);
+  const before=snapshot();
+  const old=mockDb.runAsync;
+  mockDb.runAsync=async (query:string,params:any[]=[])=>{
+    if(query.includes("INSERT INTO memory_extraction_segments"))throw new Error("simulated_segment_failure");
+    return old(query,params);
+  };
+  await expect(applyRecognitionCandidate(repo,candidate)).rejects.toThrow("simulated_segment_failure");
+  expect(snapshot()).toEqual(before);
+  expect((await repo.entity(id))!.payload.extracted_text).toBe("Исходный текст");
+  expect(sqlite.prepare("SELECT COUNT(*) AS n FROM memory_extractions").get().n).toBe(1);
+});
+
+test("G: trashed or unrelated sources cannot re-recognize a note",async()=>{
+  const note=await savedNote(),repo=new SqliteMemoryRepository(mockDb);
+  const attachment=sqlite.prepare("SELECT * FROM memory_attachments WHERE entity_id=?").get(note.id);
+  const revision=await savedOriginalRevision("guest",attachment);
+  await expect(applyRecognitionCandidate(repo,{
+    note,attachment:{...attachment,entity_id:"different"},expectedSourceVersion:revision,
+    text:"Содержимое",producerId:"local",producerRevision:"v1",
+  })).rejects.toThrow("invalid_recognition_candidate");
+  sqlite.prepare("UPDATE memory_entities SET record_status='trashed' WHERE id=?").run(note.id);
+  await expect(savedOriginalRevision("guest",attachment)).rejects.toThrow("stale_memory_version");
 });
