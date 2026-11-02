@@ -34,7 +34,7 @@ export function validatePdfTextWindow(
   if(!Number.isSafeInteger(total) || (total as number)<1 ||
     !Number.isSafeInteger(from) || from!==expectedStart ||
     !Number.isSafeInteger(count) || (count as number)<1 ||
-    (count as number)>requestedCount || from! <= (total as number) ||
+    (count as number)>requestedCount || from! > (total as number) ||
     (count as number)!==Math.min(requestedCount,(total as number)-from!+1) ||
     (previousTotal!==null && total!==previousTotal) || !Array.isArray(row.pages))
       throw new Error("invalid_pdf_window");
