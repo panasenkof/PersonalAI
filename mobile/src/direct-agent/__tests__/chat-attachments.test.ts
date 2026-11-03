@@ -4,7 +4,7 @@ const image: ChatAttachment = {id:'image',name:'test.png',mime:'image/png',kind:
 const text: ChatAttachment = {id:'text',name:'recipe.txt',mime:'text/plain',kind:'text',data:'Индейка, чеснок',size:32};
 test('validates byte limits, type signatures and text without silently truncating',()=>{
   expect(checkedChatAttachments([image,text])).toHaveLength(2);
-  for(const files of [[{...image,mime:'image/jpeg'}],[{...image,data:'a'.repeat(3000000)}],[{...image,data:'http://example.org/file'}],[{...text,data:'x'.repeat(24001)}],[{...text,data:'bad\0text'}],Array(4).fill(image)])expect(()=>checkedChatAttachments(files)).toThrow();
+  for(const files of [[{...image,mime:'image/jpeg'}],[{...image,data:'a'.repeat(3000000)}],[{...image,data:'http://example.org/file'}],[{...text,data:'x'.repeat(240001)}],[{...text,data:'bad\0text'}],Array(4).fill(image)])expect(()=>checkedChatAttachments(files)).toThrow();
 });
 test.each(['responses','chat','anthropic'] as const)('encodes real image bytes and untrusted text for %s',protocol=>{
   const content=chatContent('Сравни',[image,text],protocol) as any[];
@@ -25,18 +25,21 @@ test('encrypted conversation JSON round-trips attachments; corrupt file cannot s
 });
 
 test('H-DOC1a: exact per-file and aggregate errors never claim that 24k is a model limit',()=>{
-  const long:ChatAttachment={...text,id:'long',data:'Я'.repeat(24_001),size:72_003};
+  const long:ChatAttachment={...text,id:'long',data:'Я'.repeat(240_001),size:720_003};
   const alone=chatAttachmentAdmissionIssue([],long);
-  expect(alone?.replace(/\s+/g,' ')).toContain('24 001');
+  expect(alone?.replace(/\s+/g,' ')).toContain('240 001');
   expect(alone).toContain('не предел модели');
   expect(alone).toContain('не отправлен');
-  const first:ChatAttachment={...text,id:'first',data:'a'.repeat(23_500),size:23_500};
-  const next:ChatAttachment={...text,id:'next',data:'b'.repeat(600),size:600};
+  const first:ChatAttachment={...text,id:'first',data:'a'.repeat(235_000),size:235_000};
+  const next:ChatAttachment={...text,id:'next',data:'b'.repeat(6_000),size:6_000};
   const combined=chatAttachmentAdmissionIssue([first],next);
-  expect(combined?.replace(/\s+/g,' ')).toContain('24 100');
+  expect(combined?.replace(/\s+/g,' ')).toContain('241 000');
   expect(combined).toContain('не предел ИИ-модели');
-  expect(chatAttachmentAdmissionIssue([first],{...text,id:'fits',data:'z'.repeat(500)})).toBe(null);
+  expect(chatAttachmentAdmissionIssue([first],{...text,id:'fits',data:'z'.repeat(5_000)})).toBe(null);
   expect(chatAttachmentAdmissionIssue([image,text,image],{...text,id:'fourth'})).toContain('3 файла');
   // This deliberately preserves the secure 24k wire gate until H-DOC1b.
   expect(()=>checkedChatAttachments([long])).toThrow();
+  // The ordinary chatContent route must never upload a long document without
+  // its own explicit consent/call budget path.
+  expect(()=>chatContent('Перескажи',[{...text,data:'x'.repeat(24_001)}],'chat')).toThrow('big_document_requires_explicit_synthesis');
 });

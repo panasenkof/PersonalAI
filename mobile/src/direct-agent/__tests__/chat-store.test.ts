@@ -4,6 +4,7 @@ import { defaultDirectPreferences } from "../settings";
 import { saveApprovedNote } from "../memory";
 import { waitForApplicationSession } from "../../local-memory/storage";
 import { loadModelCallLimit } from "../agent-preferences";
+import { planDocumentSynthesis } from "../document-synthesis";
 
 jest.mock("../../local-memory/storage", () => ({ waitForApplicationSession: jest.fn(async () => {}), withLocalMemoryDatabase: jest.fn() }));
 jest.mock("../memory", () => ({ searchApprovedNotes: jest.fn(async () => []), saveApprovedNote: jest.fn(async () => "note") }));
@@ -307,5 +308,31 @@ test("H5: explicit supported Flash model can pass a photo to the existing runner
   await store.send({...deepseekPro,model:"deepseek-flash"});
   expect(runner).toHaveBeenCalledTimes(1);
   expect(runner.mock.calls[0][0].attachments).toEqual([tinyImage]);
+  store.dispose();
+});
+
+test("H-DOC1b2: long documents require an explicit approval key before store/model mutation",async()=>{
+  const {repo,records}=repository();
+  const runner=jest.fn(async(args:any)=>({text:args.prompt.includes("ПРОВЕРЕННЫЕ МЕТКИ")?"Общий вывод":"Вывод части",sources:[],requests:1}));
+  const store=new DirectChatStore("guest",repo,runner);await store.initialize();
+  const id=store.getSnapshot().activeId!;
+  const sources=[
+    {id:"d1",name:"first.txt",kind:"text" as const,mime:"text/plain",data:"A".repeat(20_000),size:60_000},
+    {id:"d2",name:"second.txt",kind:"text" as const,mime:"text/plain",data:"Б".repeat(20_000),size:60_000},
+  ];
+  store.setQuestion("Перескажи отдельно и вместе");
+  store.setAttachments(id,sources);
+  await store.send(settings);
+  expect(runner).not.toHaveBeenCalled();
+  expect(store.getSnapshot().conversations[0].attachments).toEqual(sources);
+  expect(store.getSnapshot().conversations[0].rows).toHaveLength(0);
+  const plan=planDocumentSynthesis(sources,settings.model)!;
+  (loadModelCallLimit as jest.Mock).mockResolvedValueOnce(5);
+  await store.send(settings,undefined,plan.approvalKey);
+  expect(runner).toHaveBeenCalledTimes(5);
+  expect(store.getSnapshot().conversations[0].rows.at(-1)).toMatchObject({role:"assistant",text:"Общий вывод"});
+  expect(records.get(id)?.rows[0].attachments).toEqual(sources);
+  expect(runner.mock.calls[0][0].settings.apiKey).toBe(settings.apiKey);
+  expect(runner.mock.calls[0][0].settings.allowWeb).toBe(false);
   store.dispose();
 });

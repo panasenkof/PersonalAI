@@ -4,10 +4,12 @@ import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import * as FileSystem from 'expo-file-system/legacy';
 import { File, FileMode } from 'expo-file-system';
 import { extractPdfPages, pdfCoverageMessage } from './pdf-pages';
+import { readPdfTextWindows } from './pdf-window-reader';
+import { readUtf8SourceSlices } from './document-chunks';
 import { getWhisperStatus, initWhisper, transcribeAudioFile } from './whisper';
 import { localMemorySessionUnlocked } from '../local-memory/storage';
 import { withNativeInteraction } from '../security/native-interaction';
-import { chatAttachmentAdmissionIssue, checkedChatAttachments, MAX_CHAT_FILE_BYTES, MAX_CHAT_IMAGE_SOURCE_BYTES, MAX_CHAT_FILES, type ChatAttachment } from '../direct-agent/chat-attachments';
+import { chatAttachmentAdmissionIssue, checkedChatAttachments, MAX_CHAT_FILE_BYTES, MAX_CHAT_IMAGE_SOURCE_BYTES, MAX_CHAT_FILES, MAX_CHAT_TEXT_CHARS, type ChatAttachment } from '../direct-agent/chat-attachments';
 
 /** Per-file picker failures never become chat attachments. The user can
  * select only failed files again; already accepted ones remain in the draft.
@@ -32,7 +34,7 @@ export function safeChatFileFailure(error:unknown):string {
   if (message.includes("текстовый слой")) return "В PDF нет читаемого текстового слоя.";
   if (message.includes("защищён паролем")) return "PDF защищён паролем.";
   if (message.includes("6 МБ")) return "PDF превышает 6 МБ.";
-  if (message.includes("24 000")) return "Временный лимит текущего режима чата — 24 000 символов; это не лимит ИИ-модели. Файл не прикреплён.";
+  if (message.includes("240 000") || message.includes("doc_text_memory_bound")) return "Документ превышает ресурсный предел защищённого черновика — 240 000 символов. Это не предел выбранной модели. Файл не прикреплён.";
   if (message.includes("80 МБ")) return "Фотография превышает 80 МБ.";
   // The unsupported-format diagnostic mentions UTF-8 as an allowed format;
   // classify the full error before looking for a true text decoding failure.
@@ -155,7 +157,7 @@ export async function readChatAttachments(assets: Array<{uri:string; name:string
       if (kind === 'pdf' && size > MAX_CHAT_FILE_BYTES)
         throw new Error('Для чата выберите PDF до 6 МБ. Большой документ сохраните в память.');
       // Bound text reads as well as image reads before bringing bytes into JS.
-      if (kind === 'text' && size > 96000) throw new Error('Текстовый файл слишком большой: до 24 000 символов.');
+      if (kind === 'text' && size > MAX_CHAT_FILE_BYTES) throw new Error('Текстовый файл превышает ресурсный предел 6 МБ.');
       const prepared = kind === 'image'
         ? await prepareChatPhoto(asset.uri,size,signal)
         : {uri:asset.uri,mime:"",temporary:false};
@@ -164,6 +166,7 @@ export async function readChatAttachments(assets: Array<{uri:string; name:string
         const data = kind === 'pdf'
           ? await pdfChatText(asset.uri, asset.name, signal)
           : kind === 'audio' ? await localAudioChatText(asset.uri, signal)
+          : kind === 'text' && size > 96000 ? await largeUtf8ChatText(prepared.uri, check)
           : await FileSystem.readAsStringAsync(prepared.uri, {encoding:kind === 'image' ? FileSystem.EncodingType.Base64 : FileSystem.EncodingType.UTF8});
         check();
         files.push({id:Crypto.randomUUID(), name:kind === 'pdf' ? ('Текст PDF: ' + asset.name).slice(0,240)
@@ -176,6 +179,21 @@ export async function readChatAttachments(assets: Array<{uri:string; name:string
       }
     }
     return checkedChatAttachments(files);
+}
+
+/** Limit retained plaintext in RAM, not the model context. The original file
+ * is processed incrementally; neither truncated text nor partial PDF can be
+ * presented as a complete attachment. */
+async function largeUtf8ChatText(uri:string,check:()=>void):Promise<string>{
+  const parts:string[]=[];
+  let chars=0;
+  for await(const slice of readUtf8SourceSlices(uri,check)){
+    chars+=slice.text.length;
+    if(chars>MAX_CHAT_TEXT_CHARS)throw new Error("doc_text_memory_bound");
+    parts.push(slice.text);
+  }
+  check();
+  return parts.join("");
 }
 
 /** Audio is decoded and transcribed only on the phone after explicit file selection.
@@ -207,13 +225,42 @@ async function pdfChatText(uri: string, name: string, signal: AbortSignal): Prom
       throw new Error('Выбранный файл не является PDF. Проверьте формат и повторите выбор.');
   } finally { handle.close(); }
   if (signal.aborted || !localMemorySessionUnlocked()) throw new Error('Выбор файлов прерван.');
-  const pages = await extractPdfPages({uri,name,mimeType:'application/pdf'},signal);
-  if (signal.aborted || !localMemorySessionUnlocked()) throw new Error('Выбор файлов прерван.');
-  const text = 'Только извлечённый текст PDF. Исходный файл в модель не отправляется.\n' +
-    pdfCoverageMessage(pages) + '\n\n' + pages.text;
-  if (text.length > 24_000)
-    throw new Error('Извлечённый текст PDF превышает общий лимит чата 24 000 символов. Разделите документ; текст не обрезан.');
-  return text;
+  const check=()=>{if(signal.aborted || !localMemorySessionUnlocked())throw new Error('Выбор файлов прерван.');};
+  try {
+    // Fast legacy path remains unchanged for small PDFs.
+    const pages = await extractPdfPages({uri,name,mimeType:'application/pdf'},signal);
+    check();
+    const text = 'Только извлечённый текст PDF. Исходный файл в модель не отправляется.\n' +
+      pdfCoverageMessage(pages) + '\n\n' + pages.text;
+    if(text.length>MAX_CHAT_TEXT_CHARS)throw new Error("doc_text_memory_bound");
+    return text;
+  } catch(error){
+    check();
+    const message=String((error as Error)?.message||"");
+    if(!/128 страниц|60 000 символов|pdf_page_limit_exceeded|pdf_text_limit_exceeded|pdf_segment_limit_exceeded/.test(message))
+      throw error;
+  }
+  let result="Только извлечённый текст PDF. Исходный файл в модель не отправляется.\n";
+  let seen=0, missing=0, total=0, listed:number[]=[];
+  for await(const window of readPdfTextWindows({uri,name,mimeType:'application/pdf'},check)){
+    total=window.pageCount;seen+=window.pages.length;missing+=window.missingPages.length;
+    if(listed.length<12)listed.push(...window.missingPages.slice(0,12-listed.length));
+    for(const page of window.pages){
+      const entry="\n\nСтраница "+page.page+":\n"+page.text;
+      if(result.length+entry.length>MAX_CHAT_TEXT_CHARS)throw new Error("doc_text_memory_bound");
+      result+=entry;
+    }
+  }
+  check();
+  if(!seen)throw new Error("В PDF нет читаемого текстового слоя.");
+  const cover="Текст PDF: "+seen+" из "+total+" стр. "+
+    (missing ? "Без текстового слоя: стр. "+listed.join(", ")+
+      (missing>listed.length?" и ещё "+(missing-listed.length):"")+
+      ". OCR не проводился." :
+      "На всех страницах найден текстовый слой, но полнота символов не гарантирована.");
+  const complete=result+"\n\n"+cover;
+  if(complete.length>MAX_CHAT_TEXT_CHARS)throw new Error("doc_text_memory_bound");
+  return complete;
 }
 
 export function chatFileFormat(asset: {name:string; mimeType?:string|null}): {kind:'image'|'text'|'pdf'|'audio';mime:string} {

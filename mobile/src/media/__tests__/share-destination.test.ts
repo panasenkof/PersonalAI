@@ -21,9 +21,9 @@ test.each(['audio/mpeg','video/mp4'])('unsupported chat %s remains available for
   expect(result.chatError).toBeTruthy();expect(result.memoryError).toBe('');expect(mockCopy).not.toHaveBeenCalled();
 });
 test('count, sizes and actual read limits are checked before chat is offered',async()=>{
-  expect(inspectSharedMaterial(Array(4).fill(file)).chatError).toContain('3');mockSize=3*1024*1024;
-  expect(inspectSharedMaterial([file]).chatError).toContain('24 000');mockSize=81*1024*1024;expect(inspectSharedMaterial([file]).memoryError).toContain('80 МБ');
-  mockSize=100;(readAsStringAsync as jest.Mock).mockResolvedValue('x'.repeat(24001));const result=await prepareSharedMaterial([file],new AbortController().signal);expect(result.chatError).toBeTruthy();expect(result.attachments).toEqual([]);expect(mockDelete).toHaveBeenCalled();
+  expect(inspectSharedMaterial(Array(4).fill(file)).chatError).toContain('3');mockSize=7*1024*1024;
+  expect(inspectSharedMaterial([file]).chatError).toContain('6 МБ');mockSize=81*1024*1024;expect(inspectSharedMaterial([file]).memoryError).toContain('80 МБ');
+  mockSize=100;(readAsStringAsync as jest.Mock).mockResolvedValue('x'.repeat(240001));const result=await prepareSharedMaterial([file],new AbortController().signal);expect(result.chatError).toBeTruthy();expect(result.attachments).toEqual([]);expect(mockDelete).toHaveBeenCalled();
 });
 test.each(['abort','lock'])('%s during copy discards the late result and cleans cache',async mode=>{
   const controller=new AbortController();mockCopy.mockImplementation(async()=>{if(mode==='abort')controller.abort();else mockUnlocked=false;});
@@ -85,13 +85,13 @@ test('H3a: one provider copy error leaves following valid text available without
 test('H3a: aggregate 24k limit rejects only overflow, not a later smaller file',async()=>{
   const second={...file,value:'content://provider/second.txt'};
   const third={...file,value:'content://provider/third.txt'};
-  (readAsStringAsync as jest.Mock).mockResolvedValueOnce('А'.repeat(20_000))
-    .mockResolvedValueOnce('Б'.repeat(5_000)).mockResolvedValueOnce('В'.repeat(1000));
+  (readAsStringAsync as jest.Mock).mockResolvedValueOnce('А'.repeat(200_000))
+    .mockResolvedValueOnce('Б'.repeat(50_000)).mockResolvedValueOnce('В'.repeat(1000));
   const result=await prepareSharedMaterial([file,second,third],new AbortController().signal);
   expect(result.chatError).toBe('');
   expect(result.attachments.map(x=>x.name)).toEqual(['recipe.txt','third.txt']);
   expect(result.chatStatuses.map(x=>x.state)).toEqual(['ready','error','ready']);
-  expect(result.chatStatuses[1].reason).toContain('24 000');
+  expect(result.chatStatuses[1].reason).toContain('240 000');
 });
 
 test('H3a: session lock during second file aborts entire Share and cleans all copies',async()=>{

@@ -4,6 +4,7 @@ import * as Crypto from "expo-crypto";
 import { beginTask, mergeTaskReceipts, recordEvidence } from "./task-state";
 import { webPreference } from "./dialogue";
 import { runDirectAgent } from "./engine";
+import { historyWithoutLargeDocuments, planDocumentSynthesis, runDocumentSynthesis } from "./document-synthesis";
 import { diagnosticTrace, redactDiagnostic } from "./diagnostics";
 import { MAX_USER_PROMPT_CHARS } from "./limits";
 import { loadModelCallLimit } from "./agent-preferences";
@@ -237,7 +238,7 @@ export class DirectChatStore {
 
   /** Explicit internet photo action reuses the existing model and web tools,
    * without consuming the user's unrelated composer draft. */
-  async send(settings: DirectAgentSettings, internetPhotoId?:string) {
+  async send(settings: DirectAgentSettings, internetPhotoId?:string, documentApprovalKey?:string) {
     const id = this.snapshot.activeId;
     const current = this.snapshot.conversations.find(c => c.id === id);
     if (!id || !current || current.busy || current.deleting || this.disposed ||
@@ -249,6 +250,13 @@ export class DirectChatStore {
       : current.question.trim() || "Посмотри приложенные файлы.";
     const displayPrompt = internetPhotoId ? "Что изображено на фото? Найти информацию в интернете" : prompt;
     const attachments = checkedChatAttachments(internetPhotoId ? [selected!] : current.attachments);
+    let documentPlan;
+    try { documentPlan = internetPhotoId ? null : planDocumentSynthesis(attachments,settings.model); }
+    catch(e) { this.publish({error:String((e as Error).message)}); return; }
+    if(documentPlan && documentApprovalKey!==documentPlan.approvalKey) {
+      this.publish({notice:"Для отправки большого документа подтвердите объём и вызовы ИИ в окне отправки."});
+      return;
+    }
     // Explicit photo intent runs only against encrypted device memory.
     // Do not send user image bytes or photo search text to the remote LLM.
     if (!internetPhotoId && localPhotoIntent83(prompt,attachments)) {
@@ -277,7 +285,7 @@ export class DirectChatStore {
       .map(r => ({ role: r.role as "user" | "assistant", content: r.text, ...(r.attachments?.length ? {attachments:r.attachments} : {}) }));
     // After switching to a model known to be text-only, historical photo
     // originals stay encrypted in prior turns but are not uploaded again.
-    const history = historyForImageCapability(previousHistory,
+    const history = historyForImageCapability(historyWithoutLargeDocuments(previousHistory),
       imageCapability(settings,previousHistory.flatMap(r => r.attachments || [])));
     const previousTaskState = internetPhotoId ? undefined : current.taskState;
     const taskState = { ...beginTask(previousTaskState, prompt), webPreference: webPreference({ prompt, history, taskState: previousTaskState }) };
@@ -320,8 +328,9 @@ export class DirectChatStore {
       beforeModelError = "Запрос не отправлен: не удалось прочитать лимит обращений к LLM. Откройте Настройки → Работа ИИ и сохраните лимит.";
       const maxRequests = await loadModelCallLimit(this.profile);
       if (this.disposed || aborter.signal.aborted) throw new Error("aborted");
+      if(documentPlan && documentPlan.calls>maxRequests)throw new Error("Для полного анализа требуется "+documentPlan.calls+" обращений к модели, но в настройках разрешено "+maxRequests+". Измените лимит перед отправкой.");
       modelStarted = true;
-      const result = await this.runner({ settings, maxRequests, prompt, attachments, skipLocalMemory:Boolean(internetPhotoId), history, previousSources, taskState, pendingNotes: internetPhotoId ? [] : current.drafts,
+      const agentOptions: Parameters<typeof runDirectAgent>[0] = { settings, maxRequests, prompt, attachments, skipLocalMemory:Boolean(internetPhotoId), history, previousSources, taskState, pendingNotes: internetPhotoId ? [] : current.drafts,
         onTaskState: next => {
           const active = this.snapshot.conversations.find(c => c.id === id);
           if (active && !aborter.signal.aborted) this.update(id, { taskState: mergeTaskReceipts(next, active.taskState) }, true);
@@ -364,7 +373,8 @@ export class DirectChatStore {
             return draftId;
           }
         },
-      });
+      };
+      const result = documentPlan ? await runDocumentSynthesis(agentOptions,documentPlan,this.runner) : await this.runner(agentOptions);
       const c = this.snapshot.conversations.find(c => c.id === id);
       if (!c || this.disposed) return;
       if (aborter.signal.aborted) throw new Error("aborted");

@@ -5,6 +5,10 @@ import { getWhisperStatus, initWhisper, transcribeAudioFile } from "../whisper";
 import { getDocumentAsync } from 'expo-document-picker';
 import { readAsStringAsync } from 'expo-file-system/legacy';
 import { manipulateAsync } from 'expo-image-manipulator';
+const mockLargeUtf8Slices=jest.fn();
+const mockPdfWindows=jest.fn();
+jest.mock('../document-chunks',()=>({readUtf8SourceSlices:(...args:any[])=>mockLargeUtf8Slices(...args)}));
+jest.mock('../pdf-window-reader',()=>({readPdfTextWindows:(...args:any[])=>mockPdfWindows(...args)}));
 let mockUnlocked=true;let mockSize=100;const mockDelete=jest.fn();
 let mockPdfHeader = new Uint8Array([37,80,68,70,45]);
 jest.mock('expo-image-manipulator',()=>({manipulateAsync:jest.fn(),SaveFormat:{JPEG:'jpeg'}}));
@@ -40,7 +44,7 @@ beforeEach(()=>{jest.resetAllMocks();mockUnlocked=true;mockSize=100;
     extractedPageCount:1,missingPages:[],coverage:"partial",segments:[]});
 });
 test('stages actual text and removes only picker cache copies',async()=>{const files=await pickChatAttachments(new AbortController().signal);expect(files[0]).toMatchObject({data:'Text',kind:'text',name:'a.txt'});expect(mockDelete).toHaveBeenCalledWith(asset.uri);});
-test('cancellation and oversized files never read content',async()=>{(getDocumentAsync as jest.Mock).mockResolvedValueOnce({canceled:true});expect(await pickChatAttachments(new AbortController().signal)).toEqual([]);mockSize=3*1024*1024;await expect(pickChatAttachments(new AbortController().signal)).rejects.toThrow('24 000 символов');expect(readAsStringAsync).not.toHaveBeenCalled();expect(mockDelete).toHaveBeenCalledWith(asset.uri);});
+test('cancellation and oversized files never read content',async()=>{(getDocumentAsync as jest.Mock).mockResolvedValueOnce({canceled:true});expect(await pickChatAttachments(new AbortController().signal)).toEqual([]);mockSize=7*1024*1024;await expect(pickChatAttachments(new AbortController().signal)).rejects.toThrow('6 МБ');expect(readAsStringAsync).not.toHaveBeenCalled();expect(mockDelete).toHaveBeenCalledWith(asset.uri);});
 test('lock during reading rejects late result and clears the plaintext cache',async()=>{(readAsStringAsync as jest.Mock).mockImplementation(async()=>{mockUnlocked=false;return 'Text';});await expect(pickChatAttachments(new AbortController().signal)).rejects.toThrow('прерван');expect(mockDelete).toHaveBeenCalledWith(asset.uri);});
 test('abort while picker open discards its result before reading',async()=>{const controller=new AbortController();(getDocumentAsync as jest.Mock).mockImplementation(async()=>{controller.abort();return {canceled:false,assets:[asset]};});await expect(pickChatAttachments(controller.signal)).rejects.toThrow('прерван');expect(readAsStringAsync).not.toHaveBeenCalled();expect(mockDelete).toHaveBeenCalledWith(asset.uri);});
 test('unsupported binary is rejected; non-cache source is not deleted',async()=>{
@@ -95,7 +99,8 @@ test("H1: empty/scanned or overlong PDF refuses upload and cleans cache, never t
   expect(mockDelete).toHaveBeenCalledWith(pdf.uri);
   (extractPdfPages as jest.Mock).mockResolvedValueOnce({text:"Л".repeat(24_000),totalPageCount:1,
     extractedPageCount:1,missingPages:[],coverage:"partial",segments:[]});
-  await expect(pickChatAttachments(new AbortController().signal)).rejects.toThrow("24 000");
+  const long=await pickChatAttachments(new AbortController().signal);
+  expect(long[0].data).toContain("Л".repeat(24_000));
   mockSize=6*1024*1024+1;
   await expect(pickChatAttachments(new AbortController().signal)).rejects.toThrow("6 МБ");
 });
@@ -130,12 +135,12 @@ test("H2: exceeding combined text budget rejects only overflowing item, preserve
     {uri:"file:///cache/oversize.txt",name:"oversize.txt",mimeType:"text/plain"},
     {uri:"file:///cache/last.txt",name:"last.txt",mimeType:"text/plain"}];
   (getDocumentAsync as jest.Mock).mockResolvedValue({canceled:false,assets:files});
-  (readAsStringAsync as jest.Mock).mockResolvedValueOnce("А".repeat(20_000))
-    .mockResolvedValueOnce("Б".repeat(5_000)).mockResolvedValueOnce("В".repeat(1_000));
+  (readAsStringAsync as jest.Mock).mockResolvedValueOnce("А".repeat(200_000))
+    .mockResolvedValueOnce("Б".repeat(50_000)).mockResolvedValueOnce("В".repeat(1_000));
   const result=await pickChatAttachmentsWithResults(new AbortController().signal);
   expect(result.files.map(f=>f.name)).toEqual(["first.txt","last.txt"]);
-  expect(result.failures).toEqual([{name:"oversize.txt",reason:expect.stringContaining("24 000")}]);
-  expect(chatContent("Сравни",result.files,"chat")).toBeTruthy();
+  expect(result.failures).toEqual([{name:"oversize.txt",reason:expect.stringContaining("240 000")}]);
+  expect(()=>chatContent("Сравни",result.files,"chat")).toThrow("big_document_requires_explicit_synthesis");
 });
 
 test("H2: session abort is never treated as an individual failure or partial success",async()=>{
@@ -239,4 +244,48 @@ test("H-DOC1a: four selected valid files keep three attached and report fourth s
   expect(result.failures).toEqual([{name:"file3.txt",reason:expect.stringContaining("до 3 файлов")}]);
   expect(readAsStringAsync).toHaveBeenCalledTimes(3);
   for(const file of selected)expect(mockDelete).toHaveBeenCalledWith(file.uri);
+});
+
+test("H-DOC1b2: >96KB TXT uses incremental UTF-8 reader, not a giant legacy read",async()=>{
+  mockSize=110_000;
+  const source="Русский текст ".repeat(10_000);
+  mockLargeUtf8Slices.mockImplementationOnce(async function*(){
+    yield {text:source.slice(0,65_000),startChar:0,endChar:65_000};
+    yield {text:source.slice(65_000),startChar:65_000,endChar:source.length};
+  });
+  const result=await pickChatAttachmentsWithResults(new AbortController().signal);
+  expect(result.failures).toEqual([]);
+  expect(result.files[0].data).toBe(source);
+  expect(readAsStringAsync).not.toHaveBeenCalled();
+  expect(mockLargeUtf8Slices).toHaveBeenCalledTimes(1);
+  expect(mockDelete).toHaveBeenCalledWith(asset.uri);
+});
+
+test("H-DOC1b2: 130-page PDF falls back to exact native windows and reports scan gaps",async()=>{
+  const pdf={uri:"file:///cache/large.pdf",name:"large.pdf",mimeType:"application/pdf"};
+  (getDocumentAsync as jest.Mock).mockResolvedValue({canceled:false,assets:[pdf]});
+  (extractPdfPages as jest.Mock).mockRejectedValueOnce(new Error("В PDF больше 128 страниц."));
+  mockPdfWindows.mockImplementationOnce(async function*(){
+    yield {pageCount:130,firstPage:1,processedPageCount:16,pages:[{page:1,text:"Начало"}],missingPages:[2,3]};
+    yield {pageCount:130,firstPage:17,processedPageCount:16,pages:[{page:129,text:"Конец"}],missingPages:[17]};
+  });
+  const result=await pickChatAttachmentsWithResults(new AbortController().signal);
+  expect(result.failures).toEqual([]);
+  expect(result.files[0].data).toContain("Страница 129:\nКонец");
+  expect(result.files[0].data).toContain("OCR не проводился");
+  expect(result.files[0].data).toContain("из 130 стр.");
+  expect(mockPdfWindows).toHaveBeenCalledTimes(1);
+  expect(mockDelete).toHaveBeenCalledWith(pdf.uri);
+});
+
+test("H-DOC1b2: source > memory safety budget is rejected without a partial attachment",async()=>{
+  mockSize=110_000;
+  mockLargeUtf8Slices.mockImplementationOnce(async function*(){
+    yield {text:"Я".repeat(240_001),startChar:0,endChar:240_001};
+  });
+  const result=await pickChatAttachmentsWithResults(new AbortController().signal);
+  expect(result.files).toEqual([]);
+  expect(result.failures).toHaveLength(1);
+  expect(result.failures[0].reason).toContain("240 000");
+  expect(mockDelete).toHaveBeenCalledWith(asset.uri);
 });
