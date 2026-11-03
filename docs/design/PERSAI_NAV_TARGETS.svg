@@ -79,60 +79,66 @@ SOFTWARE.
 </g>
 <text x="227" y="169" fill="#F6F8FF" font-size="14" font-weight="600" text-anchor="start">Корзина</text>
 <text x="16" y="226" fill="#F6F8FF" font-size="19" font-weight="650" text-anchor="start">Коллекции</text>
-<rect x="184" y="193" width="160" height="48" rx="14" fill="#1D2E51" stroke="#445574"/>
-<g transform="translate(196 209) scale(0.6666666666666666)" fill="none" stroke="#30CAED" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+<g id="action-1" data-visual-role="quiet" data-label="Все коллекции">
+<rect x="160" y="190" width="184" height="48" rx="16" fill="#1D2E51" stroke="#7186A8"/>
+<g transform="translate(177.61 204) scale(0.8333333333333334)" fill="none" stroke="#F6F8FF" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
 <path d="M20 5a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h2.5a1.5 1.5 0 0 1 1.2.6l.6.8a1.5 1.5 0 0 0 1.2.6z"/>
 <path d="M3 8.268a2 2 0 0 0-1 1.738V19a2 2 0 0 0 2 2h11a2 2 0 0 0 1.732-1"/>
 </g>
-<text x="220" y="222" fill="#30CAED" font-size="13" font-weight="620" text-anchor="start">Все коллекции</text>
-<rect x="16" y="244" width="160" height="95" rx="18" fill="#14213D" />
-<g transform="translate(30 256) scale(0.875)" fill="none" stroke="#30CAED" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+<text x="205.61" y="219" fill="#F6F8FF" font-size="14" font-weight="600" text-anchor="start">Все коллекции</text>
+</g>
+<rect x="16" y="246" width="160" height="70" rx="18" fill="#14213D" />
+<g transform="translate(28 258) scale(0.8333333333333334)" fill="none" stroke="#30CAED" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
 <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>
 </g>
-<text x="30" y="302" fill="#F6F8FF" font-size="15" font-weight="650" text-anchor="start">Заметки</text>
-<text x="30" y="322" fill="#ABBAD8" font-size="13" font-weight="400" text-anchor="start">15 записей</text>
-<rect x="184" y="244" width="160" height="95" rx="18" fill="#14213D" />
-<g transform="translate(198 256) scale(0.875)" fill="none" stroke="#30CAED" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+<text x="57" y="274" fill="#F6F8FF" font-size="15" font-weight="650" text-anchor="start">Заметки</text>
+<text x="57" y="297" fill="#ABBAD8" font-size="13" font-weight="400" text-anchor="start">15 записей</text>
+<rect x="184" y="246" width="160" height="70" rx="18" fill="#14213D" />
+<g transform="translate(196 258) scale(0.8333333333333334)" fill="none" stroke="#30CAED" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
 <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>
 </g>
-<text x="198" y="302" fill="#F6F8FF" font-size="15" font-weight="650" text-anchor="start">Поездки</text>
-<text x="198" y="322" fill="#ABBAD8" font-size="13" font-weight="400" text-anchor="start">4 записи</text>
-<text x="16" y="375" fill="#F6F8FF" font-size="18" font-weight="650" text-anchor="start">Недавние</text>
-<rect x="123" y="342" width="99" height="48" rx="14" fill="#1D2E51" stroke="#445574"/>
-<g transform="translate(135 358) scale(0.6666666666666666)" fill="none" stroke="#30CAED" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+<text x="225" y="274" fill="#F6F8FF" font-size="15" font-weight="650" text-anchor="start">Поездки</text>
+<text x="225" y="297" fill="#ABBAD8" font-size="13" font-weight="400" text-anchor="start">4 записи</text>
+<text x="16" y="343" fill="#F6F8FF" font-size="18" font-weight="650" text-anchor="start">Недавние</text>
+<g id="action-2" data-visual-role="quiet" data-label="Плитки">
+<rect x="16" y="355" width="124" height="48" rx="16" fill="#1D2E51" stroke="#7186A8"/>
+<g transform="translate(34.985 369) scale(0.8333333333333334)" fill="none" stroke="#F6F8FF" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
 <rect width="7" height="7" x="3" y="3" rx="1"/>
 <rect width="7" height="7" x="14" y="3" rx="1"/>
 <rect width="7" height="7" x="14" y="14" rx="1"/>
 <rect width="7" height="7" x="3" y="14" rx="1"/>
 </g>
-<text x="159" y="371" fill="#30CAED" font-size="13" font-weight="620" text-anchor="start">Плитки</text>
-<rect x="230" y="342" width="114" height="48" rx="14" fill="#1D2E51" stroke="#445574"/>
-<g transform="translate(242 358) scale(0.6666666666666666)" fill="none" stroke="#30CAED" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+<text x="62.985" y="384" fill="#F6F8FF" font-size="14" font-weight="600" text-anchor="start">Плитки</text>
+</g>
+<g id="action-3" data-visual-role="quiet" data-label="Выбрать">
+<rect x="148" y="355" width="134" height="48" rx="16" fill="#1D2E51" stroke="#7186A8"/>
+<g transform="translate(166.535 369) scale(0.8333333333333334)" fill="none" stroke="#F6F8FF" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
 <path d="M13 5h8"/>
 <path d="M13 12h8"/>
 <path d="M13 19h8"/>
 <path d="m3 17 2 2 4-4"/>
 <path d="m3 7 2 2 4-4"/>
 </g>
-<text x="266" y="371" fill="#30CAED" font-size="13" font-weight="620" text-anchor="start">Выбрать</text>
-<rect x="16" y="393" width="328" height="124" rx="18" fill="#14213D" />
-<g transform="translate(30 414) scale(0.8333333333333334)" fill="none" stroke="#30CAED" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+<text x="194.535" y="384" fill="#F6F8FF" font-size="14" font-weight="600" text-anchor="start">Выбрать</text>
+</g>
+<rect x="16" y="411" width="328" height="124" rx="18" fill="#14213D" />
+<g transform="translate(30 432) scale(0.8333333333333334)" fill="none" stroke="#30CAED" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
 <path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/>
 <path d="M14 2v5a1 1 0 0 0 1 1h5"/>
 <path d="M10 9H8"/>
 <path d="M16 13H8"/>
 <path d="M16 17H8"/>
 </g>
-<text x="62" y="421" fill="#F6F8FF" font-size="15" font-weight="620" text-anchor="start">Маршрут на выходные</text>
-<text x="62" y="442" fill="#ABBAD8" font-size="13" font-weight="400" text-anchor="start">PDF · Поездки</text>
-<rect x="298" y="406" width="40" height="36" rx="12" fill="#1D2E51" />
-<g transform="translate(310 415) scale(0.7083333333333334)" fill="none" stroke="#ABBAD8" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+<text x="62" y="439" fill="#F6F8FF" font-size="15" font-weight="620" text-anchor="start">Маршрут на выходные</text>
+<text x="62" y="460" fill="#ABBAD8" font-size="13" font-weight="400" text-anchor="start">PDF · Поездки</text>
+<rect x="298" y="424" width="40" height="36" rx="12" fill="#1D2E51" />
+<g transform="translate(310 433) scale(0.7083333333333334)" fill="none" stroke="#ABBAD8" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
 <circle cx="12" cy="12" r="1"/>
 <circle cx="12" cy="5" r="1"/>
 <circle cx="12" cy="19" r="1"/>
 </g>
-<rect x="62" y="454" width="261" height="1" rx="0" fill="#2D3B59" />
-<g transform="translate(30 473) scale(0.8333333333333334)" fill="none" stroke="#30CAED" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+<rect x="62" y="472" width="261" height="1" rx="0" fill="#2D3B59" />
+<g transform="translate(30 491) scale(0.8333333333333334)" fill="none" stroke="#30CAED" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
 <path d="M13.4 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7.4"/>
 <path d="M2 6h4"/>
 <path d="M2 10h4"/>
@@ -140,10 +146,10 @@ SOFTWARE.
 <path d="M2 18h4"/>
 <path d="M21.378 5.626a1 1 0 1 0-3.004-3.004l-5.01 5.012a2 2 0 0 0-.506.854l-.837 2.87a.5.5 0 0 0 .62.62l2.87-.837a2 2 0 0 0 .854-.506z"/>
 </g>
-<text x="62" y="480" fill="#F6F8FF" font-size="15" font-weight="620" text-anchor="start">Что взять с собой</text>
-<text x="62" y="501" fill="#ABBAD8" font-size="13" font-weight="400" text-anchor="start">Текст · Заметки</text>
-<rect x="298" y="465" width="40" height="36" rx="12" fill="#1D2E51" />
-<g transform="translate(310 474) scale(0.7083333333333334)" fill="none" stroke="#ABBAD8" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+<text x="62" y="498" fill="#F6F8FF" font-size="15" font-weight="620" text-anchor="start">Что взять с собой</text>
+<text x="62" y="519" fill="#ABBAD8" font-size="13" font-weight="400" text-anchor="start">Текст · Заметки</text>
+<rect x="298" y="483" width="40" height="36" rx="12" fill="#1D2E51" />
+<g transform="translate(310 492) scale(0.7083333333333334)" fill="none" stroke="#ABBAD8" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
 <circle cx="12" cy="12" r="1"/>
 <circle cx="12" cy="5" r="1"/>
 <circle cx="12" cy="19" r="1"/>
@@ -179,22 +185,23 @@ SOFTWARE.
 <text x="53" y="45" fill="#F6F8FF" font-size="20" font-weight="650" text-anchor="start">Новая заметка</text>
 <rect x="16" y="63" width="328" height="1" rx="0" fill="#2D3B59" />
 <text x="16" y="103" fill="#F6F8FF" font-size="22" font-weight="700" text-anchor="start">Маршрут на выходные</text>
-<rect x="16" y="121" width="328" height="134" rx="18" fill="#14213D" />
-<g transform="translate(32 137) scale(1)" fill="none" stroke="#30CAED" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+<rect x="16" y="117" width="328" height="131" rx="18" fill="#14213D" />
+<g transform="translate(32 132) scale(1)" fill="none" stroke="#30CAED" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
 <path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/>
 <path d="M14 2v5a1 1 0 0 0 1 1h5"/>
 <path d="M10 9H8"/>
 <path d="M16 13H8"/>
 <path d="M16 17H8"/>
 </g>
-<text x="69" y="152" fill="#F6F8FF" font-size="16" font-weight="650" text-anchor="start">Маршрут.pdf</text>
-<text x="69" y="172" fill="#ABBAD8" font-size="13" font-weight="400" text-anchor="start">PDF · 4 страницы</text>
-<rect x="32" y="185" width="296" height="1" rx="0" fill="#2D3B59" />
-<g transform="translate(312 141) scale(0.7083333333333334)" fill="none" stroke="#ABBAD8" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+<text x="69" y="149" fill="#F6F8FF" font-size="16" font-weight="650" text-anchor="start">Маршрут.pdf</text>
+<text x="69" y="169" fill="#ABBAD8" font-size="13" font-weight="400" text-anchor="start">PDF · 4 страницы</text>
+<rect x="32" y="179" width="296" height="1" rx="0" fill="#2D3B59" />
+<g transform="translate(312 137) scale(0.7083333333333334)" fill="none" stroke="#ABBAD8" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
 <path d="m9 18 6-6-6-6"/>
 </g>
-<rect x="29" y="194" width="201" height="48" rx="14" fill="#1D2E51" stroke="#445574"/>
-<g transform="translate(41 210) scale(0.6666666666666666)" fill="none" stroke="#30CAED" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+<g id="action-4" data-visual-role="quiet" data-label="Распознать заново">
+<rect x="32" y="189" width="216" height="48" rx="16" fill="#1D2E51" stroke="#7186A8"/>
+<g transform="translate(50.43000000000001 203) scale(0.8333333333333334)" fill="none" stroke="#F6F8FF" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
 <path d="M3 7V5a2 2 0 0 1 2-2h2"/>
 <path d="M17 3h2a2 2 0 0 1 2 2v2"/>
 <path d="M21 17v2a2 2 0 0 1-2 2h-2"/>
@@ -203,39 +210,44 @@ SOFTWARE.
 <path d="M7 12h10"/>
 <path d="M7 16h6"/>
 </g>
-<text x="65" y="223" fill="#30CAED" font-size="13" font-weight="620" text-anchor="start">Распознать заново</text>
+<text x="78.43" y="218" fill="#F6F8FF" font-size="14" font-weight="600" text-anchor="start">Распознать заново</text>
+</g>
 <text x="16" y="289" fill="#F6F8FF" font-size="17" font-weight="650" text-anchor="start">Текст из PDF</text>
-<rect x="179" y="260" width="165" height="48" rx="14" fill="#1D2E51" stroke="#445574"/>
-<g transform="translate(191 276) scale(0.6666666666666666)" fill="none" stroke="#30CAED" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+<g id="action-5" data-visual-role="quiet" data-label="Открыть текст">
+<rect x="160" y="260" width="184" height="48" rx="16" fill="#1D2E51" stroke="#7186A8"/>
+<g transform="translate(179.25 274) scale(0.8333333333333334)" fill="none" stroke="#F6F8FF" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
 <path d="M21 5H3"/>
 <path d="M15 12H3"/>
 <path d="M17 19H3"/>
 </g>
-<text x="215" y="289" fill="#30CAED" font-size="13" font-weight="620" text-anchor="start">Открыть текст</text>
+<text x="207.25" y="289" fill="#F6F8FF" font-size="14" font-weight="600" text-anchor="start">Открыть текст</text>
+</g>
 <text x="16" y="329" fill="#F6F8FF" font-size="15" font-weight="400" text-anchor="start">День 1. Прогулка по набережной.</text>
 <text x="16" y="350" fill="#F6F8FF" font-size="15" font-weight="400" text-anchor="start">День 2. Возвращение домой…</text>
-<rect x="16" y="358" width="212" height="48" rx="14" fill="#1D2E51" stroke="#445574"/>
-<g transform="translate(28 374) scale(0.6666666666666666)" fill="none" stroke="#30CAED" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+<g id="action-6" data-visual-role="quiet" data-label="Улучшить текст с ИИ">
+<rect x="16" y="360" width="236" height="48" rx="16" fill="#1D2E51" stroke="#7186A8"/>
+<g transform="translate(34.989999999999995 374) scale(0.8333333333333334)" fill="none" stroke="#F6F8FF" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
 <path d="M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z"/>
 <path d="M20 2v4"/>
 <path d="M22 4h-4"/>
 <circle cx="4" cy="20" r="2"/>
 </g>
-<text x="52" y="387" fill="#30CAED" font-size="13" font-weight="620" text-anchor="start">Улучшить текст с ИИ</text>
-<rect x="16" y="415" width="328" height="1" rx="0" fill="#2D3B59" />
-<text x="16" y="438" fill="#F6F8FF" font-size="17" font-weight="650" text-anchor="start">Моя заметка</text>
-<rect x="16" y="445" width="328" height="48" rx="16" fill="#14213D" />
-<text x="32" y="475" fill="#ABBAD8" font-size="15" font-weight="400" text-anchor="start">Добавить комментарий…</text>
-<rect x="16" y="498" width="328" height="48" rx="14" fill="#14213D" />
-<g transform="translate(28 513) scale(0.7083333333333334)" fill="none" stroke="#30CAED" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+<text x="62.989999999999995" y="389" fill="#F6F8FF" font-size="14" font-weight="600" text-anchor="start">Улучшить текст с ИИ</text>
+</g>
+<rect x="16" y="419" width="328" height="1" rx="0" fill="#2D3B59" />
+<text x="16" y="440" fill="#F6F8FF" font-size="17" font-weight="650" text-anchor="start">Моя заметка</text>
+<rect x="16" y="449" width="328" height="48" rx="16" fill="#14213D" />
+<text x="32" y="479" fill="#ABBAD8" font-size="15" font-weight="400" text-anchor="start">Добавить комментарий…</text>
+<rect x="16" y="505" width="328" height="48" rx="14" fill="#14213D" />
+<g transform="translate(28 520) scale(0.7083333333333334)" fill="none" stroke="#30CAED" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
 <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>
 </g>
-<text x="54" y="528" fill="#F6F8FF" font-size="14" font-weight="400" text-anchor="start">Поездки · Только на телефоне</text>
-<g transform="translate(316 513) scale(0.6666666666666666)" fill="none" stroke="#ABBAD8" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+<text x="54" y="535" fill="#F6F8FF" font-size="14" font-weight="400" text-anchor="start">Поездки · Только на телефоне</text>
+<g transform="translate(316 520) scale(0.6666666666666666)" fill="none" stroke="#ABBAD8" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
 <path d="m9 18 6-6-6-6"/>
 </g>
-<rect x="16" y="553" width="328" height="52" rx="16" fill="#7051DB" />
-<text x="180" y="586" fill="#FFFFFF" font-size="16" font-weight="650" text-anchor="middle">Сохранить</text>
+<rect x="16" y="561" width="328" height="52" rx="16" fill="#7051DB" />
+<text x="180" y="593" fill="#FFFFFF" font-size="16" font-weight="600" text-anchor="middle">Сохранить</text>
 <rect x="151" y="622" width="58" height="4" rx="2" fill="#7785A2" />
 </g>
 <text x="36" y="858" fill="#132441" font-size="16" font-weight="650" text-anchor="start">03   /   Дать согласие в чате</text>
@@ -260,13 +272,16 @@ SOFTWARE.
 <text x="22" y="400" fill="#F6F8FF" font-size="15" font-weight="400" text-anchor="start">Он может содержать личные сведения.</text>
 <text x="22" y="423" fill="#F6F8FF" font-size="15" font-weight="400" text-anchor="start">Оригиналы останутся на телефоне.</text>
 <text x="22" y="462" fill="#ABBAD8" font-size="14" font-weight="400" text-anchor="start">1 запрос · возможна оплата</text>
-<rect x="22" y="477" width="136" height="48" rx="14" fill="#1D2E51" stroke="#445574"/>
-<g transform="translate(34 493) scale(0.6666666666666666)" fill="none" stroke="#30CAED" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+<g id="action-7" data-visual-role="quiet" data-label="Подробнее">
+<rect x="22" y="477" width="156" height="48" rx="16" fill="#1D2E51" stroke="#7186A8"/>
+<g transform="translate(40.98 491) scale(0.8333333333333334)" fill="none" stroke="#F6F8FF" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
 <path d="m6 9 6 6 6-6"/>
 </g>
-<text x="58" y="506" fill="#30CAED" font-size="13" font-weight="620" text-anchor="start">Подробнее</text>
-<rect x="16" y="544" width="328" height="52" rx="16" fill="#7051DB" />
-<text x="180" y="577" fill="#FFFFFF" font-size="16" font-weight="650" text-anchor="middle">Отправить текст и составить итог</text>
+<text x="68.97999999999999" y="506" fill="#F6F8FF" font-size="14" font-weight="600" text-anchor="start">Подробнее</text>
+</g>
+<rect x="16" y="544" width="328" height="64" rx="16" fill="#7051DB" />
+<text x="180" y="571" fill="#FFFFFF" font-size="16" font-weight="600" text-anchor="middle">Отправить текст</text>
+<text x="180" y="593" fill="#FFFFFF" font-size="16" font-weight="600" text-anchor="middle">и составить итог</text>
 <rect x="151" y="622" width="58" height="4" rx="2" fill="#7785A2" />
 </g>
 <text x="428" y="858" fill="#132441" font-size="16" font-weight="650" text-anchor="start">04   /   Изменить одну настройку</text>
