@@ -132,8 +132,8 @@ export function MemoryNoteScreen() {
       const fromChat = route.params?.chatReply
         ? prepareAssistantReplyNote(chatStore.getSnapshot().conversations, route.params.chatReply)
         : null;
-      sourceAtOpen.current = fromChat ? {profile,body:fromChat.body} : null;
       if (!stillCurrent()) return;
+      sourceAtOpen.current = fromChat ? {profile,body:fromChat.body} : null;
       repository.current = db; setCollections(sections); setSelected(note); setExtractedText(String(note?.payload.extracted_text || "")); setAllowAgent(false);
       const initialTitle = note?.title || fromChat?.title || "";
       const initialBody = note ? String(note.payload.body || "") : fromChat?.body || "";
