@@ -18,6 +18,7 @@ import { nebulaSpacing, nebulaRadii, nebulaTouch } from "../design/nebula/tokens
 import { MemoryCover } from "../media/MemoryCover";
 import { memoryDisplayTitle, memoryNoteHasPhoto } from "../design/nebula/memoryNotePresentation";
 import { MemoryNoteCard } from "../design/nebula/MemoryNoteCard";
+import { NebulaAction } from "../design/nebula/components";
 
 import { mergeText, noteUndoLabel, type NoteAction } from "../local-memory/note-actions";
 import { scheduleVectors } from "../media/vector-runner";
@@ -233,11 +234,13 @@ export function LocalMemoryScreen() {
       }
     }finally{if(token===hygieneGeneration.current)setBusy(false);}
   }
-  async function act(action: NoteAction, target?: string) {
-    if (!repository.current || busy) return;
+  async function act(action: NoteAction, target?: string, directNotes?: EntityRecord[]) {
+    const affectedNotes = directNotes ?? selectedNotes;
+    if (!repository.current || busy || affectedNotes.length === 0) return;
     setBusy(true); setError("");
     try {
-      const token = await repository.current.changeNotes(action, selectedNotes, target);
+      // A card-local restore must target that exact source/version, never another selection.
+      const token = await repository.current.changeNotes(action, affectedNotes, target);
       setUndo(token); setSelectedIds([]); setSelecting(false); setActionsOpen(false); setConfirmation(null); setContextNote(null); setMoveOpen(false); setMergeOpen(false); setRetry(n => n + 1);
       if (profile) scheduleVectors(profile);
     } catch (e) { setError(memoryErrorMessage(e)); } finally { setBusy(false); }
@@ -293,9 +296,9 @@ export function LocalMemoryScreen() {
   const actionButton = { ...button, alignItems: "flex-start" as const, borderBottomWidth: 1, borderBottomColor: t.line };
   return <View style={{ flex: 1, backgroundColor: t.bg, paddingTop: insets.top }}>
     {selecting ? <View testID="memory-selection-toolbar" style={{ paddingHorizontal: 16, backgroundColor: t.panel, borderBottomWidth: 1, borderBottomColor: t.line, flexDirection: "row", alignItems: "center", flexWrap: "wrap", minHeight: 56, gap: 4 }}>
-      <Pressable disabled={busy} accessibilityRole="button" accessibilityLabel="Отменить выбор записей" onPress={cancelSelection} style={{ ...button, paddingHorizontal: 12 }}><Text style={{ color: t.secondary }}>Отмена</Text></Pressable>
+      <NebulaAction icon="x" label="Отмена" accessibilityLabel="Отменить выбор записей" onPress={cancelSelection} disabled={busy} />
       <Text accessibilityLiveRegion="polite" style={{ flex: 1, color: t.text }}>Выбрано: {selectedIds.length}</Text>
-      <Pressable accessibilityRole="button" accessibilityLabel="Действия с выбранными записями" accessibilityState={{ disabled: busy || !selectedIds.length }} disabled={busy || !selectedIds.length} onPress={() => setActionsOpen(true)} style={{ ...button, opacity: selectedIds.length ? 1 : .45 }}><Text style={{ color: t.secondary }}>Действия</Text></Pressable>
+      <NebulaAction icon="more-horizontal" label="Действия" accessibilityLabel="Действия с выбранными записями" variant="primary" onPress={() => setActionsOpen(true)} disabled={busy || !selectedIds.length} />
     </View> : <View testID="memory-normal-toolbar" style={{ paddingHorizontal: 16, minHeight: 56, flexDirection: "row", alignItems: "center", gap: nebulaSpacing.xs }}>
           <Text accessibilityRole="header" style={{ flex: 1, color: t.text, fontSize: 28, fontWeight: "800" }}>Память</Text>
           <Pressable accessibilityRole="button" accessibilityLabel="Добавить в память" onPress={() => setAddOpen(true)}
@@ -321,7 +324,7 @@ export function LocalMemoryScreen() {
         {!term && status === "active" && !collectionId ? <>
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
             <Text style={{ color: t.text, fontSize: 18, fontWeight: "700" }}>Коллекции</Text>
-            <Pressable accessibilityRole="button" accessibilityLabel="Все коллекции" disabled={selecting} accessibilityState={{ disabled: selecting }} onPress={() => setCollectionMenu(true)} style={button}><Text style={{ color: t.secondary }}>Все</Text></Pressable>
+            <NebulaAction icon="grid" label="Все разделы" accessibilityLabel="Все коллекции" disabled={selecting} onPress={() => setCollectionMenu(true)} />
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: nebulaSpacing.sm }}>
             {collectionCards.map(c => <Pressable key={c.id} accessibilityRole="button" accessibilityLabel={"Раздел " + c.name}
@@ -347,7 +350,10 @@ export function LocalMemoryScreen() {
             <Text style={{ color: t.secondary, fontWeight: "700" }}>На проверке · возможные изменения</Text>
             <Text style={{ color: t.muted, fontSize: 13 }}>Сравнить источники и решить, что делать с прежними фактами</Text>
           </Pressable> : null}
-        {notes.length ? <Pressable disabled={selecting || loading} accessibilityElementsHidden={selecting} importantForAccessibility={selecting ? "no-hide-descendants" : "auto"} accessibilityRole="button" accessibilityLabel="Выбрать записи" onPress={() => { setContextNote(null); setSelecting(true); }} style={{ ...button, opacity: selecting ? 0 : 1, alignItems: "flex-start" }}><Text style={{ color: t.secondary }}>Выбрать записи</Text></Pressable> : null}
+        {notes.length && !selecting ? <View style={{ alignItems: "flex-start" }}>
+          <NebulaAction icon="check-square" label="Выбрать записи"
+            disabled={loading} onPress={() => { setContextNote(null); setSelecting(true); }} />
+        </View> : null}
         {status === "trashed" ? <Text style={{ color: t.muted, fontSize: 13, lineHeight: 19 }}>
           Удалённые записи исключены из поиска агента. Их можно восстановить или удалить окончательно.
         </Text> : null}
@@ -365,6 +371,8 @@ export function LocalMemoryScreen() {
         sectionName={collections.find(c => c.id === item.collection_id)?.name || "Запись"}
         selected={selectedIds.includes(item.id)} selecting={selecting}
         onToggleSelection={() => toggleSelection(item.id)}
+        onRestore={status === "trashed" ? () => { void act("restore", undefined, [item]); } : undefined}
+        restoreDisabled={busy || loading}
         onActions={() => { if (!busy && !loading) { setConfirmation(null); setContextNote(item); setActionsOpen(true); } }}
         onOpen={() => selecting
           ? toggleSelection(item.id)

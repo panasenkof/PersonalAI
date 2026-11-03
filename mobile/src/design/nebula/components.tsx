@@ -45,14 +45,14 @@ export function NebulaSection({ title, children }: { title: string; children: Re
   </View>;
 }
 
-export function NebulaAction({ icon, label, onPress, disabled = false, variant = "quiet", testID }: {
+export function NebulaAction({ icon, label, accessibilityLabel, onPress, disabled = false, variant = "quiet", testID }: {
   icon?: React.ComponentProps<typeof Feather>["name"];
-  label: string; onPress: () => void; disabled?: boolean;
+  label: string; accessibilityLabel?: string; onPress: () => void; disabled?: boolean;
   variant?: "quiet" | "primary" | "danger"; testID?: string;
 }) {
   const c = useNebulaColors();
   const foreground = variant === "primary" ? c.textOnAccent : variant === "danger" ? c.danger : c.text;
-  return <Pressable testID={testID} accessibilityRole="button" accessibilityLabel={label}
+  return <Pressable testID={testID} accessibilityRole="button" accessibilityLabel={accessibilityLabel || label}
     accessibilityState={{ disabled }} disabled={disabled} onPress={onPress}
     style={({ pressed }) => ({
       flexDirection: "row",
