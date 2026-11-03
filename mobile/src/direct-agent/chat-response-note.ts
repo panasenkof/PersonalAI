@@ -8,7 +8,9 @@ export type ChatReplyLocator = { conversationId: string; rowId: string };
 
 export type PreparedReplyNote = {
   title: string; body: string;
-  provenance: { kind: "assistant_reply"; conversationId: string; rowId: string };
+  provenance: { kind: "assistant_reply" | "dialogue_summary"; conversationId: string; rowId: string;
+    scope?: "all" | "last10"; includedRows?: number; totalRows?: number; omittedAttachments?: number;
+    firstRowId?: string; lastRowId?: string; model?: string; provider?: string; createdAt?: string };
 };
 
 /** H-SAVE1a: a finished assistant row, not the ephemeral stream footer,
@@ -31,8 +33,15 @@ export function prepareAssistantReplyNote(
     throw new Error("Ответ длиннее 60 000 символов. Сохранение без обрезания пока недоступно.");
   const conversationTitle = conversation.title.replace(/[\r\n\t]+/g, " ").trim();
   return {
-    title: ("Ответ ИИ · " + (conversationTitle || "Диалог")).slice(0, 160),
+    title: ((answer.dialogueSummary ? "Итог диалога · " : "Ответ ИИ · ") + (conversationTitle || "Диалог")).slice(0, 160),
     body: answer.text,
-    provenance: {kind:"assistant_reply", conversationId:locator.conversationId, rowId:locator.rowId},
+    provenance: answer.dialogueSummary
+      ? {kind:"dialogue_summary", conversationId:locator.conversationId, rowId:locator.rowId,
+        scope:answer.dialogueSummary.scope, includedRows:answer.dialogueSummary.includedRows,
+        totalRows:answer.dialogueSummary.totalRows, omittedAttachments:answer.dialogueSummary.omittedAttachments,
+        firstRowId:answer.dialogueSummary.firstRowId,lastRowId:answer.dialogueSummary.lastRowId,
+        model:answer.dialogueSummary.model,provider:answer.dialogueSummary.provider,
+        createdAt:answer.dialogueSummary.createdAt}
+      : {kind:"assistant_reply", conversationId:locator.conversationId, rowId:locator.rowId},
   };
 }

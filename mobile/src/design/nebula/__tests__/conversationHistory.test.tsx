@@ -80,4 +80,17 @@ describe("Conversation history presentation", () => {
     expect(view.getAllByTestId(/chat-history-item-/)).toHaveLength(30);
     expect(onDelete).not.toHaveBeenCalled();
   });
+  it("offers a single accessible opt-in summary action, disabled while the chat runs", () => {
+    const onSummary=jest.fn();
+    const free=chat("free","Рабочая переписка");
+    const busy=chat("busy","Диалог занят",undefined,"",true);
+    const view=render(<ConversationHistorySheet visible conversations={[free,busy]}
+      onClose={jest.fn()} onSelect={jest.fn()} onDelete={jest.fn()} onNewChat={jest.fn()}
+      onSummary={onSummary}/>);
+    expect(view.getByLabelText("Сохранить итог диалога Диалог занят").props.accessibilityState.disabled).toBe(true);
+    fireEvent.press(view.getByLabelText("Сохранить итог диалога Рабочая переписка"));
+    expect(onSummary).toHaveBeenCalledTimes(1);
+    expect(onSummary).toHaveBeenCalledWith(expect.objectContaining({id:"free"}));
+  });
+
 });

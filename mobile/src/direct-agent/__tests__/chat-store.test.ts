@@ -5,8 +5,9 @@ import { saveApprovedNote } from "../memory";
 import { waitForApplicationSession } from "../../local-memory/storage";
 import { loadModelCallLimit } from "../agent-preferences";
 import { planDocumentSynthesis } from "../document-synthesis";
+import { planDialogueSummary } from "../dialogue-summary";
 
-jest.mock("../../local-memory/storage", () => ({ waitForApplicationSession: jest.fn(async () => {}), withLocalMemoryDatabase: jest.fn() }));
+jest.mock("../../local-memory/storage", () => ({ waitForApplicationSession: jest.fn(async () => {}), withLocalMemoryDatabase: jest.fn(), onLocalMemorySessionChange: jest.fn(() => () => {}) }));
 jest.mock("../memory", () => ({ searchApprovedNotes: jest.fn(async () => []), saveApprovedNote: jest.fn(async () => "note") }));
 jest.mock("expo-crypto", () => ({ randomUUID: () => "id-" + Math.random().toString(36).slice(2) }));
 jest.mock("../agent-preferences", () => ({ loadModelCallLimit: jest.fn(async () => 4) }));
@@ -334,5 +335,47 @@ test("H-DOC1b2: long documents require an explicit approval key before store/mod
   expect(records.get(id)?.rows[0].attachments).toEqual(sources);
   expect(runner.mock.calls[0][0].settings.apiKey).toBe(settings.apiKey);
   expect(runner.mock.calls[0][0].settings.allowWeb).toBe(false);
+  store.dispose();
+});
+
+test("H-SAVE1b: confirmed summary is durable in SQLCipher chat, but not a memory note until user saves",async()=>{
+  const {repo,records}=repository();
+  const original:SavedConversation={id:"summary-chat",title:"Исходный диалог",createdAt:"2026-11-02",
+    updatedAt:"2026-11-03",rows:[{id:"u1",role:"user",text:"Выбери из статей главные темы"},
+      {id:"a1",role:"assistant",text:"Статьи о машинном обучении"}],question:"",drafts:[]};
+  records.set(original.id,original);
+  const runner=jest.fn(async(o:any)=>({text:"Кратко: **машинное обучение**.",sources:[],requests:1}));
+  const store=new DirectChatStore("guest",repo,runner); await store.initialize();
+  const plan=planDialogueSummary(original,"all",settings.model,settings.provider);
+  const result=await store.summarizeForNote(original.id,settings,"all",plan.approvalKey);
+  const snapshot=records.get(original.id)!;
+  expect(result.conversationId).toBe(original.id);
+  expect(snapshot.rows.at(-1)).toMatchObject({id:result.rowId,role:"assistant",
+    dialogueSummary:{scope:"all",includedRows:2,totalRows:2}});
+  expect(snapshot.rows.at(-1)?.text).toContain("2 текстовых сообщений из 2");
+  expect(snapshot.interrupted).toBe(false);
+  expect(runner).toHaveBeenCalledTimes(1);
+  expect(runner.mock.calls[0][0].settings.allowWeb).toBe(false);
+  expect(saveApprovedNote).not.toHaveBeenCalled();
+  store.dispose();
+});
+test("H-SAVE1b: stale approval or explicit Stop never adds a misleading summary",async()=>{
+  const {repo,records}=repository();
+  const original:SavedConversation={id:"summary-chat",title:"Диалог",createdAt:"2026-11-02",
+    updatedAt:"2026-11-03",rows:[{id:"u1",role:"user",text:"Что произошло?"}],question:"",drafts:[]};
+  records.set(original.id,original);
+  const runner=jest.fn((o:any)=>new Promise<never>((_resolve,reject)=>{
+    o.signal.addEventListener("abort",()=>reject(new Error("aborted")));
+  }));
+  const store=new DirectChatStore("guest",repo,runner);await store.initialize();
+  const plan=planDialogueSummary(original,"all",settings.model,settings.provider);
+  await expect(store.summarizeForNote(original.id,settings,"all","stale-approval")).rejects.toThrow("изменились");
+  expect(runner).not.toHaveBeenCalled();
+  const pending=store.summarizeForNote(original.id,settings,"all",plan.approvalKey);
+  await started(runner);
+  store.stop(original.id);
+  await expect(pending).rejects.toThrow();
+  expect(records.get(original.id)?.rows).toHaveLength(1);
+  expect(store.getSnapshot().conversations[0].busy).toBe(false);
   store.dispose();
 });

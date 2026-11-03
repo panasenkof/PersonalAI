@@ -5,6 +5,7 @@ import { beginTask, mergeTaskReceipts, recordEvidence } from "./task-state";
 import { webPreference } from "./dialogue";
 import { runDirectAgent } from "./engine";
 import { historyWithoutLargeDocuments, planDocumentSynthesis, runDocumentSynthesis } from "./document-synthesis";
+import { planDialogueSummary, runDialogueSummary, type DialogueSummaryScope } from "./dialogue-summary";
 import { diagnosticTrace, redactDiagnostic } from "./diagnostics";
 import { MAX_USER_PROMPT_CHARS } from "./limits";
 import { loadModelCallLimit } from "./agent-preferences";
@@ -19,7 +20,7 @@ import type { MemorySection } from "./fact-tool";
 import { conversationRepository } from "./conversations";
 import type { ChatDraft, ConversationRepository, SavedConversation } from "./conversations";
 import type { DirectAgentSettings } from "./settings";
-import { waitForApplicationSession } from "../local-memory/storage";
+import { waitForApplicationSession, onLocalMemorySessionChange } from "../local-memory/storage";
 import { localPhotoIntent83, localPhotoSuggestion83, searchLocalPhotosFromChat83 } from "../media/vision-chat-search";
 
 /** `streamText` is the answer as it arrives; it is never persisted. */
@@ -403,6 +404,68 @@ export class DirectChatStore {
       if (paint) clearTimeout(paint);
       const final = this.update(id, { busy: false, progress: "", progressSince: undefined, streamText: undefined });
       if (final) await this.persist(final).catch(() => {});
+    }
+  }
+  /** H-SAVE1b: explicit, bounded summary of a chosen history range. Only the
+   * existing SQLCipher conversation writer persists the generated preview.
+   * Nothing is written into memory until the existing note editor saves it. */
+  async summarizeForNote(
+    conversationId: string, settings: DirectAgentSettings,
+    scope: DialogueSummaryScope, approvalKey: string,
+  ): Promise<{conversationId:string;rowId:string}> {
+    const current=this.snapshot.conversations.find(c=>c.id===conversationId);
+    if (!this.snapshot.ready || this.disposed || !current || current.busy || current.deleting ||
+        this.requests.has(conversationId))
+      throw new Error("Диалог занят или недоступен. Дождитесь завершения ответа.");
+    const plan=planDialogueSummary(current,scope,settings.model,settings.provider);
+    if (plan.approvalKey!==approvalKey)
+      throw new Error("После подтверждения переписка или модель изменились. Подтвердите диапазон заново.");
+    const maxRequests=await loadModelCallLimit(this.profile);
+    if (plan.calls>maxRequests)
+      throw new Error("Нужно "+plan.calls+" обращений к модели, разрешено "+maxRequests+". Ничего не отправлено.");
+    const latest=this.snapshot.conversations.find(c=>c.id===conversationId);
+    if (!latest || latest.busy || latest.deleting || this.requests.has(conversationId) ||
+        planDialogueSummary(latest,scope,settings.model,settings.provider).approvalKey!==approvalKey)
+      throw new Error("Диалог изменился до начала обработки. Повторите подтверждение.");
+    const aborter=new AbortController();
+    this.requests.set(conversationId,aborter);
+    // Unlike ordinary visible chat responses, an optional paid whole-history
+    // export stops as soon as AppLock closes; never continue shipping text.
+    const offSession=onLocalMemorySessionChange(unlocked=>{if(!unlocked)aborter.abort();});
+    this.update(conversationId,{busy:true,progress:"Готовлю итог диалога…",progressSince:Date.now()});
+    try {
+      await waitForApplicationSession(this.lifetime.signal);
+      if(this.disposed || aborter.signal.aborted)throw new Error("Создание итога отменено.");
+      const result=await runDialogueSummary({
+        settings, prompt:"Составить итог переписки",history:[],maxRequests,
+        signal:aborter.signal, lookup:async()=>[],propose:()=>undefined,
+        status:progress=>{if(!aborter.signal.aborted)this.update(conversationId,{progress,progressSince:Date.now()});},
+      },plan,this.runner);
+      if(this.disposed || aborter.signal.aborted)throw new Error("Создание итога отменено.");
+      const beforeSave=this.snapshot.conversations.find(c=>c.id===conversationId);
+      if(!beforeSave || beforeSave.deleting ||
+          planDialogueSummary(beforeSave,scope,settings.model,settings.provider).approvalKey!==approvalKey)
+        throw new Error("История изменилась во время составления итога. Результат не сохранён.");
+      const rowId=Crypto.randomUUID();
+      const createdAt=new Date().toISOString();
+      const rows=[...beforeSave.rows,{id:rowId,role:"assistant" as const,text:result.body,
+        dialogueSummary:{scope:plan.scope,includedRows:plan.includedRows,totalRows:plan.totalRows,
+          omittedAttachments:plan.omittedAttachments,sourceChars:plan.source.length,
+          parts:plan.parts.length,firstRowId:plan.firstRowId,lastRowId:plan.lastRowId,
+          model:settings.model,provider:settings.provider,createdAt}}];
+      // Durability before navigating to a note. Do not create a new writer.
+      await this.persist({...beforeSave,rows,updatedAt:createdAt});
+      if(this.disposed || aborter.signal.aborted)throw new Error("Обработка остановлена. Проверьте историю диалога.");
+      this.update(conversationId,{rows,updatedAt:createdAt});
+      return {conversationId,rowId};
+    } catch(e) {
+      if(!this.disposed)this.publish({error:(e as Error)?.message||"Не удалось составить итог диалога."});
+      throw e;
+    } finally {
+      offSession();
+      this.requests.delete(conversationId);
+      const final=this.update(conversationId,{busy:false,progress:"",progressSince:undefined});
+      if(final)await this.persist(final).catch(()=>{});
     }
   }
   stop(id = this.snapshot.activeId) { if (id && this.requests.has(id)) { this.update(id, { progress: "Останавливаю запрос…" }); this.requests.get(id)?.abort(); } }

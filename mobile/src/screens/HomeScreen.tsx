@@ -44,6 +44,7 @@ import { MarkdownText } from "../components/Markdown";
 import { KIND_NAMES } from "../direct-agent/fact-tool";
 import { useDraftNormalization } from "../direct-agent/use-draft-normalization";
 import { prepareAssistantReplyNote } from "../direct-agent/chat-response-note";
+import { planDialogueSummary, type DialogueSummaryScope } from "../direct-agent/dialogue-summary";
 
 export function HomeScreen() {
   return <NebulaHomeThemeProvider><NebulaHomeContent /></NebulaHomeThemeProvider>;
@@ -282,6 +283,48 @@ function NebulaHomeContent() {
       }).catch(()=>setNotice("Не удалось проверить лимит обращений к ИИ; документы не отправлены."));
     }
   };
+  /** H-SAVE1b is opt-in, never an automatic paid background summary. */
+  const chooseDialogueSummary = (conversationId:string) => {
+    const selected=store.getSnapshot().conversations.find(c=>c.id===conversationId);
+    if(!selected || selected.busy || selected.deleting || !settings || !profile) {
+      setNotice("Для создания итога нужен доступный диалог и настроенная модель."); return;
+    }
+    Alert.alert("Сохранить итог диалога", "Какую часть переписки включить? Оригиналы файлов не отправляются.", [
+      {text:"Отмена",style:"cancel"},
+      {text:"Последние 10",onPress:()=>void confirmDialogueSummary(conversationId,"last10")},
+      {text:"Весь диалог",onPress:()=>void confirmDialogueSummary(conversationId,"all")},
+    ]);
+  };
+  const confirmDialogueSummary = async (conversationId:string,scope:DialogueSummaryScope) => {
+    if(!profile || !settings)return;
+    const chosenSettings=settings;
+    try {
+      const conversation=store.getSnapshot().conversations.find(c=>c.id===conversationId);
+      if(!conversation || conversation.busy || conversation.deleting)
+        throw new Error("Диалог занят или недоступен.");
+      const plan=planDialogueSummary(conversation,scope,chosenSettings.model,chosenSettings.provider);
+      const limit=await loadModelCallLimit(profile);
+      if(plan.calls>limit)
+        throw new Error("Для выбранной переписки требуется "+plan.calls+
+          " обращений к ИИ; ваш лимит — "+limit+". Выберите меньший диапазон или измените лимит.");
+      Alert.alert("Подтвердить создание итога",
+        "Диапазон: "+plan.includedRows+" сообщений из "+plan.totalRows+
+        ". Входной текст: "+plan.source.length.toLocaleString("ru-RU")+" символов. "+
+        "Оригиналов вложений не передаём: "+plan.omittedAttachments+".\n"+
+        "Подключение: "+chosenSettings.provider+" · "+chosenSettings.model+".\n"+
+        "До "+plan.calls+" обращений к модели (разрешено "+limit+"). "+
+        "Текст переписки может содержать личные сведения и будет передан выбранному API-подключению. "+
+        "Обработка может быть платной, точная стоимость неизвестна. "+
+        "После генерации откроется редактируемый предпросмотр; пока вы не нажмёте «Сохранить», заметка не создастся.",
+        [{text:"Отмена",style:"cancel"},
+         {text:"Разрешить и создать",onPress:()=>{
+           void store.summarizeForNote(conversationId,chosenSettings,scope,plan.approvalKey)
+             .then(locator=>{ if(store.getSnapshot().conversations.some(c=>c.id===locator.conversationId))
+               navigation.navigate("MemoryNote",{chatReply:locator}); })
+             .catch(e=>setNotice((e as Error)?.message||"Не удалось подготовить итог."));
+         }}]);
+    }catch(e){setNotice((e as Error)?.message||"Не удалось выбрать диапазон переписки.");}
+  };
   /** Local-only action: no LLM call. The editor revalidates the IDs on Save. */
   const openReplyNoteActions = (rowId:string) => {
     const conversationId=active?.id;
@@ -502,6 +545,7 @@ function NebulaHomeContent() {
     <ConversationHistorySheet visible={historyOpen} conversations={conversations} activeId={active?.id}
       onClose={() => setHistoryOpen(false)}
       onSelect={c => { store.select(c.id); setHistoryOpen(false); }}
+      onSummary={c => {store.select(c.id);setHistoryOpen(false);chooseDialogueSummary(c.id);}}
       onDelete={c => Alert.alert("Удалить диалог?", c.title, [
         { text: "Отмена", style: "cancel" },
         { text: "Удалить", style: "destructive", onPress: () => void store.remove(c.id) },
