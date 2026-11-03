@@ -13,6 +13,7 @@ import { VisionModelCard } from "./components/VisionModelCard";
 import { ScrollView } from "react-native";
 import { clearAttachmentPreviews } from "./media/attachments";
 import type { VerifiedOriginalLocator } from "./local-memory/types";
+import type { ChatReplyLocator } from "./direct-agent/chat-response-note";
 
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -32,7 +33,7 @@ export type RootStackParams = {
   Tabs: NavigatorScreenParams<TabParams> | undefined;
   /** `presetId` adds and selects a ready-made provider (first-run setup). */
   ModelConnections: { presetId?: string } | undefined;
-  MemoryNote: { entityId?: string; collectionId?: string; photoAttachmentId?: string; verifiedOriginal?: VerifiedOriginalLocator };
+  MemoryNote: { entityId?: string; collectionId?: string; photoAttachmentId?: string; verifiedOriginal?: VerifiedOriginalLocator; chatReply?: ChatReplyLocator };
   PhotoSearchSettings: undefined;
   MemoryBackup: undefined;
   MemoryTemporalReview: { collectionId: string };
