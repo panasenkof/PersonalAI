@@ -27,6 +27,8 @@ Prefer deterministic test fixtures/clock and stable `testID` + `accessibilityRol
 
 ## 3. UX acceptance checkpoints
 
+For a new or restyled action, review the rendered control in its actual screen. In the PR, place before/after screenshots of the same state next to the approved target. Identify the object affected and the primary action. Inspect alignment, padding, button boundary, label wrapping, focus/pressed feedback and the gap to nearby targets. Include the compact large-text case when layout changes. Record the width, font scale, theme and commit. An assertion that finds the label proves presence only. For Step 8 use the [PersAI button examples and visual acceptance criteria](../../../Plans/PersAI_UI_plan.md#button-visual). Record pending device evidence in U5.
+
 - **Navigation:** Back/dismiss consistent from modal → selection → detail; no unexpected tab changes; draft loss requires explicit handling. For list routes retain search/filter/scroll and stable IDs.
 - **Chat:** send, stream, cancel/retry, auto-follow only near bottom, manual scroll anchoring, “scroll down” affordance, keyboard/voice switch and tab navigation do not jump content.
 - **Memory:** 0/1/many items, no selection trap, single versus bulk actions distinguished, menu stays on-screen at 320dp, selected count accurate, Undo/recovery.
