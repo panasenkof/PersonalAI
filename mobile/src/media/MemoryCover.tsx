@@ -33,8 +33,6 @@ export function MemoryCover({ profile, entityId, photoAttachmentId, active = tru
   const t = useTheme(); const focused = useIsFocused(); const visible = useApplicationVisible();
   const [unlocked, setUnlocked] = useState(true);
   const [uri, setUri] = useState(""); const [failed, setFailed] = useState(false);
-  const [noPreview, setNoPreview] = useState(false);
-  useEffect(() => setNoPreview(false), [profile, entityId, photoAttachmentId]);
   const [message, setMessage] = useState(""); const [loading, setLoading] = useState(false); const [attempt, setAttempt] = useState(0);
   useEffect(() => onLocalMemorySessionChange(setUnlocked), []);
   const activation = useRef({ key: "", seen: false });
@@ -53,7 +51,6 @@ export function MemoryCover({ profile, entityId, photoAttachmentId, active = tru
       const image = items.find(item => (!photoAttachmentId || item.id === photoAttachmentId) && attachmentPreviewKind(item) === "image" && item.size <= 12 * 1024 * 1024);
       if (controller.signal.aborted) return;
       if (!image) {
-        setNoPreview(true);
         setMessage(items.some(item => attachmentPreviewKind(item) === "image") ? "Большое фото · откройте оригинал во вложениях" : "Оригинал фото не сохранён");
         return;
       }
@@ -69,19 +66,26 @@ export function MemoryCover({ profile, entityId, photoAttachmentId, active = tru
           directory.create({ intermediates: true, idempotent: true });
           const destination = new File(directory, Crypto.randomUUID() + ".jpg");
           new File(thumbnail).move(destination); thumbnail = destination.uri;
-          setNoPreview(false); setUri(thumbnail);
+          setUri(thumbnail);
         }
       } finally { removeCoverFile(original); }
-    }).catch(() => { if (!controller.signal.aborted) { setFailed(true); setNoPreview(true); setMessage("Не удалось загрузить превью"); } })
+    }).catch(() => { if (!controller.signal.aborted) { setFailed(true); setMessage("Не удалось загрузить превью"); } })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => { controller.abort(); removeCoverFile(thumbnail); };
   }, [enabled, profile, entityId, photoAttachmentId, attempt]);
-  return <View testID={"memory-cover-" + entityId} style={{ height: noPreview ? undefined : height, minHeight: compact ? 48 : 64, paddingVertical: uri ? 0 : 8, backgroundColor: t.soft, justifyContent: "center", alignItems: "center", overflow: "hidden" }}>
+  // Keep the same bounded footprint during loading, missing originals and decoder errors.
+  // A failed thumbnail must not push adjacent grid items or move the list anchor.
+  return <View testID={"memory-cover-" + entityId} style={{ height, minHeight: compact ? height : 64, paddingVertical: uri ? 0 : 8, backgroundColor: t.soft, justifyContent: "center", alignItems: "center", overflow: "hidden" }}>
     {enabled && uri && !failed ? <Image source={{ uri }} accessibilityLabel={label} resizeMode={fit}
-      onError={() => { removeCoverFile(uri); setUri(""); setFailed(true); setNoPreview(true); setMessage("Не удалось показать превью"); }} style={{ width: "100%", height: "100%" }} /> : <>
+      onError={() => { removeCoverFile(uri); setUri(""); setFailed(true); setMessage("Не удалось показать превью"); }} style={{ width: "100%", height: "100%" }} /> : <>
       {loading ? <ActivityIndicator accessibilityLabel="Загрузка обложки" /> : <Feather name="image" size={compact ? 24 : 28} color={t.muted} />}
       {!compact ? <Text style={{ color: t.muted, fontSize: 13, padding: 8, textAlign: "center" }}>{loading ? "Загружаю фото…" : message || "Фото"}</Text> : null}
-      {failed && enabled ? <Pressable accessibilityRole="button" accessibilityLabel="Повторить загрузку обложки" onPress={event => { event?.stopPropagation?.(); setAttempt(value => value + 1); }} style={{ minHeight: 48, justifyContent: "center", paddingHorizontal: 12 }}><Text style={{ color: t.secondary }}>Повторить</Text></Pressable> : null}
+      {failed && enabled ? <Pressable accessibilityRole="button" accessibilityLabel="Повторить загрузку обложки"
+        onPress={event => { event?.stopPropagation?.(); setAttempt(value => value + 1); }}
+        style={compact ? { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, minHeight: 48, alignItems: "center", justifyContent: "center", backgroundColor: t.soft } :
+          { minHeight: 48, justifyContent: "center", paddingHorizontal: 12 }}>
+        {compact ? <Feather name="refresh-cw" size={22} color={t.secondary} /> : <Text style={{ color: t.secondary }}>Повторить</Text>}
+      </Pressable> : null}
     </>}
   </View>;
 }
