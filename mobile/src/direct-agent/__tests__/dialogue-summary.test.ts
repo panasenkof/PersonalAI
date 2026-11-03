@@ -5,7 +5,7 @@ import { defaultDirectPreferences } from "../settings";
 import type { DirectAgentOptions } from "../engine";
 import { TRUNCATED_NOTE } from "../limits";
 
-const settings={...defaultDirectPreferences,apiKey:"test",allowWeb:true};
+const settings={...defaultDirectPreferences,apiKey:"test",webSearchKey:"",allowWeb:true};
 function conversation(rows:SavedConversation["rows"]):SavedConversation {
   return {id:"conversation",title:"Диалог об обработке PDF",createdAt:"2026-11-02",
     updatedAt:"2026-11-03",rows,drafts:[],question:""};
