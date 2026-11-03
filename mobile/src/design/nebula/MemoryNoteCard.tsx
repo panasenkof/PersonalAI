@@ -4,11 +4,12 @@ import Feather from "@expo/vector-icons/Feather";
 import type { EntityRecord } from "../../local-memory/types";
 import { useTheme } from "../../theme";
 import { nebulaRadii, nebulaSpacing } from "./tokens";
+import { NebulaAction } from "./components";
 import { memoryDisplayTitle, memoryNoteDate, memoryNotePreview, memoryNoteType } from "./memoryNotePresentation";
 
 /** The library card is display-only: selection, long-press and navigation
  * remain under the owning Memory screen. No persistence or LLM calls here. */
-export function MemoryNoteCard({ note, sectionName, selected, selecting = false, onOpen, onToggleSelection, onActions, cover, grid = false }: {
+export function MemoryNoteCard({ note, sectionName, selected, selecting = false, onOpen, onToggleSelection, onActions, onRestore, restoreDisabled = false, cover, grid = false }: {
   cover?: React.ReactNode;
   grid?: boolean;
   note: EntityRecord;
@@ -16,6 +17,8 @@ export function MemoryNoteCard({ note, sectionName, selected, selecting = false,
   selected: boolean;
   selecting?: boolean;
   onActions?: () => void;
+  onRestore?: () => void;
+  restoreDisabled?: boolean;
   onOpen: () => void;
   onToggleSelection: () => void;
 }) {
@@ -54,5 +57,9 @@ export function MemoryNoteCard({ note, sectionName, selected, selecting = false,
   </Pressable>
     {!selecting && onActions ? <Pressable accessibilityRole="button" accessibilityLabel={"Действия с заметкой " + title} onPress={onActions}
       style={{ position: "absolute", top: 0, right: 0, minHeight: 48, minWidth: 48, alignItems: "center", justifyContent: "center" }}><Feather name="more-vertical" size={22} color={t.secondary} /></Pressable> : null}
+    {!selecting && onRestore ? <View style={{ marginTop: nebulaSpacing.xs }}>
+      <NebulaAction testID={"memory-restore-" + note.id} icon="rotate-ccw" label="Восстановить"
+        accessibilityLabel={"Восстановить заметку " + title} disabled={restoreDisabled} onPress={onRestore} />
+    </View> : null}
   </View>;
 }
