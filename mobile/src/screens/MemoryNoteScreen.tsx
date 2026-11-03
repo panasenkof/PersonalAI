@@ -58,7 +58,7 @@ export function MemoryNoteScreen() {
   const route = useRoute<RouteProp<RootStackParams, "MemoryNote">>();
   const profile = useProfile();
   const { store: chatStore } = useDirectChat();
-  const sourceAtOpen = useRef<{profile:string;body:string}|null>(null);
+  const sourceAtOpen = useRef<{profile:string;body:string;kind:"assistant_reply"|"dialogue_summary"}|null>(null);
   const activeProfile = useRef(profile); activeProfile.current = profile;
   const extraction = useRef<AbortController | null>(null);
   useEffect(() => { const off = onLocalMemorySessionChange(unlocked => { if (!unlocked) { extraction.current?.abort(); setCandidate(null); setRepeatFiles([]); } }); return () => { off(); extraction.current?.abort(); }; }, []);
@@ -133,7 +133,7 @@ export function MemoryNoteScreen() {
         ? prepareAssistantReplyNote(chatStore.getSnapshot().conversations, route.params.chatReply)
         : null;
       if (!stillCurrent()) return;
-      sourceAtOpen.current = fromChat ? {profile,body:fromChat.body} : null;
+      sourceAtOpen.current = fromChat ? {profile,body:fromChat.body,kind:fromChat.provenance.kind} : null;
       repository.current = db; setCollections(sections); setSelected(note); setExtractedText(String(note?.payload.extracted_text || "")); setAllowAgent(false);
       const initialTitle = note?.title || fromChat?.title || "";
       const initialBody = note ? String(note.payload.body || "") : fromChat?.body || "";
@@ -188,7 +188,7 @@ export function MemoryNoteScreen() {
       // H-SAVE1a preserves Markdown and its trailing newlines exactly;
       // ordinary hand-written notes retain the established trim behavior.
       body: fromChat ? body : body.trim(), extracted_text: extractedText.trim(),
-      ...(fromChat ? { chat_origin: { ...fromChat.provenance, label: "Ответ ИИ",
+      ...(fromChat ? { chat_origin: { ...fromChat.provenance, label: fromChat.provenance.kind === "dialogue_summary" ? "Итог диалога" : "Ответ ИИ",
         savedAt: new Date().toISOString() } } : {}) };
     const base = baseline.current;
     const cardFields = { kind, aliases: splitNames(namesForSave.current), userTerms: splitNames(terms) };
@@ -333,10 +333,14 @@ export function MemoryNoteScreen() {
       </View>
       {loading ? <ActivityIndicator accessibilityLabel="Загрузка записи" /> : null}
       {!loading && route.params?.chatReply && !selected ? <Text style={{color:t.muted,...nebulaTypography.label}}>
-        Черновик из ответа ИИ · текст и разметку можно изменить. Сохранение выполняется на телефоне без запроса к модели.
+        {sourceAtOpen.current?.kind === "dialogue_summary"
+          ? "Итог диалога · проверьте полноту и исправьте текст перед сохранением. Запись в память только по кнопке «Сохранить»."
+          : "Черновик из ответа ИИ · текст и разметку можно изменить. Сохранение выполняется на телефоне без запроса к модели."}
       </Text> : null}
       {!loading && selected?.payload.chat_origin && typeof selected.payload.chat_origin==="object" ? <Text style={{color:t.muted,...nebulaTypography.label}}>
-        Источник: ответ ИИ. Это сохранённый текст помощника, а не подтверждённый факт.
+        {((selected.payload.chat_origin as {kind?:string}).kind === "dialogue_summary")
+          ? "Источник: созданный ИИ итог диалога. Сведения требуют проверки, оригиналы вложений не включены."
+          : "Источник: ответ ИИ. Это сохранённый текст помощника, а не подтверждённый факт."}
       </Text> : null}
 
       {!loading && repository.current ? <>
