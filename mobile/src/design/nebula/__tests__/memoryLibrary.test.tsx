@@ -56,10 +56,14 @@ describe("U2 Memory library note presentation", () => {
   it("retains the operations that existing browser/native flows require", () => {
     const home = readFileSync(join(__dirname, "..", "..", "..", "screens", "LocalMemoryScreen.tsx"), "utf8");
     for (const label of ["Текст или голос", "Добавить в память", "Поиск по заметкам",
-      "Раздел ", "Открыть архив", "Открыть текущие записи", "Открыть корзину",
-      "Резервные копии", "Выбрать записи", "Новый раздел памяти"]) {
+      "Раздел ", "Открыть архив", "Открыть корзину",
+      "Выбрать записи", "Новый раздел памяти"]) {
       expect(home).toContain(label);
     }
+    // Backups are reached from Settings only, not duplicated in the memory overflow.
+    const settings = readFileSync(join(__dirname, "..", "..", "..", "screens", "DeviceSettingsScreen.tsx"), "utf8");
+    expect(home).not.toContain('accessibilityLabel="Резервные копии"');
+    expect(settings).toContain('title="Резервные копии"');
     expect(home).toContain("MemoryNoteCard");
     expect(home).toContain('testID="memory-note-list"');
     expect(home).toContain("selectedIds.length");
