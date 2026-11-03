@@ -20,7 +20,7 @@ import type { MemorySection } from "./fact-tool";
 import { conversationRepository } from "./conversations";
 import type { ChatDraft, ConversationRepository, SavedConversation } from "./conversations";
 import type { DirectAgentSettings } from "./settings";
-import { waitForApplicationSession } from "../local-memory/storage";
+import { waitForApplicationSession, onLocalMemorySessionChange } from "../local-memory/storage";
 import { localPhotoIntent83, localPhotoSuggestion83, searchLocalPhotosFromChat83 } from "../media/vision-chat-search";
 
 /** `streamText` is the answer as it arrives; it is never persisted. */
@@ -429,6 +429,9 @@ export class DirectChatStore {
       throw new Error("Диалог изменился до начала обработки. Повторите подтверждение.");
     const aborter=new AbortController();
     this.requests.set(conversationId,aborter);
+    // Unlike ordinary visible chat responses, an optional paid whole-history
+    // export stops as soon as AppLock closes; never continue shipping text.
+    const offSession=onLocalMemorySessionChange(unlocked=>{if(!unlocked)aborter.abort();});
     this.update(conversationId,{busy:true,progress:"Готовлю итог диалога…",progressSince:Date.now()});
     try {
       await waitForApplicationSession(this.lifetime.signal);
@@ -459,6 +462,7 @@ export class DirectChatStore {
       if(!this.disposed)this.publish({error:(e as Error)?.message||"Не удалось составить итог диалога."});
       throw e;
     } finally {
+      offSession();
       this.requests.delete(conversationId);
       const final=this.update(conversationId,{busy:false,progress:"",progressSince:undefined});
       if(final)await this.persist(final).catch(()=>{});
