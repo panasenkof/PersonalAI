@@ -329,6 +329,13 @@ export function MemoryNoteScreen() {
         {!loading && dirty ? <Text accessibilityLabel="Несохранённые изменения" style={{ color: t.muted, ...nebulaTypography.label }}>Не сохранено</Text> : null}
       </View>
       {loading ? <ActivityIndicator accessibilityLabel="Загрузка записи" /> : null}
+      {!loading && route.params?.chatReply && !selected ? <Text style={{color:t.muted,...nebulaTypography.label}}>
+        Черновик из ответа ИИ · текст и разметку можно изменить. Сохранение выполняется на телефоне без запроса к модели.
+      </Text> : null}
+      {!loading && selected?.payload.chat_origin && typeof selected.payload.chat_origin==="object" ? <Text style={{color:t.muted,...nebulaTypography.label}}>
+        Источник: ответ ИИ. Это сохранённый текст помощника, а не подтверждённый факт.
+      </Text> : null}
+
       {!loading && repository.current ? <>
         {!editing ? <>
           {selected && profile && route.params?.photoAttachmentId ? <AttachmentView key={selected.record_version + ":" + (route.params?.verifiedOriginal?.attachmentId || route.params?.photoAttachmentId || "")} profile={profile} entityId={selected.id} verifiedOriginal={route.params?.verifiedOriginal} photoAttachmentId={route.params?.photoAttachmentId} /> : null}
