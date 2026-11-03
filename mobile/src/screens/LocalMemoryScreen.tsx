@@ -314,7 +314,7 @@ export function LocalMemoryScreen() {
       <Text accessibilityLiveRegion="polite" style={{ flex: 1, color: t.text }}>Выбрано: {selectedIds.length}</Text>
       <NebulaAction icon="more-horizontal" label="Действия" accessibilityLabel="Действия с выбранными записями" variant="primary" onPress={() => setActionsOpen(true)} disabled={busy || !selectedIds.length} />
     </View> : <View testID="memory-normal-toolbar" style={{ paddingHorizontal: 16, minHeight: 56, flexDirection: "row", alignItems: "center", gap: nebulaSpacing.xs }}>
-          {status !== "active" || collectionId ? <Pressable accessibilityRole="button" accessibilityLabel="Ко всем записям" onPress={openAll}
+          {status !== "active" || collectionId ? <Pressable accessibilityRole="button" accessibilityLabel="Ко всем записям" disabled={busy} onPress={openAll}
             style={{ ...button, paddingHorizontal: nebulaSpacing.sm, minWidth: nebulaTouch.minimum }}>
             <Feather name="arrow-left" size={22} color={t.secondary} />
           </Pressable> : null}
@@ -322,9 +322,9 @@ export function LocalMemoryScreen() {
             {status === "archived" ? "Архив" : status === "trashed" ? "Корзина" :
               collectionId ? collections.find(c => c.id === collectionId)?.name || "Раздел" : "Память"}
           </Text>
-          {status === "active" ? <Pressable accessibilityRole="button" accessibilityLabel="Добавить в память" onPress={() => setAddOpen(true)}
+          {status === "active" ? <Pressable accessibilityRole="button" accessibilityLabel="Добавить в память" disabled={busy} onPress={() => setAddOpen(true)}
             style={{ ...button, paddingHorizontal: 12, backgroundColor: t.accent }}><Feather name="plus" size={24} color={t.userText} /></Pressable> : null}
-          {status === "active" ? <Pressable accessibilityRole="button" accessibilityLabel="Меню памяти" onPress={() => setMenuOpen(true)} style={{ ...button, paddingHorizontal: 12 }}><Feather name="more-vertical" size={24} color={t.text} /></Pressable> : null}
+          {status === "active" ? <Pressable accessibilityRole="button" accessibilityLabel="Меню памяти" disabled={busy} onPress={() => setMenuOpen(true)} style={{ ...button, paddingHorizontal: 12 }}><Feather name="more-vertical" size={24} color={t.text} /></Pressable> : null}
         </View>}
     <FlatList
       testID="memory-note-list" key={columns} numColumns={columns}
@@ -346,9 +346,9 @@ export function LocalMemoryScreen() {
         {status === "active" && !term && !collectionId && !selecting ? <View testID="memory-quick-sections"
           style={{ flexDirection: "row", flexWrap: "wrap", gap: nebulaSpacing.xs }}>
           <NebulaAction testID="memory-open-archive" icon="archive" label="Архив"
-            accessibilityLabel="Открыть архив" onPress={() => openStatus("archived")} />
+            accessibilityLabel="Открыть архив" disabled={busy || loading} onPress={() => openStatus("archived")} />
           <NebulaAction testID="memory-open-trash" icon="trash-2" label="Корзина"
-            accessibilityLabel="Открыть корзину" onPress={() => openStatus("trashed")} />
+            accessibilityLabel="Открыть корзину" disabled={busy || loading} onPress={() => openStatus("trashed")} />
         </View> : null}
         {!term && status === "active" && !collectionId ? <>
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
@@ -395,7 +395,9 @@ export function LocalMemoryScreen() {
       contentContainerStyle={{ paddingHorizontal: nebulaSpacing.md, paddingBottom: nebulaSpacing.xl, gap: nebulaSpacing.sm, flexGrow: 1 }}
       ListEmptyComponent={!loading && !error ? <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24, gap: 12 }}><Feather name={term ? "search" : "book-open"} size={40} color={t.secondary} />
         <Text style={{ color: t.text, fontSize: 20, fontWeight: "700", textAlign: "center" }}>{term ? "Ничего не найдено" : status === "archived" ? "Архив пуст" : status === "trashed" ? "Корзина пуста" : "Начните с важного"}</Text>
-        <Text style={{ color: t.muted, textAlign: "center", lineHeight: 21 }}>{term ? "Попробуйте другое слово или раздел «Все записи»." : status === "trashed" ? "Здесь будут удалённые заметки, пока вы их не восстановите." : status === "archived" ? "Здесь хранятся записи, которые вы отправили в архив. Их можно вернуть в обычную память." : "Создайте запись или добавьте сведения из файла."}</Text></View> : null}
+        <Text style={{ color: t.muted, textAlign: "center", lineHeight: 21 }}>{term ? "Попробуйте другое слово или раздел «Все записи»." : status === "trashed" ? "Здесь будут удалённые заметки, пока вы их не восстановите." : status === "archived" ? "Здесь хранятся записи, которые вы отправили в архив. Их можно вернуть в обычную память." : "Создайте запись или добавьте сведения из файла."}</Text>
+        {!term && status !== "active" ? <NebulaAction icon="arrow-left" label="Вернуться в память" onPress={openAll} /> : null}
+      </View> : null}
       renderItem={({ item }) => <View style={{ flex: 1, maxWidth: columns === 2 ? "50%" : "100%" }}><MemoryNoteCard note={item} grid={columns === 2}
         cover={profile && memoryNoteHasPhoto(item)
           ? <MemoryCover profile={profile} entityId={item.id} active={visibleIds.has(item.id)} label={"Обложка " + item.title} /> : undefined}
