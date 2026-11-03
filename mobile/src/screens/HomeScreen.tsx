@@ -43,6 +43,7 @@ import { NebulaHomeThemeProvider, useTheme } from "../theme";
 import { MarkdownText } from "../components/Markdown";
 import { KIND_NAMES } from "../direct-agent/fact-tool";
 import { useDraftNormalization } from "../direct-agent/use-draft-normalization";
+import { prepareAssistantReplyNote } from "../direct-agent/chat-response-note";
 
 export function HomeScreen() {
   return <NebulaHomeThemeProvider><NebulaHomeContent /></NebulaHomeThemeProvider>;
@@ -281,6 +282,23 @@ function NebulaHomeContent() {
       }).catch(()=>setNotice("Не удалось проверить лимит обращений к ИИ; документы не отправлены."));
     }
   };
+  /** Local-only action: no LLM call. The editor revalidates the IDs on Save. */
+  const openReplyNoteActions = (rowId:string) => {
+    const conversationId=active?.id;
+    if(!conversationId)return;
+    try {
+      prepareAssistantReplyNote(store.getSnapshot().conversations,{conversationId,rowId});
+    } catch(e) {
+      setNotice((e as Error).message); return;
+    }
+    Alert.alert("Действия с ответом", "Редактор заметки откроется с полным текстом. ИИ повторно не вызывается.", [
+      { text:"Отмена",style:"cancel" },
+      { text:"Сохранить в заметки",onPress:()=>{
+        if(store.getSnapshot().activeId===conversationId)
+          navigation.navigate("MemoryNote",{chatReply:{conversationId,rowId}});
+      } },
+    ]);
+  };
   const openConnections = (presetId?: string) => navigation.navigate("ModelConnections", presetId ? { presetId } : undefined);
   // First run: the active connection has neither a key nor a keyless local address.
   const needsSetup = Boolean(settings && !settings.apiKey && !anonymousLocalAllowed(settings));
@@ -341,25 +359,10 @@ function NebulaHomeContent() {
           accessibilityHint="Долгое нажатие: сохранить ответ в заметки"
           accessibilityActions={[{ name: "longpress", label: "Действия с ответом" }]}
           onAccessibilityAction={event => {
-            if (event.nativeEvent.actionName === "longpress" && !item.streaming && active?.id)
-              Alert.alert("Действия с ответом", "Сохранение откроет редактор заметки без нового обращения к ИИ.", [
-                { text: "Отмена", style: "cancel" },
-                { text: "Сохранить в заметки", onPress: () => navigation.navigate("MemoryNote", {
-                  chatReply: { conversationId: active.id, rowId: item.id },
-                }) },
-              ]);
+            if(event.nativeEvent.actionName === "longpress" && !item.streaming)
+              openReplyNoteActions(item.id);
           }}
-          onLongPress={() => {
-            if (item.streaming || !active?.id) return;
-            const conversationId = active.id;
-            const rowId = item.id;
-            Alert.alert("Действия с ответом", "Сохранение откроет редактор заметки без нового обращения к ИИ.", [
-              { text: "Отмена", style: "cancel" },
-              { text: "Сохранить в заметки", onPress: () => navigation.navigate("MemoryNote", {
-                chatReply: { conversationId, rowId },
-              }) },
-            ]);
-          }}>
+          onLongPress={() => {if(!item.streaming)openReplyNoteActions(item.id);}}>
           <MarkdownText text={item.text} style={{ color: t.text, lineHeight: 23 }} />
         </Pressable> :
           <Text selectable style={{ color: item.role === "user" ? t.userText : item.role === "info" ? t.muted : t.text, lineHeight: 23 }}>{item.text}</Text>}
