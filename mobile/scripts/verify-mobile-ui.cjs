@@ -371,6 +371,16 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByLabel('Открыть заметку Индейка', { exact: true }).waitFor();
       await page.getByLabel('Открыть заметку Индейка', { exact: true }).click();
       assert.equal(await page.getByLabel('Текст заметки', { exact: true }).count(), 0, 'Opening a saved note shows reading, not a form');
+      // Reader actions belong above the body/attachments, not below a long document.
+      const quickActions = page.getByTestId('note-quick-actions');
+      await quickActions.waitFor();
+      assert.equal(await page.getByLabel('Редактировать запись', { exact: true }).count(), 1, 'Reader has one Edit action');
+      assert.equal(await page.getByLabel('Изменить заметку с ИИ', { exact: true }).count(), 1, 'Reader has one AI edit action');
+      await page.setViewportSize({ width, height: 470 }); await page.evaluate(() => window.__insets(48));
+      const quickBox = await quickActions.boundingBox();
+      assert(quickBox && quickBox.y >= 0 && quickBox.y + quickBox.height <= 470 - 48,
+        'Reader actions are visible before scrolling even on a short screen');
+      await page.setViewportSize({ width, height: 900 }); await page.evaluate(() => window.__insets(24));
       await page.clock.runFor(500);
       if (process.env.SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, `note-reading-${width}.png`) });
       await page.getByLabel('Добавить файлы к заметке', { exact: true }).click();
@@ -520,6 +530,19 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByLabel('Выбрать заметку Индейка', { exact: true }).click();
       assert.equal(await page.getByTestId('memory-selection-toolbar').count(), 0, 'Last deselection exits');
       assert.equal(await page.getByText('Выбрать все', { exact: true }).count(), 0);
+      // Contextual restore is available immediately in the opened trashed note.
+      // Reuse the existing version-checked writer, not a parallel delete/restore path.
+      await page.getByLabel('Действия с заметкой Индейка', { exact: true }).click();
+      await page.getByText('В корзину', { exact: true }).click();
+      await page.getByLabel('Подтвердить перемещение в корзину', { exact: true }).click();
+      await page.getByLabel('Открыть корзину', { exact: true }).click();
+      await page.getByLabel('Открыть заметку Индейка', { exact: true }).click();
+      await page.getByLabel('Восстановить запись из корзины', { exact: true }).waitFor();
+      assert.equal(await page.getByLabel('Редактировать запись', { exact: true }).count(), 0,
+        'Trashed note shows Restore, not an edit action');
+      await page.getByLabel('Восстановить запись из корзины', { exact: true }).click();
+      await page.getByLabel('Ко всем записям', { exact: true }).click();
+      await page.getByLabel('Открыть заметку Индейка', { exact: true }).waitFor();
       // Narrow available height approximates the resized viewport, while the
       // native IME and gesture/three-button navigation still need phone QA.
       await page.getByLabel('Вкладка Главная', { exact: true }).click();
