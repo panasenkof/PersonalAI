@@ -7,7 +7,7 @@ import { loadModelCallLimit } from "../agent-preferences";
 import { planDocumentSynthesis } from "../document-synthesis";
 import { planDialogueSummary } from "../dialogue-summary";
 
-jest.mock("../../local-memory/storage", () => ({ waitForApplicationSession: jest.fn(async () => {}), withLocalMemoryDatabase: jest.fn() }));
+jest.mock("../../local-memory/storage", () => ({ waitForApplicationSession: jest.fn(async () => {}), withLocalMemoryDatabase: jest.fn(), onLocalMemorySessionChange: jest.fn(() => () => {}) }));
 jest.mock("../memory", () => ({ searchApprovedNotes: jest.fn(async () => []), saveApprovedNote: jest.fn(async () => "note") }));
 jest.mock("expo-crypto", () => ({ randomUUID: () => "id-" + Math.random().toString(36).slice(2) }));
 jest.mock("../agent-preferences", () => ({ loadModelCallLimit: jest.fn(async () => 4) }));
