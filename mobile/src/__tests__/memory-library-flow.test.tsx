@@ -17,6 +17,7 @@ const notes = [
  { id: "one", collection_id: "a", sensitivity: "inherit", title: "Первая", payload: { body: "Содержание" }, record_status: "active", record_version: 1, updated_at: "2026-10-24", kind: "note" },
  { id: "two", collection_id: "b", title: "Вторая", payload: { body: "Содержание" }, record_status: "active", record_version: 1, updated_at: "2026-10-24", kind: "note" },
  { id: "old", collection_id: "b", title: "Архивная", payload: {}, record_status: "archived", updated_at: "2026-10-24", kind: "note" },
+ { id: "deleted", collection_id: "a", title: "Удалённая", payload: {}, record_status: "trashed", record_version: 7, updated_at: "2026-10-24", kind: "note" },
 ];
 const mockDb = {
  hygiene: () => ({ previewWithExclusions: mockHygienePreview, preference:mockHygienePreference,setPreference:mockHygieneSetPreference }),
@@ -34,7 +35,13 @@ jest.mock("../local-memory/note-actions", () => ({ mergeText: () => "", noteUndo
 jest.mock("../local-memory/errors", () => ({ memoryErrorMessage: (e: Error) => e.message }));
 jest.mock("expo-crypto", () => ({ randomUUID: () => "id" }));
 jest.mock("@expo/vector-icons/Feather", () => () => null);
-jest.mock("../theme", () => ({ useTheme: () => ({}) }));
+jest.mock("../theme", () => ({
+  useTheme: () => ({}),
+  useNebulaColors: () => ({
+    text: "#ffffff", textOnAccent: "#ffffff", border: "#445574", accent: "#7051db",
+    danger: "#ff9faf", surfaceElevated: "#1d2e51",
+  }),
+}));
 jest.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ top: 24, bottom: 24 }) }));
 jest.mock("../components/BottomSheet", () => ({ BottomSheet: ({ visible, children, title, onClose }: any) => { const { Pressable, Text } = require("react-native"); return visible ? <><Pressable accessibilityLabel={"Закрыть панель " + title} onPress={onClose}><Text>Закрыть</Text></Pressable>{children}</> : null; } }));
 jest.mock("@react-navigation/native", () => ({ useNavigation: () => ({ navigate: mockNavigate }), useFocusEffect: (fn: any) => require("react").useEffect(fn, [fn]) }));
@@ -47,6 +54,17 @@ test("all-records clears collection, archive and search from either entry", asyn
  await waitFor(() => v.getByLabelText("Открыть заметку Архивная")); expect(v.getByLabelText("Поиск по заметкам").props.value).toBe("");
  fireEvent.press(v.getByLabelText("Меню памяти")); fireEvent.press(v.getByLabelText("Открыть текущие записи")); await waitFor(() => v.getByLabelText("Все коллекции")); fireEvent.press(v.getByLabelText("Все коллекции")); fireEvent.press(v.getByLabelText("Раздел Все записи"));
  await waitFor(() => v.getByLabelText("Открыть заметку Вторая")); expect(v.getByLabelText("Открыть заметку Первая")).toBeTruthy(); expect(v.queryByLabelText("Открыть заметку Архивная")).toBeNull();
+});
+test("one-tap restore targets only the versioned trashed note and keeps the existing writer", async () => {
+ const v = render(<LocalMemoryScreen />);
+ await waitFor(() => v.getByLabelText("Открыть заметку Первая"));
+ fireEvent.press(v.getByLabelText("Меню памяти"));
+ fireEvent.press(v.getByLabelText("Открыть корзину"));
+ await waitFor(() => v.getByLabelText("Восстановить заметку Удалённая"));
+ expect(v.queryByLabelText("Восстановить заметку Первая")).toBeNull();
+ await act(async () => { fireEvent.press(v.getByLabelText("Восстановить заметку Удалённая")); });
+ expect(mockDb.changeNotes).toHaveBeenCalledWith("restore", [expect.objectContaining({id: "deleted", record_version: 7})], undefined);
+ expect(mockNavigate).not.toHaveBeenCalled();
 });
 test("selection starts empty and taps select only the chosen record", async () => {
  const v = render(<LocalMemoryScreen />); await waitFor(() => v.getByLabelText("Открыть заметку Первая"));
