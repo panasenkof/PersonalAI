@@ -12,6 +12,8 @@ import { BottomSheet } from "../components/BottomSheet";
 import { MarkdownText } from "../components/Markdown";
 import { NoteAiEditor } from "../components/NoteAiEditor";
 import { mayEditNoteText, type NoteDraft } from "../direct-agent/edit-note";
+import { prepareAssistantReplyNote } from "../direct-agent/chat-response-note";
+import { useDirectChat } from "../direct-agent/ChatContext";
 import { MemoryCover } from "../media/MemoryCover";
 import { VoiceInput } from "../components/VoiceInput";
 import { localMemoryRepository } from "../local-memory/repository";
@@ -55,6 +57,8 @@ export function MemoryNoteScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParams>>();
   const route = useRoute<RouteProp<RootStackParams, "MemoryNote">>();
   const profile = useProfile();
+  const { store: chatStore } = useDirectChat();
+  const sourceAtOpen = useRef<{profile:string;body:string}|null>(null);
   const activeProfile = useRef(profile); activeProfile.current = profile;
   const extraction = useRef<AbortController | null>(null);
   useEffect(() => { const off = onLocalMemorySessionChange(unlocked => { if (!unlocked) { extraction.current?.abort(); setCandidate(null); setRepeatFiles([]); } }); return () => { off(); extraction.current?.abort(); }; }, []);
@@ -119,10 +123,19 @@ export function MemoryNoteScreen() {
       const sections = await ensureSections(db);
       const note = route.params?.entityId ? await db.entity(route.params.entityId) : null;
       if (route.params?.entityId && !note) throw new Error("Запись не найдена.");
+      if (route.params?.chatReply && route.params?.entityId) throw new Error("Нельзя одновременно открыть существующую запись и ответ ИИ.");
+      // Resolve from the encrypted store AFTER opening the user profile.
+      // Never copy the private response body into navigation parameters.
+      const fromChat = route.params?.chatReply
+        ? prepareAssistantReplyNote(chatStore.getSnapshot().conversations, route.params.chatReply)
+        : null;
+      sourceAtOpen.current = fromChat ? {profile,body:fromChat.body} : null;
       if (!alive.current) return;
       repository.current = db; setCollections(sections); setSelected(note); setExtractedText(String(note?.payload.extracted_text || "")); setAllowAgent(false);
-      const initialTitle = note?.title || ""; const initialBody = String(note?.payload.body || "");
-      const initialCollection = note?.collection_id || route.params?.collectionId;
+      const initialTitle = note?.title || fromChat?.title || "";
+      const initialBody = note ? String(note.payload.body || "") : fromChat?.body || "";
+      const initialCollection = note?.collection_id || route.params?.collectionId ||
+        (fromChat ? sections.find(c => c.slug === "notes")?.id : undefined);
       const initialKind = note?.kind || defaultKind(sections.find(c => c.id === initialCollection)?.slug);
       const initialNames = note ? (await db.aliases(note.id)).join(", ") : "";
       const indexTerms = note ? await db.indexTerms(note.id) : [];
@@ -134,7 +147,8 @@ export function MemoryNoteScreen() {
       setTitle(initialTitle); setBody(initialBody); setCollectionId(initialCollection); setKind(initialKind); namesForSave.current = initialNames; setNames(initialNames);
     })().catch(e => { if (alive.current) setError(memoryErrorMessage(e)); }).finally(() => { if (alive.current) setLoading(false); });
     return () => { alive.current = false; repository.current = null; };
-  }, [profile, route.params?.entityId, route.params?.collectionId, retry]);
+  }, [profile, chatStore, route.params?.entityId, route.params?.collectionId,
+    route.params?.chatReply?.conversationId, route.params?.chatReply?.rowId, retry]);
   const run = useCallback(async (work: (db: SqliteMemoryRepository) => Promise<void>) => {
     if (!repository.current || pending.current) return;
     pending.current = true; setBusy(true); setError("");
@@ -157,8 +171,22 @@ export function MemoryNoteScreen() {
       if (!notes) throw new Error("Для доступа агенту нужен обычный раздел «Заметки».");
       collection = notes.id;
     }
+    // Re-check source identity and current profile before writing a source-backed
+    // copy. The existing SQLCipher writer is the only note write path.
+    const fromChat = route.params?.chatReply && !selected
+      ? prepareAssistantReplyNote(chatStore.getSnapshot().conversations, route.params.chatReply)
+      : null;
+    if (route.params?.chatReply && !selected &&
+      (activeProfile.current !== profile || sourceAtOpen.current?.profile !== profile ||
+       !fromChat || sourceAtOpen.current?.body !== fromChat.body))
+      throw new Error("Исходный ответ или профиль изменился. Откройте ответ из диалога заново.");
     const finalTitle = title.trim() || body.trim().split("\n")[0].slice(0, 80);
-    const payload = { ...selected?.payload, type: "note", title: finalTitle, body: body.trim(), extracted_text: extractedText.trim() };
+    const payload = { ...selected?.payload, type: "note", title: finalTitle,
+      // H-SAVE1a preserves Markdown and its trailing newlines exactly;
+      // ordinary hand-written notes retain the established trim behavior.
+      body: fromChat ? body : body.trim(), extracted_text: extractedText.trim(),
+      ...(fromChat ? { chat_origin: { ...fromChat.provenance, label: "Ответ ИИ",
+        savedAt: new Date().toISOString() } } : {}) };
     const base = baseline.current;
     const cardFields = { kind, aliases: splitNames(namesForSave.current), userTerms: splitNames(terms) };
     if (selected) {
