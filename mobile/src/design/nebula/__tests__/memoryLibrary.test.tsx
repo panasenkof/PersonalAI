@@ -8,6 +8,10 @@ import { join } from "node:path";
 
 jest.mock("@expo/vector-icons/Feather", () => () => null);
 jest.mock("../../../theme", () => ({
+  useNebulaColors: () => ({
+    text: "#ffffff", textOnAccent: "#ffffff", border: "#445574", accent: "#7051db",
+    danger: "#ff9faf", surfaceElevated: "#1d2e51",
+  }),
   useTheme: () => ({
     bg: "#070d20", panel: "#14213d", soft: "#26395c", line: "#445574",
     text: "#ffffff", muted: "#abbad8", accent: "#7051db",
@@ -66,6 +70,20 @@ describe("U2 Memory library note presentation", () => {
   });
 });
 
+test("trashed card shows a labelled restore button next to the record without opening it", () => {
+ const open = jest.fn(), select = jest.fn(), restore = jest.fn();
+ const v = render(<MemoryNoteCard note={note()} selected={false} sectionName="Заметки"
+   onOpen={open} onToggleSelection={select} onRestore={restore} />);
+ const action = v.getByLabelText("Восстановить заметку " + note().title);
+ expect(action.props.accessibilityState.disabled).toBe(false);
+ fireEvent.press(action);
+ expect(restore).toHaveBeenCalledTimes(1);
+ expect(open).not.toHaveBeenCalled();
+ expect(select).not.toHaveBeenCalled();
+ v.rerender(<MemoryNoteCard note={note()} selected={false} selecting sectionName="Заметки"
+   onOpen={open} onToggleSelection={select} onRestore={restore} />);
+ expect(v.queryByLabelText("Восстановить заметку " + note().title)).toBeNull();
+});
 test("overflow is a separate accessible action and never opens the note", () => {
  const open = jest.fn(), select = jest.fn(), menu = jest.fn();
  const v = render(<MemoryNoteCard note={note()} selected={false} sectionName="Заметки" onOpen={open} onToggleSelection={select} onActions={menu} />);
