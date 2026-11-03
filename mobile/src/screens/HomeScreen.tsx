@@ -333,7 +333,35 @@ function NebulaHomeContent() {
       </View> : null}
       renderItem={({ item }) => <View testID={"chat-message-" + item.role} accessibilityLiveRegion={item.streaming ? "polite" : undefined} style={{ alignSelf: item.role === "user" ? "flex-end" : "stretch", backgroundColor: item.role === "user" ? t.userBubble : item.role === "info" ? t.soft : t.panel,
         borderWidth: item.role === "assistant" ? 1 : 0, borderColor: t.line, borderRadius: 20, padding: 15, gap: 10 }}>
-        {item.role === "assistant" ? <MarkdownText text={item.text} style={{ color: t.text, lineHeight: 23 }} /> :
+        {item.role === "assistant" ? <Pressable
+          disabled={Boolean(item.streaming)}
+          delayLongPress={430}
+          accessibilityRole="button"
+          accessibilityLabel="Ответ ИИ. Действия с ответом"
+          accessibilityHint="Долгое нажатие: сохранить ответ в заметки"
+          accessibilityActions={[{ name: "longpress", label: "Действия с ответом" }]}
+          onAccessibilityAction={event => {
+            if (event.nativeEvent.actionName === "longpress" && !item.streaming && active?.id)
+              Alert.alert("Действия с ответом", "Сохранение откроет редактор заметки без нового обращения к ИИ.", [
+                { text: "Отмена", style: "cancel" },
+                { text: "Сохранить в заметки", onPress: () => navigation.navigate("MemoryNote", {
+                  chatReply: { conversationId: active.id, rowId: item.id },
+                }) },
+              ]);
+          }}
+          onLongPress={() => {
+            if (item.streaming || !active?.id) return;
+            const conversationId = active.id;
+            const rowId = item.id;
+            Alert.alert("Действия с ответом", "Сохранение откроет редактор заметки без нового обращения к ИИ.", [
+              { text: "Отмена", style: "cancel" },
+              { text: "Сохранить в заметки", onPress: () => navigation.navigate("MemoryNote", {
+                chatReply: { conversationId, rowId },
+              }) },
+            ]);
+          }}>
+          <MarkdownText text={item.text} style={{ color: t.text, lineHeight: 23 }} />
+        </Pressable> :
           <Text selectable style={{ color: item.role === "user" ? t.userText : item.role === "info" ? t.muted : t.text, lineHeight: 23 }}>{item.text}</Text>}
         {active?.retryPhoto?.rowId === item.id && active?.retryPhoto ? <Pressable accessibilityRole="button"
           disabled={busy} onPress={() => void store.searchPhotosLocally(active.retryPhoto!.image,active.id)}
