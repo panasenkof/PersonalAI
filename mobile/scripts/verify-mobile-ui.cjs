@@ -438,7 +438,9 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       assert.equal(await page.getByLabel('Текст заметки', { exact: true }).inputValue(), 'Чеснок, паприка и перец');
       await page.getByLabel('Архивировать запись', { exact: true }).click();
       assert.equal(await page.getByLabel('Открыть заметку Индейка', { exact: true }).count(), 0);
-      // Archive is a visible button on the memory root rather than nested in overflow.
+      // This note belongs to the «Рецепты» collection. Return to the root first:
+      // archive/trash are global sections, not unrelated actions of that collection.
+      await page.getByLabel('Ко всем записям', { exact: true }).click();
       await page.getByLabel('Открыть архив', { exact: true }).click();
       await page.getByLabel('Открыть заметку Индейка', { exact: true }).click();
       await page.getByLabel('Редактировать запись', { exact: true }).click();
