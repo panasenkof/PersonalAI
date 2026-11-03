@@ -11,7 +11,7 @@ const PAGE_SIZE = 30;
 
 /** U1 history surface. The active chat, drafts and running agent stay in ChatStore. */
 export function ConversationHistorySheet({
-  visible, conversations, activeId, onClose, onSelect, onDelete, onNewChat,
+  visible, conversations, activeId, onClose, onSelect, onDelete, onNewChat, onSummary,
 }: {
   visible: boolean;
   conversations: readonly LiveConversation[];
@@ -20,6 +20,7 @@ export function ConversationHistorySheet({
   onSelect: (conversation: LiveConversation) => void;
   onDelete: (conversation: LiveConversation) => void;
   onNewChat: () => void;
+  onSummary?: (conversation: LiveConversation) => void;
 }) {
   const t = useTheme();
   const [query, setQuery] = useState("");
@@ -74,6 +75,14 @@ export function ConversationHistorySheet({
           <Text numberOfLines={2} style={{ color: t.muted, fontSize: 13, lineHeight: 18 }}>{preview}</Text>
           <Text style={{ color: c.busy ? t.accent : t.muted, fontSize: 12 }}>{c.busy ? "Готовлю ответ…" : dateText}</Text>
         </Pressable>
+        {onSummary ? <Pressable testID={"chat-history-summary-"+c.id} accessibilityRole="button"
+          accessibilityLabel={"Сохранить итог диалога " + c.title}
+          accessibilityState={{disabled:c.busy || Boolean(c.deleting)}}
+          disabled={c.busy || Boolean(c.deleting)}
+          onPress={()=>onSummary(c)}
+          style={{minHeight:nebulaTouch.minimum,minWidth:nebulaTouch.minimum,alignItems:"center",justifyContent:"center"}}>
+          <Feather name="file-text" size={19} color={t.accent}/>
+        </Pressable> : null}
         <Pressable accessibilityRole="button" accessibilityLabel={"Удалить диалог " + c.title}
           accessibilityState={{ disabled: cannotDelete }} disabled={cannotDelete}
           onPress={() => onDelete(c)}
