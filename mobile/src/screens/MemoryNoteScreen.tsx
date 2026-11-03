@@ -63,6 +63,7 @@ export function MemoryNoteScreen() {
   const extraction = useRef<AbortController | null>(null);
   useEffect(() => { const off = onLocalMemorySessionChange(unlocked => { if (!unlocked) { extraction.current?.abort(); setCandidate(null); setRepeatFiles([]); } }); return () => { off(); extraction.current?.abort(); }; }, []);
   const repository = useRef<SqliteMemoryRepository | null>(null); const alive = useRef(true); const pending = useRef(false);
+  const loadSequence = useRef(0);
   const [editing, setEditing] = useState(!route.params?.entityId);
   const [aiOpen, setAiOpen] = useState(false);
   const [noteMenu, setNoteMenu] = useState(false);
@@ -116,6 +117,8 @@ export function MemoryNoteScreen() {
   });
   useEffect(() => { if (leaving) navigation.goBack(); }, [leaving, navigation]);
   useEffect(() => {
+    const sequence = ++loadSequence.current;
+    const stillCurrent = () => alive.current && loadSequence.current === sequence && activeProfile.current === profile;
     alive.current = true; setLoading(true); setError(""); setMetadataOpen(false); setFileContentOpen(false); setCandidate(null); setRepeatFiles([]);
     void (async () => {
       if (!profile) throw new Error("profile_missing");
@@ -130,7 +133,7 @@ export function MemoryNoteScreen() {
         ? prepareAssistantReplyNote(chatStore.getSnapshot().conversations, route.params.chatReply)
         : null;
       sourceAtOpen.current = fromChat ? {profile,body:fromChat.body} : null;
-      if (!alive.current) return;
+      if (!stillCurrent()) return;
       repository.current = db; setCollections(sections); setSelected(note); setExtractedText(String(note?.payload.extracted_text || "")); setAllowAgent(false);
       const initialTitle = note?.title || fromChat?.title || "";
       const initialBody = note ? String(note.payload.body || "") : fromChat?.body || "";
@@ -140,13 +143,13 @@ export function MemoryNoteScreen() {
       const initialNames = note ? (await db.aliases(note.id)).join(", ") : "";
       const indexTerms = note ? await db.indexTerms(note.id) : [];
       const initialTerms = (indexTerms.find(x => x.source === "user")?.terms || []).join(", ");
-      if (!alive.current) return;
+      if (!stillCurrent()) return;
       baseline.current = { title: initialTitle, body: initialBody, collectionId: initialCollection, kind: initialKind, names: initialNames, terms: initialTerms };
       setTerms(initialTerms); setModelTerms(indexTerms.filter(x => x.source.startsWith("model:")).flatMap(x => x.terms));
       kindTouched.current = false;
       setTitle(initialTitle); setBody(initialBody); setCollectionId(initialCollection); setKind(initialKind); namesForSave.current = initialNames; setNames(initialNames);
-    })().catch(e => { if (alive.current) setError(memoryErrorMessage(e)); }).finally(() => { if (alive.current) setLoading(false); });
-    return () => { alive.current = false; repository.current = null; };
+    })().catch(e => { if (stillCurrent()) setError(memoryErrorMessage(e)); }).finally(() => { if (stillCurrent()) setLoading(false); });
+    return () => { loadSequence.current++; alive.current = false; repository.current = null; };
   }, [profile, chatStore, route.params?.entityId, route.params?.collectionId,
     route.params?.chatReply?.conversationId, route.params?.chatReply?.rowId, retry]);
   const run = useCallback(async (work: (db: SqliteMemoryRepository) => Promise<void>) => {
