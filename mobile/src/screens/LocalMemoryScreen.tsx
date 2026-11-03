@@ -30,7 +30,6 @@ export function LocalMemoryScreen() {
   const profile = useProfile(); const insets = useSafeAreaInsets();
   const { width, fontScale } = useWindowDimensions();
   const [grid, setGrid] = useState(true);
-  const columns = grid && width >= 350 && fontScale < 1.4 ? 2 : 1;
   const [addOpen, setAddOpen] = useState(false);
   const [selecting, setSelecting] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
@@ -46,6 +45,8 @@ export function LocalMemoryScreen() {
   const [collections, setCollections] = useState<CollectionRecord[]>([]);
   const [collectionId, setCollectionId] = useState<string | undefined>();
   const [status, setStatus] = useState<"active" | "archived" | "trashed">("active");
+  // Archive and trash use full-width rows without changing the user's grid preference.
+  const columns = status !== "active" ? 1 : grid && width >= 350 && fontScale < 1.4 ? 2 : 1;
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [moveOpen, setMoveOpen] = useState(false);
   const [mergeOpen, setMergeOpen] = useState(false);
@@ -247,19 +248,32 @@ export function LocalMemoryScreen() {
   }
   useEffect(() => { setSelectedIds([]); setSelecting(false); setActionsOpen(false); setConfirmation(null); setNotes([]); setContextNote(null); setMoveOpen(false); setMergeOpen(false); hygieneGeneration.current++; setHygieneReviewOpen(false); setHygieneSuggestionsOpen(false); setHygieneSuggestions(null); setSuggestedReviewNotes(null); setHygieneExcluded([]); setHygienePreview(null); setHygieneConfirm(false); setHygienePolicyItem(null); setHygieneAction("archive"); }, [profile, collectionId, term, status]);
   function openAll() { setStatus("active"); setCollectionId(undefined); setSearch(""); setTerm(""); setSelectedIds([]); setSelecting(false); }
-  function openStatus(value: typeof status) { openAll(); setStatus(value); setMenuOpen(false); }
+  function openStatus(value: typeof status) { openAll(); setStatus(value); }
   const cancelSelection = useCallback(() => {
     setSelectedIds([]); setSelecting(false); setActionsOpen(false); setConfirmation(null); setContextNote(null);
   }, []);
   useFocusEffect(useCallback(() => {
     const sub = BackHandler.addEventListener("hardwareBackPress", () => {
-      if (actionsOpen || moveOpen || mergeOpen || hygieneReviewOpen || hygieneSuggestionsOpen) return false;
-      if (!selecting) return false;
-      if (!busy) cancelSelection();
-      return true;
+      // A sheet or native keyboard handles its own Back; never change the area underneath.
+      if (actionsOpen || moveOpen || mergeOpen || hygieneReviewOpen || hygieneSuggestionsOpen ||
+          addOpen || menuOpen || collectionMenu || sectionOpen) return false;
+      if (selecting) {
+        if (!busy) cancelSelection();
+        return true;
+      }
+      if (search) {
+        if (!busy) setSearch("");
+        return true;
+      }
+      if (status !== "active" || collectionId) {
+        if (!busy) openAll();
+        return true;
+      }
+      return false;
     });
     return () => sub.remove();
-  }, [selecting, busy, actionsOpen, moveOpen, mergeOpen, hygieneReviewOpen, hygieneSuggestionsOpen, cancelSelection]));
+  }, [selecting, busy, actionsOpen, moveOpen, mergeOpen, hygieneReviewOpen,
+    hygieneSuggestionsOpen, addOpen, menuOpen, collectionMenu, sectionOpen, search, status, collectionId, cancelSelection]));
   function toggleSelection(id: string) {
     if (busy || loading) return;
     if (!selectedIds.includes(id) && selectedIds.length >= 100) { setError("За один раз можно выбрать до 100 записей."); return; }
@@ -300,10 +314,17 @@ export function LocalMemoryScreen() {
       <Text accessibilityLiveRegion="polite" style={{ flex: 1, color: t.text }}>Выбрано: {selectedIds.length}</Text>
       <NebulaAction icon="more-horizontal" label="Действия" accessibilityLabel="Действия с выбранными записями" variant="primary" onPress={() => setActionsOpen(true)} disabled={busy || !selectedIds.length} />
     </View> : <View testID="memory-normal-toolbar" style={{ paddingHorizontal: 16, minHeight: 56, flexDirection: "row", alignItems: "center", gap: nebulaSpacing.xs }}>
-          <Text accessibilityRole="header" style={{ flex: 1, color: t.text, fontSize: 28, fontWeight: "800" }}>Память</Text>
-          <Pressable accessibilityRole="button" accessibilityLabel="Добавить в память" onPress={() => setAddOpen(true)}
-            style={{ ...button, paddingHorizontal: 12, backgroundColor: t.accent }}><Feather name="plus" size={24} color={t.userText} /></Pressable>
-          <Pressable accessibilityRole="button" accessibilityLabel="Меню памяти" onPress={() => setMenuOpen(true)} style={{ ...button, paddingHorizontal: 12 }}><Feather name="more-vertical" size={24} color={t.text} /></Pressable>
+          {status !== "active" || collectionId ? <Pressable accessibilityRole="button" accessibilityLabel="Ко всем записям" onPress={openAll}
+            style={{ ...button, paddingHorizontal: nebulaSpacing.sm, minWidth: nebulaTouch.minimum }}>
+            <Feather name="arrow-left" size={22} color={t.secondary} />
+          </Pressable> : null}
+          <Text accessibilityRole="header" numberOfLines={2} style={{ flex: 1, color: t.text, fontSize: 26, fontWeight: "800" }}>
+            {status === "archived" ? "Архив" : status === "trashed" ? "Корзина" :
+              collectionId ? collections.find(c => c.id === collectionId)?.name || "Раздел" : "Память"}
+          </Text>
+          {status === "active" ? <Pressable accessibilityRole="button" accessibilityLabel="Добавить в память" onPress={() => setAddOpen(true)}
+            style={{ ...button, paddingHorizontal: 12, backgroundColor: t.accent }}><Feather name="plus" size={24} color={t.userText} /></Pressable> : null}
+          {status === "active" ? <Pressable accessibilityRole="button" accessibilityLabel="Меню памяти" onPress={() => setMenuOpen(true)} style={{ ...button, paddingHorizontal: 12 }}><Feather name="more-vertical" size={24} color={t.text} /></Pressable> : null}
         </View>}
     <FlatList
       testID="memory-note-list" key={columns} numColumns={columns}
@@ -313,7 +334,8 @@ export function LocalMemoryScreen() {
         <View style={{ flexDirection: "row", alignItems: "center", borderWidth: 1, borderColor: t.line, borderRadius: nebulaRadii.field, backgroundColor: t.panel }}>
           <Feather name="search" size={19} color={t.muted} style={{ marginLeft: nebulaSpacing.sm }} />
           <TextInput testID="memory-search" accessibilityLabel="Поиск по заметкам"
-            value={search} editable={!selecting && !loading} onChangeText={setSearch} placeholder="Поиск по памяти"
+            value={search} editable={!selecting && !loading} onChangeText={setSearch}
+            placeholder={status === "trashed" ? "Поиск в корзине" : status === "archived" ? "Поиск в архиве" : "Поиск по памяти"}
             placeholderTextColor={t.muted} returnKeyType="search"
             style={{ flex: 1, minWidth: 0, minHeight: nebulaTouch.minimum, fontSize: 16, color: t.text, paddingHorizontal: nebulaSpacing.sm }} />
           {search ? <Pressable accessibilityRole="button" disabled={selecting} accessibilityLabel="Очистить поиск по памяти"
@@ -321,6 +343,13 @@ export function LocalMemoryScreen() {
             <Feather name="x" size={20} color={t.muted} />
           </Pressable> : null}
         </View>
+        {status === "active" && !term && !collectionId && !selecting ? <View testID="memory-quick-sections"
+          style={{ flexDirection: "row", flexWrap: "wrap", gap: nebulaSpacing.xs }}>
+          <NebulaAction testID="memory-open-archive" icon="archive" label="Архив"
+            accessibilityLabel="Открыть архив" onPress={() => openStatus("archived")} />
+          <NebulaAction testID="memory-open-trash" icon="trash-2" label="Корзина"
+            accessibilityLabel="Открыть корзину" onPress={() => openStatus("trashed")} />
+        </View> : null}
         {!term && status === "active" && !collectionId ? <>
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
             <Text style={{ color: t.text, fontSize: 18, fontWeight: "700" }}>Коллекции</Text>
@@ -336,11 +365,13 @@ export function LocalMemoryScreen() {
           </ScrollView>
         </> : null}
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-          {collectionId || status !== "active" || term ? <Pressable accessibilityRole="button" disabled={selecting} accessibilityLabel="Ко всем записям" onPress={openAll} style={{ ...button, paddingHorizontal: 8 }}><Feather name="arrow-left" size={20} color={t.secondary} /></Pressable> : null}
-          <Text style={{ flex: 1, color: t.text, fontSize: 18, fontWeight: "700" }}>{term ? "Результаты поиска" : status === "archived" ? "Архив" : status === "trashed" ? "Корзина" : collectionId ? collections.find(c => c.id === collectionId)?.name : "Недавнее"}</Text>
-          <Pressable accessibilityRole="button" accessibilityLabel={grid ? "Показать списком" : "Показать плитками"} disabled={selecting} onPress={() => setGrid(v => !v)} style={{ ...button, paddingHorizontal: 12 }}>
+          <Text style={{ flex: 1, color: t.text, fontSize: 18, fontWeight: "700" }}>
+            {term ? "Результаты поиска" : status === "archived" ? "Записи в архиве" :
+              status === "trashed" ? "Удалённые записи" : collectionId ? "Записи раздела" : "Недавнее"}
+          </Text>
+          {status === "active" ? <Pressable accessibilityRole="button" accessibilityLabel={grid ? "Показать списком" : "Показать плитками"} disabled={selecting} onPress={() => setGrid(v => !v)} style={{ ...button, paddingHorizontal: 12 }}>
             <Feather name={grid ? "list" : "grid"} size={20} color={t.secondary} />
-          </Pressable>
+          </Pressable> : null}
         </View>
         {collectionId && status === "active" && !term && !selecting &&
             collections.some(c => c.id === collectionId && c.sensitivity === "standard") ?
@@ -578,11 +609,7 @@ export function LocalMemoryScreen() {
           <Text style={{color:t.muted,fontSize:13}}>{hint}</Text></View>
       </Pressable>)}
     </BottomSheet>
-    <BottomSheet visible={menuOpen} title="Память" onClose={() => setMenuOpen(false)}>
-      <Text style={{ color: t.muted }}>Показать</Text>
-      {(["active", "archived", "trashed"] as const).map((value, i) => <Pressable key={value} accessibilityRole="button" accessibilityState={{ selected: status === value }}
-        accessibilityLabel={["Открыть текущие записи", "Открыть архив", "Открыть корзину"][i]} style={{ ...button, alignItems: "center", flexDirection: "row", justifyContent: "space-between" }}
-        onPress={() => openStatus(value)}><Text style={{ color: t.text }}>{["Все записи", "Архив", "Корзина"][i]}</Text>{status === value ? <Feather name="check" size={20} color={t.secondary} /> : null}</Pressable>)}
+    <BottomSheet visible={menuOpen && status === "active"} title="Инструменты памяти" onClose={() => setMenuOpen(false)}>
       <Text style={{ color: t.muted }}>Ревизия</Text>
       <Pressable accessibilityRole="button" accessibilityLabel="Найти группы для проверки памяти"
         disabled={busy} style={{ ...button, alignItems: "flex-start" }}
@@ -590,8 +617,6 @@ export function LocalMemoryScreen() {
         <Text style={{ color: t.text }}>Предложения для ревизии</Text>
         <Text style={{ color: t.muted, fontSize: 13 }}>Только ручная проверка · без автоматического удаления</Text>
       </Pressable>
-      <Text style={{ color: t.muted }}>Данные</Text>
-      <Pressable accessibilityRole="button" accessibilityLabel="Резервные копии" style={{ ...button, alignItems: "flex-start" }} onPress={() => { setMenuOpen(false); navigation.navigate("MemoryBackup"); }}><Text style={{ color: t.text }}>Резервные копии</Text></Pressable>
     </BottomSheet>
     <BottomSheet visible={collectionMenu} title="Коллекции" onClose={() => setCollectionMenu(false)}>
       {[{ id: undefined, name: "Все записи" }, ...collections].map(c => <Pressable key={c.id || "all"} accessibilityRole="button" accessibilityLabel={"Раздел " + c.name} style={{ ...button, alignItems: "flex-start" }}
