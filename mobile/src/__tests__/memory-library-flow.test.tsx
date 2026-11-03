@@ -80,7 +80,9 @@ test("archive and trash have direct, non-duplicated entries and Android Back ret
  fireEvent.press(v.getByLabelText("Закрыть панель Инструменты памяти"));
  fireEvent.press(v.getByLabelText("Открыть архив"));
  await waitFor(() => v.getByLabelText("Открыть заметку Архивная"));
- expect(v.getByTestId("memory-note-list").props.numColumns).toBe(1);
+ expect(v.getByText("Записи в архиве")).toBeTruthy();
+ expect(v.queryByLabelText("Показать плитками")).toBeNull();
+ expect(v.queryByLabelText("Показать списком")).toBeNull();
  expect(v.queryByLabelText("Открыть корзину")).toBeNull();
  expect(v.queryByLabelText("Добавить в память")).toBeNull();
  const back = () => spy.mock.calls.filter(c => c[0] === "hardwareBackPress").at(-1)![1]({ type: "hardwareBackPress", timeStamp: 0 });
