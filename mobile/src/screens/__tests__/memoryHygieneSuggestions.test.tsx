@@ -64,7 +64,12 @@ jest.mock("../../media/vector-runner", () => ({ scheduleVectors: jest.fn() }));
 jest.mock("../../media/MemoryCover", () => ({ MemoryCover: "MemoryCover" }));
 jest.mock("../../design/nebula/MemoryNoteCard", () => ({ MemoryNoteCard: () => null }));
 jest.mock("../../local-memory/errors", () => ({ memoryErrorMessage: (e: Error) => e.message }));
-jest.mock("../../theme", () => ({ useTheme: () => ({
+jest.mock("../../theme", () => ({
+  useNebulaColors: () => ({
+    text: "#ffffff", textOnAccent: "#ffffff", border: "#445574", accent: "#7051db",
+    danger: "#ff9faf", surfaceElevated: "#1d2e51",
+  }),
+  useTheme: () => ({
   bg: "#05050b", panel: "#181823", soft: "#242435", text: "#fff",
   muted: "#aaa", accent: "#82d4ff", secondary: "#8cdbff",
   line: "#333", err: "#ff7777", userText: "#fff",
