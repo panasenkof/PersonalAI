@@ -12,7 +12,7 @@ function conversation(rows:SavedConversation["rows"]):SavedConversation {
 }
 const rows=()=>[
   {id:"u1",role:"user" as const,text:"Сравни PDF и TXT",attachments:[
-    {id:"file1",name:"secret.pdf",mime:"application/pdf",kind:"text" as const,
+    {id:"file1",name:"secret.pdf",mime:"text/plain",kind:"text" as const,
       data:"SECRET_ORIGINAL",size:16}]},
   {id:"a1",role:"assistant" as const,text:"PDF — инструкция; TXT — план"},
   {id:"u2",role:"user" as const,text:"Что решить дальше?"},
