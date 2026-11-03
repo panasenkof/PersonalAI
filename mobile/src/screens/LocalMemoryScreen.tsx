@@ -400,8 +400,9 @@ export function LocalMemoryScreen() {
       </View> : null}
       renderItem={({ item }) => <View style={{ flex: 1, maxWidth: columns === 2 ? "50%" : "100%" }}><MemoryNoteCard note={item} grid={columns === 2}
         cover={profile && memoryNoteHasPhoto(item)
-          ? <MemoryCover profile={profile} entityId={item.id} active={visibleIds.has(item.id)} label={"Обложка " + item.title} /> : undefined}
-        sectionName={collections.find(c => c.id === item.collection_id)?.name || "Запись"}
+          ? <MemoryCover profile={profile} entityId={item.id} active={visibleIds.has(item.id)}
+            height={columns === 2 ? 116 : 56} compact={columns !== 2} label={"Обложка " + item.title} /> : undefined}
+        sectionName={collectionId ? "" : collections.find(c => c.id === item.collection_id)?.name || "Запись"}
         selected={selectedIds.includes(item.id)} selecting={selecting}
         onToggleSelection={() => toggleSelection(item.id)}
         onRestore={status === "trashed" ? () => { void act("restore", undefined, [item]); } : undefined}

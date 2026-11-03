@@ -56,6 +56,22 @@ test("oversized pictures do not trigger automatic decoding", async () => {
   await act(async () => {});
   expect(materializeAttachment).not.toHaveBeenCalled();
 });
+test("compact thumbnail keeps 56dp in loading, missing-file and retry states", async () => {
+  (attachmentsForEntity as jest.Mock).mockResolvedValueOnce([]);
+  const screen = render(<MemoryCover profile="p" entityId="n" active compact height={56} />);
+  expect(screen.getByTestId("memory-cover-n").props.style.height).toBe(56);
+  await waitFor(() => expect(attachmentsForEntity).toHaveBeenCalledTimes(1));
+  expect(screen.getByTestId("memory-cover-n").props.style.height).toBe(56);
+  (attachmentsForEntity as jest.Mock).mockResolvedValue(items);
+  (manipulateAsync as jest.Mock).mockRejectedValueOnce(new Error("decoder"));
+  screen.rerender(<MemoryCover profile="p" entityId="other" active compact height={56} />);
+  await waitFor(() => screen.getByLabelText("Повторить загрузку обложки"));
+  expect(screen.getByTestId("memory-cover-other").props.style.height).toBe(56);
+  const { fireEvent } = require("@testing-library/react-native");
+  fireEvent.press(screen.getByLabelText("Повторить загрузку обложки"));
+  await waitFor(() => screen.getByLabelText("Обложка записи"));
+  expect(screen.getByTestId("memory-cover-other").props.style.height).toBe(56);
+});
 test("cover work runs at most two jobs concurrently", async () => {
   const release: (() => void)[] = []; let active = 0, max = 0;
   const tasks = Array.from({ length: 5 }, () => coverSlot(async () => {

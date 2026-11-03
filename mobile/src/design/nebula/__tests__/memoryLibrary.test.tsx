@@ -1,5 +1,6 @@
 import React from "react";
 import { fireEvent, render } from "@testing-library/react-native";
+import { Text } from "react-native";
 import type { EntityRecord } from "../../../local-memory/types";
 import { MemoryNoteCard } from "../MemoryNoteCard";
 import { memoryNoteDate, memoryNotePreview } from "../memoryNotePresentation";
@@ -43,7 +44,20 @@ describe("U2 Memory library note presentation", () => {
     expect(onOpen).toHaveBeenCalledTimes(1);
     expect(onToggleSelection).toHaveBeenCalledTimes(1);
     expect(view.getByText(note().title || "Без названия").props.numberOfLines).toBe(2);
-    expect(view.getByText("Мой длинный текст заметки").props.numberOfLines).toBe(3);
+    expect(view.getByText("Мой длинный текст заметки").props.numberOfLines).toBe(1);
+    expect(view.getByText(/^Рецепты · /).props.numberOfLines).toBe(1);
+  });
+  it("keeps tiled previews compact while retaining the full underlying note", () => {
+    const view = render(<MemoryNoteCard note={note()} grid selected={false}
+      sectionName="Рецепты" onOpen={jest.fn()} onToggleSelection={jest.fn()}
+      cover={<Text testID="library-cover">Фото</Text>} />);
+    expect(view.getByTestId("library-cover")).toBeTruthy();
+    expect(view.getByText(note().title || "Без названия").props.numberOfLines).toBe(2);
+    expect(view.getByText(/^Рецепты · /).props.numberOfLines).toBe(1);
+    expect(view.queryByText("Мой длинный текст заметки")).toBeNull();
+    const inside = render(<MemoryNoteCard note={note()} selected={false}
+      sectionName="" onOpen={jest.fn()} onToggleSelection={jest.fn()} />);
+    expect(inside.queryByText(/^Рецепты · /)).toBeNull();
   });
   it("toggles selected cards without opening their editor", () => {
     const onOpen = jest.fn(), onToggleSelection = jest.fn();
