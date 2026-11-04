@@ -47,12 +47,14 @@ test("trash preview is a single read-only SQL snapshot with only trashed note ve
   expect(snapshot.items).toEqual([{ id: one.id, record_version: expected!.record_version }]);
   expect(snapshot.originalCount).toBe(0);
   expect(snapshot.affectedRelationCount).toBe(0);
+  expect(await repo.trashNoteCount()).toBe(1);
   expect(snapshot.items.some(row => row.id === two.id)).toBe(false);
   // Preview does not mutate any record; a later restore invalidates the CAS.
   expect((await repo.entity(one.id))!.record_status).toBe("trashed");
   await repo.changeNotes("restore", snapshot.items);
   await expect(repo.purgeNotes(snapshot.items)).rejects.toBeInstanceOf(MemoryConflictError);
   expect((await repo.entity(one.id))!.record_status).toBe("active");
+  expect(await repo.trashNoteCount()).toBe(0);
 });
 
 test("creates offline note, edits with CAS, stores immutable history and updates full-text search", async () => {
