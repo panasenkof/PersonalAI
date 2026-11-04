@@ -78,26 +78,19 @@ function PdfOriginalPages({ uri }: { uri: string }) {
     </Text>
     {loading ? <Text accessibilityLiveRegion="polite" style={{ color: t.muted }}>Открываю страницу {page}…</Text> : null}
     {error ? <Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text> : null}
-    {error ? <Pressable accessibilityRole="button" accessibilityLabel="Повторить просмотр страницы PDF"
-      onPress={() => setAttempt(v => v + 1)} style={{ minHeight: nebulaTouch.minimum, justifyContent: "center" }}>
-      <Text style={{ color: t.secondary, fontWeight: "700" }}>Повторить просмотр</Text>
-    </Pressable> : null}
+    {error ? <NebulaAction icon="refresh-cw" label="Повторить просмотр"
+      accessibilityLabel="Повторить просмотр страницы PDF"
+      onPress={() => setAttempt(v => v + 1)} /> : null}
     {imageUri && !loading && !error ? <Image source={{ uri: imageUri }}
       accessibilityLabel={"Исходная страница PDF " + page} resizeMode="contain"
       onError={() => setError("Не удалось показать страницу PDF. Оригинал сохранён.")}
       style={{ width: "100%", height: 390, borderRadius: nebulaRadii.field }} /> : null}
     {pageCount !== null ? <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-      <Pressable accessibilityRole="button" accessibilityLabel="Предыдущая страница PDF"
-        disabled={page <= 1 || loading} onPress={() => setPage(p => Math.max(1, p - 1))}
-        style={{ minHeight: nebulaTouch.minimum, justifyContent: "center", opacity: page <= 1 || loading ? .4 : 1 }}>
-        <Text style={{ color: t.secondary }}>Назад</Text>
-      </Pressable>
+      <NebulaAction icon="chevron-left" label="Назад" accessibilityLabel="Предыдущая страница PDF"
+        disabled={page <= 1 || loading} onPress={() => setPage(p => Math.max(1, p - 1))} />
       <Text style={{ color: t.text, fontWeight: "700" }}>Страница {page} из {pageCount}</Text>
-      <Pressable accessibilityRole="button" accessibilityLabel="Следующая страница PDF"
-        disabled={page >= pageCount || loading} onPress={() => setPage(p => Math.min(pageCount, p + 1))}
-        style={{ minHeight: nebulaTouch.minimum, justifyContent: "center", opacity: page >= pageCount || loading ? .4 : 1 }}>
-        <Text style={{ color: t.secondary }}>Далее</Text>
-      </Pressable>
+      <NebulaAction icon="chevron-right" label="Далее" accessibilityLabel="Следующая страница PDF"
+        disabled={page >= pageCount || loading} onPress={() => setPage(p => Math.min(pageCount, p + 1))} />
     </View> : null}
   </View>;
 }
@@ -246,14 +239,10 @@ function AudioPreview({ uri, profile, attachment, onError }: {
               <Text style={{ color: t.text, lineHeight: 22 }}>{segment.text}</Text>
             </Pressable>;
         })}
-        {segments.length > 5 ? <Pressable accessibilityRole="button"
+        {segments.length > 5 ? <NebulaAction icon={showAllSegments ? "chevron-up" : "chevron-down"}
+          label={showAllSegments ? "Свернуть" : "Показать все фрагменты · " + segments.length}
           accessibilityLabel={showAllSegments ? "Свернуть транскрипт" : "Показать весь транскрипт"}
-          onPress={() => setShowAllSegments(value => !value)}
-          style={{ minHeight: nebulaTouch.minimum, justifyContent: "center" }}>
-          <Text style={{ color: t.secondary, fontWeight: "700" }}>
-            {showAllSegments ? "Свернуть" : "Показать все фрагменты · " + segments.length}
-          </Text>
-        </Pressable> : null}
+          onPress={() => setShowAllSegments(value => !value)} /> : null}
       </> : null}
     </View>
   </View>;
@@ -301,10 +290,8 @@ export function AttachmentView({ profile, entityId, verifiedOriginal, photoAttac
     {loading ? <Text style={{ color: t.muted }}>Загружаю список вложений…</Text> : null}
     {error ? <>
       <Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text>
-      <Pressable accessibilityRole="button" accessibilityLabel="Повторить загрузку вложений" onPress={() => setRetry(x => x + 1)}
-        style={{ minHeight: nebulaTouch.minimum, justifyContent: "center" }}>
-        <Text style={{ color: t.secondary }}>Повторить загрузку</Text>
-      </Pressable>
+      <NebulaAction icon="refresh-cw" label="Повторить загрузку"
+        accessibilityLabel="Повторить загрузку вложений" onPress={() => setRetry(x => x + 1)} />
     </> : null}
     {missingVerified ? <Text accessibilityRole="alert" style={{ color: t.err }}>Источник изменён или недоступен. Повторите поиск.</Text> : null}
     {listed.map(attachment => <OneAttachment key={attachment.id} profile={profile} attachment={attachment} verified={verifiedOriginal}
