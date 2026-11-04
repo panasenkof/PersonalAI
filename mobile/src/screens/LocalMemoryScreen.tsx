@@ -428,29 +428,49 @@ export function LocalMemoryScreen() {
       {error ? <Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text> : null}
       <Text numberOfLines={2} style={{ color: t.muted }}>{selectedNotes.map(memoryDisplayTitle).join(", ")}</Text>
       {confirmation ? <>
-        <Text style={{ color: t.text }}>{confirmation === "trash" ? `Записей: ${selectedNotes.length}. Их можно будет восстановить из корзины.` : `Записей: ${selectedNotes.length}. Записи, оригиналы и история будут удалены без возможности восстановления.`}</Text>
-        <Pressable disabled={busy} accessibilityRole="button" style={actionButton} onPress={() => setConfirmation(null)}><Text style={{ color: t.secondary }}>Отмена</Text></Pressable>
-        <Pressable disabled={busy} accessibilityRole="button" accessibilityLabel={confirmation === "trash" ? "Подтвердить перемещение в корзину" : "Подтвердить удаление навсегда"} style={actionButton} onPress={() => confirmation === "trash" ? void act("trash") : void purgeSelected()}><Text style={{ color: t.err }}>{busy ? "Выполняю…" : confirmation === "trash" ? "В корзину" : "Удалить навсегда"}</Text></Pressable>
+        <Text style={{ color: t.text }}>
+          {confirmation === "trash"
+            ? `Записей: ${selectedNotes.length}. Их можно будет восстановить из корзины.`
+            : `Записей: ${selectedNotes.length}. Записи, оригиналы и история будут удалены без возможности восстановления.`}
+        </Text>
+        <NebulaAction icon="x" label="Отмена" disabled={busy} onPress={() => setConfirmation(null)} />
+        <NebulaAction icon="trash-2" variant="danger"
+          label={busy ? "Выполняю…" : confirmation === "trash" ? "В корзину" : "Удалить навсегда"}
+          accessibilityLabel={confirmation === "trash" ? "Подтвердить перемещение в корзину" : "Подтвердить удаление навсегда"}
+          disabled={busy} onPress={() => confirmation === "trash" ? void act("trash") : void purgeSelected()} />
       </> : <>
-      {selectedNotes.length === 1 ? <Pressable accessibilityRole="button" style={actionButton} onPress={() => { setActionsOpen(false); setConfirmation(null); setContextNote(null); navigation.navigate("MemoryNote", { entityId: selectedNotes[0].id }); }}><Text style={{ color: t.text }}>{status === "trashed" ? "Открыть запись" : "Редактировать"}</Text></Pressable> : null}
+        {selectedNotes.length === 1 ? <NebulaAction icon={status === "trashed" ? "eye" : "edit-3"}
+          label={status === "trashed" ? "Открыть запись" : "Редактировать"}
+          disabled={busy} onPress={() => { setActionsOpen(false); setConfirmation(null); setContextNote(null);
+            navigation.navigate("MemoryNote", { entityId: selectedNotes[0].id }); }} /> : null}
         {status === "trashed" ? <>
-          <Pressable disabled={busy} accessibilityRole="button" style={actionButton} onPress={() => void act("restore")}><Text style={{ color: t.secondary }}>Восстановить</Text></Pressable>
-          <Pressable disabled={busy} accessibilityRole="button" style={actionButton} onPress={() => setConfirmation("purge")}><Text style={{ color: t.err }}>Удалить навсегда</Text></Pressable>
+          <NebulaAction icon="rotate-ccw" label="Восстановить" disabled={busy}
+            onPress={() => void act("restore")} />
+          <NebulaAction icon="trash-2" label="Удалить навсегда" variant="danger" disabled={busy}
+            onPress={() => setConfirmation("purge")} />
         </> : <>
-          <Pressable disabled={busy} accessibilityRole="button" style={actionButton} onPress={() => void act(status === "archived" ? "unarchive" : "archive")}><Text style={{ color: t.secondary }}>{status === "archived" ? "Вернуть из архива" : "В архив"}</Text></Pressable>
-          <Pressable disabled={busy} accessibilityRole="button" style={actionButton} onPress={() => { setActionsOpen(false); setMoveOpen(true); }}><Text style={{ color: t.secondary }}>Перенести</Text></Pressable>
-          {selectedNotes.length >= 2 && status === "active" ? <Pressable disabled={busy} accessibilityRole="button" style={actionButton} onPress={() => { setActionsOpen(false); setMergeOpen(true); }}><Text style={{ color: t.secondary }}>Объединить записи</Text></Pressable> : null}
-          {selectedNotes.length >= 2 && status === "active" ? <Pressable
-            disabled={busy} accessibilityRole="button" accessibilityLabel="Проверить последствия групповой ревизии"
-            style={actionButton} onPress={() => {
-              setActionsOpen(false);setHygieneExcluded([]);setHygienePreview(null);setHygieneAction("archive");setHygieneConfirm(false);setHygienePolicyItem(null);
-              setHygieneReviewOpen(true);void inspectHygiene([]);
-            }}>
-            <Text style={{ color:t.secondary }}>Проверить группу и исключения</Text>
-          </Pressable> : null}
-          <Pressable disabled={busy} accessibilityRole="button" style={actionButton} onPress={() => setConfirmation("trash")}><Text style={{ color: t.err }}>В корзину</Text></Pressable>
+          <NebulaAction icon={status === "archived" ? "corner-up-left" : "archive"}
+            label={status === "archived" ? "Вернуть из архива" : "В архив"}
+            disabled={busy} onPress={() => void act(status === "archived" ? "unarchive" : "archive")} />
+          <NebulaAction icon="folder" label="Перенести" disabled={busy}
+            onPress={() => { setActionsOpen(false); setMoveOpen(true); }} />
+          {selectedNotes.length >= 2 && status === "active" ? <NebulaAction icon="git-merge"
+            label="Объединить записи" disabled={busy}
+            onPress={() => { setActionsOpen(false); setMergeOpen(true); }} /> : null}
+          {selectedNotes.length >= 2 && status === "active" ? <NebulaAction icon="clipboard"
+            label="Проверить группу и исключения" accessibilityLabel="Проверить последствия групповой ревизии"
+            disabled={busy} onPress={() => {
+              setActionsOpen(false); setHygieneExcluded([]); setHygienePreview(null);
+              setHygieneAction("archive"); setHygieneConfirm(false); setHygienePolicyItem(null);
+              setHygieneReviewOpen(true); void inspectHygiene([]);
+            }} /> : null}
+          <NebulaAction icon="trash-2" label="В корзину" variant="danger"
+            disabled={busy} onPress={() => setConfirmation("trash")} />
         </>}
-      {contextNote ? <Pressable disabled={busy} accessibilityRole="button" style={actionButton} onPress={() => { setSelectedIds([contextNote.id]); setSelecting(true); setContextNote(null); setActionsOpen(false); }}><Text style={{ color: t.secondary }}>Выбрать несколько</Text></Pressable> : null}
+        {contextNote ? <NebulaAction icon="check-square" label="Выбрать несколько"
+          disabled={busy} onPress={() => {
+            setSelectedIds([contextNote.id]); setSelecting(true); setContextNote(null); setActionsOpen(false);
+          }} /> : null}
       </>}
       </BottomSheet>
 

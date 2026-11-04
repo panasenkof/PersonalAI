@@ -520,6 +520,10 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       }
       await page.getByLabel('Действия с заметкой Индейка', { exact: true }).click();
       await page.getByText('В архив', { exact: true }).waitFor();
+      const archiveAction = page.getByRole('button', { name: 'В архив', exact: true });
+      const archiveBox = await archiveAction.boundingBox();
+      assert(archiveBox && archiveBox.height >= 48 && archiveBox.width >= 48,
+        'Card action is a full-size labelled Nebula button, not a plain text row');
       assert.equal(await page.getByTestId('memory-selection-toolbar').count(), 0, 'Single-note menu does not select');
       await page.getByLabel('Закрыть панель Действия с записью', { exact: true }).click();
       await page.getByLabel('Выбрать записи', { exact: true }).click();
@@ -532,6 +536,8 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       if (process.env.SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, `selection-menu-${width}.png`), animations: "disabled" });
       await page.getByText('В корзину', { exact: true }).click();
       await page.getByLabel('Подтвердить перемещение в корзину', { exact: true }).waitFor();
+      const dangerous = await page.getByLabel('Подтвердить перемещение в корзину', { exact: true }).boundingBox();
+      assert(dangerous && dangerous.height >= 48, 'Destructive confirmation uses a full-size named button');
       assert.equal(await page.getByLabel('Закрыть панель Действия с записью', { exact: true }).count(), 0, 'Confirmation replaces actions without stacking another modal');
       await page.getByLabel('Закрыть панель В корзину?', { exact: true }).click();
       await page.getByText('Выбрано: 1', { exact: true }).waitFor();
