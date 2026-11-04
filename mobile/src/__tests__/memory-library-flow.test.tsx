@@ -355,7 +355,7 @@ test("03.4: clear-trash is contextual, previews ALL 205 rows, cancel never calls
   expect(ui.queryByLabelText("Подтвердить очистку всей корзины")).toBeNull();
   fireEvent.press(ui.getByLabelText("Проверить последствия очистки корзины"));
   expect(ui.getByLabelText("Подтвердить очистку всей корзины")).toBeTruthy();
-  expect(ui.getByText(/Оригиналов: 14/)).toBeTruthy();
+  expect(ui.getByText(/Оригиналов в удаляемых записях: 14/)).toBeTruthy();
   fireEvent.press(ui.getByLabelText("Отменить очистку корзины"));
   expect(mockDb.purgeNotes).not.toHaveBeenCalled();
   await waitFor(()=>ui.getByLabelText("Восстановить заметку Удалённая"));
