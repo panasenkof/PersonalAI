@@ -147,16 +147,6 @@ function NebulaHomeContent() {
   const suggestedPhotoSearch = localPhotoSuggestion83(question, active?.attachments || []);
   const canSearchLocal = Boolean(ready && !cameraBusy && !pickingAttachment && !active?.deleting && localPhotoSearch);
   const busy = active?.busy || false;
-  // QA-only diagnostic; remove after identifying the missing action's cause.
-  const qaScope = (globalThis as unknown as {__qa?: Record<string,unknown>}).__qa;
-  if (qaScope) qaScope.photoSuggestionState = {
-    question, activeId: active?.id, attachments: active?.attachments?.length || 0,
-    suggestedPhotoSearch, localPhotoSearch, ready, busy, cameraBusy, pickingAttachment, dictating,
-    directIntent: localPhotoIntent83(question, []),
-    forcedIntent: localPhotoIntent83("Найди " + question, []),
-    plainSuggestion: localPhotoSuggestion83(question, []),
-    regexMatch: /^(?:фото|фотография|фотографии|снимок|снимки|изображение|изображения)\s+[^?]+$/iu.test(question),
-  };
   const statusSignals = { voicePhase, busy, streamText: active?.streamText, progress: active?.progress, error, ready };
   const orbPhase = resolveNebulaHomePhase(statusSignals);
   const statusText = normalization.busy && !busy ? "Улучшаю текст" : resolveNebulaStatus(statusSignals);
