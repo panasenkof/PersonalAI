@@ -19,7 +19,7 @@ import { useTheme } from "../theme";
 import { nebulaSpacing, nebulaRadii, nebulaTouch } from "../design/nebula/tokens";
 import { MemoryCover } from "../media/MemoryCover";
 import { memoryDisplayTitle, memoryNoteHasPhoto } from "../design/nebula/memoryNotePresentation";
-import { MemoryNoteCard } from "../design/nebula/MemoryNoteCard";
+import { MemoryNoteCard, MEMORY_GRID_MEDIA_HEIGHT } from "../design/nebula/MemoryNoteCard";
 import { NebulaAction } from "../design/nebula/components";
 import { loadMemoryLibraryView, saveMemoryLibraryView } from "../design/nebula/memoryViewPreference";
 
@@ -647,7 +647,7 @@ export function LocalMemoryScreen() {
       renderItem={({ item }) => <View style={{ flex: 1, maxWidth: columns === 2 ? "50%" : "100%" }}><MemoryNoteCard note={item} grid={columns === 2}
         cover={profile && memoryNoteHasPhoto(item)
           ? <MemoryCover profile={profile} entityId={item.id} active={visibleIds.has(item.id)}
-            height={columns === 2 ? 116 : 56} compact={columns !== 2} label={"Обложка " + item.title} /> : undefined}
+            height={columns === 2 ? MEMORY_GRID_MEDIA_HEIGHT : 56} compact={columns !== 2} label={"Обложка " + item.title} /> : undefined}
         sectionName={collectionId ? "" : collections.find(c => c.id === item.collection_id)?.name || "Запись"}
         selected={selectedIds.includes(item.id)} selecting={selecting}
         onToggleSelection={() => toggleSelection(item.id)}
