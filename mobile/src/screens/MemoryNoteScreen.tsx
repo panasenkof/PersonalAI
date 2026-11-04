@@ -396,7 +396,8 @@ export function MemoryNoteScreen() {
           {typeof selected?.payload.source_url === "string" && /^https:\/\//.test(selected.payload.source_url) ? <Pressable accessibilityRole="link" style={button} onPress={() => void Linking.openURL(String(selected.payload.source_url)).catch(() => setError("Не удалось открыть источник."))}><Text style={{ color: t.secondary }}>Открыть источник</Text></Pressable> : null}
         </> : <>
         <TextInput testID="note-body-input" accessibilityLabel="Текст заметки" multiline value={body} onChangeText={value => { setBeforeAi(null); setBody(value); }} editable={!busy && !voiceActive} placeholder="Что нужно запомнить?" placeholderTextColor={t.muted} style={{ ...field, minHeight: 200, textAlignVertical: "top", lineHeight: 23 }} />
-        {!body && extractedText ? <Pressable accessibilityRole="button" style={button} onPress={() => setBody(extractedText)}><Text style={{ color: t.secondary }}>Вставить распознанный текст</Text></Pressable> : null}
+        {!body && extractedText ? <NebulaAction icon="file-text" label="Вставить распознанный текст"
+          onPress={() => setBody(extractedText)} /> : null}
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}><VoiceInput value={body} onChange={value => { setBeforeAi(null); setBody(value); }} maxLength={60000} disabled={busy || aiOpen} onActiveChange={setVoiceActive} onError={setError} /><Text style={{ color: t.muted }}>Надиктовать запись</Text></View>
 
         <Pressable accessibilityRole="button" accessibilityLabel="Выбрать раздел записи" onPress={() => setSectionOpen(true)}
@@ -407,7 +408,9 @@ export function MemoryNoteScreen() {
         </Pressable>
         <TextInput testID="note-title-input" accessibilityLabel="Заголовок заметки" value={title} onChangeText={value => { setBeforeAi(null); setTitle(value); }} editable={!busy} maxLength={160} placeholder="Заголовок — необязательно" placeholderTextColor={t.muted} style={field} />
 
-        {beforeAi ? <Pressable accessibilityRole="button" accessibilityLabel="Вернуть текст до правки ИИ" style={button} onPress={() => { setTitle(beforeAi.title); setBody(beforeAi.body); setBeforeAi(null); }}><Text style={{ color: t.secondary }}>Отменить правку ИИ</Text></Pressable> : null}
+        {beforeAi ? <NebulaAction icon="rotate-ccw" label="Отменить правку ИИ"
+          accessibilityLabel="Вернуть текст до правки ИИ"
+          onPress={() => { setTitle(beforeAi.title); setBody(beforeAi.body); setBeforeAi(null); }} /> : null}
         <NoteEditorSection testID="note-metadata-toggle" title="Параметры записи" summary={"Тип: " + KIND_NAMES[kind] + " · заполнять необязательно"}
           expanded={metadataOpen} onToggle={() => { Keyboard.dismiss(); setMetadataOpen(open => !open); }}>
         <Text style={{ color: t.muted, fontSize: 12 }}>Тип записи</Text>
@@ -455,9 +458,7 @@ export function MemoryNoteScreen() {
               style={{...button,backgroundColor:t.soft}}>
               <Text numberOfLines={2} style={{color:t.secondary}}>{file.name}</Text>
             </Pressable>)}
-            <Pressable accessibilityRole="button" onPress={()=>setRepeatFiles([])} style={button}>
-              <Text style={{color:t.muted}}>Отмена выбора</Text>
-            </Pressable>
+            <NebulaAction icon="x" label="Отмена выбора" onPress={()=>setRepeatFiles([])} />
           </View> : null}
           {candidate ? <View testID="re-recognition-review" style={{borderColor:t.line,borderWidth:1,
             borderRadius:nebulaRadii.card,padding:nebulaSpacing.md,gap:nebulaSpacing.sm,backgroundColor:t.panel}}>
@@ -467,15 +468,11 @@ export function MemoryNoteScreen() {
               <Text selectable style={{color:t.text,lineHeight:23}}>{candidate.text}</Text>
             </ScrollView>
             <View style={{flexDirection:"row",flexWrap:"wrap",gap:nebulaSpacing.sm}}>
-              <Pressable accessibilityRole="button" accessibilityLabel="Оставить текущий текст"
-                onPress={()=>setCandidate(null)} style={{...button,backgroundColor:t.soft}}>
-                <Text style={{color:t.secondary}}>Оставить текущий</Text>
-              </Pressable>
-              <Pressable accessibilityRole="button" accessibilityLabel="Применить новый текст"
-                disabled={busy || dirty} onPress={acceptCandidate}
-                style={{...button,backgroundColor:t.soft,opacity:busy||dirty?.5:1}}>
-                <Text style={{color:t.secondary,fontWeight:"700"}}>Применить новый</Text>
-              </Pressable>
+              <NebulaAction icon="x" label="Оставить текущий"
+                accessibilityLabel="Оставить текущий текст" onPress={()=>setCandidate(null)} />
+              <NebulaAction icon="check" label="Применить новый"
+                accessibilityLabel="Применить новый текст" variant="primary"
+                disabled={busy || dirty} onPress={acceptCandidate} />
             </View>
           </View> : null}
         </NoteEditorSection> : null}
@@ -496,14 +493,16 @@ export function MemoryNoteScreen() {
             <Text style={{ color: t.text, fontWeight: "700" }}>События</Text>
             {events.map(e => <Text key={e.id} style={{ color: t.muted }}>{new Date(e.occurred_at).toLocaleDateString()} · {String(e.payload.text || e.kind)}</Text>)}
             <TextInput accessibilityLabel="Новое событие" value={eventText} onChangeText={setEventText} placeholder="Что произошло?" placeholderTextColor={t.muted} style={field} />
-            <Pressable accessibilityRole="button" disabled={busy || !eventText.trim()} style={button} onPress={() => void run(async db => {
+            <NebulaAction icon="plus" label="Добавить событие" disabled={busy || !eventText.trim()}
+              onPress={() => void run(async db => {
               await db.createObservation({ entity_id: selected.id, kind: "note_event", occurred_at: new Date().toISOString(), payload: { text: eventText.trim() }, sensitivity: "inherit", source_kind: "user", source_ref: "device" });
               if (alive.current) { setEvents(await db.observations(selected.id)); setEventText(""); }
-            })}><Text style={{ color: t.secondary }}>Добавить событие</Text></Pressable>
+            })} />
             <Text style={{ color: t.text, fontWeight: "700" }}>Связанные записи ({relations.length})</Text>
             {relations.map(r => { const other = related.find(e => e.id === (r.source_entity_id === selected.id ? r.target_entity_id : r.source_entity_id));
               return <Text key={r.id} style={{ color: t.muted }}>{(other?.title || "Другая запись") + (other?.kind ? " · " + KIND_NAMES[other.kind] : "") + (r.kind === "about" ? (r.source_entity_id === selected.id ? " — о ком запись" : " — запись об этом человеке") : "")}</Text>; })}
-            <Pressable accessibilityRole="button" accessibilityLabel="Связать с другой записью" style={button} onPress={() => setLinkOpen(true)}><Text style={{ color: t.secondary }}>+ Связать с другой записью</Text></Pressable>
+            <NebulaAction icon="link-2" label="Связать с другой записью"
+              onPress={() => setLinkOpen(true)} />
           </View> : null}
           <Pressable accessibilityRole="button" accessibilityLabel={selected.record_status === "archived" ? "Вернуть запись из архива" : "Архивировать запись"} disabled={busy || dirty || !["active", "archived"].includes(selected.record_status)} style={button} onPress={() => void run(async db => {
             await db.setEntityStatus(selected.id, selected.record_version, selected.record_status === "archived" ? "active" : "archived");
@@ -517,7 +516,8 @@ export function MemoryNoteScreen() {
           onSaved={updated => { setSelected(updated); setBeforeAi(null); scheduleVectors(profile); }} /> : null}
       </> : null}
       {error ? <Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text> : null}
-      {!loading && !repository.current ? <Pressable accessibilityRole="button" style={button} onPress={() => setRetry(n => n + 1)}><Text style={{ color: t.secondary }}>Повторить загрузку</Text></Pressable> : null}
+      {!loading && !repository.current ? <NebulaAction icon="refresh-cw"
+        label="Повторить загрузку" onPress={() => setRetry(n => n + 1)} /> : null}
     </ScrollView>
     {!loading && repository.current && editing ? <View style={{ paddingHorizontal: nebulaSpacing.md, paddingTop: nebulaSpacing.xs, paddingBottom: keyboardOpen ? nebulaSpacing.xs : insets.bottom + nebulaSpacing.xs, borderTopWidth: 1, borderTopColor: t.line, backgroundColor: t.bg }}>
       <Pressable testID="note-save-button" accessibilityRole="button" accessibilityLabel={editing ? "Сохранить запись" : "Редактировать запись"} disabled={saveDisabled} accessibilityState={{ disabled: saveDisabled }}
@@ -525,7 +525,9 @@ export function MemoryNoteScreen() {
         style={{ ...button, backgroundColor: t.accent, opacity: saveDisabled ? 0.45 : 1, alignItems: "center" }}>
         <Text style={{ color: "#fff", fontWeight: "700" }}>{busy ? "Сохранение…" : editing ? "Сохранить запись" : "Редактировать"}</Text>
       </Pressable>
-      <Pressable accessibilityRole="button" accessibilityLabel="Изменить заметку с ИИ" disabled={busy || voiceActive || !canEditWithAi} accessibilityState={{ disabled: busy || voiceActive || !canEditWithAi }} onPress={() => { Keyboard.dismiss(); setAiOpen(true); }} style={{ ...button, opacity: canEditWithAi ? 1 : 0.45, alignItems: "center" }}><Text style={{ color: t.secondary, fontWeight: "700" }}>Изменить с ИИ</Text></Pressable>
+      <NebulaAction icon="edit-3" label="Изменить с ИИ" accessibilityLabel="Изменить заметку с ИИ"
+        disabled={busy || voiceActive || !canEditWithAi}
+        onPress={() => { Keyboard.dismiss(); setAiOpen(true); }} />
       {!canEditWithAi ? <Text style={{ color: t.muted, ...nebulaTypography.label, textAlign: "center" }}>Добавьте текст или надиктуйте запись для правки с ИИ.</Text> : null}
     </View> : null}
     {aiOpen && profile ? <NoteAiEditor profile={profile} draft={{ title, body: body.trim() ? body : extractedText }}
