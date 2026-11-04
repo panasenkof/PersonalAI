@@ -527,7 +527,7 @@ function NebulaHomeContent() {
           disabled={!ready || dictating || (!normalization.busy && (!question.trim() || (!normalization.alternate && !canSend)))}
           onPress={() => void normalization.toggle(settings)} /> : null}
         <View style={{ flex: 1, minWidth: 0 }} />
-        <IconAction compact icon={busy ? "square" : "arrow-up"} label={busy ? "Стоп" : localPhotoSearch ? "Найти" : "Отправить"} accessibilityLabel={busy ? "Остановить запрос" : localPhotoSearch ? "Найти фотографии в памяти" : "Отправить запрос"}
+        <IconAction compact explainOnTap={false} icon={busy ? "square" : "arrow-up"} label={busy ? "Стоп" : localPhotoSearch ? "Найти" : "Отправить"} accessibilityLabel={busy ? "Остановить запрос" : localPhotoSearch ? "Найти фотографии в памяти" : "Отправить запрос"}
           hint={busy ? "Остановить ответ ИИ в этом диалоге." : localPhotoSearch ? "Найти фотографии на телефоне." : "Отправить написанное сообщение выбранной модели."} hintAbove emphasized={!busy}
           disabled={!busy && (pickingAttachment || !(canSend || canSearchLocal) || (!question.trim() && !active?.attachments?.length))} onPress={sendOrStop} />
       </View>
