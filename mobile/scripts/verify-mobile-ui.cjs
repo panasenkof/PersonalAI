@@ -243,10 +243,10 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.clock.runFor(100);
       await page.getByLabel('Убрать вложение note.txt', { exact: true }).waitFor();
       const removeButton = page.getByLabel('Убрать вложение note.txt', { exact: true });
-      const removeBox = await removeButton.boundingBox();
+      const attachmentRemoveBox = await removeButton.boundingBox();
       const removeBorder = await removeButton.evaluate(el => parseFloat(getComputedStyle(el).borderTopWidth));
-      assert(removeBox && removeBox.height >= 48 && removeBorder >= 1 &&
-        removeBox.x >= 0 && removeBox.x + removeBox.width <= width,
+      assert(attachmentRemoveBox && attachmentRemoveBox.height >= 48 && removeBorder >= 1 &&
+        attachmentRemoveBox.x >= 0 && attachmentRemoveBox.x + attachmentRemoveBox.width <= width,
         'Remove must be a visible, reachable attachment-local Nebula button');
       await page.clock.runFor(6000);
       if (process.env.SCREENSHOT_DIR) await page.screenshot({animations:'disabled', path:path.join(process.env.SCREENSHOT_DIR, `chat-attachment-${width}.png`)});
