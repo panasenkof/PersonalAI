@@ -151,6 +151,11 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await showShare([{shareType:'url',value:'https://example.org/shared'}, {shareType:'file',value:'content://provider/shared.txt',mimeType:'text/plain'}]);
       await page.getByLabel('Добавить входящее в чат',{exact:true}).waitFor();
       await page.waitForFunction(()=>!document.querySelector('[aria-label="Добавить входящее в чат"]').disabled);
+      const shareCancel = page.getByLabel('Отменить приём материала', {exact:true});
+      const shareCancelBox = await shareCancel.boundingBox();
+      const shareCancelBorder = await shareCancel.evaluate(el => parseFloat(getComputedStyle(el).borderTopWidth));
+      assert(shareCancelBox && shareCancelBox.height >= 48 && shareCancelBorder >= 1,
+        'Share Cancel is a visible Nebula button, not unframed text');
       if(process.env.SCREENSHOT_DIR) await page.screenshot({animations:'disabled',path:path.join(process.env.SCREENSHOT_DIR,`share-choice-${width}.png`)});
       assert.equal(replyNumber,0,'Share preview does not send');
       await page.getByLabel('Добавить входящее в чат',{exact:true}).click();
@@ -237,6 +242,12 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByLabel('Прикрепить файл к сообщению', { exact: true }).click();
       await page.clock.runFor(100);
       await page.getByLabel('Убрать вложение note.txt', { exact: true }).waitFor();
+      const removeButton = page.getByLabel('Убрать вложение note.txt', { exact: true });
+      const removeBox = await removeButton.boundingBox();
+      const removeBorder = await removeButton.evaluate(el => parseFloat(getComputedStyle(el).borderTopWidth));
+      assert(removeBox && removeBox.height >= 48 && removeBorder >= 1 &&
+        removeBox.x >= 0 && removeBox.x + removeBox.width <= width,
+        'Remove must be a visible, reachable attachment-local Nebula button');
       await page.clock.runFor(6000);
       if (process.env.SCREENSHOT_DIR) await page.screenshot({animations:'disabled', path:path.join(process.env.SCREENSHOT_DIR, `chat-attachment-${width}.png`)});
 
