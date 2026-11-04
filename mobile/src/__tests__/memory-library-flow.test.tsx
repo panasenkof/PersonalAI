@@ -165,7 +165,7 @@ test("merge preview identifies the primary record, keeps the full text optional 
  expect(v.getByText("Основная · Первая")).toBeTruthy();
  expect(v.getByText("Будет объединена · Вторая")).toBeTruthy();
  expect(v.getByText(/вложения остальных/)).toBeTruthy();
- expect(v.getByText(/из 60 000 допустимых символов/)).toBeTruthy();
+ expect(v.getByText(/Текст: .*\/ 60 000 символов/)).toBeTruthy();
  expect(mockDb.changeNotes).not.toHaveBeenCalled();
  fireEvent.press(v.getByText("Проверить полный текст"));
  expect(v.getByText("Свернуть предпросмотр")).toBeTruthy();
