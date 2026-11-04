@@ -719,18 +719,28 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByText('Объединить записи', { exact: true }).click();
       await page.getByText('Основная · Индейка', { exact: true }).waitFor();
       await page.getByText(/Будет объединена · Рецепт: индейка/).waitFor();
-      assert.equal(await page.getByText(/вложения остальных записей переходят к основной/i).count(), 1,
+      assert.equal(await page.getByText(/получит тексты и вложения остальных/i).count(), 1,
         'Merge preview states the effect on source attachments without changing notes');
       if (process.env.SCREENSHOT_DIR) {
         await page.screenshot({animations:'disabled',
           path:path.join(process.env.SCREENSHOT_DIR,`merge-preview-${width}.png`)});
       }
       const confirmMerge = page.getByLabel('Подтвердить объединение', { exact:true });
+      const cancelMerge = page.getByLabel('Отмена', { exact:true });
+      const initialConfirmBox = await confirmMerge.boundingBox();
+      const initialCancelBox = await cancelMerge.boundingBox();
+      assert(initialConfirmBox && initialCancelBox &&
+        initialConfirmBox.y >= 0 && initialConfirmBox.y + initialConfirmBox.height <= 900 &&
+        initialCancelBox.y >= 0 && initialCancelBox.y + initialCancelBox.height <= 900,
+        'Merge Confirm and Cancel are BOTH visible without scrolling at the narrowest width');
       await confirmMerge.click({trial:true});
       const mergeBox = await confirmMerge.boundingBox();
       assert(mergeBox && mergeBox.width >= 48 && mergeBox.x >= 0 && mergeBox.x + mergeBox.width <= width,
         'Merge confirmation is a framed reachable button on narrow screens');
-      await page.getByLabel('Отмена', { exact:true }).click();
+      await page.getByLabel('Проверить полный текст', {exact:true}).click();
+      await page.getByLabel('Свернуть предпросмотр', {exact:true}).waitFor();
+      await page.getByLabel('Свернуть предпросмотр', {exact:true}).click();
+      await cancelMerge.click();
       await page.getByLabel('Отменить выбор записей', { exact:true }).click();
       // Contextual restore is available immediately in the opened trashed note.
       // Reuse the existing version-checked writer, not a parallel delete/restore path.
