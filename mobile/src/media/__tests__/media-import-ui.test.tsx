@@ -27,12 +27,14 @@ jest.mock('@react-navigation/elements', () => ({ useHeaderHeight: () => 56 }));
 jest.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ bottom: 24 }) }));
 jest.mock('../../profile/ProfileContext', () => ({ useProfile: () => 'guest' }));
 jest.mock('../../security/native-interaction', () => ({ withNativeInteraction: (fn: any) => fn() }));
-jest.mock('../../direct-agent/settings', () => ({ loadDirectConnections: async () => ({ connections: [{ id: 'vision', name: 'Vision', apiKey: 'key', provider: 'openai', model: 'vision' }], activeId: 'vision' }), defaultDirectPreferences: {}, anonymousLocalAllowed: () => false }));
+jest.mock('../../direct-agent/settings', () => ({ loadDirectConnections: async () => ({ connections: [{ id: 'vision', name: 'Vision', apiKey: 'key', provider: 'openai', baseUrl: 'https://api.openai.com/v1', model: 'vision' }], activeId: 'vision' }), defaultDirectPreferences: {}, anonymousLocalAllowed: () => false }));
 jest.mock('../../direct-agent/enrich-runner', () => ({ scheduleIndexTerms: jest.fn() }));
 jest.mock('../vector-runner', () => ({ scheduleVectors: jest.fn() }));
 jest.mock('../whisper', () => ({ useWhisperStatus: () => ({ state: 'absent' }) }));
 jest.mock('../attachments', () => ({ MAX_ORIGINALS_PER_NOTE: 10, MAX_TOTAL_ORIGINAL_BYTES: 80 * 1024 * 1024, saveMediaNote: jest.fn(async () => 'note') }));
-jest.mock('../extract', () => ({ ...jest.requireActual('../kinds'), extractMedia: jest.fn() }));
+jest.mock('../extract', () => ({ ...jest.requireActual('../kinds'), extractMedia: jest.fn(),
+  officialAudioProvider: (c: any) => c.provider === 'openai' && c.baseUrl === 'https://api.openai.com/v1',
+}));
 jest.mock('../joint-recognition', () => ({ analyzeFilesTogether: jest.fn() }));
 jest.mock('expo-document-picker', () => ({ getDocumentAsync: jest.fn(async () => ({ canceled: false, assets: [{ uri: 'file:///cache/photo.png', name: 'photo.png', mimeType: 'image/png' }] })) }));
 jest.mock('expo-image-picker', () => ({ launchImageLibraryAsync: jest.fn(), requestCameraPermissionsAsync: jest.fn(), launchCameraAsync: jest.fn() }));
