@@ -11,7 +11,10 @@ jest.mock("@react-navigation/native", () => ({
 }));
 jest.mock("../profile/ProfileContext", () => ({ useProfile: () => "guest" }));
 jest.mock("@react-navigation/elements", () => ({ useHeaderHeight: () => 64 }));
-jest.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ top: 24, bottom: 24, left: 0, right: 0 }) }));
+jest.mock("react-native-safe-area-context", () => ({
+  useSafeAreaInsets: () => ({ top: 24, bottom: 24, left: 0, right: 0 }),
+  SafeAreaProvider: ({ children }: any) => children,
+}));
 jest.mock("../direct-agent/settings", () => ({ ...jest.requireActual("../direct-agent/settings"), loadDirectConnections: jest.fn(), saveDirectConnections: jest.fn() }));
 const mockBack = jest.fn();
 const mockParams: { current: { presetId?: string } | undefined } = { current: undefined };
