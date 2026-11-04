@@ -33,3 +33,16 @@ test('an index failure after a committed append reports pending without claiming
   await waitFor(()=>expect(props.onSaved).toHaveBeenCalledTimes(1));
   expect(s.getByText(/оригиналы сохранены/)).toBeTruthy();
 });
+
+test('file actions are proper labelled buttons and removing a staged item does not save', async () => {
+  const s = render(<AppendNoteAttachments {...props} />);
+  const addButton = s.getByLabelText('Добавить файлы к заметке');
+  expect(addButton.props.accessibilityRole).toBe('button');
+  await pick(s);
+  const remove = s.getByLabelText('Убрать из добавления doc.pdf');
+  expect(remove.props.accessibilityRole).toBe('button');
+  fireEvent.press(remove);
+  expect(mockDelete).toHaveBeenCalledWith(asset.uri);
+  expect(appendNoteAttachments).not.toHaveBeenCalled();
+  expect(s.queryByLabelText('Сохранить новые вложения')).toBeNull();
+});
