@@ -149,7 +149,7 @@ export function DiagnosticLogsScreen() {
   </ScrollView>
     <NebulaConfirmSheet visible={clearScope !== null && clearScope.profile === profile}
       title="Удалить журналы?"
-      message={`Будут удалены ${clearScope?.names.length ?? 0} файлов диагностики этого профиля. Восстановить их нельзя. Заметки и диалоги сохранятся.`}
+      message={`Файлов диагностики для удаления: ${clearScope?.names.length ?? 0}. Восстановить их нельзя. Заметки и диалоги сохранятся.`}
       confirmLabel="Удалить журналы" cancelLabel="Оставить журналы" danger disabled={busy || !ready}
       onCancel={() => setClearScope(null)} onConfirm={finishClear} />
   </>;
