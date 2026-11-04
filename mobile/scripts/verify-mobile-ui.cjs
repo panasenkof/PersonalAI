@@ -125,6 +125,17 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByLabel('Подключение OpenAI', { exact: true }).click();
       assert.equal(await page.getByLabel('Название модели', { exact: true }).inputValue(), 'gpt-4.1');
       assert.equal(await page.getByLabel('Разрешить чтение локальной памяти', { exact: true }).count(), 0);
+      // The contextual connection action is a real Nebula button. A cancelled
+      // removal must preserve the selected model and cannot persist anything.
+      await page.getByLabel('Удалить подключение', { exact: true }).click();
+      await page.getByText('Убрать подключение?', { exact: true }).waitFor();
+      const removeBox = await page.getByLabel('Убрать из списка', { exact: true }).boundingBox();
+      assert(removeBox && removeBox.height >= 48 && removeBox.x >= 0 && removeBox.x + removeBox.width <= width,
+        'Connection removal confirmation must be a reachable 48dp Nebula button');
+      if (process.env.SCREENSHOT_DIR) await page.screenshot({animations:'disabled',path:path.join(process.env.SCREENSHOT_DIR,`connections-remove-${width}.png`)});
+      await page.getByLabel('Оставить подключение', { exact: true }).click();
+      assert.equal(await page.getByLabel('Название модели', { exact: true }).inputValue(), 'gpt-4.1',
+        'Cancel connection removal keeps the edited model');
       await page.getByText('Сохранить настройки', { exact: true }).click();
       await page.getByLabel('Вкладка Главная', { exact: true }).click();
       await page.getByLabel('Сообщение ассистенту', { exact: true }).waitFor();
