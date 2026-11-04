@@ -424,6 +424,17 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.setViewportSize({ width, height: 900 }); await page.evaluate(() => window.__insets(24));
       await page.getByLabel('Сохранить запись', { exact: true }).click();
       await page.getByLabel('Открыть заметку Индейка', { exact: true }).waitFor();
+      if (width >= 350) {
+        const tile = page.getByLabel('Открыть заметку Индейка', { exact: true });
+        const media = tile.getByTestId('memory-grid-media-slot');
+        const box = await media.boundingBox();
+        assert(box && Math.abs(box.height - 108) <= 1, 'Text and image tiles reserve the same 108dp preview footprint');
+        const actions = page.getByLabel('Действия с заметкой Индейка', { exact: true });
+        const actionBox = await actions.boundingBox();
+        assert(actionBox && actionBox.width >= 48 && actionBox.height >= 48,
+          'Tile overflow has its own reachable 48dp touch target');
+        if (process.env.SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, `memory-tile-${width}.png`) });
+      }
       await page.getByLabel('Открыть заметку Индейка', { exact: true }).click();
       assert.equal(await page.getByLabel('Текст заметки', { exact: true }).count(), 0, 'Opening a saved note shows reading, not a form');
       // Reader actions belong above the body/attachments, not below a long document.
