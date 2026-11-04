@@ -73,7 +73,7 @@ export function NoteAiEditor({ profile, draft, allowed, onApply, onClose }: {
           setResult(null); setShowOriginal(false);
         }} />
       </View>
-    </> : !busy ? <NebulaAction icon="sparkles" variant="primary" label="Показать результат"
+    </> : !busy ? <NebulaAction icon="zap" variant="primary" label="Показать результат"
       accessibilityLabel="Запросить правку ИИ" disabled={!allowed || !instruction.trim() || voice}
       onPress={() => void run()} /> : null}
     <NebulaAction icon="x" label="Отменить" accessibilityLabel="Отменить правку ИИ"
