@@ -49,6 +49,7 @@ export function LocalMemoryScreen() {
   // A session/profile/list change invalidates the approval before any next batch.
   const trashEpoch = useRef(0);
   const trashRunning = useRef(false);
+  const purgeHasCompleted = useRef(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [collectionMenu, setCollectionMenu] = useState(false);
   const [collectionCards, setCollectionCards] = useState<CollectionRecord[]>([]);
@@ -83,7 +84,7 @@ export function LocalMemoryScreen() {
   const [sectionOpen, setSectionOpen] = useState(false); const [sectionName, setSectionName] = useState("");
   const repository = useRef<SqliteMemoryRepository | null>(null); const generation = useRef(0);
   useEffect(() => { const timer = setTimeout(() => setTerm(search.trim()), 250); return () => clearTimeout(timer); }, [search]);
-  useEffect(() => { setCollectionId(undefined); setSearch(""); setStatus("active"); setCollections([]); setNotes([]); setCollectionCards([]); setSelectedIds([]); setSelecting(false); setCounts({}); setVisibleIds(new Set()); }, [profile]);
+  useEffect(() => { purgeHasCompleted.current = false; setCollectionId(undefined); setSearch(""); setStatus("active"); setCollections([]); setNotes([]); setCollectionCards([]); setSelectedIds([]); setSelecting(false); setCounts({}); setVisibleIds(new Set()); }, [profile]);
   useEffect(() => {
     // A first visit still defaults to a two-column library where space permits.
     // An asynchronous preference read may not override an immediate user tap.
@@ -117,7 +118,7 @@ export function LocalMemoryScreen() {
       ]);
       if (request !== generation.current) return;
       setTrashCount(deletedTotal);
-      setCounts(totals); repository.current = db; void db.lastNoteOperation().then(value => { if (request === generation.current) setUndo(value); }).catch(() => {}); setCollections(sections); setNotes(page); setMore(page.length === 50);
+      setCounts(totals); repository.current = db; void db.lastNoteOperation().then(value => { if (request === generation.current) setUndo(purgeHasCompleted.current ? "" : value); }).catch(() => {}); setCollections(sections); setNotes(page); setMore(page.length === 50);
       const recentIds = [...new Set(page.map(n => n.collection_id))];
       const shownSections = [...sections].sort((a, b) => {
         const rank = (id: string) => recentIds.includes(id) ? recentIds.indexOf(id) : recentIds.length;
@@ -283,7 +284,7 @@ export function LocalMemoryScreen() {
     try {
       // A card-local restore must target that exact source/version, never another selection.
       const token = await repository.current.changeNotes(action, affectedNotes, target);
-      setUndo(token); setSelectedIds([]); setSelecting(false); setActionsOpen(false); setConfirmation(null); setContextNote(null); setMoveOpen(false); setMergeOpen(false); setRetry(n => n + 1);
+      purgeHasCompleted.current = false; setUndo(token); setSelectedIds([]); setSelecting(false); setActionsOpen(false); setConfirmation(null); setContextNote(null); setMoveOpen(false); setMergeOpen(false); setRetry(n => n + 1);
       if (profile) scheduleVectors(profile);
     } catch (e) { setError(memoryErrorMessage(e)); } finally { setBusy(false); }
   }
@@ -326,6 +327,7 @@ export function LocalMemoryScreen() {
     setBusy(true); setError("");
     try {
       await repository.current.purgeNotes(selectedNotes);
+      purgeHasCompleted.current = true;
       cancelSelection(); setConfirmation(null); setUndo(""); setRetry(n => n + 1);
     } catch (e) { setError(memoryErrorMessage(e)); } finally { setBusy(false); }
   }
@@ -369,6 +371,7 @@ export function LocalMemoryScreen() {
         count => { if (allowed()) setTrashProgress(count); },
       );
       if (!allowed()) return;
+      if (outcome.confirmed > 0) purgeHasCompleted.current = true;
       setTrashPreview(null); setTrashConfirm(false); setUndo("");
       // Authoritative fresh read only. Never automatically repeat an unknown
       // or failed commit, even when some confirmed batches already succeeded.
