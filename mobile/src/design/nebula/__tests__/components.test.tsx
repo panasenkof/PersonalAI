@@ -32,6 +32,20 @@ describe("Nebula base components", () => {
     fireEvent.press(action);
     expect(onPress).toHaveBeenCalledTimes(1);
   });
+  it("outlined Nebula buttons have a visible accessible boundary in both palettes", () => {
+    for (const theme of ["dark", "light"] as const) {
+      const colors=nebulaColors(theme);
+      expect(contrastRatio(colors.actionOutline, colors.surfaceElevated))
+        .toBeGreaterThanOrEqual(3);
+    }
+    const view=render(<NebulaAction icon="x" label="Убрать" variant="quiet" onPress={()=>{}} />);
+    const action=view.getByLabelText("Убрать");
+    const style=typeof action.props.style==="function"
+      ? action.props.style({pressed:false}):action.props.style;
+    expect(style.minHeight).toBeGreaterThanOrEqual(48);
+    expect(style.borderWidth).toBe(1);
+    expect(style.borderColor).toBe(nebulaColors("dark").actionOutline);
+  });
   it("presents settings as one navigable summary, not an inline settings form", () => {
     const open = jest.fn();
     const v = render(<NebulaSettingRow title="Подключения" summary="Модели и API" icon="link" onPress={open} />);

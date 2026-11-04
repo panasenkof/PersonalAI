@@ -66,7 +66,7 @@ export function NebulaAction({ icon, label, accessibilityLabel, onPress, disable
       paddingHorizontal: nebulaSpacing.md,
       borderRadius: nebulaRadii.field,
       borderWidth: variant === "primary" || variant === "danger-solid" ? 0 : 1,
-      borderColor: c.border,
+      borderColor: c.actionOutline,
       backgroundColor: variant === "primary" ? c.accent
         : variant === "danger-solid" ? c.danger : c.surfaceElevated,
       opacity: disabled ? 0.5 : pressed ? 0.85 : 1,

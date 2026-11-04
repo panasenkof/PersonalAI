@@ -13,6 +13,8 @@ export const nebulaPalette = {
     surfaceElevated: "#1D2E51",
     surfaceMuted: "#26395C",
     border: "#445574",
+    /** High-contrast outline for interactive buttons, not passive dividers. */
+    actionOutline: "#7186A8",
     text: "#F6F8FF",
     textSecondary: "#ABBAD8",
     accent: "#7051DB",
@@ -32,6 +34,7 @@ export const nebulaPalette = {
     surfaceElevated: "#EDF0FA",
     surfaceMuted: "#E5E9F6",
     border: "#8993AB",
+    actionOutline: "#62718B",
     text: "#18213B",
     textSecondary: "#535D78",
     accent: "#5541CE",
