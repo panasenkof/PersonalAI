@@ -773,12 +773,11 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByLabel('Создать итог', {exact:true}).click({trial:true});
       await captureAction('summary', 'Создать итог');
       await page.getByLabel('Отмена', {exact:true}).click();
-      await page.getByLabel('Действия с ответом', {exact:true}).first().waitFor();
+      await page.getByLabel('Сохранить ответ в заметки', {exact:true}).first().waitFor();
       await page.clock.runFor(600);
-      await captureAction('reply-actions', 'Действия с ответом');
-      await page.getByLabel('Действия с ответом', {exact:true}).first().click();
-      await page.getByLabel('Сохранить в заметки', {exact:true}).waitFor();
-      await page.getByLabel('Закрыть панель Действия с ответом', {exact:true}).click();
+      await captureAction('reply-save', 'Сохранить ответ в заметки');
+      assert.equal(await page.getByLabel('Закрыть панель Действия с ответом', {exact:true}).count(), 0,
+        'Saving one reply does not require a redundant actions sheet');
       await page.getByLabel('История диалогов', {exact:true}).click();
       await page.getByLabel('Открыть диалог Второй вопрос', { exact: true }).click();
       await page.getByLabel('Поиск диалогов', { exact: true }).waitFor({ state: 'hidden' });
@@ -803,6 +802,10 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByLabel('Поиск диалогов', { exact: true }).waitFor({ state: 'hidden' });
       assert.deepEqual(errors, []);
       if (process.env.SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, `home-${width}.png`) });
+      await page.getByLabel('Сохранить ответ в заметки', {exact:true}).first().click();
+      await page.getByText(/Черновик из ответа ИИ/).waitFor();
+      await page.getByLabel('Сохранить запись', {exact:true}).waitFor();
+      // No write occurs until the user explicitly saves the editable draft.
       console.log(`PASS ${width}px: production app/navigation, 0/24/48px system insets, Android Modal focus events, named actions, persisted chats, work across tabs/dialogs, memory CRUD, profiles, picker, five-minute session and reduced viewport`);
 
       await page.close();
