@@ -180,6 +180,12 @@ export class SqliteMemoryRepository implements MemoryRepository {
   purgeNotes(selection: NoteSelection[]) { return purgeNotes(this.db, selection); }
   /** All trashed note identities/versions, from one unlocked SQLCipher snapshot. */
   trashPurgeSnapshot() { return readTrashPurgeSnapshot(this.db); }
+  /** The toolbar count is independent of the currently loaded 50-note page. */
+  async trashNoteCount(): Promise<number> {
+    const row = await this.db.getFirstAsync<{ total: number }>(
+      "SELECT COUNT(*) AS total FROM memory_entities WHERE domain='notes' AND record_status='trashed'");
+    return row?.total ?? 0;
+  }
   async lastNoteOperation(): Promise<string> {
     const row = await this.db.getFirstAsync<{ reason: string }>("SELECT reason FROM memory_revisions WHERE reason LIKE 'notes:%' OR reason LIKE 'Отмена notes:%' ORDER BY created_at DESC,rowid DESC LIMIT 1");
     return row?.reason.startsWith("notes:") ? row.reason : "";
