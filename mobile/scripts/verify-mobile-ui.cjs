@@ -311,7 +311,7 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByLabel(/back/i).click();
       await page.getByTestId('settings-overview').waitFor();
 
-      await page.getByTestId('composer-actions').getByLabel('Голосовой ввод', { exact: true }).click();
+      await page.getByTestId('settings-overview').getByLabel('Голосовой ввод', { exact: true }).click();
       await page.getByRole('radio', { name: 'Системное распознавание', exact: true }).waitFor();
       await page.getByRole('radio', { name: 'Системное распознавание', exact: true }).click();
       await page.waitForFunction(() => localStorage.getItem('pia.voice.engine.v1') === 'system' &&
@@ -349,7 +349,7 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByText('Лимит сохранён. Он действует для следующих сообщений.', { exact: true }).waitFor();
       await page.getByLabel(/back/i).click();
       await page.getByTestId('settings-overview').waitFor();
-      await page.getByTestId('composer-actions').getByLabel('Голосовой ввод', { exact: true }).click();
+      await page.getByTestId('settings-overview').getByLabel('Голосовой ввод', { exact: true }).click();
       await page.getByRole('radio', { name: 'Системное распознавание', exact: true }).waitFor();
       assert.equal(await page.getByRole('radio', { name: 'Системное распознавание', exact: true }).getAttribute('aria-checked'), 'true',
         'Selected engine survives full application reload');
