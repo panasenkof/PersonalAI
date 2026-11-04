@@ -7,6 +7,9 @@ import { nebulaRadii, nebulaSpacing, nebulaTouch } from "./tokens";
 import { NebulaAction } from "./components";
 import { memoryDisplayTitle, memoryNoteDate, memoryNotePreview, memoryNoteType } from "./memoryNotePresentation";
 
+/** Shared with the FlatList cover: tiles keep identical footprints during thumbnail decoding. */
+export const MEMORY_GRID_MEDIA_HEIGHT = 108;
+
 /** Presentation only: selection, navigation and versioned operations are owned by LocalMemoryScreen.
  * A list row never expands just to repeat full source/type/date metadata. */
 export function MemoryNoteCard({ note, sectionName, selected, selecting = false, onOpen, onToggleSelection, onActions, onRestore, restoreDisabled = false, cover, grid = false }: {
@@ -38,19 +41,25 @@ export function MemoryNoteCard({ note, sectionName, selected, selecting = false,
       accessibilityRole={selecting ? "checkbox" : "button"} accessibilityLabel={(selecting ? "Выбрать заметку " : "Открыть заметку ") + title}
       accessibilityState={{ selected, ...(selecting ? { checked: selected } : {}) }}
       accessibilityHint={selecting ? "Нажмите, чтобы изменить выбор" : "Нажмите для открытия, удерживайте для выбора"}
-      onLongPress={onToggleSelection} onPress={selected ? onToggleSelection : onOpen}
+      onLongPress={onToggleSelection} onPress={selecting || selected ? onToggleSelection : onOpen}
       style={({ pressed }) => ({
         borderWidth: 1, borderColor: selected ? t.accent : t.line,
         borderRadius: nebulaRadii.card, backgroundColor: pressed ? t.soft : t.panel,
-        overflow: "hidden", minHeight: grid ? 148 : 88,
+        overflow: "hidden", minHeight: grid ? 172 : 88,
       })}>
       {grid ? <>
-        <View style={{ height: cover ? 116 : 56, backgroundColor: t.soft, alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
+        <View testID="memory-grid-media-slot" style={{
+          height: MEMORY_GRID_MEDIA_HEIGHT, backgroundColor: t.soft, alignItems: "center",
+          justifyContent: "center", overflow: "hidden", gap: 3,
+          paddingHorizontal: cover ? 0 : nebulaSpacing.sm,
+        }}>
           {media}
+          {!cover && excerpt ? <Text numberOfLines={2} style={{
+            color: t.muted, fontSize: 12, lineHeight: 16, textAlign: "center",
+          }}>{excerpt}</Text> : null}
         </View>
         <View style={{ padding: nebulaSpacing.sm, gap: 4 }}>
           <Text numberOfLines={2} style={{ color: t.text, fontWeight: "700", fontSize: 16, lineHeight: 23 }}>{title}</Text>
-          {!cover && excerpt ? <Text numberOfLines={1} style={{ color: t.muted, fontSize: 13, lineHeight: 20 }}>{excerpt}</Text> : null}
           {meta ? <Text numberOfLines={1} style={{ color: t.muted, fontSize: 13, lineHeight: 20 }}>{meta}</Text> : null}
         </View>
       </> : <View style={{ minHeight: 88, flexDirection: "row", alignItems: "center", padding: nebulaSpacing.sm, gap: nebulaSpacing.sm }}>
