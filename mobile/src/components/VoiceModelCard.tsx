@@ -51,8 +51,6 @@ export function VoiceModelCard({ defaultOpen = false }: { defaultOpen?: boolean 
   };
   const current = status.state === "ready" || status.state === "downloading" ? status.id : undefined;
   const picked = WHISPER_CHOICES.find(c => c.id === choice)!;
-  const button = (primary: boolean) => ({ minHeight: 46, paddingHorizontal: 16, justifyContent: "center" as const, alignItems: "center" as const,
-    borderRadius: 16, borderWidth: 1, borderColor: t.accent, backgroundColor: primary ? t.accent : t.panel });
   const askDownload = () => {
     if (status.state === "unsupported" || status.state === "downloading" || !voice.loaded || voice.saving || current === choice) return;
     setApproval({ kind: "download", id: picked.id, name: picked.name, approxMb: picked.approxMb });
