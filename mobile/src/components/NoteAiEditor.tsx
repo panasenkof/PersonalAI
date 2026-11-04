@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Pressable, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Text, TextInput, View } from "react-native";
+import { NebulaAction } from "../design/nebula/components";
 import { useIsFocused } from "@react-navigation/native";
 import { BottomSheet } from "./BottomSheet";
 import { VoiceInput } from "./VoiceInput";
@@ -8,7 +9,7 @@ import { loadDirectSettings } from "../direct-agent/settings";
 import { onLocalMemorySessionChange } from "../local-memory/storage";
 import { useApplicationVisible } from "../security/visibility";
 import { useTheme } from "../theme";
-import { nebulaRadii, nebulaTouch, nebulaSpacing, nebulaTypography } from "../design/nebula/tokens";
+import { nebulaRadii, nebulaSpacing, nebulaTypography } from "../design/nebula/tokens";
 
 export function NoteAiEditor({ profile, draft, allowed, onApply, onClose }: {
   profile: string; draft: NoteDraft; allowed: boolean; onApply: (draft: NoteDraft) => void; onClose: () => void;
@@ -38,7 +39,6 @@ export function NoteAiEditor({ profile, draft, allowed, onApply, onClose }: {
     } catch (e) { if (!controller.signal.aborted) setError((e as Error).message); }
     finally { if (request.current === controller) { request.current = null; setBusy(false); } }
   };
-  const button = { minHeight: nebulaTouch.minimum, padding: nebulaSpacing.sm, borderRadius: nebulaRadii.field, justifyContent: "center" as const, alignItems: "center" as const };
   return <BottomSheet visible title="Изменить с ИИ" onClose={() => { stop(); onClose(); }}>
     <Text style={{ color: t.muted, ...nebulaTypography.label }}>{allowed
       ? "Команда, заголовок и текст будут переданы выбранной LLM. Файлы не отправляются."
@@ -54,22 +54,29 @@ export function NoteAiEditor({ profile, draft, allowed, onApply, onClose }: {
     {busy ? <ActivityIndicator accessibilityLabel="ИИ редактирует заметку" /> : null}
     {result ? <>
       <Text style={{ color: t.muted }}>Предпросмотр · ещё не сохранено</Text>
-      <Pressable accessibilityRole="button" onPress={() => setShowOriginal(v => !v)} style={button}>
-        <Text style={{ color: t.secondary }}>{showOriginal ? "Показать результат" : "Сравнить с исходным"}</Text>
-      </Pressable>
+      <View style={{ alignItems: "flex-start" }}>
+        <NebulaAction icon="git-compare" label={showOriginal ? "Показать результат" : "Сравнить с исходным"}
+          accessibilityLabel={showOriginal ? "Показать результат" : "Сравнить с исходным"}
+          onPress={() => setShowOriginal(v => !v)} />
+      </View>
       <Text style={{ color: t.text, ...nebulaTypography.heading }}>{(showOriginal ? original.current : result)?.title}</Text>
       <Text testID="note-ai-preview" selectable style={{ color: t.text, ...nebulaTypography.body }}>{(showOriginal ? original.current : result)?.body}</Text>
-      <Pressable accessibilityRole="button" accessibilityLabel="Применить правку ИИ" style={{ ...button, backgroundColor: t.accent }} onPress={() => {
-        if (original.current?.title !== latest.current.title || original.current?.body !== latest.current.body) { setError("Заметка изменилась. Повторите запрос."); setResult(null); return; }
-        onApply(result); onClose();
-      }}><Text style={{ color: t.userText, fontWeight: "700" }}>Применить к черновику</Text></Pressable>
-      <Pressable accessibilityRole="button" style={button} onPress={() => { setResult(null); setShowOriginal(false); }}><Text style={{ color: t.secondary }}>Изменить команду</Text></Pressable>
-    </> : !busy ? <Pressable accessibilityRole="button" accessibilityLabel="Запросить правку ИИ" disabled={!allowed || !instruction.trim() || voice}
-      style={{ ...button, backgroundColor: t.accent, opacity: !allowed || !instruction.trim() || voice ? 0.5 : 1 }} onPress={() => void run()}>
-      <Text style={{ color: t.userText, fontWeight: "700" }}>Показать результат</Text>
-    </Pressable> : null}
-    <Pressable accessibilityRole="button" accessibilityLabel="Отменить правку ИИ" style={button} onPress={() => { stop(); onClose(); }}>
-      <Text style={{ color: t.secondary }}>Отменить</Text>
-    </Pressable>
+      <NebulaAction icon="check" variant="primary" label="Применить к черновику"
+        accessibilityLabel="Применить правку ИИ" onPress={() => {
+          if (original.current?.title !== latest.current.title || original.current?.body !== latest.current.body) {
+            setError("Заметка изменилась. Повторите запрос."); setResult(null); return;
+          }
+          onApply(result); onClose();
+        }} />
+      <View style={{ alignItems: "flex-start" }}>
+        <NebulaAction icon="edit-3" label="Изменить команду" onPress={() => {
+          setResult(null); setShowOriginal(false);
+        }} />
+      </View>
+    </> : !busy ? <NebulaAction icon="sparkles" variant="primary" label="Показать результат"
+      accessibilityLabel="Запросить правку ИИ" disabled={!allowed || !instruction.trim() || voice}
+      onPress={() => void run()} /> : null}
+    <NebulaAction icon="x" label="Отменить" accessibilityLabel="Отменить правку ИИ"
+      onPress={() => { stop(); onClose(); }} />
   </BottomSheet>;
 }
