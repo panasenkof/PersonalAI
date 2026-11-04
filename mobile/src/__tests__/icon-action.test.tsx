@@ -78,3 +78,30 @@ test("compact composer action is icon-only, keyboard-accessible, and retains its
   expect(onPress).toHaveBeenCalledTimes(1);
   expect(view.getByText("Снять фото и распознать текст")).toBeTruthy();
 });
+
+test("Send to Stop clears the old hint and a tap executes without overlay", () => {
+  jest.useFakeTimers();
+  const send = jest.fn(); const stop = jest.fn();
+  const v = render(<IconAction compact explainOnTap={false} icon="arrow-up"
+    label="Отправить" accessibilityLabel="Отправить запрос"
+    hint="Отправить написанное сообщение" onPress={send} />);
+  fireEvent.press(v.getByLabelText("Отправить запрос"));
+  expect(send).toHaveBeenCalledTimes(1);
+  expect(v.queryByTestId("action-hint")).toBeNull();
+
+  fireEvent(v.getByLabelText("Отправить запрос"), "longPress");
+  expect(v.getByText("Отправить написанное сообщение")).toBeTruthy();
+  v.rerender(<IconAction compact explainOnTap={false} icon="square"
+    label="Стоп" accessibilityLabel="Остановить запрос"
+    hint="Остановить ответ ИИ" onPress={stop} />);
+  expect(v.queryByText("Отправить написанное сообщение")).toBeNull();
+  expect(v.queryByTestId("action-hint")).toBeNull();
+
+  fireEvent.press(v.getByLabelText("Остановить запрос"));
+  expect(stop).toHaveBeenCalledTimes(1);
+  expect(v.queryByTestId("action-hint")).toBeNull();
+  fireEvent(v.getByLabelText("Остановить запрос"), "longPress");
+  expect(v.getByText("Остановить ответ ИИ")).toBeTruthy();
+  act(() => jest.advanceTimersByTime(2500));
+  expect(v.queryByTestId("action-hint")).toBeNull();
+});
