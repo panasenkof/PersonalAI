@@ -5,7 +5,7 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useHeaderHeight } from "@react-navigation/elements";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import Feather from "@expo/vector-icons/Feather";
-import { ActivityIndicator, Alert, Keyboard, KeyboardAvoidingView, Linking, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Keyboard, KeyboardAvoidingView, Linking, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useProfile } from "../profile/ProfileContext";
 import { BottomSheet } from "../components/BottomSheet";
@@ -22,7 +22,7 @@ import type { SqliteMemoryRepository } from "../local-memory/repository";
 import { MemoryConflictError } from "../local-memory/types";
 import { noteHistoryLabel } from "../local-memory/note-actions";
 import type { CollectionRecord, EntityRecord, ObservationRecord, RelationRecord, RevisionRecord } from "../local-memory/types";
-import { onLocalMemorySessionChange } from "../local-memory/storage";
+import { localMemorySessionUnlocked, onLocalMemorySessionChange } from "../local-memory/storage";
 import { memoryErrorMessage } from "../local-memory/errors";
 import { ensureSections } from "../local-memory/sections";
 import { MEMORY_KINDS, defaultKind } from "../local-memory/search-index";
@@ -54,6 +54,7 @@ import { memoryNoteHasPhoto, memoryDisplayTitle } from "../design/nebula/memoryN
 import { NoteEditorSection } from "../design/nebula/NoteEditorSection";
 import { NoteReadPreview } from "../design/nebula/NoteReadPreview";
 import { NebulaAction } from "../design/nebula/components";
+import { recognitionApprovalMatches } from "../design/nebula/recognitionApproval";
 
 export function MemoryNoteScreen() {
   const t = useTheme(); const insets = useSafeAreaInsets(); const headerHeight = useHeaderHeight();
@@ -64,7 +65,14 @@ export function MemoryNoteScreen() {
   const sourceAtOpen = useRef<{profile:string;body:string;kind:"assistant_reply"|"dialogue_summary"}|null>(null);
   const activeProfile = useRef(profile); activeProfile.current = profile;
   const extraction = useRef<AbortController | null>(null);
-  useEffect(() => { const off = onLocalMemorySessionChange(unlocked => { if (!unlocked) { extraction.current?.abort(); setCandidate(null); setRepeatFiles([]); setConfirmKind(null); } }); return () => { off(); extraction.current?.abort(); }; }, []);
+  // Keep consent ephemeral and tied to ONE original + one expected record
+  // version. Never persist providers, files or secrets in navigation params.
+  const repeatApproval = useRef<null | {
+    profileId: string; noteId: string; recordVersion: number; attachmentId: string;
+    start: () => void;
+  }>(null);
+  const [repeatMessage, setRepeatMessage] = useState<string | null>(null);
+  useEffect(() => { const off = onLocalMemorySessionChange(unlocked => { if (!unlocked) { extraction.current?.abort(); repeatApproval.current = null; setRepeatMessage(null); setCandidate(null); setRepeatFiles([]); setConfirmKind(null); } }); return () => { off(); extraction.current?.abort(); }; }, []);
   const repository = useRef<SqliteMemoryRepository | null>(null); const alive = useRef(true); const pending = useRef(false);
   const loadSequence = useRef(0);
   const [editing, setEditing] = useState(!route.params?.entityId);
@@ -120,7 +128,7 @@ export function MemoryNoteScreen() {
   useEffect(() => {
     const sequence = ++loadSequence.current;
     const stillCurrent = () => alive.current && loadSequence.current === sequence && activeProfile.current === profile;
-    alive.current = true; setLoading(true); setError(""); setMetadataOpen(false); setFileContentOpen(false); setCandidate(null); setRepeatFiles([]);
+    alive.current = true; setLoading(true); setError(""); setMetadataOpen(false); setFileContentOpen(false); repeatApproval.current = null; setRepeatMessage(null); setCandidate(null); setRepeatFiles([]);
     void (async () => {
       if (!profile) throw new Error("profile_missing");
       const db = await localMemoryRepository(profile);
@@ -244,9 +252,10 @@ export function MemoryNoteScreen() {
         (remote ? "\nФайл будет передан указанному провайдеру только после подтверждения." :
           "\nОригинал не будет отправлен провайдеру.") +
         "\nПрежний текст не изменится до вашего подтверждения.";
-      Alert.alert("Распознать заново?",message,[
-        {text:"Отмена",style:"cancel"},
-        {text:"Распознать",onPress:()=>void run(async db => {
+      repeatApproval.current = {
+        profileId: profile, noteId: note.id, recordVersion: note.record_version,
+        attachmentId: attachment.id,
+        start: () => void run(async db => {
           if (!profile || activeProfile.current !== profile) throw new Error("profile_missing");
           setCandidate(null); setRepeatFiles([]);
           const current = await db.entity(note.id);
@@ -289,8 +298,9 @@ export function MemoryNoteScreen() {
             if (extraction.current === aborter) extraction.current = null;
             if (uri) { try { const file = new File(uri); if (file.exists) file.delete(); } catch { /* Lock may purge cache first. */ } }
           }
-        })}
-      ]);
+        }),
+      };
+      setRepeatMessage(message);
     }).catch(e => { if (alive.current) setError(memoryErrorMessage(e)); });
   };
   const acceptCandidate = () => void run(async db => {
@@ -533,6 +543,24 @@ export function MemoryNoteScreen() {
       })}><Text style={{ color: t.secondary }}>{e.title || "Без названия"}</Text></Pressable>)}
       {error ? <Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text> : null}
     </BottomSheet>
+    <NebulaConfirmSheet visible={repeatMessage !== null}
+      title="Распознать заново?" message={repeatMessage || ""}
+      confirmLabel="Распознать" cancelLabel="Оставить прежний текст"
+      disabled={busy || dirty}
+      onCancel={() => { repeatApproval.current = null; setRepeatMessage(null); }}
+      onConfirm={() => {
+        const approved = repeatApproval.current;
+        repeatApproval.current = null; setRepeatMessage(null);
+        if (!approved) return;
+        if (!recognitionApprovalMatches({
+          approved, activeProfile: activeProfile.current, selected, busy, dirty,
+          unlocked: localMemorySessionUnlocked(),
+        })) {
+          setError("Запись изменилась или приложение заблокировано. Выберите оригинал заново.");
+          return;
+        }
+        approved.start();
+      }} />
     <NebulaConfirmSheet visible={confirmKind !== null}
       title={confirmKind === "leave" ? "Изменения не сохранены" : "Разрешить доступ агенту?"}
       message={confirmKind === "leave"
