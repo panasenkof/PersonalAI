@@ -264,19 +264,23 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       const settingsCanvas = await page.getByTestId('settings-overview').evaluate(el => getComputedStyle(el).backgroundColor);
       assert.equal(settingsCanvas, 'rgb(7, 13, 32)', 'Working screens use the approved dark theme regardless of OS appearance');
       assert(await page.getByLabel('Модели и подключения', { exact: true }).count());
-      // U5: recognition routes have exactly one owner in Settings, not a
-      // competing Save inside the nested connection editor.
-      const openMedia = page.getByLabel('Развернуть: Распознавание файлов', { exact: true });
-      if (await openMedia.count()) await openMedia.click();
+      // Settings is now an index of real screen-sized actions. A detail is
+      // immediately expanded and Back returns to the same index, not the chat.
+      await page.getByLabel('Распознавание файлов', { exact: true }).click();
+      await page.getByTestId('settings-detail').waitFor();
       const photoProvider = page.getByLabel('Изображения и кадры видео: Anthropic', { exact: true });
       await photoProvider.waitFor();
       await photoProvider.click();
       await page.getByText('Выбор для медиа сохранён.', { exact: true }).waitFor();
-      assert.equal(await photoProvider.getAttribute('aria-checked'), 'true', 'Chosen media provider is saved in one action');
-      assert.equal(await page.getByText('Сохранить выбор для медиа', { exact: true }).count(), 0, 'There is no duplicate media Save');
+      assert.equal(await photoProvider.getAttribute('aria-checked'), 'true', 'The media choice uses one canonical writer');
+      assert.equal(await page.getByText('Сохранить выбор для медиа', { exact: true }).count(), 0, 'There is no duplicate Save');
       if (process.env.SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, `settings-media-${width}.png`) });
-      await page.getByLabel('Развернуть: Работа ИИ', { exact: true }).click();
+      await page.getByLabel(/back/i).click();
+      await page.getByTestId('settings-overview').waitFor();
+
+      await page.getByLabel('Работа ИИ', { exact: true }).click();
       const limitInput = page.getByLabel('Лимит обращений к LLM на сообщение', { exact: true });
+      await limitInput.waitFor();
       assert.equal(await limitInput.inputValue(), '5', 'New profiles start with the five-call default');
       await limitInput.fill('0');
       await page.getByLabel('Сохранить лимит обращений к LLM', { exact: true }).click();
@@ -287,20 +291,23 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByText('Лимит сохранён. Он действует для следующих сообщений.', { exact: true }).waitFor();
       await page.getByLabel('Сохранить лимит обращений к LLM', { exact: true }).scrollIntoViewIfNeeded();
       const saveLimitBox = await page.getByLabel('Сохранить лимит обращений к LLM', { exact: true }).boundingBox();
-      const settingsTabBox = await page.getByLabel('Вкладка Настройки', { exact: true }).boundingBox();
-      assert(saveLimitBox.y + saveLimitBox.height <= settingsTabBox.y, 'The save action can scroll above the tab bar in a reduced viewport');
+      assert(saveLimitBox && saveLimitBox.y >= 0 && saveLimitBox.y + saveLimitBox.height <= 580 - 24,
+        'The detail Save clears the system inset in a reduced viewport');
       if (process.env.SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, `agent-limit-${width}.png`) });
       await page.setViewportSize({ width, height: 900 });
-      await page.getByLabel('Свернуть: Работа ИИ', { exact: true }).click();
-      // Settings groups are folded; the voice group opens and stays open after a reload.
-      await page.getByLabel('Развернуть: Голосовой ввод', { exact: true }).click();
+      await page.getByLabel(/back/i).click();
+      await page.getByTestId('settings-overview').waitFor();
+
+      await page.getByLabel('Голосовой ввод', { exact: true }).click();
+      await page.getByRole('radio', { name: 'Системное распознавание', exact: true }).waitFor();
       await page.getByRole('radio', { name: 'Системное распознавание', exact: true }).click();
-      await page.waitForFunction(() => localStorage.getItem('pia.voice.engine.v1') === 'system' && document.querySelector('[role="radio"][aria-label="Системное распознавание"]')?.getAttribute('aria-checked') === 'true');
-      assert.equal(await page.getByRole('radio', { name: 'Системное распознавание', exact: true }).getAttribute('aria-checked'), 'true');
-      // A web browser cannot run native Whisper; unsupported devices explain it.
+      await page.waitForFunction(() => localStorage.getItem('pia.voice.engine.v1') === 'system' &&
+        document.querySelector('[role="radio"][aria-label="Системное распознавание"]')?.getAttribute('aria-checked') === 'true');
       assert.equal(await page.getByRole('radio', { name: 'Whisper на телефоне', exact: true }).isDisabled(), true);
-      assert.equal(await page.getByText('Голос без интернета', { exact: true }).count(), 0, 'Whisper settings are hidden for the system engine');
+      assert.equal(await page.getByText('Голос без интернета', { exact: true }).count(), 0, 'Whisper settings are hidden for system mode');
       if (process.env.SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, `voice-settings-${width}.png`) });
+      await page.getByLabel(/back/i).click();
+      await page.getByTestId('settings-overview').waitFor();
 
       await page.getByLabel('Вкладка Главная', { exact: true }).click();
       await page.getByLabel('Остановить запрос', { exact: true }).waitFor();
@@ -315,17 +322,26 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.reload();
       await page.getByText('Ответ 1', { exact: true }).waitFor();
       await page.getByLabel('Вкладка Настройки', { exact: true }).click();
-      const mediaCollapsed = page.getByLabel('Развернуть: Распознавание файлов', { exact: true });
-      if (await mediaCollapsed.count()) await mediaCollapsed.click();
+      await page.getByLabel('Распознавание файлов', { exact: true }).click();
       await page.getByLabel('Изображения и кадры видео: Anthropic', { exact: true }).waitFor();
-      assert.equal(await page.getByLabel('Изображения и кадры видео: Anthropic', { exact: true }).getAttribute('aria-checked'), 'true', 'Media selection persists after full reload');
-      await page.getByLabel('Развернуть: Работа ИИ', { exact: true }).click();
-      assert.equal(await page.getByLabel('Лимит обращений к LLM на сообщение', { exact: true }).inputValue(), '6', 'The chosen limit survives a full app reload');
+      assert.equal(await page.getByLabel('Изображения и кадры видео: Anthropic', { exact: true }).getAttribute('aria-checked'), 'true',
+        'Media selection persists after app reload');
+      await page.getByLabel(/back/i).click();
+      await page.getByTestId('settings-overview').waitFor();
+      await page.getByLabel('Работа ИИ', { exact: true }).click();
+      assert.equal(await page.getByLabel('Лимит обращений к LLM на сообщение', { exact: true }).inputValue(), '6',
+        'The chosen limit survives a full app reload');
       await page.getByLabel('Увеличить лимит обращений к LLM', { exact: true }).click();
       await page.getByLabel('Сохранить лимит обращений к LLM', { exact: true }).click();
       await page.getByText('Лимит сохранён. Он действует для следующих сообщений.', { exact: true }).waitFor();
-      await page.waitForFunction(() => document.querySelector('[role="radio"][aria-label="Системное распознавание"]')?.getAttribute('aria-checked') === 'true');
-      assert.equal(await page.getByRole('radio', { name: 'Системное распознавание', exact: true }).getAttribute('aria-checked'), 'true', 'The selected engine survives a full application reload');
+      await page.getByLabel(/back/i).click();
+      await page.getByTestId('settings-overview').waitFor();
+      await page.getByLabel('Голосовой ввод', { exact: true }).click();
+      await page.getByRole('radio', { name: 'Системное распознавание', exact: true }).waitFor();
+      assert.equal(await page.getByRole('radio', { name: 'Системное распознавание', exact: true }).getAttribute('aria-checked'), 'true',
+        'Selected engine survives full application reload');
+      await page.getByLabel(/back/i).click();
+      await page.getByTestId('settings-overview').waitFor();
       await page.getByLabel('Вкладка Главная', { exact: true }).click();
       await page.getByLabel('Новый диалог', { exact: true }).click();
       await page.getByText('Начать пустой диалог. Предыдущие диалоги останутся в истории.', { exact: true }).waitFor();
