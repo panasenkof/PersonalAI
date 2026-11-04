@@ -152,6 +152,10 @@ function NebulaHomeContent() {
   if (qaScope) qaScope.photoSuggestionState = {
     question, activeId: active?.id, attachments: active?.attachments?.length || 0,
     suggestedPhotoSearch, localPhotoSearch, ready, busy, cameraBusy, pickingAttachment, dictating,
+    directIntent: localPhotoIntent83(question, []),
+    forcedIntent: localPhotoIntent83("Найди " + question, []),
+    plainSuggestion: localPhotoSuggestion83(question, []),
+    regexMatch: /^(?:фото|фотография|фотографии|снимок|снимки|изображение|изображения)\s+[^?]+$/iu.test(question),
   };
   const statusSignals = { voicePhase, busy, streamText: active?.streamText, progress: active?.progress, error, ready };
   const orbPhase = resolveNebulaHomePhase(statusSignals);
