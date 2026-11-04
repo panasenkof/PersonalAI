@@ -84,7 +84,7 @@ export function LocalMemoryScreen() {
   const [sectionOpen, setSectionOpen] = useState(false); const [sectionName, setSectionName] = useState("");
   const repository = useRef<SqliteMemoryRepository | null>(null); const generation = useRef(0);
   useEffect(() => { const timer = setTimeout(() => setTerm(search.trim()), 250); return () => clearTimeout(timer); }, [search]);
-  useEffect(() => { purgeHasCompleted.current = false; setCollectionId(undefined); setSearch(""); setStatus("active"); setCollections([]); setNotes([]); setCollectionCards([]); setSelectedIds([]); setSelecting(false); setCounts({}); setVisibleIds(new Set()); }, [profile]);
+  useEffect(() => { purgeHasCompleted.current = false; setBusy(false); setCollectionId(undefined); setSearch(""); setStatus("active"); setCollections([]); setNotes([]); setCollectionCards([]); setSelectedIds([]); setSelecting(false); setCounts({}); setVisibleIds(new Set()); }, [profile]);
   useEffect(() => {
     // A first visit still defaults to a two-column library where space permits.
     // An asynchronous preference read may not override an immediate user tap.
@@ -350,7 +350,9 @@ export function LocalMemoryScreen() {
       if (epoch === trashEpoch.current && request === generation.current)
         setError("Не удалось проверить корзину: " + memoryErrorMessage(e));
     } finally {
-      if (epoch === trashEpoch.current) setBusy(false);
+      // Search/filter navigation can invalidate the preview while the read is
+      // pending. Release the busy state for this profile even then.
+      if (viewProfile.current === currentProfile && localMemorySessionUnlocked()) setBusy(false);
     }
   }
   async function emptyWholeTrash() {
@@ -391,7 +393,10 @@ export function LocalMemoryScreen() {
       if (allowed()) setRetry(n => n + 1);
     } finally {
       trashRunning.current = false;
-      if (allowed()) setBusy(false);
+      // Switching the filter invalidates further batches, but must never
+      // leave the current screen permanently busy. Profile/lock already
+      // reset their state independently.
+      if (viewProfile.current === currentProfile && localMemorySessionUnlocked()) setBusy(false);
     }
   }
   async function loadMore() {
