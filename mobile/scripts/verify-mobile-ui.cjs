@@ -572,6 +572,19 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByText('В корзину', { exact: true }).click();
       await page.getByLabel('Подтвердить перемещение в корзину', { exact: true }).click();
       await page.getByLabel('Открыть корзину', { exact: true }).click();
+      // The global command is contextual; the count covers the whole trash,
+      // while the two-step confirmation must never purge without the final tap.
+      await page.getByLabel('Очистить всю корзину', { exact: true }).waitFor();
+      await page.getByLabel('Очистить всю корзину', { exact: true }).click();
+      await page.getByLabel('Проверить последствия очистки корзины', { exact: true }).waitFor();
+      assert.equal(await page.getByLabel('Подтвердить очистку всей корзины', { exact: true }).count(), 0,
+        'Preview never exposes the irreversible action before the extra review step');
+      await page.getByLabel('Проверить последствия очистки корзины', { exact: true }).click();
+      await page.getByLabel('Подтвердить очистку всей корзины', { exact: true }).waitFor();
+      if (process.env.SCREENSHOT_DIR) await page.screenshot({
+        path: path.join(process.env.SCREENSHOT_DIR, `trash-preview-${width}.png`),
+      });
+      await page.getByLabel('Отменить очистку корзины', { exact: true }).click();
       await page.getByLabel('Открыть заметку Индейка', { exact: true }).click();
       await page.getByLabel('Восстановить запись из корзины', { exact: true }).waitFor();
       assert.equal(await page.getByLabel('Редактировать запись', { exact: true }).count(), 0,
