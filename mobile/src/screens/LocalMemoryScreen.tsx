@@ -341,8 +341,8 @@ export function LocalMemoryScreen() {
       const snapshot = await db.trashPurgeSnapshot();
       if (epoch !== trashEpoch.current || request !== generation.current ||
           viewProfile.current !== currentProfile || !localMemorySessionUnlocked()) return;
-      setTrashCount(snapshot.items.length);
-      if (!snapshot.items.length) {
+      setTrashCount(snapshot.totalCount);
+      if (!snapshot.totalCount) {
         setTrashMessage("Корзина пуста. Удалять нечего.");
         setRetry(n => n + 1);
       } else setTrashPreview(snapshot);
@@ -367,7 +367,7 @@ export function LocalMemoryScreen() {
       // Every chunk contains only IDs and versions from the snapshot the user
       // reviewed. The canonical purgeNotes writer enforces CAS/status atomically.
       const outcome = await purgeConfirmedTrash(
-        snapshot.items, batch => db.purgeNotes(batch), allowed,
+        snapshot.items, batch => db.purgeNotes(batch, { protectReferences: true }), allowed,
         count => { if (allowed()) setTrashProgress(count); },
       );
       if (!allowed()) return;
@@ -383,7 +383,7 @@ export function LocalMemoryScreen() {
           ? `Подтверждено удаление ${outcome.confirmed} из ${outcome.total}. Операция остановлена. В корзине осталось ${remaining}. Проверьте состояние перед новым удалением.`
           : remaining === 0
             ? `Удалено ${trashPurgeCountLabel(outcome.confirmed)}. Корзина пуста.`
-            : `Удалено ${trashPurgeCountLabel(outcome.confirmed)}. В корзине осталось ${trashPurgeCountLabel(remaining)} (возможны новые записи). Для них нужно новое подтверждение.`);
+            : `Удалено ${trashPurgeCountLabel(outcome.confirmed)}. В корзине осталось ${trashPurgeCountLabel(remaining)}. Записи со связями требуют отдельной проверки; новые записи автоматически не удалялись.`);
       } catch {
         if (allowed()) setTrashMessage(
           `Подтверждено удаление ${outcome.confirmed} из ${outcome.total}, но остаток проверить не удалось. Проверьте состояние корзины; удаление автоматически не повторялось.`);
@@ -551,25 +551,32 @@ export function LocalMemoryScreen() {
           <Text style={{ color: t.text, fontSize: 17, lineHeight: 25 }}>
             {trashConfirm
               ? `Будут безвозвратно удалены ${trashPurgeCountLabel(trashPreview.items.length)} из корзины этого профиля.`
-              : `К удалению из корзины найдено ${trashPurgeCountLabel(trashPreview.items.length)}. Это весь список, а не только видимые 50.`}
+              : `Всего в корзине ${trashPurgeCountLabel(trashPreview.totalCount)}. Массово можно удалить ${trashPurgeCountLabel(trashPreview.items.length)}. Проверен весь список, а не только видимые 50.`}
           </Text>
           <Text style={{ color: t.muted, lineHeight: 22 }}>
-            Оригиналов: {trashPreview.originalCount}. Связанных отношений: {trashPreview.affectedRelationCount}.
-            Исходные файлы, история и связи удаляемых записей могут стать недоступными.
-            Экспортированные ранее копии не затрагиваются. Восстановить удалённое в приложении нельзя.
+            Оригиналов в удаляемых записях: {trashPreview.originalCount}.
+            {trashPreview.protectedCount > 0
+              ? ` Защищены от массового удаления: ${trashPurgeCountLabel(trashPreview.protectedCount)}. Эти записи содержат связи, источники или подтверждённые факты и требуют отдельного просмотра. Связанных отношений: ${trashPreview.affectedRelationCount}.`
+              : ""}
+            История и оригиналы удаляемых записей исчезнут. Экспортированные ранее копии не затрагиваются.
+            Восстановить удалённое в приложении нельзя.
           </Text>
           {busy ? <Text accessibilityLiveRegion="polite" style={{ color: t.muted }}>
             Подтверждено удаление {trashProgress} из {trashPreview.items.length}…
           </Text> : null}
           <NebulaAction icon="x" label="Отмена" accessibilityLabel="Отменить очистку корзины"
             disabled={busy} onPress={() => { trashEpoch.current++; setTrashPreview(null); setTrashConfirm(false); }} />
-          {trashConfirm ? <NebulaAction icon="trash-2" variant="danger"
-            label={`Удалить ${trashPurgeCountLabel(trashPreview.items.length)}`}
-            accessibilityLabel="Подтвердить очистку всей корзины" disabled={busy}
-            onPress={() => void emptyWholeTrash()} /> :
-            <NebulaAction icon="alert-triangle" variant="danger" label="Продолжить к подтверждению"
-              accessibilityLabel="Проверить последствия очистки корзины"
-              disabled={busy} onPress={() => setTrashConfirm(true)} />}
+          {trashPreview.items.length === 0
+            ? <Text accessibilityRole="alert" style={{ color: t.muted }}>
+                Все записи требуют отдельной проверки. Массовое удаление недоступно.
+              </Text>
+            : trashConfirm ? <NebulaAction icon="trash-2" variant="danger"
+              label={`Удалить ${trashPurgeCountLabel(trashPreview.items.length)}`}
+              accessibilityLabel="Подтвердить очистку всей корзины" disabled={busy}
+              onPress={() => void emptyWholeTrash()} />
+            : <NebulaAction icon="alert-triangle" variant="danger" label="Продолжить к подтверждению"
+                accessibilityLabel="Проверить последствия очистки корзины"
+                disabled={busy} onPress={() => setTrashConfirm(true)} />}
         </> : null}
       </BottomSheet>
       <BottomSheet visible={actionsOpen && selectedNotes.length > 0} title={confirmation ? (confirmation === "trash" ? "В корзину?" : "Удалить навсегда?") : selectedNotes.length === 1 ? "Действия с записью" : `Действия · ${selectedNotes.length}`} onClose={() => { if (busy) return; if (confirmation) setConfirmation(null); else { setActionsOpen(false); setContextNote(null); } }}>
