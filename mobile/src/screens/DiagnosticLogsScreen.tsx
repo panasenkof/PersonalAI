@@ -1,6 +1,6 @@
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Switch, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useProfile } from "../profile/ProfileContext";
@@ -23,6 +23,7 @@ export function DiagnosticLogsScreen() {
   const [prefs, setPrefs] = useState<DiagnosticSettings>(DEFAULT_DIAGNOSTICS);
   const [logs, setLogs] = useState<DiagnosticFile[]>([]);
   const [busy, setBusy] = useState(false);
+  const operationPending = useRef(false);
   const [notice, setNotice] = useState("");
   const [clearScope, setClearScope] = useState<{ profile: string; names: string[] } | null>(null);
   // A pending destructive confirmation must never survive a profile switch.
@@ -49,18 +50,21 @@ export function DiagnosticLogsScreen() {
     return () => { current = false; setClearScope(null); };
   }, [profile]));
   const run = async (operation: () => Promise<void>, success?: string) => {
-    if (!profile || busy) return;
+    if (!profile || busy || operationPending.current) return;
+    operationPending.current = true;
     setBusy(true); setNotice("");
     try {
       await operation();
       if (success) setNotice(success);
       await refresh();
     } catch (error) {
-      setNotice(error instanceof Error && error.message === "DIAGNOSTIC_FILES_CHANGED"
+      const changed = error instanceof Error && error.message === "DIAGNOSTIC_FILES_CHANGED";
+      if (changed) { try { await refresh(); } catch { /* keep cancellation safe */ } }
+      setNotice(changed
         ? "Список журналов изменился. Проверьте его и подтвердите удаление заново."
         : "Операция с журналом не выполнена. Повторите попытку.");
     }
-    finally { setBusy(false); }
+    finally { operationPending.current = false; setBusy(false); }
   };
   const update = (next: DiagnosticSettings) => void run(async () => {
     await setDiagnosticSettings(profile!, next);
