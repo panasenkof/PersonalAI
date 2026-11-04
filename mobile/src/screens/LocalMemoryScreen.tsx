@@ -916,20 +916,22 @@ export function LocalMemoryScreen() {
       </Pressable>
     </BottomSheet>
     <BottomSheet visible={collectionMenu} title="Коллекции" onClose={() => setCollectionMenu(false)}>
-      {[{ id: undefined, name: "Все записи" }, ...collections].map(c => <Pressable key={c.id || "all"} accessibilityRole="button" accessibilityLabel={"Раздел " + c.name} style={{ ...button, alignItems: "flex-start" }}
+      {[{ id: undefined, name: "Все записи" }, ...collections].map(c => <Pressable key={c.id || "all"} accessibilityRole="button" accessibilityLabel={"Раздел " + c.name} style={actionButton}
         onPress={() => { openAll(); setCollectionId(c.id); setCollectionMenu(false); }}><Text style={{ color: t.text }}>{c.name}</Text></Pressable>)}
-      <Pressable accessibilityRole="button" accessibilityLabel="Новый раздел памяти" style={button} onPress={() => { setCollectionMenu(false); setSectionOpen(true); }}><Text style={{ color: t.secondary }}>Создать коллекцию</Text></Pressable>
+      <NebulaAction icon="plus" label="Создать коллекцию" accessibilityLabel="Новый раздел памяти"
+        onPress={() => { setCollectionMenu(false); setSectionOpen(true); }} />
     </BottomSheet>
     <BottomSheet visible={moveOpen} title="Перенести выбранные записи" onClose={() => { setMoveOpen(false); setContextNote(null); }}>
       {error ? <Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text> : null}
       <Text style={{ color: t.muted }}>{selectedNotes.map(memoryDisplayTitle).join(", ")}</Text>
-      {collections.map(c => <Pressable key={c.id} disabled={busy} style={button} onPress={() => void act("move", c.id)}><Text style={{ color: t.secondary }}>{c.name}</Text></Pressable>)}
+      {collections.map(c => <Pressable key={c.id} disabled={busy} style={actionButton} onPress={() => void act("move", c.id)}><Text style={{ color: t.secondary }}>{c.name}</Text></Pressable>)}
     </BottomSheet>
     <BottomSheet visible={mergeOpen} title="Предпросмотр объединения" onClose={() => setMergeOpen(false)}>
       <Text style={{ color: t.muted }}>Название первой выбранной записи сохраняется. Тексты остаются отдельными блоками; вложения и источники сохраняются. Противоречия не исправляются автоматически.</Text>
       {error ? <Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text> : null}
       <ScrollView style={{ maxHeight: 300 }}><Text style={{ color: t.text }}>{mergeText(selectedNotes)}</Text></ScrollView>
-      <Pressable disabled={busy} style={button} onPress={() => void act("merge")}><Text style={{ color: t.secondary }}>Подтвердить объединение</Text></Pressable>
+      <NebulaAction icon="check" label="Подтвердить объединение" variant="primary"
+        disabled={busy} onPress={() => void act("merge")} />
     </BottomSheet>
     <BottomSheet visible={sectionOpen} title="Новый раздел" onClose={() => setSectionOpen(false)}>
       <Text style={{ color: t.muted }}>Например: «Рецепты», «Идеи» или «Планы».</Text>
