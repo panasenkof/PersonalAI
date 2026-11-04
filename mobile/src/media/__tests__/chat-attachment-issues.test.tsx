@@ -19,8 +19,17 @@ test("H4: rejected items are independently actionable and no original data is re
   expect(ui.getByText(issues[0].reason)).toBeTruthy();
   expect(ui.getByText(issues[1].reason)).toBeTruthy();
   expect(ui.getByLabelText("Причины ошибок вложений").props.style.maxHeight).toBe(222);
-  fireEvent.press(ui.getByLabelText("Выбрать заново scan.pdf"));
-  fireEvent.press(ui.getByLabelText("Убрать ошибку meeting.mp3"));
+  const retryButton=ui.getByLabelText("Выбрать заново scan.pdf");
+  const removeButton=ui.getByLabelText("Убрать ошибку meeting.mp3");
+  for (const button of [retryButton,removeButton]) {
+    const style=typeof button.props.style==="function" ? button.props.style({pressed:false}) : button.props.style;
+    expect(style.minHeight).toBeGreaterThanOrEqual(48);
+    expect(style.borderWidth).toBe(1);
+    expect(style.borderColor).toBeTruthy();
+    expect(style.backgroundColor).toBeTruthy();
+  }
+  fireEvent.press(retryButton);
+  fireEvent.press(removeButton);
   expect(retry).toHaveBeenCalledTimes(1);
   expect(dismiss).toHaveBeenCalledWith(1);
 });

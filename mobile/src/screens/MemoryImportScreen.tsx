@@ -83,6 +83,20 @@ export function MemoryImportScreen() {
   const whisper = useWhisperStatus();
   const russianOcr = useRussianOcrStatus();
   const t = useTheme();
+  // Shared visual treatment for mutually exclusive choices in this form.
+  // Selection changes only the user's existing local draft, never saves or
+  // uploads anything without the canonical operation and confirmation.
+  const choiceStyle = (selected: boolean, disabled = false) => ({
+    minHeight: 48,
+    justifyContent: "center" as const,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    borderWidth: selected ? 2 : 1,
+    borderColor: selected ? t.accent : t.line,
+    backgroundColor: selected ? t.soft : t.panel,
+    opacity: disabled ? 0.5 : 1,
+  });
   const header = useHeaderHeight(); const insets = useSafeAreaInsets();
   const profile = useProfile();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParams>>();
@@ -576,15 +590,15 @@ export function MemoryImportScreen() {
         {files.some(item => mediaKind(item) === "image") ? <View style={{ gap: 6 }}>
           <Text style={{ color: t.text, fontWeight: "700" }}>Что сделать с фотографией</Text>
           <Pressable accessibilityRole="button" accessibilityLabel="Описать фотографию" accessibilityState={{ selected: imageExtractionMode === "describe" }} disabled={busy}
-            onPress={() => setImageExtractionMode("describe")} style={{ minHeight: 48, justifyContent: "center" }}>
+            onPress={() => setImageExtractionMode("describe")} style={choiceStyle(imageExtractionMode === "describe", busy)}>
             <Text style={{ color: imageExtractionMode === "describe" ? t.secondary : t.text }}>{imageExtractionMode === "describe" ? "● " : "○ "}Описать содержание фото</Text>
           </Pressable>
           <Pressable accessibilityRole="button" accessibilityLabel="Прочитать текст фотографии через ИИ" accessibilityState={{ selected: imageExtractionMode === "document-text" }} disabled={busy}
-            onPress={() => setImageExtractionMode("document-text")} style={{ minHeight: 48, justifyContent: "center" }}>
+            onPress={() => setImageExtractionMode("document-text")} style={choiceStyle(imageExtractionMode === "document-text", busy)}>
             <Text style={{ color: imageExtractionMode === "document-text" ? t.secondary : t.text }}>{imageExtractionMode === "document-text" ? "● " : "○ "}Прочитать текст документа (ИИ)</Text>
           </Pressable>
           <Pressable accessibilityRole="button" accessibilityLabel="Прочитать фотографию на телефоне" accessibilityState={{ selected: imageExtractionMode === "offline-ocr" }} disabled={busy}
-            onPress={() => setImageExtractionMode("offline-ocr")} style={{ minHeight: 48, justifyContent: "center" }}>
+            onPress={() => setImageExtractionMode("offline-ocr")} style={choiceStyle(imageExtractionMode === "offline-ocr", busy)}>
             <Text style={{ color: imageExtractionMode === "offline-ocr" ? t.secondary : t.text }}>{imageExtractionMode === "offline-ocr" ? "● " : "○ "}Прочитать русский текст на телефоне (OCR)</Text>
           </Pressable>
           {imageExtractionMode === "document-text" ? <Text accessibilityRole="text" style={{ color: t.muted, fontSize: 13, lineHeight: 19 }}>
@@ -595,12 +609,12 @@ export function MemoryImportScreen() {
           <Text style={{ color: t.text, fontWeight: "700" }}>Чтение PDF</Text>
           <Pressable accessibilityRole="button" accessibilityLabel="Только текстовый слой PDF"
             accessibilityState={{ selected: imageExtractionMode !== "offline-ocr" }} disabled={busy}
-            onPress={() => setImageExtractionMode("describe")} style={{ minHeight: 44, justifyContent: "center" }}>
+            onPress={() => setImageExtractionMode("describe")} style={choiceStyle(imageExtractionMode !== "offline-ocr", busy)}>
             <Text style={{ color: imageExtractionMode !== "offline-ocr" ? t.secondary : t.text }}>○ Текстовый слой — быстро, без OCR</Text>
           </Pressable>
           <Pressable accessibilityRole="button" accessibilityLabel="Распознать сканы PDF на телефоне"
             accessibilityState={{ selected: imageExtractionMode === "offline-ocr" }} disabled={busy}
-            onPress={() => setImageExtractionMode("offline-ocr")} style={{ minHeight: 44, justifyContent: "center" }}>
+            onPress={() => setImageExtractionMode("offline-ocr")} style={choiceStyle(imageExtractionMode === "offline-ocr", busy)}>
             <Text style={{ color: imageExtractionMode === "offline-ocr" ? t.secondary : t.text }}>○ Добавить локальное OCR отсутствующих страниц</Text>
           </Pressable>
           <Text style={{ color: t.muted, fontSize: 12 }}>
@@ -613,12 +627,12 @@ export function MemoryImportScreen() {
           <Text style={{ color: t.text, fontWeight: "700" }}>Режим распознавания</Text>
           <Pressable disabled={busy} accessibilityRole="button" accessibilityLabel="Распознавать по очереди"
             accessibilityState={{ selected: recognitionMode === "sequential" }} onPress={() => setRecognitionMode("sequential")}
-            style={{ minHeight: 44, justifyContent: "center" }}>
+            style={choiceStyle(recognitionMode === "sequential", busy)}>
             <Text style={{ color: recognitionMode === "sequential" ? t.secondary : t.text }}>{recognitionMode === "sequential" ? "● " : "○ "}По очереди — результат каждого файла отдельно</Text>
           </Pressable>
           <Pressable disabled={busy || !providerApproved} accessibilityRole="button" accessibilityLabel="Распознавать вместе"
             accessibilityState={{ selected: recognitionMode === "joint", disabled: !providerApproved }} onPress={() => setRecognitionMode("joint")}
-            style={{ minHeight: 44, justifyContent: "center", opacity: providerApproved ? 1 : .5 }}>
+            style={choiceStyle(recognitionMode === "joint", busy || !providerApproved)}>
             <Text style={{ color: recognitionMode === "joint" ? t.secondary : t.text }}>{recognitionMode === "joint" ? "● " : "○ "}Вместе — дополнительно сопоставить все материалы</Text>
           </Pressable>
           <Text style={{ color: t.muted, fontSize: 12 }}>
@@ -628,7 +642,7 @@ export function MemoryImportScreen() {
         {(files.length > 1 || (kind !== "text" && kind !== "document" && !localAudio)) ? <NoteEditorSection testID="import-processing-options" title="Параметры распознавания" summary="Модель и подключение" expanded={processingOptionsOpen} onToggle={() => setProcessingOptionsOpen(v => !v)}>
           <Text style={{ color: t.muted, fontSize: 12 }}>Для локального OCR файлы не отправляются. Для прочих режимов выбранная модель может получить файл или кадры.</Text>
           <Text style={{ color: t.text, fontWeight: "600" }}>Подключение для разбора</Text>
-          {connections.map(c => <Pressable disabled={busy} key={c.id} accessibilityRole="button" accessibilityLabel={"Разобрать через " + c.name} style={{ minHeight: 44, justifyContent: "center" }} onPress={() => setConnectionId(c.id)}>
+          {connections.map(c => <Pressable disabled={busy} key={c.id} accessibilityRole="button" accessibilityLabel={"Разобрать через " + c.name} accessibilityState={{selected:connectionId === c.id,disabled:busy}} style={choiceStyle(connectionId === c.id, busy)} onPress={() => setConnectionId(c.id)}>
             <Text style={{ color: connectionId === c.id ? t.secondary : t.text }}>{connectionId === c.id ? "● " : "○ "}{c.name} · {c.model}</Text>
           </Pressable>)}
         </NoteEditorSection> : null}
@@ -636,13 +650,13 @@ export function MemoryImportScreen() {
           <Text style={{ color: t.text, fontWeight: "700" }}>Распознавание речи из файла</Text>
           {([ ["device", "На телефоне · Whisper"], ["online", "Онлайн · OpenAI" ] ] as const).map(([id, label]) => <Pressable key={id} accessibilityRole="radio" accessibilityLabel={"Способ распознавания аудиофайла: " + label}
             accessibilityState={{ checked: fileAsrMode === id, disabled: busy }} disabled={busy} onPress={() => setFileAsrMode(id)}
-            style={{ minHeight: 48, justifyContent: "center" }}><Text style={{ color: fileAsrMode === id ? t.secondary : t.text }}>{fileAsrMode === id ? "● " : "○ "}{label}</Text></Pressable>)}
+            style={choiceStyle(fileAsrMode === id, busy)}><Text style={{ color: fileAsrMode === id ? t.secondary : t.text }}>{fileAsrMode === id ? "● " : "○ "}{label}</Text></Pressable>)}
           {fileAsrMode === "online" ? <>
             <Text style={{ color: t.muted, fontSize: 12 }}>Будет отправлен исходный звук; требуется разрешение на каждый запрос. Для личных и закрытых записей отправка запрещена.</Text>
             <Text style={{ color: t.text }}>Подключение для распознавания</Text>
             {connections.filter(c => officialAudioProvider(c)).map(c => <Pressable key={c.id} accessibilityRole="radio" accessibilityLabel={"Аудио через " + c.name}
               accessibilityState={{ checked: c.id === speechConnectionId, disabled: busy }} disabled={busy}
-              onPress={() => setSpeechConnectionId(c.id)} style={{ minHeight: 48, justifyContent: "center" }}>
+              onPress={() => setSpeechConnectionId(c.id)} style={choiceStyle(c.id === speechConnectionId, busy)}>
               <Text style={{ color: c.id === speechConnectionId ? t.secondary : t.text }}>{c.id === speechConnectionId ? "● " : "○ "}{c.name} · {c.transcriptionModel || "gpt-transcribe"}</Text>
             </Pressable>)}
             {!speechSelected || !officialAudioProvider(speechSelected) ? <Text style={{ color: t.err }}>Выберите подключение OpenAI с поддержкой аудиофайлов. Произвольный LLM/DeepSeek не подходит.</Text> : null}
@@ -730,7 +744,7 @@ export function MemoryImportScreen() {
       void extract(true);
     }} />
   <BottomSheet visible={sectionOpen} title="Коллекция для записи" onClose={() => setSectionOpen(false)}>
-        {collections.map(c => <Pressable key={c.id} disabled={busy} accessibilityRole="button" accessibilityLabel={"Коллекция: " + c.name} onPress={() => { setCollectionId(c.id); setSectionOpen(false); }} style={{ minHeight: 44 }}><Text style={{ color: c.id === collectionId ? t.secondary : t.text }}>{c.id === collectionId ? "● " : "○ "}{c.name}</Text></Pressable>)}
+        {collections.map(c => <Pressable key={c.id} disabled={busy} accessibilityRole="button" accessibilityLabel={"Коллекция: " + c.name} onPress={() => { setCollectionId(c.id); setSectionOpen(false); }} style={choiceStyle(c.id === collectionId, busy)}><Text style={{ color: c.id === collectionId ? t.secondary : t.text }}>{c.id === collectionId ? "● " : "○ "}{c.name}</Text></Pressable>)}
   </BottomSheet>
   </View>;
 }

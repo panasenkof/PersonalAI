@@ -141,6 +141,21 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByLabel('Сообщение ассистенту', { exact: true }).waitFor();
       const prompt = page.getByLabel('Сообщение ассистенту', { exact: true });
       assert.equal(await page.getByLabel('Очистить сообщение', { exact: true }).count(), 0);
+      // A plain photo description suggests an explicit *local* search, not an
+      // automatic request. Its action must look like a real Nebula button.
+      await prompt.fill('фото красного велосипеда');
+      const suggestPhoto = page.getByLabel('Поискать в моих фото', {exact:true});
+      await suggestPhoto.waitFor();
+      const photoActionBox = await suggestPhoto.boundingBox();
+      const photoActionBorder = await suggestPhoto.evaluate(el => parseFloat(getComputedStyle(el).borderTopWidth));
+      assert(photoActionBox && photoActionBox.height >= 48 && photoActionBorder >= 1 &&
+        photoActionBox.x >= 0 && photoActionBox.x + photoActionBox.width <= width,
+        'Suggested local photo search must be a visible, reachable action');
+      assert.equal(replyNumber,0,'Typing a photo description never silently sends a network request');
+      if (process.env.SCREENSHOT_DIR) await page.screenshot({animations:'disabled',
+        path:path.join(process.env.SCREENSHOT_DIR,`chat-photo-suggestion-${width}.png`)});
+      await prompt.fill('');
+
       const showShare = async payloads => {
         await page.evaluate(payloads => { window.__incoming=payloads;window.__qa.androidShare=true;window.__state('active'); },payloads);
         await page.clock.runFor(600);
@@ -460,6 +475,9 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await quickActions.waitFor();
       assert.equal(await page.getByLabel('Редактировать запись', { exact: true }).count(), 1, 'Reader has one Edit action');
       assert.equal(await page.getByLabel('Изменить заметку с ИИ', { exact: true }).count(), 1, 'Reader has one AI edit action');
+      const editAction=page.getByLabel('Изменить заметку с ИИ', { exact: true });
+      const editBorder=await editAction.evaluate(el=>parseFloat(getComputedStyle(el).borderTopWidth));
+      assert(editBorder >= 1, 'AI edit must be a visible bordered action, not plain text');
       await page.setViewportSize({ width, height: 470 }); await page.evaluate(() => window.__insets(48));
       const quickBox = await quickActions.boundingBox();
       assert(quickBox && quickBox.y >= 0 && quickBox.y + quickBox.height <= 470 - 48,
@@ -710,9 +728,13 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.waitForFunction(() => document.querySelector('[aria-label="Открыть диалог Второй вопрос"]').getBoundingClientRect().bottom <= innerHeight - 48);
       const historyBox = await page.getByLabel('Открыть диалог Второй вопрос', { exact: true }).boundingBox();
       assert(historyBox.y + historyBox.height <= 470 - 48, 'History row clears the system bar in a reduced viewport');
-      await page.getByText('+ Новый диалог', { exact: true }).scrollIntoViewIfNeeded();
-      const historyAction = await page.getByText('+ Новый диалог', { exact: true }).boundingBox();
-      assert(historyAction.y + historyAction.height <= 470 - 48, 'The last sheet action is reachable above system navigation');
+      const historyNewAction = page.getByLabel('Создать новый диалог', { exact: true });
+      await historyNewAction.scrollIntoViewIfNeeded();
+      const historyAction = await historyNewAction.boundingBox();
+      const historyActionBorder = await historyNewAction.evaluate(el => parseFloat(getComputedStyle(el).borderTopWidth));
+      assert(historyAction && historyAction.height >= 48 && historyActionBorder >= 1 &&
+        historyAction.y + historyAction.height <= 470 - 48,
+        'The last sheet action is a visible framed Nebula button above system navigation');
       if (process.env.SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, `history-${width}.png`) });
       await page.getByLabel('Открыть диалог Второй вопрос', { exact: true }).click();
       await page.getByLabel('Поиск диалогов', { exact: true }).waitFor({ state: 'hidden' });

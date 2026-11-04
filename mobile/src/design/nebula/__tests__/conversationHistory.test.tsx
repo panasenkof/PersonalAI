@@ -80,6 +80,30 @@ describe("Conversation history presentation", () => {
     expect(view.getAllByTestId(/chat-history-item-/)).toHaveLength(30);
     expect(onDelete).not.toHaveBeenCalled();
   });
+  it("keeps the row icons compact but framed and the new-chat action visible", () => {
+    const onDelete=jest.fn();
+    const onNewChat=jest.fn();
+    const conversation=chat("a","Заметки");
+    const view=render(<ConversationHistorySheet visible conversations={[conversation]}
+      onClose={jest.fn()} onSelect={jest.fn()} onDelete={onDelete}
+      onNewChat={onNewChat} onSummary={jest.fn()}/>);
+    const summary=view.getByLabelText("Сохранить итог диалога Заметки");
+    const remove=view.getByLabelText("Удалить диалог Заметки");
+    for (const iconAction of [summary, remove]) {
+      expect(iconAction.props.style.minHeight).toBeGreaterThanOrEqual(48);
+      expect(iconAction.props.style.borderWidth).toBe(1);
+      expect(iconAction.props.style.backgroundColor).toBeTruthy();
+    }
+    const create=view.getByLabelText("Создать новый диалог");
+    const style=typeof create.props.style==="function"
+      ? create.props.style({pressed:false}):create.props.style;
+    expect(style.minHeight).toBeGreaterThanOrEqual(48);
+    expect(style.borderWidth).toBe(1);
+    fireEvent.press(create);
+    expect(onNewChat).toHaveBeenCalledTimes(1);
+    fireEvent.press(remove);
+    expect(onDelete).toHaveBeenCalledWith(conversation);
+  });
   it("offers a single accessible opt-in summary action, disabled while the chat runs", () => {
     const onSummary=jest.fn();
     const free=chat("free","Рабочая переписка");
