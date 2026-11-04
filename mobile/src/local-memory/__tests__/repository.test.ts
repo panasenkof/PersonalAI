@@ -122,6 +122,26 @@ test("03.4: global purge excludes linked note, rechecks new links in writer, pre
   expect(await fake.getFirstAsync("PRAGMA foreign_key_check")).toBeNull();
 });
 
+test("03.4: user-selected profile identity is never silently unbound by global purge", async()=>{
+  const fake=new FakeSqlite(),repo=new SqliteMemoryRepository(fake as never);
+  await fake.execAsync("PRAGMA foreign_keys=ON");
+  const col=await repo.createCollection({name:"Люди",slug:"people",sensitivity:"standard"});
+  const person=await repo.createEntity({collection_id:col.id,domain:"notes",kind:"person",title:"Я",payload:{body:"profile"}});
+  await fake.runAsync(
+    "INSERT INTO memory_profile_self(slot,person_id,binding_version,actor_kind,updated_at) VALUES(1,?,1,'user',?)",
+    [person.id,"2026-11-04T00:00:00Z"]);
+  await repo.changeNotes("trash",[{id:person.id,record_version:person.record_version}]);
+  const preview=await repo.trashPurgeSnapshot();
+  expect(preview.totalCount).toBe(1);
+  expect(preview.protectedCount).toBe(1);
+  expect(preview.items).toEqual([]);
+  await expect(repo.purgeNotes([{id:person.id,record_version:2}],{protectReferences:true}))
+    .rejects.toBeInstanceOf(MemoryConflictError);
+  expect((await fake.getFirstAsync<{person_id:string}>(
+    "SELECT person_id FROM memory_profile_self WHERE slot=1"))?.person_id).toBe(person.id);
+  expect((await repo.entity(person.id))?.record_status).toBe("trashed");
+});
+
 test("creates offline note, edits with CAS, stores immutable history and updates full-text search", async () => {
   const fake = new FakeSqlite();
   const repo = new SqliteMemoryRepository(fake as never);
