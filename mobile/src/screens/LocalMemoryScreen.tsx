@@ -658,7 +658,9 @@ export function LocalMemoryScreen() {
           ? toggleSelection(item.id)
           : navigation.navigate("MemoryNote", { entityId: item.id })}
       /></View>}
-      ListFooterComponent={more && !loading ? <Pressable accessibilityRole="button" accessibilityLabel="Показать ещё заметки" disabled={busy} onPress={() => void loadMore()} style={button}><Text style={{ color: t.secondary }}>{busy ? "Загружаю…" : "Показать ещё"}</Text></Pressable> : null} />
+      ListFooterComponent={more && !loading ? <NebulaAction icon="chevron-down"
+          label={busy ? "Загружаю…" : "Показать ещё"} accessibilityLabel="Показать ещё заметки"
+          disabled={busy} onPress={() => void loadMore()} /> : null} />
       <BottomSheet visible={Boolean(trashPreview)} title={trashConfirm ? "Очистить корзину?" : "Проверка корзины"}
         onClose={() => { if (busy) return; trashEpoch.current++; setTrashPreview(null); setTrashConfirm(false); }}>
         {trashPreview ? <>
@@ -775,10 +777,8 @@ export function LocalMemoryScreen() {
           <Text style={{color:t.secondary,fontSize:13}}>Записей: {group.targets.length} · Проверить и исключить</Text>
         </Pressable>)}
       {error?<Text accessibilityRole="alert" style={{color:t.err}}>{error}</Text>:null}
-      <Pressable accessibilityRole="button" accessibilityLabel="Закрыть предложения для ревизии"
-        style={button} onPress={closeHygieneSuggestions}>
-        <Text style={{color:t.secondary}}>Закрыть без изменений</Text>
-      </Pressable>
+      <NebulaAction icon="x" label="Закрыть без изменений"
+        accessibilityLabel="Закрыть предложения для ревизии" onPress={closeHygieneSuggestions} />
     </BottomSheet>
 
     <BottomSheet visible={hygieneReviewOpen && reviewNotes.length>=2}
@@ -872,25 +872,19 @@ export function LocalMemoryScreen() {
             Подтвердите {hygieneAction==="archive"?"архивирование":"перемещение в корзину"}:
             {hygienePreview.eligibleIds.length} записей. Исключённые и заблокированные останутся без изменений.
           </Text>
-          <Pressable accessibilityRole="button" accessibilityLabel="Подтвердить групповое действие памяти"
-            style={actionButton} onPress={()=>void applyHygiene()}>
-            <Text style={{color:hygieneAction==="trash"?t.err:t.secondary}}>
-              {hygieneAction==="archive"?"Подтвердить архивирование":"Подтвердить перемещение в корзину"}
-            </Text>
-          </Pressable>
-          <Pressable accessibilityRole="button" accessibilityLabel="Отмена подтверждения группового действия"
-            style={actionButton} onPress={()=>setHygieneConfirm(false)}><Text style={{color:t.secondary}}>Назад к проверке</Text></Pressable>
-        </> : <Pressable accessibilityRole="button"
+          <NebulaAction icon="check" accessibilityLabel="Подтвердить групповое действие памяти"
+            label={hygieneAction==="archive"?"Подтвердить архивирование":"Подтвердить перемещение в корзину"}
+            variant={hygieneAction==="trash"?"danger":"quiet"} onPress={()=>void applyHygiene()} />
+          <NebulaAction icon="arrow-left" label="Назад к проверке"
+            accessibilityLabel="Отмена подтверждения группового действия"
+            onPress={()=>setHygieneConfirm(false)} />
+        </> : <NebulaAction icon={hygieneAction==="archive"?"archive":"trash-2"}
           accessibilityLabel={hygieneAction==="archive"?"Продолжить архивирование группы":"Продолжить перемещение группы в корзину"}
-          style={actionButton} onPress={()=>setHygieneConfirm(true)}>
-          <Text style={{color:hygieneAction==="trash"?t.err:t.secondary}}>
-            {hygieneAction==="archive"?"Архивировать":"В корзину"} · {hygienePreview.eligibleIds.length}
-          </Text>
-        </Pressable>) : null}
-      <Pressable accessibilityRole="button" accessibilityLabel="Закрыть предпросмотр без изменений"
-        style={button} onPress={closeHygiene}>
-        <Text style={{color:t.secondary}}>Закрыть без изменений</Text>
-      </Pressable>
+          variant={hygieneAction==="trash"?"danger":"quiet"}
+          label={(hygieneAction==="archive"?"Архивировать":"В корзину")+" · "+hygienePreview.eligibleIds.length}
+          onPress={()=>setHygieneConfirm(true)} />) : null}
+      <NebulaAction icon="x" label="Закрыть без изменений"
+        accessibilityLabel="Закрыть предпросмотр без изменений" onPress={closeHygiene} />
     </BottomSheet>
 
     <BottomSheet visible={addOpen} title="Добавить в память" onClose={() => setAddOpen(false)}>
@@ -922,20 +916,22 @@ export function LocalMemoryScreen() {
       </Pressable>
     </BottomSheet>
     <BottomSheet visible={collectionMenu} title="Коллекции" onClose={() => setCollectionMenu(false)}>
-      {[{ id: undefined, name: "Все записи" }, ...collections].map(c => <Pressable key={c.id || "all"} accessibilityRole="button" accessibilityLabel={"Раздел " + c.name} style={{ ...button, alignItems: "flex-start" }}
+      {[{ id: undefined, name: "Все записи" }, ...collections].map(c => <Pressable key={c.id || "all"} accessibilityRole="button" accessibilityLabel={"Раздел " + c.name} style={actionButton}
         onPress={() => { openAll(); setCollectionId(c.id); setCollectionMenu(false); }}><Text style={{ color: t.text }}>{c.name}</Text></Pressable>)}
-      <Pressable accessibilityRole="button" accessibilityLabel="Новый раздел памяти" style={button} onPress={() => { setCollectionMenu(false); setSectionOpen(true); }}><Text style={{ color: t.secondary }}>Создать коллекцию</Text></Pressable>
+      <NebulaAction icon="plus" label="Создать коллекцию" accessibilityLabel="Новый раздел памяти"
+        onPress={() => { setCollectionMenu(false); setSectionOpen(true); }} />
     </BottomSheet>
     <BottomSheet visible={moveOpen} title="Перенести выбранные записи" onClose={() => { setMoveOpen(false); setContextNote(null); }}>
       {error ? <Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text> : null}
       <Text style={{ color: t.muted }}>{selectedNotes.map(memoryDisplayTitle).join(", ")}</Text>
-      {collections.map(c => <Pressable key={c.id} disabled={busy} style={button} onPress={() => void act("move", c.id)}><Text style={{ color: t.secondary }}>{c.name}</Text></Pressable>)}
+      {collections.map(c => <Pressable key={c.id} disabled={busy} style={actionButton} onPress={() => void act("move", c.id)}><Text style={{ color: t.secondary }}>{c.name}</Text></Pressable>)}
     </BottomSheet>
     <BottomSheet visible={mergeOpen} title="Предпросмотр объединения" onClose={() => setMergeOpen(false)}>
       <Text style={{ color: t.muted }}>Название первой выбранной записи сохраняется. Тексты остаются отдельными блоками; вложения и источники сохраняются. Противоречия не исправляются автоматически.</Text>
       {error ? <Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text> : null}
       <ScrollView style={{ maxHeight: 300 }}><Text style={{ color: t.text }}>{mergeText(selectedNotes)}</Text></ScrollView>
-      <Pressable disabled={busy} style={button} onPress={() => void act("merge")}><Text style={{ color: t.secondary }}>Подтвердить объединение</Text></Pressable>
+      <NebulaAction icon="check" label="Подтвердить объединение" variant="primary"
+        disabled={busy} onPress={() => void act("merge")} />
     </BottomSheet>
     <BottomSheet visible={sectionOpen} title="Новый раздел" onClose={() => setSectionOpen(false)}>
       <Text style={{ color: t.muted }}>Например: «Рецепты», «Идеи» или «Планы».</Text>
