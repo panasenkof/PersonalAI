@@ -24,6 +24,9 @@ const mockDb = {
  changeNotes: jest.fn(async () => "notes:archive:test"),
  lastNoteOperation: mockLastNoteOperation, undoNotes: jest.fn(async () => {}),
  collectionNoteCounts: async () => ({ a: 1, b: 1 }),
+ trashNoteCount: jest.fn(async () => 1),
+ trashPurgeSnapshot: jest.fn(async () => ({items:[{id:"deleted",record_version:7}],originalCount:0,affectedRelationCount:0})),
+ purgeNotes: jest.fn(async () => {}),
  searchNotes: jest.fn(async (term, _limit, _offset, filter) => notes.filter(n => n.record_status === filter.status && (!filter.collectionId || n.collection_id === filter.collectionId) && n.title.includes(term))),
 };
 jest.mock("../local-memory/repository", () => ({ localMemoryRepository: async () => mockDb }));
