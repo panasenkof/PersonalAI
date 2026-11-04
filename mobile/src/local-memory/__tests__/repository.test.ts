@@ -57,6 +57,28 @@ test("trash preview is a single read-only SQL snapshot with only trashed note ve
   expect(await repo.trashNoteCount()).toBe(0);
 });
 
+
+test("03.4: a permanent purge cannot resurrect a stale Undo after repository reopening", async () => {
+  const fake = new FakeSqlite();
+  const repo = new SqliteMemoryRepository(fake as never);
+  const col = await repo.createCollection({ name:"Заметки", slug:"notes", sensitivity:"standard" });
+  const a = await repo.createEntity({ collection_id:col.id, domain:"notes", title:"А", payload:{ body:"one" } });
+  const b = await repo.createEntity({ collection_id:col.id, domain:"notes", title:"Б", payload:{ body:"two" } });
+  const batch = await repo.changeNotes("trash", [
+    {id:a.id,record_version:a.record_version}, {id:b.id,record_version:b.record_version},
+  ]);
+  expect(await repo.lastNoteOperation()).toBe(batch);
+  const aAfter = await repo.entity(a.id);
+  await repo.purgeNotes([{id:a.id,record_version:aAfter!.record_version}]);
+  const reopened = new SqliteMemoryRepository(fake as never);
+  expect(await reopened.lastNoteOperation()).toBe("");
+  const bAfter = await reopened.entity(b.id);
+  expect(bAfter?.record_status).toBe("trashed");
+  // A single-note purge also leaves no impossible undo action on next launch.
+  await reopened.purgeNotes([{id:b.id,record_version:bAfter!.record_version}]);
+  expect(await (new SqliteMemoryRepository(fake as never)).lastNoteOperation()).toBe("");
+});
+
 test("creates offline note, edits with CAS, stores immutable history and updates full-text search", async () => {
   const fake = new FakeSqlite();
   const repo = new SqliteMemoryRepository(fake as never);
