@@ -43,6 +43,16 @@ export function resolveNebulaStatus(signals: NebulaHomeSignals & { progress?: st
   const suffix = done >= 1 && total >= done && total <= 20 ? ` (${done}/${total})` : "";
   if (/останавливаю/i.test(progress)) return "Останавливаю";
   if (/сохраняю|записываю/i.test(progress)) return "Сохраняю запрос";
+  // Show stages ONLY when they were emitted by the actual agent pipeline.
+  // Generic busy must not pretend that a document is being read.
+  if (/готовлю итог/i.test(progress)) return "Готовлю итог" + suffix;
+  if (/составляю итог|обобщаю диалог|формирую итог/i.test(progress)) return "Составляю итог" + suffix;
+  if (/читаю|извлекаю|открываю/i.test(progress) && /документ|файл|источник|страниц/i.test(progress))
+    return "Читаю материалы" + suffix;
+  if (/обрабатываю|анализирую|сверяю/i.test(progress) && /част|фрагмент|документ|файл/i.test(progress))
+    return "Обрабатываю материалы" + suffix;
+  if (/проверяю/i.test(progress) && /источник|документ|ссылк/i.test(progress))
+    return "Проверяю источники" + suffix;
   if (/памят|заметк|документ/i.test(progress) && /ищ|поиск|смотр|провер/i.test(progress)) return "Ищу в памяти";
   if (/интернет|веб|web|search|страниц/i.test(progress) && /ищ|поиск|запрос|загруж/i.test(progress)) return "Ищу в интернете";
   if (/подключаюсь|соединени|connecting/i.test(progress)) return "Подключаюсь" + suffix;
