@@ -1,4 +1,5 @@
 import { changeNotes, undoNotes, purgeNotes, type NoteAction, type NoteSelection, type NoteHygieneGuard } from "./note-actions";
+import { readTrashPurgeSnapshot } from "./trash-clear";
 import { MemoryHygieneService } from "./hygiene";
 import { chooseProfileSelfIdentity, readProfileSelfIdentity } from "./self-identity";
 import type { ChooseProfileSelfIdentity } from "./self-identity";
@@ -177,6 +178,8 @@ export class SqliteMemoryRepository implements MemoryRepository {
   hygiene() { return new MemoryHygieneService(this.db); }
   changeNotes(action: NoteAction, selection: NoteSelection[], collectionId?: string, hygiene?: NoteHygieneGuard) { return changeNotes(this.db, action, selection, collectionId, hygiene); }
   purgeNotes(selection: NoteSelection[]) { return purgeNotes(this.db, selection); }
+  /** All trashed note identities/versions, from one unlocked SQLCipher snapshot. */
+  trashPurgeSnapshot() { return readTrashPurgeSnapshot(this.db); }
   async lastNoteOperation(): Promise<string> {
     const row = await this.db.getFirstAsync<{ reason: string }>("SELECT reason FROM memory_revisions WHERE reason LIKE 'notes:%' OR reason LIKE 'Отмена notes:%' ORDER BY created_at DESC,rowid DESC LIMIT 1");
     return row?.reason.startsWith("notes:") ? row.reason : "";
