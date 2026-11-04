@@ -398,3 +398,26 @@ test("03.4: linked sources are counted but never included in bulk purge confirma
   fireEvent.press(ui.getByLabelText("Отменить очистку корзины"));
   expect(mockDb.purgeNotes).not.toHaveBeenCalled();
 });
+
+
+test("03.4: entering search while a batch is in flight stops every subsequent destructive batch", async () => {
+  const items = Array.from({length: 101}, (_,i) => ({id:"trash-"+i,record_version:7}));
+  mockDb.trashNoteCount.mockResolvedValue(101);
+  mockDb.trashPurgeSnapshot.mockResolvedValue({items,totalCount:101,
+    protectedCount:0,originalCount:0,affectedRelationCount:0});
+  let finish: (() => void) | undefined;
+  mockDb.purgeNotes.mockImplementationOnce(() => new Promise<void>(resolve => {finish=resolve;}));
+  const ui=render(<LocalMemoryScreen />);
+  await waitFor(()=>ui.getByLabelText("Открыть корзину"));
+  fireEvent.press(ui.getByLabelText("Открыть корзину"));
+  await waitFor(()=>ui.getByLabelText("Очистить всю корзину"));
+  await act(async()=>fireEvent.press(ui.getByLabelText("Очистить всю корзину")));
+  fireEvent.press(ui.getByLabelText("Проверить последствия очистки корзины"));
+  act(()=>fireEvent.press(ui.getByLabelText("Подтвердить очистку всей корзины")));
+  await waitFor(()=>expect(mockDb.purgeNotes).toHaveBeenCalledTimes(1));
+  fireEvent.changeText(ui.getByLabelText("Поиск по заметкам"),"ищу другое");
+  await act(async()=>{ finish?.(); });
+  expect(mockDb.purgeNotes).toHaveBeenCalledTimes(1);
+  expect(ui.queryByLabelText("Подтвердить очистку всей корзины")).toBeNull();
+  ui.unmount();
+});
