@@ -7,7 +7,7 @@ import { useProfile } from "../profile/ProfileContext";
 import { useTheme } from "../theme";
 import { Collapsible } from "./Collapsible";
 
-export function AgentLimitsCard() {
+export function AgentLimitsCard({ defaultOpen = false }: { defaultOpen?: boolean } = {}) {
   const profile = useProfile(); const t = useTheme();
   const [draft, setDraft] = useState(String(DEFAULT_MODEL_CALL_LIMIT));
   const [saved, setSaved] = useState(DEFAULT_MODEL_CALL_LIMIT);
@@ -38,7 +38,7 @@ export function AgentLimitsCard() {
     } catch { if (mounted.current) setError("Не удалось сохранить лимит. Прежнее значение остаётся в силе; повторите сохранение."); }
     finally { savingNow.current = false; if (mounted.current) setSaving(false); }
   }
-  return <Collapsible icon="sliders" id="settings.agent-limits" title="Работа ИИ" summary={loaded ? `До ${saved} обращений к LLM на сообщение` : "Загружаю лимит…"}>
+  return <Collapsible icon="sliders" id="settings.agent-limits" defaultOpen={defaultOpen} forceOpen={defaultOpen} title="Работа ИИ" summary={loaded ? `До ${saved} обращений к LLM на сообщение` : "Загружаю лимит…"}>
     <Text style={{ color: t.text, fontWeight: "600" }}>Максимум обращений к LLM на одно сообщение</Text>
     <Text style={{ color: t.muted, fontSize: 12, lineHeight: 18 }}>Помощник обращается к модели, чтобы выбрать действие, обработать найденные сведения и ответить. Больше обращений позволяют выполнить больше шагов, но могут увеличить время и стоимость ответа. От 1 до 20, по умолчанию 5.</Text>
     <NumericStepper value={draft} onChange={change} min={1} max={MAX_MODEL_CALL_LIMIT} disabled={!loaded || saving}
