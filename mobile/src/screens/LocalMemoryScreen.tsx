@@ -478,7 +478,9 @@ export function LocalMemoryScreen() {
           </ScrollView>
         </> : null}
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <Text style={{ flex: 1, color: t.text, fontSize: 18, fontWeight: "700" }}>
+          <Text testID={status === "trashed" ? "trash-total-counter" : undefined}
+            style={{ flex: 1, minWidth: status === "trashed" && width < 560 ? width - 32 : undefined,
+              color: t.text, fontSize: 18, fontWeight: "700" }}>
             {term ? "Результаты поиска" : status === "archived" ? "Записи в архиве" :
               status === "trashed" ? "Корзина · " + trashPurgeCountLabel(trashCount) : collectionId ? "Записи раздела" : "Недавнее"}
           </Text>
