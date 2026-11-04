@@ -437,7 +437,7 @@ export function LocalMemoryScreen() {
         listRef.current?.scrollToOffset({ offset: Math.max(0, averageItemLength * index), animated: false });
         if (restoreTimer.current) clearTimeout(restoreTimer.current);
         restoreTimer.current = setTimeout(restoreListAnchor, 90);
-      }
+      }}
       initialNumToRender={8} windowSize={5} columnWrapperStyle={columns > 1 ? { gap: nebulaSpacing.sm, alignItems: "flex-start" } : undefined}
       ListHeaderComponent={<View style={{ paddingTop: nebulaSpacing.sm, paddingBottom: nebulaSpacing.sm, gap: nebulaSpacing.sm }}>
         <View style={{ flexDirection: "row", alignItems: "center", borderWidth: 1, borderColor: t.line, borderRadius: nebulaRadii.field, backgroundColor: t.panel }}>
