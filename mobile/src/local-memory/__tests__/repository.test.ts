@@ -47,6 +47,8 @@ test("trash preview is a single read-only SQL snapshot with only trashed note ve
   expect(snapshot.items).toEqual([{ id: one.id, record_version: expected!.record_version }]);
   expect(snapshot.originalCount).toBe(0);
   expect(snapshot.affectedRelationCount).toBe(0);
+  expect(snapshot.totalCount).toBe(1);
+  expect(snapshot.protectedCount).toBe(0);
   expect(await repo.trashNoteCount()).toBe(1);
   expect(snapshot.items.some(row => row.id === two.id)).toBe(false);
   // Preview does not mutate any record; a later restore invalidates the CAS.
@@ -77,6 +79,47 @@ test("03.4: a permanent purge cannot resurrect a stale Undo after repository reo
   // A single-note purge also leaves no impossible undo action on next launch.
   await reopened.purgeNotes([{id:b.id,record_version:bAfter!.record_version}]);
   expect(await (new SqliteMemoryRepository(fake as never)).lastNoteOperation()).toBe("");
+});
+
+
+test("03.4: global purge excludes linked note, rechecks new links in writer, preserves unrelated originals", async()=>{
+  const fake=new FakeSqlite(), repo=new SqliteMemoryRepository(fake as never);
+  await fake.execAsync("PRAGMA foreign_keys=ON");
+  const col=await repo.createCollection({name:"Раздел",slug:"notes",sensitivity:"standard"});
+  const active=await repo.createEntity({collection_id:col.id,domain:"notes",title:"Active",payload:{body:"keep"}});
+  const linked=await repo.createEntity({collection_id:col.id,domain:"notes",title:"Linked",payload:{body:"relation"}});
+  const ordinary=await repo.createEntity({collection_id:col.id,domain:"notes",title:"Ordinary",payload:{body:"delete"}});
+  await repo.changeNotes("trash", [
+    {id:linked.id,record_version:1},{id:ordinary.id,record_version:1},
+  ]);
+  await fake.runAsync(
+    "INSERT INTO memory_relations(id,source_entity_id,target_entity_id,kind,created_at) VALUES(?,?,?,?,?)",
+    ["link-kept",active.id,linked.id,"related_to","2026-11-04T00:00:00Z"]);
+  await fake.runAsync(
+    "INSERT INTO memory_attachments(id,entity_id,name,mime,size,created_at) VALUES(?,?,?,?,?,?)",
+    ["original-kept",active.id,"photo.jpg","image/jpeg",12,"2026-11-04T00:00:00Z"]);
+  const snapshot=await repo.trashPurgeSnapshot();
+  expect(snapshot.totalCount).toBe(2);
+  expect(snapshot.protectedCount).toBe(1);
+  expect(snapshot.items).toEqual([{id:ordinary.id,record_version:2}]);
+  expect(snapshot.originalCount).toBe(0);
+  // New relation introduced after preview does not increment the note version.
+  await fake.runAsync(
+    "INSERT INTO memory_relations(id,source_entity_id,target_entity_id,kind,created_at) VALUES(?,?,?,?,?)",
+    ["late-link",active.id,ordinary.id,"related_to","2026-11-04T00:00:00Z"]);
+  await expect(repo.purgeNotes(snapshot.items,{protectReferences:true}))
+    .rejects.toBeInstanceOf(MemoryConflictError);
+  expect((await repo.entity(ordinary.id))?.record_status).toBe("trashed");
+  await fake.runAsync("DELETE FROM memory_relations WHERE id=?",["late-link"]);
+  await repo.purgeNotes(snapshot.items,{protectReferences:true});
+  expect(await repo.entity(ordinary.id)).toBeNull();
+  expect((await repo.entity(linked.id))?.record_status).toBe("trashed");
+  expect((await repo.entity(active.id))?.record_status).toBe("active");
+  expect((await fake.getFirstAsync<{id:string}>(
+    "SELECT id FROM memory_attachments WHERE id=?",["original-kept"]))?.id).toBe("original-kept");
+  expect((await fake.getFirstAsync<{id:string}>(
+    "SELECT id FROM memory_relations WHERE id=?",["link-kept"]))?.id).toBe("link-kept");
+  expect(await fake.getFirstAsync("PRAGMA foreign_key_check")).toBeNull();
 });
 
 test("creates offline note, edits with CAS, stores immutable history and updates full-text search", async () => {
