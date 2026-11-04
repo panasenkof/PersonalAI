@@ -709,6 +709,29 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByLabel('Выбрать заметку Индейка', { exact: true }).click();
       assert.equal(await page.getByTestId('memory-selection-toolbar').count(), 0, 'Last deselection exits');
       assert.equal(await page.getByText('Выбрать все', { exact: true }).count(), 0);
+      // UI-3/6: check the actual merge preview on every phone/tablet width.
+      // A reversible DRY preview must have the correct primary row, show
+      // consequences, and never commit before explicit confirmation.
+      await page.getByLabel('Выбрать записи', { exact: true }).click();
+      await page.getByLabel('Выбрать заметку Индейка', { exact: true }).click();
+      await page.getByLabel(/Выбрать заметку Рецепт: индейка/).click();
+      await page.getByLabel('Действия с выбранными записями', { exact: true }).click();
+      await page.getByText('Объединить записи', { exact: true }).click();
+      await page.getByText('Основная · Индейка', { exact: true }).waitFor();
+      await page.getByText(/Будет объединена · Рецепт: индейка/).waitFor();
+      assert.equal(await page.getByText(/вложения остальных записей переходят к основной/i).count(), 1,
+        'Merge preview states the effect on source attachments without changing notes');
+      if (process.env.SCREENSHOT_DIR) {
+        await page.screenshot({animations:'disabled',
+          path:path.join(process.env.SCREENSHOT_DIR,`merge-preview-${width}.png`)});
+      }
+      const confirmMerge = page.getByLabel('Подтвердить объединение', { exact:true });
+      await confirmMerge.click({trial:true});
+      const mergeBox = await confirmMerge.boundingBox();
+      assert(mergeBox && mergeBox.width >= 48 && mergeBox.x >= 0 && mergeBox.x + mergeBox.width <= width,
+        'Merge confirmation is a framed reachable button on narrow screens');
+      await page.getByLabel('Отмена', { exact:true }).click();
+      await page.getByLabel('Отменить выбор записей', { exact:true }).click();
       // Contextual restore is available immediately in the opened trashed note.
       // Reuse the existing version-checked writer, not a parallel delete/restore path.
       await page.getByLabel('Действия с заметкой Индейка', { exact: true }).click();
