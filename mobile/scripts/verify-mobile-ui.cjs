@@ -338,7 +338,21 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByLabel('Поиск диалогов', { exact: true }).waitFor({ state: 'hidden' });
       await page.getByTestId('chat-message-list').getByText('Ответ 2', { exact: true }).waitFor();
       await page.getByLabel('Вкладка Память', { exact: true }).click();
+      // List/grid is a labelled real button only when two columns can actually fit.
+      if (width >= 350) {
+        const viewSwitch = page.getByLabel('Показать списком', { exact: true });
+        await viewSwitch.waitFor();
+        assert.equal(await viewSwitch.getByText('Список', { exact: true }).count(), 1);
+        await viewSwitch.click();
+        const gridSwitch = page.getByLabel('Показать плитками', { exact: true });
+        await gridSwitch.waitFor();
+        assert.equal(await gridSwitch.getByText('Плитки', { exact: true }).count(), 1);
+        await gridSwitch.click();
+      } else {
+        assert.equal(await page.getByLabel('Показать списком', { exact: true }).count(), 0);
+      }
       await page.getByLabel('Все коллекции', { exact: true }).click();
+
       const beforeSection = await page.evaluate(() => window.__qa.modalShows || 0);
       await page.getByLabel('Новый раздел памяти', { exact: true }).click();
       await page.getByLabel('Название раздела памяти', { exact: true }).fill('Рецепты');
