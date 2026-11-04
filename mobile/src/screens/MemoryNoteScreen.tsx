@@ -51,6 +51,7 @@ import { useTheme } from "../theme";
 import { nebulaRadii, nebulaSpacing, nebulaTouch, nebulaTypography } from "../design/nebula/tokens";
 import { memoryNoteHasPhoto, memoryDisplayTitle } from "../design/nebula/memoryNotePresentation";
 import { NoteEditorSection } from "../design/nebula/NoteEditorSection";
+import { NoteReadPreview } from "../design/nebula/NoteReadPreview";
 import { NebulaAction } from "../design/nebula/components";
 
 export function MemoryNoteScreen() {
@@ -365,7 +366,9 @@ export function MemoryNoteScreen() {
           {selected && profile && route.params?.photoAttachmentId ? <AttachmentView key={selected.record_version + ":" + (route.params?.verifiedOriginal?.attachmentId || route.params?.photoAttachmentId || "")} profile={profile} entityId={selected.id} verifiedOriginal={route.params?.verifiedOriginal} photoAttachmentId={route.params?.photoAttachmentId} /> : null}
           {profile && selected && !route.params?.verifiedOriginal && !route.params?.photoAttachmentId && memoryNoteHasPhoto(selected) ? <View style={{ borderRadius: nebulaRadii.card, overflow: "hidden" }}><MemoryCover profile={profile} entityId={selected.id} height={210} label={title} /></View> : null}
           <Text accessibilityRole="header" selectable style={{ color: t.text, fontSize: 28, lineHeight: 36, fontWeight: "800" }}>{readingTitle || "Без названия"}</Text>
-          {body && body.trim() !== readingTitle ? <View testID="note-read-body"><MarkdownText text={body} style={{ color: t.text, ...nebulaTypography.body }} /></View> : null}
+          {body && body.trim() !== readingTitle ? <NoteReadPreview
+            testID="note-read-body" text={body} fullTitle="Полный текст заметки"
+            actionLabel="Читать полностью" maxLines={6} /> : null}
           {profile && selected?.kind === "person" && selected.record_status === "active" ? <VerifiedRelativeConversations key={profile + ":" + selected.id + ":" + selected.record_version} profile={profile} personId={selected.id} personTitle={readingTitle} /> : null}
           {profile && selected?.kind === "person" && selected.record_status === "active" &&
             ["standard","inherit"].includes(selected.sensitivity) &&
@@ -373,7 +376,10 @@ export function MemoryNoteScreen() {
             <MemoryTemporalTimeline key={profile + ":" + selected.id + ":" + selected.record_version}
               profile={profile} subjectId={selected.id} collectionId={selected.collection_id}/> : null}
           {selected && profile && !route.params?.photoAttachmentId ? <AttachmentView key={selected.record_version + ":" + (route.params?.verifiedOriginal?.attachmentId || route.params?.photoAttachmentId || "")} profile={profile} entityId={selected.id} verifiedOriginal={route.params?.verifiedOriginal} photoAttachmentId={route.params?.photoAttachmentId} /> : null}
-          {!body && extractedText ? <MarkdownText text={extractedText} style={{ color: t.text, ...nebulaTypography.body }} /> : null}
+          {extractedText && extractedText.trim() !== body.trim() ? <NoteReadPreview
+            testID="note-extracted-summary" text={extractedText}
+            heading="Текст из файла" fullTitle="Полный распознанный текст"
+            actionLabel="Читать текст файла" maxLines={4} /> : null}
           {typeof selected?.payload.source_url === "string" && /^https:\/\//.test(selected.payload.source_url) ? <Pressable accessibilityRole="link" style={button} onPress={() => void Linking.openURL(String(selected.payload.source_url)).catch(() => setError("Не удалось открыть источник."))}><Text style={{ color: t.secondary }}>Открыть источник</Text></Pressable> : null}
         </> : <>
         <TextInput testID="note-body-input" accessibilityLabel="Текст заметки" multiline value={body} onChangeText={value => { setBeforeAi(null); setBody(value); }} editable={!busy && !voiceActive} placeholder="Что нужно запомнить?" placeholderTextColor={t.muted} style={{ ...field, minHeight: 200, textAlignVertical: "top", lineHeight: 23 }} />
@@ -410,7 +416,9 @@ export function MemoryNoteScreen() {
           summary="Распознанное содержимое участвует в поиске по памяти"
           expanded={fileContentOpen} onToggle={() => { Keyboard.dismiss(); setFileContentOpen(open => !open); }}>
           <Text style={{ color: t.muted, ...nebulaTypography.label }}>Проверьте распознанный текст. Он индексируется вместе с записью.</Text>
-          <TextInput accessibilityLabel="Распознанное содержимое файла" multiline editable={!busy} value={extractedText} onChangeText={setExtractedText} maxLength={60_000} style={field} />
+          <TextInput accessibilityLabel="Распознанное содержимое файла" multiline scrollEnabled
+            editable={!busy} value={extractedText} onChangeText={setExtractedText} maxLength={60_000}
+            style={{ ...field, height: 184, maxHeight: 220, textAlignVertical: "top" }} />
           <Pressable disabled={busy || dirty || selected.record_status !== "active"} accessibilityRole="button"
             accessibilityLabel="Распознать сохранённый файл заново" style={button}
             onPress={() => {
