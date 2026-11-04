@@ -6,17 +6,17 @@ import type { Span } from "./markdown-parse";
 import { useTheme } from "../theme";
 
 /** Renders a model answer as one selectable text: copying still takes it whole. */
-export function MarkdownText({ text, style }: { text: string; style?: TextStyle }) {
+export function MarkdownText({ text, style, numberOfLines }: { text: string; style?: TextStyle; numberOfLines?: number }) {
   const t = useTheme();
   const mono = Platform.OS === "ios" ? "Menlo" : "monospace";
-  if (!hasMarkdown(text)) return <Text selectable style={style}>{text}</Text>;
+  if (!hasMarkdown(text)) return <Text selectable numberOfLines={numberOfLines} style={style}>{text}</Text>;
   const plain = (s: Span) => !s.bold && !s.italic && !s.code && !s.url;
   const spans = (items: Span[], prefix: string) => items.length === 1 && plain(items[0]) ? items[0].text : items.map((s, i) => plain(s) ? s.text : <Text key={prefix + i}
     onPress={s.url ? () => void Linking.openURL(s.url!).catch(() => undefined) : undefined}
     style={{ ...(s.bold ? { fontWeight: "700" as const } : {}), ...(s.italic ? { fontStyle: "italic" as const } : {}),
       ...(s.code ? { fontFamily: mono, backgroundColor: t.soft } : {}), ...(s.url ? { color: t.accent, textDecorationLine: "underline" as const } : {}) }}>{s.text}</Text>);
   const blocks = parseMarkdown(text);
-  return <Text selectable style={style}>
+  return <Text selectable numberOfLines={numberOfLines} style={style}>
     {blocks.map((b, i) => {
       const nl = i < blocks.length - 1 ? "\n" : "";
       const key = "b" + i;

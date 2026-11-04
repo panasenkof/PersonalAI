@@ -9,6 +9,7 @@ import { ActivityIndicator, Alert, Keyboard, KeyboardAvoidingView, Linking, Plat
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useProfile } from "../profile/ProfileContext";
 import { BottomSheet } from "../components/BottomSheet";
+import { NebulaConfirmSheet } from "../components/NebulaConfirmSheet";
 import { MarkdownText } from "../components/Markdown";
 import { NoteAiEditor } from "../components/NoteAiEditor";
 import { mayEditNoteText, type NoteDraft } from "../direct-agent/edit-note";
@@ -51,6 +52,7 @@ import { useTheme } from "../theme";
 import { nebulaRadii, nebulaSpacing, nebulaTouch, nebulaTypography } from "../design/nebula/tokens";
 import { memoryNoteHasPhoto, memoryDisplayTitle } from "../design/nebula/memoryNotePresentation";
 import { NoteEditorSection } from "../design/nebula/NoteEditorSection";
+import { NoteReadPreview } from "../design/nebula/NoteReadPreview";
 import { NebulaAction } from "../design/nebula/components";
 
 export function MemoryNoteScreen() {
@@ -62,12 +64,13 @@ export function MemoryNoteScreen() {
   const sourceAtOpen = useRef<{profile:string;body:string;kind:"assistant_reply"|"dialogue_summary"}|null>(null);
   const activeProfile = useRef(profile); activeProfile.current = profile;
   const extraction = useRef<AbortController | null>(null);
-  useEffect(() => { const off = onLocalMemorySessionChange(unlocked => { if (!unlocked) { extraction.current?.abort(); setCandidate(null); setRepeatFiles([]); } }); return () => { off(); extraction.current?.abort(); }; }, []);
+  useEffect(() => { const off = onLocalMemorySessionChange(unlocked => { if (!unlocked) { extraction.current?.abort(); setCandidate(null); setRepeatFiles([]); setConfirmKind(null); } }); return () => { off(); extraction.current?.abort(); }; }, []);
   const repository = useRef<SqliteMemoryRepository | null>(null); const alive = useRef(true); const pending = useRef(false);
   const loadSequence = useRef(0);
   const [editing, setEditing] = useState(!route.params?.entityId);
   const [aiOpen, setAiOpen] = useState(false);
   const [noteMenu, setNoteMenu] = useState(false);
+  const [confirmKind, setConfirmKind] = useState<"leave" | "agent" | null>(null);
   const [voiceActive, setVoiceActive] = useState(false);
   const [beforeAi, setBeforeAi] = useState<NoteDraft | null>(null);
   const closeAi = useCallback(() => setAiOpen(false), []);
@@ -111,10 +114,7 @@ export function MemoryNoteScreen() {
     terms.trim() !== baseline.current.terms.trim();
   usePreventRemove(!leaving && (busy || dirty || voiceActive || attachmentDraft), ({ data }) => {
     if (busy || voiceActive) { setError("Дождитесь завершения сохранения или диктовки."); return; }
-    Alert.alert("Изменения не сохранены", "Закрыть запись без сохранения?", [
-      { text: "Продолжить редактирование", style: "cancel" },
-      { text: "Закрыть", style: "destructive", onPress: () => setLeaving(true) },
-    ]);
+    setConfirmKind("leave");
   });
   useEffect(() => { if (leaving) navigation.goBack(); }, [leaving, navigation]);
   useEffect(() => {
@@ -365,7 +365,9 @@ export function MemoryNoteScreen() {
           {selected && profile && route.params?.photoAttachmentId ? <AttachmentView key={selected.record_version + ":" + (route.params?.verifiedOriginal?.attachmentId || route.params?.photoAttachmentId || "")} profile={profile} entityId={selected.id} verifiedOriginal={route.params?.verifiedOriginal} photoAttachmentId={route.params?.photoAttachmentId} /> : null}
           {profile && selected && !route.params?.verifiedOriginal && !route.params?.photoAttachmentId && memoryNoteHasPhoto(selected) ? <View style={{ borderRadius: nebulaRadii.card, overflow: "hidden" }}><MemoryCover profile={profile} entityId={selected.id} height={210} label={title} /></View> : null}
           <Text accessibilityRole="header" selectable style={{ color: t.text, fontSize: 28, lineHeight: 36, fontWeight: "800" }}>{readingTitle || "Без названия"}</Text>
-          {body && body.trim() !== readingTitle ? <View testID="note-read-body"><MarkdownText text={body} style={{ color: t.text, ...nebulaTypography.body }} /></View> : null}
+          {body && body.trim() !== readingTitle ? <NoteReadPreview
+            testID="note-read-body" text={body} fullTitle="Полный текст заметки"
+            actionLabel="Читать полностью" maxLines={6} /> : null}
           {profile && selected?.kind === "person" && selected.record_status === "active" ? <VerifiedRelativeConversations key={profile + ":" + selected.id + ":" + selected.record_version} profile={profile} personId={selected.id} personTitle={readingTitle} /> : null}
           {profile && selected?.kind === "person" && selected.record_status === "active" &&
             ["standard","inherit"].includes(selected.sensitivity) &&
@@ -373,7 +375,10 @@ export function MemoryNoteScreen() {
             <MemoryTemporalTimeline key={profile + ":" + selected.id + ":" + selected.record_version}
               profile={profile} subjectId={selected.id} collectionId={selected.collection_id}/> : null}
           {selected && profile && !route.params?.photoAttachmentId ? <AttachmentView key={selected.record_version + ":" + (route.params?.verifiedOriginal?.attachmentId || route.params?.photoAttachmentId || "")} profile={profile} entityId={selected.id} verifiedOriginal={route.params?.verifiedOriginal} photoAttachmentId={route.params?.photoAttachmentId} /> : null}
-          {!body && extractedText ? <MarkdownText text={extractedText} style={{ color: t.text, ...nebulaTypography.body }} /> : null}
+          {extractedText && extractedText.trim() !== body.trim() ? <NoteReadPreview
+            testID="note-extracted-summary" text={extractedText}
+            heading="Текст из файла" fullTitle="Полный распознанный текст"
+            actionLabel="Читать текст файла" maxLines={4} /> : null}
           {typeof selected?.payload.source_url === "string" && /^https:\/\//.test(selected.payload.source_url) ? <Pressable accessibilityRole="link" style={button} onPress={() => void Linking.openURL(String(selected.payload.source_url)).catch(() => setError("Не удалось открыть источник."))}><Text style={{ color: t.secondary }}>Открыть источник</Text></Pressable> : null}
         </> : <>
         <TextInput testID="note-body-input" accessibilityLabel="Текст заметки" multiline value={body} onChangeText={value => { setBeforeAi(null); setBody(value); }} editable={!busy && !voiceActive} placeholder="Что нужно запомнить?" placeholderTextColor={t.muted} style={{ ...field, minHeight: 200, textAlignVertical: "top", lineHeight: 23 }} />
@@ -410,7 +415,9 @@ export function MemoryNoteScreen() {
           summary="Распознанное содержимое участвует в поиске по памяти"
           expanded={fileContentOpen} onToggle={() => { Keyboard.dismiss(); setFileContentOpen(open => !open); }}>
           <Text style={{ color: t.muted, ...nebulaTypography.label }}>Проверьте распознанный текст. Он индексируется вместе с записью.</Text>
-          <TextInput accessibilityLabel="Распознанное содержимое файла" multiline editable={!busy} value={extractedText} onChangeText={setExtractedText} maxLength={60_000} style={field} />
+          <TextInput accessibilityLabel="Распознанное содержимое файла" multiline scrollEnabled
+            editable={!busy} value={extractedText} onChangeText={setExtractedText} maxLength={60_000}
+            style={{ ...field, height: 184, maxHeight: 220, textAlignVertical: "top" }} />
           <Pressable disabled={busy || dirty || selected.record_status !== "active"} accessibilityRole="button"
             accessibilityLabel="Распознать сохранённый файл заново" style={button}
             onPress={() => {
@@ -460,7 +467,8 @@ export function MemoryNoteScreen() {
         </NoteEditorSection> : null}
         {selected && (selected.sensitivity === "sensitive" || collections.find(c => c.id === selected.collection_id)?.sensitivity !== "standard") ? <>
           <Text style={{ color: t.muted }}>Запись закрыта для агента. Локальная векторизация доступна, но текст не передаётся модели.</Text>
-          <Pressable disabled={busy} accessibilityRole="button" style={button} onPress={() => Alert.alert("Разрешить доступ агенту?", "После сохранения запись перейдёт в обычные «Заметки». Текст и распознанное содержимое смогут передаваться модели при поиске. Оригинал автоматически не отправляется.", [{ text: "Отмена", style: "cancel" }, { text: "Разрешить", onPress: () => setAllowAgent(true) }])}><Text style={{ color: t.secondary }}>{allowAgent ? "Доступ будет разрешён после сохранения" : "Разрешить агенту находить запись"}</Text></Pressable>
+          <NebulaAction icon="shield" label={allowAgent ? "Доступ будет разрешён после сохранения" : "Разрешить агенту находить запись"}
+            disabled={busy} onPress={() => setConfirmKind("agent")} />
         </> : null}
         {typeof selected?.payload.source_url === "string" ? <Pressable accessibilityRole="link" style={button} onPress={() => { const url = String(selected.payload.source_url); if (/^https:\/\//.test(url)) void Linking.openURL(url).catch(() => setError("Не удалось открыть ссылку.")); }}><Text style={{ color: t.secondary }}>Источник: {selected.payload.source_url}</Text></Pressable> : null}
         {Array.isArray(selected?.payload.merged_sources) ? <View><Text style={{ color: t.muted }}>Исходные записи, их даты и связи сохранены:</Text>{(selected.payload.merged_sources as { id: string; title: string }[]).filter(n => n.id !== selected.id).map(n => <Pressable key={n.id} style={button} onPress={() => navigation.push("MemoryNote", { entityId: n.id })}><Text style={{ color: t.secondary }}>{n.title || "Исходная запись"}</Text></Pressable>)}</View> : null}
@@ -525,5 +533,18 @@ export function MemoryNoteScreen() {
       })}><Text style={{ color: t.secondary }}>{e.title || "Без названия"}</Text></Pressable>)}
       {error ? <Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text> : null}
     </BottomSheet>
+    <NebulaConfirmSheet visible={confirmKind !== null}
+      title={confirmKind === "leave" ? "Изменения не сохранены" : "Разрешить доступ агенту?"}
+      message={confirmKind === "leave"
+        ? "Изменения в записи не сохранятся. Продолжить редактирование или выйти без сохранения?"
+        : "После сохранения запись перейдёт в обычные «Заметки». Текст и распознанное содержимое смогут передаваться модели при поиске. Оригинал автоматически не отправляется."}
+      confirmLabel={confirmKind === "leave" ? "Выйти без сохранения" : "Разрешить"}
+      cancelLabel={confirmKind === "leave" ? "Продолжить редактирование" : "Отмена"}
+      danger={confirmKind === "leave"} disabled={busy}
+      onCancel={() => setConfirmKind(null)}
+      onConfirm={() => {
+        if (confirmKind === "leave") { setConfirmKind(null); setLeaving(true); }
+        else if (confirmKind === "agent") { setConfirmKind(null); setAllowAgent(true); }
+      }} />
   </KeyboardAvoidingView>;
 }

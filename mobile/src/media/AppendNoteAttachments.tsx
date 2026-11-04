@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Text, View } from "react-native";
 import * as DocumentPicker from "expo-document-picker";
 import * as LegacyFileSystem from "expo-file-system/legacy";
 import { File } from "expo-file-system";
@@ -9,7 +9,8 @@ import { MemoryConflictError, type EntityRecord } from "../local-memory/types";
 import { memoryErrorMessage } from "../local-memory/errors";
 import { withNativeInteraction } from "../security/native-interaction";
 import { useTheme } from "../theme";
-import { nebulaRadii, nebulaSpacing, nebulaTouch } from "../design/nebula/tokens";
+import { nebulaSpacing } from "../design/nebula/tokens";
+import { NebulaAction } from "../design/nebula/components";
 import { appendNoteAttachments, MAX_ORIGINALS_PER_NOTE } from "./attachments";
 import { readableAttachmentSize } from "./attachmentPresentation";
 import { autoIndexNotePhotos83 } from "./auto-index-note-photos";
@@ -91,9 +92,12 @@ export function AppendNoteAttachments({ profile, note, disabled, onBusyChange, o
     }
   }
   const cancel = () => { if (abort.current) abort.current.abort(); else discard(); };
-  const button = { minHeight: nebulaTouch.minimum, borderRadius: nebulaRadii.field, padding: nebulaSpacing.sm, justifyContent: "center" as const };
   return <View style={{ gap: nebulaSpacing.xs }}>
-    <Pressable accessibilityRole="button" accessibilityLabel="Добавить файлы к заметке" accessibilityState={{ disabled: disabled || stage !== "idle" }} disabled={disabled || stage !== "idle"} onPress={() => void pick()} style={{ ...button, backgroundColor: t.soft, opacity: disabled ? .5 : 1 }}><Text style={{ color: t.secondary }}>{stage === "picking" ? "Выбираю файлы…" : "Добавить файлы"}</Text></Pressable>
+    <View style={{ alignItems: "flex-start" }}>
+      <NebulaAction icon="paperclip" label={stage === "picking" ? "Выбираю файлы…" : "Добавить файлы"}
+        accessibilityLabel="Добавить файлы к заметке" disabled={disabled || stage !== "idle"}
+        onPress={() => void pick()} />
+    </View>
     {disabled && stage === "idle" ? <Text style={{ color: t.muted }}>Сначала сохраните изменения и завершите диктовку.</Text> : null}
     {notice ? <Text accessibilityLiveRegion="polite" style={{ color: t.secondary }}>{notice}</Text> : null}
     {!files.length && error ? <Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text> : null}
@@ -102,13 +106,18 @@ export function AppendNoteAttachments({ profile, note, disabled, onBusyChange, o
       <Text style={{ color: t.muted }}>До 10 файлов и 80 МБ вместе с сохранёнными. Оригиналы останутся на телефоне; распознавание и отправка модели не запускаются.</Text>
       {files.map((item, index) => <View key={item.uri} style={{ flexDirection: "row", alignItems: "center", gap: nebulaSpacing.sm }}>
         <Text style={{ flex: 1, color: t.text }}>{item.name}{item.size ? ` · ${readableAttachmentSize(item.size)}` : ""}</Text>
-        <Pressable accessibilityRole="button" accessibilityLabel={"Убрать из добавления " + item.name} disabled={stage === "saving"} style={button} onPress={() => {
-          cleanup([item]); const next = files.filter((_, i) => i !== index); owned.current = next; setFiles(next); callbacks.current.onDraftChange(next.length > 0);
-        }}><Text style={{ color: t.secondary }}>Убрать</Text></Pressable>
+        <NebulaAction icon="x" label="Убрать" accessibilityLabel={"Убрать из добавления " + item.name}
+          disabled={stage === "saving"} onPress={() => {
+            cleanup([item]); const next = files.filter((_, i) => i !== index); owned.current = next;
+            setFiles(next); callbacks.current.onDraftChange(next.length > 0);
+          }} />
       </View>)}
       {error ? <Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text> : null}
-      <Pressable accessibilityRole="button" accessibilityLabel="Сохранить новые вложения" disabled={stage === "saving" || disabled} onPress={() => void save()} style={{ ...button, backgroundColor: t.accent }}><Text style={{ color: t.userText }}>{stage === "saving" ? "Сохраняю файлы…" : `Добавить файлы (${files.length})`}</Text></Pressable>
-      <Pressable accessibilityRole="button" accessibilityLabel="Отменить добавление файлов" onPress={cancel} style={button}><Text style={{ color: t.secondary }}>{stage === "saving" ? "Остановить добавление" : "Отмена"}</Text></Pressable>
+      <NebulaAction icon="check" label={stage === "saving" ? "Сохраняю файлы…" : `Добавить файлы (${files.length})`}
+        accessibilityLabel="Сохранить новые вложения" variant="primary"
+        disabled={stage === "saving" || disabled} onPress={() => void save()} />
+      <NebulaAction icon="x" label={stage === "saving" ? "Остановить добавление" : "Отмена"}
+        accessibilityLabel="Отменить добавление файлов" onPress={cancel} />
     </BottomSheet>
   </View>;
 }

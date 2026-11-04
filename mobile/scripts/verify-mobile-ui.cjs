@@ -460,6 +460,11 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       // Rejecting an unsaved edit must return to the list without overwriting the saved record.
       await page.getByLabel('Текст заметки', { exact: true }).fill('Черновик — НЕ СОХРАНЯТЬ');
       await page.getByLabel(/back/i).click();
+      await page.getByLabel('Продолжить редактирование', { exact: true }).click();
+      assert.equal(await page.getByLabel('Текст заметки', { exact: true }).inputValue(),
+        'Черновик — НЕ СОХРАНЯТЬ', 'Cancelling the Nebula exit confirmation keeps the draft');
+      await page.getByLabel(/back/i).click();
+      await page.getByLabel('Выйти без сохранения', { exact: true }).click();
       await page.getByLabel('Открыть заметку Индейка', { exact: true }).waitFor();
       await page.getByLabel('Открыть заметку Индейка', { exact: true }).click();
       await page.getByLabel('Редактировать запись', { exact: true }).click();
