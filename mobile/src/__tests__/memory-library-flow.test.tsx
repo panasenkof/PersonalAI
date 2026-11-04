@@ -34,6 +34,9 @@ jest.mock("../media/MemoryCover", () => ({ MemoryCover: () => null }));
 jest.mock("../local-memory/note-actions", () => ({ mergeText: () => "", noteUndoLabel: () => "Отменить архивирование" }));
 jest.mock("../local-memory/errors", () => ({ memoryErrorMessage: (e: Error) => e.message }));
 jest.mock("expo-crypto", () => ({ randomUUID: () => "id" }));
+jest.mock("expo-secure-store", () => ({
+  getItemAsync: jest.fn(async () => null), setItemAsync: jest.fn(async () => undefined),
+}));
 jest.mock("@expo/vector-icons/Feather", () => () => null);
 jest.mock("../theme", () => ({
   useTheme: () => ({}),

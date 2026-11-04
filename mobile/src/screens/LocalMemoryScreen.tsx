@@ -19,6 +19,7 @@ import { MemoryCover } from "../media/MemoryCover";
 import { memoryDisplayTitle, memoryNoteHasPhoto } from "../design/nebula/memoryNotePresentation";
 import { MemoryNoteCard } from "../design/nebula/MemoryNoteCard";
 import { NebulaAction } from "../design/nebula/components";
+import { loadMemoryLibraryView, saveMemoryLibraryView } from "../design/nebula/memoryViewPreference";
 
 import { mergeText, noteUndoLabel, type NoteAction } from "../local-memory/note-actions";
 import { scheduleVectors } from "../media/vector-runner";
@@ -30,6 +31,9 @@ export function LocalMemoryScreen() {
   const profile = useProfile(); const insets = useSafeAreaInsets();
   const { width, fontScale } = useWindowDimensions();
   const [grid, setGrid] = useState(true);
+  const viewChanged = useRef(false);
+  const viewSaveQueue = useRef<Promise<void>>(Promise.resolve());
+  const viewProfile = useRef(profile); viewProfile.current = profile;
   const [addOpen, setAddOpen] = useState(false);
   const [selecting, setSelecting] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
@@ -71,6 +75,30 @@ export function LocalMemoryScreen() {
   const repository = useRef<SqliteMemoryRepository | null>(null); const generation = useRef(0);
   useEffect(() => { const timer = setTimeout(() => setTerm(search.trim()), 250); return () => clearTimeout(timer); }, [search]);
   useEffect(() => { setCollectionId(undefined); setSearch(""); setStatus("active"); setCollections([]); setNotes([]); setCollectionCards([]); setSelectedIds([]); setSelecting(false); setCounts({}); setVisibleIds(new Set()); }, [profile]);
+  useEffect(() => {
+    // A first visit still defaults to a two-column library where space permits.
+    // An asynchronous preference read may not override an immediate user tap.
+    let active = true;
+    viewChanged.current = false;
+    setGrid(true);
+    if (profile) void loadMemoryLibraryView(profile).then(saved => {
+      if (active && !viewChanged.current && saved) setGrid(saved === "grid");
+    }).catch(() => { /* use the documented first-visit default */ });
+    return () => { active = false; };
+  }, [profile]);
+  function switchMemoryView() {
+    const next = !grid;
+    viewChanged.current = true;
+    setGrid(next);
+    if (!profile) return;
+    const forProfile = profile;
+    // Preserve user choice order even if two writes finish at different speeds.
+    viewSaveQueue.current = viewSaveQueue.current.catch(() => undefined)
+      .then(() => saveMemoryLibraryView(forProfile, next ? "grid" : "list"));
+    void viewSaveQueue.current.catch(() => {
+      if (viewProfile.current === forProfile) setError("Не удалось запомнить вид памяти. Попробуйте ещё раз.");
+    });
+  }
   useFocusEffect(useCallback(() => {
     const request = ++generation.current; setLoading(true); setError("");
     if (profile) void localMemoryRepository(profile).then(async db => {
@@ -382,7 +410,7 @@ export function LocalMemoryScreen() {
           {status === "active" && width >= 350 && fontScale < 1.4 ?
             <NebulaAction icon={grid ? "list" : "grid"} label={grid ? "Список" : "Плитки"}
               accessibilityLabel={grid ? "Показать списком" : "Показать плитками"}
-              disabled={selecting} onPress={() => setGrid(v => !v)} /> : null}
+              disabled={selecting} onPress={switchMemoryView} /> : null}
         </View>
         {collectionId && status === "active" && !term && !selecting &&
             collections.some(c => c.id === collectionId && c.sensitivity === "standard") ?
