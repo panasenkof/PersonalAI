@@ -572,3 +572,35 @@ test('online audio original is never uploaded before an exact one-time Nebula co
   fireEvent.press(ui.getByLabelText('Отправить и распознать'));
   await waitFor(() => expect(extractMedia).toHaveBeenCalledTimes(1));
 });
+
+test("recognition mode choices are visible framed cards; changing one does not send or save", async () => {
+  const screen=render(<MemoryImportScreen/>);
+  fireEvent.press(screen.getByLabelText("Выбрать файл для памяти"));
+  await waitFor(() => expect(screen.getByText("photo.png")).toBeTruthy());
+  fireEvent.press(screen.getByLabelText("Распознавание"));
+  const describe=screen.getByLabelText("Описать фотографию");
+  const localOcr=screen.getByLabelText("Прочитать фотографию на телефоне");
+  expect(describe.props.style.minHeight).toBe(48);
+  expect(describe.props.style.borderWidth).toBe(2);
+  expect(localOcr.props.style.borderWidth).toBe(1);
+  expect(localOcr.props.style.borderRadius).toBe(14);
+  fireEvent.press(localOcr);
+  expect(screen.getByLabelText("Прочитать фотографию на телефоне").props.style.borderWidth).toBe(2);
+  expect(screen.getByLabelText("Описать фотографию").props.style.borderWidth).toBe(1);
+  expect(saveMediaNote).not.toHaveBeenCalled();
+  expect(extractMedia).not.toHaveBeenCalled();
+});
+
+test("selection of an import connection is visibly highlighted but remains a draft",async()=>{
+  const screen=render(<MemoryImportScreen/>);
+  fireEvent.press(screen.getByLabelText("Выбрать файл для памяти"));
+  await waitFor(() => expect(screen.getByText("photo.png")).toBeTruthy());
+  fireEvent.press(screen.getByLabelText("Распознавание"));
+  fireEvent.press(screen.getByLabelText("Параметры распознавания"));
+  const provider=screen.getByLabelText("Разобрать через Vision");
+  expect(provider.props.style.minHeight).toBe(48);
+  expect(provider.props.style.borderWidth).toBe(2);
+  expect(provider.props.accessibilityState.selected).toBe(true);
+  expect(saveMediaNote).not.toHaveBeenCalled();
+  expect(extractMedia).not.toHaveBeenCalled();
+});
