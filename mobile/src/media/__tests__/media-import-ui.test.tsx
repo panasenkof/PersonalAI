@@ -10,6 +10,7 @@ import { Alert } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 jest.mock('../../components/BottomSheet', () => ({ BottomSheet: ({ visible, children }: any) => visible ? children : null }));
 const mockBack = jest.fn();
+const mockDispatch = jest.fn();
 let mockParams: any = undefined;
 jest.mock("../preferences", () => ({ loadMediaPreferences: async () => ({ visionId: "", speechId: "" }) }));
 jest.mock('../link-import', () => ({
@@ -21,7 +22,7 @@ const mockSessionListeners=new Set<(unlocked:boolean)=>void>();
 jest.mock("../../local-memory/storage", () => ({ onLocalMemorySessionChange: (fn:any) => {mockSessionListeners.add(fn);return ()=>mockSessionListeners.delete(fn);} }));
 jest.mock('../../local-memory/repository', () => ({ localMemoryRepository: async () => ({}) }));
 jest.mock('../../local-memory/sections', () => ({ ensureSections: jest.fn(async () => [{ id: 'notes', name: 'Заметки', slug: 'notes', sensitivity: 'standard' }]) }));
-jest.mock('@react-navigation/native', () => ({ useNavigation: () => ({ goBack: mockBack }), useRoute: () => ({ params: mockParams }), usePreventRemove: jest.fn() }));
+jest.mock('@react-navigation/native', () => ({ useNavigation: () => ({ goBack: mockBack, dispatch: mockDispatch }), useRoute: () => ({ params: mockParams }), usePreventRemove: jest.fn() }));
 jest.mock('@react-navigation/elements', () => ({ useHeaderHeight: () => 56 }));
 jest.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ bottom: 24 }) }));
 jest.mock('../../profile/ProfileContext', () => ({ useProfile: () => 'guest' }));
@@ -508,4 +509,64 @@ test('step 8 E re-recognition protects edits with Nebula cancel and explicit con
   fireEvent.press(ui.getByLabelText('Распознать и заменить'));
   await waitFor(()=>expect(extractMedia).toHaveBeenCalledTimes(2));
   await waitFor(()=>expect(ui.getByLabelText('Распознанное содержимое файла').props.value).toBe('Продукт: масло 200 г'));
+});
+
+
+test('skipping an incoming material asks through Nebula, preserves the draft on cancel and never saves automatically', async () => {
+  mockParams = { incoming: [
+    { shareType: 'text', value: 'Текст первой заметки' },
+    { shareType: 'text', value: 'Текст второй заметки' },
+  ] };
+  const ui = render(<MemoryImportScreen />);
+  await waitFor(() => expect(ui.getByLabelText('Сведения из файла').props.value).toBe('Текст первой заметки'));
+  fireEvent.press(ui.getByLabelText('Пропустить материал'));
+  expect(ui.getByLabelText('Оставить текущий материал')).toBeTruthy();
+  expect(saveMediaNote).not.toHaveBeenCalled();
+  fireEvent.press(ui.getByLabelText('Оставить текущий материал'));
+  expect(ui.getByLabelText('Сведения из файла').props.value).toBe('Текст первой заметки');
+  fireEvent.press(ui.getByLabelText('Пропустить материал'));
+  fireEvent.press(ui.getByLabelText('Пропустить материал без сохранения'));
+  await waitFor(() => expect(ui.getByLabelText('Сведения из файла').props.value).toBe('Текст второй заметки'));
+  expect(saveMediaNote).not.toHaveBeenCalled();
+});
+
+test('import guarded Back shows Nebula consent and replays the original navigation action only on confirmation', async () => {
+  const ui = render(<MemoryImportScreen />);
+  fireEvent.press(ui.getByText('Ссылка'));
+  fireEvent.changeText(ui.getByLabelText('Ссылка для импорта'), 'https://example.org/draft');
+  const nav = require('@react-navigation/native');
+  const findGuard = () => [...(nav.usePreventRemove as jest.Mock).mock.calls].reverse().find(([enabled]) => enabled)?.[1];
+  const action = { type: 'GO_BACK' };
+  act(() => { findGuard()?.({ data: { action } }); });
+  expect(ui.getByLabelText('Продолжить редактирование')).toBeTruthy();
+  expect(mockDispatch).not.toHaveBeenCalled();
+  fireEvent.press(ui.getByLabelText('Продолжить редактирование'));
+  expect(ui.getByLabelText('Ссылка для импорта').props.value).toBe('https://example.org/draft');
+  act(() => { findGuard()?.({ data: { action } }); });
+  fireEvent.press(ui.getByLabelText('Закрыть без сохранения'));
+  await waitFor(() => expect(mockDispatch).toHaveBeenCalledWith(action));
+  expect(mockDispatch).toHaveBeenCalledTimes(1);
+  expect(saveMediaNote).not.toHaveBeenCalled();
+});
+
+test('online audio original is never uploaded before an exact one-time Nebula consent', async () => {
+  (DocumentPicker.getDocumentAsync as jest.Mock).mockResolvedValueOnce({
+    canceled: false, assets: [{ uri: 'file:///cache/voice.mp3', name: 'voice.mp3', mimeType: 'audio/mpeg' }],
+  });
+  (extractMedia as jest.Mock).mockResolvedValueOnce('Расшифрованный голос');
+  const ui = render(<MemoryImportScreen />);
+  fireEvent.press(ui.getByLabelText('Выбрать файл для памяти'));
+  await waitFor(() => expect(ui.getByText('voice.mp3')).toBeTruthy());
+  if (!ui.queryByLabelText('Способ распознавания аудиофайла: Онлайн · OpenAI'))
+    fireEvent.press(ui.getByLabelText('Распознавание'));
+  fireEvent.press(ui.getByLabelText('Способ распознавания аудиофайла: Онлайн · OpenAI'));
+  await waitFor(() => expect(ui.getByLabelText('Извлечь сведения из файла').props.disabled ?? ui.getByLabelText('Извлечь сведения из файла').props.accessibilityState?.disabled).toBeFalsy());
+  fireEvent.press(ui.getByLabelText('Извлечь сведения из файла'));
+  expect(ui.getByLabelText('Не отправлять')).toBeTruthy();
+  expect(extractMedia).not.toHaveBeenCalled();
+  fireEvent.press(ui.getByLabelText('Не отправлять'));
+  expect(extractMedia).not.toHaveBeenCalled();
+  fireEvent.press(ui.getByLabelText('Извлечь сведения из файла'));
+  fireEvent.press(ui.getByLabelText('Отправить и распознать'));
+  await waitFor(() => expect(extractMedia).toHaveBeenCalledTimes(1));
 });
