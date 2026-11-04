@@ -497,11 +497,11 @@ test('step 8 E re-recognition protects edits with Nebula cancel and explicit con
   await waitFor(()=>expect(ui.getByLabelText('Распознанное содержимое файла').props.value).toBe('Продукт: масло'));
   fireEvent.changeText(ui.getByLabelText('Распознанное содержимое файла'),'Продукт: масло — исправлено пользователем');
   fireEvent.press(ui.getByLabelText('Извлечь сведения из файла'));
-  expect(ui.getByText('Заменить распознанный текст?')).toBeTruthy();
+  expect(ui.getByLabelText('Оставить текущий текст')).toBeTruthy();
   expect(ui.getByText(/Новый разбор заменит текущий текст \(photo\.png\)/)).toBeTruthy();
   expect(extractMedia).toHaveBeenCalledTimes(1);
   fireEvent.press(ui.getByLabelText('Оставить текущий текст'));
-  expect(ui.queryByText('Заменить распознанный текст?')).toBeNull();
+  expect(ui.queryByLabelText('Оставить текущий текст')).toBeNull();
   expect(ui.getByLabelText('Распознанное содержимое файла').props.value).toContain('исправлено пользователем');
   expect(extractMedia).toHaveBeenCalledTimes(1);
   fireEvent.press(ui.getByLabelText('Извлечь сведения из файла'));
