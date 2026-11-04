@@ -247,7 +247,7 @@ function AudioPreview({ uri, profile, attachment, onError }: {
     </View>
   </View>;
 }
-export function AttachmentView({ profile, entityId, verifiedOriginal, photoAttachmentId }: { profile: string; entityId: string; verifiedOriginal?: VerifiedOriginalLocator; photoAttachmentId?: string }) {
+export function AttachmentView({ profile, entityId, verifiedOriginal, photoAttachmentId, onRecognize }: { onRecognize?: (attachment: Attachment) => void; profile: string; entityId: string; verifiedOriginal?: VerifiedOriginalLocator; photoAttachmentId?: string }) {
   const t = useTheme();
   const focused = useIsFocused();
   const appVisible = useApplicationVisible();
@@ -294,7 +294,7 @@ export function AttachmentView({ profile, entityId, verifiedOriginal, photoAttac
         accessibilityLabel="Повторить загрузку вложений" onPress={() => setRetry(x => x + 1)} />
     </> : null}
     {missingVerified ? <Text accessibilityRole="alert" style={{ color: t.err }}>Источник изменён или недоступен. Повторите поиск.</Text> : null}
-    {listed.map(attachment => <OneAttachment key={attachment.id} profile={profile} attachment={attachment} verified={verifiedOriginal}
+    {listed.map(attachment => <OneAttachment key={attachment.id} onRecognize={onRecognize} profile={profile} attachment={attachment} verified={verifiedOriginal}
       expanded={visible && (openId === attachment.id || (openId === null && attachment.id === photoAttachmentId))} visible={visible}
       onToggle={() => setOpenId(id => id === attachment.id || (id === null && attachment.id === photoAttachmentId) ? "" : attachment.id)} />)}
     {hasMore ? <NebulaAction testID="note-attachments-expand"
@@ -309,9 +309,10 @@ export function AttachmentView({ profile, entityId, verifiedOriginal, photoAttac
   </View>;
 }
 
-function OneAttachment({ profile, attachment, expanded, visible, onToggle, verified }: {
+function OneAttachment({ profile, attachment, expanded, visible, onToggle, verified, onRecognize }: {
   profile: string;
   attachment: Attachment;
+  onRecognize?: (attachment: Attachment) => void;
   verified?: VerifiedOriginalLocator;
   expanded: boolean;
   visible: boolean;
@@ -370,6 +371,8 @@ function OneAttachment({ profile, attachment, expanded, visible, onToggle, verif
         color={t.secondary} size={19} />
       <Text style={{ color: t.secondary, fontWeight: "700" }}>{expanded ? error ? "Повторить просмотр" : "Закрыть просмотр" : action}</Text>
     </Pressable> : <Text style={{ color: t.muted }}>Оригинал сохранён в зашифрованной памяти. Встроенный просмотр этого формата пока не поддерживается.</Text>}
+    {onRecognize ? <NebulaAction icon="refresh-cw" label="Распознать заново"
+      accessibilityLabel={"Распознать заново " + attachment.name} onPress={() => onRecognize(attachment)} /> : null}
     {active && loading ? <Text style={{ color: t.muted }}>Подготавливаю защищённый просмотр…</Text> : null}
     {active && uri && !loading && !error ? kind === "image" ? <Image accessibilityLabel={"Просмотр изображения " + attachment.name}
       source={{ uri }} resizeMode="contain" onError={() => setError("Не удалось показать изображение. Оригинал сохранён.")}

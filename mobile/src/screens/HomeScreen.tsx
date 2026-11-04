@@ -1,3 +1,4 @@
+import { BottomSheet } from "../components/BottomSheet";
 import { ChatAttachmentList } from "../media/ChatAttachmentList";
 import { ChatAttachmentIssues } from "../media/ChatAttachmentIssues";
 import Feather from "@expo/vector-icons/Feather";
@@ -87,6 +88,22 @@ function NebulaHomeContent() {
         releaseCameraOriginal(id);
     }
   },[active?.id,active?.attachments]);
+  const [replyMenu, setReplyMenu] = useState<{conversationId: string; rowId: string} | null>(null);
+  const [summaryId, setSummaryId] = useState<string | null>(null);
+  const [summaryScope, setSummaryScope] = useState<DialogueSummaryScope>("last10");
+  const [summaryLimit, setSummaryLimit] = useState<number | null>(null);
+  const [summaryError, setSummaryError] = useState("");
+  useEffect(() => {
+    if (!summaryId || !profile) return;
+    let current = true;
+    void loadModelCallLimit(profile).then(limit => { if (current) setSummaryLimit(limit); })
+      .catch(() => { if (current) setSummaryError("Не удалось загрузить лимит обращений."); });
+    return () => { current = false; };
+  }, [profile, summaryId]);
+  useEffect(() => {
+    setSummaryId(null); setReplyMenu(null);
+    return onLocalMemorySessionChange(unlocked => { if (!unlocked) { setSummaryId(null); setReplyMenu(null); } });
+  }, [profile]);
   const [historyOpen, setHistoryOpen] = useState(false);
   const voicePreference = useVoiceEngine();
   const showWhisperImprove = showDraftImprove(voicePreference.pending ?? voicePreference.preference);
@@ -284,46 +301,24 @@ function NebulaHomeContent() {
     }
   };
   /** H-SAVE1b is opt-in, never an automatic paid background summary. */
-  const chooseDialogueSummary = (conversationId:string) => {
-    const selected=store.getSnapshot().conversations.find(c=>c.id===conversationId);
-    if(!selected || selected.busy || selected.deleting || !settings || !profile) {
-      setNotice("Для создания итога нужен доступный диалог и настроенная модель."); return;
-    }
-    Alert.alert("Сохранить итог диалога", "Какую часть переписки включить? Оригиналы файлов не отправляются.", [
-      {text:"Отмена",style:"cancel"},
-      {text:"Последние 10",onPress:()=>void confirmDialogueSummary(conversationId,"last10")},
-      {text:"Весь диалог",onPress:()=>void confirmDialogueSummary(conversationId,"all")},
-    ]);
+  const chooseDialogueSummary = (id: string) => {
+    setSummaryLimit(null); setSummaryError(""); setSummaryScope("last10"); setSummaryId(id);
   };
-  const confirmDialogueSummary = async (conversationId:string,scope:DialogueSummaryScope) => {
-    if(!profile || !settings)return;
-    const chosenSettings=settings;
+  const summaryConversation = conversations.find(c => c.id === summaryId);
+  const summary = useMemo(() => {
+    if (!summaryConversation || !settings) return { error: "Диалог или подключение недоступны." };
     try {
-      const conversation=store.getSnapshot().conversations.find(c=>c.id===conversationId);
-      if(!conversation || conversation.busy || conversation.deleting)
-        throw new Error("Диалог занят или недоступен.");
-      const plan=planDialogueSummary(conversation,scope,chosenSettings.model,chosenSettings.provider);
-      const limit=await loadModelCallLimit(profile);
-      if(plan.calls>limit)
-        throw new Error("Для выбранной переписки требуется "+plan.calls+
-          " обращений к ИИ; ваш лимит — "+limit+". Выберите меньший диапазон или измените лимит.");
-      Alert.alert("Подтвердить создание итога",
-        "Диапазон: "+plan.includedRows+" сообщений из "+plan.totalRows+
-        ". Входной текст: "+plan.source.length.toLocaleString("ru-RU")+" символов. "+
-        "Оригиналов вложений не передаём: "+plan.omittedAttachments+".\n"+
-        "Подключение: "+chosenSettings.provider+" · "+chosenSettings.model+".\n"+
-        "До "+plan.calls+" обращений к модели (разрешено "+limit+"). "+
-        "Текст переписки может содержать личные сведения и будет передан выбранному API-подключению. "+
-        "Обработка может быть платной, точная стоимость неизвестна. "+
-        "После генерации откроется редактируемый предпросмотр; пока вы не нажмёте «Сохранить», заметка не создастся.",
-        [{text:"Отмена",style:"cancel"},
-         {text:"Разрешить и создать",onPress:()=>{
-           void store.summarizeForNote(conversationId,chosenSettings,scope,plan.approvalKey)
-             .then(locator=>{ if(store.getSnapshot().conversations.some(c=>c.id===locator.conversationId))
-               navigation.navigate("MemoryNote",{chatReply:locator}); })
-             .catch(e=>setNotice((e as Error)?.message||"Не удалось подготовить итог."));
-         }}]);
-    }catch(e){setNotice((e as Error)?.message||"Не удалось выбрать диапазон переписки.");}
+      return { plan: planDialogueSummary(summaryConversation, summaryScope, settings.model, settings.provider) };
+    } catch (e) { return { error: (e as Error).message }; }
+  }, [summaryConversation, summaryScope, settings]);
+  const createSummary = () => {
+    const plan = summary.plan;
+    if (!plan || !settings || summaryLimit === null || plan.calls > summaryLimit || !summaryId) return;
+    setSummaryId(null);
+    void store.summarizeForNote(summaryId, settings, plan.scope, plan.approvalKey)
+      .then(locator => { if (store.getSnapshot().conversations.some(c => c.id === locator.conversationId))
+        navigation.navigate("MemoryNote", {chatReply: locator}); })
+      .catch(e => setNotice((e as Error).message));
   };
   /** Local-only action: no LLM call. The editor revalidates the IDs on Save. */
   const openReplyNoteActions = (rowId:string) => {
@@ -334,13 +329,7 @@ function NebulaHomeContent() {
     } catch(e) {
       setNotice((e as Error).message); return;
     }
-    Alert.alert("Действия с ответом", "Редактор заметки откроется с полным текстом. ИИ повторно не вызывается.", [
-      { text:"Отмена",style:"cancel" },
-      { text:"Сохранить в заметки",onPress:()=>{
-        if(store.getSnapshot().activeId===conversationId)
-          navigation.navigate("MemoryNote",{chatReply:{conversationId,rowId}});
-      } },
-    ]);
+    setReplyMenu({conversationId, rowId});
   };
   const openConnections = (presetId?: string) => navigation.navigate("ModelConnections", presetId ? { presetId } : undefined);
   // First run: the active connection has neither a key nor a keyless local address.
@@ -410,6 +399,11 @@ function NebulaHomeContent() {
           <MarkdownText text={item.text} style={{ color: t.text, lineHeight: 23 }} />
         </Pressable> :
           <Text selectable style={{ color: item.role === "user" ? t.userText : item.role === "info" ? t.muted : t.text, lineHeight: 23 }}>{item.text}</Text>}
+        {item.role === "assistant" && !item.streaming && item.text.trim() ? <View style={{ alignSelf: "flex-end", borderWidth: 1, borderColor: t.line, backgroundColor: t.soft, borderRadius: 15 }}>
+          <IconAction compact explainOnTap={false} icon="more-horizontal" label="Действия с ответом"
+            accessibilityLabel="Действия с ответом" hint="Сохранить этот ответ в заметки"
+            onPress={() => openReplyNoteActions(item.id)} />
+        </View> : null}
         {active?.retryPhoto?.rowId === item.id && active?.retryPhoto ?
           <NebulaAction icon="refresh-cw" label="Повторить поиск по фото"
             disabled={busy} onPress={() => void store.searchPhotosLocally(active.retryPhoto!.image,active.id)} /> : null}
@@ -543,6 +537,31 @@ function NebulaHomeContent() {
           onPress={()=>setPreviewPhotoId(null)} />
       </View>
     </Modal>
+    <BottomSheet visible={Boolean(replyMenu && replyMenu.conversationId === active?.id)} title="Действия с ответом" onClose={() => setReplyMenu(null)}>
+      <NebulaAction icon="bookmark" label="Сохранить в заметки" onPress={() => {
+        if (!replyMenu || store.getSnapshot().activeId !== replyMenu.conversationId) return;
+        setReplyMenu(null);
+        navigation.navigate("MemoryNote", {chatReply: replyMenu});
+      }} />
+    </BottomSheet>
+    <BottomSheet visible={Boolean(summaryId)} title="Итог диалога" onClose={() => setSummaryId(null)}>
+      {summary.plan && summary.plan.totalRows <= 10 ? null :
+        <NebulaAction icon="list" label={summaryScope === "all" ? "Выбрать последние 10 сообщений" : "Выбрать весь диалог"}
+          onPress={() => setSummaryScope(summaryScope === "all" ? "last10" : "all")} />}
+      {summary.plan ? <Text style={{color:t.text}}>
+        {summary.plan.includedRows === summary.plan.totalRows ? "Весь диалог" : "Последние 10"} · {summary.plan.includedRows} сообщ.
+        {"\n"}Объём: {summary.plan.source.length.toLocaleString("ru-RU")} символов. Оригиналы файлов не отправляются.
+        {"\n"}{settings?.provider} · {settings?.model}. Обращений к модели: до {summary.plan.calls}. Лимит: {summaryLimit ?? "…"}.
+        {"\n"}Текст переписки будет передан модели. Возможна оплата. Перед сохранением заметки вы увидите черновик.
+      </Text> : null}
+      {summary.error || summaryError ? <Text accessibilityRole="alert" style={{color:t.err}}>{summary.error || summaryError}</Text> : null}
+      {summary.plan && summaryLimit !== null && summary.plan.calls > summaryLimit ?
+        <Text style={{color:t.err}}>Превышен лимит обращений к модели.</Text> : null}
+      <NebulaAction icon="check" label="Создать итог" variant="primary"
+        disabled={!summary.plan || summaryLimit === null || summary.plan.calls > summaryLimit || summaryConversation?.busy}
+        onPress={createSummary} />
+      <NebulaAction icon="x" label="Отмена" onPress={() => setSummaryId(null)} />
+    </BottomSheet>
     <ConversationHistorySheet visible={historyOpen} conversations={conversations} activeId={active?.id}
       onClose={() => setHistoryOpen(false)}
       onSelect={c => { store.select(c.id); setHistoryOpen(false); }}

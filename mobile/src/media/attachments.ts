@@ -1,3 +1,4 @@
+import { replaceFileText } from "./batch-recognition";
 import * as Crypto from 'expo-crypto';
 import { Directory, File, FileMode, Paths } from 'expo-file-system';
 import type { SQLiteDatabase } from 'expo-sqlite';
@@ -381,7 +382,11 @@ export async function applyRecognitionCandidate(repo: SqliteMemoryRepository, in
   const kind = mediaKind({uri:"file:///original",name:attachment.name,mimeType:attachment.mime});
   const segments = input.segments ?? unknownSegments(input.text);
   if (segments.length > 128 || !segments.length) throw new Error("invalid_recognition_segments");
-  const payload = {...note.payload, extracted_text:input.text.trim()};
+  const names = Array.isArray(note.payload.source_files) ? note.payload.source_files.map(String) : [attachment.name];
+  const index = names.indexOf(attachment.name);
+  if (index < 0 || index !== names.lastIndexOf(attachment.name))
+    throw new Error("Не удалось однозначно определить файл. Текущий текст сохранён.");
+  const payload = {...note.payload, extracted_text: replaceFileText(String(note.payload.extracted_text || ""), names, index, input.text.trim())};
   return repo.reviseEntity(note.id,note.record_version,payload,"Повторное распознавание оригинала",
     undefined,false,async (tx,entityId) => {
       const current = await tx.getFirstAsync<{id:string;record_status:string}>(

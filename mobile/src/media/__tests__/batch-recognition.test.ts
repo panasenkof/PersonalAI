@@ -1,4 +1,4 @@
-import { combinedRecognitionText, recognizeFilesSequentially } from "../batch-recognition";
+import { replaceFileText, combinedRecognitionText, recognizeFilesSequentially } from "../batch-recognition";
 
 const files = [
   { uri: "file:///a.png", name: "a.png", mimeType: "image/png" },
@@ -54,4 +54,10 @@ test("single file stays backward compatible and total note length is checked", (
     { index: 0, name: "a", status: "success", text: "x".repeat(40000) },
     { index: 1, name: "b", status: "success", text: "y".repeat(40000) },
   ], 2)).toThrow("60 000");
+});
+
+test("repeat updates only the selected file and preserves neighbouring manual edits", () => {
+  const original = "Файл 1: a.pdf\nМоя правка\n\nФайл 2: b.txt\nСтарый текст";
+  expect(replaceFileText(original, ["a.pdf", "b.txt"], 1, "Новый")).toBe(original.replace("Старый текст", "Новый"));
+  expect(() => replaceFileText(original.replace("Файл 2:", "Источник:"), ["a.pdf", "b.txt"], 0, "Новый")).toThrow();
 });

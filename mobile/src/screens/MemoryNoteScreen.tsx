@@ -77,12 +77,13 @@ export function MemoryNoteScreen() {
   const repository = useRef<SqliteMemoryRepository | null>(null); const alive = useRef(true); const pending = useRef(false);
   const loadSequence = useRef(0);
   const [editing, setEditing] = useState(!route.params?.entityId);
-  const [aiOpen, setAiOpen] = useState(false);
+  const [aiField, setAiField] = useState<"body" | "extracted" | null>(null);
+  const aiOpen = aiField !== null;
   const [noteMenu, setNoteMenu] = useState(false);
   const [confirmKind, setConfirmKind] = useState<"leave" | "agent" | null>(null);
   const [voiceActive, setVoiceActive] = useState(false);
-  const [beforeAi, setBeforeAi] = useState<NoteDraft | null>(null);
-  const closeAi = useCallback(() => setAiOpen(false), []);
+  const [beforeAi, setBeforeAi] = useState<(NoteDraft & { extracted?: string }) | null>(null);
+  const closeAi = useCallback(() => setAiField(null), []);
   const [selected, setSelected] = useState<EntityRecord | null>(null);
   const [collections, setCollections] = useState<CollectionRecord[]>([]);
   const [collectionId, setCollectionId] = useState(route.params?.collectionId);
@@ -129,7 +130,7 @@ export function MemoryNoteScreen() {
   useEffect(() => {
     const sequence = ++loadSequence.current;
     const stillCurrent = () => alive.current && loadSequence.current === sequence && activeProfile.current === profile;
-    alive.current = true; setLoading(true); setError(""); setMetadataOpen(false); setFileContentOpen(false); repeatRequest.current++; repeatApproval.current = null; setRepeatMessage(null); setCandidate(null); setRepeatFiles([]);
+    alive.current = true; setLoading(true); setAiField(null); setError(""); setMetadataOpen(false); setFileContentOpen(false); repeatRequest.current++; repeatApproval.current = null; setRepeatMessage(null); setCandidate(null); setRepeatFiles([]);
     void (async () => {
       if (!profile) throw new Error("profile_missing");
       const db = await localMemoryRepository(profile);
@@ -224,7 +225,9 @@ export function MemoryNoteScreen() {
     const request = ++repeatRequest.current;
     repeatApproval.current = null; setRepeatMessage(null);
     const note = selected;
-    const kind = mediaKind({uri:"file:///original",name:attachment.name,mimeType:attachment.mime});
+    let kind: ReturnType<typeof mediaKind>;
+    try { kind = mediaKind({uri:"file:///original",name:attachment.name,mimeType:attachment.mime}); }
+    catch { setError("Распознавание этого формата недоступно."); return; }
     const localOcr = getRussianOcrStatus().ready;
     const remoteAllowed = maySendOriginalToProvider(note.sensitivity,
       collections.find(c => c.id === note.collection_id)?.sensitivity);
@@ -318,7 +321,7 @@ export function MemoryNoteScreen() {
       segments:candidate.segments,
     });
     if (alive.current) {
-      setSelected(updated); setExtractedText(candidate.text); setCandidate(null);
+      setSelected(updated); setExtractedText(String(updated.payload.extracted_text || "")); setCandidate(null);
       scheduleIndexTerms(profile); scheduleVectors(profile);
     }
   });
@@ -335,7 +338,7 @@ export function MemoryNoteScreen() {
     return () => { cancelled = true; clearTimeout(timer); };
   }, [linkOpen, linkSearch]);
   const field = { borderWidth: 1, borderColor: t.line, borderRadius: nebulaRadii.field, backgroundColor: t.panel, minHeight: nebulaTouch.minimum, padding: nebulaSpacing.md, color: t.text, ...nebulaTypography.body };
-  const canEditWithAi = Boolean(body.trim() || extractedText.trim());
+  const canEditWithAi = Boolean(body.trim());
   const saveDisabled = busy || voiceActive || (editing && !title.trim() && !body.trim());
   const readingTitle = selected ? memoryDisplayTitle({ ...selected, title, payload: { ...selected.payload, body } }) : title;
   const button = { minHeight: nebulaTouch.minimum, borderRadius: nebulaRadii.field, justifyContent: "center" as const, padding: nebulaSpacing.md };
@@ -358,8 +361,7 @@ export function MemoryNoteScreen() {
           })} /> : <>
           <NebulaAction icon="edit-3" label="Редактировать" accessibilityLabel="Редактировать запись"
             onPress={() => setEditing(true)} disabled={busy} variant="primary" />
-          <NebulaAction icon="zap" label="Изменить с ИИ" accessibilityLabel="Изменить заметку с ИИ"
-            disabled={busy || !canEditWithAi} onPress={() => setAiOpen(true)} />
+
         </>}
       </View> : null}
       {loading ? <ActivityIndicator accessibilityLabel="Загрузка записи" /> : null}
@@ -376,26 +378,33 @@ export function MemoryNoteScreen() {
 
       {!loading && repository.current ? <>
         {!editing ? <>
-          {selected && profile && route.params?.photoAttachmentId ? <AttachmentView key={selected.record_version + ":" + (route.params?.verifiedOriginal?.attachmentId || route.params?.photoAttachmentId || "")} profile={profile} entityId={selected.id} verifiedOriginal={route.params?.verifiedOriginal} photoAttachmentId={route.params?.photoAttachmentId} /> : null}
+          {selected && profile && route.params?.photoAttachmentId ? <AttachmentView key={selected.record_version + ":" + (route.params?.verifiedOriginal?.attachmentId || route.params?.photoAttachmentId || "")} profile={profile} entityId={selected.id} verifiedOriginal={route.params?.verifiedOriginal} photoAttachmentId={route.params?.photoAttachmentId} onRecognize={!editing && !busy && selected.record_status === "active" ? rerunAttachment : undefined} /> : null}
           {profile && selected && !route.params?.verifiedOriginal && !route.params?.photoAttachmentId && memoryNoteHasPhoto(selected) ? <View style={{ borderRadius: nebulaRadii.card, overflow: "hidden" }}><MemoryCover profile={profile} entityId={selected.id} height={210} label={title} /></View> : null}
           <Text accessibilityRole="header" selectable style={{ color: t.text, fontSize: 28, lineHeight: 36, fontWeight: "800" }}>{readingTitle || "Без названия"}</Text>
           {body && body.trim() !== readingTitle ? <NoteReadPreview
             testID="note-read-body" text={body} fullTitle="Полный текст заметки"
             actionLabel="Читать полностью" maxLines={6} /> : null}
+          {body.trim() ? <NebulaAction icon="zap" label="Изменить с ИИ" accessibilityLabel="Изменить заметку с ИИ"
+            disabled={busy || !canEditWithAi} onPress={() => setAiField("body")} /> : null}
           {profile && selected?.kind === "person" && selected.record_status === "active" ? <VerifiedRelativeConversations key={profile + ":" + selected.id + ":" + selected.record_version} profile={profile} personId={selected.id} personTitle={readingTitle} /> : null}
           {profile && selected?.kind === "person" && selected.record_status === "active" &&
             ["standard","inherit"].includes(selected.sensitivity) &&
             collections.some(c=>c.id===selected.collection_id&&c.sensitivity==="standard") ?
             <MemoryTemporalTimeline key={profile + ":" + selected.id + ":" + selected.record_version}
               profile={profile} subjectId={selected.id} collectionId={selected.collection_id}/> : null}
-          {selected && profile && !route.params?.photoAttachmentId ? <AttachmentView key={selected.record_version + ":" + (route.params?.verifiedOriginal?.attachmentId || route.params?.photoAttachmentId || "")} profile={profile} entityId={selected.id} verifiedOriginal={route.params?.verifiedOriginal} photoAttachmentId={route.params?.photoAttachmentId} /> : null}
+          {selected && profile && !route.params?.photoAttachmentId ? <AttachmentView key={selected.record_version + ":" + (route.params?.verifiedOriginal?.attachmentId || route.params?.photoAttachmentId || "")} profile={profile} entityId={selected.id} verifiedOriginal={route.params?.verifiedOriginal} photoAttachmentId={route.params?.photoAttachmentId} onRecognize={!editing && !busy && selected.record_status === "active" ? rerunAttachment : undefined} /> : null}
           {extractedText && extractedText.trim() !== body.trim() ? <NoteReadPreview
             testID="note-extracted-summary" text={extractedText}
             heading="Текст из файла" fullTitle="Полный распознанный текст"
             actionLabel="Читать текст файла" maxLines={4} /> : null}
+          {extractedText.trim() ? <NebulaAction icon="zap" label="Улучшить текст файла с ИИ"
+            disabled={busy} onPress={() => setAiField("extracted")} /> : null}
           {typeof selected?.payload.source_url === "string" && /^https:\/\//.test(selected.payload.source_url) ? <Pressable accessibilityRole="link" style={button} onPress={() => void Linking.openURL(String(selected.payload.source_url)).catch(() => setError("Не удалось открыть источник."))}><Text style={{ color: t.secondary }}>Открыть источник</Text></Pressable> : null}
         </> : <>
         <TextInput testID="note-body-input" accessibilityLabel="Текст заметки" multiline value={body} onChangeText={value => { setBeforeAi(null); setBody(value); }} editable={!busy && !voiceActive} placeholder="Что нужно запомнить?" placeholderTextColor={t.muted} style={{ ...field, minHeight: 200, textAlignVertical: "top", lineHeight: 23 }} />
+      <NebulaAction icon="edit-3" label="Изменить с ИИ" accessibilityLabel="Изменить заметку с ИИ"
+        disabled={busy || voiceActive || !canEditWithAi}
+        onPress={() => { Keyboard.dismiss(); setAiField("body"); }} />
         {!body && extractedText ? <NebulaAction icon="file-text" label="Вставить распознанный текст"
           onPress={() => setBody(extractedText)} /> : null}
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}><VoiceInput value={body} onChange={value => { setBeforeAi(null); setBody(value); }} maxLength={60000} disabled={busy || aiOpen} onActiveChange={setVoiceActive} onError={setError} /><Text style={{ color: t.muted }}>Надиктовать запись</Text></View>
@@ -410,7 +419,7 @@ export function MemoryNoteScreen() {
 
         {beforeAi ? <NebulaAction icon="rotate-ccw" label="Отменить правку ИИ"
           accessibilityLabel="Вернуть текст до правки ИИ"
-          onPress={() => { setTitle(beforeAi.title); setBody(beforeAi.body); setBeforeAi(null); }} /> : null}
+          onPress={() => { if (beforeAi.extracted !== undefined) setExtractedText(beforeAi.extracted); else { setTitle(beforeAi.title); setBody(beforeAi.body); } setBeforeAi(null); }} /> : null}
         <NoteEditorSection testID="note-metadata-toggle" title="Параметры записи" summary={"Тип: " + KIND_NAMES[kind] + " · заполнять необязательно"}
           expanded={metadataOpen} onToggle={() => { Keyboard.dismiss(); setMetadataOpen(open => !open); }}>
         <Text style={{ color: t.muted, fontSize: 12 }}>Тип записи</Text>
@@ -433,8 +442,9 @@ export function MemoryNoteScreen() {
           expanded={fileContentOpen} onToggle={() => { Keyboard.dismiss(); setFileContentOpen(open => !open); }}>
           <Text style={{ color: t.muted, ...nebulaTypography.label }}>Проверьте распознанный текст. Он индексируется вместе с записью.</Text>
           <TextInput accessibilityLabel="Распознанное содержимое файла" multiline scrollEnabled
-            editable={!busy} value={extractedText} onChangeText={setExtractedText} maxLength={60_000}
+            editable={!busy} value={extractedText} onChangeText={value => {setBeforeAi(null); setExtractedText(value);}} maxLength={60_000}
             style={{ ...field, height: 184, maxHeight: 220, textAlignVertical: "top" }} />
+          {extractedText.trim() ? <NebulaAction icon="zap" label="Улучшить текст файла с ИИ" disabled={busy} onPress={() => setAiField("extracted")} /> : null}
           <Pressable disabled={busy || dirty || selected.record_status !== "active"} accessibilityRole="button"
             accessibilityLabel="Распознать сохранённый файл заново"
             style={{...button,borderWidth:1,borderColor:t.secondary,backgroundColor:t.panel}}
@@ -460,21 +470,6 @@ export function MemoryNoteScreen() {
               <Text numberOfLines={2} style={{color:t.secondary}}>{file.name}</Text>
             </Pressable>)}
             <NebulaAction icon="x" label="Отмена выбора" onPress={()=>setRepeatFiles([])} />
-          </View> : null}
-          {candidate ? <View testID="re-recognition-review" style={{borderColor:t.line,borderWidth:1,
-            borderRadius:nebulaRadii.card,padding:nebulaSpacing.md,gap:nebulaSpacing.sm,backgroundColor:t.panel}}>
-            <Text accessibilityRole="header" style={{color:t.text,fontWeight:"700"}}>Новый результат · {candidate.attachment.name}</Text>
-            <Text style={{color:t.muted}}>Текущий текст выше остаётся без изменений. Применение заменит только распознанный текст; ваш комментарий сохранится.</Text>
-            <ScrollView nestedScrollEnabled style={{maxHeight:240}}>
-              <Text selectable style={{color:t.text,lineHeight:23}}>{candidate.text}</Text>
-            </ScrollView>
-            <View style={{flexDirection:"row",flexWrap:"wrap",gap:nebulaSpacing.sm}}>
-              <NebulaAction icon="x" label="Оставить текущий"
-                accessibilityLabel="Оставить текущий текст" onPress={()=>setCandidate(null)} />
-              <NebulaAction icon="check" label="Применить новый"
-                accessibilityLabel="Применить новый текст" variant="primary"
-                disabled={busy || dirty} onPress={acceptCandidate} />
-            </View>
           </View> : null}
         </NoteEditorSection> : null}
         {selected && (selected.sensitivity === "sensitive" || collections.find(c => c.id === selected.collection_id)?.sensitivity !== "standard") ? <>
@@ -530,14 +525,35 @@ export function MemoryNoteScreen() {
         style={{ ...button, backgroundColor: t.accent, opacity: saveDisabled ? 0.45 : 1, alignItems: "center" }}>
         <Text style={{ color: "#fff", fontWeight: "700" }}>{busy ? "Сохранение…" : editing ? "Сохранить запись" : "Редактировать"}</Text>
       </Pressable>
-      <NebulaAction icon="edit-3" label="Изменить с ИИ" accessibilityLabel="Изменить заметку с ИИ"
-        disabled={busy || voiceActive || !canEditWithAi}
-        onPress={() => { Keyboard.dismiss(); setAiOpen(true); }} />
-      {!canEditWithAi ? <Text style={{ color: t.muted, ...nebulaTypography.label, textAlign: "center" }}>Добавьте текст или надиктуйте запись для правки с ИИ.</Text> : null}
     </View> : null}
-    {aiOpen && profile ? <NoteAiEditor profile={profile} draft={{ title, body: body.trim() ? body : extractedText }}
+    {aiOpen && profile ? <NoteAiEditor profile={profile} draft={{ title: aiField === "extracted" ? "" : title, body: aiField === "extracted" ? extractedText : body }}
       allowed={mayEditNoteText(selected?.sensitivity || "inherit", collections.find(c => c.id === collectionId)?.sensitivity || (!selected && !collectionId ? "standard" : undefined), selected ? collections.find(c => c.id === selected.collection_id)?.sensitivity || "unclassified" : undefined)}
-      onClose={closeAi} onApply={draft => { setBeforeAi({ title, body }); setTitle(draft.title); setBody(draft.body); setEditing(true); }} /> : null}
+      onClose={closeAi} onApply={draft => { if (aiField === "extracted") {
+        setBeforeAi({title, body, extracted: extractedText}); setExtractedText(draft.body); setFileContentOpen(true);
+      } else {
+        setBeforeAi({title, body}); setTitle(draft.title); setBody(draft.body);
+      }
+      setEditing(true); }} /> : null}
+    <BottomSheet visible={Boolean(candidate)} title="Сравнить результат" onClose={() => setCandidate(null)}>
+          {candidate ? <View testID="re-recognition-review" style={{borderColor:t.line,borderWidth:1,
+            borderRadius:nebulaRadii.card,padding:nebulaSpacing.md,gap:nebulaSpacing.sm,backgroundColor:t.panel}}>
+            <Text accessibilityRole="header" style={{color:t.text,fontWeight:"700"}}>Новый результат · {candidate.attachment.name}</Text>
+            <Text style={{color:t.muted}}>Текущий текст сохраняется до применения. Применение заменит только распознанный текст; ваш комментарий сохранится.</Text>
+            <Text style={{color:t.secondary}}>Текущий текст</Text>
+            <ScrollView nestedScrollEnabled style={{maxHeight:160}}><Text selectable style={{color:t.text}}>{extractedText}</Text></ScrollView>
+            <Text style={{color:t.secondary}}>Новый текст файла</Text>
+            <ScrollView nestedScrollEnabled style={{maxHeight:240}}>
+              <Text selectable style={{color:t.text,lineHeight:23}}>{candidate.text}</Text>
+            </ScrollView>
+            <View style={{flexDirection:"row",flexWrap:"wrap",gap:nebulaSpacing.sm}}>
+              <NebulaAction icon="x" label="Оставить текущий"
+                accessibilityLabel="Оставить текущий текст" onPress={()=>setCandidate(null)} />
+              <NebulaAction icon="check" label="Применить новый"
+                accessibilityLabel="Применить новый текст" variant="primary"
+                disabled={busy || dirty} onPress={acceptCandidate} />
+            </View>
+          </View> : null}
+    </BottomSheet>
     <BottomSheet visible={noteMenu} title="Запись" onClose={() => setNoteMenu(false)}>
       <Pressable accessibilityRole="button" style={{...button,backgroundColor:t.soft}} onPress={() => { setNoteMenu(false); setEditing(true); setMetadataOpen(true); }}><Text style={{ color: t.text }}>Свойства и доступ</Text></Pressable>
       <Pressable accessibilityRole="button" style={{...button,backgroundColor:t.soft}} onPress={() => { setNoteMenu(false); setEditing(true); void loadDetails(); }}><Text style={{ color: t.text }}>История, события и связи</Text></Pressable>

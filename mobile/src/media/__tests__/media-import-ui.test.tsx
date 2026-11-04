@@ -9,6 +9,12 @@ import { ensureSections } from '../../local-memory/sections';
 import { Alert } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 jest.mock('../../components/BottomSheet', () => ({ BottomSheet: ({ visible, children }: any) => visible ? children : null }));
+jest.mock('../../components/NoteAiEditor', () => ({
+  NoteAiEditor: ({onApply, onClose}: any) => {
+    const {Text} = require('react-native');
+    return <Text onPress={() => { onApply({title: '', body: 'Правка модели'}); onClose(); }}>Применить тестовую правку</Text>;
+  },
+}));
 const mockBack = jest.fn();
 const mockDispatch = jest.fn();
 let mockParams: any = undefined;
@@ -499,18 +505,21 @@ test('step 8 E re-recognition protects edits with Nebula cancel and explicit con
   fireEvent.press(ui.getByLabelText('Извлечь сведения из файла'));
   await waitFor(()=>expect(ui.getByLabelText('Распознанное содержимое файла').props.value).toBe('Продукт: масло'));
   fireEvent.changeText(ui.getByLabelText('Распознанное содержимое файла'),'Продукт: масло — исправлено пользователем');
-  fireEvent.press(ui.getByLabelText('Извлечь сведения из файла'));
-  expect(ui.getByLabelText('Оставить текущий текст')).toBeTruthy();
-  expect(ui.getByText(/Новый разбор заменит текущий текст \(photo\.png\)/)).toBeTruthy();
-  expect(extractMedia).toHaveBeenCalledTimes(1);
-  fireEvent.press(ui.getByLabelText('Оставить текущий текст'));
-  expect(ui.queryByLabelText('Оставить текущий текст')).toBeNull();
+  fireEvent.press(ui.getByLabelText('Распознать заново'));
+  await waitFor(()=>expect(ui.getByLabelText('Оставить текущий')).toBeTruthy());
   expect(ui.getByLabelText('Распознанное содержимое файла').props.value).toContain('исправлено пользователем');
-  expect(extractMedia).toHaveBeenCalledTimes(1);
-  fireEvent.press(ui.getByLabelText('Извлечь сведения из файла'));
-  fireEvent.press(ui.getByLabelText('Распознать и заменить'));
-  await waitFor(()=>expect(extractMedia).toHaveBeenCalledTimes(2));
-  await waitFor(()=>expect(ui.getByLabelText('Распознанное содержимое файла').props.value).toBe('Продукт: масло 200 г'));
+  fireEvent.press(ui.getByLabelText('Оставить текущий'));
+  expect(ui.getByLabelText('Распознанное содержимое файла').props.value).toContain('исправлено пользователем');
+  (extractMedia as jest.Mock).mockResolvedValueOnce('Продукт: масло 300 г');
+  fireEvent.press(ui.getByLabelText('Распознать заново'));
+  await waitFor(()=>expect(ui.getByLabelText('Применить новый')).toBeTruthy());
+  fireEvent.press(ui.getByLabelText('Применить новый'));
+  expect(ui.getByLabelText('Распознанное содержимое файла').props.value).toBe('Продукт: масло 300 г');
+  fireEvent.changeText(ui.getByLabelText('Сведения из файла'),'Мой комментарий');
+  fireEvent.press(ui.getByLabelText('Улучшить текст файла с ИИ'));
+  fireEvent.press(ui.getByText('Применить тестовую правку'));
+  expect(ui.getByLabelText('Распознанное содержимое файла').props.value).toBe('Правка модели');
+  expect(ui.getByLabelText('Сведения из файла').props.value).toBe('Мой комментарий');
 });
 
 

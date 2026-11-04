@@ -31,6 +31,10 @@ export const readAsStringAsync = async (_uri: string, options?: any) => options?
 export const deleteAsync = async (uri: string) => { stats.deletes.push(uri); };
 export const getDocumentAsync = async () => {
   (window as any).__state("background"); await new Promise(resolve => setTimeout(resolve, 20)); (window as any).__state("active");
+  if ((window as any).__pickPdf) {
+    delete (window as any).__pickPdf;
+    return {canceled:false, assets:[{uri:"file:///qa-cache/recipe.pdf", name:"recipe.pdf", mimeType:"application/pdf", size:100}]};
+  }
   return { canceled: false, assets: [{ uri: "file:///qa-cache/note.txt", name: "note.txt", mimeType: "text/plain", size: 100 }] };
 };
 export const createVideoPlayer = () => ({ release() {}, muted: true, addListener() { return { remove() {} }; }, replaceAsync: async () => {}, generateThumbnailsAsync: async (times: number[]) => times.map(t => ({ requestedTime: t })) });
