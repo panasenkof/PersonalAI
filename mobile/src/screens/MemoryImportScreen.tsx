@@ -1,4 +1,5 @@
 import { useNavigation, useRoute, usePreventRemove } from "@react-navigation/native";
+import type { NavigationAction } from "@react-navigation/native";
 import type { RouteProp } from "@react-navigation/native";
 import { localMemoryRepository } from "../local-memory/repository";
 import { ensureSections } from "../local-memory/sections";
@@ -73,6 +74,10 @@ export function MemoryImportScreen() {
   const [collections, setCollections] = useState<CollectionRecord[]>([]);
   const [collectionId, setCollectionId] = useState("");
   const [leaving, setLeaving] = useState(false);
+  const leaveAction = useRef<NavigationAction | null>(null);
+  const leaveDispatched = useRef(false);
+  const [leaveApproval, setLeaveApproval] = useState(false);
+  const [skipApproval, setSkipApproval] = useState<{ profile: string; position: number } | null>(null);
   const [prepareAttempt, setPrepareAttempt] = useState(0);
   const [preparing, setPreparing] = useState(false);
   const whisper = useWhisperStatus();
@@ -98,6 +103,7 @@ export function MemoryImportScreen() {
   const [extractedText, setExtractedText] = useState("");
   const [notice, setNotice] = useState("");
   const [replacementApproval, setReplacementApproval] = useState<{ scope: string; label: string } | null>(null);
+  const [audioApproval, setAudioApproval] = useState<{ scope: string; service: string; model: string; replaced: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
   const alive = useRef(true);
   const controller = useRef<AbortController | null>(null);
@@ -142,14 +148,29 @@ export function MemoryImportScreen() {
     return () => { cancelled = true; off(); cleanup(); };
   }, [incoming, position, prepareAttempt]);
   usePreventRemove(!leaving && Boolean(incoming || file || body || extractedText || linkDraft.trim()), ({ data }) => {
-    if (busy) { setNotice("Дождитесь завершения операции или остановите её."); return; }
-    Alert.alert("Закрыть без сохранения?", "Несохранённые материалы будут отменены.", [{ text: "Продолжить", style: "cancel" }, { text: "Закрыть", style: "destructive", onPress: () => navigation.dispatch(data.action) }]);
+    if (busy || preparing) { setNotice("Дождитесь завершения операции или остановите её."); return; }
+    leaveAction.current = data.action;
+    setLeaveApproval(true);
   });
-  useEffect(() => { if (leaving) navigation.goBack(); }, [leaving, navigation]);
+  useEffect(() => {
+    if (!leaving || leaveDispatched.current) return;
+    leaveDispatched.current = true;
+    const original = leaveAction.current;
+    leaveAction.current = null;
+    if (original) navigation.dispatch(original);
+    else navigation.goBack();
+  }, [leaving, navigation]);
   useEffect(() => onLocalMemorySessionChange(unlocked => {
-    if (!unlocked) { controller.current?.abort(); setReplacementApproval(null); }
+    if (!unlocked) {
+      controller.current?.abort(); leaveAction.current = null;
+      setLeaveApproval(false); setSkipApproval(null); setAudioApproval(null); setReplacementApproval(null);
+    }
   }), []);
-  useEffect(() => { setReplacementApproval(null); }, [profile, position, prepareAttempt]);
+  useEffect(() => {
+    leaveAction.current = null; setLeaveApproval(false);
+    setSkipApproval(null); setAudioApproval(null); setReplacementApproval(null);
+  }, [profile]);
+  useEffect(() => { setSkipApproval(null); setAudioApproval(null); setReplacementApproval(null); }, [position, prepareAttempt]);
   // Both target record AND collection must permit provider egress.
   const collectionAllowsProvider = collections.find(c => c.id === collectionId)?.sensitivity === "standard";
   const providerApproved = classification === "standard" && collectionAllowsProvider;
@@ -328,6 +349,7 @@ export function MemoryImportScreen() {
     files: files.map(item => [item.uri, item.name, item.size]), extractedText,
     imageExtractionMode, recognitionMode, classification, collectionId,
     connectionId, speechConnectionId, fileAsrMode,
+    speechService: speechSelected?.name, speechModel: speechSelected?.transcriptionModel,
   });
   async function extract(confirmedReplacement = false, onlineConsent = false) {
     if (!file || !canExtract || busy || controller.current) return;
@@ -343,10 +365,8 @@ export function MemoryImportScreen() {
       if (!speechSelected || !officialAudioProvider(speechSelected)) {
         setNotice("Для онлайн-распознавания аудиофайла выберите официальное подключение OpenAI."); return;
       }
-      Alert.alert("Передать оригинал аудио в OpenAI?",
-        "Будет отправлен звук из выбранных файлов через " + speechSelected.name +
-        " (модель " + (speechSelected.transcriptionModel || "gpt-transcribe") + "). Возможна оплата и расход мобильного трафика (до 20 МБ на аудиофайл).",
-        [{ text: "Отмена", style: "cancel" }, { text: "Отправить и распознать", onPress: () => void extract(confirmedReplacement, true) }]);
+      setAudioApproval({ scope: replacementScope(), service: speechSelected.name,
+        model: speechSelected.transcriptionModel || "gpt-transcribe", replaced: confirmedReplacement });
       return;
     }
     const aborter = new AbortController(); controller.current = aborter; setBusy(true); setNotice("");
@@ -519,10 +539,7 @@ export function MemoryImportScreen() {
         <NebulaAction icon="refresh-cw" label="Повторить подготовку" disabled={busy}
           onPress={() => setPrepareAttempt(n => n + 1)} />
         {position + 1 < incoming.length ? <NebulaAction icon="skip-forward" label="Пропустить материал"
-          disabled={busy} onPress={() => Alert.alert("Пропустить материал?", "Этот материал не будет сохранён.", [
-            { text: "Отмена", style: "cancel" },
-            { text: "Пропустить", onPress: () => setPosition(p => p + 1) },
-          ])} /> : null}
+          disabled={busy || preparing} onPress={() => { if (profile) setSkipApproval({ profile, position }); }} /> : null}
       </View> : null}
       {notice ? <Text accessibilityRole="alert" style={{ color: t.muted }}>{notice}</Text> : null}
       {hasMaterial ? <>
@@ -665,6 +682,39 @@ export function MemoryImportScreen() {
       </Pressable>
     </View> : null}
   </KeyboardAvoidingView>
+  <NebulaConfirmSheet visible={leaveApproval}
+    title="Закрыть без сохранения?"
+    message="Несохранённые материалы будут отменены. Сохранённые заметки и оригиналы не затрагиваются."
+    confirmLabel="Закрыть без сохранения" cancelLabel="Продолжить редактирование" danger disabled={busy || preparing}
+    onCancel={() => { leaveAction.current = null; setLeaveApproval(false); }}
+    onConfirm={() => { if (busy || preparing) return; setLeaveApproval(false); setLeaving(true); }} />
+  <NebulaConfirmSheet visible={skipApproval !== null && skipApproval.profile === profile}
+    title="Пропустить материал?"
+    message="Текущий материал не будет сохранён. Следующий материал откроется для проверки без автоматического сохранения."
+    confirmLabel="Пропустить материал без сохранения" cancelLabel="Оставить текущий материал" danger disabled={busy || preparing}
+    onCancel={() => setSkipApproval(null)}
+    onConfirm={() => {
+      const approval = skipApproval; setSkipApproval(null);
+      if (!approval || approval.profile !== profile || approval.position !== position ||
+        !incoming || position + 1 >= incoming.length || busy || preparing) return;
+      setPosition(p => p + 1);
+    }} />
+  <NebulaConfirmSheet visible={audioApproval !== null}
+    title="Передать исходный звук?"
+    message={`Выбранные аудио/видеофайлы будут отправлены через ${audioApproval?.service || "сервис"} (модель ${audioApproval?.model || "—"}). Возможны оплата и расход трафика (до 20 МБ на аудиофайл). Согласие только на этот запуск.`}
+    confirmLabel="Отправить и распознать" cancelLabel="Не отправлять" disabled={busy || preparing}
+    onCancel={() => setAudioApproval(null)}
+    onConfirm={() => {
+      const approval = audioApproval; setAudioApproval(null);
+      if (!approval || !profile || approval.scope !== replacementScope() || busy || preparing || !file ||
+        !files.some(item => ["audio", "video"].includes(mediaKind(item))) ||
+        !speechSelected || !officialAudioProvider(speechSelected) || fileAsrMode !== "online" ||
+        !providerApproved || !canExtract) {
+        setNotice("Файл, подключение или доступ изменились. Проверьте параметры и подтвердите передачу заново.");
+        return;
+      }
+      void extract(approval.replaced, true);
+    }} />
   <NebulaConfirmSheet visible={replacementApproval !== null}
     title="Заменить распознанный текст?"
     message={`Новый разбор заменит текущий текст (${replacementApproval?.label || "файл"}), в том числе ручные исправления. Подпись к заметке не изменится.`}
