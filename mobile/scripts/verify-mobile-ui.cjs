@@ -496,6 +496,16 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       const authenticationCount = await page.evaluate(() => window.__qa.auth);
       await page.getByLabel('Файл', { exact: true }).click();
       await page.getByText('note.txt', { exact: true }).waitFor();
+      // Visible selected privacy cards: a change of classification never uploads
+      // a file or silently grants provider access.
+      const personal = page.getByRole('radio', { name: 'Личные — только на телефоне', exact: true });
+      const ordinary = page.getByRole('radio', { name: 'Обычные — доступны агенту и разбору у провайдера', exact: true });
+      assert.equal(await ordinary.getAttribute('aria-checked'), 'true', 'Standard is selected initially');
+      await personal.click();
+      assert.equal(await personal.getAttribute('aria-checked'), 'true', 'Personal selection is explicit');
+      assert.equal(await ordinary.getAttribute('aria-checked'), 'false');
+      await ordinary.click();
+      assert.equal(await ordinary.getAttribute('aria-checked'), 'true', 'Returning to standard remains explicit');
       assert.equal(await page.evaluate(() => window.__qa.auth), authenticationCount, 'A short file-picker switch must not ask for biometrics');
       assert.equal(await page.getByLabel('Извлечь сведения из файла', { exact: true }).count(), 0, 'Recognition is optional and collapsed');
       assert.equal(await page.getByLabel('Название импортируемой заметки', { exact: true }).count(), 0, 'Metadata is collapsed');
@@ -511,6 +521,8 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByLabel('Распознавание', { exact: true }).click();
       await page.getByLabel('Извлечь сведения из файла', { exact: true }).click();
       await page.waitForFunction(() => document.querySelector('[aria-label="Распознанное содержимое файла"]').value.includes('индейка'));
+      const resultBox = await page.getByLabel('Распознанное содержимое файла', { exact: true }).boundingBox();
+      assert(resultBox && resultBox.height <= 190, 'Recognized text field must not expand the import form without bound');
       await page.getByLabel('Сохранить сведения в память', { exact: true }).click();
       await page.getByLabel(/Открыть заметку Рецепт: индейка/).waitFor();
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, `Overflow at ${width}px`);

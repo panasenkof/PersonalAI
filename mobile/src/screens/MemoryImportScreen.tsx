@@ -35,11 +35,18 @@ import { memoryErrorMessage } from "../local-memory/errors";
 import { useTheme } from "../theme";
 import { BottomSheet } from "../components/BottomSheet";
 import { NoteEditorSection } from "../design/nebula/NoteEditorSection";
+import { NebulaAction } from "../design/nebula/components";
+import { ImportFileSummary } from "../design/nebula/ImportFileSummary";
+import Feather from "@expo/vector-icons/Feather";
 import { useWhisperStatus } from "../media/whisper";
 import { scheduleIndexTerms } from "../direct-agent/enrich-runner";
 import { scheduleVectors } from "../media/vector-runner";
 import { discardCameraPhotoDraft83 } from "../media/vision-chat-camera";
 import { autoIndexNotePhotos83 } from "../media/auto-index-note-photos";
+
+const IMPORT_KIND_LABELS: Record<string, string> = {
+  image: "Фото", document: "Документ", audio: "Аудио", video: "Видео", text: "Текст",
+};
 
 export function MemoryImportScreen() {
   const route = useRoute<RouteProp<RootStackParams, "MemoryImport">>();
@@ -490,28 +497,53 @@ export function MemoryImportScreen() {
       {!file && extractedText ? <Text style={{ color: t.muted, fontSize: 12 }}>Выбранный источник: текст по ссылке</Text> : null}
       {preparing ? <ActivityIndicator accessibilityLabel="Подготовка входящего файла" /> : null}
 
-      {file ? <View style={{ backgroundColor: t.panel, padding: 16, borderRadius: 20, borderWidth: 1, borderColor: t.line, gap: 10 }}>
-        <Text style={{ color: t.text, fontWeight: "700" }}>{files.length > 1 ? "Вложения · " + files.length : file.name}</Text>
-        {files.length > 1 ? files.map((item, index) => <Text key={index} style={{ color: t.muted }}>
-          {index + 1}. {item.name} · {mediaKind(item)}
-        </Text>) : null}
-        {kind === "image" ? <Image source={{ uri: file.uri }} resizeMode="contain" style={{ width: "100%", height: 180, borderRadius: 14 }} /> : null}
+      {file ? <ImportFileSummary key={files.map(item => item.uri).join("|")}
+        files={files.map(item => ({ id: item.uri, name: item.name, kind: IMPORT_KIND_LABELS[mediaKind(item)] || "Файл" }))}
+        preview={kind === "image" ? <Image source={{ uri: file.uri }} resizeMode="contain"
+          style={{ width: "100%", height: 180, borderRadius: 14 }} /> : undefined} /> : null}
+      {busy ? <View style={{ gap: 8 }}><ActivityIndicator />
+        <NebulaAction icon="square" label="Остановить разбор" variant="danger"
+          onPress={() => controller.current?.abort()} />
       </View> : null}
-      {busy ? <><ActivityIndicator /><Pressable accessibilityRole="button" onPress={() => controller.current?.abort()} style={{ minHeight: 44 }}><Text style={{ color: t.err }}>Остановить</Text></Pressable></> : null}
-      {incoming && !preparing ? <View style={{ flexDirection: "row", gap: 16 }}>
-        <Pressable disabled={busy} style={{ minHeight: 44 }} onPress={() => setPrepareAttempt(n => n + 1)}><Text style={{ color: t.secondary }}>Повторить подготовку</Text></Pressable>
-        {position + 1 < incoming.length ? <Pressable disabled={busy} style={{ minHeight: 44 }} onPress={() => Alert.alert("Пропустить материал?", "Этот материал не будет сохранён.", [{ text: "Отмена", style: "cancel" }, { text: "Пропустить", onPress: () => setPosition(p => p + 1) }])}><Text style={{ color: t.secondary }}>Пропустить</Text></Pressable> : null}
+      {incoming && !preparing ? <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+        <NebulaAction icon="refresh-cw" label="Повторить подготовку" disabled={busy}
+          onPress={() => setPrepareAttempt(n => n + 1)} />
+        {position + 1 < incoming.length ? <NebulaAction icon="skip-forward" label="Пропустить материал"
+          disabled={busy} onPress={() => Alert.alert("Пропустить материал?", "Этот материал не будет сохранён.", [
+            { text: "Отмена", style: "cancel" },
+            { text: "Пропустить", onPress: () => setPosition(p => p + 1) },
+          ])} /> : null}
       </View> : null}
       {notice ? <Text accessibilityRole="alert" style={{ color: t.muted }}>{notice}</Text> : null}
       {hasMaterial ? <>
         <TextInput accessibilityLabel="Сведения из файла" editable={!busy} multiline value={body} onChangeText={setBody} maxLength={60_000} style={[field, { minHeight: 96, textAlignVertical: "top" }]} placeholder={linkOnly ? "Моя заметка — что важно сохранить? (необязательно)" : "Добавьте подпись — необязательно"} placeholderTextColor={t.muted} />
         <Pressable accessibilityRole="button" accessibilityLabel="Выбрать коллекцию" disabled={busy} onPress={() => { Keyboard.dismiss(); setSectionOpen(true); }} style={{ ...button, backgroundColor: t.panel, alignItems: "flex-start" }}><Text style={{ color: t.text }}>Коллекция: {collections.find(c => c.id === collectionId)?.name || "Заметки"} · Изменить</Text></Pressable>
-        {collections.find(c => c.id === collectionId)?.sensitivity !== "standard" ? <Text style={{ color: t.muted }}>Выбранная коллекция закрыта для агента независимо от настройки записи.</Text> : null}
-        <Text style={{ color: t.text, fontWeight: "600" }}>Доступ к записи</Text>
-        {([ ["sensitive", "Личные — только на телефоне"], ["standard", "Обычные — доступны агенту и разбору у провайдера"] ] as const).map(([id, label]) =>
-          <Pressable disabled={busy} key={id} accessibilityRole="button" accessibilityLabel={label} onPress={() => { setClassification(id); if (id === "sensitive") setRecognitionMode("sequential"); }} style={{ minHeight: 46, justifyContent: "center" }}>
-            <Text style={{ color: classification === id ? t.secondary : t.text }}>{classification === id ? "● " : "○ "}{label}</Text>
-          </Pressable>)}
+        <View testID="import-access-options" style={{ gap: 8 }}>
+          <Text accessibilityRole="header" style={{ color: t.text, fontWeight: "700" }}>Доступ к записи</Text>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+            {([
+              ["sensitive", "Личные", "Только на телефоне", "lock", "Личные — только на телефоне"],
+              ["standard", "Обычные", "Агент может использовать текст; отправка оригинала — по подтверждению", "globe", "Обычные — доступны агенту и разбору у провайдера"],
+            ] as const).map(([id, title, description, icon, label]) => {
+              const checked = classification === id;
+              return <Pressable key={id} accessibilityRole="radio" accessibilityLabel={label}
+                accessibilityState={{ checked, disabled: busy }} aria-checked={checked} disabled={busy}
+                onPress={() => { setClassification(id); if (id === "sensitive") setRecognitionMode("sequential"); }}
+                style={{ flexGrow: 1, flexBasis: 130, minHeight: 84, padding: 10, gap: 5,
+                  borderRadius: 14, borderWidth: checked ? 2 : 1,
+                  borderColor: checked ? t.accent : t.line, backgroundColor: checked ? t.soft : t.panel }}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  <Feather name={icon} size={17} color={checked ? t.secondary : t.muted} />
+                  <Text style={{ flex: 1, color: t.text, fontWeight: "700" }}>{title}</Text>
+                  <Feather name={checked ? "check-circle" : "circle"} size={17} color={checked ? t.secondary : t.muted} />
+                </View>
+                <Text style={{ color: t.muted, fontSize: 12, lineHeight: 17 }}>{description}</Text>
+              </Pressable>;
+            })}
+          </View>
+          {collections.find(c => c.id === collectionId)?.sensitivity !== "standard"
+            ? <Text style={{ color: t.muted }}>Выбранная коллекция закрыта для агента независимо от настройки записи.</Text> : null}
+        </View>
         {file ? <NoteEditorSection title="Распознавание" summary={extractedText ? "Текст получен · можно повторить" : "Необязательно · для поиска по содержимому"} expanded={recognitionOpen} onToggle={() => setRecognitionOpen(v => !v)}>
         <Text style={{ color: t.muted, fontSize: 12 }}>{kind === "video" ? "Речь и пять выборочных кадров обрабатываются отдельно. Максимум 10 минут; частичные результаты явно отмечены." : kind === "audio" ? (fileAsrMode === "device" ? "На телефоне · Whisper. Без сети и без автоматического переключения. Если модель не скачана, установите её в настройках голоса." : "Онлайн · только официальный OpenAI. Оригинал звука уйдёт провайдеру после подтверждения, возможна оплата.") : kind === "text" ? "Текстовый файл читается на телефоне, без отправки в интернет." : kind === "document" ? "PDF читается локально: Android 15+ или Android 12–14 с расширением S v13+. У сканов без текстового слоя страницы останутся непрочитанными; оригинал сохранится." : "Выбранная модель должна поддерживать изображения."}</Text>
         {files.some(item => mediaKind(item) === "image") ? <View style={{ gap: 6 }}>
@@ -604,7 +636,9 @@ export function MemoryImportScreen() {
         </NoteEditorSection> : null}
         {extractedText ? <>
           <Text style={{ color: t.text }}>Распознанный текст</Text>
-          <TextInput accessibilityLabel="Распознанное содержимое файла" editable={!busy} multiline value={extractedText} onChangeText={setExtractedText} maxLength={60_000} style={field} />
+          <TextInput accessibilityLabel="Распознанное содержимое файла" editable={!busy} multiline
+            scrollEnabled value={extractedText} onChangeText={setExtractedText} maxLength={60_000}
+            style={[field, { minHeight: 140, maxHeight: 188, textAlignVertical: "top" }]} />
         </> : null}
         <NoteEditorSection title="Дополнительные параметры" summary="Название и сохранение оригинала" expanded={detailsOpen} onToggle={() => setDetailsOpen(v => !v)}>
           <Text style={{ color: t.text }}>Название — необязательно</Text>
