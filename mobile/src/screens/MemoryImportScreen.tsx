@@ -34,6 +34,7 @@ import { withNativeInteraction } from "../security/native-interaction";
 import { memoryErrorMessage } from "../local-memory/errors";
 import { useTheme } from "../theme";
 import { BottomSheet } from "../components/BottomSheet";
+import { NebulaConfirmSheet } from "../components/NebulaConfirmSheet";
 import { NoteEditorSection } from "../design/nebula/NoteEditorSection";
 import { NebulaAction } from "../design/nebula/components";
 import { ImportFileSummary } from "../design/nebula/ImportFileSummary";
@@ -96,6 +97,7 @@ export function MemoryImportScreen() {
   const [body, setBody] = useState("");
   const [extractedText, setExtractedText] = useState("");
   const [notice, setNotice] = useState("");
+  const [replacementApproval, setReplacementApproval] = useState<{ scope: string; label: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const alive = useRef(true);
   const controller = useRef<AbortController | null>(null);
@@ -144,7 +146,10 @@ export function MemoryImportScreen() {
     Alert.alert("Закрыть без сохранения?", "Несохранённые материалы будут отменены.", [{ text: "Продолжить", style: "cancel" }, { text: "Закрыть", style: "destructive", onPress: () => navigation.dispatch(data.action) }]);
   });
   useEffect(() => { if (leaving) navigation.goBack(); }, [leaving, navigation]);
-  useEffect(() => onLocalMemorySessionChange(unlocked => { if (!unlocked) controller.current?.abort(); }), []);
+  useEffect(() => onLocalMemorySessionChange(unlocked => {
+    if (!unlocked) { controller.current?.abort(); setReplacementApproval(null); }
+  }), []);
+  useEffect(() => { setReplacementApproval(null); }, [profile, position, prepareAttempt]);
   // Both target record AND collection must permit provider egress.
   const collectionAllowsProvider = collections.find(c => c.id === collectionId)?.sensitivity === "standard";
   const providerApproved = classification === "standard" && collectionAllowsProvider;
@@ -317,15 +322,20 @@ export function MemoryImportScreen() {
     } catch (e) { if (alive.current) setNotice((e as Error).message); }
     finally { if (alive.current) setPreparing(false); }
   }
+  // Ephemeral scope for a particular draft, set of originals, extraction method
+  // and current user edits. No consent is persisted or carried between files.
+  const replacementScope = () => JSON.stringify({ profile,
+    files: files.map(item => [item.uri, item.name, item.size]), extractedText,
+    imageExtractionMode, recognitionMode, classification, collectionId,
+    connectionId, speechConnectionId, fileAsrMode,
+  });
   async function extract(confirmedReplacement = false, onlineConsent = false) {
     if (!file || !canExtract || busy || controller.current) return;
-    // Reprocessing a corrected document must not silently erase user edits.
-    // Full versioned candidate comparison is implemented in package G.
-    if ((imageExtractionMode === "document-text" || imageExtractionMode === "offline-ocr") && extractedText.trim() && !confirmedReplacement) {
-      Alert.alert("Заменить полученный текст?",
-        "Текущий распознанный текст мог быть исправлен вручную. Новый результат заменит его только после вашего подтверждения; подпись к заметке не изменится.",
-        [{ text: "Оставить текущий", style: "cancel" },
-         { text: "Заменить после разбора", onPress: () => void extract(true) }]);
+    // Reprocessing ANY previously extracted text must not silently erase edits,
+    // including text-layer PDF and plain text files.
+    if (extractedText.trim() && !confirmedReplacement) {
+      setReplacementApproval({ scope: replacementScope(),
+        label: files.length > 1 ? `${files.length} файлов` : file.name });
       return;
     }
     // Explicit permission is required for *each* upload of original audio.
@@ -655,6 +665,20 @@ export function MemoryImportScreen() {
       </Pressable>
     </View> : null}
   </KeyboardAvoidingView>
+  <NebulaConfirmSheet visible={replacementApproval !== null}
+    title="Заменить распознанный текст?"
+    message={`Новый разбор заменит текущий текст (${replacementApproval?.label || "файл"}), в том числе ручные исправления. Подпись к заметке не изменится.`}
+    confirmLabel="Распознать и заменить" cancelLabel="Оставить текущий текст" danger disabled={busy || preparing}
+    onCancel={() => setReplacementApproval(null)}
+    onConfirm={() => {
+      const approval = replacementApproval;
+      setReplacementApproval(null);
+      if (!approval || !profile || approval.scope !== replacementScope() || busy || preparing || !file || !canExtract) {
+        setNotice("Файл или параметры распознавания изменились. Проверьте их и запустите распознавание заново.");
+        return;
+      }
+      void extract(true);
+    }} />
   <BottomSheet visible={sectionOpen} title="Коллекция для записи" onClose={() => setSectionOpen(false)}>
         {collections.map(c => <Pressable key={c.id} disabled={busy} accessibilityRole="button" accessibilityLabel={"Коллекция: " + c.name} onPress={() => { setCollectionId(c.id); setSectionOpen(false); }} style={{ minHeight: 44 }}><Text style={{ color: c.id === collectionId ? t.secondary : t.text }}>{c.id === collectionId ? "● " : "○ "}{c.name}</Text></Pressable>)}
   </BottomSheet>
