@@ -72,6 +72,7 @@ export function LocalMemoryScreen() {
   const [moveOpen, setMoveOpen] = useState(false);
   const [mergeOpen, setMergeOpen] = useState(false);
   const [mergeExpanded, setMergeExpanded] = useState(false);
+  const [mergeItemsExpanded, setMergeItemsExpanded] = useState(false);
   const [hygieneReviewOpen, setHygieneReviewOpen] = useState(false);
   const [hygieneSuggestionsOpen, setHygieneSuggestionsOpen] = useState(false);
   const [hygieneSuggestions, setHygieneSuggestions] = useState<MemoryHygieneSuggestions | null>(null);
@@ -372,11 +373,11 @@ export function LocalMemoryScreen() {
     try {
       // A card-local restore must target that exact source/version, never another selection.
       const token = await repository.current.changeNotes(action, affectedNotes, target);
-      purgeHasCompleted.current = false; setUndo(token); setSelectedIds([]); setSelecting(false); setActionsOpen(false); setConfirmation(null); setContextNote(null); setMoveOpen(false); setMergeOpen(false); setMergeExpanded(false); setRetry(n => n + 1);
+      purgeHasCompleted.current = false; setUndo(token); setSelectedIds([]); setSelecting(false); setActionsOpen(false); setConfirmation(null); setContextNote(null); setMoveOpen(false); setMergeOpen(false); setMergeExpanded(false); setMergeItemsExpanded(false); setRetry(n => n + 1);
       if (profile) scheduleVectors(profile);
     } catch (e) { setError(memoryErrorMessage(e)); } finally { setBusy(false); }
   }
-  useEffect(() => { trashEpoch.current++; setTrashPreview(null); setTrashConfirm(false); setTrashMessage(""); setTrashProgress(0); setSelectedIds([]); setSelecting(false); setActionsOpen(false); setConfirmation(null); setNotes([]); setContextNote(null); setMoveOpen(false); setMergeOpen(false); setMergeExpanded(false); hygieneGeneration.current++; setHygieneReviewOpen(false); setHygieneSuggestionsOpen(false); setHygieneSuggestions(null); setSuggestedReviewNotes(null); setHygieneExcluded([]); setHygienePreview(null); setHygieneConfirm(false); setHygienePolicyItem(null); setHygieneAction("archive"); }, [profile, collectionId, term, status]);
+  useEffect(() => { trashEpoch.current++; setTrashPreview(null); setTrashConfirm(false); setTrashMessage(""); setTrashProgress(0); setSelectedIds([]); setSelecting(false); setActionsOpen(false); setConfirmation(null); setNotes([]); setContextNote(null); setMoveOpen(false); setMergeOpen(false); setMergeExpanded(false); setMergeItemsExpanded(false); hygieneGeneration.current++; setHygieneReviewOpen(false); setHygieneSuggestionsOpen(false); setHygieneSuggestions(null); setSuggestedReviewNotes(null); setHygieneExcluded([]); setHygienePreview(null); setHygieneConfirm(false); setHygienePolicyItem(null); setHygieneAction("archive"); }, [profile, collectionId, term, status]);
   function openAll() { setStatus("active"); setCollectionId(undefined); setSearch(""); setTerm(""); setSelectedIds([]); setSelecting(false); }
   function openStatus(value: typeof status) { openAll(); setStatus(value); }
   const cancelSelection = useCallback(() => {
@@ -729,7 +730,7 @@ export function LocalMemoryScreen() {
             onPress={() => { setActionsOpen(false); setMoveOpen(true); }} />
           {selectedNotes.length >= 2 && status === "active" ? <NebulaAction icon="git-merge"
             label="Объединить записи" disabled={busy}
-            onPress={() => { setActionsOpen(false); setMergeExpanded(false); setMergeOpen(true); }} /> : null}
+            onPress={() => { setActionsOpen(false); setMergeExpanded(false); setMergeItemsExpanded(false); setMergeOpen(true); }} /> : null}
           {selectedNotes.length >= 2 && status === "active" ? <NebulaAction icon="clipboard"
             label="Проверить группу и исключения" accessibilityLabel="Проверить последствия групповой ревизии"
             disabled={busy} onPress={() => {
@@ -928,9 +929,12 @@ export function LocalMemoryScreen() {
       <Text style={{ color: t.muted }}>{selectedNotes.map(memoryDisplayTitle).join(", ")}</Text>
       {collections.map(c => <Pressable key={c.id} disabled={busy} style={actionButton} onPress={() => void act("move", c.id)}><Text style={{ color: t.secondary }}>{c.name}</Text></Pressable>)}
     </BottomSheet>
-    <BottomSheet visible={mergeOpen} title="Предпросмотр объединения" onClose={() => { if (busy) return; setMergeOpen(false); setMergeExpanded(false); }}>
+    <BottomSheet visible={mergeOpen} title="Предпросмотр объединения" onClose={() => { if (busy) return; setMergeOpen(false); setMergeExpanded(false); setMergeItemsExpanded(false); }}>
       <Text style={{ color: t.text, fontWeight: "700" }}>Выбрано записей: {selectedNotes.length} · основная определяется порядком выбора</Text>
-      {selectedNotes.map((note, index) => <View key={note.id}
+      <ScrollView nestedScrollEnabled scrollEnabled={mergeItemsExpanded}
+        style={{ maxHeight: mergeItemsExpanded ? 232 : undefined }}
+        contentContainerStyle={{ gap: nebulaSpacing.xs }}>
+      {selectedNotes.slice(0, mergeItemsExpanded ? selectedNotes.length : 3).map((note, index) => <View key={note.id}
         style={{ padding: nebulaSpacing.sm, gap: 3, borderWidth: 1,
           borderColor: index === 0 ? t.accent : t.line, borderRadius: nebulaRadii.field,
           backgroundColor: index === 0 ? t.soft : t.panel }}>
@@ -941,6 +945,10 @@ export function LocalMemoryScreen() {
           {collections.find(c => c.id === note.collection_id)?.name || "Раздел не указан"}
         </Text>
       </View>)}
+      </ScrollView>
+      {selectedNotes.length > 3 ? <NebulaAction icon={mergeItemsExpanded ? "chevron-up" : "list"}
+        label={mergeItemsExpanded ? "Свернуть список записей" : "Показать все выбранные записи · " + selectedNotes.length}
+        onPress={() => setMergeItemsExpanded(value => !value)} /> : null}
       <Text style={{ color: t.muted, lineHeight: 20 }}>
         Заголовок основной записи сохраняется. Тексты объединяются в ней; вложения остальных
         записей переходят к основной. Остальные записи больше не отображаются как активные.
@@ -963,7 +971,7 @@ export function LocalMemoryScreen() {
         disabled={busy || selectedNotes.length < 2 || mergePreview.length > 60000}
         onPress={() => void act("merge")} />
       <NebulaAction icon="x" label="Отмена" disabled={busy}
-        onPress={() => { setMergeOpen(false); setMergeExpanded(false); }} />
+        onPress={() => { setMergeOpen(false); setMergeExpanded(false); setMergeItemsExpanded(false); }} />
     </BottomSheet>
     <BottomSheet visible={sectionOpen} title="Новый раздел" onClose={() => setSectionOpen(false)}>
       <Text style={{ color: t.muted }}>Например: «Рецепты», «Идеи» или «Планы».</Text>
