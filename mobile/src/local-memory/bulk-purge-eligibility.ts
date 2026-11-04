@@ -18,4 +18,7 @@ export const BULK_PURGE_NEEDS_REVIEW_SQL = [
     "WHERE p.source_entity_id=e.id OR p.target_entity_id=e.id OR p.evidence_entity_id=e.id)",
   "EXISTS (SELECT 1 FROM memory_temporal_claims c WHERE c.entity_id=e.id)",
   "EXISTS (SELECT 1 FROM memory_temporal_evidence te WHERE te.entity_id=e.id)",
+  // Purging the currently bound profile person would silently unset the
+  // user-owned identity pointer (ON DELETE SET NULL). Require manual review.
+  "EXISTS (SELECT 1 FROM memory_profile_self self WHERE self.person_id=e.id)",
 ].join(" OR ");
