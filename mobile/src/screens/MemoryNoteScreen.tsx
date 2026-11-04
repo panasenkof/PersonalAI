@@ -436,7 +436,8 @@ export function MemoryNoteScreen() {
             editable={!busy} value={extractedText} onChangeText={setExtractedText} maxLength={60_000}
             style={{ ...field, height: 184, maxHeight: 220, textAlignVertical: "top" }} />
           <Pressable disabled={busy || dirty || selected.record_status !== "active"} accessibilityRole="button"
-            accessibilityLabel="Распознать сохранённый файл заново" style={button}
+            accessibilityLabel="Распознать сохранённый файл заново"
+            style={{...button,borderWidth:1,borderColor:t.secondary,backgroundColor:t.panel}}
             onPress={() => {
               if (!profile) return;
               setError("");
@@ -504,10 +505,14 @@ export function MemoryNoteScreen() {
             <NebulaAction icon="link-2" label="Связать с другой записью"
               onPress={() => setLinkOpen(true)} />
           </View> : null}
-          <Pressable accessibilityRole="button" accessibilityLabel={selected.record_status === "archived" ? "Вернуть запись из архива" : "Архивировать запись"} disabled={busy || dirty || !["active", "archived"].includes(selected.record_status)} style={button} onPress={() => void run(async db => {
-            await db.setEntityStatus(selected.id, selected.record_version, selected.record_status === "archived" ? "active" : "archived");
-            if (alive.current) setLeaving(true);
-          })}><Text style={{ color: t.muted }}>{selected.record_status === "archived" ? "Вернуть из архива" : "Перенести в архив"}</Text></Pressable>
+          <NebulaAction icon="archive"
+            accessibilityLabel={selected.record_status === "archived" ? "Вернуть запись из архива" : "Архивировать запись"}
+            label={selected.record_status === "archived" ? "Вернуть из архива" : "Перенести в архив"}
+            disabled={busy || dirty || !["active", "archived"].includes(selected.record_status)}
+            onPress={() => void run(async db => {
+              await db.setEntityStatus(selected.id, selected.record_version, selected.record_status === "archived" ? "active" : "archived");
+              if (alive.current) setLeaving(true);
+            })} />
         </> : null}
         </>}
         {selected && profile && ["active", "archived"].includes(selected.record_status) ? <AppendNoteAttachments
