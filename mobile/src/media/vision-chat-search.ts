@@ -62,7 +62,7 @@ export function localPhotoIntent83(
     }
   }
   const everydayPhotoQuestion = /^(?:у меня есть|есть ли у меня|сохранил(?:а)? ли я)\s+(?:фото|сним|изображен)/iu.test(prompt);
-  if(!prompt || prompt.length>256 || externalWeb.test(prompt) || /^как(?:\s|[?.,])/iu.test(prompt) || (!findVerb.test(prompt) && !everydayPhotoQuestion))
+  if(!prompt || prompt.length>256 || explicitWebDestination(prompt) || /^как(?:\s|[?.,])/iu.test(prompt) || (!findVerb.test(prompt) && !everydayPhotoQuestion))
     return null;
   const imageCount=attachments.filter(a=>a.kind==="image").length;
   if(imageCount && (similarWord.test(prompt) ||
