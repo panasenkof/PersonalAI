@@ -9,7 +9,7 @@ import { Collapsible } from "./Collapsible";
 
 /** «Умный поиск по памяти»: index words from the user's model (п. 12) and
  * search by meaning with a model on the phone (п. 13). */
-export function SmartSearchCard() {
+export function SmartSearchCard({ defaultOpen = false }: { defaultOpen?: boolean } = {}) {
   const t = useTheme(); const profile = useProfile();
   const enrich = useEnrichState();
   const model = useEmbedderStatus(); const vectors = useVectorState();
@@ -30,7 +30,7 @@ export function SmartSearchCard() {
   const summary = [enrich.enabled ? `слова для поиска: ${enrich.done}${enrich.pending ? ", ждут " + enrich.pending : ""}` : "слова для поиска выключены",
     model.state === "ready" ? `по смыслу: ${vectors.done} из ${vectors.total}` : model.state === "downloading" ? `модель скачивается ${model.progress}%` :
     model.state === "unsupported" ? "" : "по смыслу: модель не скачана"].filter(Boolean).join(" · ");
-  return <Collapsible icon="search" id="settings.smart-search" title="Умный поиск по памяти" summary={(enrich.error || vectors.error ? "⚠ " : "") + summary}>
+  return <Collapsible icon="search" id="settings.smart-search" defaultOpen={defaultOpen} forceOpen={defaultOpen} title="Умный поиск по памяти" summary={(enrich.error || vectors.error ? "⚠ " : "") + summary}>
     <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
       <View style={{ flex: 1, gap: 4 }}>
         <Text style={{ color: t.text, fontWeight: "600" }}>Слова для поиска</Text>
