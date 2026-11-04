@@ -31,7 +31,7 @@ export function SmartSearchCard({ defaultOpen = false }: { defaultOpen?: boolean
     setApproval(null);
     // A cancelled/changed download must not be deleted by a stale dialog.
     if (action === "download" &&
-        (model.state === "idle" || model.state === "error" || model.state === "missing")) {
+        (model.state === "absent" || model.state === "error")) {
       void downloadEmbedder();
     } else if (action === "delete" && model.state === "ready") {
       stopVectors();
