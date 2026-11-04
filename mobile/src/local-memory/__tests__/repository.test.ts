@@ -35,6 +35,26 @@ class FakeSqlite {
   }
 }
 
+test("trash preview is a single read-only SQL snapshot with only trashed note versions", async () => {
+  const fake = new FakeSqlite();
+  const repo = new SqliteMemoryRepository(fake as never);
+  const col = await repo.createCollection({ name: "Заметки", slug: "notes", sensitivity: "standard" });
+  const one = await repo.createEntity({ collection_id: col.id, domain: "notes", title: "One", payload: { body: "one" } });
+  const two = await repo.createEntity({ collection_id: col.id, domain: "notes", title: "Two", payload: { body: "two" } });
+  await repo.changeNotes("trash", [{ id: one.id, record_version: one.record_version }]);
+  const expected = await repo.entity(one.id);
+  const snapshot = await repo.trashPurgeSnapshot();
+  expect(snapshot.items).toEqual([{ id: one.id, record_version: expected!.record_version }]);
+  expect(snapshot.originalCount).toBe(0);
+  expect(snapshot.affectedRelationCount).toBe(0);
+  expect(snapshot.items.some(row => row.id === two.id)).toBe(false);
+  // Preview does not mutate any record; a later restore invalidates the CAS.
+  expect((await repo.entity(one.id))!.record_status).toBe("trashed");
+  await repo.changeNotes("restore", snapshot.items);
+  await expect(repo.purgeNotes(snapshot.items)).rejects.toBeInstanceOf(MemoryConflictError);
+  expect((await repo.entity(one.id))!.record_status).toBe("active");
+});
+
 test("creates offline note, edits with CAS, stores immutable history and updates full-text search", async () => {
   const fake = new FakeSqlite();
   const repo = new SqliteMemoryRepository(fake as never);
