@@ -169,6 +169,16 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       assert.equal(await page.getByLabel('Сведения из файла',{exact:true}).inputValue(),'Тестовая входящая заметка');
       assert.equal(await page.evaluate(()=>localStorage.getItem('qa.notes')),notesBeforeShare,'Choosing memory does not autosave');
       await page.getByLabel(/back/i).click();
+      await page.getByLabel('Продолжить редактирование', { exact: true }).waitFor();
+      assert.equal(await page.evaluate(()=>localStorage.getItem('qa.notes')), notesBeforeShare,
+        'Back to an unsaved import cannot silently save');
+      if (process.env.SCREENSHOT_DIR) await page.screenshot({ animations:'disabled',
+        path:path.join(process.env.SCREENSHOT_DIR,`import-leave-confirm-${width}.png`) });
+      await page.getByLabel('Продолжить редактирование', { exact: true }).click();
+      assert.equal(await page.getByLabel('Сведения из файла', { exact: true }).inputValue(), 'Тестовая входящая заметка',
+        'Cancelling Back retains the imported draft');
+      await page.getByLabel(/back/i).click();
+      await page.getByLabel('Закрыть без сохранения', { exact: true }).click();
       await prompt.waitFor();
       await prompt.fill('Длинный черновик\nВторая строка');
       await page.getByLabel('Очистить сообщение', { exact: true }).click();
