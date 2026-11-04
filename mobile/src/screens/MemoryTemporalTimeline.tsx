@@ -15,6 +15,7 @@ import type {TemporalBound} from "../local-memory/temporal-claims";
 import type {RootStackParams} from "../navigation";
 import {useTheme} from "../theme";
 import {nebulaRadii,nebulaSpacing,nebulaTouch} from "../design/nebula/tokens";
+import {NebulaAction} from "../design/nebula/components";
 
 const MODES:ReadonlyArray<{mode:TemporalHistoryMode;label:string}>=[
   {mode:"all",label:"Все"},{mode:"states",label:"Состояния"},
@@ -127,15 +128,13 @@ export function MemoryTemporalTimeline({profile,subjectId,collectionId}:{
           item.claim.modality==="hypothetical"?"Гипотеза, не факт":
           item.claim.negated?"Отрицательное утверждение источника":"Не подтверждено как текущий факт"}</Text>
         <Text numberOfLines={4} style={{color:t.muted}}>Из источника: «{item.claim.evidence.quote}»</Text>
-        <Pressable accessibilityRole="button" accessibilityLabel={"Открыть источник для "+item.claim.value}
-          disabled={busy} style={touch} onPress={()=>void showSource(item)}>
-          <Text style={{color:t.secondary}}>Открыть источник</Text>
-        </Pressable>
+        <NebulaAction icon="file-text" label="Открыть источник"
+          accessibilityLabel={"Открыть источник для "+item.claim.value}
+          disabled={busy} onPress={()=>void showSource(item)} />
       </View>)}
-      {cursor&&!busy?<Pressable accessibilityRole="button" accessibilityLabel="Показать ещё периоды и события"
-        onPress={()=>void load(mode,cursor)} style={touch}>
-        <Text style={{color:t.secondary}}>Показать ещё</Text>
-      </Pressable>:null}
+      {cursor&&!busy?<NebulaAction icon="chevron-down" label="Показать ещё"
+        accessibilityLabel="Показать ещё периоды и события"
+        onPress={()=>void load(mode,cursor)} />:null}
     </View>:null}
   </View>;
 }
