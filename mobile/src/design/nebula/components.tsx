@@ -48,10 +48,12 @@ export function NebulaSection({ title, children }: { title: string; children: Re
 export function NebulaAction({ icon, label, accessibilityLabel, onPress, disabled = false, variant = "quiet", testID }: {
   icon?: React.ComponentProps<typeof Feather>["name"];
   label: string; accessibilityLabel?: string; onPress: () => void; disabled?: boolean;
-  variant?: "quiet" | "primary" | "danger"; testID?: string;
+  variant?: "quiet" | "primary" | "danger" | "danger-solid"; testID?: string;
 }) {
   const c = useNebulaColors();
-  const foreground = variant === "primary" ? c.textOnAccent : variant === "danger" ? c.danger : c.text;
+  const foreground = variant === "primary" ? c.textOnAccent
+    : variant === "danger-solid" ? c.canvas
+    : variant === "danger" ? c.danger : c.text;
   return <Pressable testID={testID} accessibilityRole="button" accessibilityLabel={accessibilityLabel || label}
     accessibilityState={{ disabled }} disabled={disabled} onPress={onPress}
     style={({ pressed }) => ({
@@ -63,9 +65,10 @@ export function NebulaAction({ icon, label, accessibilityLabel, onPress, disable
       minWidth: nebulaTouch.minimum,
       paddingHorizontal: nebulaSpacing.md,
       borderRadius: nebulaRadii.field,
-      borderWidth: variant === "primary" ? 0 : 1,
+      borderWidth: variant === "primary" || variant === "danger-solid" ? 0 : 1,
       borderColor: c.border,
-      backgroundColor: variant === "primary" ? c.accent : c.surfaceElevated,
+      backgroundColor: variant === "primary" ? c.accent
+        : variant === "danger-solid" ? c.danger : c.surfaceElevated,
       opacity: disabled ? 0.5 : pressed ? 0.85 : 1,
     })}>
     {icon ? <Feather name={icon} size={20} color={foreground} /> : null}
