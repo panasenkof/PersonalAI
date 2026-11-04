@@ -65,6 +65,7 @@ export function MemoryNoteScreen() {
   const sourceAtOpen = useRef<{profile:string;body:string;kind:"assistant_reply"|"dialogue_summary"}|null>(null);
   const activeProfile = useRef(profile); activeProfile.current = profile;
   const extraction = useRef<AbortController | null>(null);
+  const repeatRequest = useRef(0);
   // Keep consent ephemeral and tied to ONE original + one expected record
   // version. Never persist providers, files or secrets in navigation params.
   const repeatApproval = useRef<null | {
@@ -72,7 +73,7 @@ export function MemoryNoteScreen() {
     start: () => void;
   }>(null);
   const [repeatMessage, setRepeatMessage] = useState<string | null>(null);
-  useEffect(() => { const off = onLocalMemorySessionChange(unlocked => { if (!unlocked) { extraction.current?.abort(); repeatApproval.current = null; setRepeatMessage(null); setCandidate(null); setRepeatFiles([]); setConfirmKind(null); } }); return () => { off(); extraction.current?.abort(); }; }, []);
+  useEffect(() => { const off = onLocalMemorySessionChange(unlocked => { if (!unlocked) { extraction.current?.abort(); repeatRequest.current++; repeatApproval.current = null; setRepeatMessage(null); setCandidate(null); setRepeatFiles([]); setConfirmKind(null); } }); return () => { off(); extraction.current?.abort(); }; }, []);
   const repository = useRef<SqliteMemoryRepository | null>(null); const alive = useRef(true); const pending = useRef(false);
   const loadSequence = useRef(0);
   const [editing, setEditing] = useState(!route.params?.entityId);
@@ -128,7 +129,7 @@ export function MemoryNoteScreen() {
   useEffect(() => {
     const sequence = ++loadSequence.current;
     const stillCurrent = () => alive.current && loadSequence.current === sequence && activeProfile.current === profile;
-    alive.current = true; setLoading(true); setError(""); setMetadataOpen(false); setFileContentOpen(false); repeatApproval.current = null; setRepeatMessage(null); setCandidate(null); setRepeatFiles([]);
+    alive.current = true; setLoading(true); setError(""); setMetadataOpen(false); setFileContentOpen(false); repeatRequest.current++; repeatApproval.current = null; setRepeatMessage(null); setCandidate(null); setRepeatFiles([]);
     void (async () => {
       if (!profile) throw new Error("profile_missing");
       const db = await localMemoryRepository(profile);
@@ -219,6 +220,9 @@ export function MemoryNoteScreen() {
   });
   const rerunAttachment = (attachment: Attachment) => {
     if (!selected || !profile || activeProfile.current !== profile || busy || dirty || selected.record_status !== "active") return;
+    // The second original wins even if an earlier preferences read resolves later.
+    const request = ++repeatRequest.current;
+    repeatApproval.current = null; setRepeatMessage(null);
     const note = selected;
     const kind = mediaKind({uri:"file:///original",name:attachment.name,mimeType:attachment.mime});
     const localOcr = getRussianOcrStatus().ready;
@@ -227,7 +231,7 @@ export function MemoryNoteScreen() {
     const mode: ImageExtractionMode = (kind === "document" || kind === "image") && localOcr ? "offline-ocr" :
       kind === "image" ? "document-text" : "describe";
     void mediaConnections(profile).then(settings => {
-      if (!alive.current || activeProfile.current !== profile) return;
+      if (!alive.current || activeProfile.current !== profile || request !== repeatRequest.current) return;
       const localSpeech = settings.fileAsrMode === "device" && getWhisperStatus().state === "ready";
       if (!remoteAllowed && (kind === "video" || (kind === "image" && !localOcr) ||
           (kind === "audio" && !localSpeech))) {
@@ -301,7 +305,7 @@ export function MemoryNoteScreen() {
         }),
       };
       setRepeatMessage(message);
-    }).catch(e => { if (alive.current) setError(memoryErrorMessage(e)); });
+    }).catch(e => { if (alive.current && request === repeatRequest.current) setError(memoryErrorMessage(e)); });
   };
   const acceptCandidate = () => void run(async db => {
     if (!profile || activeProfile.current !== profile || !selected || !candidate) return;
@@ -547,10 +551,10 @@ export function MemoryNoteScreen() {
       title="Распознать заново?" message={repeatMessage || ""}
       confirmLabel="Распознать" cancelLabel="Оставить прежний текст"
       disabled={busy || dirty}
-      onCancel={() => { repeatApproval.current = null; setRepeatMessage(null); }}
+      onCancel={() => { repeatRequest.current++; repeatApproval.current = null; setRepeatMessage(null); }}
       onConfirm={() => {
         const approved = repeatApproval.current;
-        repeatApproval.current = null; setRepeatMessage(null);
+        repeatRequest.current++; repeatApproval.current = null; setRepeatMessage(null);
         if (!approved) return;
         if (!recognitionApprovalMatches({
           approved, activeProfile: activeProfile.current, selected, busy, dirty,
