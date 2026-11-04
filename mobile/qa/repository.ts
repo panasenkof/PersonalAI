@@ -26,6 +26,44 @@ export async function localMemoryRepository(_profile: string): Promise<any> {
     createEntity: async (item: any, _writeAttachment?: any, card?: any) => { const n = { kind: "note", ...item, id: crypto.randomUUID(), record_status: "active", record_version: 1, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }; applyCard(n as EntityRecord, card); notes.unshift(n); save(); return n; },
     reviseEntity: async (id: string, version: number, payload: any, reason: string, collectionId?: string, _allowAgent?: boolean, _writeAttachment?: any, card?: any) => { const n = notes.find(n => n.id === id)!; if (n.record_version !== version) throw new Error("stale_memory_version"); Object.assign(n, { payload, title: payload.title, collection_id: collectionId || n.collection_id, record_version: version + 1 }); applyCard(n, card); history.push({ id: crypto.randomUUID(), entityId: id, version: n.record_version, created_at: new Date().toISOString(), reason }); save(); return n; },
     setEntityStatus: async (id: string, version: number, status: any) => { const n = notes.find(n => n.id === id)!; if (n.record_version !== version) throw new Error("stale_memory_version"); Object.assign(n, { record_status: status, record_version: version + 1 }); save(); return n; },
+    // QA-only replica of the existing changeNotes contract: verify the whole
+    // selection before mutating it, then emulate its status/payload transitions.
+    // This does NOT replace native SQLCipher/ACL/transaction tests.
+    changeNotes: async (action: string, selected: {id: string;record_version: number}[], targetCollectionId?: string) => {
+      if (!selected.length || selected.length > 100 || new Set(selected.map(n => n.id)).size !== selected.length)
+        throw new Error("invalid_note_selection");
+      const rows = selected.map(item => {
+        const note = notes.find(n => n.id === item.id);
+        if (!note || note.record_version !== item.record_version) throw new Error("stale_memory_version");
+        const status = note.record_status;
+        if (action === "restore" ? status !== "trashed" :
+            action === "unarchive" ? status !== "archived" :
+            action === "archive" ? status !== "active" :
+            !["active", "archived"].includes(status)) throw new Error("stale_note_status");
+        return note;
+      });
+      if (!["trash", "restore", "archive", "unarchive", "move"].includes(action))
+        throw new Error("unsupported_browser_note_action");
+      if (action === "move" && !collections.some(c => c.id === targetCollectionId))
+        throw new Error("invalid_collection");
+      const now = new Date().toISOString();
+      for (const note of rows) {
+        const payload: Record<string, unknown> = { ...note.payload };
+        if (action === "trash") { payload.pre_trash_status = note.record_status; payload.trashed_at = now; note.record_status = "trashed"; }
+        if (action === "restore") {
+          note.record_status = payload.pre_trash_status === "archived" ? "archived" : "active";
+          delete payload.trashed_at; delete payload.pre_trash_status;
+        }
+        if (action === "archive") note.record_status = "archived";
+        if (action === "unarchive") note.record_status = "active";
+        if (action === "move") note.collection_id = targetCollectionId!;
+        note.payload = payload;
+        note.record_version += 1;
+        note.updated_at = now;
+      }
+      save();
+      return "notes:" + action + ":qa";
+    },
     observations: async (entityId: string) => events.filter(e => e.entity_id === entityId),
     relationsForEntity: async (id: string) => relations.filter(r => r.source_entity_id === id || r.target_entity_id === id),
     revisions: async (_type: string, id: string) => history.filter(r => r.entityId === id),
