@@ -177,7 +177,7 @@ export class SqliteMemoryRepository implements MemoryRepository {
   /** M1/№79а: read-only review and persistent user exceptions; no automatic deletes. */
   hygiene() { return new MemoryHygieneService(this.db); }
   changeNotes(action: NoteAction, selection: NoteSelection[], collectionId?: string, hygiene?: NoteHygieneGuard) { return changeNotes(this.db, action, selection, collectionId, hygiene); }
-  purgeNotes(selection: NoteSelection[]) { return purgeNotes(this.db, selection); }
+  purgeNotes(selection: NoteSelection[], options?: { protectReferences?: boolean }) { return purgeNotes(this.db, selection, options); }
   /** All trashed note identities/versions, from one unlocked SQLCipher snapshot. */
   trashPurgeSnapshot() { return readTrashPurgeSnapshot(this.db); }
   /** The toolbar count is independent of the currently loaded 50-note page. */
