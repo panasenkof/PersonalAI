@@ -76,6 +76,10 @@ export function LocalMemoryScreen() {
   const hygieneGeneration = useRef(0);
   const [undo, setUndo] = useState("");
   const [search, setSearch] = useState(""); const [term, setTerm] = useState("");
+  // Async deletion checks the CURRENT UI scope, never a stale closure captured
+  // when the user first tapped the confirmation button.
+  const trashScope = useRef({ status, search, term, selecting, collectionId });
+  trashScope.current = { status, search, term, selecting, collectionId };
   const [notes, setNotes] = useState<EntityRecord[]>([]); const [more, setMore] = useState(false);
   const selectedNotes = contextNote ? [contextNote] : selectedIds.map(id => notes.find(n => n.id === id)).filter((note): note is EntityRecord => Boolean(note));
   const reviewNotes = suggestedReviewNotes ?? selectedNotes;
@@ -84,6 +88,14 @@ export function LocalMemoryScreen() {
   const [sectionOpen, setSectionOpen] = useState(false); const [sectionName, setSectionName] = useState("");
   const repository = useRef<SqliteMemoryRepository | null>(null); const generation = useRef(0);
   useEffect(() => { const timer = setTimeout(() => setTerm(search.trim()), 250); return () => clearTimeout(timer); }, [search]);
+  useEffect(() => {
+    // Invalidate a reviewed destructive action immediately when the user
+    // starts searching/selecting, not 250 ms later when term is debounced.
+    if (search || selecting) {
+      trashEpoch.current++;
+      setTrashPreview(null); setTrashConfirm(false);
+    }
+  }, [search, selecting]);
   useEffect(() => { purgeHasCompleted.current = false; setBusy(false); setCollectionId(undefined); setSearch(""); setStatus("active"); setCollections([]); setNotes([]); setCollectionCards([]); setSelectedIds([]); setSelecting(false); setCounts({}); setVisibleIds(new Set()); }, [profile]);
   useEffect(() => {
     // A first visit still defaults to a two-column library where space permits.
@@ -361,9 +373,13 @@ export function LocalMemoryScreen() {
         status !== "trashed" || selecting || search || term || collectionId || !localMemorySessionUnlocked()) return;
     trashRunning.current = true;
     const epoch = trashEpoch.current, request = generation.current, currentProfile = profile;
-    const allowed = () => epoch === trashEpoch.current && request === generation.current &&
-      viewProfile.current === currentProfile && status === "trashed" &&
-      !search && !term && !selecting && !collectionId && localMemorySessionUnlocked();
+    const allowed = () => {
+      const scope = trashScope.current;
+      return epoch === trashEpoch.current && request === generation.current &&
+        viewProfile.current === currentProfile && scope.status === "trashed" &&
+        !scope.search && !scope.term && !scope.selecting && !scope.collectionId &&
+        localMemorySessionUnlocked();
+    };
     setBusy(true); setError(""); setTrashProgress(0);
     try {
       // Every chunk contains only IDs and versions from the snapshot the user
@@ -512,7 +528,7 @@ export function LocalMemoryScreen() {
           </Pressable> : null}
         {notes.length && !selecting ? <View style={{ alignItems: "flex-start" }}>
           <NebulaAction icon="check-square" label="Выбрать записи"
-            disabled={loading} onPress={() => { setContextNote(null); setSelecting(true); }} />
+            disabled={loading || busy} onPress={() => { setContextNote(null); setSelecting(true); }} />
         </View> : null}
         {status === "trashed" ? <Text style={{ color: t.muted, fontSize: 13, lineHeight: 19 }}>
           Удалённые записи исключены из поиска агента. Их можно восстановить или удалить окончательно.
