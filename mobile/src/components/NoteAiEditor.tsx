@@ -55,7 +55,7 @@ export function NoteAiEditor({ profile, draft, allowed, onApply, onClose }: {
     {result ? <>
       <Text style={{ color: t.muted }}>Предпросмотр · ещё не сохранено</Text>
       <View style={{ alignItems: "flex-start" }}>
-        <NebulaAction icon="git-compare" label={showOriginal ? "Показать результат" : "Сравнить с исходным"}
+        <NebulaAction icon="columns" label={showOriginal ? "Показать результат" : "Сравнить с исходным"}
           accessibilityLabel={showOriginal ? "Показать результат" : "Сравнить с исходным"}
           onPress={() => setShowOriginal(v => !v)} />
       </View>
