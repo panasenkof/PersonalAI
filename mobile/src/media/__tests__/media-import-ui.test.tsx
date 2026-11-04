@@ -486,26 +486,26 @@ test('step 8 E protected collection blocks external OCR even when record is stan
 });
 
 
-test('step 8 E re-recognition never overwrites edited photographed text without confirmation',async()=>{
-  const confirm=jest.spyOn(Alert,'alert').mockImplementation(()=>undefined);
-  try{
-    (extractMedia as jest.Mock).mockResolvedValueOnce('Продукт: масло').mockResolvedValueOnce('Продукт: масло 200 г');
-    const ui=render(<MemoryImportScreen/>);
-    fireEvent.press(ui.getByLabelText('Выбрать файл для памяти'));
-    await waitFor(()=>expect(ui.getByText('photo.png')).toBeTruthy());
-    if(!ui.queryByLabelText('Прочитать текст фотографии через ИИ'))fireEvent.press(ui.getByLabelText('Распознавание'));
-    fireEvent.press(ui.getByLabelText('Прочитать текст фотографии через ИИ'));
-    fireEvent.press(ui.getByLabelText('Извлечь сведения из файла'));
-    await waitFor(()=>expect(ui.getByLabelText('Распознанное содержимое файла').props.value).toBe('Продукт: масло'));
-    fireEvent.changeText(ui.getByLabelText('Распознанное содержимое файла'),'Продукт: масло — исправлено пользователем');
-    fireEvent.press(ui.getByLabelText('Извлечь сведения из файла'));
-    expect(confirm).toHaveBeenCalledWith('Заменить полученный текст?',expect.any(String),expect.any(Array));
-    expect(extractMedia).toHaveBeenCalledTimes(1);
-    expect(ui.getByLabelText('Распознанное содержимое файла').props.value).toContain('исправлено пользователем');
-    const buttons=confirm.mock.calls.at(-1)?.[2] as Array<{text:string;onPress?:()=>void}>;
-    expect(buttons[0].text).toBe('Оставить текущий');
-    buttons[1].onPress?.();
-    await waitFor(()=>expect(extractMedia).toHaveBeenCalledTimes(2));
-    await waitFor(()=>expect(ui.getByLabelText('Распознанное содержимое файла').props.value).toBe('Продукт: масло 200 г'));
-  }finally{confirm.mockRestore();}
+test('step 8 E re-recognition protects edits with Nebula cancel and explicit confirm',async()=>{
+  (extractMedia as jest.Mock).mockResolvedValueOnce('Продукт: масло').mockResolvedValueOnce('Продукт: масло 200 г');
+  const ui=render(<MemoryImportScreen/>);
+  fireEvent.press(ui.getByLabelText('Выбрать файл для памяти'));
+  await waitFor(()=>expect(ui.getByText('photo.png')).toBeTruthy());
+  if(!ui.queryByLabelText('Прочитать текст фотографии через ИИ'))fireEvent.press(ui.getByLabelText('Распознавание'));
+  fireEvent.press(ui.getByLabelText('Прочитать текст фотографии через ИИ'));
+  fireEvent.press(ui.getByLabelText('Извлечь сведения из файла'));
+  await waitFor(()=>expect(ui.getByLabelText('Распознанное содержимое файла').props.value).toBe('Продукт: масло'));
+  fireEvent.changeText(ui.getByLabelText('Распознанное содержимое файла'),'Продукт: масло — исправлено пользователем');
+  fireEvent.press(ui.getByLabelText('Извлечь сведения из файла'));
+  expect(ui.getByText('Заменить распознанный текст?')).toBeTruthy();
+  expect(ui.getByText(/photo.png/)).toBeTruthy();
+  expect(extractMedia).toHaveBeenCalledTimes(1);
+  fireEvent.press(ui.getByLabelText('Оставить текущий текст'));
+  expect(ui.queryByText('Заменить распознанный текст?')).toBeNull();
+  expect(ui.getByLabelText('Распознанное содержимое файла').props.value).toContain('исправлено пользователем');
+  expect(extractMedia).toHaveBeenCalledTimes(1);
+  fireEvent.press(ui.getByLabelText('Извлечь сведения из файла'));
+  fireEvent.press(ui.getByLabelText('Распознать и заменить'));
+  await waitFor(()=>expect(extractMedia).toHaveBeenCalledTimes(2));
+  await waitFor(()=>expect(ui.getByLabelText('Распознанное содержимое файла').props.value).toBe('Продукт: масло 200 г'));
 });
