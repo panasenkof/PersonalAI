@@ -11,6 +11,7 @@ import { savedMemoryProfile } from "./active-profile";
 import { authenticateExistingMemory, authorizeLocalMemorySession, revokeLocalMemorySession, closeLocalMemory } from "../local-memory/storage";
 import { useTheme } from "../theme";
 import { ApplicationVisibility, applicationModalActive } from "./visibility";
+import { NebulaAction } from "../design/nebula/components";
 
 /** One application boundary owns the session. Keep work mounted behind an
  * opaque privacy cover; briefly switching apps never destroys chats or jobs.
@@ -108,9 +109,8 @@ export function AppLock({ children }: { children: React.ReactNode }) {
         <Text style={{ color: "#fff", fontWeight: "700" }}>Разблокировать</Text>
       </Pressable>}
       {notice ? <Text accessibilityRole="alert" style={{ color: t.err, textAlign: "center" }}>{notice}</Text> : null}
-      <Pressable accessibilityRole="button" onPress={() => void Linking.openSettings().catch(() => setNotice("Откройте настройки телефона и включите блокировку экрана."))} style={{ minHeight: 44, justifyContent: "center" }}>
-        <Text style={{ color: t.accent }}>Настройки телефона</Text>
-      </Pressable>
+      <NebulaAction icon="settings" label="Настройки телефона"
+        onPress={() => void Linking.openSettings().catch(() => setNotice("Откройте настройки телефона и включите блокировку экрана."))} />
     </View>
   );
   const hidden = !unlocked || covered;
