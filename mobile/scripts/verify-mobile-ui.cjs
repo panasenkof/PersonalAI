@@ -203,7 +203,7 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await prompt.fill(originalDraft);
       assert.equal(await page.getByLabel('Улучшить текст', { exact: true }).count(), 0);
       assert.equal(normalizationCalls, 0, 'Google does not run a cleanup LLM request');
-      const micButton = await page.getByLabel('Голосовой ввод', { exact: true }).boundingBox();
+      const micButton = await page.getByTestId('composer-actions').getByLabel('Голосовой ввод', { exact: true }).boundingBox();
       assert(micButton && micButton.width >= 44, 'Microphone remains tappable without improvement');
       let composerRowY = null;
       for (const label of ['Прикрепить файл к сообщению', 'Сделать снимок', 'Голосовой ввод', 'Отправить запрос']) {
@@ -217,7 +217,7 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByLabel('Очистить сообщение', { exact: true }).click();
       // Clear an active recording, then deliver the service's stale callback.
       await page.evaluate(() => { window.__qa.holdSpeech = true; });
-      await page.getByLabel('Голосовой ввод', { exact: true }).click();
+      await page.getByTestId('composer-actions').getByLabel('Голосовой ввод', { exact: true }).click();
       await page.getByLabel('Остановить диктовку', { exact: true }).waitFor();
       assert.equal(await page.getByLabel('Улучшить текст', { exact: true }).count(), 0, 'Google has no cleanup button during dictation');
       await page.evaluate(() => window.__speechEvent('result', { results: [{ transcript: 'Удалить эту диктовку' }], isFinal: false }));
@@ -226,7 +226,7 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.evaluate(() => window.__speechEvent('result', { results: [{ transcript: 'Старый результат' }], isFinal: true }));
       assert.equal(await prompt.inputValue(), '', 'A late transcription must not refill a cleared draft');
       await page.evaluate(() => { window.__qa.holdSpeech = false; });
-      await page.getByLabel('Голосовой ввод', { exact: true }).click();
+      await page.getByTestId('composer-actions').getByLabel('Голосовой ввод', { exact: true }).click();
       await page.waitForFunction(() => document.querySelector('[aria-label="Сообщение ассистенту"]').value.includes('Купить молоко'));
       assert.equal(replyNumber, 0, 'Dictation never autosends');
       await page.getByLabel('Прикрепить файл к сообщению', { exact: true }).click();
@@ -242,7 +242,7 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
 
       // Sending a draft also ends any still-active dictation for that draft.
       await page.evaluate(() => { window.__qa.holdSpeech = true; });
-      await page.getByLabel('Голосовой ввод', { exact: true }).click();
+      await page.getByTestId('composer-actions').getByLabel('Голосовой ввод', { exact: true }).click();
       await page.getByLabel('Остановить диктовку', { exact: true }).waitFor();
       await page.getByLabel('Отправить запрос', { exact: true }).click();
       await page.waitForFunction(() => window.__qa.speechAborts === 2);
@@ -308,7 +308,7 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByLabel(/back/i).click();
       await page.getByTestId('settings-overview').waitFor();
 
-      await page.getByLabel('Голосовой ввод', { exact: true }).click();
+      await page.getByTestId('composer-actions').getByLabel('Голосовой ввод', { exact: true }).click();
       await page.getByRole('radio', { name: 'Системное распознавание', exact: true }).waitFor();
       await page.getByRole('radio', { name: 'Системное распознавание', exact: true }).click();
       await page.waitForFunction(() => localStorage.getItem('pia.voice.engine.v1') === 'system' &&
@@ -346,7 +346,7 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByText('Лимит сохранён. Он действует для следующих сообщений.', { exact: true }).waitFor();
       await page.getByLabel(/back/i).click();
       await page.getByTestId('settings-overview').waitFor();
-      await page.getByLabel('Голосовой ввод', { exact: true }).click();
+      await page.getByTestId('composer-actions').getByLabel('Голосовой ввод', { exact: true }).click();
       await page.getByRole('radio', { name: 'Системное распознавание', exact: true }).waitFor();
       assert.equal(await page.getByRole('radio', { name: 'Системное распознавание', exact: true }).getAttribute('aria-checked'), 'true',
         'Selected engine survives full application reload');
