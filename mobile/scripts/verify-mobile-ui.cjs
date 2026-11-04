@@ -344,10 +344,14 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
         await viewSwitch.waitFor();
         assert.equal(await viewSwitch.getByText('Список', { exact: true }).count(), 1);
         await viewSwitch.click();
+        await page.waitForFunction(() => Object.entries(localStorage).some(([key, value]) =>
+          key.startsWith('persai.memory-library-view.v1.') && value === 'list'));
         const gridSwitch = page.getByLabel('Показать плитками', { exact: true });
         await gridSwitch.waitFor();
         assert.equal(await gridSwitch.getByText('Плитки', { exact: true }).count(), 1);
         await gridSwitch.click();
+        await page.waitForFunction(() => Object.entries(localStorage).some(([key, value]) =>
+          key.startsWith('persai.memory-library-view.v1.') && value === 'grid'));
       } else {
         assert.equal(await page.getByLabel('Показать списком', { exact: true }).count(), 0);
       }
