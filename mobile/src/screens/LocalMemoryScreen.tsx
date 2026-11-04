@@ -357,10 +357,20 @@ export function LocalMemoryScreen() {
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: nebulaSpacing.sm }}>
             {collectionCards.map(c => <Pressable key={c.id} accessibilityRole="button" accessibilityLabel={"Раздел " + c.name}
-              disabled={selecting} accessibilityState={{ disabled: selecting }} onPress={() => setCollectionId(c.id)} style={{ width: Math.min(width - 48, 180 * Math.min(fontScale, 1.5)), borderRadius: nebulaRadii.field, overflow: "hidden", backgroundColor: t.panel, borderWidth: 1, borderColor: t.line }}>
-              <View style={{ height: 80, backgroundColor: t.soft, justifyContent: "center", alignItems: "center" }}><Feather name={c.slug === "people" ? "users" : c.slug === "preferences" ? "heart" : c.slug === "events" ? "calendar" : "folder"} size={24} color={t.secondary} /></View>
-              <Text numberOfLines={2} style={{ color: t.text, fontWeight: "600", fontSize: 15, padding: nebulaSpacing.sm }}>{c.name}</Text>
-              <Text style={{ color: t.muted, fontSize: 13, paddingHorizontal: nebulaSpacing.sm, paddingBottom: nebulaSpacing.sm }}>Записей: {counts[c.id] ?? 0}</Text>
+              disabled={selecting} accessibilityState={{ disabled: selecting }} onPress={() => setCollectionId(c.id)}
+              style={{ width: Math.min(width - 48, 176 * Math.min(fontScale, 1.3)),
+                minHeight: nebulaTouch.minimum + nebulaSpacing.md, padding: nebulaSpacing.sm,
+                flexDirection: "row", alignItems: "center", gap: nebulaSpacing.sm,
+                borderRadius: nebulaRadii.field, backgroundColor: t.panel, borderWidth: 1, borderColor: t.line }}>
+              <View style={{ width: 40, height: 40, flexShrink: 0, borderRadius: nebulaRadii.chip,
+                backgroundColor: t.soft, justifyContent: "center", alignItems: "center" }}>
+                <Feather name={c.slug === "people" ? "users" : c.slug === "preferences" ? "heart" : c.slug === "events" ? "calendar" : "folder"}
+                  size={21} color={t.secondary} />
+              </View>
+              <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
+                <Text numberOfLines={2} style={{ color: t.text, fontWeight: "700", fontSize: 15 }}>{c.name}</Text>
+                <Text numberOfLines={1} style={{ color: t.muted, fontSize: 13 }}>Записей: {counts[c.id] ?? 0}</Text>
+              </View>
             </Pressable>)}
           </ScrollView>
         </> : null}
@@ -369,9 +379,10 @@ export function LocalMemoryScreen() {
             {term ? "Результаты поиска" : status === "archived" ? "Записи в архиве" :
               status === "trashed" ? "Удалённые записи" : collectionId ? "Записи раздела" : "Недавнее"}
           </Text>
-          {status === "active" ? <Pressable accessibilityRole="button" accessibilityLabel={grid ? "Показать списком" : "Показать плитками"} disabled={selecting} onPress={() => setGrid(v => !v)} style={{ ...button, paddingHorizontal: 12 }}>
-            <Feather name={grid ? "list" : "grid"} size={20} color={t.secondary} />
-          </Pressable> : null}
+          {status === "active" && width >= 350 && fontScale < 1.4 ?
+            <NebulaAction icon={grid ? "list" : "grid"} label={grid ? "Список" : "Плитки"}
+              accessibilityLabel={grid ? "Показать списком" : "Показать плитками"}
+              disabled={selecting} onPress={() => setGrid(v => !v)} /> : null}
         </View>
         {collectionId && status === "active" && !term && !selecting &&
             collections.some(c => c.id === collectionId && c.sensitivity === "standard") ?

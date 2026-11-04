@@ -60,6 +60,17 @@ test("all-records clears collection, archive and search from either entry", asyn
  await waitFor(() => v.getByLabelText("Все коллекции")); fireEvent.press(v.getByLabelText("Все коллекции")); fireEvent.press(v.getByLabelText("Раздел Все записи"));
  await waitFor(() => v.getByLabelText("Открыть заметку Вторая")); expect(v.getByLabelText("Открыть заметку Первая")).toBeTruthy(); expect(v.queryByLabelText("Открыть заметку Архивная")).toBeNull();
 });
+test("compact collection rows are labelled, touchable and keep the canonical destination", async () => {
+ const v = render(<LocalMemoryScreen />);
+ await waitFor(() => v.getByLabelText("Раздел Заметки"));
+ const card = v.getByLabelText("Раздел Заметки");
+ expect(card.props.style.flexDirection).toBe("row");
+ expect(card.props.style.minHeight).toBeGreaterThanOrEqual(48);
+ expect(v.getAllByText("Записей: 1").length).toBeGreaterThan(0);
+ fireEvent.press(card);
+ await waitFor(() => expect(v.getByLabelText("Ко всем записям")).toBeTruthy());
+ expect(v.getByLabelText("Открыть заметку Первая")).toBeTruthy();
+});
 test("one-tap restore targets only the versioned trashed note and keeps the existing writer", async () => {
  const v = render(<LocalMemoryScreen />);
  await waitFor(() => v.getByLabelText("Открыть заметку Первая"));
