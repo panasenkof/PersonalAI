@@ -540,6 +540,22 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.waitForFunction(() => document.querySelector('[aria-label="Распознанное содержимое файла"]').value.includes('индейка'));
       const resultBox = await page.getByLabel('Распознанное содержимое файла', { exact: true }).boundingBox();
       assert(resultBox && resultBox.height <= 190, 'Recognized text field must not expand the import form without bound');
+      // A second extraction must use the same contextual Nebula consent sheet,
+      // not a native white Alert; cancel protects edited text without another run.
+      await page.getByLabel('Распознанное содержимое файла', { exact: true }).fill('Исправлено вручную');
+      await page.getByLabel('Извлечь сведения из файла', { exact: true }).click();
+      await page.getByText('Заменить распознанный текст?', { exact: true }).waitFor();
+      assert.equal(await page.getByLabel('Распознанное содержимое файла', { exact: true }).inputValue(), 'Исправлено вручную');
+      await page.getByLabel('Оставить текущий текст', { exact: true }).click();
+      assert.equal(await page.getByLabel('Распознанное содержимое файла', { exact: true }).inputValue(), 'Исправлено вручную');
+      await page.getByLabel('Извлечь сведения из файла', { exact: true }).click();
+      await page.getByText('Заменить распознанный текст?', { exact: true }).waitFor();
+      if (process.env.SCREENSHOT_DIR) await page.screenshot({ animations: 'disabled', path: path.join(process.env.SCREENSHOT_DIR, `import-replace-confirm-${width}.png`) });
+      const replaceBox = await page.getByLabel('Распознать и заменить', { exact: true }).boundingBox();
+      assert(replaceBox && replaceBox.height >= 48 && replaceBox.x >= 0 && replaceBox.x + replaceBox.width <= width,
+        'Import destructive confirmation has a real reachable 48dp Nebula button');
+      await page.getByLabel('Распознать и заменить', { exact: true }).click();
+      await page.waitForFunction(() => document.querySelector('[aria-label="Распознанное содержимое файла"]').value.includes('индейка'));
       await page.getByLabel('Сохранить сведения в память', { exact: true }).click();
       await page.getByLabel(/Открыть заметку Рецепт: индейка/).waitFor();
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, `Overflow at ${width}px`);
