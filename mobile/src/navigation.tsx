@@ -62,7 +62,7 @@ function Tabs() {
         tabBarInactiveTintColor: colors.muted,
         tabBarLabelStyle: { fontSize: 11, fontWeight: "600" },
         // Respect Android gesture / three-button navigation in all themes.
-        tabBarStyle: { height: 64 + insets.bottom, paddingTop: 7,
+        tabBarStyle: { height: 76 + insets.bottom, paddingTop: 7,
           paddingBottom: insets.bottom + 7, backgroundColor: colors.panel,
           borderTopColor: colors.line, elevation: 0 },
         headerStyle: { backgroundColor: colors.panel },
