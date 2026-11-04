@@ -17,7 +17,7 @@ export function NebulaConfirmSheet({ visible, title, message, confirmLabel, canc
     <View style={{ gap: 10, marginTop: 4 }}>
       <NebulaAction icon="x" label={cancelLabel} disabled={disabled} onPress={onCancel} />
       <NebulaAction icon={danger ? "alert-triangle" : "check"} label={confirmLabel}
-        variant={danger ? "danger" : "primary"} disabled={disabled} onPress={onConfirm} />
+        variant={danger ? "danger-solid" : "primary"} disabled={disabled} onPress={onConfirm} />
     </View>
   </BottomSheet>;
 }
