@@ -53,7 +53,7 @@ export function VoiceModelCard({ defaultOpen = false }: { defaultOpen?: boolean 
 
   const summary = (selected === "whisper" ? "Whisper на телефоне" : googleOnAndroid ? "Google · системное окно · через интернет" : "Системное распознавание · через интернет") +
     (status.state === "ready" ? " · модель " + (WHISPER_CHOICES.find(c => c.id === status.id)?.name || "") + " скачана" : status.state === "downloading" ? ` · скачивается ${status.progress}%` : "");
-  return <Collapsible icon="mic" id="settings.voice" title="Голосовой ввод" summary={summary} defaultOpen={defaultOpen}>
+  return <Collapsible icon="mic" id="settings.voice" title="Голосовой ввод" summary={summary} defaultOpen={defaultOpen} forceOpen={defaultOpen}>
     <Text style={{ color: t.muted, lineHeight: 20 }}>Выберите способ диктовки для чата и заметок. Выбор сохраняется; скачанную модель Whisper можно использовать снова в любой момент.</Text>
     <View accessibilityRole="radiogroup" accessibilityLabel="Способ распознавания речи" style={{ gap: 8 }}>
       {([
