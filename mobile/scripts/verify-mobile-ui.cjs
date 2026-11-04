@@ -516,6 +516,14 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       for (const bottom of [0, 24, 48]) {
         await page.evaluate(value => window.__insets(value), bottom);
         await page.setViewportSize({ width, height: 470 });
+        // A native inset / viewport change is committed by React on the next
+        // layout frame. Do not measure the stale previous frame: await the
+        // required safe-area geometry, then assert the SAME visibility rule.
+        await page.waitForFunction((safeBottom) => {
+          const save = document.querySelector('[aria-label="Сохранить сведения в память"]');
+          const bounds = save?.getBoundingClientRect();
+          return bounds && bounds.y >= 0 && bounds.bottom <= innerHeight - safeBottom + 1;
+        }, bottom, { timeout: 5000 });
         const save = await page.getByLabel('Сохранить сведения в память', { exact: true }).boundingBox();
         assert(save && save.y >= 0 && save.y + save.height <= 470 - bottom + 1, 'Import save remains above system bars in a reduced viewport');
       }
