@@ -8,6 +8,7 @@ import { ActivityIndicator, BackHandler, FlatList, Pressable, ScrollView, Text, 
 import { useProfile } from "../profile/ProfileContext";
 import { BottomSheet } from "../components/BottomSheet";
 import { localMemoryRepository } from "../local-memory/repository";
+import { purgeConfirmedTrash, trashPurgeCountLabel, type TrashPurgeSnapshot } from "../local-memory/trash-clear";
 import type { SqliteMemoryRepository } from "../local-memory/repository";
 import type { CollectionRecord, EntityRecord } from "../local-memory/types";
 import { memoryErrorMessage } from "../local-memory/errors";
@@ -40,6 +41,14 @@ export function LocalMemoryScreen() {
   const [confirmation, setConfirmation] = useState<"trash" | "purge" | null>(null);
   const [contextNote, setContextNote] = useState<EntityRecord | null>(null);
   const [counts, setCounts] = useState<Record<string, number>>({});
+  const [trashCount, setTrashCount] = useState(0);
+  const [trashPreview, setTrashPreview] = useState<TrashPurgeSnapshot | null>(null);
+  const [trashConfirm, setTrashConfirm] = useState(false);
+  const [trashProgress, setTrashProgress] = useState(0);
+  const [trashMessage, setTrashMessage] = useState("");
+  // A session/profile/list change invalidates the approval before any next batch.
+  const trashEpoch = useRef(0);
+  const trashRunning = useRef(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [collectionMenu, setCollectionMenu] = useState(false);
   const [collectionCards, setCollectionCards] = useState<CollectionRecord[]>([]);
@@ -102,11 +111,12 @@ export function LocalMemoryScreen() {
   useFocusEffect(useCallback(() => {
     const request = ++generation.current; setLoading(true); setError("");
     if (profile) void localMemoryRepository(profile).then(async db => {
-      const [sections, page, totals] = await Promise.all([
+      const [sections, page, totals, deletedTotal] = await Promise.all([
         ensureSections(db), db.searchNotes(term, 50, 0, { collectionId, status }),
-        db.collectionNoteCounts(),
+        db.collectionNoteCounts(), status === "trashed" ? db.trashNoteCount() : Promise.resolve(0),
       ]);
       if (request !== generation.current) return;
+      setTrashCount(deletedTotal);
       setCounts(totals); repository.current = db; void db.lastNoteOperation().then(value => { if (request === generation.current) setUndo(value); }).catch(() => {}); setCollections(sections); setNotes(page); setMore(page.length === 50);
       const recentIds = [...new Set(page.map(n => n.collection_id))];
       const shownSections = [...sections].sort((a, b) => {
@@ -121,6 +131,9 @@ export function LocalMemoryScreen() {
   }, [profile, term, collectionId, status, retry]));
   useEffect(() => onLocalMemorySessionChange(unlocked => {
     if (!unlocked) {
+      trashEpoch.current++;
+      setTrashPreview(null); setTrashConfirm(false); setTrashProgress(0);
+      setTrashMessage(""); setTrashCount(0);
       hygieneGeneration.current++;
       setHygieneSuggestionsOpen(false); setHygieneSuggestions(null);
       setSuggestedReviewNotes(null); setHygieneReviewOpen(false);
@@ -274,7 +287,7 @@ export function LocalMemoryScreen() {
       if (profile) scheduleVectors(profile);
     } catch (e) { setError(memoryErrorMessage(e)); } finally { setBusy(false); }
   }
-  useEffect(() => { setSelectedIds([]); setSelecting(false); setActionsOpen(false); setConfirmation(null); setNotes([]); setContextNote(null); setMoveOpen(false); setMergeOpen(false); hygieneGeneration.current++; setHygieneReviewOpen(false); setHygieneSuggestionsOpen(false); setHygieneSuggestions(null); setSuggestedReviewNotes(null); setHygieneExcluded([]); setHygienePreview(null); setHygieneConfirm(false); setHygienePolicyItem(null); setHygieneAction("archive"); }, [profile, collectionId, term, status]);
+  useEffect(() => { trashEpoch.current++; setTrashPreview(null); setTrashConfirm(false); setTrashMessage(""); setTrashProgress(0); setSelectedIds([]); setSelecting(false); setActionsOpen(false); setConfirmation(null); setNotes([]); setContextNote(null); setMoveOpen(false); setMergeOpen(false); hygieneGeneration.current++; setHygieneReviewOpen(false); setHygieneSuggestionsOpen(false); setHygieneSuggestions(null); setSuggestedReviewNotes(null); setHygieneExcluded([]); setHygienePreview(null); setHygieneConfirm(false); setHygienePolicyItem(null); setHygieneAction("archive"); }, [profile, collectionId, term, status]);
   function openAll() { setStatus("active"); setCollectionId(undefined); setSearch(""); setTerm(""); setSelectedIds([]); setSelecting(false); }
   function openStatus(value: typeof status) { openAll(); setStatus(value); }
   const cancelSelection = useCallback(() => {
@@ -284,7 +297,7 @@ export function LocalMemoryScreen() {
     const sub = BackHandler.addEventListener("hardwareBackPress", () => {
       // A sheet or native keyboard handles its own Back; never change the area underneath.
       if (actionsOpen || moveOpen || mergeOpen || hygieneReviewOpen || hygieneSuggestionsOpen ||
-          addOpen || menuOpen || collectionMenu || sectionOpen) return false;
+          addOpen || menuOpen || collectionMenu || sectionOpen || trashPreview !== null) return false;
       if (selecting) {
         if (!busy) cancelSelection();
         return true;
@@ -301,7 +314,7 @@ export function LocalMemoryScreen() {
     });
     return () => sub.remove();
   }, [selecting, busy, actionsOpen, moveOpen, mergeOpen, hygieneReviewOpen,
-    hygieneSuggestionsOpen, addOpen, menuOpen, collectionMenu, sectionOpen, search, status, collectionId, cancelSelection]));
+    hygieneSuggestionsOpen, addOpen, menuOpen, collectionMenu, sectionOpen, trashPreview, search, status, collectionId, cancelSelection]));
   function toggleSelection(id: string) {
     if (busy || loading) return;
     if (!selectedIds.includes(id) && selectedIds.length >= 100) { setError("За один раз можно выбрать до 100 записей."); return; }
@@ -315,6 +328,68 @@ export function LocalMemoryScreen() {
       await repository.current.purgeNotes(selectedNotes);
       cancelSelection(); setConfirmation(null); setUndo(""); setRetry(n => n + 1);
     } catch (e) { setError(memoryErrorMessage(e)); } finally { setBusy(false); }
+  }
+  async function inspectWholeTrash() {
+    if (!repository.current || busy || trashRunning.current || loading ||
+        status !== "trashed" || selecting || search || term || collectionId || !localMemorySessionUnlocked()) return;
+    const epoch = ++trashEpoch.current, request = generation.current;
+    const currentProfile = profile, db = repository.current;
+    setBusy(true); setError(""); setTrashMessage(""); setTrashConfirm(false); setTrashPreview(null);
+    try {
+      const snapshot = await db.trashPurgeSnapshot();
+      if (epoch !== trashEpoch.current || request !== generation.current ||
+          viewProfile.current !== currentProfile || !localMemorySessionUnlocked()) return;
+      setTrashCount(snapshot.items.length);
+      if (!snapshot.items.length) {
+        setTrashMessage("Корзина пуста. Удалять нечего.");
+        setRetry(n => n + 1);
+      } else setTrashPreview(snapshot);
+    } catch (e) {
+      if (epoch === trashEpoch.current && request === generation.current)
+        setError("Не удалось проверить корзину: " + memoryErrorMessage(e));
+    } finally {
+      if (epoch === trashEpoch.current) setBusy(false);
+    }
+  }
+  async function emptyWholeTrash() {
+    const snapshot = trashPreview, db = repository.current;
+    if (!snapshot?.items.length || !db || !trashConfirm || busy || trashRunning.current ||
+        status !== "trashed" || selecting || search || term || collectionId || !localMemorySessionUnlocked()) return;
+    trashRunning.current = true;
+    const epoch = trashEpoch.current, request = generation.current, currentProfile = profile;
+    const allowed = () => epoch === trashEpoch.current && request === generation.current &&
+      viewProfile.current === currentProfile && status === "trashed" &&
+      !search && !term && !selecting && !collectionId && localMemorySessionUnlocked();
+    setBusy(true); setError(""); setTrashProgress(0);
+    try {
+      // Every chunk contains only IDs and versions from the snapshot the user
+      // reviewed. The canonical purgeNotes writer enforces CAS/status atomically.
+      const outcome = await purgeConfirmedTrash(
+        snapshot.items, batch => db.purgeNotes(batch), allowed,
+        count => { if (allowed()) setTrashProgress(count); },
+      );
+      if (!allowed()) return;
+      setTrashPreview(null); setTrashConfirm(false); setUndo("");
+      // Authoritative fresh read only. Never automatically repeat an unknown
+      // or failed commit, even when some confirmed batches already succeeded.
+      try {
+        const remaining = await db.trashNoteCount();
+        if (!allowed()) return;
+        setTrashCount(remaining);
+        setTrashMessage(outcome.error
+          ? `Подтверждено удаление ${outcome.confirmed} из ${outcome.total}. Операция остановлена. В корзине осталось ${remaining}. Проверьте состояние перед новым удалением.`
+          : remaining === 0
+            ? `Удалено ${trashPurgeCountLabel(outcome.confirmed)}. Корзина пуста.`
+            : `Удалено ${trashPurgeCountLabel(outcome.confirmed)}. В корзине осталось ${trashPurgeCountLabel(remaining)} (возможны новые записи). Для них нужно новое подтверждение.`);
+      } catch {
+        if (allowed()) setTrashMessage(
+          `Подтверждено удаление ${outcome.confirmed} из ${outcome.total}, но остаток проверить не удалось. Проверьте состояние корзины; удаление автоматически не повторялось.`);
+      }
+      if (allowed()) setRetry(n => n + 1);
+    } finally {
+      trashRunning.current = false;
+      if (allowed()) setBusy(false);
+    }
   }
   async function loadMore() {
     if (!repository.current || busy) return;
@@ -402,11 +477,16 @@ export function LocalMemoryScreen() {
             </Pressable>)}
           </ScrollView>
         </> : null}
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <Text style={{ flex: 1, color: t.text, fontSize: 18, fontWeight: "700" }}>
             {term ? "Результаты поиска" : status === "archived" ? "Записи в архиве" :
-              status === "trashed" ? "Удалённые записи" : collectionId ? "Записи раздела" : "Недавнее"}
+              status === "trashed" ? "Корзина · " + trashPurgeCountLabel(trashCount) : collectionId ? "Записи раздела" : "Недавнее"}
           </Text>
+          {status === "trashed" && !term && !search && !selecting && !collectionId &&
+            trashCount > 0 && !loading ? <NebulaAction testID="memory-empty-trash"
+              icon="trash-2" label="Очистить корзину" variant="danger"
+              accessibilityLabel="Очистить всю корзину" disabled={busy}
+              onPress={() => void inspectWholeTrash()} /> : null}
           {status === "active" && width >= 350 && fontScale < 1.4 ?
             <NebulaAction icon={grid ? "list" : "grid"} label={grid ? "Список" : "Плитки"}
               accessibilityLabel={grid ? "Показать списком" : "Показать плитками"}
@@ -426,7 +506,15 @@ export function LocalMemoryScreen() {
         </View> : null}
         {status === "trashed" ? <Text style={{ color: t.muted, fontSize: 13, lineHeight: 19 }}>
           Удалённые записи исключены из поиска агента. Их можно восстановить или удалить окончательно.
+          Команда «Очистить корзину» касается только этого профиля и требует отдельного подтверждения.
         </Text> : null}
+        {status === "trashed" && !term && !selecting && trashMessage ? <View style={{ gap: 8 }}>
+          <Text accessibilityLiveRegion="polite" style={{ color: t.text }}>{trashMessage}</Text>
+          <View style={{ alignItems: "flex-start" }}>
+            <NebulaAction icon="refresh-cw" label="Проверить состояние корзины" disabled={busy}
+              onPress={() => { setTrashMessage(""); setRetry(n => n + 1); }} />
+          </View>
+        </View> : null}
       {undo ? <Pressable disabled={busy || selecting} style={button} onPress={() => { if (!repository.current) return; setBusy(true); void repository.current.undoNotes(undo).then(() => { setUndo(""); setRetry(n => n + 1); if (profile) scheduleVectors(profile); }).catch(e => setError(memoryErrorMessage(e))).finally(() => setBusy(false)); }}><Text style={{ color: t.secondary }}>{noteUndoLabel(undo)}</Text></Pressable> : null}
     {error && !hygieneReviewOpen && !hygieneSuggestionsOpen ? <View style={{ paddingHorizontal: 18, gap: 8 }}><Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text><Pressable accessibilityRole="button" onPress={() => setRetry(n => n + 1)} style={button}><Text style={{ color: t.secondary }}>Повторить загрузку</Text></Pressable></View> : null}
     {loading ? <ActivityIndicator accessibilityLabel="Загрузка записей" /> : null}
@@ -452,6 +540,33 @@ export function LocalMemoryScreen() {
           : navigation.navigate("MemoryNote", { entityId: item.id })}
       /></View>}
       ListFooterComponent={more && !loading ? <Pressable accessibilityRole="button" accessibilityLabel="Показать ещё заметки" disabled={busy} onPress={() => void loadMore()} style={button}><Text style={{ color: t.secondary }}>{busy ? "Загружаю…" : "Показать ещё"}</Text></Pressable> : null} />
+      <BottomSheet visible={Boolean(trashPreview)} title={trashConfirm ? "Очистить корзину?" : "Проверка корзины"}
+        onClose={() => { if (busy) return; trashEpoch.current++; setTrashPreview(null); setTrashConfirm(false); }}>
+        {trashPreview ? <>
+          <Text style={{ color: t.text, fontSize: 17, lineHeight: 25 }}>
+            {trashConfirm
+              ? `Будут безвозвратно удалены ${trashPurgeCountLabel(trashPreview.items.length)} из корзины этого профиля.`
+              : `К удалению из корзины найдено ${trashPurgeCountLabel(trashPreview.items.length)}. Это весь список, а не только видимые 50.`}
+          </Text>
+          <Text style={{ color: t.muted, lineHeight: 22 }}>
+            Оригиналов: {trashPreview.originalCount}. Связанных отношений: {trashPreview.affectedRelationCount}.
+            Исходные файлы, история и связи удаляемых записей могут стать недоступными.
+            Экспортированные ранее копии не затрагиваются. Восстановить удалённое в приложении нельзя.
+          </Text>
+          {busy ? <Text accessibilityLiveRegion="polite" style={{ color: t.muted }}>
+            Подтверждено удаление {trashProgress} из {trashPreview.items.length}…
+          </Text> : null}
+          <NebulaAction icon="x" label="Отмена" accessibilityLabel="Отменить очистку корзины"
+            disabled={busy} onPress={() => { trashEpoch.current++; setTrashPreview(null); setTrashConfirm(false); }} />
+          {trashConfirm ? <NebulaAction icon="trash-2" variant="danger"
+            label={`Удалить ${trashPurgeCountLabel(trashPreview.items.length)}`}
+            accessibilityLabel="Подтвердить очистку всей корзины" disabled={busy}
+            onPress={() => void emptyWholeTrash()} /> :
+            <NebulaAction icon="alert-triangle" variant="danger" label="Продолжить к подтверждению"
+              accessibilityLabel="Проверить последствия очистки корзины"
+              disabled={busy} onPress={() => setTrashConfirm(true)} />}
+        </> : null}
+      </BottomSheet>
       <BottomSheet visible={actionsOpen && selectedNotes.length > 0} title={confirmation ? (confirmation === "trash" ? "В корзину?" : "Удалить навсегда?") : selectedNotes.length === 1 ? "Действия с записью" : `Действия · ${selectedNotes.length}`} onClose={() => { if (busy) return; if (confirmation) setConfirmation(null); else { setActionsOpen(false); setContextNote(null); } }}>
       {error ? <Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text> : null}
       <Text numberOfLines={2} style={{ color: t.muted }}>{selectedNotes.map(memoryDisplayTitle).join(", ")}</Text>
