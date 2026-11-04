@@ -299,7 +299,10 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await limitInput.fill('6');
       await page.getByLabel('Сохранить лимит обращений к LLM', { exact: true }).click();
       await page.getByText('Лимит сохранён. Он действует для следующих сообщений.', { exact: true }).waitFor();
-      await page.getByLabel('Сохранить лимит обращений к LLM', { exact: true }).scrollIntoViewIfNeeded();
+      // Scroll to the end of the actual detail container, so the user can
+      // fully reveal Save above the navigation gesture/three-button inset.
+      // scrollIntoViewIfNeeded alone may align it flush with the unsafe bottom.
+      await page.getByTestId('settings-detail').evaluate(el => { el.scrollTop = el.scrollHeight; });
       const saveLimitBox = await page.getByLabel('Сохранить лимит обращений к LLM', { exact: true }).boundingBox();
       assert(saveLimitBox && saveLimitBox.y >= 0 && saveLimitBox.y + saveLimitBox.height <= 580 - 24,
         'The detail Save clears the system inset in a reduced viewport');
