@@ -11,6 +11,7 @@ import {prepareSharedMaterial, type PreparedShare} from '../media/share-destinat
 import {ChatAttachmentList} from '../media/ChatAttachmentList';
 import {useTheme} from '../theme';
 import {nebulaSpacing, nebulaRadii, nebulaTouch} from '../design/nebula/tokens';
+import {NebulaAction} from '../design/nebula/components';
 
 export function ShareDestinationScreen(){
   const route=useRoute<RouteProp<RootStackParams,'ShareDestination'>>();
@@ -64,12 +65,9 @@ export function ShareDestinationScreen(){
       </View> : !material.attachments.length ? material.files.map((f,i)=><Text key={i} style={{color:t.text}}>{f.name}</Text>) : null}
       {material.chatStatuses?.some(item=>item.state==='error') ? <>
         <Text style={{color:t.muted}}>В чат попадут только готовые материалы. Неудавшиеся файлы можно проверить повторно или сохранить оригиналы в память.</Text>
-        <Pressable accessibilityRole="button" accessibilityLabel="Повторить подготовку файлов"
-          disabled={!available || handled.current} accessibilityState={{disabled:!available || handled.current}}
-          onPress={()=>setAttempt(n=>n+1)}
-          style={{minHeight:nebulaTouch.minimum,justifyContent:'center'}}>
-          <Text style={{color:t.accent,fontWeight:'600'}}>Повторить подготовку</Text>
-        </Pressable>
+        <NebulaAction icon="refresh-cw" label="Повторить подготовку"
+          accessibilityLabel="Повторить подготовку файлов" disabled={!available || handled.current}
+          onPress={()=>setAttempt(n=>n+1)}/>
       </> : null}
     </View> : null}
     <Pressable accessibilityRole="button" accessibilityLabel="Добавить входящее в чат" accessibilityState={{disabled:!available || Boolean(chatError)}} disabled={!available || Boolean(chatError)} onPress={toChat} style={{...button,backgroundColor:t.soft,opacity:available&&!chatError?1:.5}}>
@@ -82,7 +80,7 @@ export function ShareDestinationScreen(){
       <Text style={{color:t.muted}}>Предпросмотр новой заметки и выбор коллекции. Сохранение — отдельной кнопкой.</Text>
     </Pressable>
     {material?.memoryError ? <Text style={{color:t.muted}}>{material.memoryError}</Text> : null}
-    {error ? <><Text accessibilityRole="alert" style={{color:t.err}}>{error}</Text><Pressable accessibilityRole="button" accessibilityLabel="Повторить проверку входящего" onPress={()=>setAttempt(n=>n+1)} style={button}><Text style={{color:t.secondary}}>Повторить проверку</Text></Pressable></> : null}
-    <Pressable accessibilityRole="button" accessibilityLabel="Отменить приём материала" onPress={()=>navigation.goBack()} style={button}><Text style={{color:t.secondary}}>Отмена</Text></Pressable>
+    {error ? <><Text accessibilityRole="alert" style={{color:t.err}}>{error}</Text><NebulaAction icon="refresh-cw" label="Повторить проверку" accessibilityLabel="Повторить проверку входящего" onPress={()=>setAttempt(n=>n+1)}/></> : null}
+    <NebulaAction icon="x" label="Отмена" accessibilityLabel="Отменить приём материала" onPress={()=>navigation.goBack()}/>
   </ScrollView>;
 }

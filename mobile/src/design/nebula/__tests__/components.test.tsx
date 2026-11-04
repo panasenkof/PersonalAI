@@ -2,6 +2,7 @@ import React from "react";
 import { Text } from "react-native";
 import { fireEvent, render } from "@testing-library/react-native";
 import { NebulaAction, NebulaSection, NebulaSettingRow, NebulaSurface } from "../components";
+import { contrastRatio, nebulaColors } from "../tokens";
 
 jest.mock("@expo/vector-icons/Feather", () => () => null);
 
@@ -15,6 +16,35 @@ describe("Nebula base components", () => {
     expect(v.getByLabelText("Добавить файл").props.accessibilityState.disabled).toBe(true);
     fireEvent.press(v.getByLabelText("Добавить файл"));
     expect(onPress).toHaveBeenCalledTimes(1);
+  });
+  it("renders a true filled irreversible action, with contrast, and preserves cancellation", () => {
+    const onPress = jest.fn();
+    const view = render(<NebulaAction label="Удалить 101 запись" variant="danger-solid"
+      icon="trash-2" onPress={onPress} />);
+    const action = view.getByLabelText("Удалить 101 запись");
+    const style = typeof action.props.style === "function"
+      ? action.props.style({ pressed: false }) : action.props.style;
+    expect(style.backgroundColor).toBe(nebulaColors("dark").danger);
+    expect(style.borderWidth).toBe(0);
+    expect(contrastRatio(nebulaColors("dark").canvas, nebulaColors("dark").danger))
+      .toBeGreaterThan(4.5);
+    expect(view.getByText("Удалить 101 запись").props.style.color).toBe(nebulaColors("dark").canvas);
+    fireEvent.press(action);
+    expect(onPress).toHaveBeenCalledTimes(1);
+  });
+  it("outlined Nebula buttons have a visible accessible boundary in both palettes", () => {
+    for (const theme of ["dark", "light"] as const) {
+      const colors=nebulaColors(theme);
+      expect(contrastRatio(colors.actionOutline, colors.surfaceElevated))
+        .toBeGreaterThanOrEqual(3);
+    }
+    const view=render(<NebulaAction icon="x" label="Убрать" variant="quiet" onPress={()=>{}} />);
+    const action=view.getByLabelText("Убрать");
+    const style=typeof action.props.style==="function"
+      ? action.props.style({pressed:false}):action.props.style;
+    expect(style.minHeight).toBeGreaterThanOrEqual(48);
+    expect(style.borderWidth).toBe(1);
+    expect(style.borderColor).toBe(nebulaColors("dark").actionOutline);
   });
   it("presents settings as one navigable summary, not an inline settings form", () => {
     const open = jest.fn();

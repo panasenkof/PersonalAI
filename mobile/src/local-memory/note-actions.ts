@@ -4,6 +4,7 @@ import { withUnlockedTransaction } from './transaction';
 import { localMemorySessionUnlocked } from './storage';
 import { indexEntity, memoryText } from './search-index';
 import { MemoryConflictError } from './types';
+import { BULK_PURGE_NEEDS_REVIEW_SQL } from './bulk-purge-eligibility';
 
 type SQL = Pick<SQLiteDatabase, 'getFirstAsync' | 'getAllAsync' | 'runAsync' | 'execAsync'>;
 type Row = Record<string, any>;
@@ -126,12 +127,24 @@ export async function undoNotes(db: SQL, batch: string): Promise<void> {
 }
 
 /** Irreversible, explicit second confirmation in the UI; never operates on active notes. */
-export async function purgeNotes(db: SQL, selection: NoteSelection[]): Promise<void> {
-  if (!selection.length || selection.length > 100) throw new Error('Выберите от 1 до 100 записей.');
+export async function purgeNotes(db: SQL, selection: NoteSelection[], options?: { protectReferences?: boolean }): Promise<void> {
+  if (!selection.length || selection.length > 100 || new Set(selection.map(s=>s.id)).size !== selection.length ||
+      selection.some(s=>!s.id || !Number.isSafeInteger(s.record_version) || s.record_version < 1))
+    throw new Error('Выберите от 1 до 100 разных записей.');
   await withUnlockedTransaction(db, async tx => {
     for (const selected of selection) {
       const current = await snapshot(tx, selected.id);
-      if (current.record_version !== selected.record_version || current.record_status !== 'trashed') throw new MemoryConflictError('stale_memory_version');
+      if (current.record_version !== selected.record_version || current.record_status !== 'trashed' || current.domain !== 'notes')
+        throw new MemoryConflictError('stale_memory_version');
+      if (options?.protectReferences) {
+        // Preview eligibility can change without incrementing record_version
+        // when another record links to this source. Recheck atomically within
+        // the SAME canonical writer, before deleting ANY item in this batch.
+        const linked = await tx.getFirstAsync<{ id: string }>(
+          "SELECT e.id FROM memory_entities e WHERE e.id=? AND (" +
+          BULK_PURGE_NEEDS_REVIEW_SQL + ")", [selected.id]);
+        if (linked) throw new MemoryConflictError('trash_references_changed_repeat_preview');
+      }
     }
     for (const selected of selection) {
       // SQLCipher v13's immutable review history contains undo -> retract

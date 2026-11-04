@@ -1,6 +1,6 @@
 import React from "react";
 import { Alert, Platform } from "react-native";
-import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
+import { fireEvent, render, waitFor } from "@testing-library/react-native";
 import { VoiceModelCard } from "../components/VoiceModelCard";
 import { grantOnlineSpeechConsent, setVoiceEngine } from "../media/voice-engine";
 
@@ -12,6 +12,8 @@ jest.mock("../media/voice-engine", () => ({
   grantOnlineSpeechConsent: jest.fn(async () => { mockConsent.allowed = true; }),
   setVoiceEngine: jest.fn(async () => {}),
 }));
+// React Native Modal is native-owned; render the app sheet inline for button assertions.
+jest.mock("../components/BottomSheet", () => ({ BottomSheet: ({ visible, children }: any) => visible ? children : null }));
 jest.mock("../media/whisper", () => ({
   useWhisperStatus: () => ({ state: "ready", id: "base" }),
   downloadWhisper: jest.fn(), deleteWhisper: jest.fn(), cancelWhisperDownload: jest.fn(),
@@ -21,21 +23,22 @@ beforeEach(() => {
   jest.clearAllMocks(); mockConsent.allowed = false;
 });
 
-test("Google online permission is requested once in settings, not silently granted", async () => {
+test("Google online permission is requested once in Nebula settings, not silently granted", async () => {
   const alert = jest.spyOn(Alert, "alert").mockImplementation(() => {});
   const v = render(<VoiceModelCard defaultOpen />);
   await waitFor(() => expect(v.getByText(/Для первого запуска нажмите/)).toBeTruthy());
   fireEvent.press(v.getByLabelText("Google — системное окно"));
-  await waitFor(() => expect(alert).toHaveBeenCalledWith(
-    "Распознавание Google", expect.stringContaining("передаваться Google"), expect.any(Array),
-  ));
+  await waitFor(() => expect(v.getByLabelText("Разрешить онлайн-распознавание")).toBeTruthy());
+  expect(v.getByText(/Речь может передаваться Google через интернет/)).toBeTruthy();
+  expect(alert).not.toHaveBeenCalled();
   expect(grantOnlineSpeechConsent).not.toHaveBeenCalled();
   expect(setVoiceEngine).not.toHaveBeenCalled();
-  const buttons = alert.mock.calls[alert.mock.calls.length - 1][2] || [];
-  await act(async () => { buttons.find(button => button.text === "Разрешить")?.onPress?.(); });
+  fireEvent.press(v.getByLabelText("Разрешить онлайн-распознавание"));
   await waitFor(() => expect(grantOnlineSpeechConsent).toHaveBeenCalledTimes(1));
-  expect(setVoiceEngine).toHaveBeenCalledWith("system");
-  expect(v.queryByText(/Для первого запуска нажмите/)).toBeNull();
+  await waitFor(() => expect(setVoiceEngine).toHaveBeenCalledWith("system"));
+  await waitFor(() => expect(v.queryByText(/Для первого запуска нажмите/)).toBeNull());
+  expect(v.queryByLabelText("Разрешить онлайн-распознавание")).toBeNull();
+  expect(alert).not.toHaveBeenCalled();
   v.unmount();
   alert.mockRestore();
 });
@@ -44,11 +47,12 @@ test("canceling first Google online approval does not grant consent or switch en
   const alert = jest.spyOn(Alert, "alert").mockImplementation(() => {});
   const v = render(<VoiceModelCard defaultOpen />);
   fireEvent.press(v.getByLabelText("Google — системное окно"));
-  await waitFor(() => expect(alert).toHaveBeenCalled());
-  const buttons = alert.mock.calls[alert.mock.calls.length - 1][2] || [];
-  await act(async () => { buttons.find(button => button.text === "Отмена")?.onPress?.(); });
+  await waitFor(() => expect(v.getByLabelText("Разрешить онлайн-распознавание")).toBeTruthy());
+  fireEvent.press(v.getByLabelText("Отмена"));
+  expect(v.queryByLabelText("Разрешить онлайн-распознавание")).toBeNull();
   expect(grantOnlineSpeechConsent).not.toHaveBeenCalled();
   expect(setVoiceEngine).not.toHaveBeenCalled();
+  expect(alert).not.toHaveBeenCalled();
   v.unmount(); alert.mockRestore();
 });
 

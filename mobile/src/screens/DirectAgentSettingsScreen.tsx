@@ -4,7 +4,7 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useHeaderHeight } from "@react-navigation/elements";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, Switch, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, Switch, Text, TextInput, View } from "react-native";
 import { useProfile } from "../profile/ProfileContext";
 import { PROVIDER_PRESETS, apiTypeOf, isDeepSeekApi, connectionFromPreset, defaultBaseUrl, loadDirectConnections, newDirectConnection, providerFor, saveDirectConnections, searchKeyOf } from "../direct-agent/settings";
 import { checkConnection, checkWebSearch } from "../direct-agent/check";
@@ -16,6 +16,8 @@ import type { RootStackParams } from "../navigation";
 import { useTheme } from "../theme";
 import { connectionDraftFingerprint } from "./connectionDraft";
 import { Collapsible } from "../components/Collapsible";
+import { NebulaConfirmSheet } from "../components/NebulaConfirmSheet";
+import { NebulaAction } from "../design/nebula/components";
 
 const API_TYPES: Array<{ id: ApiType; name: string; hint: string }> = [
   { id: "openai", name: "OpenAI-совместимый", hint: "DeepSeek, YandexGPT, OpenRouter, OpenAI, Ollama, LM Studio и большинство других сервисов." },
@@ -41,6 +43,10 @@ export function DirectAgentSettingsScreen() {
   const pending = useRef(false);
   const baselineFingerprint = useRef("");
   const [leaving, setLeaving] = useState(false);
+  const [confirmation, setConfirmation] = useState<
+    { kind: "leave"; profile: string } | { kind: "remove"; profile: string; id: string; name: string } | null
+  >(null);
+  useEffect(() => { setConfirmation(null); }, [profile]);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [retry, setRetry] = useState(0);
@@ -68,17 +74,14 @@ export function DirectAgentSettingsScreen() {
         appliedPreset.current = presetId;
       } else { setValue(saved); setSelectedId(saved.activeId); }
     }).catch(() => { if (alive) setNotice("Не удалось открыть защищённые подключения."); });
-    return () => { alive = false; setValue(null); checkAbort.current?.abort(); setChecking(false); setCheck(null);
+    return () => { alive = false; setValue(null); setConfirmation(null); checkAbort.current?.abort(); setChecking(false); setCheck(null);
       searchAbort.current?.abort(); setSearching(false); setSearchCheck(null); };
   }, [profile, retry]));
 
   const dirty = Boolean(value && baselineFingerprint.current && connectionDraftFingerprint(value, selectedId) !== baselineFingerprint.current);
   usePreventRemove(!leaving && (busy || dirty), () => {
-    if (busy) { Alert.alert("Сохранение", "Дождитесь завершения сохранения настроек."); return; }
-    Alert.alert("Изменения не сохранены", "Закрыть настройки без сохранения?", [
-      { text: "Продолжить редактирование", style: "cancel" },
-      { text: "Закрыть без сохранения", style: "destructive", onPress: () => setLeaving(true) },
-    ]);
+    if (busy) { setNotice("Дождитесь завершения сохранения настроек."); return; }
+    if (profile) setConfirmation({ kind: "leave", profile });
   });
   useEffect(() => { if (leaving) navigation.goBack(); }, [leaving, navigation]);
 
@@ -89,6 +92,24 @@ export function DirectAgentSettingsScreen() {
   const keys: SearchKeys = selected ? selected.searchKeys ?? (search !== "builtin" && selected.webSearchKey ? { [search]: selected.webSearchKey } as SearchKeys : {}) : {};
 
   function choose(id: string) { setSelectedId(id); setCheck(null); setSearchCheck(null); }
+  function finishConfirmation() {
+    const request = confirmation;
+    setConfirmation(null);
+    if (!request || !profile || request.profile !== profile || busy) return;
+    if (request.kind === "leave") { setLeaving(true); return; }
+    // The draft can change while a modal is open, e.g. after a profile reload.
+    // Do not apply removal to a different selected connection.
+    if (!value || value.connections.length < 2 || selectedId !== request.id ||
+      !value.connections.some(c => c.id === request.id && c.name === request.name)) {
+      setNotice("Список подключений изменился. Проверьте его перед удалением.");
+      return;
+    }
+    const remaining = value.connections.filter(c => c.id !== request.id);
+    setValue({ activeId: remaining.some(c => c.id === value.activeId) ? value.activeId : remaining[0].id,
+      connections: remaining });
+    choose(remaining[0].id);
+    setNotice("Подключение убрано из списка. Для применения нажмите «Сохранить настройки».");
+  }
   function add(connection: DirectConnection) {
     setValue(v => v ? { ...v, connections: [...v.connections, connection] } : v); choose(connection.id);
   }
@@ -164,6 +185,7 @@ export function DirectAgentSettingsScreen() {
     borderWidth: 1, borderColor: on ? t.accent : t.line, backgroundColor: on ? t.panel : t.bg });
   const host = (url: string) => { try { return new URL(url).host; } catch { return url; } };
   return (
+    <>
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: t.bg }} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={headerHeight}>
     <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 24, gap: 12 }}>
       <Text style={{ color: t.text, fontSize: 28, fontWeight: "800" }}>Ваши модели</Text>
@@ -271,17 +293,24 @@ export function DirectAgentSettingsScreen() {
           <Text style={{ color: "#fff", fontWeight: "700" }}>{busy ? "Сохранение…" : "Сохранить настройки"}</Text>
         </Pressable>
         <Text style={small}>Сохранение делает выбранное подключение активным. Число обращений к модели на сообщение задаётся в Настройки → Работа ИИ. До 4000 выходных токенов на обращение (8000 для моделей с рассуждением); денежный бюджет задаётся у провайдера.</Text>
-        {value.connections.length > 1 ? <Pressable accessibilityRole="button" disabled={busy} accessibilityLabel="Удалить подключение" style={{ minHeight: 44, justifyContent: "center" }}
-          onPress={() => Alert.alert("Удалить подключение «" + selected.name + "»?", "Изменение вступит в силу после сохранения.", [
-            { text: "Отмена", style: "cancel" }, { text: "Удалить", style: "destructive", onPress: () => {
-              const rest = value.connections.filter(c => c.id !== selectedId);
-              setValue({ activeId: rest.some(c => c.id === value.activeId) ? value.activeId : rest[0].id, connections: rest }); choose(rest[0].id);
-            } },
-          ])}><Text style={{ color: t.err }}>Удалить это подключение</Text></Pressable> : null}
+        {value.connections.length > 1 ? <NebulaAction icon="trash-2" label="Удалить это подключение"
+          accessibilityLabel="Удалить подключение" variant="danger" disabled={busy}
+          onPress={() => { if (profile) setConfirmation({ kind: "remove", profile, id: selectedId, name: selected.name }); }} /> : null}
       </> : null}
       {notice && !value ? <><Text accessibilityRole="alert" style={{ color: t.err }}>{notice}</Text>
-        <Pressable accessibilityRole="button" onPress={() => setRetry(x => x + 1)} style={{ minHeight: 44 }}><Text style={{ color: t.secondary }}>Повторить загрузку</Text></Pressable></> : null}
+        <NebulaAction icon="refresh-cw" label="Повторить загрузку" onPress={() => setRetry(x => x + 1)} />
+      </> : null}
       </ScrollView>
     </KeyboardAvoidingView>
+    <NebulaConfirmSheet visible={confirmation !== null}
+      title={confirmation?.kind === "leave" ? "Изменения не сохранены" : "Убрать подключение?"}
+      message={confirmation?.kind === "leave"
+        ? "Несохранённые изменения настроек будут потеряны. Выйти без сохранения?"
+        : `Убрать подключение «${confirmation?.name || ""}» из списка? Оно будет удалено с телефона только после «Сохранить настройки».`}
+      cancelLabel={confirmation?.kind === "leave" ? "Продолжить редактирование" : "Оставить подключение"}
+      confirmLabel={confirmation?.kind === "leave" ? "Выйти без сохранения" : "Убрать из списка"}
+      danger={confirmation?.kind === "leave"} disabled={busy}
+      onCancel={() => setConfirmation(null)} onConfirm={finishConfirmation} />
+    </>
   );
 }

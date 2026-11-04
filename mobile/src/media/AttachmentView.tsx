@@ -1,5 +1,6 @@
 import { memoryErrorMessage } from "../local-memory/errors";
 import React, { useEffect, useState } from "react";
+import Feather from "@expo/vector-icons/Feather";
 import { Image, Pressable, Text, View } from "react-native";
 import { useIsFocused } from "@react-navigation/native";
 import { File } from "expo-file-system";
@@ -7,6 +8,7 @@ import { useVideoPlayer, VideoView } from "expo-video";
 import { useApplicationVisible } from "../security/visibility";
 import { useTheme } from "../theme";
 import { nebulaRadii, nebulaSpacing, nebulaTouch } from "../design/nebula/tokens";
+import { NebulaAction } from "../design/nebula/components";
 import { attachmentsForEntity, materializeAttachment } from "./attachments";
 import { localExtractionEvidence } from "../local-memory/extractions";
 import { renderPdfPage, deletePdfPagePreview } from "./pdf-page-preview";
@@ -76,26 +78,19 @@ function PdfOriginalPages({ uri }: { uri: string }) {
     </Text>
     {loading ? <Text accessibilityLiveRegion="polite" style={{ color: t.muted }}>Открываю страницу {page}…</Text> : null}
     {error ? <Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text> : null}
-    {error ? <Pressable accessibilityRole="button" accessibilityLabel="Повторить просмотр страницы PDF"
-      onPress={() => setAttempt(v => v + 1)} style={{ minHeight: nebulaTouch.minimum, justifyContent: "center" }}>
-      <Text style={{ color: t.secondary, fontWeight: "700" }}>Повторить просмотр</Text>
-    </Pressable> : null}
+    {error ? <NebulaAction icon="refresh-cw" label="Повторить просмотр"
+      accessibilityLabel="Повторить просмотр страницы PDF"
+      onPress={() => setAttempt(v => v + 1)} /> : null}
     {imageUri && !loading && !error ? <Image source={{ uri: imageUri }}
       accessibilityLabel={"Исходная страница PDF " + page} resizeMode="contain"
       onError={() => setError("Не удалось показать страницу PDF. Оригинал сохранён.")}
       style={{ width: "100%", height: 390, borderRadius: nebulaRadii.field }} /> : null}
     {pageCount !== null ? <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-      <Pressable accessibilityRole="button" accessibilityLabel="Предыдущая страница PDF"
-        disabled={page <= 1 || loading} onPress={() => setPage(p => Math.max(1, p - 1))}
-        style={{ minHeight: nebulaTouch.minimum, justifyContent: "center", opacity: page <= 1 || loading ? .4 : 1 }}>
-        <Text style={{ color: t.secondary }}>Назад</Text>
-      </Pressable>
+      <NebulaAction icon="chevron-left" label="Назад" accessibilityLabel="Предыдущая страница PDF"
+        disabled={page <= 1 || loading} onPress={() => setPage(p => Math.max(1, p - 1))} />
       <Text style={{ color: t.text, fontWeight: "700" }}>Страница {page} из {pageCount}</Text>
-      <Pressable accessibilityRole="button" accessibilityLabel="Следующая страница PDF"
-        disabled={page >= pageCount || loading} onPress={() => setPage(p => Math.min(pageCount, p + 1))}
-        style={{ minHeight: nebulaTouch.minimum, justifyContent: "center", opacity: page >= pageCount || loading ? .4 : 1 }}>
-        <Text style={{ color: t.secondary }}>Далее</Text>
-      </Pressable>
+      <NebulaAction icon="chevron-right" label="Далее" accessibilityLabel="Следующая страница PDF"
+        disabled={page >= pageCount || loading} onPress={() => setPage(p => Math.min(pageCount, p + 1))} />
     </View> : null}
   </View>;
 }
@@ -244,14 +239,10 @@ function AudioPreview({ uri, profile, attachment, onError }: {
               <Text style={{ color: t.text, lineHeight: 22 }}>{segment.text}</Text>
             </Pressable>;
         })}
-        {segments.length > 5 ? <Pressable accessibilityRole="button"
+        {segments.length > 5 ? <NebulaAction icon={showAllSegments ? "chevron-up" : "chevron-down"}
+          label={showAllSegments ? "Свернуть" : "Показать все фрагменты · " + segments.length}
           accessibilityLabel={showAllSegments ? "Свернуть транскрипт" : "Показать весь транскрипт"}
-          onPress={() => setShowAllSegments(value => !value)}
-          style={{ minHeight: nebulaTouch.minimum, justifyContent: "center" }}>
-          <Text style={{ color: t.secondary, fontWeight: "700" }}>
-            {showAllSegments ? "Свернуть" : "Показать все фрагменты · " + segments.length}
-          </Text>
-        </Pressable> : null}
+          onPress={() => setShowAllSegments(value => !value)} /> : null}
       </> : null}
     </View>
   </View>;
@@ -263,13 +254,14 @@ export function AttachmentView({ profile, entityId, verifiedOriginal, photoAttac
   const visible = focused && appVisible;
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [allShown, setAllShown] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [retry, setRetry] = useState(0);
 
   useEffect(() => {
     let alive = true;
-    setOpenId(null); setAttachments([]); setError(""); setLoading(true);
+    setOpenId(null); setAllShown(false); setAttachments([]); setError(""); setLoading(true);
     void attachmentsForEntity(profile, entityId)
       .then(items => { if (alive) setAttachments(items); })
       .catch(e => { if (alive) setError(memoryErrorMessage(e)); })
@@ -284,6 +276,10 @@ export function AttachmentView({ profile, entityId, verifiedOriginal, photoAttac
     item.entity_id === verifiedOriginal.recordId &&
     item.entity_id === entityId) : photoAttachmentId ? attachments.filter(item => item.id === photoAttachmentId && item.entity_id === entityId) : attachments;
   const missingVerified = Boolean((verifiedOriginal || photoAttachmentId) && !loading && !error && scoped.length !== 1);
+  // A proven original always has its exact one-item scope. Ordinary notes start
+  // with two compact file rows; disclosure never fetches or decrypts anything.
+  const hasMore = !verifiedOriginal && !photoAttachmentId && scoped.length > 2;
+  const listed = hasMore && !allShown ? scoped.slice(0, 2) : scoped;
   // Background, navigation away and app lock immediately disable all previews.
   useEffect(() => { if (!visible) setOpenId(null); }, [visible]);
   useEffect(() => { setOpenId(null); }, [verifiedOriginal?.attachmentId, verifiedOriginal?.recordVersion]);
@@ -294,15 +290,22 @@ export function AttachmentView({ profile, entityId, verifiedOriginal, photoAttac
     {loading ? <Text style={{ color: t.muted }}>Загружаю список вложений…</Text> : null}
     {error ? <>
       <Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text>
-      <Pressable accessibilityRole="button" accessibilityLabel="Повторить загрузку вложений" onPress={() => setRetry(x => x + 1)}
-        style={{ minHeight: nebulaTouch.minimum, justifyContent: "center" }}>
-        <Text style={{ color: t.secondary }}>Повторить загрузку</Text>
-      </Pressable>
+      <NebulaAction icon="refresh-cw" label="Повторить загрузку"
+        accessibilityLabel="Повторить загрузку вложений" onPress={() => setRetry(x => x + 1)} />
     </> : null}
     {missingVerified ? <Text accessibilityRole="alert" style={{ color: t.err }}>Источник изменён или недоступен. Повторите поиск.</Text> : null}
-    {scoped.map(attachment => <OneAttachment key={attachment.id} profile={profile} attachment={attachment} verified={verifiedOriginal}
+    {listed.map(attachment => <OneAttachment key={attachment.id} profile={profile} attachment={attachment} verified={verifiedOriginal}
       expanded={visible && (openId === attachment.id || (openId === null && attachment.id === photoAttachmentId))} visible={visible}
       onToggle={() => setOpenId(id => id === attachment.id || (id === null && attachment.id === photoAttachmentId) ? "" : attachment.id)} />)}
+    {hasMore ? <NebulaAction testID="note-attachments-expand"
+      icon={allShown ? "chevron-up" : "layers"}
+      label={allShown ? "Свернуть вложения" : `Показать остальные · ${scoped.length - 2}`}
+      onPress={() => {
+        // Closing a hidden attachment unmounts its one source-bound preview and
+        // invokes the existing temporary-file cleanup.
+        if (allShown) setOpenId(null);
+        setAllShown(!allShown);
+      }} /> : null}
   </View>;
 }
 
@@ -356,7 +359,15 @@ function OneAttachment({ profile, attachment, expanded, visible, onToggle, verif
       accessibilityState={{ expanded }} onPress={() => {
         if (expanded && error) { setAttempt(n => n + 1); return; }
         onToggle();
-      }} style={{ minHeight: nebulaTouch.minimum, justifyContent: "center" }}>
+      }} style={({ pressed }) => ({
+        alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: nebulaSpacing.xs,
+        minHeight: nebulaTouch.minimum, minWidth: nebulaTouch.minimum,
+        paddingHorizontal: nebulaSpacing.md, borderWidth: 1, borderColor: t.line,
+        borderRadius: nebulaRadii.field, backgroundColor: t.soft, opacity: pressed ? .8 : 1,
+      })}>
+      <Feather name={expanded ? "chevron-up" : kind === "audio" ? "play-circle" :
+        kind === "image" ? "image" : kind === "document" ? "file-text" : "video"}
+        color={t.secondary} size={19} />
       <Text style={{ color: t.secondary, fontWeight: "700" }}>{expanded ? error ? "Повторить просмотр" : "Закрыть просмотр" : action}</Text>
     </Pressable> : <Text style={{ color: t.muted }}>Оригинал сохранён в зашифрованной памяти. Встроенный просмотр этого формата пока не поддерживается.</Text>}
     {active && loading ? <Text style={{ color: t.muted }}>Подготавливаю защищённый просмотр…</Text> : null}

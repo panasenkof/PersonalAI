@@ -9,8 +9,7 @@ import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import React, { useEffect } from "react";
 import { createNavigationContainerRef } from "@react-navigation/native";
 import { IncomingShares } from "./media/IncomingShares";
-import { VisionModelCard } from "./components/VisionModelCard";
-import { ScrollView } from "react-native";
+import { SettingsDetailScreen, PhotoSearchSettingsScreen, type SettingsTopic } from "./screens/SettingsDetailScreen";
 import { clearAttachmentPreviews } from "./media/attachments";
 import type { VerifiedOriginalLocator } from "./local-memory/types";
 import type { ChatReplyLocator } from "./direct-agent/chat-response-note";
@@ -35,6 +34,7 @@ export type RootStackParams = {
   ModelConnections: { presetId?: string } | undefined;
   MemoryNote: { entityId?: string; collectionId?: string; photoAttachmentId?: string; verifiedOriginal?: VerifiedOriginalLocator; chatReply?: ChatReplyLocator };
   PhotoSearchSettings: undefined;
+  SettingsDetail: { topic: SettingsTopic };
   MemoryBackup: undefined;
   MemoryTemporalReview: { collectionId: string };
   MemoryImport: { incoming?: SharePayload[]; camera?: boolean; initialPhotoUri?:string; source?: "camera" | "gallery" | "photo" | "file" | "link"; collectionId?: string } | undefined;
@@ -43,13 +43,6 @@ export type RootStackParams = {
   /** Research-only native graphics screen (not a bottom tab). */
   NebulaLab: undefined;
 };
-function PhotoSearchSettings() {
-  const t = useTheme();
-  const insets = useSafeAreaInsets();
-  return <ScrollView style={{flex:1,backgroundColor:t.bg}} contentContainerStyle={{padding:16,paddingBottom:insets.bottom+16}}>
-    <VisionModelCard defaultOpen />
-  </ScrollView>;
-}
 const navigationRef = createNavigationContainerRef<RootStackParams>();
 const Stack = createNativeStackNavigator<RootStackParams>();
 const Tab = createBottomTabNavigator<TabParams>();
@@ -103,7 +96,10 @@ function ThemedRootNavigator() {
         <Stack.Screen name="ShareDestination" component={ShareDestinationScreen} options={{ title: "Полученный материал" }} />
         <Stack.Screen name="MemoryImport" component={MemoryImportScreen} options={{ title: "Добавить в память" }} />
         <Stack.Screen name="MemoryNote" component={MemoryNoteScreen} options={{ title: "Запись" }} />
-        <Stack.Screen name="PhotoSearchSettings" component={PhotoSearchSettings} options={{title:"Поиск фотографий"}} />
+        <Stack.Screen name="PhotoSearchSettings" component={PhotoSearchSettingsScreen} options={{title:"Поиск фотографий"}} />
+        <Stack.Screen name="SettingsDetail" component={SettingsDetailScreen}
+          options={({ route }) => ({ title: ({ voice: "Голосовой ввод", "smart-search": "Умный поиск",
+            limits: "Работа ИИ", photos: "Фото и поиск", media: "Распознавание файлов" } as Record<SettingsTopic, string>)[route.params.topic] })} />
         <Stack.Screen name="MemoryBackup" component={MemoryBackupScreen} options={{ title: "Резервные копии" }} />
         <Stack.Screen name="MemoryTemporalReview" component={MemoryTemporalReviewScreen} options={{ title: "На проверке" }} />
         <Stack.Screen name="ModelConnections" component={DirectAgentSettingsScreen} options={{ title: "Модели и подключения" }} />

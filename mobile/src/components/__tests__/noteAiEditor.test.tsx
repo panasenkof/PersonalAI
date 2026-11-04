@@ -2,6 +2,7 @@ import React from "react";
 import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 import { NoteAiEditor } from "../NoteAiEditor";
 import { editNote } from "../../direct-agent/edit-note";
+jest.mock("@expo/vector-icons/Feather", () => () => null);
 jest.mock("../../direct-agent/edit-note", () => ({ editNote: jest.fn() }));
 jest.mock("../../direct-agent/settings", () => ({ loadDirectSettings: jest.fn(async () => ({})) }));
 jest.mock("@react-navigation/native", () => ({ useIsFocused: () => true }));
@@ -46,4 +47,20 @@ test("editing draft while preview is open prevents stale Apply", async () => {
   screen.rerender(<NoteAiEditor profile="p" draft={{ ...original, body: "Новая ручная правка" }} allowed onApply={onApply} onClose={onClose} />);
   fireEvent.press(screen.getByLabelText("Применить правку ИИ"));
   expect(onApply).not.toHaveBeenCalled(); expect(screen.getByText("Заметка изменилась. Повторите запрос.")).toBeTruthy();
+});
+
+test("preview and editing commands remain distinct accessible buttons", async () => {
+  edit.mockResolvedValue(edited);
+  const screen=render(<NoteAiEditor profile="p" draft={original} allowed onApply={jest.fn()} onClose={jest.fn()} />);
+  fireEvent.changeText(screen.getByLabelText("Команда для редактирования заметки"), "Исправь ошибки");
+  fireEvent.press(screen.getByLabelText("Запросить правку ИИ"));
+  await waitFor(() => expect(screen.getByLabelText("Сравнить с исходным")).toBeTruthy());
+  expect(screen.getByLabelText("Сравнить с исходным").props.accessibilityRole).toBe("button");
+  fireEvent.press(screen.getByLabelText("Сравнить с исходным"));
+  expect(screen.getByTestId("note-ai-preview").props.children).toBe(original.body);
+  fireEvent.press(screen.getByLabelText("Показать результат"));
+  expect(screen.getByTestId("note-ai-preview").props.children).toBe(edited.body);
+  fireEvent.press(screen.getByLabelText("Изменить команду"));
+  expect(screen.queryByTestId("note-ai-preview")).toBeNull();
+  expect(screen.getByLabelText("Запросить правку ИИ")).toBeTruthy();
 });

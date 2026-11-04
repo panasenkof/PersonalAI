@@ -35,6 +35,113 @@ class FakeSqlite {
   }
 }
 
+test("trash preview is a single read-only SQL snapshot with only trashed note versions", async () => {
+  const fake = new FakeSqlite();
+  const repo = new SqliteMemoryRepository(fake as never);
+  const col = await repo.createCollection({ name: "Заметки", slug: "notes", sensitivity: "standard" });
+  const one = await repo.createEntity({ collection_id: col.id, domain: "notes", title: "One", payload: { body: "one" } });
+  const two = await repo.createEntity({ collection_id: col.id, domain: "notes", title: "Two", payload: { body: "two" } });
+  await repo.changeNotes("trash", [{ id: one.id, record_version: one.record_version }]);
+  const expected = await repo.entity(one.id);
+  const snapshot = await repo.trashPurgeSnapshot();
+  expect(snapshot.items).toEqual([{ id: one.id, record_version: expected!.record_version }]);
+  expect(snapshot.originalCount).toBe(0);
+  expect(snapshot.affectedRelationCount).toBe(0);
+  expect(snapshot.totalCount).toBe(1);
+  expect(snapshot.protectedCount).toBe(0);
+  expect(await repo.trashNoteCount()).toBe(1);
+  expect(snapshot.items.some(row => row.id === two.id)).toBe(false);
+  // Preview does not mutate any record; a later restore invalidates the CAS.
+  expect((await repo.entity(one.id))!.record_status).toBe("trashed");
+  await repo.changeNotes("restore", snapshot.items);
+  await expect(repo.purgeNotes(snapshot.items)).rejects.toBeInstanceOf(MemoryConflictError);
+  expect((await repo.entity(one.id))!.record_status).toBe("active");
+  expect(await repo.trashNoteCount()).toBe(0);
+});
+
+
+test("03.4: a permanent purge cannot resurrect a stale Undo after repository reopening", async () => {
+  const fake = new FakeSqlite();
+  const repo = new SqliteMemoryRepository(fake as never);
+  const col = await repo.createCollection({ name:"Заметки", slug:"notes", sensitivity:"standard" });
+  const a = await repo.createEntity({ collection_id:col.id, domain:"notes", title:"А", payload:{ body:"one" } });
+  const b = await repo.createEntity({ collection_id:col.id, domain:"notes", title:"Б", payload:{ body:"two" } });
+  const batch = await repo.changeNotes("trash", [
+    {id:a.id,record_version:a.record_version}, {id:b.id,record_version:b.record_version},
+  ]);
+  expect(await repo.lastNoteOperation()).toBe(batch);
+  const aAfter = await repo.entity(a.id);
+  await repo.purgeNotes([{id:a.id,record_version:aAfter!.record_version}]);
+  const reopened = new SqliteMemoryRepository(fake as never);
+  expect(await reopened.lastNoteOperation()).toBe("");
+  const bAfter = await reopened.entity(b.id);
+  expect(bAfter?.record_status).toBe("trashed");
+  // A single-note purge also leaves no impossible undo action on next launch.
+  await reopened.purgeNotes([{id:b.id,record_version:bAfter!.record_version}]);
+  expect(await (new SqliteMemoryRepository(fake as never)).lastNoteOperation()).toBe("");
+});
+
+
+test("03.4: global purge excludes linked note, rechecks new links in writer, preserves unrelated originals", async()=>{
+  const fake=new FakeSqlite(), repo=new SqliteMemoryRepository(fake as never);
+  await fake.execAsync("PRAGMA foreign_keys=ON");
+  const col=await repo.createCollection({name:"Раздел",slug:"notes",sensitivity:"standard"});
+  const active=await repo.createEntity({collection_id:col.id,domain:"notes",title:"Active",payload:{body:"keep"}});
+  const linked=await repo.createEntity({collection_id:col.id,domain:"notes",title:"Linked",payload:{body:"relation"}});
+  const ordinary=await repo.createEntity({collection_id:col.id,domain:"notes",title:"Ordinary",payload:{body:"delete"}});
+  await repo.changeNotes("trash", [
+    {id:linked.id,record_version:1},{id:ordinary.id,record_version:1},
+  ]);
+  await fake.runAsync(
+    "INSERT INTO memory_relations(id,source_entity_id,target_entity_id,kind,created_at) VALUES(?,?,?,?,?)",
+    ["link-kept",active.id,linked.id,"related_to","2026-11-04T00:00:00Z"]);
+  await fake.runAsync(
+    "INSERT INTO memory_attachments(id,entity_id,name,mime,size,created_at) VALUES(?,?,?,?,?,?)",
+    ["original-kept",active.id,"photo.jpg","image/jpeg",12,"2026-11-04T00:00:00Z"]);
+  const snapshot=await repo.trashPurgeSnapshot();
+  expect(snapshot.totalCount).toBe(2);
+  expect(snapshot.protectedCount).toBe(1);
+  expect(snapshot.items).toEqual([{id:ordinary.id,record_version:2}]);
+  expect(snapshot.originalCount).toBe(0);
+  // New relation introduced after preview does not increment the note version.
+  await fake.runAsync(
+    "INSERT INTO memory_relations(id,source_entity_id,target_entity_id,kind,created_at) VALUES(?,?,?,?,?)",
+    ["late-link",active.id,ordinary.id,"related_to","2026-11-04T00:00:00Z"]);
+  await expect(repo.purgeNotes(snapshot.items,{protectReferences:true}))
+    .rejects.toBeInstanceOf(MemoryConflictError);
+  expect((await repo.entity(ordinary.id))?.record_status).toBe("trashed");
+  await fake.runAsync("DELETE FROM memory_relations WHERE id=?",["late-link"]);
+  await repo.purgeNotes(snapshot.items,{protectReferences:true});
+  expect(await repo.entity(ordinary.id)).toBeNull();
+  expect((await repo.entity(linked.id))?.record_status).toBe("trashed");
+  expect((await repo.entity(active.id))?.record_status).toBe("active");
+  expect((await fake.getFirstAsync<{id:string}>(
+    "SELECT id FROM memory_attachments WHERE id=?",["original-kept"]))?.id).toBe("original-kept");
+  expect((await fake.getFirstAsync<{id:string}>(
+    "SELECT id FROM memory_relations WHERE id=?",["link-kept"]))?.id).toBe("link-kept");
+  expect(await fake.getFirstAsync("PRAGMA foreign_key_check")).toBeNull();
+});
+
+test("03.4: user-selected profile identity is never silently unbound by global purge", async()=>{
+  const fake=new FakeSqlite(),repo=new SqliteMemoryRepository(fake as never);
+  await fake.execAsync("PRAGMA foreign_keys=ON");
+  const col=await repo.createCollection({name:"Люди",slug:"people",sensitivity:"standard"});
+  const person=await repo.createEntity({collection_id:col.id,domain:"notes",kind:"person",title:"Я",payload:{body:"profile"}});
+  await fake.runAsync(
+    "INSERT INTO memory_profile_self(slot,person_id,binding_version,actor_kind,updated_at) VALUES(1,?,1,'user',?)",
+    [person.id,"2026-11-04T00:00:00Z"]);
+  await repo.changeNotes("trash",[{id:person.id,record_version:person.record_version}]);
+  const preview=await repo.trashPurgeSnapshot();
+  expect(preview.totalCount).toBe(1);
+  expect(preview.protectedCount).toBe(1);
+  expect(preview.items).toEqual([]);
+  await expect(repo.purgeNotes([{id:person.id,record_version:2}],{protectReferences:true}))
+    .rejects.toBeInstanceOf(MemoryConflictError);
+  expect((await fake.getFirstAsync<{person_id:string}>(
+    "SELECT person_id FROM memory_profile_self WHERE slot=1"))?.person_id).toBe(person.id);
+  expect((await repo.entity(person.id))?.record_status).toBe("trashed");
+});
+
 test("creates offline note, edits with CAS, stores immutable history and updates full-text search", async () => {
   const fake = new FakeSqlite();
   const repo = new SqliteMemoryRepository(fake as never);

@@ -1,4 +1,5 @@
 import { useNavigation, useRoute, usePreventRemove } from "@react-navigation/native";
+import type { NavigationAction } from "@react-navigation/native";
 import type { RouteProp } from "@react-navigation/native";
 import { localMemoryRepository } from "../local-memory/repository";
 import { ensureSections } from "../local-memory/sections";
@@ -34,6 +35,7 @@ import { withNativeInteraction } from "../security/native-interaction";
 import { memoryErrorMessage } from "../local-memory/errors";
 import { useTheme } from "../theme";
 import { BottomSheet } from "../components/BottomSheet";
+import { NebulaConfirmSheet } from "../components/NebulaConfirmSheet";
 import { NoteEditorSection } from "../design/nebula/NoteEditorSection";
 import { NebulaAction } from "../design/nebula/components";
 import { ImportFileSummary } from "../design/nebula/ImportFileSummary";
@@ -72,11 +74,29 @@ export function MemoryImportScreen() {
   const [collections, setCollections] = useState<CollectionRecord[]>([]);
   const [collectionId, setCollectionId] = useState("");
   const [leaving, setLeaving] = useState(false);
+  const leaveAction = useRef<NavigationAction | null>(null);
+  const leaveDispatched = useRef(false);
+  const [leaveApproval, setLeaveApproval] = useState(false);
+  const [skipApproval, setSkipApproval] = useState<{ profile: string; position: number } | null>(null);
   const [prepareAttempt, setPrepareAttempt] = useState(0);
   const [preparing, setPreparing] = useState(false);
   const whisper = useWhisperStatus();
   const russianOcr = useRussianOcrStatus();
   const t = useTheme();
+  // Shared visual treatment for mutually exclusive choices in this form.
+  // Selection changes only the user's existing local draft, never saves or
+  // uploads anything without the canonical operation and confirmation.
+  const choiceStyle = (selected: boolean, disabled = false) => ({
+    minHeight: 48,
+    justifyContent: "center" as const,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    borderWidth: selected ? 2 : 1,
+    borderColor: selected ? t.accent : t.line,
+    backgroundColor: selected ? t.soft : t.panel,
+    opacity: disabled ? 0.5 : 1,
+  });
   const header = useHeaderHeight(); const insets = useSafeAreaInsets();
   const profile = useProfile();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParams>>();
@@ -96,6 +116,8 @@ export function MemoryImportScreen() {
   const [body, setBody] = useState("");
   const [extractedText, setExtractedText] = useState("");
   const [notice, setNotice] = useState("");
+  const [replacementApproval, setReplacementApproval] = useState<{ scope: string; label: string } | null>(null);
+  const [audioApproval, setAudioApproval] = useState<{ scope: string; service: string; model: string; replaced: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
   const alive = useRef(true);
   const controller = useRef<AbortController | null>(null);
@@ -140,11 +162,29 @@ export function MemoryImportScreen() {
     return () => { cancelled = true; off(); cleanup(); };
   }, [incoming, position, prepareAttempt]);
   usePreventRemove(!leaving && Boolean(incoming || file || body || extractedText || linkDraft.trim()), ({ data }) => {
-    if (busy) { setNotice("Дождитесь завершения операции или остановите её."); return; }
-    Alert.alert("Закрыть без сохранения?", "Несохранённые материалы будут отменены.", [{ text: "Продолжить", style: "cancel" }, { text: "Закрыть", style: "destructive", onPress: () => navigation.dispatch(data.action) }]);
+    if (busy || preparing) { setNotice("Дождитесь завершения операции или остановите её."); return; }
+    leaveAction.current = data.action;
+    setLeaveApproval(true);
   });
-  useEffect(() => { if (leaving) navigation.goBack(); }, [leaving, navigation]);
-  useEffect(() => onLocalMemorySessionChange(unlocked => { if (!unlocked) controller.current?.abort(); }), []);
+  useEffect(() => {
+    if (!leaving || leaveDispatched.current) return;
+    leaveDispatched.current = true;
+    const original = leaveAction.current;
+    leaveAction.current = null;
+    if (original) navigation.dispatch(original);
+    else navigation.goBack();
+  }, [leaving, navigation]);
+  useEffect(() => onLocalMemorySessionChange(unlocked => {
+    if (!unlocked) {
+      controller.current?.abort(); leaveAction.current = null;
+      setLeaveApproval(false); setSkipApproval(null); setAudioApproval(null); setReplacementApproval(null);
+    }
+  }), []);
+  useEffect(() => {
+    leaveAction.current = null; setLeaveApproval(false);
+    setSkipApproval(null); setAudioApproval(null); setReplacementApproval(null);
+  }, [profile]);
+  useEffect(() => { setSkipApproval(null); setAudioApproval(null); setReplacementApproval(null); }, [position, prepareAttempt]);
   // Both target record AND collection must permit provider egress.
   const collectionAllowsProvider = collections.find(c => c.id === collectionId)?.sensitivity === "standard";
   const providerApproved = classification === "standard" && collectionAllowsProvider;
@@ -317,15 +357,21 @@ export function MemoryImportScreen() {
     } catch (e) { if (alive.current) setNotice((e as Error).message); }
     finally { if (alive.current) setPreparing(false); }
   }
+  // Ephemeral scope for a particular draft, set of originals, extraction method
+  // and current user edits. No consent is persisted or carried between files.
+  const replacementScope = () => JSON.stringify({ profile,
+    files: files.map(item => [item.uri, item.name, item.size]), extractedText,
+    imageExtractionMode, recognitionMode, classification, collectionId,
+    connectionId, speechConnectionId, fileAsrMode,
+    speechService: speechSelected?.name, speechModel: speechSelected?.transcriptionModel,
+  });
   async function extract(confirmedReplacement = false, onlineConsent = false) {
     if (!file || !canExtract || busy || controller.current) return;
-    // Reprocessing a corrected document must not silently erase user edits.
-    // Full versioned candidate comparison is implemented in package G.
-    if ((imageExtractionMode === "document-text" || imageExtractionMode === "offline-ocr") && extractedText.trim() && !confirmedReplacement) {
-      Alert.alert("Заменить полученный текст?",
-        "Текущий распознанный текст мог быть исправлен вручную. Новый результат заменит его только после вашего подтверждения; подпись к заметке не изменится.",
-        [{ text: "Оставить текущий", style: "cancel" },
-         { text: "Заменить после разбора", onPress: () => void extract(true) }]);
+    // Reprocessing ANY previously extracted text must not silently erase edits,
+    // including text-layer PDF and plain text files.
+    if (extractedText.trim() && !confirmedReplacement) {
+      setReplacementApproval({ scope: replacementScope(),
+        label: files.length > 1 ? `${files.length} файлов` : file.name });
       return;
     }
     // Explicit permission is required for *each* upload of original audio.
@@ -333,10 +379,8 @@ export function MemoryImportScreen() {
       if (!speechSelected || !officialAudioProvider(speechSelected)) {
         setNotice("Для онлайн-распознавания аудиофайла выберите официальное подключение OpenAI."); return;
       }
-      Alert.alert("Передать оригинал аудио в OpenAI?",
-        "Будет отправлен звук из выбранных файлов через " + speechSelected.name +
-        " (модель " + (speechSelected.transcriptionModel || "gpt-transcribe") + "). Возможна оплата и расход мобильного трафика (до 20 МБ на аудиофайл).",
-        [{ text: "Отмена", style: "cancel" }, { text: "Отправить и распознать", onPress: () => void extract(confirmedReplacement, true) }]);
+      setAudioApproval({ scope: replacementScope(), service: speechSelected.name,
+        model: speechSelected.transcriptionModel || "gpt-transcribe", replaced: confirmedReplacement });
       return;
     }
     const aborter = new AbortController(); controller.current = aborter; setBusy(true); setNotice("");
@@ -509,10 +553,7 @@ export function MemoryImportScreen() {
         <NebulaAction icon="refresh-cw" label="Повторить подготовку" disabled={busy}
           onPress={() => setPrepareAttempt(n => n + 1)} />
         {position + 1 < incoming.length ? <NebulaAction icon="skip-forward" label="Пропустить материал"
-          disabled={busy} onPress={() => Alert.alert("Пропустить материал?", "Этот материал не будет сохранён.", [
-            { text: "Отмена", style: "cancel" },
-            { text: "Пропустить", onPress: () => setPosition(p => p + 1) },
-          ])} /> : null}
+          disabled={busy || preparing} onPress={() => { if (profile) setSkipApproval({ profile, position }); }} /> : null}
       </View> : null}
       {notice ? <Text accessibilityRole="alert" style={{ color: t.muted }}>{notice}</Text> : null}
       {hasMaterial ? <>
@@ -549,15 +590,15 @@ export function MemoryImportScreen() {
         {files.some(item => mediaKind(item) === "image") ? <View style={{ gap: 6 }}>
           <Text style={{ color: t.text, fontWeight: "700" }}>Что сделать с фотографией</Text>
           <Pressable accessibilityRole="button" accessibilityLabel="Описать фотографию" accessibilityState={{ selected: imageExtractionMode === "describe" }} disabled={busy}
-            onPress={() => setImageExtractionMode("describe")} style={{ minHeight: 48, justifyContent: "center" }}>
+            onPress={() => setImageExtractionMode("describe")} style={choiceStyle(imageExtractionMode === "describe", busy)}>
             <Text style={{ color: imageExtractionMode === "describe" ? t.secondary : t.text }}>{imageExtractionMode === "describe" ? "● " : "○ "}Описать содержание фото</Text>
           </Pressable>
           <Pressable accessibilityRole="button" accessibilityLabel="Прочитать текст фотографии через ИИ" accessibilityState={{ selected: imageExtractionMode === "document-text" }} disabled={busy}
-            onPress={() => setImageExtractionMode("document-text")} style={{ minHeight: 48, justifyContent: "center" }}>
+            onPress={() => setImageExtractionMode("document-text")} style={choiceStyle(imageExtractionMode === "document-text", busy)}>
             <Text style={{ color: imageExtractionMode === "document-text" ? t.secondary : t.text }}>{imageExtractionMode === "document-text" ? "● " : "○ "}Прочитать текст документа (ИИ)</Text>
           </Pressable>
           <Pressable accessibilityRole="button" accessibilityLabel="Прочитать фотографию на телефоне" accessibilityState={{ selected: imageExtractionMode === "offline-ocr" }} disabled={busy}
-            onPress={() => setImageExtractionMode("offline-ocr")} style={{ minHeight: 48, justifyContent: "center" }}>
+            onPress={() => setImageExtractionMode("offline-ocr")} style={choiceStyle(imageExtractionMode === "offline-ocr", busy)}>
             <Text style={{ color: imageExtractionMode === "offline-ocr" ? t.secondary : t.text }}>{imageExtractionMode === "offline-ocr" ? "● " : "○ "}Прочитать русский текст на телефоне (OCR)</Text>
           </Pressable>
           {imageExtractionMode === "document-text" ? <Text accessibilityRole="text" style={{ color: t.muted, fontSize: 13, lineHeight: 19 }}>
@@ -568,12 +609,12 @@ export function MemoryImportScreen() {
           <Text style={{ color: t.text, fontWeight: "700" }}>Чтение PDF</Text>
           <Pressable accessibilityRole="button" accessibilityLabel="Только текстовый слой PDF"
             accessibilityState={{ selected: imageExtractionMode !== "offline-ocr" }} disabled={busy}
-            onPress={() => setImageExtractionMode("describe")} style={{ minHeight: 44, justifyContent: "center" }}>
+            onPress={() => setImageExtractionMode("describe")} style={choiceStyle(imageExtractionMode !== "offline-ocr", busy)}>
             <Text style={{ color: imageExtractionMode !== "offline-ocr" ? t.secondary : t.text }}>○ Текстовый слой — быстро, без OCR</Text>
           </Pressable>
           <Pressable accessibilityRole="button" accessibilityLabel="Распознать сканы PDF на телефоне"
             accessibilityState={{ selected: imageExtractionMode === "offline-ocr" }} disabled={busy}
-            onPress={() => setImageExtractionMode("offline-ocr")} style={{ minHeight: 44, justifyContent: "center" }}>
+            onPress={() => setImageExtractionMode("offline-ocr")} style={choiceStyle(imageExtractionMode === "offline-ocr", busy)}>
             <Text style={{ color: imageExtractionMode === "offline-ocr" ? t.secondary : t.text }}>○ Добавить локальное OCR отсутствующих страниц</Text>
           </Pressable>
           <Text style={{ color: t.muted, fontSize: 12 }}>
@@ -586,12 +627,12 @@ export function MemoryImportScreen() {
           <Text style={{ color: t.text, fontWeight: "700" }}>Режим распознавания</Text>
           <Pressable disabled={busy} accessibilityRole="button" accessibilityLabel="Распознавать по очереди"
             accessibilityState={{ selected: recognitionMode === "sequential" }} onPress={() => setRecognitionMode("sequential")}
-            style={{ minHeight: 44, justifyContent: "center" }}>
+            style={choiceStyle(recognitionMode === "sequential", busy)}>
             <Text style={{ color: recognitionMode === "sequential" ? t.secondary : t.text }}>{recognitionMode === "sequential" ? "● " : "○ "}По очереди — результат каждого файла отдельно</Text>
           </Pressable>
           <Pressable disabled={busy || !providerApproved} accessibilityRole="button" accessibilityLabel="Распознавать вместе"
             accessibilityState={{ selected: recognitionMode === "joint", disabled: !providerApproved }} onPress={() => setRecognitionMode("joint")}
-            style={{ minHeight: 44, justifyContent: "center", opacity: providerApproved ? 1 : .5 }}>
+            style={choiceStyle(recognitionMode === "joint", busy || !providerApproved)}>
             <Text style={{ color: recognitionMode === "joint" ? t.secondary : t.text }}>{recognitionMode === "joint" ? "● " : "○ "}Вместе — дополнительно сопоставить все материалы</Text>
           </Pressable>
           <Text style={{ color: t.muted, fontSize: 12 }}>
@@ -601,7 +642,7 @@ export function MemoryImportScreen() {
         {(files.length > 1 || (kind !== "text" && kind !== "document" && !localAudio)) ? <NoteEditorSection testID="import-processing-options" title="Параметры распознавания" summary="Модель и подключение" expanded={processingOptionsOpen} onToggle={() => setProcessingOptionsOpen(v => !v)}>
           <Text style={{ color: t.muted, fontSize: 12 }}>Для локального OCR файлы не отправляются. Для прочих режимов выбранная модель может получить файл или кадры.</Text>
           <Text style={{ color: t.text, fontWeight: "600" }}>Подключение для разбора</Text>
-          {connections.map(c => <Pressable disabled={busy} key={c.id} accessibilityRole="button" accessibilityLabel={"Разобрать через " + c.name} style={{ minHeight: 44, justifyContent: "center" }} onPress={() => setConnectionId(c.id)}>
+          {connections.map(c => <Pressable disabled={busy} key={c.id} accessibilityRole="button" accessibilityLabel={"Разобрать через " + c.name} accessibilityState={{selected:connectionId === c.id,disabled:busy}} style={choiceStyle(connectionId === c.id, busy)} onPress={() => setConnectionId(c.id)}>
             <Text style={{ color: connectionId === c.id ? t.secondary : t.text }}>{connectionId === c.id ? "● " : "○ "}{c.name} · {c.model}</Text>
           </Pressable>)}
         </NoteEditorSection> : null}
@@ -609,13 +650,13 @@ export function MemoryImportScreen() {
           <Text style={{ color: t.text, fontWeight: "700" }}>Распознавание речи из файла</Text>
           {([ ["device", "На телефоне · Whisper"], ["online", "Онлайн · OpenAI" ] ] as const).map(([id, label]) => <Pressable key={id} accessibilityRole="radio" accessibilityLabel={"Способ распознавания аудиофайла: " + label}
             accessibilityState={{ checked: fileAsrMode === id, disabled: busy }} disabled={busy} onPress={() => setFileAsrMode(id)}
-            style={{ minHeight: 48, justifyContent: "center" }}><Text style={{ color: fileAsrMode === id ? t.secondary : t.text }}>{fileAsrMode === id ? "● " : "○ "}{label}</Text></Pressable>)}
+            style={choiceStyle(fileAsrMode === id, busy)}><Text style={{ color: fileAsrMode === id ? t.secondary : t.text }}>{fileAsrMode === id ? "● " : "○ "}{label}</Text></Pressable>)}
           {fileAsrMode === "online" ? <>
             <Text style={{ color: t.muted, fontSize: 12 }}>Будет отправлен исходный звук; требуется разрешение на каждый запрос. Для личных и закрытых записей отправка запрещена.</Text>
             <Text style={{ color: t.text }}>Подключение для распознавания</Text>
             {connections.filter(c => officialAudioProvider(c)).map(c => <Pressable key={c.id} accessibilityRole="radio" accessibilityLabel={"Аудио через " + c.name}
               accessibilityState={{ checked: c.id === speechConnectionId, disabled: busy }} disabled={busy}
-              onPress={() => setSpeechConnectionId(c.id)} style={{ minHeight: 48, justifyContent: "center" }}>
+              onPress={() => setSpeechConnectionId(c.id)} style={choiceStyle(c.id === speechConnectionId, busy)}>
               <Text style={{ color: c.id === speechConnectionId ? t.secondary : t.text }}>{c.id === speechConnectionId ? "● " : "○ "}{c.name} · {c.transcriptionModel || "gpt-transcribe"}</Text>
             </Pressable>)}
             {!speechSelected || !officialAudioProvider(speechSelected) ? <Text style={{ color: t.err }}>Выберите подключение OpenAI с поддержкой аудиофайлов. Произвольный LLM/DeepSeek не подходит.</Text> : null}
@@ -655,8 +696,55 @@ export function MemoryImportScreen() {
       </Pressable>
     </View> : null}
   </KeyboardAvoidingView>
+  <NebulaConfirmSheet visible={leaveApproval}
+    title="Закрыть без сохранения?"
+    message="Несохранённые материалы будут отменены. Сохранённые заметки и оригиналы не затрагиваются."
+    confirmLabel="Закрыть без сохранения" cancelLabel="Продолжить редактирование" danger disabled={busy || preparing}
+    onCancel={() => { leaveAction.current = null; setLeaveApproval(false); }}
+    onConfirm={() => { if (busy || preparing) return; setLeaveApproval(false); setLeaving(true); }} />
+  <NebulaConfirmSheet visible={skipApproval !== null && skipApproval.profile === profile}
+    title="Пропустить материал?"
+    message="Текущий материал не будет сохранён. Следующий материал откроется для проверки без автоматического сохранения."
+    confirmLabel="Пропустить материал без сохранения" cancelLabel="Оставить текущий материал" danger disabled={busy || preparing}
+    onCancel={() => setSkipApproval(null)}
+    onConfirm={() => {
+      const approval = skipApproval; setSkipApproval(null);
+      if (!approval || approval.profile !== profile || approval.position !== position ||
+        !incoming || position + 1 >= incoming.length || busy || preparing) return;
+      setPosition(p => p + 1);
+    }} />
+  <NebulaConfirmSheet visible={audioApproval !== null}
+    title="Передать исходный звук?"
+    message={`Выбранные аудио/видеофайлы будут отправлены через ${audioApproval?.service || "сервис"} (модель ${audioApproval?.model || "—"}). Возможны оплата и расход трафика (до 20 МБ на аудиофайл). Согласие только на этот запуск.`}
+    confirmLabel="Отправить и распознать" cancelLabel="Не отправлять" disabled={busy || preparing}
+    onCancel={() => setAudioApproval(null)}
+    onConfirm={() => {
+      const approval = audioApproval; setAudioApproval(null);
+      if (!approval || !profile || approval.scope !== replacementScope() || busy || preparing || !file ||
+        !files.some(item => ["audio", "video"].includes(mediaKind(item))) ||
+        !speechSelected || !officialAudioProvider(speechSelected) || fileAsrMode !== "online" ||
+        !providerApproved || !canExtract) {
+        setNotice("Файл, подключение или доступ изменились. Проверьте параметры и подтвердите передачу заново.");
+        return;
+      }
+      void extract(approval.replaced, true);
+    }} />
+  <NebulaConfirmSheet visible={replacementApproval !== null}
+    title="Заменить распознанный текст?"
+    message={`Новый разбор заменит текущий текст (${replacementApproval?.label || "файл"}), в том числе ручные исправления. Подпись к заметке не изменится.`}
+    confirmLabel="Распознать и заменить" cancelLabel="Оставить текущий текст" danger disabled={busy || preparing}
+    onCancel={() => setReplacementApproval(null)}
+    onConfirm={() => {
+      const approval = replacementApproval;
+      setReplacementApproval(null);
+      if (!approval || !profile || approval.scope !== replacementScope() || busy || preparing || !file || !canExtract) {
+        setNotice("Файл или параметры распознавания изменились. Проверьте их и запустите распознавание заново.");
+        return;
+      }
+      void extract(true);
+    }} />
   <BottomSheet visible={sectionOpen} title="Коллекция для записи" onClose={() => setSectionOpen(false)}>
-        {collections.map(c => <Pressable key={c.id} disabled={busy} accessibilityRole="button" accessibilityLabel={"Коллекция: " + c.name} onPress={() => { setCollectionId(c.id); setSectionOpen(false); }} style={{ minHeight: 44 }}><Text style={{ color: c.id === collectionId ? t.secondary : t.text }}>{c.id === collectionId ? "● " : "○ "}{c.name}</Text></Pressable>)}
+        {collections.map(c => <Pressable key={c.id} disabled={busy} accessibilityRole="button" accessibilityLabel={"Коллекция: " + c.name} onPress={() => { setCollectionId(c.id); setSectionOpen(false); }} style={choiceStyle(c.id === collectionId, busy)}><Text style={{ color: c.id === collectionId ? t.secondary : t.text }}>{c.id === collectionId ? "● " : "○ "}{c.name}</Text></Pressable>)}
   </BottomSheet>
   </View>;
 }

@@ -125,11 +125,37 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByLabel('Подключение OpenAI', { exact: true }).click();
       assert.equal(await page.getByLabel('Название модели', { exact: true }).inputValue(), 'gpt-4.1');
       assert.equal(await page.getByLabel('Разрешить чтение локальной памяти', { exact: true }).count(), 0);
+      // The contextual connection action is a real Nebula button. A cancelled
+      // removal must preserve the selected model and cannot persist anything.
+      await page.getByLabel('Удалить подключение', { exact: true }).click();
+      await page.getByText('Убрать подключение?', { exact: true }).waitFor();
+      const removeBox = await page.getByLabel('Убрать из списка', { exact: true }).boundingBox();
+      assert(removeBox && removeBox.height >= 48 && removeBox.x >= 0 && removeBox.x + removeBox.width <= width,
+        'Connection removal confirmation must be a reachable 48dp Nebula button');
+      if (process.env.SCREENSHOT_DIR) await page.screenshot({animations:'disabled',path:path.join(process.env.SCREENSHOT_DIR,`connections-remove-${width}.png`)});
+      await page.getByLabel('Оставить подключение', { exact: true }).click();
+      assert.equal(await page.getByLabel('Название модели', { exact: true }).inputValue(), 'gpt-4.1',
+        'Cancel connection removal keeps the edited model');
       await page.getByText('Сохранить настройки', { exact: true }).click();
       await page.getByLabel('Вкладка Главная', { exact: true }).click();
       await page.getByLabel('Сообщение ассистенту', { exact: true }).waitFor();
       const prompt = page.getByLabel('Сообщение ассистенту', { exact: true });
       assert.equal(await page.getByLabel('Очистить сообщение', { exact: true }).count(), 0);
+      // A plain photo description suggests an explicit *local* search, not an
+      // automatic request. Its action must look like a real Nebula button.
+      await prompt.fill('фото красного велосипеда');
+      const suggestPhoto = page.getByLabel('Поискать в моих фото', {exact:true});
+      await suggestPhoto.waitFor();
+      const photoActionBox = await suggestPhoto.boundingBox();
+      const photoActionBorder = await suggestPhoto.evaluate(el => parseFloat(getComputedStyle(el).borderTopWidth));
+      assert(photoActionBox && photoActionBox.height >= 48 && photoActionBorder >= 1 &&
+        photoActionBox.x >= 0 && photoActionBox.x + photoActionBox.width <= width,
+        'Suggested local photo search must be a visible, reachable action');
+      assert.equal(replyNumber,0,'Typing a photo description never silently sends a network request');
+      if (process.env.SCREENSHOT_DIR) await page.screenshot({animations:'disabled',
+        path:path.join(process.env.SCREENSHOT_DIR,`chat-photo-suggestion-${width}.png`)});
+      await prompt.fill('');
+
       const showShare = async payloads => {
         await page.evaluate(payloads => { window.__incoming=payloads;window.__qa.androidShare=true;window.__state('active'); },payloads);
         await page.clock.runFor(600);
@@ -140,6 +166,11 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await showShare([{shareType:'url',value:'https://example.org/shared'}, {shareType:'file',value:'content://provider/shared.txt',mimeType:'text/plain'}]);
       await page.getByLabel('Добавить входящее в чат',{exact:true}).waitFor();
       await page.waitForFunction(()=>!document.querySelector('[aria-label="Добавить входящее в чат"]').disabled);
+      const shareCancel = page.getByLabel('Отменить приём материала', {exact:true});
+      const shareCancelBox = await shareCancel.boundingBox();
+      const shareCancelBorder = await shareCancel.evaluate(el => parseFloat(getComputedStyle(el).borderTopWidth));
+      assert(shareCancelBox && shareCancelBox.height >= 48 && shareCancelBorder >= 1,
+        'Share Cancel is a visible Nebula button, not unframed text');
       if(process.env.SCREENSHOT_DIR) await page.screenshot({animations:'disabled',path:path.join(process.env.SCREENSHOT_DIR,`share-choice-${width}.png`)});
       assert.equal(replyNumber,0,'Share preview does not send');
       await page.getByLabel('Добавить входящее в чат',{exact:true}).click();
@@ -158,6 +189,16 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       assert.equal(await page.getByLabel('Сведения из файла',{exact:true}).inputValue(),'Тестовая входящая заметка');
       assert.equal(await page.evaluate(()=>localStorage.getItem('qa.notes')),notesBeforeShare,'Choosing memory does not autosave');
       await page.getByLabel(/back/i).click();
+      await page.getByLabel('Продолжить редактирование', { exact: true }).waitFor();
+      assert.equal(await page.evaluate(()=>localStorage.getItem('qa.notes')), notesBeforeShare,
+        'Back to an unsaved import cannot silently save');
+      if (process.env.SCREENSHOT_DIR) await page.screenshot({ animations:'disabled',
+        path:path.join(process.env.SCREENSHOT_DIR,`import-leave-confirm-${width}.png`) });
+      await page.getByLabel('Продолжить редактирование', { exact: true }).click();
+      assert.equal(await page.getByLabel('Сведения из файла', { exact: true }).inputValue(), 'Тестовая входящая заметка',
+        'Cancelling Back retains the imported draft');
+      await page.getByLabel(/back/i).click();
+      await page.getByLabel('Закрыть без сохранения', { exact: true }).click();
       await prompt.waitFor();
       await prompt.fill('Длинный черновик\nВторая строка');
       await page.getByLabel('Очистить сообщение', { exact: true }).click();
@@ -182,7 +223,7 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await prompt.fill(originalDraft);
       assert.equal(await page.getByLabel('Улучшить текст', { exact: true }).count(), 0);
       assert.equal(normalizationCalls, 0, 'Google does not run a cleanup LLM request');
-      const micButton = await page.getByLabel('Голосовой ввод', { exact: true }).boundingBox();
+      const micButton = await page.getByTestId('composer-actions').getByLabel('Голосовой ввод', { exact: true }).boundingBox();
       assert(micButton && micButton.width >= 44, 'Microphone remains tappable without improvement');
       let composerRowY = null;
       for (const label of ['Прикрепить файл к сообщению', 'Сделать снимок', 'Голосовой ввод', 'Отправить запрос']) {
@@ -196,7 +237,7 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByLabel('Очистить сообщение', { exact: true }).click();
       // Clear an active recording, then deliver the service's stale callback.
       await page.evaluate(() => { window.__qa.holdSpeech = true; });
-      await page.getByLabel('Голосовой ввод', { exact: true }).click();
+      await page.getByTestId('composer-actions').getByLabel('Голосовой ввод', { exact: true }).click();
       await page.getByLabel('Остановить диктовку', { exact: true }).waitFor();
       assert.equal(await page.getByLabel('Улучшить текст', { exact: true }).count(), 0, 'Google has no cleanup button during dictation');
       await page.evaluate(() => window.__speechEvent('result', { results: [{ transcript: 'Удалить эту диктовку' }], isFinal: false }));
@@ -205,7 +246,7 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.evaluate(() => window.__speechEvent('result', { results: [{ transcript: 'Старый результат' }], isFinal: true }));
       assert.equal(await prompt.inputValue(), '', 'A late transcription must not refill a cleared draft');
       await page.evaluate(() => { window.__qa.holdSpeech = false; });
-      await page.getByLabel('Голосовой ввод', { exact: true }).click();
+      await page.getByTestId('composer-actions').getByLabel('Голосовой ввод', { exact: true }).click();
       await page.waitForFunction(() => document.querySelector('[aria-label="Сообщение ассистенту"]').value.includes('Купить молоко'));
       assert.equal(replyNumber, 0, 'Dictation never autosends');
       await page.getByLabel('Прикрепить файл к сообщению', { exact: true }).click();
@@ -216,12 +257,18 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByLabel('Прикрепить файл к сообщению', { exact: true }).click();
       await page.clock.runFor(100);
       await page.getByLabel('Убрать вложение note.txt', { exact: true }).waitFor();
+      const removeButton = page.getByLabel('Убрать вложение note.txt', { exact: true });
+      const attachmentRemoveBox = await removeButton.boundingBox();
+      const removeBorder = await removeButton.evaluate(el => parseFloat(getComputedStyle(el).borderTopWidth));
+      assert(attachmentRemoveBox && attachmentRemoveBox.height >= 48 && removeBorder >= 1 &&
+        attachmentRemoveBox.x >= 0 && attachmentRemoveBox.x + attachmentRemoveBox.width <= width,
+        'Remove must be a visible, reachable attachment-local Nebula button');
       await page.clock.runFor(6000);
       if (process.env.SCREENSHOT_DIR) await page.screenshot({animations:'disabled', path:path.join(process.env.SCREENSHOT_DIR, `chat-attachment-${width}.png`)});
 
       // Sending a draft also ends any still-active dictation for that draft.
       await page.evaluate(() => { window.__qa.holdSpeech = true; });
-      await page.getByLabel('Голосовой ввод', { exact: true }).click();
+      await page.getByTestId('composer-actions').getByLabel('Голосовой ввод', { exact: true }).click();
       await page.getByLabel('Остановить диктовку', { exact: true }).waitFor();
       await page.getByLabel('Отправить запрос', { exact: true }).click();
       await page.waitForFunction(() => window.__qa.speechAborts === 2);
@@ -237,13 +284,17 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       assert(userBox && promptBox && userBox.y >= 0 &&
         userBox.y + userBox.height <= promptBox.y, 'Sent question remains visible above the composer');
 
-      const sendHint = page.getByText('Отправить написанное сообщение выбранной модели.', { exact: true });
-      await sendHint.waitFor();
-      const hintBox = await sendHint.boundingBox();
-      const buttonBox = await page.getByLabel('Остановить запрос', { exact: true }).boundingBox();
-      assert(hintBox.x >= 0 && hintBox.x + hintBox.width <= width, 'Hint stays inside a narrow screen');
-      assert(hintBox.y + hintBox.height < buttonBox.y && buttonBox.y - hintBox.y - hintBox.height < 30, 'Composer hint appears right above its button');
-      if (process.env.SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, `composer-hint-${width}.png`) });
+      // A tap must send immediately without a bubble obscuring the composer.
+      // When Send changes to Stop, the old action must not remain visible.
+      const stopButton = page.getByLabel('Остановить запрос', { exact: true });
+      await stopButton.waitFor();
+      assert.equal(await page.getByText('Отправить написанное сообщение выбранной модели.', { exact: true }).count(), 0,
+        'No stale Send hint is visible once the action becomes Stop');
+      const buttonBox = await stopButton.boundingBox();
+      assert(buttonBox && buttonBox.width >= 48 && buttonBox.height >= 48 &&
+        buttonBox.x >= 0 && buttonBox.x + buttonBox.width <= width,
+        'Stop remains a reachable 48dp button even on narrow screens');
+      if (process.env.SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, `composer-stop-${width}.png`) });
 
       await page.waitForFunction(() => /Подключаюсь|Думаю|Обрабатываю|Пишу ответ/.test(document.querySelector('[data-testid="nebula-home-status"]')?.textContent || ''));
       await page.getByLabel('Вкладка Память', { exact: true }).click();
@@ -253,19 +304,23 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       const settingsCanvas = await page.getByTestId('settings-overview').evaluate(el => getComputedStyle(el).backgroundColor);
       assert.equal(settingsCanvas, 'rgb(7, 13, 32)', 'Working screens use the approved dark theme regardless of OS appearance');
       assert(await page.getByLabel('Модели и подключения', { exact: true }).count());
-      // U5: recognition routes have exactly one owner in Settings, not a
-      // competing Save inside the nested connection editor.
-      const openMedia = page.getByLabel('Развернуть: Распознавание файлов', { exact: true });
-      if (await openMedia.count()) await openMedia.click();
+      // Settings is now an index of real screen-sized actions. A detail is
+      // immediately expanded and Back returns to the same index, not the chat.
+      await page.getByLabel('Распознавание файлов', { exact: true }).click();
+      await page.getByTestId('settings-detail').waitFor();
       const photoProvider = page.getByLabel('Изображения и кадры видео: Anthropic', { exact: true });
       await photoProvider.waitFor();
       await photoProvider.click();
       await page.getByText('Выбор для медиа сохранён.', { exact: true }).waitFor();
-      assert.equal(await photoProvider.getAttribute('aria-checked'), 'true', 'Chosen media provider is saved in one action');
-      assert.equal(await page.getByText('Сохранить выбор для медиа', { exact: true }).count(), 0, 'There is no duplicate media Save');
+      assert.equal(await photoProvider.getAttribute('aria-checked'), 'true', 'The media choice uses one canonical writer');
+      assert.equal(await page.getByText('Сохранить выбор для медиа', { exact: true }).count(), 0, 'There is no duplicate Save');
       if (process.env.SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, `settings-media-${width}.png`) });
-      await page.getByLabel('Развернуть: Работа ИИ', { exact: true }).click();
+      await page.getByLabel(/back/i).click();
+      await page.getByTestId('settings-overview').waitFor();
+
+      await page.getByLabel('Работа ИИ', { exact: true }).click();
       const limitInput = page.getByLabel('Лимит обращений к LLM на сообщение', { exact: true });
+      await limitInput.waitFor();
       assert.equal(await limitInput.inputValue(), '5', 'New profiles start with the five-call default');
       await limitInput.fill('0');
       await page.getByLabel('Сохранить лимит обращений к LLM', { exact: true }).click();
@@ -274,22 +329,28 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await limitInput.fill('6');
       await page.getByLabel('Сохранить лимит обращений к LLM', { exact: true }).click();
       await page.getByText('Лимит сохранён. Он действует для следующих сообщений.', { exact: true }).waitFor();
-      await page.getByLabel('Сохранить лимит обращений к LLM', { exact: true }).scrollIntoViewIfNeeded();
+      // Scroll to the end of the actual detail container, so the user can
+      // fully reveal Save above the navigation gesture/three-button inset.
+      // scrollIntoViewIfNeeded alone may align it flush with the unsafe bottom.
+      await page.getByTestId('settings-detail').evaluate(el => { el.scrollTop = el.scrollHeight; });
       const saveLimitBox = await page.getByLabel('Сохранить лимит обращений к LLM', { exact: true }).boundingBox();
-      const settingsTabBox = await page.getByLabel('Вкладка Настройки', { exact: true }).boundingBox();
-      assert(saveLimitBox.y + saveLimitBox.height <= settingsTabBox.y, 'The save action can scroll above the tab bar in a reduced viewport');
+      assert(saveLimitBox && saveLimitBox.y >= 0 && saveLimitBox.y + saveLimitBox.height <= 580 - 24,
+        'The detail Save clears the system inset in a reduced viewport');
       if (process.env.SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, `agent-limit-${width}.png`) });
       await page.setViewportSize({ width, height: 900 });
-      await page.getByLabel('Свернуть: Работа ИИ', { exact: true }).click();
-      // Settings groups are folded; the voice group opens and stays open after a reload.
-      await page.getByLabel('Развернуть: Голосовой ввод', { exact: true }).click();
+      await page.getByLabel(/back/i).click();
+      await page.getByTestId('settings-overview').waitFor();
+
+      await page.getByTestId('settings-overview').getByLabel('Голосовой ввод', { exact: true }).click();
+      await page.getByRole('radio', { name: 'Системное распознавание', exact: true }).waitFor();
       await page.getByRole('radio', { name: 'Системное распознавание', exact: true }).click();
-      await page.waitForFunction(() => localStorage.getItem('pia.voice.engine.v1') === 'system' && document.querySelector('[role="radio"][aria-label="Системное распознавание"]')?.getAttribute('aria-checked') === 'true');
-      assert.equal(await page.getByRole('radio', { name: 'Системное распознавание', exact: true }).getAttribute('aria-checked'), 'true');
-      // A web browser cannot run native Whisper; unsupported devices explain it.
+      await page.waitForFunction(() => localStorage.getItem('pia.voice.engine.v1') === 'system' &&
+        document.querySelector('[role="radio"][aria-label="Системное распознавание"]')?.getAttribute('aria-checked') === 'true');
       assert.equal(await page.getByRole('radio', { name: 'Whisper на телефоне', exact: true }).isDisabled(), true);
-      assert.equal(await page.getByText('Голос без интернета', { exact: true }).count(), 0, 'Whisper settings are hidden for the system engine');
+      assert.equal(await page.getByText('Голос без интернета', { exact: true }).count(), 0, 'Whisper settings are hidden for system mode');
       if (process.env.SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, `voice-settings-${width}.png`) });
+      await page.getByLabel(/back/i).click();
+      await page.getByTestId('settings-overview').waitFor();
 
       await page.getByLabel('Вкладка Главная', { exact: true }).click();
       await page.getByLabel('Остановить запрос', { exact: true }).waitFor();
@@ -304,17 +365,26 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.reload();
       await page.getByText('Ответ 1', { exact: true }).waitFor();
       await page.getByLabel('Вкладка Настройки', { exact: true }).click();
-      const mediaCollapsed = page.getByLabel('Развернуть: Распознавание файлов', { exact: true });
-      if (await mediaCollapsed.count()) await mediaCollapsed.click();
+      await page.getByLabel('Распознавание файлов', { exact: true }).click();
       await page.getByLabel('Изображения и кадры видео: Anthropic', { exact: true }).waitFor();
-      assert.equal(await page.getByLabel('Изображения и кадры видео: Anthropic', { exact: true }).getAttribute('aria-checked'), 'true', 'Media selection persists after full reload');
-      await page.getByLabel('Развернуть: Работа ИИ', { exact: true }).click();
-      assert.equal(await page.getByLabel('Лимит обращений к LLM на сообщение', { exact: true }).inputValue(), '6', 'The chosen limit survives a full app reload');
+      assert.equal(await page.getByLabel('Изображения и кадры видео: Anthropic', { exact: true }).getAttribute('aria-checked'), 'true',
+        'Media selection persists after app reload');
+      await page.getByLabel(/back/i).click();
+      await page.getByTestId('settings-overview').waitFor();
+      await page.getByLabel('Работа ИИ', { exact: true }).click();
+      assert.equal(await page.getByLabel('Лимит обращений к LLM на сообщение', { exact: true }).inputValue(), '6',
+        'The chosen limit survives a full app reload');
       await page.getByLabel('Увеличить лимит обращений к LLM', { exact: true }).click();
       await page.getByLabel('Сохранить лимит обращений к LLM', { exact: true }).click();
       await page.getByText('Лимит сохранён. Он действует для следующих сообщений.', { exact: true }).waitFor();
-      await page.waitForFunction(() => document.querySelector('[role="radio"][aria-label="Системное распознавание"]')?.getAttribute('aria-checked') === 'true');
-      assert.equal(await page.getByRole('radio', { name: 'Системное распознавание', exact: true }).getAttribute('aria-checked'), 'true', 'The selected engine survives a full application reload');
+      await page.getByLabel(/back/i).click();
+      await page.getByTestId('settings-overview').waitFor();
+      await page.getByTestId('settings-overview').getByLabel('Голосовой ввод', { exact: true }).click();
+      await page.getByRole('radio', { name: 'Системное распознавание', exact: true }).waitFor();
+      assert.equal(await page.getByRole('radio', { name: 'Системное распознавание', exact: true }).getAttribute('aria-checked'), 'true',
+        'Selected engine survives full application reload');
+      await page.getByLabel(/back/i).click();
+      await page.getByTestId('settings-overview').waitFor();
       await page.getByLabel('Вкладка Главная', { exact: true }).click();
       await page.getByLabel('Новый диалог', { exact: true }).click();
       await page.getByText('Начать пустой диалог. Предыдущие диалоги останутся в истории.', { exact: true }).waitFor();
@@ -387,6 +457,17 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.setViewportSize({ width, height: 900 }); await page.evaluate(() => window.__insets(24));
       await page.getByLabel('Сохранить запись', { exact: true }).click();
       await page.getByLabel('Открыть заметку Индейка', { exact: true }).waitFor();
+      if (width >= 350) {
+        const tile = page.getByLabel('Открыть заметку Индейка', { exact: true });
+        const media = tile.getByTestId('memory-grid-media-slot');
+        const box = await media.boundingBox();
+        assert(box && Math.abs(box.height - 108) <= 1, 'Text and image tiles reserve the same 108dp preview footprint');
+        const actions = page.getByLabel('Действия с заметкой Индейка', { exact: true });
+        const actionBox = await actions.boundingBox();
+        assert(actionBox && actionBox.width >= 48 && actionBox.height >= 48,
+          'Tile overflow has its own reachable 48dp touch target');
+        if (process.env.SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, `memory-tile-${width}.png`) });
+      }
       await page.getByLabel('Открыть заметку Индейка', { exact: true }).click();
       assert.equal(await page.getByLabel('Текст заметки', { exact: true }).count(), 0, 'Opening a saved note shows reading, not a form');
       // Reader actions belong above the body/attachments, not below a long document.
@@ -394,6 +475,9 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await quickActions.waitFor();
       assert.equal(await page.getByLabel('Редактировать запись', { exact: true }).count(), 1, 'Reader has one Edit action');
       assert.equal(await page.getByLabel('Изменить заметку с ИИ', { exact: true }).count(), 1, 'Reader has one AI edit action');
+      const editAction=page.getByLabel('Изменить заметку с ИИ', { exact: true });
+      const editBorder=await editAction.evaluate(el=>parseFloat(getComputedStyle(el).borderTopWidth));
+      assert(editBorder >= 1, 'AI edit must be a visible bordered action, not plain text');
       await page.setViewportSize({ width, height: 470 }); await page.evaluate(() => window.__insets(48));
       const quickBox = await quickActions.boundingBox();
       assert(quickBox && quickBox.y >= 0 && quickBox.y + quickBox.height <= 470 - 48,
@@ -460,6 +544,11 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       // Rejecting an unsaved edit must return to the list without overwriting the saved record.
       await page.getByLabel('Текст заметки', { exact: true }).fill('Черновик — НЕ СОХРАНЯТЬ');
       await page.getByLabel(/back/i).click();
+      await page.getByLabel('Продолжить редактирование', { exact: true }).click();
+      assert.equal(await page.getByLabel('Текст заметки', { exact: true }).inputValue(),
+        'Черновик — НЕ СОХРАНЯТЬ', 'Cancelling the Nebula exit confirmation keeps the draft');
+      await page.getByLabel(/back/i).click();
+      await page.getByLabel('Выйти без сохранения', { exact: true }).click();
       await page.getByLabel('Открыть заметку Индейка', { exact: true }).waitFor();
       await page.getByLabel('Открыть заметку Индейка', { exact: true }).click();
       await page.getByLabel('Редактировать запись', { exact: true }).click();
@@ -516,6 +605,14 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       for (const bottom of [0, 24, 48]) {
         await page.evaluate(value => window.__insets(value), bottom);
         await page.setViewportSize({ width, height: 470 });
+        // A native inset / viewport change is committed by React on the next
+        // layout frame. Do not measure the stale previous frame: await the
+        // required safe-area geometry, then assert the SAME visibility rule.
+        await page.waitForFunction((safeBottom) => {
+          const save = document.querySelector('[aria-label="Сохранить сведения в память"]');
+          const bounds = save?.getBoundingClientRect();
+          return bounds && bounds.y >= 0 && bounds.bottom <= innerHeight - safeBottom + 1;
+        }, bottom, { timeout: 5000 });
         const save = await page.getByLabel('Сохранить сведения в память', { exact: true }).boundingBox();
         assert(save && save.y >= 0 && save.y + save.height <= 470 - bottom + 1, 'Import save remains above system bars in a reduced viewport');
       }
@@ -527,6 +624,22 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.waitForFunction(() => document.querySelector('[aria-label="Распознанное содержимое файла"]').value.includes('индейка'));
       const resultBox = await page.getByLabel('Распознанное содержимое файла', { exact: true }).boundingBox();
       assert(resultBox && resultBox.height <= 190, 'Recognized text field must not expand the import form without bound');
+      // A second extraction must use the same contextual Nebula consent sheet,
+      // not a native white Alert; cancel protects edited text without another run.
+      await page.getByLabel('Распознанное содержимое файла', { exact: true }).fill('Исправлено вручную');
+      await page.getByLabel('Извлечь сведения из файла', { exact: true }).click();
+      await page.getByText('Заменить распознанный текст?', { exact: true }).waitFor();
+      assert.equal(await page.getByLabel('Распознанное содержимое файла', { exact: true }).inputValue(), 'Исправлено вручную');
+      await page.getByLabel('Оставить текущий текст', { exact: true }).click();
+      assert.equal(await page.getByLabel('Распознанное содержимое файла', { exact: true }).inputValue(), 'Исправлено вручную');
+      await page.getByLabel('Извлечь сведения из файла', { exact: true }).click();
+      await page.getByText('Заменить распознанный текст?', { exact: true }).waitFor();
+      if (process.env.SCREENSHOT_DIR) await page.screenshot({ animations: 'disabled', path: path.join(process.env.SCREENSHOT_DIR, `import-replace-confirm-${width}.png`) });
+      const replaceBox = await page.getByLabel('Распознать и заменить', { exact: true }).boundingBox();
+      assert(replaceBox && replaceBox.height >= 48 && replaceBox.x >= 0 && replaceBox.x + replaceBox.width <= width,
+        'Import destructive confirmation has a real reachable 48dp Nebula button');
+      await page.getByLabel('Распознать и заменить', { exact: true }).click();
+      await page.waitForFunction(() => document.querySelector('[aria-label="Распознанное содержимое файла"]').value.includes('индейка'));
       await page.getByLabel('Сохранить сведения в память', { exact: true }).click();
       await page.getByLabel(/Открыть заметку Рецепт: индейка/).waitFor();
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, `Overflow at ${width}px`);
@@ -572,6 +685,27 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByText('В корзину', { exact: true }).click();
       await page.getByLabel('Подтвердить перемещение в корзину', { exact: true }).click();
       await page.getByLabel('Открыть корзину', { exact: true }).click();
+      // The global command is contextual; the count covers the whole trash,
+      // while the two-step confirmation must never purge without the final tap.
+      await page.getByLabel('Очистить всю корзину', { exact: true }).waitFor();
+      if (width < 560) {
+        const counterBox = await page.getByTestId('trash-total-counter').boundingBox();
+        const buttonBox = await page.getByLabel('Очистить всю корзину', { exact: true }).boundingBox();
+        assert(counterBox && buttonBox && buttonBox.y >= counterBox.y + counterBox.height - 1,
+          'The full-trash button is below the readable count on a narrow screen');
+        assert(buttonBox.x >= 0 && buttonBox.x + buttonBox.width <= width,
+          'The full-trash action stays inside the viewport');
+      }
+      await page.getByLabel('Очистить всю корзину', { exact: true }).click();
+      await page.getByLabel('Проверить последствия очистки корзины', { exact: true }).waitFor();
+      assert.equal(await page.getByLabel('Подтвердить очистку всей корзины', { exact: true }).count(), 0,
+        'Preview never exposes the irreversible action before the extra review step');
+      await page.getByLabel('Проверить последствия очистки корзины', { exact: true }).click();
+      await page.getByLabel('Подтвердить очистку всей корзины', { exact: true }).waitFor();
+      if (process.env.SCREENSHOT_DIR) await page.screenshot({
+        path: path.join(process.env.SCREENSHOT_DIR, `trash-preview-${width}.png`),
+      });
+      await page.getByLabel('Отменить очистку корзины', { exact: true }).click();
       await page.getByLabel('Открыть заметку Индейка', { exact: true }).click();
       await page.getByLabel('Восстановить запись из корзины', { exact: true }).waitFor();
       assert.equal(await page.getByLabel('Редактировать запись', { exact: true }).count(), 0,
@@ -594,9 +728,13 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.waitForFunction(() => document.querySelector('[aria-label="Открыть диалог Второй вопрос"]').getBoundingClientRect().bottom <= innerHeight - 48);
       const historyBox = await page.getByLabel('Открыть диалог Второй вопрос', { exact: true }).boundingBox();
       assert(historyBox.y + historyBox.height <= 470 - 48, 'History row clears the system bar in a reduced viewport');
-      await page.getByText('+ Новый диалог', { exact: true }).scrollIntoViewIfNeeded();
-      const historyAction = await page.getByText('+ Новый диалог', { exact: true }).boundingBox();
-      assert(historyAction.y + historyAction.height <= 470 - 48, 'The last sheet action is reachable above system navigation');
+      const historyNewAction = page.getByLabel('Создать новый диалог', { exact: true });
+      await historyNewAction.scrollIntoViewIfNeeded();
+      const historyAction = await historyNewAction.boundingBox();
+      const historyActionBorder = await historyNewAction.evaluate(el => parseFloat(getComputedStyle(el).borderTopWidth));
+      assert(historyAction && historyAction.height >= 48 && historyActionBorder >= 1 &&
+        historyAction.y + historyAction.height <= 470 - 48,
+        'The last sheet action is a visible framed Nebula button above system navigation');
       if (process.env.SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, `history-${width}.png`) });
       await page.getByLabel('Открыть диалог Второй вопрос', { exact: true }).click();
       await page.getByLabel('Поиск диалогов', { exact: true }).waitFor({ state: 'hidden' });

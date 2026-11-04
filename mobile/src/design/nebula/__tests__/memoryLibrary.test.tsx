@@ -102,6 +102,35 @@ test("trashed card shows a labelled restore button next to the record without op
    onOpen={open} onToggleSelection={select} onRestore={restore} />);
  expect(v.queryByLabelText("Восстановить заметку " + note().title)).toBeNull();
 });
+test("memory tiles reserve the same preview footprint with or without an encrypted image", () => {
+ const open = jest.fn(), select = jest.fn();
+ const image = render(<MemoryNoteCard note={note({ source_file: "photo.jpg", source_media: "image" })}
+   grid selected={false} sectionName="Рецепты" onOpen={open} onToggleSelection={select}
+   cover={<Text testID="grid-image-cover">Показываю фото</Text>} />);
+ const imageSlot = image.getByTestId("memory-grid-media-slot");
+ expect(imageSlot.props.style.height).toBe(108);
+ expect(image.getByTestId("grid-image-cover")).toBeTruthy();
+ expect(image.queryByText("Мой длинный текст заметки")).toBeNull();
+ const textTile = render(<MemoryNoteCard note={note()} grid selected={false}
+   sectionName="Рецепты" onOpen={open} onToggleSelection={select} />);
+ expect(textTile.getByTestId("memory-grid-media-slot").props.style.height)
+   .toBe(imageSlot.props.style.height);
+ expect(textTile.getByText("Мой длинный текст заметки").props.numberOfLines).toBe(2);
+ expect(textTile.getByText(note().title || "Без названия").props.numberOfLines).toBe(2);
+});
+
+test("tapping an unselected note in selection mode checks it without opening it", () => {
+ const open = jest.fn(), select = jest.fn(), menu = jest.fn();
+ const ui = render(<MemoryNoteCard note={note()} selecting selected={false}
+   sectionName="Рецепты" onOpen={open} onToggleSelection={select} onActions={menu} />);
+ const card = ui.getByLabelText("Выбрать заметку " + note().title);
+ expect(card.props.accessibilityState.checked).toBe(false);
+ fireEvent.press(card);
+ expect(select).toHaveBeenCalledTimes(1);
+ expect(open).not.toHaveBeenCalled();
+ expect(ui.queryByLabelText("Действия с заметкой " + note().title)).toBeNull();
+});
+
 test("overflow is a separate accessible action and never opens the note", () => {
  const open = jest.fn(), select = jest.fn(), menu = jest.fn();
  const v = render(<MemoryNoteCard note={note()} selected={false} sectionName="Заметки" onOpen={open} onToggleSelection={select} onActions={menu} />);

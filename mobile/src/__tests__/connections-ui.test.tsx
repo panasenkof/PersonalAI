@@ -1,22 +1,27 @@
 import React from "react";
-import { fireEvent, render, waitFor } from "@testing-library/react-native";
+import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 import { DirectAgentSettingsScreen } from "../screens/DirectAgentSettingsScreen";
 import { loadDirectConnections, newDirectConnection, saveDirectConnections } from "../direct-agent/settings";
+const mockGuard: { enabled: boolean; callback: (() => void) | null } = { enabled: false, callback: null };
 jest.mock("@react-navigation/native", () => ({
   useNavigation: () => ({ goBack: mockBack }),
   useRoute: () => ({ params: mockParams.current }),
   useFocusEffect: (cb: () => void | (() => void)) => require("react").useEffect(cb, [cb]),
-  usePreventRemove: () => {},
+  usePreventRemove: (enabled: boolean, cb: () => void) => { mockGuard.enabled = enabled; mockGuard.callback = cb; },
 }));
 jest.mock("../profile/ProfileContext", () => ({ useProfile: () => "guest" }));
 jest.mock("@react-navigation/elements", () => ({ useHeaderHeight: () => 64 }));
-jest.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ top: 24, bottom: 24, left: 0, right: 0 }) }));
+jest.mock("react-native-safe-area-context", () => ({
+  useSafeAreaInsets: () => ({ top: 24, bottom: 24, left: 0, right: 0 }),
+  SafeAreaProvider: ({ children }: any) => children,
+}));
 jest.mock("../direct-agent/settings", () => ({ ...jest.requireActual("../direct-agent/settings"), loadDirectConnections: jest.fn(), saveDirectConnections: jest.fn() }));
 const mockBack = jest.fn();
 const mockParams: { current: { presetId?: string } | undefined } = { current: undefined };
 beforeEach(() => {
   jest.clearAllMocks();
   mockParams.current = undefined;
+  mockGuard.enabled = false; mockGuard.callback = null;
   (loadDirectConnections as jest.Mock).mockResolvedValue({ activeId: "one", connections: [
     { ...newDirectConnection("openai", "one"), name: "OpenAI", apiKey: "key-a" },
     { ...newDirectConnection("anthropic", "two"), name: "Anthropic", baseUrl: "https://my.example/v1", apiKey: "key-b", model: "my-claude" },
@@ -100,4 +105,40 @@ test("two API types: switching to Anthropic sets its address and asks for a new 
   expect(v.getByLabelText("API-ключ LLM").props.value).toBe("");
   expect(v.getByLabelText("Шаблон Anthropic (Claude)")).toBeTruthy();
   expect(v.queryByLabelText("Шаблон DeepSeek")).toBeNull();
+});
+
+
+test("removing a connection uses Nebula confirmation and persists only after saving", async () => {
+  const v = render(<DirectAgentSettingsScreen />);
+  await waitFor(() => v.getByLabelText("Удалить подключение"));
+  fireEvent.press(v.getByLabelText("Удалить подключение"));
+  expect(v.getByText("Убрать подключение?")).toBeTruthy();
+  expect(v.getByText(/OpenAI.*Сохранить настройки/)).toBeTruthy();
+  fireEvent.press(v.getByLabelText("Оставить подключение"));
+  expect(v.getByLabelText("Подключение OpenAI")).toBeTruthy();
+  expect(saveDirectConnections).not.toHaveBeenCalled();
+  fireEvent.press(v.getByLabelText("Удалить подключение"));
+  fireEvent.press(v.getByLabelText("Убрать из списка"));
+  expect(v.queryByLabelText("Подключение OpenAI")).toBeNull();
+  expect(v.getByLabelText("Подключение Anthropic")).toBeTruthy();
+  expect(saveDirectConnections).not.toHaveBeenCalled();
+  fireEvent.press(v.getByText("Сохранить настройки"));
+  await waitFor(() => expect(saveDirectConnections).toHaveBeenCalledWith("guest",
+    expect.objectContaining({ activeId: "two", connections: [expect.objectContaining({ id: "two" })] })));
+});
+
+test("unsaved connection edits trigger a Nebula leave dialog with safe cancel", async () => {
+  const v = render(<DirectAgentSettingsScreen />);
+  await waitFor(() => v.getByLabelText("Название модели"));
+  fireEvent.changeText(v.getByLabelText("Название модели"), "updated-model");
+  expect(mockGuard.enabled).toBe(true);
+  act(() => mockGuard.callback?.());
+  expect(v.getByText("Изменения не сохранены")).toBeTruthy();
+  fireEvent.press(v.getByLabelText("Продолжить редактирование"));
+  expect(mockBack).not.toHaveBeenCalled();
+  expect(v.getByLabelText("Название модели").props.value).toBe("updated-model");
+  act(() => mockGuard.callback?.());
+  fireEvent.press(v.getByLabelText("Выйти без сохранения"));
+  await waitFor(() => expect(mockBack).toHaveBeenCalledTimes(1));
+  expect(saveDirectConnections).not.toHaveBeenCalled();
 });

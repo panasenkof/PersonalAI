@@ -34,6 +34,7 @@ import { resolveNebulaHomePhase, resolveNebulaStatus, type NebulaVoicePhase } fr
 import type { CellRendererProps } from "react-native";
 import { presentChatRows, type PresentedChatRow } from "../design/nebula/chatPresentation";
 import { nebulaSpacing, nebulaTouch } from "../design/nebula/tokens";
+import { NebulaAction } from "../design/nebula/components";
 import { useChatBottomFollow } from "../design/nebula/useChatBottomFollow";
 import { VoiceInput } from "../components/VoiceInput";
 import { showDraftImprove, useVoiceEngine } from "../media/voice-engine";
@@ -153,7 +154,6 @@ function NebulaHomeContent() {
   const artLayout = { listHeight: listViewportHeight, windowHeight: height,
     windowWidth: width, composerOccluded };
   const artworkSize = nebulaEmptyOrbSize(artLayout);
-  const action = { minHeight: 44, minWidth: 44, justifyContent: "center" as const, alignItems: "center" as const };
   const selectedPhoto:ChatAttachment|undefined =
     active?.attachments?.find(f=>f.id===selectedPhotoId && f.kind==="image");
   const previewPhoto=active?.attachments?.find(f=>f.id===previewPhotoId && f.kind==="image");
@@ -354,7 +354,7 @@ function NebulaHomeContent() {
       showOrb={ready} orbPhase={orbPhase}
       newChatEnabled={ready} onNewChat={() => store.create()} />
     {!ready ? <View style={{ padding: 20, gap: 12 }}>{!error ? <ActivityIndicator accessibilityLabel="Загрузка диалогов" /> : null}
-      {error ? <Pressable accessibilityRole="button" onPress={() => void store.initialize()} style={action}><Text style={{ color: t.accent }}>Повторить загрузку</Text></Pressable> : null}</View> : null}
+      {error ? <NebulaAction icon="refresh-cw" label="Повторить загрузку" onPress={() => void store.initialize()} /> : null}</View> : null}
     <View style={{ flex: 1 }}>
     <FlatList key={active?.id || "empty"} ref={viewport.list} data={rows} keyExtractor={item => item.viewKey}
       testID="chat-message-list" style={{ flex: 1 }} removeClippedSubviews={false}
@@ -386,8 +386,9 @@ function NebulaHomeContent() {
             style={{ flexBasis: "45%", flexGrow: 1, minHeight: 56, justifyContent: "center", backgroundColor: t.panel, borderWidth: 1, borderColor: t.accent, borderRadius: 16, padding: 12 }}
             onPress={() => openConnections(p.id)}><Text style={{ color: t.accent, fontWeight: "700" }}>{p.name}</Text></Pressable>)}
         </View>
-        <Pressable accessibilityRole="button" onPress={() => openConnections()} style={{ minHeight: 44, justifyContent: "center", alignItems: "center" }}>
-          <Text style={{ color: t.accent }}>Другие варианты, включая OpenAI и Anthropic →</Text></Pressable>
+        <NebulaAction icon="settings" label="Другие варианты подключения"
+          accessibilityLabel="Другие варианты, включая OpenAI и Anthropic"
+          onPress={() => openConnections()} />
       </View> : ready && !busy ? <View testID="nebula-home-empty-state"
         style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 12 }}>
         {artworkSize > 0 ? <NebulaHomeArtwork size={artworkSize} phase={orbPhase} /> : null}
@@ -409,15 +410,13 @@ function NebulaHomeContent() {
           <MarkdownText text={item.text} style={{ color: t.text, lineHeight: 23 }} />
         </Pressable> :
           <Text selectable style={{ color: item.role === "user" ? t.userText : item.role === "info" ? t.muted : t.text, lineHeight: 23 }}>{item.text}</Text>}
-        {active?.retryPhoto?.rowId === item.id && active?.retryPhoto ? <Pressable accessibilityRole="button"
-          disabled={busy} onPress={() => void store.searchPhotosLocally(active.retryPhoto!.image,active.id)}
-          style={{minHeight:48,justifyContent:"center"}}>
-          <Text style={{color:t.secondary}}>Повторить поиск по фото</Text>
-        </Pressable> : null}
-        {item.photoAction ? <Pressable accessibilityRole="button" style={{minHeight:48,justifyContent:"center"}}
-          onPress={() => item.photoAction === "import" ? navigation.navigate("MemoryImport", {source:"photo"}) : navigation.navigate("PhotoSearchSettings")}>
-          <Text style={{color:t.secondary}}>{item.photoAction === "model" ? "Выбрать модель" : item.photoAction === "import" ? "Добавить фото в память" : "Подготовить фото"}</Text>
-        </Pressable> : null}
+        {active?.retryPhoto?.rowId === item.id && active?.retryPhoto ?
+          <NebulaAction icon="refresh-cw" label="Повторить поиск по фото"
+            disabled={busy} onPress={() => void store.searchPhotosLocally(active.retryPhoto!.image,active.id)} /> : null}
+        {item.photoAction ? <NebulaAction
+          icon={item.photoAction === "import" ? "plus-circle" : "settings"}
+          label={item.photoAction === "model" ? "Выбрать модель" : item.photoAction === "import" ? "Добавить фото в память" : "Подготовить фото"}
+          onPress={() => item.photoAction === "import" ? navigation.navigate("MemoryImport", {source:"photo"}) : navigation.navigate("PhotoSearchSettings")} /> : null}
         {item.attachments?.length ? <ChatAttachmentList files={item.attachments}/> : null}
         {item.memory?.length ? <View style={{ gap: 4 }}><Text style={{ color: t.muted, fontSize: 12 }}>Из памяти</Text>
           {item.memory.some(m => m.photo) ? <PhotoSearchResults key={item.id} profile={profile} results={item.memory.filter(m=>m.photo)} limit={photoResultCount}
@@ -444,8 +443,12 @@ function NebulaHomeContent() {
               style={{ minHeight: 36, paddingHorizontal: 10, justifyContent: "center", borderRadius: 12, borderWidth: 1, borderColor: chosen ? t.accent : t.line, backgroundColor: chosen ? t.soft : t.panel }}>
               <Text style={{ color: chosen ? t.accent : t.text, fontSize: 13 }}>{x.name}</Text></Pressable>; })}
           </View>
-          <View style={{ flexDirection: "row", gap: 20 }}><Pressable accessibilityRole="button" disabled={Boolean(active.savingDraft)} onPress={() => void store.approve(d)} style={action}><Text style={{ color: t.accent }}>{active.savingDraft === d.id ? "Сохранение…" : "Сохранить"}</Text></Pressable>
-            <Pressable accessibilityRole="button" disabled={Boolean(active.savingDraft)} onPress={() => store.dismiss(d)} style={action}><Text style={{ color: t.muted }}>Отклонить</Text></Pressable></View>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: nebulaSpacing.sm }}>
+            <NebulaAction icon="check" label={active.savingDraft === d.id ? "Сохранение…" : "Сохранить"}
+              variant="primary" disabled={Boolean(active.savingDraft)} onPress={() => void store.approve(d)} />
+            <NebulaAction icon="x" label="Отклонить" disabled={Boolean(active.savingDraft)}
+              onPress={() => store.dismiss(d)} />
+          </View>
         </View>)}
 
       </View>}
@@ -466,16 +469,18 @@ function NebulaHomeContent() {
           <Feather name="x" size={18} color={t.secondary}/>
         </Pressable> : null}
       </View>
-      {error && ready ? <Pressable accessibilityRole="button" onPress={() => void store.checkpoint().catch(() => {})} style={{ minHeight: 44, justifyContent: "center" }}><Text style={{ color: t.accent }}>Повторить сохранение истории</Text></Pressable> : null}</View> : null}
-    {!canSend && ready && !(needsSetup && !active?.rows.length) ? <Pressable accessibilityRole="button" onPress={() => openConnections()} style={{ paddingHorizontal: 16, minHeight: 44, justifyContent: "center" }}><Text style={{ color: t.accent }}>Добавьте модель в настройках подключений →</Text></Pressable> : null}
+      {error && ready ? <NebulaAction icon="refresh-cw" label="Повторить сохранение истории"
+        onPress={() => void store.checkpoint().catch(() => {})} /> : null}</View> : null}
+    {!canSend && ready && !(needsSetup && !active?.rows.length) ? <View style={{paddingHorizontal:nebulaSpacing.md}}>
+      <NebulaAction icon="settings" label="Настроить подключение модели"
+        accessibilityLabel="Добавьте модель в настройках подключений" onPress={() => openConnections()} />
+    </View> : null}
     <View style={{ zIndex: 3, padding: 10, gap: 5, backgroundColor: t.panel, borderTopWidth: 1, borderColor: t.line }}>
       {pickingAttachment && audioPreparing ? <View style={{flexDirection:'row',alignItems:'center',gap:12,minHeight:48,paddingHorizontal:6}}>
         <ActivityIndicator accessibilityLabel="Локальное распознавание аудио"/>
         <Text accessibilityLiveRegion="polite" style={{color:t.secondary,flex:1}}>Распознаю аудио на телефоне…</Text>
-        <Pressable accessibilityRole="button" accessibilityLabel="Отменить распознавание аудио"
-          onPress={cancelAttachmentPreparation} style={{minHeight:48,minWidth:48,justifyContent:'center'}}>
-          <Text style={{color:t.accent}}>Отмена</Text>
-        </Pressable>
+        <NebulaAction icon="x" label="Отмена" accessibilityLabel="Отменить распознавание аудио"
+          onPress={cancelAttachmentPreparation} />
       </View> : null}
       {draftImageSupport === "unsupported" ? <Text accessibilityRole="alert"
         style={{color:t.accent,fontSize:13,lineHeight:19,paddingHorizontal:6}}>
@@ -506,11 +511,9 @@ function NebulaHomeContent() {
             {id:"preview",label:"Посмотреть",run:()=>setPreviewPhotoId(selectedPhoto.id)},
           ]} /> : null}
       </> : null}
-      {suggestedPhotoSearch && ready && !busy && !cameraBusy && !pickingAttachment && !dictating ? <Pressable
-        accessibilityRole="button" accessibilityLabel="Поискать в моих фото" style={{minHeight:48,justifyContent:"center"}}
-        onPress={() => { Keyboard.dismiss(); void store.searchPhotosLocally(undefined, active?.id, true); }}>
-        <Text style={{color:t.accent}}>Поискать в моих фото</Text>
-      </Pressable> : null}
+      {suggestedPhotoSearch && ready && !busy && !cameraBusy && !pickingAttachment && !dictating ?
+        <NebulaAction icon="search" label="Поискать в моих фото"
+          onPress={() => { Keyboard.dismiss(); void store.searchPhotosLocally(undefined, active?.id, true); }} /> : null}
       <PromptInput value={question} onChange={value => store.setQuestion(value)} onClear={() => { normalization.reset(); setVoiceReset(n => n + 1); }} editable={ready} onFocusChange={setComposerFocused} />
       <View testID="composer-actions" style={{ zIndex: 1, flexDirection: "row", alignItems: "center", gap: 4 }}>
         <IconAction compact explainOnTap={false} icon="paperclip" label="Файл" accessibilityLabel="Прикрепить файл к сообщению" hint="JPEG/PNG/WebP, текст, PDF с текстовым слоем и аудио MP3/M4A/WAV/OGG/FLAC/AAC до 20 МБ через скачанный Whisper. Аудио распознаётся только на телефоне; в чат попадёт текст без оригинала. До 3 файлов, PDF до 6 МБ, совокупный текст до 240 000 символов (защита памяти телефона, не предел ИИ). Большие документы анализируются по частям после подтверждения расходов. Файлы не сохраняются как заметки." hintAbove hintAlign="start" disabled={!ready || busy || pickingAttachment || dictating} onPress={() => void pickAttachment()} />
@@ -527,7 +530,7 @@ function NebulaHomeContent() {
           disabled={!ready || dictating || (!normalization.busy && (!question.trim() || (!normalization.alternate && !canSend)))}
           onPress={() => void normalization.toggle(settings)} /> : null}
         <View style={{ flex: 1, minWidth: 0 }} />
-        <IconAction compact icon={busy ? "square" : "arrow-up"} label={busy ? "Стоп" : localPhotoSearch ? "Найти" : "Отправить"} accessibilityLabel={busy ? "Остановить запрос" : localPhotoSearch ? "Найти фотографии в памяти" : "Отправить запрос"}
+        <IconAction compact explainOnTap={false} icon={busy ? "square" : "arrow-up"} label={busy ? "Стоп" : localPhotoSearch ? "Найти" : "Отправить"} accessibilityLabel={busy ? "Остановить запрос" : localPhotoSearch ? "Найти фотографии в памяти" : "Отправить запрос"}
           hint={busy ? "Остановить ответ ИИ в этом диалоге." : localPhotoSearch ? "Найти фотографии на телефоне." : "Отправить написанное сообщение выбранной модели."} hintAbove emphasized={!busy}
           disabled={!busy && (pickingAttachment || !(canSend || canSearchLocal) || (!question.trim() && !active?.attachments?.length))} onPress={sendOrStop} />
       </View>
@@ -536,10 +539,8 @@ function NebulaHomeContent() {
       <View style={{flex:1,backgroundColor:"rgba(0,0,0,0.94)",justifyContent:"center",padding:16,gap:12}}>
         {previewPhoto ? <Image source={{uri:`data:${previewPhoto.mime};base64,${previewPhoto.data}`}}
           style={{width:"100%",height:"75%"}} resizeMode="contain" accessibilityLabel="Просмотр фотографии"/> : null}
-        <Pressable accessibilityRole="button" accessibilityLabel="Закрыть просмотр фото"
-          style={{minHeight:48,alignItems:"center",justifyContent:"center"}} onPress={()=>setPreviewPhotoId(null)}>
-          <Text style={{color:"#fff",fontWeight:"700"}}>Закрыть</Text>
-        </Pressable>
+        <NebulaAction icon="x" label="Закрыть" accessibilityLabel="Закрыть просмотр фото"
+          onPress={()=>setPreviewPhotoId(null)} />
       </View>
     </Modal>
     <ConversationHistorySheet visible={historyOpen} conversations={conversations} activeId={active?.id}

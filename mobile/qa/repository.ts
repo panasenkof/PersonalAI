@@ -21,6 +21,34 @@ export async function localMemoryRepository(_profile: string): Promise<any> {
     entity: async (id: string) => notes.find(n => n.id === id) || null,
     searchNotes: async (term: string, limit = 50, offset = 0, filter: any = {}) => notes.filter(n => n.record_status === (filter.status || "active") && (!filter.collectionId || filter.collectionId === n.collection_id) && (!term || JSON.stringify(n).toLowerCase().includes(term.toLowerCase()))).slice(offset, offset + limit),
     collectionNoteCounts: async () => Object.fromEntries(collections.map(c => [c.id, notes.filter(n => n.collection_id === c.id && n.record_status === "active").length])),
+    trashNoteCount: async () => notes.filter(n => n.domain === "notes" && n.record_status === "trashed").length,
+    // QA substitutes localStorage for native SQLCipher. This is a scope/CAS
+    // fixture, not evidence for native cascade/rollback correctness.
+    trashPurgeSnapshot: async () => {
+      const trashed = notes.filter(n => n.domain === "notes" && n.record_status === "trashed");
+      const protectedIds = new Set(trashed.filter(n => relations.some(r =>
+        r.source_entity_id === n.id || r.target_entity_id === n.id)).map(n => n.id));
+      return { items: trashed.filter(n => !protectedIds.has(n.id))
+        .map(n => ({id:n.id,record_version:n.record_version})),
+        totalCount: trashed.length, protectedCount: protectedIds.size,
+        originalCount: 0, affectedRelationCount: relations.filter(r => trashed.some(n =>
+          n.id === r.source_entity_id || n.id === r.target_entity_id)).length };
+    },
+    purgeNotes: async (items: {id:string;record_version:number}[], options?: {protectReferences?:boolean}) => {
+      if (!items.length || items.length > 100 || new Set(items.map(x => x.id)).size !== items.length)
+        throw new Error("invalid_note_selection");
+      const selected = items.map(x => {
+        const note = notes.find(n => n.id === x.id);
+        if (!note || note.domain !== "notes" || note.record_status !== "trashed" ||
+            note.record_version !== x.record_version) throw new Error("stale_memory_version");
+        if (options?.protectReferences && relations.some(r =>
+          r.source_entity_id === x.id || r.target_entity_id === x.id))
+          throw new Error("trash_references_changed_repeat_preview");
+        return note;
+      });
+      for (const note of selected) notes.splice(notes.indexOf(note),1);
+      save();
+    },
     listCollections: async () => collections,
     createCollection: async (item: any) => { const c = { ...item, id: crypto.randomUUID(), created_at: new Date().toISOString() }; collections.push(c); save(); return c; },
     createEntity: async (item: any, _writeAttachment?: any, card?: any) => { const n = { kind: "note", ...item, id: crypto.randomUUID(), record_status: "active", record_version: 1, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }; applyCard(n as EntityRecord, card); notes.unshift(n); save(); return n; },

@@ -5,9 +5,11 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import * as Crypto from "expo-crypto";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, BackHandler, FlatList, Pressable, ScrollView, Text, TextInput, View, useWindowDimensions } from "react-native";
+import { memoryScrollReloadCount, memoryScrollRowIndex, memoryScrollScope, type MemoryScrollAnchor } from "../design/nebula/memoryScrollAnchor";
 import { useProfile } from "../profile/ProfileContext";
 import { BottomSheet } from "../components/BottomSheet";
 import { localMemoryRepository } from "../local-memory/repository";
+import { purgeConfirmedTrash, trashPurgeCountLabel, type TrashPurgeSnapshot } from "../local-memory/trash-clear";
 import type { SqliteMemoryRepository } from "../local-memory/repository";
 import type { CollectionRecord, EntityRecord } from "../local-memory/types";
 import { memoryErrorMessage } from "../local-memory/errors";
@@ -17,7 +19,7 @@ import { useTheme } from "../theme";
 import { nebulaSpacing, nebulaRadii, nebulaTouch } from "../design/nebula/tokens";
 import { MemoryCover } from "../media/MemoryCover";
 import { memoryDisplayTitle, memoryNoteHasPhoto } from "../design/nebula/memoryNotePresentation";
-import { MemoryNoteCard } from "../design/nebula/MemoryNoteCard";
+import { MemoryNoteCard, MEMORY_GRID_MEDIA_HEIGHT } from "../design/nebula/MemoryNoteCard";
 import { NebulaAction } from "../design/nebula/components";
 import { loadMemoryLibraryView, saveMemoryLibraryView } from "../design/nebula/memoryViewPreference";
 
@@ -40,12 +42,27 @@ export function LocalMemoryScreen() {
   const [confirmation, setConfirmation] = useState<"trash" | "purge" | null>(null);
   const [contextNote, setContextNote] = useState<EntityRecord | null>(null);
   const [counts, setCounts] = useState<Record<string, number>>({});
+  const [trashCount, setTrashCount] = useState(0);
+  const [trashPreview, setTrashPreview] = useState<TrashPurgeSnapshot | null>(null);
+  const [trashConfirm, setTrashConfirm] = useState(false);
+  const [trashProgress, setTrashProgress] = useState(0);
+  const [trashMessage, setTrashMessage] = useState("");
+  // A session/profile/list change invalidates the approval before any next batch.
+  const trashEpoch = useRef(0);
+  const trashRunning = useRef(false);
+  const purgeHasCompleted = useRef(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [collectionMenu, setCollectionMenu] = useState(false);
   const [collectionCards, setCollectionCards] = useState<CollectionRecord[]>([]);
   const [visibleIds, setVisibleIds] = useState<Set<string>>(new Set());
-  const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: { item: EntityRecord }[] }) => setVisibleIds(new Set(viewableItems.map(x => x.item.id)))).current;
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 10 }).current;
+  const listRef = useRef<FlatList<EntityRecord>>(null);
+  // Only transient navigation state, keyed by profile/collection/status/search.
+  const listAnchors = useRef(new Map<string, MemoryScrollAnchor>());
+  const pendingAnchor = useRef<(MemoryScrollAnchor & { attempts: number }) | null>(null);
+  const restoreTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const loadedCount = useRef(0);
+  const scrollY = useRef(0);
   const [collections, setCollections] = useState<CollectionRecord[]>([]);
   const [collectionId, setCollectionId] = useState<string | undefined>();
   const [status, setStatus] = useState<"active" | "archived" | "trashed">("active");
@@ -66,6 +83,10 @@ export function LocalMemoryScreen() {
   const hygieneGeneration = useRef(0);
   const [undo, setUndo] = useState("");
   const [search, setSearch] = useState(""); const [term, setTerm] = useState("");
+  // Async deletion checks the CURRENT UI scope, never a stale closure captured
+  // when the user first tapped the confirmation button.
+  const trashScope = useRef({ status, search, term, selecting, collectionId });
+  trashScope.current = { status, search, term, selecting, collectionId };
   const [notes, setNotes] = useState<EntityRecord[]>([]); const [more, setMore] = useState(false);
   const selectedNotes = contextNote ? [contextNote] : selectedIds.map(id => notes.find(n => n.id === id)).filter((note): note is EntityRecord => Boolean(note));
   const reviewNotes = suggestedReviewNotes ?? selectedNotes;
@@ -73,8 +94,63 @@ export function LocalMemoryScreen() {
   const [error, setError] = useState(""); const [retry, setRetry] = useState(0);
   const [sectionOpen, setSectionOpen] = useState(false); const [sectionName, setSectionName] = useState("");
   const repository = useRef<SqliteMemoryRepository | null>(null); const generation = useRef(0);
+  const scope = memoryScrollScope(profile, collectionId, status, term);
+  const scopeRef = useRef(scope);
+  scopeRef.current = scope;
+  loadedCount.current = notes.length;
+  const onViewableItemsChanged = useRef(({ viewableItems }: {
+    viewableItems: { item: EntityRecord; index: number | null }[];
+  }) => {
+    setVisibleIds(new Set(viewableItems.map(x => x.item.id)));
+    if (!localMemorySessionUnlocked()) return;
+    const currentScope = scopeRef.current;
+    const pending = pendingAnchor.current;
+    if (pending?.scope === currentScope) {
+      if (viewableItems.some(x => x.item.id === pending.id)) pendingAnchor.current = null;
+      return;
+    }
+    if (scrollY.current < 20) {
+      listAnchors.current.delete(currentScope);
+      return;
+    }
+    const first = viewableItems.find(x => x.index !== null);
+    if (first?.index != null) {
+      listAnchors.current.set(currentScope, {
+        scope: currentScope, id: first.item.id, index: first.index, loaded: loadedCount.current,
+      });
+    }
+  }).current;
+  function restoreListAnchor() {
+    const pending = pendingAnchor.current;
+    if (!pending || pending.scope !== scope || loading || !notes.length || pending.attempts >= 4) return;
+    // A multi-column FlatList scrolls by ROW, while viewability indexes individual notes.
+    const index = memoryScrollRowIndex(notes, pending, scope, columns);
+    if (index === null) { pendingAnchor.current = null; return; }
+    pending.attempts += 1;
+    listRef.current?.scrollToIndex({ index, viewPosition: 0, animated: false });
+  }
+  useEffect(() => {
+    const anchor = listAnchors.current.get(scope);
+    pendingAnchor.current = anchor ? { ...anchor, attempts: 0 } : null;
+    scrollY.current = 0;
+    return () => { if (restoreTimer.current) clearTimeout(restoreTimer.current); restoreTimer.current = null; };
+  }, [scope]);
+  useEffect(() => {
+    if (pendingAnchor.current && !loading && notes.length) {
+      const timer = setTimeout(restoreListAnchor, 0);
+      return () => clearTimeout(timer);
+    }
+  }, [scope, columns, loading, notes]);
   useEffect(() => { const timer = setTimeout(() => setTerm(search.trim()), 250); return () => clearTimeout(timer); }, [search]);
-  useEffect(() => { setCollectionId(undefined); setSearch(""); setStatus("active"); setCollections([]); setNotes([]); setCollectionCards([]); setSelectedIds([]); setSelecting(false); setCounts({}); setVisibleIds(new Set()); }, [profile]);
+  useEffect(() => {
+    // Invalidate a reviewed destructive action immediately when the user
+    // starts searching/selecting, not 250 ms later when term is debounced.
+    if (search || selecting) {
+      trashEpoch.current++;
+      setTrashPreview(null); setTrashConfirm(false);
+    }
+  }, [search, selecting]);
+  useEffect(() => { listAnchors.current.clear(); pendingAnchor.current = null; purgeHasCompleted.current = false; setBusy(false); setCollectionId(undefined); setSearch(""); setStatus("active"); setCollections([]); setNotes([]); setCollectionCards([]); setSelectedIds([]); setSelecting(false); setCounts({}); setVisibleIds(new Set()); }, [profile]);
   useEffect(() => {
     // A first visit still defaults to a two-column library where space permits.
     // An asynchronous preference read may not override an immediate user tap.
@@ -88,6 +164,8 @@ export function LocalMemoryScreen() {
   }, [profile]);
   function switchMemoryView() {
     const next = !grid;
+    const anchor = listAnchors.current.get(scope);
+    pendingAnchor.current = anchor ? { ...anchor, attempts: 0 } : null;
     viewChanged.current = true;
     setGrid(next);
     if (!profile) return;
@@ -101,13 +179,27 @@ export function LocalMemoryScreen() {
   }
   useFocusEffect(useCallback(() => {
     const request = ++generation.current; setLoading(true); setError("");
+    const anchor = listAnchors.current.get(scope);
+    pendingAnchor.current = anchor ? { ...anchor, attempts: 0 } : null;
     if (profile) void localMemoryRepository(profile).then(async db => {
-      const [sections, page, totals] = await Promise.all([
-        ensureSections(db), db.searchNotes(term, 50, 0, { collectionId, status }),
-        db.collectionNoteCounts(),
+      const [sections, totals, deletedTotal] = await Promise.all([
+        ensureSections(db), db.collectionNoteCounts(),
+        status === "trashed" ? db.trashNoteCount() : Promise.resolve(0),
       ]);
+      // Preserve the pages needed to restore the visible note by ID, never
+      // use a stale pixel offset or the first 50 rows as the trash total.
+      const target = memoryScrollReloadCount(anchor, scope);
+      const page: EntityRecord[] = [];
+      while (page.length < target) {
+        if (request !== generation.current) return;
+        const size = Math.min(100, target - page.length);
+        const batch = await db.searchNotes(term, size, page.length, { collectionId, status });
+        page.push(...batch);
+        if (batch.length < size) break;
+      }
       if (request !== generation.current) return;
-      setCounts(totals); repository.current = db; void db.lastNoteOperation().then(value => { if (request === generation.current) setUndo(value); }).catch(() => {}); setCollections(sections); setNotes(page); setMore(page.length === 50);
+      setTrashCount(deletedTotal);
+      setCounts(totals); repository.current = db; void db.lastNoteOperation().then(value => { if (request === generation.current) setUndo(purgeHasCompleted.current ? "" : value); }).catch(() => {}); setCollections(sections); setNotes(page); setMore(page.length === target);
       const recentIds = [...new Set(page.map(n => n.collection_id))];
       const shownSections = [...sections].sort((a, b) => {
         const rank = (id: string) => recentIds.includes(id) ? recentIds.indexOf(id) : recentIds.length;
@@ -121,6 +213,14 @@ export function LocalMemoryScreen() {
   }, [profile, term, collectionId, status, retry]));
   useEffect(() => onLocalMemorySessionChange(unlocked => {
     if (!unlocked) {
+      // Discard private navigation identities on lock, in addition to the
+      // current global purge snapshot.
+      listAnchors.current.clear(); pendingAnchor.current = null;
+      if (restoreTimer.current) clearTimeout(restoreTimer.current);
+      restoreTimer.current = null;
+      trashEpoch.current++;
+      setTrashPreview(null); setTrashConfirm(false); setTrashProgress(0);
+      setTrashMessage(""); setTrashCount(0);
       hygieneGeneration.current++;
       setHygieneSuggestionsOpen(false); setHygieneSuggestions(null);
       setSuggestedReviewNotes(null); setHygieneReviewOpen(false);
@@ -270,11 +370,11 @@ export function LocalMemoryScreen() {
     try {
       // A card-local restore must target that exact source/version, never another selection.
       const token = await repository.current.changeNotes(action, affectedNotes, target);
-      setUndo(token); setSelectedIds([]); setSelecting(false); setActionsOpen(false); setConfirmation(null); setContextNote(null); setMoveOpen(false); setMergeOpen(false); setRetry(n => n + 1);
+      purgeHasCompleted.current = false; setUndo(token); setSelectedIds([]); setSelecting(false); setActionsOpen(false); setConfirmation(null); setContextNote(null); setMoveOpen(false); setMergeOpen(false); setRetry(n => n + 1);
       if (profile) scheduleVectors(profile);
     } catch (e) { setError(memoryErrorMessage(e)); } finally { setBusy(false); }
   }
-  useEffect(() => { setSelectedIds([]); setSelecting(false); setActionsOpen(false); setConfirmation(null); setNotes([]); setContextNote(null); setMoveOpen(false); setMergeOpen(false); hygieneGeneration.current++; setHygieneReviewOpen(false); setHygieneSuggestionsOpen(false); setHygieneSuggestions(null); setSuggestedReviewNotes(null); setHygieneExcluded([]); setHygienePreview(null); setHygieneConfirm(false); setHygienePolicyItem(null); setHygieneAction("archive"); }, [profile, collectionId, term, status]);
+  useEffect(() => { trashEpoch.current++; setTrashPreview(null); setTrashConfirm(false); setTrashMessage(""); setTrashProgress(0); setSelectedIds([]); setSelecting(false); setActionsOpen(false); setConfirmation(null); setNotes([]); setContextNote(null); setMoveOpen(false); setMergeOpen(false); hygieneGeneration.current++; setHygieneReviewOpen(false); setHygieneSuggestionsOpen(false); setHygieneSuggestions(null); setSuggestedReviewNotes(null); setHygieneExcluded([]); setHygienePreview(null); setHygieneConfirm(false); setHygienePolicyItem(null); setHygieneAction("archive"); }, [profile, collectionId, term, status]);
   function openAll() { setStatus("active"); setCollectionId(undefined); setSearch(""); setTerm(""); setSelectedIds([]); setSelecting(false); }
   function openStatus(value: typeof status) { openAll(); setStatus(value); }
   const cancelSelection = useCallback(() => {
@@ -284,7 +384,7 @@ export function LocalMemoryScreen() {
     const sub = BackHandler.addEventListener("hardwareBackPress", () => {
       // A sheet or native keyboard handles its own Back; never change the area underneath.
       if (actionsOpen || moveOpen || mergeOpen || hygieneReviewOpen || hygieneSuggestionsOpen ||
-          addOpen || menuOpen || collectionMenu || sectionOpen) return false;
+          addOpen || menuOpen || collectionMenu || sectionOpen || trashPreview !== null) return false;
       if (selecting) {
         if (!busy) cancelSelection();
         return true;
@@ -301,7 +401,7 @@ export function LocalMemoryScreen() {
     });
     return () => sub.remove();
   }, [selecting, busy, actionsOpen, moveOpen, mergeOpen, hygieneReviewOpen,
-    hygieneSuggestionsOpen, addOpen, menuOpen, collectionMenu, sectionOpen, search, status, collectionId, cancelSelection]));
+    hygieneSuggestionsOpen, addOpen, menuOpen, collectionMenu, sectionOpen, trashPreview, search, status, collectionId, cancelSelection]));
   function toggleSelection(id: string) {
     if (busy || loading) return;
     if (!selectedIds.includes(id) && selectedIds.length >= 100) { setError("За один раз можно выбрать до 100 записей."); return; }
@@ -313,8 +413,81 @@ export function LocalMemoryScreen() {
     setBusy(true); setError("");
     try {
       await repository.current.purgeNotes(selectedNotes);
+      purgeHasCompleted.current = true;
       cancelSelection(); setConfirmation(null); setUndo(""); setRetry(n => n + 1);
     } catch (e) { setError(memoryErrorMessage(e)); } finally { setBusy(false); }
+  }
+  async function inspectWholeTrash() {
+    if (!repository.current || busy || trashRunning.current || loading ||
+        status !== "trashed" || selecting || search || term || collectionId || !localMemorySessionUnlocked()) return;
+    const epoch = ++trashEpoch.current, request = generation.current;
+    const currentProfile = profile, db = repository.current;
+    setBusy(true); setError(""); setTrashMessage(""); setTrashConfirm(false); setTrashPreview(null);
+    try {
+      const snapshot = await db.trashPurgeSnapshot();
+      if (epoch !== trashEpoch.current || request !== generation.current ||
+          viewProfile.current !== currentProfile || !localMemorySessionUnlocked()) return;
+      setTrashCount(snapshot.totalCount);
+      if (!snapshot.totalCount) {
+        setTrashMessage("Корзина пуста. Удалять нечего.");
+        setRetry(n => n + 1);
+      } else setTrashPreview(snapshot);
+    } catch (e) {
+      if (epoch === trashEpoch.current && request === generation.current)
+        setError("Не удалось проверить корзину: " + memoryErrorMessage(e));
+    } finally {
+      // Search/filter navigation can invalidate the preview while the read is
+      // pending. Release the busy state for this profile even then.
+      if (viewProfile.current === currentProfile && localMemorySessionUnlocked()) setBusy(false);
+    }
+  }
+  async function emptyWholeTrash() {
+    const snapshot = trashPreview, db = repository.current;
+    if (!snapshot?.items.length || !db || !trashConfirm || busy || trashRunning.current ||
+        status !== "trashed" || selecting || search || term || collectionId || !localMemorySessionUnlocked()) return;
+    trashRunning.current = true;
+    const epoch = trashEpoch.current, request = generation.current, currentProfile = profile;
+    const allowed = () => {
+      const scope = trashScope.current;
+      return epoch === trashEpoch.current && request === generation.current &&
+        viewProfile.current === currentProfile && scope.status === "trashed" &&
+        !scope.search && !scope.term && !scope.selecting && !scope.collectionId &&
+        localMemorySessionUnlocked();
+    };
+    setBusy(true); setError(""); setTrashProgress(0);
+    try {
+      // Every chunk contains only IDs and versions from the snapshot the user
+      // reviewed. The canonical purgeNotes writer enforces CAS/status atomically.
+      const outcome = await purgeConfirmedTrash(
+        snapshot.items, batch => db.purgeNotes(batch, { protectReferences: true }), allowed,
+        count => { if (allowed()) setTrashProgress(count); },
+      );
+      if (!allowed()) return;
+      if (outcome.confirmed > 0) purgeHasCompleted.current = true;
+      setTrashPreview(null); setTrashConfirm(false); setUndo("");
+      // Authoritative fresh read only. Never automatically repeat an unknown
+      // or failed commit, even when some confirmed batches already succeeded.
+      try {
+        const remaining = await db.trashNoteCount();
+        if (!allowed()) return;
+        setTrashCount(remaining);
+        setTrashMessage(outcome.error
+          ? `Подтверждено удаление ${outcome.confirmed} из ${outcome.total}. Операция остановлена. В корзине осталось ${remaining}. Проверьте состояние перед новым удалением.`
+          : remaining === 0
+            ? `Удалено ${trashPurgeCountLabel(outcome.confirmed)}. Корзина пуста.`
+            : `Удалено ${trashPurgeCountLabel(outcome.confirmed)}. В корзине осталось ${trashPurgeCountLabel(remaining)}. Записи со связями требуют отдельной проверки; новые записи автоматически не удалялись.`);
+      } catch {
+        if (allowed()) setTrashMessage(
+          `Подтверждено удаление ${outcome.confirmed} из ${outcome.total}, но остаток проверить не удалось. Проверьте состояние корзины; удаление автоматически не повторялось.`);
+      }
+      if (allowed()) setRetry(n => n + 1);
+    } finally {
+      trashRunning.current = false;
+      // Switching the filter invalidates further batches, but must never
+      // leave the current screen permanently busy. Profile/lock already
+      // reset their state independently.
+      if (viewProfile.current === currentProfile && localMemorySessionUnlocked()) setBusy(false);
+    }
   }
   async function loadMore() {
     if (!repository.current || busy) return;
@@ -355,8 +528,23 @@ export function LocalMemoryScreen() {
           {status === "active" ? <Pressable accessibilityRole="button" accessibilityLabel="Меню памяти" disabled={busy} onPress={() => setMenuOpen(true)} style={{ ...button, paddingHorizontal: 12 }}><Feather name="more-vertical" size={24} color={t.text} /></Pressable> : null}
         </View>}
     <FlatList
-      testID="memory-note-list" key={columns} numColumns={columns}
+      testID="memory-note-list" ref={listRef} key={columns} numColumns={columns}
       onViewableItemsChanged={onViewableItemsChanged} viewabilityConfig={viewabilityConfig}
+      onScroll={event => {
+        scrollY.current = event.nativeEvent.contentOffset.y;
+        if (scrollY.current < 20 && !pendingAnchor.current) listAnchors.current.delete(scope);
+      }}
+      scrollEventThrottle={100}
+      onScrollBeginDrag={() => { pendingAnchor.current = null; }}
+      onContentSizeChange={() => restoreListAnchor()}
+      onScrollToIndexFailed={({ index, averageItemLength }) => {
+        const pending = pendingAnchor.current;
+        if (!pending || pending.scope !== scope) return;
+        if (pending.attempts >= 4) { pendingAnchor.current = null; return; }
+        listRef.current?.scrollToOffset({ offset: Math.max(0, averageItemLength * index), animated: false });
+        if (restoreTimer.current) clearTimeout(restoreTimer.current);
+        restoreTimer.current = setTimeout(restoreListAnchor, 90);
+      }}
       initialNumToRender={8} windowSize={5} columnWrapperStyle={columns > 1 ? { gap: nebulaSpacing.sm, alignItems: "flex-start" } : undefined}
       ListHeaderComponent={<View style={{ paddingTop: nebulaSpacing.sm, paddingBottom: nebulaSpacing.sm, gap: nebulaSpacing.sm }}>
         <View style={{ flexDirection: "row", alignItems: "center", borderWidth: 1, borderColor: t.line, borderRadius: nebulaRadii.field, backgroundColor: t.panel }}>
@@ -402,11 +590,18 @@ export function LocalMemoryScreen() {
             </Pressable>)}
           </ScrollView>
         </> : null}
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-          <Text style={{ flex: 1, color: t.text, fontSize: 18, fontWeight: "700" }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <Text testID={status === "trashed" ? "trash-total-counter" : undefined}
+            style={{ flex: 1, minWidth: status === "trashed" && width < 560 ? width - 32 : undefined,
+              color: t.text, fontSize: 18, fontWeight: "700" }}>
             {term ? "Результаты поиска" : status === "archived" ? "Записи в архиве" :
-              status === "trashed" ? "Удалённые записи" : collectionId ? "Записи раздела" : "Недавнее"}
+              status === "trashed" ? "Корзина · " + trashPurgeCountLabel(trashCount) : collectionId ? "Записи раздела" : "Недавнее"}
           </Text>
+          {status === "trashed" && !term && !search && !selecting && !collectionId &&
+            trashCount > 0 && !loading ? <NebulaAction testID="memory-empty-trash"
+              icon="trash-2" label="Очистить корзину" variant="danger"
+              accessibilityLabel="Очистить всю корзину" disabled={busy}
+              onPress={() => void inspectWholeTrash()} /> : null}
           {status === "active" && width >= 350 && fontScale < 1.4 ?
             <NebulaAction icon={grid ? "list" : "grid"} label={grid ? "Список" : "Плитки"}
               accessibilityLabel={grid ? "Показать списком" : "Показать плитками"}
@@ -422,13 +617,25 @@ export function LocalMemoryScreen() {
           </Pressable> : null}
         {notes.length && !selecting ? <View style={{ alignItems: "flex-start" }}>
           <NebulaAction icon="check-square" label="Выбрать записи"
-            disabled={loading} onPress={() => { setContextNote(null); setSelecting(true); }} />
+            disabled={loading || busy} onPress={() => { setContextNote(null); setSelecting(true); }} />
         </View> : null}
         {status === "trashed" ? <Text style={{ color: t.muted, fontSize: 13, lineHeight: 19 }}>
           Удалённые записи исключены из поиска агента. Их можно восстановить или удалить окончательно.
+          Команда «Очистить корзину» касается только этого профиля и требует отдельного подтверждения.
         </Text> : null}
-      {undo ? <Pressable disabled={busy || selecting} style={button} onPress={() => { if (!repository.current) return; setBusy(true); void repository.current.undoNotes(undo).then(() => { setUndo(""); setRetry(n => n + 1); if (profile) scheduleVectors(profile); }).catch(e => setError(memoryErrorMessage(e))).finally(() => setBusy(false)); }}><Text style={{ color: t.secondary }}>{noteUndoLabel(undo)}</Text></Pressable> : null}
-    {error && !hygieneReviewOpen && !hygieneSuggestionsOpen ? <View style={{ paddingHorizontal: 18, gap: 8 }}><Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text><Pressable accessibilityRole="button" onPress={() => setRetry(n => n + 1)} style={button}><Text style={{ color: t.secondary }}>Повторить загрузку</Text></Pressable></View> : null}
+        {status === "trashed" && !term && !selecting && trashMessage ? <View style={{ gap: 8 }}>
+          <Text accessibilityLiveRegion="polite" style={{ color: t.text }}>{trashMessage}</Text>
+          <View style={{ alignItems: "flex-start" }}>
+            <NebulaAction icon="refresh-cw" label="Проверить состояние корзины" disabled={busy}
+              onPress={() => { setTrashMessage(""); setRetry(n => n + 1); }} />
+          </View>
+        </View> : null}
+      {undo ? <View style={{ alignItems: "flex-start" }}>
+        <NebulaAction icon="rotate-ccw" label={noteUndoLabel(undo)}
+          accessibilityLabel={noteUndoLabel(undo)} disabled={busy || selecting}
+          onPress={() => { if (!repository.current) return; setBusy(true); void repository.current.undoNotes(undo).then(() => { setUndo(""); setRetry(n => n + 1); if (profile) scheduleVectors(profile); }).catch(e => setError(memoryErrorMessage(e))).finally(() => setBusy(false)); }} />
+      </View> : null}
+    {error && !hygieneReviewOpen && !hygieneSuggestionsOpen ? <View style={{ paddingHorizontal: 18, gap: 8 }}><Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text><NebulaAction icon="refresh-cw" label="Повторить загрузку" onPress={() => setRetry(n => n + 1)} /></View> : null}
     {loading ? <ActivityIndicator accessibilityLabel="Загрузка записей" /> : null}
 </View>} data={notes} keyExtractor={item => item.id} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag"
       contentContainerStyle={{ paddingHorizontal: nebulaSpacing.md, paddingBottom: nebulaSpacing.xl, gap: nebulaSpacing.sm, flexGrow: 1 }}
@@ -440,7 +647,7 @@ export function LocalMemoryScreen() {
       renderItem={({ item }) => <View style={{ flex: 1, maxWidth: columns === 2 ? "50%" : "100%" }}><MemoryNoteCard note={item} grid={columns === 2}
         cover={profile && memoryNoteHasPhoto(item)
           ? <MemoryCover profile={profile} entityId={item.id} active={visibleIds.has(item.id)}
-            height={columns === 2 ? 116 : 56} compact={columns !== 2} label={"Обложка " + item.title} /> : undefined}
+            height={columns === 2 ? MEMORY_GRID_MEDIA_HEIGHT : 56} compact={columns !== 2} label={"Обложка " + item.title} /> : undefined}
         sectionName={collectionId ? "" : collections.find(c => c.id === item.collection_id)?.name || "Запись"}
         selected={selectedIds.includes(item.id)} selecting={selecting}
         onToggleSelection={() => toggleSelection(item.id)}
@@ -451,7 +658,43 @@ export function LocalMemoryScreen() {
           ? toggleSelection(item.id)
           : navigation.navigate("MemoryNote", { entityId: item.id })}
       /></View>}
-      ListFooterComponent={more && !loading ? <Pressable accessibilityRole="button" accessibilityLabel="Показать ещё заметки" disabled={busy} onPress={() => void loadMore()} style={button}><Text style={{ color: t.secondary }}>{busy ? "Загружаю…" : "Показать ещё"}</Text></Pressable> : null} />
+      ListFooterComponent={more && !loading ? <NebulaAction icon="chevron-down"
+          label={busy ? "Загружаю…" : "Показать ещё"} accessibilityLabel="Показать ещё заметки"
+          disabled={busy} onPress={() => void loadMore()} /> : null} />
+      <BottomSheet visible={Boolean(trashPreview)} title={trashConfirm ? "Очистить корзину?" : "Проверка корзины"}
+        onClose={() => { if (busy) return; trashEpoch.current++; setTrashPreview(null); setTrashConfirm(false); }}>
+        {trashPreview ? <>
+          <Text style={{ color: t.text, fontSize: 17, lineHeight: 25 }}>
+            {trashConfirm
+              ? `Будут безвозвратно удалены ${trashPurgeCountLabel(trashPreview.items.length)} из корзины этого профиля.`
+              : `Всего в корзине ${trashPurgeCountLabel(trashPreview.totalCount)}. Массово можно удалить ${trashPurgeCountLabel(trashPreview.items.length)}. Проверен весь список, а не только видимые 50.`}
+          </Text>
+          <Text style={{ color: t.muted, lineHeight: 22 }}>
+            Оригиналов в удаляемых записях: {trashPreview.originalCount}.
+            {trashPreview.protectedCount > 0
+              ? ` Защищены от массового удаления: ${trashPurgeCountLabel(trashPreview.protectedCount)}. Эти записи содержат связи, источники или подтверждённые факты и требуют отдельного просмотра. Связанных отношений: ${trashPreview.affectedRelationCount}.`
+              : ""}
+            История и оригиналы удаляемых записей исчезнут. Экспортированные ранее копии не затрагиваются.
+            Восстановить удалённое в приложении нельзя.
+          </Text>
+          {busy ? <Text accessibilityLiveRegion="polite" style={{ color: t.muted }}>
+            Подтверждено удаление {trashProgress} из {trashPreview.items.length}…
+          </Text> : null}
+          <NebulaAction icon="x" label="Отмена" accessibilityLabel="Отменить очистку корзины"
+            disabled={busy} onPress={() => { trashEpoch.current++; setTrashPreview(null); setTrashConfirm(false); }} />
+          {trashPreview.items.length === 0
+            ? <Text accessibilityRole="alert" style={{ color: t.muted }}>
+                Все записи требуют отдельной проверки. Массовое удаление недоступно.
+              </Text>
+            : trashConfirm ? <NebulaAction icon="trash-2" variant="danger-solid"
+              label={`Удалить ${trashPurgeCountLabel(trashPreview.items.length)}`}
+              accessibilityLabel="Подтвердить очистку всей корзины" disabled={busy}
+              onPress={() => void emptyWholeTrash()} />
+            : <NebulaAction icon="alert-triangle" variant="danger" label="Продолжить к подтверждению"
+                accessibilityLabel="Проверить последствия очистки корзины"
+                disabled={busy} onPress={() => setTrashConfirm(true)} />}
+        </> : null}
+      </BottomSheet>
       <BottomSheet visible={actionsOpen && selectedNotes.length > 0} title={confirmation ? (confirmation === "trash" ? "В корзину?" : "Удалить навсегда?") : selectedNotes.length === 1 ? "Действия с записью" : `Действия · ${selectedNotes.length}`} onClose={() => { if (busy) return; if (confirmation) setConfirmation(null); else { setActionsOpen(false); setContextNote(null); } }}>
       {error ? <Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text> : null}
       <Text numberOfLines={2} style={{ color: t.muted }}>{selectedNotes.map(memoryDisplayTitle).join(", ")}</Text>
@@ -462,7 +705,7 @@ export function LocalMemoryScreen() {
             : `Записей: ${selectedNotes.length}. Записи, оригиналы и история будут удалены без возможности восстановления.`}
         </Text>
         <NebulaAction icon="x" label="Отмена" disabled={busy} onPress={() => setConfirmation(null)} />
-        <NebulaAction icon="trash-2" variant="danger"
+        <NebulaAction icon="trash-2" variant={confirmation === "purge" ? "danger-solid" : "danger"}
           label={busy ? "Выполняю…" : confirmation === "trash" ? "В корзину" : "Удалить навсегда"}
           accessibilityLabel={confirmation === "trash" ? "Подтвердить перемещение в корзину" : "Подтвердить удаление навсегда"}
           disabled={busy} onPress={() => confirmation === "trash" ? void act("trash") : void purgeSelected()} />
@@ -534,10 +777,8 @@ export function LocalMemoryScreen() {
           <Text style={{color:t.secondary,fontSize:13}}>Записей: {group.targets.length} · Проверить и исключить</Text>
         </Pressable>)}
       {error?<Text accessibilityRole="alert" style={{color:t.err}}>{error}</Text>:null}
-      <Pressable accessibilityRole="button" accessibilityLabel="Закрыть предложения для ревизии"
-        style={button} onPress={closeHygieneSuggestions}>
-        <Text style={{color:t.secondary}}>Закрыть без изменений</Text>
-      </Pressable>
+      <NebulaAction icon="x" label="Закрыть без изменений"
+        accessibilityLabel="Закрыть предложения для ревизии" onPress={closeHygieneSuggestions} />
     </BottomSheet>
 
     <BottomSheet visible={hygieneReviewOpen && reviewNotes.length>=2}
@@ -631,25 +872,19 @@ export function LocalMemoryScreen() {
             Подтвердите {hygieneAction==="archive"?"архивирование":"перемещение в корзину"}:
             {hygienePreview.eligibleIds.length} записей. Исключённые и заблокированные останутся без изменений.
           </Text>
-          <Pressable accessibilityRole="button" accessibilityLabel="Подтвердить групповое действие памяти"
-            style={actionButton} onPress={()=>void applyHygiene()}>
-            <Text style={{color:hygieneAction==="trash"?t.err:t.secondary}}>
-              {hygieneAction==="archive"?"Подтвердить архивирование":"Подтвердить перемещение в корзину"}
-            </Text>
-          </Pressable>
-          <Pressable accessibilityRole="button" accessibilityLabel="Отмена подтверждения группового действия"
-            style={actionButton} onPress={()=>setHygieneConfirm(false)}><Text style={{color:t.secondary}}>Назад к проверке</Text></Pressable>
-        </> : <Pressable accessibilityRole="button"
+          <NebulaAction icon="check" accessibilityLabel="Подтвердить групповое действие памяти"
+            label={hygieneAction==="archive"?"Подтвердить архивирование":"Подтвердить перемещение в корзину"}
+            variant={hygieneAction==="trash"?"danger":"quiet"} onPress={()=>void applyHygiene()} />
+          <NebulaAction icon="arrow-left" label="Назад к проверке"
+            accessibilityLabel="Отмена подтверждения группового действия"
+            onPress={()=>setHygieneConfirm(false)} />
+        </> : <NebulaAction icon={hygieneAction==="archive"?"archive":"trash-2"}
           accessibilityLabel={hygieneAction==="archive"?"Продолжить архивирование группы":"Продолжить перемещение группы в корзину"}
-          style={actionButton} onPress={()=>setHygieneConfirm(true)}>
-          <Text style={{color:hygieneAction==="trash"?t.err:t.secondary}}>
-            {hygieneAction==="archive"?"Архивировать":"В корзину"} · {hygienePreview.eligibleIds.length}
-          </Text>
-        </Pressable>) : null}
-      <Pressable accessibilityRole="button" accessibilityLabel="Закрыть предпросмотр без изменений"
-        style={button} onPress={closeHygiene}>
-        <Text style={{color:t.secondary}}>Закрыть без изменений</Text>
-      </Pressable>
+          variant={hygieneAction==="trash"?"danger":"quiet"}
+          label={(hygieneAction==="archive"?"Архивировать":"В корзину")+" · "+hygienePreview.eligibleIds.length}
+          onPress={()=>setHygieneConfirm(true)} />) : null}
+      <NebulaAction icon="x" label="Закрыть без изменений"
+        accessibilityLabel="Закрыть предпросмотр без изменений" onPress={closeHygiene} />
     </BottomSheet>
 
     <BottomSheet visible={addOpen} title="Добавить в память" onClose={() => setAddOpen(false)}>
@@ -681,20 +916,22 @@ export function LocalMemoryScreen() {
       </Pressable>
     </BottomSheet>
     <BottomSheet visible={collectionMenu} title="Коллекции" onClose={() => setCollectionMenu(false)}>
-      {[{ id: undefined, name: "Все записи" }, ...collections].map(c => <Pressable key={c.id || "all"} accessibilityRole="button" accessibilityLabel={"Раздел " + c.name} style={{ ...button, alignItems: "flex-start" }}
+      {[{ id: undefined, name: "Все записи" }, ...collections].map(c => <Pressable key={c.id || "all"} accessibilityRole="button" accessibilityLabel={"Раздел " + c.name} style={actionButton}
         onPress={() => { openAll(); setCollectionId(c.id); setCollectionMenu(false); }}><Text style={{ color: t.text }}>{c.name}</Text></Pressable>)}
-      <Pressable accessibilityRole="button" accessibilityLabel="Новый раздел памяти" style={button} onPress={() => { setCollectionMenu(false); setSectionOpen(true); }}><Text style={{ color: t.secondary }}>Создать коллекцию</Text></Pressable>
+      <NebulaAction icon="plus" label="Создать коллекцию" accessibilityLabel="Новый раздел памяти"
+        onPress={() => { setCollectionMenu(false); setSectionOpen(true); }} />
     </BottomSheet>
     <BottomSheet visible={moveOpen} title="Перенести выбранные записи" onClose={() => { setMoveOpen(false); setContextNote(null); }}>
       {error ? <Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text> : null}
       <Text style={{ color: t.muted }}>{selectedNotes.map(memoryDisplayTitle).join(", ")}</Text>
-      {collections.map(c => <Pressable key={c.id} disabled={busy} style={button} onPress={() => void act("move", c.id)}><Text style={{ color: t.secondary }}>{c.name}</Text></Pressable>)}
+      {collections.map(c => <Pressable key={c.id} disabled={busy} style={actionButton} onPress={() => void act("move", c.id)}><Text style={{ color: t.secondary }}>{c.name}</Text></Pressable>)}
     </BottomSheet>
     <BottomSheet visible={mergeOpen} title="Предпросмотр объединения" onClose={() => setMergeOpen(false)}>
       <Text style={{ color: t.muted }}>Название первой выбранной записи сохраняется. Тексты остаются отдельными блоками; вложения и источники сохраняются. Противоречия не исправляются автоматически.</Text>
       {error ? <Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text> : null}
       <ScrollView style={{ maxHeight: 300 }}><Text style={{ color: t.text }}>{mergeText(selectedNotes)}</Text></ScrollView>
-      <Pressable disabled={busy} style={button} onPress={() => void act("merge")}><Text style={{ color: t.secondary }}>Подтвердить объединение</Text></Pressable>
+      <NebulaAction icon="check" label="Подтвердить объединение" variant="primary"
+        disabled={busy} onPress={() => void act("merge")} />
     </BottomSheet>
     <BottomSheet visible={sectionOpen} title="Новый раздел" onClose={() => setSectionOpen(false)}>
       <Text style={{ color: t.muted }}>Например: «Рецепты», «Идеи» или «Планы».</Text>

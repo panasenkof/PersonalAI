@@ -1,11 +1,13 @@
-import React, { useEffect, useState } from "react";
-import { ActivityIndicator, Alert, Platform, Pressable, Text, View } from "react-native";
+import React, { useEffect, useRef, useState } from "react";
+import { ActivityIndicator, Platform, Pressable, Text, View } from "react-native";
 import { WHISPER_CHOICES } from "../media/whisper-core";
 import type { WhisperId } from "../media/whisper-core";
 import { cancelWhisperDownload, deleteWhisper, downloadWhisper, useWhisperStatus } from "../media/whisper";
 import { grantOnlineSpeechConsent, hasOnlineSpeechConsent, resolveVoiceEngine, setVoiceEngine, useVoiceEngine } from "../media/voice-engine";
 import { useTheme } from "../theme";
 import { Collapsible } from "./Collapsible";
+import { NebulaConfirmSheet } from "./NebulaConfirmSheet";
+import { NebulaAction } from "../design/nebula/components";
 
 /** Dictation engine choice and independently managed on-device Whisper model. */
 export function VoiceModelCard({ defaultOpen = false }: { defaultOpen?: boolean } = {}) {
@@ -18,42 +20,77 @@ export function VoiceModelCard({ defaultOpen = false }: { defaultOpen?: boolean 
   const systemLabel = googleOnAndroid ? "Google — системное окно" : "Системное распознавание";
   const [choice, setChoice] = useState<WhisperId>("base");
   const [googleConsent, setGoogleConsent] = useState<boolean | null>(null);
+  const [notice, setNotice] = useState("");
+  const [approval, setApproval] = useState<
+    { kind: "google" } | { kind: "download"; id: WhisperId; name: string; approxMb: number } |
+    { kind: "delete"; id: WhisperId; name: string } | null
+  >(null);
+  const intent = useRef(0);
+  const mounted = useRef(true);
   useEffect(() => {
-    let mounted = true;
-    void hasOnlineSpeechConsent().then(allowed => { if (mounted) setGoogleConsent(allowed); });
-    return () => { mounted = false; };
+    mounted.current = true;
+    void hasOnlineSpeechConsent().then(allowed => { if (mounted.current) setGoogleConsent(allowed); });
+    return () => { mounted.current = false; intent.current++; };
   }, []);
   const selectEngine = async (engine: "system" | "whisper") => {
-    if (engine !== "system" || await hasOnlineSpeechConsent()) {
-      void setVoiceEngine(engine).catch(() => {});
+    const request = ++intent.current;
+    setApproval(null); setNotice("");
+    if (engine === "whisper") {
+      void setVoiceEngine("whisper").catch(() => { if (mounted.current && request === intent.current) setNotice("Не удалось сохранить выбор. Повторите."); });
       return;
     }
-    // Online consent is collected when choosing Google, never on microphone press.
-    Alert.alert(googleOnAndroid ? "Распознавание Google" : "Системное распознавание",
-      googleOnAndroid
-        ? "Откроется системное окно распознавания Android. Речь может передаваться Google через интернет. Разрешить этот способ ввода?"
-        : "Речь может передаваться системной службе для обработки через интернет. Разрешить этот способ ввода?", [
-        { text: "Отмена", style: "cancel" },
-        { text: "Разрешить", onPress: () => {
-          void grantOnlineSpeechConsent().then(() => {
-            setGoogleConsent(true);
-            return setVoiceEngine("system");
-          }).catch(() => Alert.alert("Голосовой ввод", "Не удалось сохранить разрешение. Попробуйте ещё раз."));
-        } },
-      ]);
+    try {
+      const permitted = await hasOnlineSpeechConsent();
+      if (!mounted.current || request !== intent.current) return;
+      if (permitted) {
+        void setVoiceEngine("system").catch(() => { if (mounted.current && request === intent.current) setNotice("Не удалось сохранить выбор. Повторите."); });
+      } else setApproval({ kind: "google" });
+    } catch {
+      if (mounted.current && request === intent.current) setNotice("Не удалось проверить согласие на передачу речи. Повторите выбор.");
+    }
   };
   const current = status.state === "ready" || status.state === "downloading" ? status.id : undefined;
   const picked = WHISPER_CHOICES.find(c => c.id === choice)!;
-  const button = (primary: boolean) => ({ minHeight: 46, paddingHorizontal: 16, justifyContent: "center" as const, alignItems: "center" as const,
-    borderRadius: 16, borderWidth: 1, borderColor: t.accent, backgroundColor: primary ? t.accent : t.panel });
-  const confirmDownload = () => Alert.alert("Скачать " + picked.name + "?", `Около ${picked.approxMb} МБ, лучше по Wi-Fi. Модель хранится только на телефоне; речь никуда не отправляется.`, [
-    { text: "Отмена", style: "cancel" }, { text: "Скачать", onPress: () => void downloadWhisper(choice) }]);
-  const confirmDelete = () => Alert.alert("Удалить модель распознавания?", "Освободится место на телефоне. Чтобы диктовать без скачанной модели, выберите системное распознавание.", [
-    { text: "Отмена", style: "cancel" }, { text: "Удалить", style: "destructive", onPress: () => void deleteWhisper() }]);
+  const askDownload = () => {
+    if (status.state === "unsupported" || status.state === "downloading" || !voice.loaded || voice.saving || current === choice) return;
+    setApproval({ kind: "download", id: picked.id, name: picked.name, approxMb: picked.approxMb });
+  };
+  const askDelete = () => {
+    if (status.state !== "ready") return;
+    const model = WHISPER_CHOICES.find(c => c.id === status.id);
+    if (model) setApproval({ kind: "delete", id: model.id, name: model.name });
+  };
+  const confirmAction = () => {
+    const request = approval;
+    setApproval(null);
+    if (!request) return;
+    if (request.kind === "google") {
+      const decision = ++intent.current;
+      void grantOnlineSpeechConsent().then(() => {
+        if (!mounted.current || intent.current !== decision) return;
+        setGoogleConsent(true);
+        return setVoiceEngine("system");
+      }).catch(() => {
+        if (mounted.current && intent.current === decision) setNotice("Не удалось сохранить разрешение. Попробуйте ещё раз.");
+      });
+      return;
+    }
+    if (!voice.loaded || voice.saving || status.state === "downloading" || status.state === "unsupported") return;
+    if (request.kind === "download") {
+      const model = WHISPER_CHOICES.find(c => c.id === request.id);
+      if (model?.name === request.name && model?.approxMb === request.approxMb &&
+          choice === request.id && !(status.state === "ready" && status.id === request.id)) {
+        void downloadWhisper(request.id);
+      }
+    } else if (status.state === "ready" && status.id === request.id &&
+        WHISPER_CHOICES.some(c => c.id === request.id && c.name === request.name)) {
+      void deleteWhisper();
+    }
+  };
 
   const summary = (selected === "whisper" ? "Whisper на телефоне" : googleOnAndroid ? "Google · системное окно · через интернет" : "Системное распознавание · через интернет") +
     (status.state === "ready" ? " · модель " + (WHISPER_CHOICES.find(c => c.id === status.id)?.name || "") + " скачана" : status.state === "downloading" ? ` · скачивается ${status.progress}%` : "");
-  return <Collapsible icon="mic" id="settings.voice" title="Голосовой ввод" summary={summary} defaultOpen={defaultOpen}>
+  return <><Collapsible icon="mic" id="settings.voice" title="Голосовой ввод" summary={summary} defaultOpen={defaultOpen} forceOpen={defaultOpen}>
     <Text style={{ color: t.muted, lineHeight: 20 }}>Выберите способ диктовки для чата и заметок. Выбор сохраняется; скачанную модель Whisper можно использовать снова в любой момент.</Text>
     <View accessibilityRole="radiogroup" accessibilityLabel="Способ распознавания речи" style={{ gap: 8 }}>
       {([
@@ -73,6 +110,7 @@ export function VoiceModelCard({ defaultOpen = false }: { defaultOpen?: boolean 
     </View>
     {!voice.loaded ? <Text style={{ color: t.muted }}>Загружаю настройки голоса…</Text> : null}
     {voice.error ? <Text accessibilityRole="alert" style={{ color: t.err }}>{voice.error}</Text> : null}
+    {notice ? <Text accessibilityRole="alert" style={{ color: t.err }}>{notice}</Text> : null}
     {voice.loaded && selected === "system" && googleConsent === false ?
       <Text style={{ color: t.secondary }}>Для первого запуска нажмите «{systemLabel}» и разрешите онлайн-распознавание. В чате дополнительных вопросов не будет.</Text> : null}
     {voice.loaded && !voice.error && selected === "whisper" && status.state !== "ready" && status.state !== "unsupported" ?
@@ -88,7 +126,7 @@ export function VoiceModelCard({ defaultOpen = false }: { defaultOpen?: boolean 
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}><ActivityIndicator />
           <Text style={{ color: t.text }}>Скачивается {WHISPER_CHOICES.find(c => c.id === status.id)?.name}: {status.progress}%</Text></View>
         <View style={{ height: 6, borderRadius: 3, backgroundColor: t.soft, overflow: "hidden" }}><View style={{ width: `${status.progress}%`, height: 6, backgroundColor: t.accent }} /></View>
-        <Pressable accessibilityRole="button" accessibilityLabel="Отменить скачивание модели" onPress={cancelWhisperDownload} style={button(false)}><Text style={{ color: t.secondary }}>Отменить</Text></Pressable>
+        <NebulaAction icon="x" label="Отменить скачивание" accessibilityLabel="Отменить скачивание модели" onPress={cancelWhisperDownload} />
       </View> : <>
         <View style={{ gap: 6 }}>
           {WHISPER_CHOICES.map(c => <Pressable key={c.id} accessibilityRole="button" accessibilityLabel={"Модель " + c.name} accessibilityState={{ selected: choice === c.id }}
@@ -98,13 +136,30 @@ export function VoiceModelCard({ defaultOpen = false }: { defaultOpen?: boolean 
           </Pressable>)}
         </View>
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-          {current !== choice ? <Pressable accessibilityRole="button" accessibilityLabel="Скачать модель распознавания" onPress={confirmDownload} style={button(true)}>
-            <Text style={{ color: "#fff", fontWeight: "700" }}>{current ? "Заменить на " + picked.name : "Скачать " + picked.name}</Text></Pressable> : null}
-          {status.state === "ready" ? <Pressable accessibilityRole="button" accessibilityLabel="Удалить модель распознавания" onPress={confirmDelete} style={button(false)}>
-            <Text style={{ color: t.err }}>Удалить модель</Text></Pressable> : null}
+          {current !== choice ? <NebulaAction icon="download" accessibilityLabel="Скачать модель распознавания"
+            label={current ? "Заменить на " + picked.name : "Скачать " + picked.name}
+            variant="primary" onPress={askDownload} /> : null}
+          {status.state === "ready" ? <NebulaAction icon="trash-2" label="Удалить модель"
+            accessibilityLabel="Удалить модель распознавания" variant="danger" onPress={askDelete} /> : null}
         </View>
       </>}
     </>}
     </> : null}
-  </Collapsible>;
+  </Collapsible>
+    <NebulaConfirmSheet visible={approval !== null}
+      title={approval?.kind === "google" ? (googleOnAndroid ? "Распознавание Google" : "Системное распознавание") :
+        approval?.kind === "delete" ? "Удалить модель распознавания?" : "Скачать модель Whisper?"}
+      message={approval?.kind === "google"
+        ? (googleOnAndroid
+          ? "Откроется системное окно распознавания Android. Речь может передаваться Google через интернет. Разрешить этот способ ввода?"
+          : "Речь может передаваться системной службе через интернет. Разрешить этот способ ввода?")
+        : approval?.kind === "delete"
+          ? `«${approval.name}» будет удалена с телефона. Чтобы диктовать без модели, выберите системное распознавание.`
+          : `«${approval?.name || ""}», около ${approval?.kind === "download" ? approval.approxMb : 0} МБ. Лучше использовать Wi-Fi. Модель хранится локально; речь никуда не отправляется.`}
+      confirmLabel={approval?.kind === "google" ? "Разрешить онлайн-распознавание" :
+        approval?.kind === "delete" ? "Удалить модель" : "Скачать модель"}
+      cancelLabel="Отмена" danger={approval?.kind === "delete"}
+      disabled={voice.saving || (approval?.kind !== "google" && status.state === "downloading")}
+      onCancel={() => setApproval(null)} onConfirm={confirmAction} />
+    </>;
 }

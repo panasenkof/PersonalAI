@@ -83,9 +83,9 @@ name: PersAI native offline smoke
 # 5. Settings and notes survive a full process restart.
 - tapOn: "Вкладка Настройки"
 - scrollUntilVisible:
-    element: "Развернуть: Работа ИИ"
+    element: "Работа ИИ"
     direction: DOWN
-- tapOn: "Развернуть: Работа ИИ"
+- tapOn: "Работа ИИ"
 - scrollUntilVisible:
     element: "Лимит обращений к LLM на сообщение"
     direction: DOWN
@@ -108,16 +108,13 @@ name: PersAI native offline smoke
 - scrollUntilVisible:
     element: "Работа ИИ"
     direction: DOWN
-- runFlow:
-    when:
-      visible: "Развернуть: Работа ИИ"
-    commands:
-      - tapOn: "Развернуть: Работа ИИ"
+- tapOn: "Работа ИИ"
 - scrollUntilVisible:
     element: "Лимит обращений к LLM на сообщение"
     direction: DOWN
 - assertVisible: "6"
 - takeScreenshot: 05-persistence
+- back
 # 6. Short background round trip reuses the application session.
 - tapOn: "Вкладка Главная"
 - pressKey: Home

@@ -69,6 +69,9 @@ test("lists attachments encrypted and only decrypts the explicitly opened one", 
   const screen = render(<AttachmentView profile="guest" entityId="note" />);
   await waitFor(() => expect(screen.getByText("Вложения · 3")).toBeTruthy());
   expect(materializeAttachment).not.toHaveBeenCalled();
+  expect(screen.queryByText("document.bin")).toBeNull();
+  expect(screen.getByLabelText("Показать остальные · 1")).toBeTruthy();
+  fireEvent.press(screen.getByLabelText("Показать остальные · 1"));
   expect(screen.getByText("document.bin")).toBeTruthy();
   expect(screen.getByText(/Встроенный просмотр этого формата/)).toBeTruthy();
   fireEvent.press(screen.getByLabelText("Открыть фото снимок.jpg"));
@@ -328,4 +331,41 @@ test("E2a PDF preview is discarded when the app loses focus",async()=>{
   mockFocused=false;
   ui.rerender(<AttachmentView profile="guest" entityId="note" />);
   await waitFor(()=>expect(deletePdfPagePreview).toHaveBeenCalledWith("file:///cache/persai-pdf-page-previews/page-1.jpg"));
+});
+
+test("four+ files stay compact until requested; collapsing securely unmounts their preview", async () => {
+  const many = [
+    ...items,
+    { id: "fourth", entity_id: "note", name: "дополнение.jpg", mime: "image/jpeg", size: 1200 },
+    { id: "fifth", entity_id: "note", name: "ещё.jpg", mime: "image/jpeg", size: 1200 },
+  ];
+  (attachmentsForEntity as jest.Mock).mockResolvedValueOnce(many);
+  const ui = render(<AttachmentView profile="guest" entityId="note" />);
+  await waitFor(() => expect(ui.getByText("Вложения · 5")).toBeTruthy());
+  expect(ui.getByText("снимок.jpg")).toBeTruthy();
+  expect(ui.getByText("голос.mp3")).toBeTruthy();
+  expect(ui.queryByText("дополнение.jpg")).toBeNull();
+  expect(materializeAttachment).not.toHaveBeenCalled();
+  fireEvent.press(ui.getByLabelText("Показать остальные · 3"));
+  expect(ui.getByText("дополнение.jpg")).toBeTruthy();
+  expect(materializeAttachment).not.toHaveBeenCalled();
+  fireEvent.press(ui.getByLabelText("Открыть фото дополнение.jpg"));
+  await waitFor(() => expect(ui.getByLabelText("Просмотр изображения дополнение.jpg")).toBeTruthy());
+  fireEvent.press(ui.getByLabelText("Свернуть вложения"));
+  await waitFor(() => expect(mockDelete).toHaveBeenCalledWith("file:///preview/fourth"));
+  expect(ui.queryByText("дополнение.jpg")).toBeNull();
+  expect(ui.getByText("Вложения · 5")).toBeTruthy();
+  expect(ui.getByLabelText("Показать остальные · 3")).toBeTruthy();
+});
+
+test("verified original and photo search keep their exact source without disclosure", async () => {
+  const proof = { ...proofOriginal };
+  const ui = render(<AttachmentView profile="guest" entityId="note" verifiedOriginal={proof} />);
+  await waitFor(() => expect(ui.getByText("Вложения · 1")).toBeTruthy());
+  expect(ui.queryByLabelText(/Показать остальные/)).toBeNull();
+  expect(ui.queryByText("снимок.jpg")).toBeNull();
+  ui.rerender(<AttachmentView profile="guest" entityId="note" photoAttachmentId="photo" />);
+  await waitFor(() => expect(ui.getByText("Вложения · 1")).toBeTruthy());
+  expect(ui.queryByLabelText(/Показать остальные/)).toBeNull();
+  expect(ui.queryByText("голос.mp3")).toBeNull();
 });

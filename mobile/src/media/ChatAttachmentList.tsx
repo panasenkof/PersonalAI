@@ -1,8 +1,39 @@
 import React from "react";
-import { Image, Pressable, ScrollView, Text, View } from "react-native";
+import { Image, Pressable, ScrollView, Text, View, useWindowDimensions } from "react-native";
 import type { ChatAttachment } from "../direct-agent/chat-attachments";
 import { useTheme } from "../theme";
-import { nebulaTouch, nebulaRadii, nebulaSpacing } from "../design/nebula/tokens";
+import { nebulaRadii, nebulaSpacing } from "../design/nebula/tokens";
+import { NebulaAction } from "../design/nebula/components";
+
+/** Bound the horizontal rail to its tallest real card, including multiline
+ * accessible action labels. This prevents Android from stretching the ScrollView
+ * to the viewport while keeping both photo buttons visible at large font sizes.
+ * No photo-sized empty slot is reserved for a text-only attachment. */
+export function chatAttachmentRailHeight(
+  files: readonly ChatAttachment[],
+  removable: boolean,
+  searchable: boolean,
+  fontScale = 1,
+): number {
+  if (!files.length) return 0;
+  const scale = Number.isFinite(fontScale) ? Math.max(1, fontScale) : 1;
+  const titleHeight = Math.ceil(18 * scale);
+  // "Найти похожие" may wrap to two or three lines inside a 160dp card.
+  const actionHeight = scale > 1.6
+    ? Math.ceil(60 * scale)
+    : Math.max(48, Math.ceil(40 * scale));
+  const descriptionHeight = Math.ceil(38 * scale);
+  return Math.max(...files.map(file => {
+    const image = file.kind === "image";
+    const description = file.kind === "text" &&
+      (file.name.startsWith("Текст PDF: ") || file.name.startsWith("Транскрипт аудио: "));
+    const actions = Number(removable) + Number(searchable && image);
+    const children = 1 + Number(image) + Number(description) + actions;
+    return 2 * nebulaSpacing.xs + (children - 1) * nebulaSpacing.xs
+      + titleHeight + (image ? 114 : 0) + (description ? descriptionHeight : 0)
+      + actions * actionHeight + 4; // Small native font/layout rounding allowance
+  }));
+}
 
 /** Chat attachments must have a bounded height. Horizontal ScrollView without
  * an explicit height can stretch to the FlatList viewport on Android and leave
@@ -13,9 +44,10 @@ export function ChatAttachmentList({files, onRemove, onSearch, onSelectImage, se
   onSelectImage?: (id:string)=>void; selectedImageId?:string; disabled?:boolean;
 }) {
   const t=useTheme();
+  const { fontScale } = useWindowDimensions();
   if (!files.length) return null;
   const interactive=Boolean(onRemove || onSearch || onSelectImage);
-  const height=interactive?(onRemove&&onSearch?214:onRemove||onSearch?170:146):146;
+  const height=chatAttachmentRailHeight(files,Boolean(onRemove),Boolean(onSearch),fontScale);
   return <ScrollView horizontal
     style={{height,flexGrow:0,flexShrink:0,alignSelf:"flex-start",maxWidth:"100%"}}
     contentContainerStyle={{gap:nebulaSpacing.sm,alignItems:"flex-start"}}
@@ -43,17 +75,12 @@ export function ChatAttachmentList({files, onRemove, onSearch, onSelectImage, se
       {file.kind === "text" && file.name.startsWith("Транскрипт аудио: ") ? <Text style={{color:t.muted,fontSize:12,lineHeight:17}}>
         Текст Whisper · аудио не отправится
       </Text> : null}
-      {onSearch && file.kind==="image" ? <Pressable accessibilityRole="button"
+      {onSearch && file.kind==="image" ? <NebulaAction label="Найти похожие"
         accessibilityLabel={"Найти похожие в памяти по фото "+file.name} disabled={disabled}
-        onPress={()=>onSearch(file)} style={{minHeight:nebulaTouch.minimum,justifyContent:"center"}}>
-        <Text style={{color:t.accent}}>Найти похожие</Text>
-      </Pressable> : null}
-      {onRemove ? <Pressable accessibilityRole="button"
+        onPress={()=>onSearch(file)} /> : null}
+      {onRemove ? <NebulaAction icon="x" label="Убрать"
         accessibilityLabel={"Убрать вложение "+file.name} disabled={disabled}
-        onPress={()=>onRemove(file.id)}
-        style={{minHeight:nebulaTouch.minimum,justifyContent:"center"}}>
-        <Text style={{color:t.secondary}}>Убрать</Text>
-      </Pressable> : null}
+        onPress={()=>onRemove(file.id)} /> : null}
     </View>)}
   </ScrollView>;
 }

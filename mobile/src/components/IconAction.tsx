@@ -31,6 +31,12 @@ export function IconAction({ icon, label, accessibilityLabel, hint, onPress, dis
   const help = visible?.owner === owner ? visible.text : "";
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); dismissHint(owner); }, [owner]);
+  // A single composer control changes meaning (Send → Stop / Search). Never
+  // leave the previous action’s hint on screen after its label or state changes.
+  useEffect(() => {
+    if (timer.current) { clearTimeout(timer.current); timer.current = null; }
+    dismissHint(owner);
+  }, [owner, icon, label, accessibilityLabel, hint, disabled]);
   const explain = () => {
     if (timer.current) clearTimeout(timer.current);
     showHint({ owner, text: hint });

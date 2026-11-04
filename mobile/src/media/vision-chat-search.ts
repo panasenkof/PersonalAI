@@ -24,6 +24,26 @@ const photoWord=/(?:фото|фотограф|сним(?:ок|к|ки|ков)|и
 const similarWord=/(?:похож|сходн|аналогич|такие же|такое же|similar|like this)/iu;
 const externalWeb=/(?:в интернете|из интернета|в сети|онлайн|\bonline\b|\bweb\b)/iu;
 
+// The explicit Russian photo actions must remain stable in the Android web
+// acceptance bundle as well as the native JS runtime. Match these finite
+// *whole-word prefixes* directly; never infer a search from arbitrary prose.
+const photoPrefixes = ["фотография", "фотографии", "изображения", "изображение", "снимки", "снимок", "фото"] as const;
+const photoCommands = ["показать", "покажи", "разыщи", "отыщи", "поищи", "найди", "найти", "ищи"] as const;
+const webDestinations = ["в интернете", "из интернета", "в сети", "онлайн", "online", " web"] as const;
+function explicitWebDestination(text:string) {
+  const lower=text.toLowerCase();
+  return webDestinations.some(part => lower.includes(part)) || externalWeb.test(text);
+}
+function photoDescriptionPrefix(text:string):string|null {
+  const value=text.trim();
+  const lower=value.toLowerCase();
+  const word=photoPrefixes.find(part=>lower.startsWith(part+" "));
+  if(!word)return null;
+  const detail=value.slice(word.length).trim();
+  return detail && !detail.includes("?") && !detail.includes("\n") ? detail : null;
+}
+
+
 /** Route only explicit requests, not "что на фото?" or all picture messages.
  * Non-photo conversations still take the established agent path.
  */
@@ -31,8 +51,18 @@ export function localPhotoIntent83(
   question:string, attachments:readonly ChatAttachment[] = [],
 ):LocalPhotoIntent83|null {
   const prompt=question.trim();
+  if (!attachments.length && prompt.length<=256 && !explicitWebDestination(prompt)) {
+    const lower=prompt.toLowerCase();
+    const command=photoCommands.find(word=>lower.startsWith(word+" "));
+    if(command) {
+      let remaining=prompt.slice(command.length).trim();
+      if(remaining.toLowerCase().startsWith("мне "))remaining=remaining.slice(3).trim();
+      const description=photoDescriptionPrefix(remaining);
+      if(description)return {mode:"text",description};
+    }
+  }
   const everydayPhotoQuestion = /^(?:у меня есть|есть ли у меня|сохранил(?:а)? ли я)\s+(?:фото|сним|изображен)/iu.test(prompt);
-  if(!prompt || prompt.length>256 || externalWeb.test(prompt) || /^как(?:\s|[?.,])/iu.test(prompt) || (!findVerb.test(prompt) && !everydayPhotoQuestion))
+  if(!prompt || prompt.length>256 || explicitWebDestination(prompt) || /^как(?:\s|[?.,])/iu.test(prompt) || (!findVerb.test(prompt) && !everydayPhotoQuestion))
     return null;
   const imageCount=attachments.filter(a=>a.kind==="image").length;
   if(imageCount && (similarWord.test(prompt) ||
@@ -61,9 +91,9 @@ export function localPhotoIntent83(
 /** Suggest only a short photo description. The caller still requires a tap. */
 export function localPhotoSuggestion83(question: string, attachments: readonly ChatAttachment[] = []): LocalPhotoIntent83 | null {
   const prompt = question.trim();
-  if (attachments.length || prompt.length > 200 || externalWeb.test(prompt) || localPhotoIntent83(prompt)) return null;
-  if (!/^(?:фото|фотография|фотографии|снимок|снимки|изображение|изображения)\s+[^?]+$/iu.test(prompt)) return null;
-  return localPhotoIntent83("Найди " + prompt);
+  if (attachments.length || prompt.length > 200 || explicitWebDestination(prompt) || localPhotoIntent83(prompt)) return null;
+  const description=photoDescriptionPrefix(prompt);
+  return description ? {mode:"text",description} : null;
 }
 
 function closestPhotos(hits: MemoryHit[], count: number): ChatMemoryRef[] {

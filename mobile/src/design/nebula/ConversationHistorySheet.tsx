@@ -6,6 +6,7 @@ import { BottomSheet } from "../../components/BottomSheet";
 import { useTheme } from "../../theme";
 import { nebulaSpacing, nebulaTouch } from "./tokens";
 import { indexConversationHistory, searchConversationHistory } from "./conversationHistory";
+import { NebulaAction } from "./components";
 
 const PAGE_SIZE = 30;
 
@@ -80,14 +81,16 @@ export function ConversationHistorySheet({
           accessibilityState={{disabled:c.busy || Boolean(c.deleting)}}
           disabled={c.busy || Boolean(c.deleting)}
           onPress={()=>onSummary(c)}
-          style={{minHeight:nebulaTouch.minimum,minWidth:nebulaTouch.minimum,alignItems:"center",justifyContent:"center"}}>
+          style={{minHeight:nebulaTouch.minimum,minWidth:nebulaTouch.minimum,alignItems:"center",justifyContent:"center",
+            borderWidth:1,borderColor:t.secondary,borderRadius:12,backgroundColor:t.panel}}>
           <Feather name="file-text" size={19} color={t.accent}/>
         </Pressable> : null}
         <Pressable accessibilityRole="button" accessibilityLabel={"Удалить диалог " + c.title}
           accessibilityState={{ disabled: cannotDelete }} disabled={cannotDelete}
           onPress={() => onDelete(c)}
           style={{ minHeight: nebulaTouch.minimum, minWidth: nebulaTouch.minimum,
-            justifyContent: "center", alignItems: "center", opacity: cannotDelete ? 0.45 : 1 }}>
+            justifyContent: "center", alignItems: "center", opacity: cannotDelete ? 0.45 : 1,
+            borderWidth:1,borderColor:t.secondary,borderRadius:12,backgroundColor:t.panel }}>
           <Feather name="trash-2" size={19} color={t.err} />
         </Pressable>
       </View>;
@@ -99,9 +102,7 @@ export function ConversationHistorySheet({
         borderRadius: 16, borderColor: t.line }}>
       <Text style={{ color: t.accent, fontWeight: "600" }}>{`Показать ещё · ${shown.length} из ${results.length}`}</Text>
     </Pressable> : null}
-    <Pressable accessibilityRole="button" accessibilityLabel="Создать новый диалог"
-      onPress={onNewChat} style={{ minHeight: nebulaTouch.minimum, alignItems: "center", justifyContent: "center" }}>
-      <Text style={{ color: t.accent, fontWeight: "700" }}>+ Новый диалог</Text>
-    </Pressable>
+    <NebulaAction icon="plus" label="Новый диалог"
+      accessibilityLabel="Создать новый диалог" onPress={onNewChat} />
   </BottomSheet>;
 }

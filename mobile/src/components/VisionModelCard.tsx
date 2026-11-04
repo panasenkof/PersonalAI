@@ -1,9 +1,11 @@
-import React from "react";
-import { ActivityIndicator, Alert, Pressable, Text, View } from "react-native";
+import React, { useState } from "react";
+import { ActivityIndicator, Text, View } from "react-native";
 import { useTheme } from "../theme";
 import { Collapsible } from "./Collapsible";
 import { VisionIndexControls } from "./VisionIndexControls";
-import { nebulaRadii, nebulaSpacing, nebulaTouch, nebulaTypography } from "../design/nebula/tokens";
+import { NebulaConfirmSheet } from "./NebulaConfirmSheet";
+import { NebulaAction } from "../design/nebula/components";
+import { nebulaRadii, nebulaSpacing, nebulaTypography } from "../design/nebula/tokens";
 import { VISION_MODELS, type VisionModelId } from "../media/vision-model-catalog";
 import { cancelVisionModelDownload, chooseVisionModel, deleteVisionModel,
   downloadVisionModel, useVisionModelStatus } from "../media/vision-model-manager";
@@ -14,25 +16,23 @@ import { cancelVisionModelDownload, chooseVisionModel, deleteVisionModel,
 export function VisionModelCard({ defaultOpen = false }: {defaultOpen?:boolean} = {}) {
   const t = useTheme();
   const state = useVisionModelStatus();
+  const [pending, setPending] = useState<{ kind: "download" | "delete"; id: VisionModelId; title: string; approxMB: number } | null>(null);
   const downloaded = (id: VisionModelId) => state.installed.some(m => m.id === id);
-  const buttonStyle = (disabled: boolean) => ({
-    minHeight: nebulaTouch.minimum, paddingHorizontal: nebulaSpacing.md,
-    borderRadius: nebulaRadii.field, borderWidth: 1, borderColor: t.line,
-    backgroundColor: t.panel, justifyContent: "center" as const,
-    alignItems: "center" as const, opacity: disabled ? 0.5 : 1,
-  });
-  const startDownload = (id: VisionModelId, size: number) => Alert.alert(
-    "Загрузить модель поиска фотографий?",
-    "Примерный размер: " + size + " МБ. Лучше использовать Wi-Fi и оставить запас свободного места. Модель будет проверена по SHA-256 и сохранена только на телефоне.",
-    [{ text: "Отмена", style: "cancel" },
-      { text: "Скачать", onPress: () => void downloadVisionModel(id) }]
-  );
-  const deleteModel = (id: VisionModelId) => Alert.alert(
-    "Удалить модель?",
-    "Модель будет удалена с телефона. Ваши фотографии, заметки и текстовая память сохранятся.",
-    [{ text: "Отмена", style: "cancel" },
-      { text: "Удалить", style: "destructive", onPress: () => void deleteVisionModel(id) }]
-  );
+  const ask = (kind: "download" | "delete", id: VisionModelId) => {
+    const model = VISION_MODELS.find(m => m.id === id);
+    if (!model || !state.loaded || state.busy || (kind === "delete") !== downloaded(id)) return;
+    setPending({ kind, id, title: model.title, approxMB: model.approxMB });
+  };
+  const confirm = () => {
+    const request = pending;
+    setPending(null);
+    if (!request || !state.loaded || state.busy) return;
+    const model = VISION_MODELS.find(m => m.id === request.id);
+    if (!model || model.title !== request.title || model.approxMB !== request.approxMB ||
+      (request.kind === "delete") !== downloaded(request.id)) return;
+    if (request.kind === "download") void downloadVisionModel(request.id);
+    else void deleteVisionModel(request.id);
+  };
   const current = VISION_MODELS.find(m => m.id === state.activeId);
   const summary = !state.loaded ? "Загрузка сведений…" :
     state.busy ? "Скачивание " + state.progress + "%" :
@@ -40,7 +40,7 @@ export function VisionModelCard({ defaultOpen = false }: {defaultOpen?:boolean} 
       ? (state.installed.length === 1 ? "Модель скачана" : "Скачано моделей: " + state.installed.length) +
         (current ? " · выбрана " + current.title : "")
       : "Модель ещё не скачана";
-  return <Collapsible defaultOpen={defaultOpen} forceOpen={defaultOpen} id="settings.vision-models" icon="image"
+  return <><Collapsible defaultOpen={defaultOpen} forceOpen={defaultOpen} id="settings.vision-models" icon="image"
     title="Модели поиска по фото" summary={summary}>
     <View style={{ gap: nebulaSpacing.sm }}>
       <Text style={{ color: t.muted, ...nebulaTypography.label }}>
@@ -79,28 +79,18 @@ export function VisionModelCard({ defaultOpen = false }: {defaultOpen?:boolean} 
               <View style={{ height: 6, width: `${state.progress}%` as `${number}%`,
                 backgroundColor: t.secondary }} />
             </View>
-            <Pressable accessibilityRole="button" accessibilityLabel="Отменить скачивание модели"
-              onPress={cancelVisionModelDownload} style={buttonStyle(false)}>
-              <Text style={{ color: t.secondary }}>Отменить загрузку</Text>
-            </Pressable>
+            <NebulaAction icon="x" label="Отменить загрузку" accessibilityLabel="Отменить скачивание модели"
+              onPress={cancelVisionModelDownload} />
           </> : installed ? <View style={{ flexDirection: "row", flexWrap: "wrap", gap: nebulaSpacing.xs }}>
-            {!active ? <Pressable accessibilityRole="button" accessibilityLabel={"Выбрать " + m.title}
-              disabled={disabled} style={buttonStyle(disabled)}
-              onPress={() => void chooseVisionModel(m.id)}>
-              <Text style={{ color: t.secondary }}>Выбрать</Text>
-            </Pressable> : <Text style={{ color: t.ok, ...nebulaTypography.label }}>
+            {!active ? <NebulaAction icon="check" label="Выбрать" accessibilityLabel={"Выбрать " + m.title}
+              disabled={disabled} onPress={() => void chooseVisionModel(m.id)} /> : <Text style={{ color: t.ok, ...nebulaTypography.label }}>
               SHA-256 проверен при загрузке
             </Text>}
-            <Pressable accessibilityRole="button" accessibilityLabel={"Удалить " + m.title}
-              disabled={disabled} style={buttonStyle(disabled)}
-              onPress={() => deleteModel(m.id)}>
-              <Text style={{ color: t.err }}>Удалить</Text>
-            </Pressable>
-          </View> : <Pressable accessibilityRole="button" accessibilityLabel={"Скачать " + m.title}
-            disabled={disabled} style={buttonStyle(disabled)}
-            onPress={() => startDownload(m.id, m.approxMB)}>
-            <Text style={{ color: t.secondary, fontWeight: "600" }}>Скачать · ~{m.approxMB} МБ</Text>
-          </Pressable>}
+            <NebulaAction icon="trash-2" label="Удалить" variant="danger" accessibilityLabel={"Удалить " + m.title}
+              disabled={disabled} onPress={() => ask("delete", m.id)} />
+          </View> : <NebulaAction icon="download" label={"Скачать · ~" + m.approxMB + " МБ"}
+            accessibilityLabel={"Скачать " + m.title}
+            disabled={disabled} onPress={() => ask("download", m.id)} />}
         </View>;
       })}
       <VisionIndexControls activeModel={Boolean(state.activeId && downloaded(state.activeId)) && !state.busy} />
@@ -111,5 +101,14 @@ export function VisionModelCard({ defaultOpen = false }: {defaultOpen?:boolean} 
         потребует отдельной переиндексации фотографий; старые текстовые векторы не смешиваются с визуальными.
       </Text>
     </View>
-  </Collapsible>;
+  </Collapsible>
+    <NebulaConfirmSheet visible={pending !== null}
+      title={pending?.kind === "delete" ? "Удалить модель поиска?" : "Скачать модель поиска фотографий?"}
+      message={pending?.kind === "delete"
+        ? `«${pending.title}» будет удалена с телефона. Фотографии, заметки и текстовая память сохранятся.`
+        : `«${pending?.title || ""}»: около ${pending?.approxMB || 0} МБ. Рекомендуется Wi-Fi. Перед установкой проверяется SHA-256, файлы модели сохраняются только на телефоне.`}
+      cancelLabel="Отмена" confirmLabel={pending?.kind === "delete" ? "Удалить модель" : "Скачать модель"}
+      danger={pending?.kind === "delete"} disabled={state.busy || !state.loaded}
+      onCancel={() => setPending(null)} onConfirm={confirm} />
+    </>;
 }

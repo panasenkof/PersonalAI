@@ -4,6 +4,8 @@ import { AppendNoteAttachments } from '../AppendNoteAttachments';
 import { appendNoteAttachments } from '../attachments';
 import { autoIndexNotePhotos83 } from '../auto-index-note-photos';
 import { getDocumentAsync } from 'expo-document-picker';
+// The actual NebulaAction remains under test; only native font loading is mocked.
+jest.mock('@expo/vector-icons/Feather', () => () => null);
 const mockDelete = jest.fn(); let mockLock: (unlocked: boolean) => void;
 jest.mock('../auto-index-note-photos', () => ({ autoIndexNotePhotos83: jest.fn() }));
 jest.mock('../attachments', () => ({ appendNoteAttachments: jest.fn(), MAX_ORIGINALS_PER_NOTE: 10 }));
@@ -32,4 +34,17 @@ test('an index failure after a committed append reports pending without claiming
   await pick(s);fireEvent.press(s.getByLabelText('Сохранить новые вложения'));
   await waitFor(()=>expect(props.onSaved).toHaveBeenCalledTimes(1));
   expect(s.getByText(/оригиналы сохранены/)).toBeTruthy();
+});
+
+test('file actions are proper labelled buttons and removing a staged item does not save', async () => {
+  const s = render(<AppendNoteAttachments {...props} />);
+  const addButton = s.getByLabelText('Добавить файлы к заметке');
+  expect(addButton.props.accessibilityRole).toBe('button');
+  await pick(s);
+  const remove = s.getByLabelText('Убрать из добавления doc.pdf');
+  expect(remove.props.accessibilityRole).toBe('button');
+  fireEvent.press(remove);
+  expect(mockDelete).toHaveBeenCalledWith(asset.uri);
+  expect(appendNoteAttachments).not.toHaveBeenCalled();
+  expect(s.queryByLabelText('Сохранить новые вложения')).toBeNull();
 });

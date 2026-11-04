@@ -1,10 +1,12 @@
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import React, { useCallback, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, ScrollView, Switch, Text, View } from "react-native";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { ActivityIndicator, Pressable, ScrollView, Switch, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useProfile } from "../profile/ProfileContext";
 import { useTheme } from "../theme";
+import { NebulaConfirmSheet } from "../components/NebulaConfirmSheet";
+import { NebulaAction } from "../design/nebula/components";
 import type { RootStackParams } from "../navigation";
 import { withNativeInteraction } from "../security/native-interaction";
 import { DEFAULT_DIAGNOSTICS, deleteDiagnosticFiles, getDiagnosticSettings, listDiagnosticFiles, setDiagnosticSettings, shareDiagnosticFile } from "../direct-agent/diagnostics";
@@ -21,7 +23,11 @@ export function DiagnosticLogsScreen() {
   const [prefs, setPrefs] = useState<DiagnosticSettings>(DEFAULT_DIAGNOSTICS);
   const [logs, setLogs] = useState<DiagnosticFile[]>([]);
   const [busy, setBusy] = useState(false);
+  const operationPending = useRef(false);
   const [notice, setNotice] = useState("");
+  const [clearScope, setClearScope] = useState<{ profile: string; names: string[] } | null>(null);
+  // A pending destructive confirmation must never survive a profile switch.
+  useEffect(() => { setClearScope(null); }, [profile]);
   const [ready, setReady] = useState(false);
   const [nebulaMode, setNebulaMode] = useState<NebulaVisualMode>("live");
   const card = { backgroundColor: t.panel, borderWidth: 1, borderColor: t.line, borderRadius: 18, padding: 16 };
@@ -41,25 +47,46 @@ export function DiagnosticLogsScreen() {
         if (current) { setPrefs(settings); setLogs(files); setNebulaMode(mode); setReady(true); }
       }).catch(() => { if (current) { setNotice("Не удалось прочитать диагностику или режим Nebula"); setReady(true); } });
     }
-    return () => { current = false; };
+    return () => { current = false; setClearScope(null); };
   }, [profile]));
   const run = async (operation: () => Promise<void>, success?: string) => {
-    if (!profile || busy) return;
+    if (!profile || busy || operationPending.current) return;
+    operationPending.current = true;
     setBusy(true); setNotice("");
     try {
       await operation();
       if (success) setNotice(success);
       await refresh();
-    } catch { setNotice("Операция с журналом не выполнена. Повторите попытку."); }
-    finally { setBusy(false); }
+    } catch (error) {
+      const changed = error instanceof Error && error.message === "DIAGNOSTIC_FILES_CHANGED";
+      if (changed) { try { await refresh(); } catch { /* keep cancellation safe */ } }
+      setNotice(changed
+        ? "Список журналов изменился. Проверьте его и подтвердите удаление заново."
+        : "Операция с журналом не выполнена. Повторите попытку.");
+    }
+    finally { operationPending.current = false; setBusy(false); }
   };
   const update = (next: DiagnosticSettings) => void run(async () => {
     await setDiagnosticSettings(profile!, next);
   });
-  const confirmClear = () => Alert.alert("Удалить диагностические журналы?", "Все файлы диагностики этого профиля будут удалены без возможности восстановления.", [
-    { text: "Отмена", style: "cancel" },
-    { text: "Удалить", style: "destructive", onPress: () => void run(() => deleteDiagnosticFiles(profile!), "Журналы удалены.") },
-  ]);
+  const confirmClear = () => {
+    if (!profile || !ready || busy || !logs.length) return;
+    setClearScope({ profile, names: logs.map(file => file.name).sort() });
+  };
+  const finishClear = () => {
+    const scope = clearScope;
+    setClearScope(null);
+    if (!scope || !profile || profile !== scope.profile || busy) return;
+    void run(async () => {
+      // The confirmation belongs to exactly the files shown, not an earlier
+      // profile or an outdated list after an ongoing diagnostic session.
+      const now = (await listDiagnosticFiles(scope.profile)).map(file => file.name).sort();
+      if (now.length !== scope.names.length || now.some((name, index) => name !== scope.names[index])) {
+        throw new Error("DIAGNOSTIC_FILES_CHANGED");
+      }
+      await deleteDiagnosticFiles(scope.profile);
+    }, "Журналы удалены.");
+  };
   const control = (title: string, detail: string, checked: boolean, disabled: boolean, change: (v: boolean) => void) =>
     <View style={{ ...card, gap: 10 }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
@@ -68,7 +95,7 @@ export function DiagnosticLogsScreen() {
       </View>
       <Text style={{ color: t.muted, lineHeight: 20 }}>{detail}</Text>
     </View>;
-  return <ScrollView style={{ flex: 1, backgroundColor: t.bg }} contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 30, gap: 14 }}>
+  return <><ScrollView style={{ flex: 1, backgroundColor: t.bg }} contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 30, gap: 14 }}>
     <Text style={{ color: t.text, fontSize: 24, fontWeight: "800" }}>Диагностика диалогов</Text>
     <Text style={{ color: t.muted, lineHeight: 21 }}>Временная функция для тестирования PersAI. Журналы JSONL сохраняются только во внутреннем хранилище приложения. Они не отправляются разработчикам автоматически.</Text>
     <View style={{ gap: 8 }}>
@@ -116,10 +143,14 @@ export function DiagnosticLogsScreen() {
       onPress={() => void run(async () => {})} style={{ ...card, alignItems: "center" }}>
       <Text style={{ color: t.secondary, fontWeight: "700" }}>Обновить список</Text>
     </Pressable>
-    {logs.length ? <Pressable accessibilityRole="button" accessibilityLabel="Удалить все журналы" disabled={busy}
-      onPress={confirmClear} style={{ ...card, alignItems: "center" }}>
-      <Text style={{ color: "#bf4545", fontWeight: "700" }}>Удалить все журналы</Text>
-    </Pressable> : null}
+    {logs.length ? <NebulaAction testID="diagnostics-clear-open" icon="trash-2" label="Удалить все журналы"
+      accessibilityLabel="Удалить все журналы" variant="danger" disabled={busy || !ready} onPress={confirmClear} /> : null}
     {notice ? <Text accessibilityRole="alert" style={{ color: t.muted }}>{notice}</Text> : null}
-  </ScrollView>;
+  </ScrollView>
+    <NebulaConfirmSheet visible={clearScope !== null && clearScope.profile === profile}
+      title="Удалить журналы?"
+      message={`Файлов диагностики для удаления: ${clearScope?.names.length ?? 0}. Восстановить их нельзя. Заметки и диалоги сохранятся.`}
+      confirmLabel="Удалить журналы" cancelLabel="Оставить журналы" danger disabled={busy || !ready}
+      onCancel={() => setClearScope(null)} onConfirm={finishClear} />
+  </>;
 }
