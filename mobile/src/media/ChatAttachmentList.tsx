@@ -2,7 +2,8 @@ import React from "react";
 import { Image, Pressable, ScrollView, Text, View } from "react-native";
 import type { ChatAttachment } from "../direct-agent/chat-attachments";
 import { useTheme } from "../theme";
-import { nebulaTouch, nebulaRadii, nebulaSpacing } from "../design/nebula/tokens";
+import { nebulaRadii, nebulaSpacing } from "../design/nebula/tokens";
+import { NebulaAction } from "../design/nebula/components";
 
 /** Chat attachments must have a bounded height. Horizontal ScrollView without
  * an explicit height can stretch to the FlatList viewport on Android and leave
@@ -15,7 +16,15 @@ export function ChatAttachmentList({files, onRemove, onSearch, onSelectImage, se
   const t=useTheme();
   if (!files.length) return null;
   const interactive=Boolean(onRemove || onSearch || onSelectImage);
-  const height=interactive?(onRemove&&onSearch?214:onRemove||onSearch?170:146):146;
+  const hasImage=files.some(file=>file.kind==="image");
+  const hasTranscript=files.some(file=>file.kind==="text" &&
+    (file.name.startsWith("Текст PDF: ") || file.name.startsWith("Транскрипт аудио: ")));
+  // Reserve actual vertical space for all Nebula buttons; text-only attachments
+  // must not inherit a photo-sized blank rectangle. The horizontal row height
+  // is the tallest attachment, avoiding clipped actions on mixed selections.
+  const actionCount=(onRemove?1:0)+(onSearch && hasImage?1:0);
+  const height=hasImage ? (actionCount===2?250:actionCount===1?198:146)
+    : (actionCount===2?142:actionCount===1?(hasTranscript?124:90):(hasTranscript?76:48));
   return <ScrollView horizontal
     style={{height,flexGrow:0,flexShrink:0,alignSelf:"flex-start",maxWidth:"100%"}}
     contentContainerStyle={{gap:nebulaSpacing.sm,alignItems:"flex-start"}}
@@ -43,17 +52,12 @@ export function ChatAttachmentList({files, onRemove, onSearch, onSelectImage, se
       {file.kind === "text" && file.name.startsWith("Транскрипт аудио: ") ? <Text style={{color:t.muted,fontSize:12,lineHeight:17}}>
         Текст Whisper · аудио не отправится
       </Text> : null}
-      {onSearch && file.kind==="image" ? <Pressable accessibilityRole="button"
+      {onSearch && file.kind==="image" ? <NebulaAction label="Найти похожие"
         accessibilityLabel={"Найти похожие в памяти по фото "+file.name} disabled={disabled}
-        onPress={()=>onSearch(file)} style={{minHeight:nebulaTouch.minimum,justifyContent:"center"}}>
-        <Text style={{color:t.accent}}>Найти похожие</Text>
-      </Pressable> : null}
-      {onRemove ? <Pressable accessibilityRole="button"
+        onPress={()=>onSearch(file)} /> : null}
+      {onRemove ? <NebulaAction icon="x" label="Убрать"
         accessibilityLabel={"Убрать вложение "+file.name} disabled={disabled}
-        onPress={()=>onRemove(file.id)}
-        style={{minHeight:nebulaTouch.minimum,justifyContent:"center"}}>
-        <Text style={{color:t.secondary}}>Убрать</Text>
-      </Pressable> : null}
+        onPress={()=>onRemove(file.id)} /> : null}
     </View>)}
   </ScrollView>;
 }
