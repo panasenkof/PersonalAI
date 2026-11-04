@@ -630,8 +630,12 @@ export function LocalMemoryScreen() {
               onPress={() => { setTrashMessage(""); setRetry(n => n + 1); }} />
           </View>
         </View> : null}
-      {undo ? <Pressable disabled={busy || selecting} style={button} onPress={() => { if (!repository.current) return; setBusy(true); void repository.current.undoNotes(undo).then(() => { setUndo(""); setRetry(n => n + 1); if (profile) scheduleVectors(profile); }).catch(e => setError(memoryErrorMessage(e))).finally(() => setBusy(false)); }}><Text style={{ color: t.secondary }}>{noteUndoLabel(undo)}</Text></Pressable> : null}
-    {error && !hygieneReviewOpen && !hygieneSuggestionsOpen ? <View style={{ paddingHorizontal: 18, gap: 8 }}><Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text><Pressable accessibilityRole="button" onPress={() => setRetry(n => n + 1)} style={button}><Text style={{ color: t.secondary }}>Повторить загрузку</Text></Pressable></View> : null}
+      {undo ? <View style={{ alignItems: "flex-start" }}>
+        <NebulaAction icon="rotate-ccw" label={noteUndoLabel(undo)}
+          accessibilityLabel={noteUndoLabel(undo)} disabled={busy || selecting}
+          onPress={() => { if (!repository.current) return; setBusy(true); void repository.current.undoNotes(undo).then(() => { setUndo(""); setRetry(n => n + 1); if (profile) scheduleVectors(profile); }).catch(e => setError(memoryErrorMessage(e))).finally(() => setBusy(false)); }} />
+      </View> : null}
+    {error && !hygieneReviewOpen && !hygieneSuggestionsOpen ? <View style={{ paddingHorizontal: 18, gap: 8 }}><Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text><NebulaAction icon="refresh-cw" label="Повторить загрузку" onPress={() => setRetry(n => n + 1)} /></View> : null}
     {loading ? <ActivityIndicator accessibilityLabel="Загрузка записей" /> : null}
 </View>} data={notes} keyExtractor={item => item.id} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag"
       contentContainerStyle={{ paddingHorizontal: nebulaSpacing.md, paddingBottom: nebulaSpacing.xl, gap: nebulaSpacing.sm, flexGrow: 1 }}
@@ -680,7 +684,7 @@ export function LocalMemoryScreen() {
             ? <Text accessibilityRole="alert" style={{ color: t.muted }}>
                 Все записи требуют отдельной проверки. Массовое удаление недоступно.
               </Text>
-            : trashConfirm ? <NebulaAction icon="trash-2" variant="danger"
+            : trashConfirm ? <NebulaAction icon="trash-2" variant="danger-solid"
               label={`Удалить ${trashPurgeCountLabel(trashPreview.items.length)}`}
               accessibilityLabel="Подтвердить очистку всей корзины" disabled={busy}
               onPress={() => void emptyWholeTrash()} />
@@ -699,7 +703,7 @@ export function LocalMemoryScreen() {
             : `Записей: ${selectedNotes.length}. Записи, оригиналы и история будут удалены без возможности восстановления.`}
         </Text>
         <NebulaAction icon="x" label="Отмена" disabled={busy} onPress={() => setConfirmation(null)} />
-        <NebulaAction icon="trash-2" variant="danger"
+        <NebulaAction icon="trash-2" variant={confirmation === "purge" ? "danger-solid" : "danger"}
           label={busy ? "Выполняю…" : confirmation === "trash" ? "В корзину" : "Удалить навсегда"}
           accessibilityLabel={confirmation === "trash" ? "Подтвердить перемещение в корзину" : "Подтвердить удаление навсегда"}
           disabled={busy} onPress={() => confirmation === "trash" ? void act("trash") : void purgeSelected()} />
