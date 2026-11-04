@@ -1,11 +1,11 @@
 import React, { useState } from "react";
-import { ActivityIndicator, Pressable, Text, View } from "react-native";
+import { ActivityIndicator, Text, View } from "react-native";
 import { useTheme } from "../theme";
 import { Collapsible } from "./Collapsible";
 import { VisionIndexControls } from "./VisionIndexControls";
 import { NebulaConfirmSheet } from "./NebulaConfirmSheet";
 import { NebulaAction } from "../design/nebula/components";
-import { nebulaRadii, nebulaSpacing, nebulaTouch, nebulaTypography } from "../design/nebula/tokens";
+import { nebulaRadii, nebulaSpacing, nebulaTypography } from "../design/nebula/tokens";
 import { VISION_MODELS, type VisionModelId } from "../media/vision-model-catalog";
 import { cancelVisionModelDownload, chooseVisionModel, deleteVisionModel,
   downloadVisionModel, useVisionModelStatus } from "../media/vision-model-manager";
@@ -18,12 +18,6 @@ export function VisionModelCard({ defaultOpen = false }: {defaultOpen?:boolean} 
   const state = useVisionModelStatus();
   const [pending, setPending] = useState<{ kind: "download" | "delete"; id: VisionModelId; title: string; approxMB: number } | null>(null);
   const downloaded = (id: VisionModelId) => state.installed.some(m => m.id === id);
-  const buttonStyle = (disabled: boolean) => ({
-    minHeight: nebulaTouch.minimum, paddingHorizontal: nebulaSpacing.md,
-    borderRadius: nebulaRadii.field, borderWidth: 1, borderColor: t.line,
-    backgroundColor: t.panel, justifyContent: "center" as const,
-    alignItems: "center" as const, opacity: disabled ? 0.5 : 1,
-  });
   const ask = (kind: "download" | "delete", id: VisionModelId) => {
     const model = VISION_MODELS.find(m => m.id === id);
     if (!model || !state.loaded || state.busy || (kind === "delete") !== downloaded(id)) return;
