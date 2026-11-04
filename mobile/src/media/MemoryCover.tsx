@@ -83,7 +83,8 @@ export function MemoryCover({ profile, entityId, photoAttachmentId, active = tru
       {failed && enabled ? <Pressable accessibilityRole="button" accessibilityLabel="Повторить загрузку обложки"
         onPress={event => { event?.stopPropagation?.(); setAttempt(value => value + 1); }}
         style={compact ? { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, minHeight: 48, alignItems: "center", justifyContent: "center", backgroundColor: t.soft } :
-          { minHeight: 48, justifyContent: "center", paddingHorizontal: 12 }}>
+          { minHeight: 48, justifyContent: "center", paddingHorizontal: 12, borderWidth: 1,
+            borderColor: t.secondary, backgroundColor: t.panel, borderRadius: 12 }}>
         {compact ? <Feather name="refresh-cw" size={22} color={t.secondary} /> : <Text style={{ color: t.secondary }}>Повторить</Text>}
       </Pressable> : null}
     </>}
