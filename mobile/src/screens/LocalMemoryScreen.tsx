@@ -929,7 +929,7 @@ export function LocalMemoryScreen() {
       {collections.map(c => <Pressable key={c.id} disabled={busy} style={actionButton} onPress={() => void act("move", c.id)}><Text style={{ color: t.secondary }}>{c.name}</Text></Pressable>)}
     </BottomSheet>
     <BottomSheet visible={mergeOpen} title="Предпросмотр объединения" onClose={() => { if (busy) return; setMergeOpen(false); setMergeExpanded(false); }}>
-      <Text style={{ color: t.text, fontWeight: "700" }}>Выбрано {selectedNotes.length} записи · основная определяется порядком выбора</Text>
+      <Text style={{ color: t.text, fontWeight: "700" }}>Выбрано записей: {selectedNotes.length} · основная определяется порядком выбора</Text>
       {selectedNotes.map((note, index) => <View key={note.id}
         style={{ padding: nebulaSpacing.sm, gap: 3, borderWidth: 1,
           borderColor: index === 0 ? t.accent : t.line, borderRadius: nebulaRadii.field,
