@@ -145,22 +145,7 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       // automatic request. Its action must look like a real Nebula button.
       await prompt.fill('фото красного велосипеда');
       const suggestPhoto = page.getByLabel('Поискать в моих фото', {exact:true});
-      // Diagnostic context on failure: distinguish draft/attachments from a
-      // CTA that vanished when a native-backed modal lost focus.
-      await page.clock.runFor(120);
-      if (await suggestPhoto.count() === 0) {
-        const context = await page.evaluate(() => ({
-          question: document.querySelector('[aria-label="Сообщение ассистенту"]')?.value,
-          runtime: window.__qa?.photoSuggestionState,
-          inputCodepoints: [...(document.querySelector('[aria-label="Сообщение ассистенту"]')?.value||'')].map(c=>c.codePointAt(0).toString(16)),
-          clearButton: Boolean(document.querySelector('[aria-label="Очистить сообщение"]')),
-          attached: [...document.querySelectorAll('[aria-label^="Убрать вложение"]')].map(el=>el.getAttribute('aria-label')),
-          actions: [...document.querySelectorAll('[role="button"]')].map(el=>el.getAttribute('aria-label')).filter(Boolean).slice(-24),
-          text: document.body.innerText.slice(-420),
-        }));
-        console.error('UI photo suggestion missing:', JSON.stringify(context));
-      }
-      await suggestPhoto.waitFor({timeout:3500});
+      await suggestPhoto.waitFor();
       const photoActionBox = await suggestPhoto.boundingBox();
       const photoActionBorder = await suggestPhoto.evaluate(el => parseFloat(getComputedStyle(el).borderTopWidth));
       assert(photoActionBox && photoActionBox.height >= 48 && photoActionBorder >= 1 &&
