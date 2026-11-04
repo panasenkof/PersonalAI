@@ -63,7 +63,7 @@ export function NoteAiEditor({ profile, draft, allowed, onApply, onClose }: {
       <Text testID="note-ai-preview" selectable style={{ color: t.text, ...nebulaTypography.body }}>{(showOriginal ? original.current : result)?.body}</Text>
       <NebulaAction icon="check" variant="primary" label="Применить к черновику"
         accessibilityLabel="Применить правку ИИ" onPress={() => {
-          if (original.current?.title !== latest.current.title || original.current?.body !== latest.current.body) {
+          if (!allowed || original.current?.title !== latest.current.title || original.current?.body !== latest.current.body) {
             setError("Заметка изменилась. Повторите запрос."); setResult(null); return;
           }
           onApply(result); onClose();

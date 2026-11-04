@@ -25,7 +25,8 @@ import { useProfile } from "../profile/ProfileContext";
 import { loadDirectConnections, anonymousLocalAllowed, defaultDirectPreferences } from "../direct-agent/settings";
 import type { DirectConnection } from "../direct-agent/settings";
 import { MAX_ORIGINALS_PER_NOTE, MAX_TOTAL_ORIGINAL_BYTES, saveMediaNote } from "../media/attachments";
-import { combinedRecognitionText, recognizeFilesSequentially, type FileRecognition } from "../media/batch-recognition";
+import { NoteAiEditor } from "../components/NoteAiEditor";
+import { replaceFileText, combinedRecognitionText, recognizeFilesSequentially, type FileRecognition } from "../media/batch-recognition";
 import { analyzeFilesTogether } from "../media/joint-recognition";
 import { extractMedia, mediaKind, officialAudioProvider } from "../media/extract";
 import type { ImageExtractionMode } from "../media/extract";
@@ -116,8 +117,9 @@ export function MemoryImportScreen() {
   const [body, setBody] = useState("");
   const [extractedText, setExtractedText] = useState("");
   const [notice, setNotice] = useState("");
-  const [replacementApproval, setReplacementApproval] = useState<{ scope: string; label: string } | null>(null);
-  const [audioApproval, setAudioApproval] = useState<{ scope: string; service: string; model: string; replaced: boolean } | null>(null);
+  const [aiField, setAiField] = useState<"body" | "extracted" | null>(null);
+  const [comparison, setComparison] = useState<{ scope: string; result: FileRecognition; updated: string } | null>(null);
+  const [audioApproval, setAudioApproval] = useState<{ scope: string; service: string; model: string; index?: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const alive = useRef(true);
   const controller = useRef<AbortController | null>(null);
@@ -177,14 +179,14 @@ export function MemoryImportScreen() {
   useEffect(() => onLocalMemorySessionChange(unlocked => {
     if (!unlocked) {
       controller.current?.abort(); leaveAction.current = null;
-      setLeaveApproval(false); setSkipApproval(null); setAudioApproval(null); setReplacementApproval(null);
+      setLeaveApproval(false); setSkipApproval(null); setAudioApproval(null); setComparison(null); setAiField(null);
     }
   }), []);
   useEffect(() => {
     leaveAction.current = null; setLeaveApproval(false);
-    setSkipApproval(null); setAudioApproval(null); setReplacementApproval(null);
+    setSkipApproval(null); setAudioApproval(null); setComparison(null); setAiField(null);
   }, [profile]);
-  useEffect(() => { setSkipApproval(null); setAudioApproval(null); setReplacementApproval(null); }, [position, prepareAttempt]);
+  useEffect(() => { setSkipApproval(null); setAudioApproval(null); setComparison(null); setAiField(null); }, [position, prepareAttempt]);
   // Both target record AND collection must permit provider egress.
   const collectionAllowsProvider = collections.find(c => c.id === collectionId)?.sensitivity === "standard";
   const providerApproved = classification === "standard" && collectionAllowsProvider;
@@ -193,7 +195,7 @@ export function MemoryImportScreen() {
   const localAudio = kind === "audio" && fileAsrMode === "device" && whisper.state === "ready";
   const speechSelected = connections.find(c => c.id === speechConnectionId);
   const processor = kind === "audio" ? speechSelected : selected;
-  const canExtract = files.some(item => {
+  const canExtractFile = (item: ImportFile) => {
     const currentKind = mediaKind(item);
     const currentProcessor = currentKind === "audio" ? speechSelected : selected;
     if (imageExtractionMode === "offline-ocr" && (currentKind === "document" || currentKind === "image"))
@@ -203,7 +205,8 @@ export function MemoryImportScreen() {
       (currentKind === "video" && fileAsrMode === "device" && whisper.state === "ready") ||
       Boolean(currentProcessor && providerApproved && (currentProcessor.apiKey || anonymousLocalAllowed(currentProcessor)) &&
         (currentKind !== "audio" || (fileAsrMode === "online" && officialAudioProvider(currentProcessor))));
-  });
+  };
+  const canExtract = files.some(canExtractFile);
   const field = { color: t.text, backgroundColor: t.panel, borderWidth: 1, borderColor: t.line, borderRadius: 16, padding: 14, minHeight: 50 };
   const button = { backgroundColor: t.accent, padding: 14, borderRadius: 17, minHeight: 50, justifyContent: "center" as const, alignItems: "center" as const };
 
@@ -365,22 +368,17 @@ export function MemoryImportScreen() {
     connectionId, speechConnectionId, fileAsrMode,
     speechService: speechSelected?.name, speechModel: speechSelected?.transcriptionModel,
   });
-  async function extract(confirmedReplacement = false, onlineConsent = false) {
-    if (!file || !canExtract || busy || controller.current) return;
-    // Reprocessing ANY previously extracted text must not silently erase edits,
-    // including text-layer PDF and plain text files.
-    if (extractedText.trim() && !confirmedReplacement) {
-      setReplacementApproval({ scope: replacementScope(),
-        label: files.length > 1 ? `${files.length} файлов` : file.name });
-      return;
-    }
-    // Explicit permission is required for *each* upload of original audio.
-    if (fileAsrMode === "online" && files.some(item => ["audio", "video"].includes(mediaKind(item))) && !onlineConsent) {
+  async function extract(index?: number, onlineConsent = false) {
+    const source = index === undefined ? file : files[index];
+    if (!source || !canExtract || busy || controller.current) return;
+    const sourceKind = mediaKind(source);
+    const targets = index === undefined ? files : [source];
+    if (fileAsrMode === "online" && targets.some(item => ["audio", "video"].includes(mediaKind(item))) && !onlineConsent) {
       if (!speechSelected || !officialAudioProvider(speechSelected)) {
         setNotice("Для онлайн-распознавания аудиофайла выберите официальное подключение OpenAI."); return;
       }
       setAudioApproval({ scope: replacementScope(), service: speechSelected.name,
-        model: speechSelected.transcriptionModel || "gpt-transcribe", replaced: confirmedReplacement });
+        model: speechSelected.transcriptionModel || "gpt-transcribe", index });
       return;
     }
     const aborter = new AbortController(); controller.current = aborter; setBusy(true); setNotice("");
@@ -388,18 +386,22 @@ export function MemoryImportScreen() {
       const vision = selected || { ...defaultDirectPreferences, apiKey: "", webSearchKey: "" };
       const speechBase = connections.find(c => c.id === speechConnectionId) || selected;
       const speech = speechBase ? { ...speechBase, fileAsrMode } : { ...vision, fileAsrMode };
-      if (files.length === 1) {
+      if (targets.length === 1) {
         let timedSegments: FileRecognition["segments"];
         let pdfCoverage: PdfPageCoverage | undefined;
-        const text = await extractMedia(file, vision, providerApproved, aborter.signal, undefined, speech,
+        const text = await extractMedia(source, vision, providerApproved, aborter.signal, undefined, speech,
           segments => { timedSegments = segments; }, coverage => { pdfCoverage = coverage; }, imageExtractionMode);
         if (alive.current && !aborter.signal.aborted) {
-          setRecognitionResults([{ index: 0, name: file.name, status: "success", text,
-            ...(kind === "audio" ? { asrProducerId: fileAsrMode === "device" ? "local-whisper" : "openai:" + (speech.transcriptionModel || "gpt-transcribe") } : {}),
+          const result: FileRecognition = { index: index ?? 0, name: source.name, status: "success", text,
+            ...(sourceKind === "audio" ? { asrProducerId: fileAsrMode === "device" ? "local-whisper" : "openai:" + (speech.transcriptionModel || "gpt-transcribe") } : {}),
             ...(timedSegments ? { segments: timedSegments } : {}),
             ...(pdfCoverage ? { pdfCoverage } : {}),
-            ...((kind === "image" || (kind === "document" && imageExtractionMode === "offline-ocr")) ? { imageMode: imageExtractionMode } : {}) }]);
-          setExtractedText(text);
+            ...((sourceKind === "image" || (sourceKind === "document" && imageExtractionMode === "offline-ocr")) ? { imageMode: imageExtractionMode } : {}) };
+          if (index !== undefined) {
+            setComparison({scope: replacementScope(), result, updated: replaceFileText(extractedText, files.map(item => item.name), index, text)});
+          } else {
+            setRecognitionResults([result]); setExtractedText(text);
+          }
           setNotice(pdfCoverage ? (imageExtractionMode === "offline-ocr" ? pdfCoverageMessage(pdfCoverage).replace("OCR пока не выполнялся.", "Остались страницы без прочитанного текста.") : pdfCoverageMessage(pdfCoverage)) :
             kind === "image" && imageExtractionMode === "document-text"
               ? "ИИ предложил текст фотографии, но не подтвердил точность. Проверьте все числа и исправьте ошибки перед сохранением."
@@ -558,6 +560,7 @@ export function MemoryImportScreen() {
       {notice ? <Text accessibilityRole="alert" style={{ color: t.muted }}>{notice}</Text> : null}
       {hasMaterial ? <>
         <TextInput accessibilityLabel="Сведения из файла" editable={!busy} multiline value={body} onChangeText={setBody} maxLength={60_000} style={[field, { minHeight: 96, textAlignVertical: "top" }]} placeholder={linkOnly ? "Моя заметка — что важно сохранить? (необязательно)" : "Добавьте подпись — необязательно"} placeholderTextColor={t.muted} />
+        {body.trim() ? <NebulaAction icon="zap" label="Улучшить подпись с ИИ" disabled={busy} onPress={() => setAiField("body")} /> : null}
         <Pressable accessibilityRole="button" accessibilityLabel="Выбрать коллекцию" disabled={busy} onPress={() => { Keyboard.dismiss(); setSectionOpen(true); }} style={{ ...button, backgroundColor: t.panel, alignItems: "flex-start" }}><Text style={{ color: t.text }}>Коллекция: {collections.find(c => c.id === collectionId)?.name || "Заметки"} · Изменить</Text></Pressable>
         <View testID="import-access-options" style={{ gap: 8 }}>
           <Text accessibilityRole="header" style={{ color: t.text, fontWeight: "700" }}>Доступ к записи</Text>
@@ -662,9 +665,9 @@ export function MemoryImportScreen() {
             {!speechSelected || !officialAudioProvider(speechSelected) ? <Text style={{ color: t.err }}>Выберите подключение OpenAI с поддержкой аудиофайлов. Произвольный LLM/DeepSeek не подходит.</Text> : null}
           </> : whisper.state !== "ready" ? <Text style={{ color: t.muted, fontSize: 12 }}>Whisper пока не установлен. Скачайте его в настройках голосового ввода либо выберите онлайн.</Text> : null}
         </View> : null}
-        <Pressable disabled={busy || !canExtract} accessibilityRole="button" accessibilityLabel="Извлечь сведения из файла" style={[button, { opacity: canExtract ? 1 : .5 }]} onPress={() => void extract()}>
+        {!extractedText && <Pressable disabled={busy || !canExtract} accessibilityRole="button" accessibilityLabel="Извлечь сведения из файла" style={[button, { opacity: canExtract ? 1 : .5 }]} onPress={() => void extract()}>
           <Text style={{ color: "#fff", fontWeight: "700" }}>{files.length > 1 ? recognitionMode === "joint" ? "Распознать и сопоставить" : "Распознать все по очереди" : kind === "text" ? "Прочитать текст на телефоне" : kind === "image" && imageExtractionMode === "offline-ocr" ? "Прочитать фото без интернета" : kind === "image" && imageExtractionMode === "document-text" ? "Отправить фото модели и прочитать текст" : kind === "document" && imageExtractionMode === "offline-ocr" ? "Распознать сканы PDF на телефоне" : kind === "document" ? "Прочитать страницы PDF на телефоне" : localAudio ? "Распознать речь на телефоне" : "Передать файл провайдеру и разобрать"}</Text>
-        </Pressable>
+        </Pressable>}
         {jointAnalyzing ? <Text accessibilityLiveRegion="polite" style={{ color: t.secondary }}>Сопоставляю результаты всех файлов…</Text> : null}
         {recognizingIndex >= 0 ? <Text accessibilityLiveRegion="polite" style={{ color: t.secondary }}>
           Распознаю файл {recognizingIndex + 1} из {files.length}: {files[recognizingIndex]?.name}
@@ -680,6 +683,10 @@ export function MemoryImportScreen() {
           <TextInput accessibilityLabel="Распознанное содержимое файла" editable={!busy} multiline
             scrollEnabled value={extractedText} onChangeText={setExtractedText} maxLength={60_000}
             style={[field, { minHeight: 140, maxHeight: 188, textAlignVertical: "top" }]} />
+          <NebulaAction icon="zap" label="Улучшить текст файла с ИИ" disabled={busy} onPress={() => setAiField("extracted")} />
+          {files.map((source, index) => <NebulaAction key={source.uri} icon="refresh-cw"
+            label={files.length === 1 ? "Распознать заново" : "Распознать заново · " + source.name}
+            disabled={busy || !canExtractFile(source)} onPress={() => void extract(index)} />)}
         </> : null}
         <NoteEditorSection title="Дополнительные параметры" summary="Название и сохранение оригинала" expanded={detailsOpen} onToggle={() => setDetailsOpen(v => !v)}>
           <Text style={{ color: t.text }}>Название — необязательно</Text>
@@ -727,22 +734,25 @@ export function MemoryImportScreen() {
         setNotice("Файл, подключение или доступ изменились. Проверьте параметры и подтвердите передачу заново.");
         return;
       }
-      void extract(approval.replaced, true);
+      void extract(approval.index, true);
     }} />
-  <NebulaConfirmSheet visible={replacementApproval !== null}
-    title="Заменить распознанный текст?"
-    message={`Новый разбор заменит текущий текст (${replacementApproval?.label || "файл"}), в том числе ручные исправления. Подпись к заметке не изменится.`}
-    confirmLabel="Распознать и заменить" cancelLabel="Оставить текущий текст" danger disabled={busy || preparing}
-    onCancel={() => setReplacementApproval(null)}
-    onConfirm={() => {
-      const approval = replacementApproval;
-      setReplacementApproval(null);
-      if (!approval || !profile || approval.scope !== replacementScope() || busy || preparing || !file || !canExtract) {
-        setNotice("Файл или параметры распознавания изменились. Проверьте их и запустите распознавание заново.");
-        return;
-      }
-      void extract(true);
+  {aiField && profile ? <NoteAiEditor key={profile + position + aiField} profile={profile}
+    allowed={providerApproved} draft={{title: "", body: aiField === "body" ? body : extractedText}}
+    onClose={() => setAiField(null)} onApply={draft => {
+      if (providerApproved) (aiField === "body" ? setBody : setExtractedText)(draft.body);
+    }} /> : null}
+  <BottomSheet visible={Boolean(comparison && comparison.scope === replacementScope())}
+    title={"Сравнить текст · " + (comparison?.result.name ?? "")} onClose={() => setComparison(null)}>
+    <NebulaAction icon="check" label="Применить новый" variant="primary" onPress={() => {
+      if (!comparison || comparison.scope !== replacementScope()) return;
+      setExtractedText(comparison.updated);
+      setRecognitionResults(previous => [...previous.filter(item => item.index !== comparison.result.index), comparison.result].sort((a,b) => a.index-b.index));
+      setComparison(null);
     }} />
+    <NebulaAction icon="x" label="Оставить текущий" onPress={() => setComparison(null)} />
+    <Text style={{color:t.secondary}}>Текущий текст</Text><Text selectable style={{color:t.text}}>{extractedText}</Text>
+    <Text style={{color:t.secondary}}>После замены</Text><Text selectable style={{color:t.text}}>{comparison?.updated}</Text>
+  </BottomSheet>
   <BottomSheet visible={sectionOpen} title="Коллекция для записи" onClose={() => setSectionOpen(false)}>
         {collections.map(c => <Pressable key={c.id} disabled={busy} accessibilityRole="button" accessibilityLabel={"Коллекция: " + c.name} onPress={() => { setCollectionId(c.id); setSectionOpen(false); }} style={choiceStyle(c.id === collectionId, busy)}><Text style={{ color: c.id === collectionId ? t.secondary : t.text }}>{c.id === collectionId ? "● " : "○ "}{c.name}</Text></Pressable>)}
   </BottomSheet>

@@ -55,3 +55,31 @@ export function combinedRecognitionText(results: FileRecognition[], total: numbe
   if (combined.length > 60_000) throw new Error("Общий распознанный текст превышает 60 000 символов. Обработайте меньше файлов или сократите текст.");
   return combined;
 }
+
+// Imported notes have one editable text field. Replace only a uniquely located
+// file block. If its boundaries were edited, preserve the draft and original.
+export function replaceFileText(current: string, names: string[], index: number, replacement: string): string {
+  if (names.length <= 1) return replacement;
+  const headers = names.map((name, i) => "Файл " + (i + 1) + ": " + name + "\n");
+  const header = headers[index];
+  if (!header) throw new Error("Не удалось определить исходный файл.");
+  const position = current.indexOf(header);
+  if (position < 0 || position !== current.lastIndexOf(header) ||
+      (position > 0 && !current.slice(0, position).endsWith("\n\n")))
+    throw new Error("Заголовки файлов изменились. Текущий текст сохранён.");
+  const start = position + header.length;
+  // A missing or edited following header could make a neighbour look like
+  // part of this file. Refuse automatic replacement in that case.
+  let end = current.length;
+  if (index + 1 < names.length) {
+    const next = "\n\n" + headers[index + 1];
+    end = current.indexOf(next, start);
+    if (end < 0 || end !== current.lastIndexOf(next))
+      throw new Error("Не удалось отделить соседний файл. Текущий текст сохранён.");
+  }
+  const analysis = current.indexOf("\n\nСовместный анализ материалов:\n", start);
+  if (analysis >= 0) end = Math.min(end, analysis);
+  const updated = current.slice(0, start) + replacement + current.slice(end);
+  if (updated.length > 60_000) throw new Error("Результат превышает 60 000 символов.");
+  return updated;
+}
