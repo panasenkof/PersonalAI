@@ -258,13 +258,17 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       assert(userBox && promptBox && userBox.y >= 0 &&
         userBox.y + userBox.height <= promptBox.y, 'Sent question remains visible above the composer');
 
-      const sendHint = page.getByText('Отправить написанное сообщение выбранной модели.', { exact: true });
-      await sendHint.waitFor();
-      const hintBox = await sendHint.boundingBox();
-      const buttonBox = await page.getByLabel('Остановить запрос', { exact: true }).boundingBox();
-      assert(hintBox.x >= 0 && hintBox.x + hintBox.width <= width, 'Hint stays inside a narrow screen');
-      assert(hintBox.y + hintBox.height < buttonBox.y && buttonBox.y - hintBox.y - hintBox.height < 30, 'Composer hint appears right above its button');
-      if (process.env.SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, `composer-hint-${width}.png`) });
+      // A tap must send immediately without a bubble obscuring the composer.
+      // When Send changes to Stop, the old action must not remain visible.
+      const stopButton = page.getByLabel('Остановить запрос', { exact: true });
+      await stopButton.waitFor();
+      assert.equal(await page.getByText('Отправить написанное сообщение выбранной модели.', { exact: true }).count(), 0,
+        'No stale Send hint is visible once the action becomes Stop');
+      const buttonBox = await stopButton.boundingBox();
+      assert(buttonBox && buttonBox.width >= 48 && buttonBox.height >= 48 &&
+        buttonBox.x >= 0 && buttonBox.x + buttonBox.width <= width,
+        'Stop remains a reachable 48dp button even on narrow screens');
+      if (process.env.SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, `composer-stop-${width}.png`) });
 
       await page.waitForFunction(() => /Подключаюсь|Думаю|Обрабатываю|Пишу ответ/.test(document.querySelector('[data-testid="nebula-home-status"]')?.textContent || ''));
       await page.getByLabel('Вкладка Память', { exact: true }).click();
