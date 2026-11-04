@@ -88,7 +88,6 @@ function NebulaHomeContent() {
         releaseCameraOriginal(id);
     }
   },[active?.id,active?.attachments]);
-  const [replyMenu, setReplyMenu] = useState<{conversationId: string; rowId: string} | null>(null);
   const [summaryId, setSummaryId] = useState<string | null>(null);
   const [summaryScope, setSummaryScope] = useState<DialogueSummaryScope>("last10");
   const [summaryLimit, setSummaryLimit] = useState<number | null>(null);
@@ -101,8 +100,8 @@ function NebulaHomeContent() {
     return () => { current = false; };
   }, [profile, summaryId]);
   useEffect(() => {
-    setSummaryId(null); setReplyMenu(null);
-    return onLocalMemorySessionChange(unlocked => { if (!unlocked) { setSummaryId(null); setReplyMenu(null); } });
+    setSummaryId(null);
+    return onLocalMemorySessionChange(unlocked => { if (!unlocked) setSummaryId(null); });
   }, [profile]);
   const [historyOpen, setHistoryOpen] = useState(false);
   const voicePreference = useVoiceEngine();
@@ -321,15 +320,16 @@ function NebulaHomeContent() {
       .catch(e => setNotice((e as Error).message));
   };
   /** Local-only action: no LLM call. The editor revalidates the IDs on Save. */
-  const openReplyNoteActions = (rowId:string) => {
+  const saveReplyToNotes = (rowId:string) => {
     const conversationId=active?.id;
     if(!conversationId)return;
+    const locator={conversationId,rowId};
     try {
-      prepareAssistantReplyNote(store.getSnapshot().conversations,{conversationId,rowId});
-    } catch(e) {
-      setNotice((e as Error).message); return;
-    }
-    setReplyMenu({conversationId, rowId});
+      // Validation is local/read-only; MemoryNote rechecks the locator on Save.
+      prepareAssistantReplyNote(store.getSnapshot().conversations,locator);
+      if (store.getSnapshot().activeId !== conversationId) return;
+      navigation.navigate("MemoryNote",{chatReply:locator});
+    } catch(e) { setNotice((e as Error).message); }
   };
   const openConnections = (presetId?: string) => navigation.navigate("ModelConnections", presetId ? { presetId } : undefined);
   // First run: the active connection has neither a key nor a keyless local address.
@@ -388,21 +388,21 @@ function NebulaHomeContent() {
           disabled={Boolean(item.streaming)}
           delayLongPress={430}
           accessibilityRole="button"
-          accessibilityLabel="Ответ ИИ. Действия с ответом"
-          accessibilityHint="Долгое нажатие: сохранить ответ в заметки"
-          accessibilityActions={[{ name: "longpress", label: "Действия с ответом" }]}
+          accessibilityLabel="Ответ ИИ. Долгое нажатие: сохранить в заметки"
+          accessibilityHint="Долгое нажатие открывает черновик заметки без отправки в сеть"
+          accessibilityActions={[{ name: "longpress", label: "Сохранить ответ в заметки" }]}
           onAccessibilityAction={event => {
             if(event.nativeEvent.actionName === "longpress" && !item.streaming)
-              openReplyNoteActions(item.id);
+              saveReplyToNotes(item.id);
           }}
-          onLongPress={() => {if(!item.streaming)openReplyNoteActions(item.id);}}>
+          onLongPress={() => {if(!item.streaming)saveReplyToNotes(item.id);}}>
           <MarkdownText text={item.text} style={{ color: t.text, lineHeight: 23 }} />
         </Pressable> :
           <Text selectable style={{ color: item.role === "user" ? t.userText : item.role === "info" ? t.muted : t.text, lineHeight: 23 }}>{item.text}</Text>}
         {item.role === "assistant" && !item.streaming && item.text.trim() ? <View style={{ alignSelf: "flex-end", borderWidth: 1, borderColor: t.line, backgroundColor: t.soft, borderRadius: 15 }}>
-          <IconAction compact explainOnTap={false} icon="more-horizontal" label="Действия с ответом"
-            accessibilityLabel="Действия с ответом" hint="Сохранить этот ответ в заметки"
-            onPress={() => openReplyNoteActions(item.id)} />
+          <IconAction compact explainOnTap={false} icon="bookmark" label="Сохранить ответ"
+            accessibilityLabel="Сохранить ответ в заметки" hint="Открыть черновик заметки без нового запроса ИИ"
+            onPress={() => saveReplyToNotes(item.id)} />
         </View> : null}
         {active?.retryPhoto?.rowId === item.id && active?.retryPhoto ?
           <NebulaAction icon="refresh-cw" label="Повторить поиск по фото"
@@ -537,13 +537,6 @@ function NebulaHomeContent() {
           onPress={()=>setPreviewPhotoId(null)} />
       </View>
     </Modal>
-    <BottomSheet visible={Boolean(replyMenu && replyMenu.conversationId === active?.id)} title="Действия с ответом" onClose={() => setReplyMenu(null)}>
-      <NebulaAction icon="bookmark" label="Сохранить в заметки" onPress={() => {
-        if (!replyMenu || store.getSnapshot().activeId !== replyMenu.conversationId) return;
-        setReplyMenu(null);
-        navigation.navigate("MemoryNote", {chatReply: replyMenu});
-      }} />
-    </BottomSheet>
     <BottomSheet visible={Boolean(summaryId)} title="Итог диалога" onClose={() => setSummaryId(null)}>
       {summary.plan && summary.plan.totalRows <= 10 ? null :
         <NebulaAction icon="list" label={summaryScope === "all" ? "Выбрать последние 10 сообщений" : "Выбрать весь диалог"}

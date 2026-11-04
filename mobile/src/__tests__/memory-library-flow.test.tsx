@@ -40,7 +40,7 @@ jest.mock("../local-memory/sections", () => ({ ensureSections: async () => secti
 jest.mock("../profile/ProfileContext", () => ({ useProfile: () => "p" }));
 jest.mock("../media/vector-runner", () => ({ scheduleVectors: jest.fn() }));
 jest.mock("../media/MemoryCover", () => ({ MemoryCover: () => null }));
-jest.mock("../local-memory/note-actions", () => ({ mergeText: () => "", noteUndoLabel: () => "Отменить архивирование" }));
+jest.mock("../local-memory/note-actions", () => ({ mergeText: (items: { title: string }[]) => items.map(note => note.title + "\\n" + "Т".repeat(1000)).join("\\n"), noteUndoLabel: () => "Отменить архивирование" }));
 jest.mock("../local-memory/errors", () => ({ memoryErrorMessage: (e: Error) => e.message }));
 jest.mock("expo-crypto", () => ({ randomUUID: () => "id" }));
 jest.mock("expo-secure-store", () => ({
@@ -151,6 +151,26 @@ test("selection actions are contextual and stay in one menu", async () => {
  fireEvent.press(v.getByText("Перенести"));
  expect(v.queryByText("Объединить записи")).toBeNull();
  expect(v.getByText("Первая, Вторая")).toBeTruthy();
+});
+
+test("merge preview identifies the primary record, keeps the full text optional and writes only after confirmation", async () => {
+ mockDb.changeNotes.mockClear();
+ const v = render(<LocalMemoryScreen />);
+ await waitFor(() => v.getByLabelText("Открыть заметку Первая"));
+ fireEvent.press(v.getByLabelText("Выбрать записи"));
+ fireEvent.press(v.getByLabelText("Выбрать заметку Первая"));
+ fireEvent.press(v.getByLabelText("Выбрать заметку Вторая"));
+ fireEvent.press(v.getByLabelText("Действия с выбранными записями"));
+ fireEvent.press(v.getByText("Объединить записи"));
+ expect(v.getByText("Основная · Первая")).toBeTruthy();
+ expect(v.getByText("Будет объединена · Вторая")).toBeTruthy();
+ expect(v.getByText(/вложения остальных/)).toBeTruthy();
+ expect(v.getByText(/из 60 000 допустимых символов/)).toBeTruthy();
+ expect(mockDb.changeNotes).not.toHaveBeenCalled();
+ fireEvent.press(v.getByText("Проверить полный текст"));
+ expect(v.getByText("Свернуть предпросмотр")).toBeTruthy();
+ fireEvent.press(v.getByText("Подтвердить объединение"));
+ await waitFor(() => expect(mockDb.changeNotes).toHaveBeenCalledWith("merge", [notes[0], notes[1]], undefined));
 });
 
 test("card menu does not select; last deselection exits and filters stay fixed", async () => {
