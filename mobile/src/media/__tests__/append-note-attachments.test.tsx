@@ -4,6 +4,8 @@ import { AppendNoteAttachments } from '../AppendNoteAttachments';
 import { appendNoteAttachments } from '../attachments';
 import { autoIndexNotePhotos83 } from '../auto-index-note-photos';
 import { getDocumentAsync } from 'expo-document-picker';
+// The actual NebulaAction remains under test; only native font loading is mocked.
+jest.mock('@expo/vector-icons/Feather', () => () => null);
 const mockDelete = jest.fn(); let mockLock: (unlocked: boolean) => void;
 jest.mock('../auto-index-note-photos', () => ({ autoIndexNotePhotos83: jest.fn() }));
 jest.mock('../attachments', () => ({ appendNoteAttachments: jest.fn(), MAX_ORIGINALS_PER_NOTE: 10 }));
