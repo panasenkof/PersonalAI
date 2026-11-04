@@ -167,6 +167,20 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       assert.equal(await page.getByLabel('Добавить входящее в чат',{exact:true}).isDisabled(),true);
       await page.getByLabel('Отменить приём материала',{exact:true}).click();
       assert.equal(await prompt.inputValue(),'Мой черновик\n\nhttps://example.org/shared','Cancel preserves draft');
+      // A plain photo description suggests an explicit *local* search, not an
+      // automatic request. Its action must look like a real Nebula button.
+      await prompt.fill('фото красного велосипеда');
+      const suggestPhoto = page.getByLabel('Поискать в моих фото', {exact:true});
+      await suggestPhoto.waitFor();
+      const photoActionBox = await suggestPhoto.boundingBox();
+      const photoActionBorder = await suggestPhoto.evaluate(el => parseFloat(getComputedStyle(el).borderTopWidth));
+      assert(photoActionBox && photoActionBox.height >= 48 && photoActionBorder >= 1 &&
+        photoActionBox.x >= 0 && photoActionBox.x + photoActionBox.width <= width,
+        'Suggested local photo search must be a visible, reachable action');
+      assert.equal(replyNumber,0,'Typing a photo description never silently sends a network request');
+      if (process.env.SCREENSHOT_DIR) await page.screenshot({animations:'disabled',
+        path:path.join(process.env.SCREENSHOT_DIR,`chat-photo-suggestion-${width}.png`)});
+      await prompt.fill('Мой черновик\n\nhttps://example.org/shared');
       await showShare([{shareType:'text',value:'Тестовая входящая заметка'}]);
       const notesBeforeShare=await page.evaluate(()=>localStorage.getItem('qa.notes'));
       await page.getByLabel('Добавить входящее в память',{exact:true}).click();
