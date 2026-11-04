@@ -187,6 +187,11 @@ export function LocalMemoryScreen() {
   }, [profile, term, collectionId, status, retry]));
   useEffect(() => onLocalMemorySessionChange(unlocked => {
     if (!unlocked) {
+      // A locked session must not retain note IDs in transient navigation refs.
+      listAnchors.current.clear();
+      pendingAnchor.current = null;
+      if (restoreTimer.current) clearTimeout(restoreTimer.current);
+      restoreTimer.current = null;
       hygieneGeneration.current++;
       setHygieneSuggestionsOpen(false); setHygieneSuggestions(null);
       setSuggestedReviewNotes(null); setHygieneReviewOpen(false);
