@@ -151,6 +151,7 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       if (await suggestPhoto.count() === 0) {
         const context = await page.evaluate(() => ({
           question: document.querySelector('[aria-label="Сообщение ассистенту"]')?.value,
+          runtime: window.__qa?.photoSuggestionState,
           clearButton: Boolean(document.querySelector('[aria-label="Очистить сообщение"]')),
           attached: [...document.querySelectorAll('[aria-label^="Убрать вложение"]')].map(el=>el.getAttribute('aria-label')),
           actions: [...document.querySelectorAll('[role="button"]')].map(el=>el.getAttribute('aria-label')).filter(Boolean).slice(-24),
