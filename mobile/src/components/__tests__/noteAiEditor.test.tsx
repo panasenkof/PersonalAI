@@ -2,6 +2,7 @@ import React from "react";
 import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 import { NoteAiEditor } from "../NoteAiEditor";
 import { editNote } from "../../direct-agent/edit-note";
+jest.mock("@expo/vector-icons/Feather", () => () => null);
 jest.mock("../../direct-agent/edit-note", () => ({ editNote: jest.fn() }));
 jest.mock("../../direct-agent/settings", () => ({ loadDirectSettings: jest.fn(async () => ({})) }));
 jest.mock("@react-navigation/native", () => ({ useIsFocused: () => true }));
