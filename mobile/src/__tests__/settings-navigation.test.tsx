@@ -1,6 +1,5 @@
 import React from "react";
 import { fireEvent, render, waitFor } from "@testing-library/react-native";
-import { Text } from "react-native";
 import { DeviceSettingsScreen } from "../screens/DeviceSettingsScreen";
 import { SettingsDetailScreen, PhotoSearchSettingsScreen } from "../screens/SettingsDetailScreen";
 import { loadDirectConnections } from "../direct-agent/settings";
@@ -26,22 +25,28 @@ jest.mock("../media/voice-engine", () => ({
   resolveVoiceEngine: () => "system",
 }));
 jest.mock("../components/VoiceModelCard", () => ({
-  VoiceModelCard: ({ defaultOpen }: any) => <Text>Голос: {defaultOpen ? "открыт" : "закрыт"}</Text>,
+  VoiceModelCard: ({ defaultOpen }: any) => require("react").createElement(require("react-native").Text, null,
+    "Голос: " + (defaultOpen ? "открыт" : "закрыт")),
 }));
 jest.mock("../components/AgentLimitsCard", () => ({
-  AgentLimitsCard: ({ defaultOpen }: any) => <Text>Лимит: {defaultOpen ? "открыт" : "закрыт"}</Text>,
+  AgentLimitsCard: ({ defaultOpen }: any) => require("react").createElement(require("react-native").Text, null,
+    "Лимит: " + (defaultOpen ? "открыт" : "закрыт")),
 }));
 jest.mock("../components/SmartSearchCard", () => ({
-  SmartSearchCard: ({ defaultOpen }: any) => <Text>Умный поиск: {defaultOpen ? "открыт" : "закрыт"}</Text>,
+  SmartSearchCard: ({ defaultOpen }: any) => require("react").createElement(require("react-native").Text, null,
+    "Умный поиск: " + (defaultOpen ? "открыт" : "закрыт")),
 }));
 jest.mock("../components/VisionModelCard", () => ({
-  VisionModelCard: ({ defaultOpen }: any) => <Text>Фото: {defaultOpen ? "открыт" : "закрыт"}</Text>,
+  VisionModelCard: ({ defaultOpen }: any) => require("react").createElement(require("react-native").Text, null,
+    "Фото: " + (defaultOpen ? "открыт" : "закрыт")),
 }));
 jest.mock("../components/PhotoResultsSettings", () => ({
-  PhotoResultsSettings: ({ defaultOpen }: any) => <Text>Результаты: {defaultOpen ? "открыт" : "закрыт"}</Text>,
+  PhotoResultsSettings: ({ defaultOpen }: any) => require("react").createElement(require("react-native").Text, null,
+    "Результаты: " + (defaultOpen ? "открыт" : "закрыт")),
 }));
 jest.mock("../media/MediaSettings", () => ({
-  MediaSettings: ({ connections }: any) => <Text>Распознавание: {connections.length} подключения</Text>,
+  MediaSettings: ({ connections }: any) => require("react").createElement(require("react-native").Text, null,
+    "Распознавание: " + connections.length + " подключения"),
 }));
 beforeEach(() => {
   jest.clearAllMocks();
