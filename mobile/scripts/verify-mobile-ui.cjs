@@ -43,6 +43,33 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       const page = await browser.newPage({ viewport: { width, height: 900 }, colorScheme: width === 390 ? "dark" : "light" });
       currentPage = page;
       const errors = []; page.on('pageerror', error => { errors.push(error.message); console.error('UI runtime:', error.message); if (process.env.GITHUB_ACTIONS) console.log('::warning title=UI runtime::' + String(error.message).slice(0, 500).replace(/\n/g, '%0A')); });
+      // Browser layout check for enlarged text; native font scaling and TalkBack remain device checks.
+      async function captureAction(name, label) {
+        if (!process.env.SCREENSHOT_DIR) return;
+        const button = page.getByLabel(label, {exact:true}).first();
+        await button.click({trial:true});
+        const capture = suffix => page.screenshot({animations:"disabled", path:path.join(process.env.SCREENSHOT_DIR, name+"-"+width+suffix+".png")});
+        await capture("");
+        if (width > 360) return;
+        await page.evaluate(() => {
+          const texts = [...document.querySelectorAll('div,span,textarea')].filter(el =>
+            [...el.childNodes].some(node => node.nodeType === 3 && node.textContent.trim()) || el.tagName === "TEXTAREA");
+          window.__qaRestoreText = texts.map(el => [el, el.style.fontSize, el.style.lineHeight]);
+          const sizes = texts.map(el => [parseFloat(getComputedStyle(el).fontSize), parseFloat(getComputedStyle(el).lineHeight)]);
+          texts.forEach((el,i) => { el.style.fontSize = sizes[i][0]*1.5+"px"; if (sizes[i][1]) el.style.lineHeight = sizes[i][1]*1.5+"px"; });
+        });
+        try {
+          await button.click({trial:true});
+          const box = await button.boundingBox();
+          assert(box && box.x >= -1 && box.x + box.width <= width + 1, name+" enlarged action exceeds viewport");
+          await capture("-large");
+        } finally {
+          await page.evaluate(() => {
+            for (const [el,size,height] of window.__qaRestoreText) { el.style.fontSize=size; el.style.lineHeight=height; }
+            delete window.__qaRestoreText;
+          });
+        }
+      }
       let replyNumber = 0;
       let releaseReply;
       let normalizationCalls = 0;
@@ -499,7 +526,7 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByText('Вложения · 1', { exact: true }).waitFor();
       await page.getByLabel('Распознать заново recipe.pdf', {exact:true}).scrollIntoViewIfNeeded();
       await page.getByLabel('Открыть PDF recipe.pdf', {exact:true}).waitFor();
-      if (process.env.SCREENSHOT_DIR) await page.screenshot({path:path.join(process.env.SCREENSHOT_DIR, `pdf-actions-${width}.png`)});
+      await captureAction('pdf-actions', 'Распознать заново recipe.pdf');
       assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('qa.notes')).find(n => n.title === 'Индейка').payload.body), 'Чеснок и паприка', 'Appending preserves note text');
       await page.getByLabel('Изменить заметку с ИИ', { exact: true }).click();
       await page.getByLabel('Команда для редактирования заметки', { exact: true }).click();
@@ -637,7 +664,7 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByLabel('Распознать заново', { exact: true }).click();
       await page.getByLabel('Применить новый', { exact: true }).waitFor();
       await page.clock.runFor(600);
-      if (process.env.SCREENSHOT_DIR) await page.screenshot({ animations: 'disabled', path: path.join(process.env.SCREENSHOT_DIR, `import-replace-confirm-${width}.png`) });
+      await captureAction('import-replace-confirm', 'Применить новый');
       const replaceBox = await page.getByLabel('Применить новый', { exact: true }).boundingBox();
       assert(replaceBox && replaceBox.height >= 48 && replaceBox.x >= 0 && replaceBox.x + replaceBox.width <= width,
         'Import destructive confirmation has a real reachable 48dp Nebula button');
@@ -742,12 +769,13 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByLabel('Сохранить итог диалога Второй вопрос', {exact:true}).click();
       await page.getByLabel('Создать итог', {exact:true}).waitFor();
       assert.equal(await page.getByLabel('Выбрать весь диалог', {exact:true}).count(), 0);
-      await page.clock.runFor(600);
-      if (process.env.SCREENSHOT_DIR) await page.screenshot({path:path.join(process.env.SCREENSHOT_DIR, `summary-${width}.png`)});
+      await page.setViewportSize({width, height:900});
+      await page.getByLabel('Создать итог', {exact:true}).click({trial:true});
+      await captureAction('summary', 'Создать итог');
       await page.getByLabel('Отмена', {exact:true}).click();
       await page.getByLabel('Действия с ответом', {exact:true}).first().waitFor();
       await page.clock.runFor(600);
-      if (process.env.SCREENSHOT_DIR) await page.screenshot({path:path.join(process.env.SCREENSHOT_DIR, `reply-actions-${width}.png`)});
+      await captureAction('reply-actions', 'Действия с ответом');
       await page.getByLabel('Действия с ответом', {exact:true}).first().click();
       await page.getByLabel('Сохранить в заметки', {exact:true}).waitFor();
       await page.getByLabel('Закрыть панель Действия с ответом', {exact:true}).click();

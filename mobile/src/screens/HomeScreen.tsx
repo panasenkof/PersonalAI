@@ -548,12 +548,14 @@ function NebulaHomeContent() {
       {summary.plan && summary.plan.totalRows <= 10 ? null :
         <NebulaAction icon="list" label={summaryScope === "all" ? "Выбрать последние 10 сообщений" : "Выбрать весь диалог"}
           onPress={() => setSummaryScope(summaryScope === "all" ? "last10" : "all")} />}
-      {summary.plan ? <Text style={{color:t.text}}>
-        {summary.plan.includedRows === summary.plan.totalRows ? "Весь диалог" : "Последние 10"} · {summary.plan.includedRows} сообщ.
-        {"\n"}Объём: {summary.plan.source.length.toLocaleString("ru-RU")} символов. Оригиналы файлов не отправляются.
-        {"\n"}{settings?.provider} · {settings?.model}. Обращений к модели: до {summary.plan.calls}. Лимит: {summaryLimit ?? "…"}.
-        {"\n"}Текст переписки будет передан модели. Возможна оплата. Перед сохранением заметки вы увидите черновик.
-      </Text> : null}
+      {summary.plan ? <View style={{gap:8}}>
+        <Text style={{color:t.text, fontWeight:"700"}}>
+          {summary.plan.includedRows === summary.plan.totalRows ? "Весь диалог" : "Последние 10 сообщений"}
+        </Text>
+        <Text style={{color:t.text}}>Сообщений: {summary.plan.includedRows} из {summary.plan.totalRows} · {summary.plan.source.length.toLocaleString("ru-RU")} символов</Text>
+        <Text style={{color:t.secondary}}>{settings?.provider} · {settings?.model}{"\n"}Обращений к модели: до {summary.plan.calls}. Лимит: {summaryLimit ?? "…"}.</Text>
+        <Text style={{color:t.muted}}>Модель получит текст переписки без оригиналов файлов. Возможна оплата. Итог откроется в черновике.</Text>
+      </View> : null}
       {summary.error || summaryError ? <Text accessibilityRole="alert" style={{color:t.err}}>{summary.error || summaryError}</Text> : null}
       {summary.plan && summaryLimit !== null && summary.plan.calls > summaryLimit ?
         <Text style={{color:t.err}}>Превышен лимит обращений к модели.</Text> : null}
