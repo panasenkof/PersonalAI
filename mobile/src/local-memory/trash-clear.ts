@@ -56,3 +56,28 @@ export function trashPurgeCountLabel(n: number): string {
   return n + " " + (mod100 >= 11 && mod100 <= 14 ? "записей" :
     mod10 === 1 ? "запись" : mod10 >= 2 && mod10 <= 4 ? "записи" : "записей");
 }
+
+/** A one-way runner: never searches for new items, never auto-retries a failed
+ * transaction. The UI must take a NEW reviewed snapshot after interruption. */
+export async function purgeConfirmedTrash(
+  items: readonly NoteSelection[],
+  writer: (batch: NoteSelection[]) => Promise<void>,
+  stillAllowed: () => boolean,
+  onProgress?: (count: number) => void,
+): Promise<{ total: number; confirmed: number; error: unknown | null }> {
+  const batches = trashPurgeBatches(items);
+  let confirmed = 0;
+  try {
+    for (const batch of batches) {
+      if (!stillAllowed()) throw new Error("trash_purge_session_changed");
+      await writer(batch);
+      confirmed += batch.length;
+      onProgress?.(confirmed);
+    }
+    return { total: items.length, confirmed, error: null };
+  } catch (error) {
+    // An interrupted call might have committed just before the bridge failed:
+    // do not claim the current batch succeeded or retry it without inspection.
+    return { total: items.length, confirmed, error };
+  }
+}
