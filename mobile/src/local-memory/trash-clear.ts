@@ -1,11 +1,14 @@
 import type { SQLiteDatabase } from "expo-sqlite";
 import { withUnlockedTransaction } from "./transaction";
 import type { NoteSelection } from "./note-actions";
+import { BULK_PURGE_NEEDS_REVIEW_SQL } from "./bulk-purge-eligibility";
 
 type ReadSql = Pick<SQLiteDatabase, "execAsync" | "getAllAsync" | "getFirstAsync">;
 export type TrashPurgeSnapshot = {
   /** Never expose record bodies, titles, file names or source quotes in this inventory. */
   items: NoteSelection[];
+  totalCount: number;
+  protectedCount: number;
   originalCount: number;
   affectedRelationCount: number;
 };
@@ -18,17 +21,28 @@ export async function readTrashPurgeSnapshot(db: ReadSql): Promise<TrashPurgeSna
     const rows = await tx.getAllAsync<{ id: string; record_version: number }>(
       "SELECT id,record_version FROM memory_entities " +
       "WHERE domain='notes' AND record_status='trashed' ORDER BY created_at,id");
-    const files = await tx.getFirstAsync<{ total: number }>(
-      "SELECT COUNT(*) AS total FROM memory_attachments a " +
+    // Notes tied to saved relations, proposed relations or temporal facts
+    // require individual review instead of destructive global cleanup.
+    const blocked = await tx.getAllAsync<{ id: string }>(
+      "SELECT e.id FROM memory_entities e WHERE e.domain='notes' " +
+      "AND e.record_status='trashed' AND (" + BULK_PURGE_NEEDS_REVIEW_SQL + ")");
+    const blockedIds = new Set(blocked.map(row => row.id));
+    const included = rows.filter(row => !blockedIds.has(row.id));
+    const includedIds = new Set(included.map(row => row.id));
+    const files = await tx.getAllAsync<{ entity_id: string; total: number }>(
+      "SELECT a.entity_id,COUNT(*) AS total FROM memory_attachments a " +
       "JOIN memory_entities e ON e.id=a.entity_id " +
-      "WHERE e.domain='notes' AND e.record_status='trashed'");
+      "WHERE e.domain='notes' AND e.record_status='trashed' GROUP BY a.entity_id");
     const relations = await tx.getFirstAsync<{ total: number }>(
       "SELECT COUNT(*) AS total FROM memory_relations r WHERE EXISTS " +
       "(SELECT 1 FROM memory_entities e WHERE e.domain='notes' AND e.record_status='trashed' " +
       "AND (e.id=r.source_entity_id OR e.id=r.target_entity_id))");
     snapshot = {
-      items: rows.map(row => ({ id: row.id, record_version: row.record_version })),
-      originalCount: files?.total ?? 0,
+      items: included.map(row => ({ id: row.id, record_version: row.record_version })),
+      totalCount: rows.length,
+      protectedCount: blockedIds.size,
+      originalCount: files.filter(file => includedIds.has(file.entity_id))
+        .reduce((total,file) => total + file.total,0),
       affectedRelationCount: relations?.total ?? 0,
     };
   });
