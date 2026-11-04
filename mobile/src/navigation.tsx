@@ -15,6 +15,7 @@ import type { VerifiedOriginalLocator } from "./local-memory/types";
 import type { ChatReplyLocator } from "./direct-agent/chat-response-note";
 
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useWindowDimensions } from "react-native";
 
 import { HomeScreen } from "./screens/HomeScreen";
 import { DirectAgentSettingsScreen } from "./screens/DirectAgentSettingsScreen";
@@ -50,6 +51,7 @@ const Tab = createBottomTabNavigator<TabParams>();
 function Tabs() {
   const t = useTheme();
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
   const tabIcon = (symbol: React.ComponentProps<typeof Feather>["name"]) => ({ color }: { color: string }) => (
     <Feather name={symbol} color={color} size={22} />
   );
@@ -60,9 +62,9 @@ function Tabs() {
       return {
         tabBarActiveTintColor: route.name === "Home" ? colors.accent : colors.secondary,
         tabBarInactiveTintColor: colors.muted,
-        tabBarLabelStyle: { fontSize: 11, fontWeight: "600" },
+        tabBarLabelStyle: { fontSize: width < 350 ? 10 : 11, fontWeight: "600" },
         // Respect Android gesture / three-button navigation in all themes.
-        tabBarStyle: { height: 64 + insets.bottom, paddingTop: 7,
+        tabBarStyle: { height: 76 + insets.bottom, paddingTop: 7,
           paddingBottom: insets.bottom + 7, backgroundColor: colors.panel,
           borderTopColor: colors.line, elevation: 0 },
         headerStyle: { backgroundColor: colors.panel },

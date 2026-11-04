@@ -950,23 +950,20 @@ export function LocalMemoryScreen() {
         label={mergeItemsExpanded ? "Свернуть список записей" : "Показать все выбранные записи · " + selectedNotes.length}
         onPress={() => setMergeItemsExpanded(value => !value)} /> : null}
       <Text style={{ color: t.muted, lineHeight: 20 }}>
-        Заголовок основной записи сохраняется. Тексты объединяются в ней; вложения остальных
-        записей переходят к основной. Остальные записи больше не отображаются как активные.
-        Исходные сведения сохраняются в истории объединения. Противоречия не исправляются автоматически.
-        Операцию можно отменить до последующих изменений записей.
+        Основная сохранит название и получит тексты и вложения остальных. Остальные записи
+        станут неактивными; исходные сведения сохранятся в истории. Противоречия не исправляются
+        автоматически. Отменить можно до последующих правок.
       </Text>
       {error ? <Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text> : null}
       <Text style={{ color: mergePreview.length > 60000 ? t.err : t.muted, fontSize: 13 }}>
-        Предпросмотр текста · {mergePreview.length.toLocaleString("ru-RU")} из 60 000 допустимых символов
+        Текст: {mergePreview.length.toLocaleString("ru-RU")} / 60 000 символов
       </Text>
-      {mergeExpanded ? <ScrollView style={{ maxHeight: 260 }}>
+      {mergeExpanded ? <ScrollView style={{ maxHeight: 260 }} nestedScrollEnabled>
         <Text selectable style={{ color: t.text, lineHeight: 21 }}>{mergePreview}</Text>
-      </ScrollView> : <Text selectable numberOfLines={7} style={{ color: t.text, lineHeight: 21 }}>
-        {mergePreview.slice(0, 950)}
-      </Text>}
-      {mergePreview.length > 950 ? <NebulaAction icon={mergeExpanded ? "chevron-up" : "book-open"}
+      </ScrollView> : null}
+      <NebulaAction icon={mergeExpanded ? "chevron-up" : "book-open"}
         label={mergeExpanded ? "Свернуть предпросмотр" : "Проверить полный текст"}
-        onPress={() => setMergeExpanded(value => !value)} /> : null}
+        onPress={() => setMergeExpanded(value => !value)} />
       <NebulaAction icon="check" label="Подтвердить объединение" variant="primary"
         disabled={busy || selectedNotes.length < 2 || mergePreview.length > 60000}
         onPress={() => void act("merge")} />
