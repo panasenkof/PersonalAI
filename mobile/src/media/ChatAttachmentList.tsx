@@ -1,9 +1,39 @@
 import React from "react";
-import { Image, Pressable, ScrollView, Text, View } from "react-native";
+import { Image, Pressable, ScrollView, Text, View, useWindowDimensions } from "react-native";
 import type { ChatAttachment } from "../direct-agent/chat-attachments";
 import { useTheme } from "../theme";
 import { nebulaRadii, nebulaSpacing } from "../design/nebula/tokens";
 import { NebulaAction } from "../design/nebula/components";
+
+/** Bound the horizontal rail to its tallest real card, including multiline
+ * accessible action labels. This prevents Android from stretching the ScrollView
+ * to the viewport while keeping both photo buttons visible at large font sizes.
+ * No photo-sized empty slot is reserved for a text-only attachment. */
+export function chatAttachmentRailHeight(
+  files: readonly ChatAttachment[],
+  removable: boolean,
+  searchable: boolean,
+  fontScale = 1,
+): number {
+  if (!files.length) return 0;
+  const scale = Number.isFinite(fontScale) ? Math.max(1, fontScale) : 1;
+  const titleHeight = Math.ceil(18 * scale);
+  // "Найти похожие" may wrap to two or three lines inside a 160dp card.
+  const actionHeight = scale > 1.6
+    ? Math.ceil(60 * scale)
+    : Math.max(48, Math.ceil(40 * scale));
+  const descriptionHeight = Math.ceil(38 * scale);
+  return Math.max(...files.map(file => {
+    const image = file.kind === "image";
+    const description = file.kind === "text" &&
+      (file.name.startsWith("Текст PDF: ") || file.name.startsWith("Транскрипт аудио: "));
+    const actions = Number(removable) + Number(searchable && image);
+    const children = 1 + Number(image) + Number(description) + actions;
+    return 2 * nebulaSpacing.xs + (children - 1) * nebulaSpacing.xs
+      + titleHeight + (image ? 114 : 0) + (description ? descriptionHeight : 0)
+      + actions * actionHeight + 4; // Small native font/layout rounding allowance
+  }));
+}
 
 /** Chat attachments must have a bounded height. Horizontal ScrollView without
  * an explicit height can stretch to the FlatList viewport on Android and leave
@@ -14,17 +44,10 @@ export function ChatAttachmentList({files, onRemove, onSearch, onSelectImage, se
   onSelectImage?: (id:string)=>void; selectedImageId?:string; disabled?:boolean;
 }) {
   const t=useTheme();
+  const { fontScale } = useWindowDimensions();
   if (!files.length) return null;
   const interactive=Boolean(onRemove || onSearch || onSelectImage);
-  const hasImage=files.some(file=>file.kind==="image");
-  const hasTranscript=files.some(file=>file.kind==="text" &&
-    (file.name.startsWith("Текст PDF: ") || file.name.startsWith("Транскрипт аудио: ")));
-  // Reserve actual vertical space for all Nebula buttons; text-only attachments
-  // must not inherit a photo-sized blank rectangle. The horizontal row height
-  // is the tallest attachment, avoiding clipped actions on mixed selections.
-  const actionCount=(onRemove?1:0)+(onSearch && hasImage?1:0);
-  const height=hasImage ? (actionCount===2?250:actionCount===1?198:146)
-    : (actionCount===2?142:actionCount===1?(hasTranscript?124:90):(hasTranscript?76:48));
+  const height=chatAttachmentRailHeight(files,Boolean(onRemove),Boolean(onSearch),fontScale);
   return <ScrollView horizontal
     style={{height,flexGrow:0,flexShrink:0,alignSelf:"flex-start",maxWidth:"100%"}}
     contentContainerStyle={{gap:nebulaSpacing.sm,alignItems:"flex-start"}}
