@@ -1,11 +1,13 @@
-import React, { useEffect, useRef } from "react";
-import { ActivityIndicator, Alert, Pressable, Switch, Text, View } from "react-native";
+import React, { useEffect, useRef, useState } from "react";
+import { ActivityIndicator, Pressable, Switch, Text, View } from "react-native";
 import { EMBEDDER_APPROX_MB, cancelEmbedderDownload, deleteEmbedder, downloadEmbedder, useEmbedderStatus } from "../media/embedder";
 import { refreshVectorStatus, scheduleVectors, stopVectors, useVectorState } from "../media/vector-runner";
 import { useProfile } from "../profile/ProfileContext";
 import { loadIndexTermsPreference, refreshIndexTermsStatus, scheduleIndexTerms, setIndexTermsEnabled, useEnrichState } from "../direct-agent/enrich-runner";
 import { useTheme } from "../theme";
 import { Collapsible } from "./Collapsible";
+import { NebulaConfirmSheet } from "./NebulaConfirmSheet";
+import { NebulaAction } from "../design/nebula/components";
 
 /** «Умный поиск по памяти»: index words from the user's model (п. 12) and
  * search by meaning with a model on the phone (п. 13). */
@@ -13,6 +15,7 @@ export function SmartSearchCard({ defaultOpen = false }: { defaultOpen?: boolean
   const t = useTheme(); const profile = useProfile();
   const enrich = useEnrichState();
   const model = useEmbedderStatus(); const vectors = useVectorState();
+  const [approval, setApproval] = useState<"download" | "delete" | null>(null);
   useEffect(() => { void loadIndexTermsPreference(); if (profile) { void refreshIndexTermsStatus(profile); void refreshVectorStatus(profile); } }, [profile]);
   // A finished download starts indexing at once.
   const previous = useRef(model.state);
@@ -23,14 +26,22 @@ export function SmartSearchCard({ defaultOpen = false }: { defaultOpen?: boolean
   }, [model.state, profile]);
   const button = (primary: boolean) => ({ minHeight: 46, paddingHorizontal: 16, justifyContent: "center" as const, alignItems: "center" as const,
     borderRadius: 16, borderWidth: 1, borderColor: t.accent, backgroundColor: primary ? t.accent : t.panel });
-  const confirmDownload = () => Alert.alert("Скачать модель поиска по смыслу?", `Около ${EMBEDDER_APPROX_MB} МБ, лучше по Wi-Fi. Модель хранится и работает только на телефоне; записи никуда не отправляются.`, [
-    { text: "Отмена", style: "cancel" }, { text: "Скачать", onPress: () => void downloadEmbedder() }]);
-  const confirmDelete = () => Alert.alert("Удалить модель поиска по смыслу?", "Освободится место на телефоне. Поиск продолжит работать по словам.", [
-    { text: "Отмена", style: "cancel" }, { text: "Удалить", style: "destructive", onPress: () => { stopVectors(); void deleteEmbedder(); } }]);
+  const confirmModelAction = () => {
+    const action = approval;
+    setApproval(null);
+    // A cancelled/changed download must not be deleted by a stale dialog.
+    if (action === "download" &&
+        (model.state === "idle" || model.state === "error" || model.state === "missing")) {
+      void downloadEmbedder();
+    } else if (action === "delete" && model.state === "ready") {
+      stopVectors();
+      void deleteEmbedder();
+    }
+  };
   const summary = [enrich.enabled ? `слова для поиска: ${enrich.done}${enrich.pending ? ", ждут " + enrich.pending : ""}` : "слова для поиска выключены",
     model.state === "ready" ? `по смыслу: ${vectors.done} из ${vectors.total}` : model.state === "downloading" ? `модель скачивается ${model.progress}%` :
     model.state === "unsupported" ? "" : "по смыслу: модель не скачана"].filter(Boolean).join(" · ");
-  return <Collapsible icon="search" id="settings.smart-search" defaultOpen={defaultOpen} forceOpen={defaultOpen} title="Умный поиск по памяти" summary={(enrich.error || vectors.error ? "⚠ " : "") + summary}>
+  return <><Collapsible icon="search" id="settings.smart-search" defaultOpen={defaultOpen} forceOpen={defaultOpen} title="Умный поиск по памяти" summary={(enrich.error || vectors.error ? "⚠ " : "") + summary}>
     <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
       <View style={{ flex: 1, gap: 4 }}>
         <Text style={{ color: t.text, fontWeight: "600" }}>Слова для поиска</Text>
@@ -57,17 +68,28 @@ export function SmartSearchCard({ defaultOpen = false }: { defaultOpen?: boolean
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
           {!vectors.running && vectors.done < vectors.total ? <Pressable accessibilityRole="button" accessibilityLabel="Посчитать векторы сейчас" onPress={() => { if (profile) scheduleVectors(profile, 0); }} style={button(false)}>
             <Text style={{ color: t.secondary }}>Посчитать сейчас</Text></Pressable> : null}
-          <Pressable accessibilityRole="button" accessibilityLabel="Удалить модель поиска по смыслу" onPress={confirmDelete} style={button(false)}><Text style={{ color: t.err }}>Удалить модель</Text></Pressable>
+          <NebulaAction icon="trash-2" label="Удалить модель" variant="danger"
+            accessibilityLabel="Удалить модель поиска по смыслу" onPress={() => setApproval("delete")} />
         </View>
       </> : model.state === "downloading" ? <View style={{ gap: 8 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}><ActivityIndicator /><Text style={{ color: t.text }}>Скачивается: {model.progress}%</Text></View>
         <View style={{ height: 6, borderRadius: 3, backgroundColor: t.soft, overflow: "hidden" }}><View style={{ width: `${model.progress}%`, height: 6, backgroundColor: t.accent }} /></View>
-        <Pressable accessibilityRole="button" accessibilityLabel="Отменить скачивание модели поиска" onPress={cancelEmbedderDownload} style={button(false)}><Text style={{ color: t.secondary }}>Отменить</Text></Pressable>
+        <NebulaAction icon="x" label="Отменить скачивание" accessibilityLabel="Отменить скачивание модели поиска"
+          onPress={cancelEmbedderDownload} />
       </View> : <>
         {model.state === "error" ? <Text selectable accessibilityRole="alert" style={{ color: t.err }}>{model.message}</Text> : null}
-        <Pressable accessibilityRole="button" accessibilityLabel="Скачать модель поиска по смыслу" onPress={confirmDownload} style={button(true)}>
-          <Text style={{ color: "#fff", fontWeight: "700" }}>Скачать модель · около {EMBEDDER_APPROX_MB} МБ</Text></Pressable>
+        <NebulaAction icon="download" label={"Скачать модель · около " + EMBEDDER_APPROX_MB + " МБ"}
+          accessibilityLabel="Скачать модель поиска по смыслу" variant="primary" onPress={() => setApproval("download")} />
       </>}
     </>}
-  </Collapsible>;
+  </Collapsible>
+    <NebulaConfirmSheet visible={approval !== null}
+      title={approval === "delete" ? "Удалить модель поиска по смыслу?" : "Скачать модель поиска по смыслу?"}
+      message={approval === "delete"
+        ? "Модель будет удалена с телефона, освободится место. Ваши записи сохранятся, поиск по словам продолжит работать."
+        : `Около ${EMBEDDER_APPROX_MB} МБ, рекомендуется Wi-Fi. Модель хранится и работает только на телефоне, записи не передаются на сервер.`}
+      confirmLabel={approval === "delete" ? "Удалить модель" : "Скачать модель"}
+      cancelLabel="Отмена" danger={approval === "delete"} disabled={model.state === "downloading"}
+      onCancel={() => setApproval(null)} onConfirm={confirmModelAction} />
+    </>;
 }
