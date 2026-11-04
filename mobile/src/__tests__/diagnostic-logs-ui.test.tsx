@@ -50,7 +50,7 @@ test("deletion has a contextual Nebula button, file count, safe cancel and separ
   await waitFor(() => view.getByText("Журналы (2)"));
   fireEvent.press(view.getByLabelText("Удалить все журналы"));
   expect(view.getByText("Удалить журналы?")).toBeTruthy();
-  expect(view.getByText(/Будут удалены 2 файлов/)).toBeTruthy();
+  expect(view.getByText(/Файлов диагностики для удаления: 2/)).toBeTruthy();
   expect(deleteDiagnosticFiles).not.toHaveBeenCalled();
   fireEvent.press(view.getByLabelText("Оставить журналы"));
   expect(view.queryByText("Удалить журналы?")).toBeNull();
