@@ -583,6 +583,14 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       // The global command is contextual; the count covers the whole trash,
       // while the two-step confirmation must never purge without the final tap.
       await page.getByLabel('Очистить всю корзину', { exact: true }).waitFor();
+      if (width < 560) {
+        const counterBox = await page.getByTestId('trash-total-counter').boundingBox();
+        const buttonBox = await page.getByLabel('Очистить всю корзину', { exact: true }).boundingBox();
+        assert(counterBox && buttonBox && buttonBox.y >= counterBox.y + counterBox.height - 1,
+          'The full-trash button is below the readable count on a narrow screen');
+        assert(buttonBox.x >= 0 && buttonBox.x + buttonBox.width <= width,
+          'The full-trash action stays inside the viewport');
+      }
       await page.getByLabel('Очистить всю корзину', { exact: true }).click();
       await page.getByLabel('Проверить последствия очистки корзины', { exact: true }).waitFor();
       assert.equal(await page.getByLabel('Подтвердить очистку всей корзины', { exact: true }).count(), 0,
