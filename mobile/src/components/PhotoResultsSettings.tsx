@@ -6,7 +6,7 @@ import { Collapsible } from "./Collapsible";
 import { NumericStepper } from "./NumericStepper";
 import { DEFAULT_PHOTO_RESULT_COUNT, MAX_PHOTO_RESULT_COUNT, loadPhotoResultCount, savePhotoResultCount } from "../media/photo-result-preferences";
 
-export function PhotoResultsSettings() {
+export function PhotoResultsSettings({ defaultOpen = false }: { defaultOpen?: boolean } = {}) {
   const profile = useProfile();
   const t = useTheme();
   const [draft, setDraft] = useState(String(DEFAULT_PHOTO_RESULT_COUNT));
@@ -46,7 +46,7 @@ export function PhotoResultsSettings() {
       if (mounted.current) setSaving(false);
     }
   }
-  return <Collapsible id="settings.photo-results" icon="image" title="Выдача найденных фото"
+  return <Collapsible id="settings.photo-results" defaultOpen={defaultOpen} forceOpen={defaultOpen} icon="image" title="Выдача найденных фото"
     summary={loaded ? `Показывать до ${saved} фото` : "Загружаю настройку…"}>
     <Text style={{color:t.text,fontWeight:"600"}}>Максимум найденных фотографий</Text>
     <Text style={{color:t.muted,fontSize:12,lineHeight:18}}>
