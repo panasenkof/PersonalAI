@@ -112,7 +112,7 @@ test("explicit short Russian photo requests use one local route across browser a
   expect(localPhotoIntent83("Найди фото в интернете")).toBeNull();
   expect(localPhotoSuggestion83("фото в интернете")).toBeNull();
   expect(localPhotoSuggestion83("фото красного велосипеда?")).toBeNull();
-  expect(localPhotoIntent83("Найди фото красного велосипеда",[attachment])).toBeNull();
+  expect(localPhotoIntent83("Найди похожие фотографии",[attachment])?.mode).toBe("image");
   expect(textSearch).not.toHaveBeenCalled();
 });
 test("attachment action owns photo suggestions and typing does not search",()=>{
