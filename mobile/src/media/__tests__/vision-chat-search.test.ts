@@ -96,6 +96,25 @@ test.each(["Фото коробки с инструментами", "Снимо�
 test.each(["Красный велосипед", "Как найти фото в интернете?", "Сделай фото для объявления", "Что написано на этикетке?", "", "У меня есть фото велосипеда?"])("ordinary or already explicit prompt has no extra suggestion: %s", prompt=>{
   expect(localPhotoSuggestion83(prompt)).toBeNull();
 });
+test("explicit short Russian photo requests use one local route across browser and native",()=>{
+  expect(localPhotoIntent83("Найди фото красного велосипеда")).toEqual({
+    mode:"text",description:"красного велосипеда",
+  });
+  expect(localPhotoIntent83("Покажи мне снимок коробки")).toEqual({
+    mode:"text",description:"коробки",
+  });
+  expect(localPhotoSuggestion83("фото красного велосипеда")).toEqual({
+    mode:"text",description:"красного велосипеда",
+  });
+  expect(localPhotoSuggestion83("изображение красного велосипеда")).toEqual({
+    mode:"text",description:"красного велосипеда",
+  });
+  expect(localPhotoIntent83("Найди фото в интернете")).toBeNull();
+  expect(localPhotoSuggestion83("фото в интернете")).toBeNull();
+  expect(localPhotoSuggestion83("фото красного велосипеда?")).toBeNull();
+  expect(localPhotoIntent83("Найди похожие фотографии",[attachment])?.mode).toBe("image");
+  expect(textSearch).not.toHaveBeenCalled();
+});
 test("attachment action owns photo suggestions and typing does not search",()=>{
   expect(localPhotoSuggestion83("Фото коробки",[attachment])).toBeNull();
   localPhotoSuggestion83("Фото коробки");
