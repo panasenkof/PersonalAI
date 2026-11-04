@@ -116,7 +116,7 @@ test("memory tiles reserve the same preview footprint with or without an encrypt
  expect(textTile.getByTestId("memory-grid-media-slot").props.style.height)
    .toBe(imageSlot.props.style.height);
  expect(textTile.getByText("Мой длинный текст заметки").props.numberOfLines).toBe(2);
- expect(textTile.getByText(note().title).props.numberOfLines).toBe(2);
+ expect(textTile.getByText(note().title || "Без названия").props.numberOfLines).toBe(2);
 });
 
 test("tapping an unselected note in selection mode checks it without opening it", () => {
