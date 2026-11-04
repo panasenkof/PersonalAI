@@ -5,6 +5,7 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import * as Crypto from "expo-crypto";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, BackHandler, FlatList, Pressable, ScrollView, Text, TextInput, View, useWindowDimensions } from "react-native";
+import { memoryScrollReloadCount, memoryScrollRowIndex, memoryScrollScope, type MemoryScrollAnchor } from "../design/nebula/memoryScrollAnchor";
 import { useProfile } from "../profile/ProfileContext";
 import { BottomSheet } from "../components/BottomSheet";
 import { localMemoryRepository } from "../local-memory/repository";
@@ -44,8 +45,14 @@ export function LocalMemoryScreen() {
   const [collectionMenu, setCollectionMenu] = useState(false);
   const [collectionCards, setCollectionCards] = useState<CollectionRecord[]>([]);
   const [visibleIds, setVisibleIds] = useState<Set<string>>(new Set());
-  const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: { item: EntityRecord }[] }) => setVisibleIds(new Set(viewableItems.map(x => x.item.id)))).current;
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 10 }).current;
+  const listRef = useRef<FlatList<EntityRecord>>(null);
+  // Only transient navigation state, keyed by profile/collection/status/search.
+  const listAnchors = useRef(new Map<string, MemoryScrollAnchor>());
+  const pendingAnchor = useRef<(MemoryScrollAnchor & { attempts: number }) | null>(null);
+  const restoreTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const loadedCount = useRef(0);
+  const scrollY = useRef(0);
   const [collections, setCollections] = useState<CollectionRecord[]>([]);
   const [collectionId, setCollectionId] = useState<string | undefined>();
   const [status, setStatus] = useState<"active" | "archived" | "trashed">("active");
@@ -73,8 +80,55 @@ export function LocalMemoryScreen() {
   const [error, setError] = useState(""); const [retry, setRetry] = useState(0);
   const [sectionOpen, setSectionOpen] = useState(false); const [sectionName, setSectionName] = useState("");
   const repository = useRef<SqliteMemoryRepository | null>(null); const generation = useRef(0);
+  const scope = memoryScrollScope(profile, collectionId, status, term);
+  const scopeRef = useRef(scope);
+  scopeRef.current = scope;
+  loadedCount.current = notes.length;
+  const onViewableItemsChanged = useRef(({ viewableItems }: {
+    viewableItems: { item: EntityRecord; index: number | null }[];
+  }) => {
+    setVisibleIds(new Set(viewableItems.map(x => x.item.id)));
+    if (!localMemorySessionUnlocked()) return;
+    const currentScope = scopeRef.current;
+    const pending = pendingAnchor.current;
+    if (pending?.scope === currentScope) {
+      if (viewableItems.some(x => x.item.id === pending.id)) pendingAnchor.current = null;
+      return;
+    }
+    if (scrollY.current < 20) {
+      listAnchors.current.delete(currentScope);
+      return;
+    }
+    const first = viewableItems.find(x => x.index !== null);
+    if (first?.index != null) {
+      listAnchors.current.set(currentScope, {
+        scope: currentScope, id: first.item.id, index: first.index, loaded: loadedCount.current,
+      });
+    }
+  }).current;
+  function restoreListAnchor() {
+    const pending = pendingAnchor.current;
+    if (!pending || pending.scope !== scope || loading || !notes.length || pending.attempts >= 4) return;
+    // A multi-column FlatList scrolls by ROW, while viewability indexes individual notes.
+    const index = memoryScrollRowIndex(notes, pending, scope, columns);
+    if (index === null) { pendingAnchor.current = null; return; }
+    pending.attempts += 1;
+    listRef.current?.scrollToIndex({ index, viewPosition: 0, animated: false });
+  }
+  useEffect(() => {
+    const anchor = listAnchors.current.get(scope);
+    pendingAnchor.current = anchor ? { ...anchor, attempts: 0 } : null;
+    scrollY.current = 0;
+    return () => { if (restoreTimer.current) clearTimeout(restoreTimer.current); restoreTimer.current = null; };
+  }, [scope]);
+  useEffect(() => {
+    if (pendingAnchor.current && !loading && notes.length) {
+      const timer = setTimeout(restoreListAnchor, 0);
+      return () => clearTimeout(timer);
+    }
+  }, [scope, columns, loading, notes]);
   useEffect(() => { const timer = setTimeout(() => setTerm(search.trim()), 250); return () => clearTimeout(timer); }, [search]);
-  useEffect(() => { setCollectionId(undefined); setSearch(""); setStatus("active"); setCollections([]); setNotes([]); setCollectionCards([]); setSelectedIds([]); setSelecting(false); setCounts({}); setVisibleIds(new Set()); }, [profile]);
+  useEffect(() => { listAnchors.current.clear(); pendingAnchor.current = null; setCollectionId(undefined); setSearch(""); setStatus("active"); setCollections([]); setNotes([]); setCollectionCards([]); setSelectedIds([]); setSelecting(false); setCounts({}); setVisibleIds(new Set()); }, [profile]);
   useEffect(() => {
     // A first visit still defaults to a two-column library where space permits.
     // An asynchronous preference read may not override an immediate user tap.
@@ -88,6 +142,8 @@ export function LocalMemoryScreen() {
   }, [profile]);
   function switchMemoryView() {
     const next = !grid;
+    const anchor = listAnchors.current.get(scope);
+    pendingAnchor.current = anchor ? { ...anchor, attempts: 0 } : null;
     viewChanged.current = true;
     setGrid(next);
     if (!profile) return;
@@ -101,13 +157,23 @@ export function LocalMemoryScreen() {
   }
   useFocusEffect(useCallback(() => {
     const request = ++generation.current; setLoading(true); setError("");
+    const anchor = listAnchors.current.get(scope);
+    pendingAnchor.current = anchor ? { ...anchor, attempts: 0 } : null;
     if (profile) void localMemoryRepository(profile).then(async db => {
-      const [sections, page, totals] = await Promise.all([
-        ensureSections(db), db.searchNotes(term, 50, 0, { collectionId, status }),
-        db.collectionNoteCounts(),
-      ]);
+      const [sections, totals] = await Promise.all([ensureSections(db), db.collectionNoteCounts()]);
+      // searchNotes caps requests at 100; restore previously loaded pages, not
+      // a stale pixel offset that points to a different item after an edit.
+      const target = memoryScrollReloadCount(anchor, scope);
+      const page: EntityRecord[] = [];
+      while (page.length < target) {
+        if (request !== generation.current) return;
+        const size = Math.min(100, target - page.length);
+        const batch = await db.searchNotes(term, size, page.length, { collectionId, status });
+        page.push(...batch);
+        if (batch.length < size) break;
+      }
       if (request !== generation.current) return;
-      setCounts(totals); repository.current = db; void db.lastNoteOperation().then(value => { if (request === generation.current) setUndo(value); }).catch(() => {}); setCollections(sections); setNotes(page); setMore(page.length === 50);
+      setCounts(totals); repository.current = db; void db.lastNoteOperation().then(value => { if (request === generation.current) setUndo(value); }).catch(() => {}); setCollections(sections); setNotes(page); setMore(page.length === target);
       const recentIds = [...new Set(page.map(n => n.collection_id))];
       const shownSections = [...sections].sort((a, b) => {
         const rank = (id: string) => recentIds.includes(id) ? recentIds.indexOf(id) : recentIds.length;
@@ -355,8 +421,23 @@ export function LocalMemoryScreen() {
           {status === "active" ? <Pressable accessibilityRole="button" accessibilityLabel="Меню памяти" disabled={busy} onPress={() => setMenuOpen(true)} style={{ ...button, paddingHorizontal: 12 }}><Feather name="more-vertical" size={24} color={t.text} /></Pressable> : null}
         </View>}
     <FlatList
-      testID="memory-note-list" key={columns} numColumns={columns}
+      testID="memory-note-list" ref={listRef} key={columns} numColumns={columns}
       onViewableItemsChanged={onViewableItemsChanged} viewabilityConfig={viewabilityConfig}
+      onScroll={event => {
+        scrollY.current = event.nativeEvent.contentOffset.y;
+        if (scrollY.current < 20 && !pendingAnchor.current) listAnchors.current.delete(scope);
+      }}
+      scrollEventThrottle={100}
+      onScrollBeginDrag={() => { pendingAnchor.current = null; }}
+      onContentSizeChange={() => restoreListAnchor()}
+      onScrollToIndexFailed={({ index, averageItemLength }) => {
+        const pending = pendingAnchor.current;
+        if (!pending || pending.scope !== scope) return;
+        if (pending.attempts >= 4) { pendingAnchor.current = null; return; }
+        listRef.current?.scrollToOffset({ offset: Math.max(0, averageItemLength * index), animated: false });
+        if (restoreTimer.current) clearTimeout(restoreTimer.current);
+        restoreTimer.current = setTimeout(restoreListAnchor, 90);
+      }
       initialNumToRender={8} windowSize={5} columnWrapperStyle={columns > 1 ? { gap: nebulaSpacing.sm, alignItems: "flex-start" } : undefined}
       ListHeaderComponent={<View style={{ paddingTop: nebulaSpacing.sm, paddingBottom: nebulaSpacing.sm, gap: nebulaSpacing.sm }}>
         <View style={{ flexDirection: "row", alignItems: "center", borderWidth: 1, borderColor: t.line, borderRadius: nebulaRadii.field, backgroundColor: t.panel }}>
