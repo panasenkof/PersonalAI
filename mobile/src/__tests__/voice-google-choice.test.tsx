@@ -12,6 +12,8 @@ jest.mock("../media/voice-engine", () => ({
   grantOnlineSpeechConsent: jest.fn(async () => { mockConsent.allowed = true; }),
   setVoiceEngine: jest.fn(async () => {}),
 }));
+// React Native Modal is native-owned; render the app sheet inline for button assertions.
+jest.mock("../components/BottomSheet", () => ({ BottomSheet: ({ visible, children }: any) => visible ? children : null }));
 jest.mock("../media/whisper", () => ({
   useWhisperStatus: () => ({ state: "ready", id: "base" }),
   downloadWhisper: jest.fn(), deleteWhisper: jest.fn(), cancelWhisperDownload: jest.fn(),
