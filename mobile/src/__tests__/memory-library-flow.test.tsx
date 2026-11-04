@@ -30,6 +30,12 @@ const mockDb = {
  searchNotes: jest.fn(async (term, _limit, _offset, filter) => notes.filter(n => n.record_status === filter.status && (!filter.collectionId || n.collection_id === filter.collectionId) && n.title.includes(term))),
 };
 jest.mock("../local-memory/repository", () => ({ localMemoryRepository: async () => mockDb }));
+// Only the signed-in and unlocked screen is exercised here; batch stop on lock
+// is separately verified in trash-clear runner tests.
+jest.mock("../local-memory/storage", () => ({
+  localMemorySessionUnlocked: () => true,
+  onLocalMemorySessionChange: () => () => {},
+}));
 jest.mock("../local-memory/sections", () => ({ ensureSections: async () => sections, orderCollections: (v: any) => v }));
 jest.mock("../profile/ProfileContext", () => ({ useProfile: () => "p" }));
 jest.mock("../media/vector-runner", () => ({ scheduleVectors: jest.fn() }));
@@ -51,7 +57,7 @@ jest.mock("../theme", () => ({
 jest.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ top: 24, bottom: 24 }) }));
 jest.mock("../components/BottomSheet", () => ({ BottomSheet: ({ visible, children, title, onClose }: any) => { const { Pressable, Text } = require("react-native"); return visible ? <><Pressable accessibilityLabel={"Закрыть панель " + title} onPress={onClose}><Text>Закрыть</Text></Pressable>{children}</> : null; } }));
 jest.mock("@react-navigation/native", () => ({ useNavigation: () => ({ navigate: mockNavigate }), useFocusEffect: (fn: any) => require("react").useEffect(fn, [fn]) }));
-beforeEach(() => { jest.clearAllMocks(); mockLastNoteOperation.mockResolvedValue(""); mockDb.changeNotes.mockResolvedValue("notes:archive:test"); mockHygienePreference.mockResolvedValue({entityId:"one",guard:"normal",skipUntil:null,preferenceVersion:2}); });
+beforeEach(() => { jest.clearAllMocks(); mockLastNoteOperation.mockResolvedValue(""); mockDb.changeNotes.mockResolvedValue("notes:archive:test"); mockDb.trashNoteCount.mockResolvedValue(1); mockDb.trashPurgeSnapshot.mockResolvedValue({items:[{id:"deleted",record_version:7}],originalCount:0,affectedRelationCount:0}); mockDb.purgeNotes.mockResolvedValue(undefined); mockHygienePreference.mockResolvedValue({entityId:"one",guard:"normal",skipUntil:null,preferenceVersion:2}); });
 test("all-records clears collection, archive and search from either entry", async () => {
  const v = render(<LocalMemoryScreen />); await waitFor(() => v.getByLabelText("Открыть заметку Первая"));
  fireEvent.press(v.getByLabelText("Раздел Заметки")); await waitFor(() => expect(v.queryByLabelText("Открыть заметку Вторая")).toBeNull());
@@ -331,4 +337,45 @@ test("C3: returning from a note card exposes the canonical archive undo", async 
   await waitFor(() => view.getByText("Отменить архивирование"));
   await act(async () => { fireEvent.press(view.getByText("Отменить архивирование")); });
   expect(mockDb.undoNotes).toHaveBeenCalledWith("notes:archive:card-click");
+});
+
+test("03.4: clear-trash is contextual, previews ALL 205 rows, cancel never calls writer", async () => {
+  const items = Array.from({length:205}, (_,i)=>({ id:"trash-"+i,record_version:i+1 }));
+  mockDb.trashNoteCount.mockResolvedValue(205);
+  mockDb.trashPurgeSnapshot.mockResolvedValue({items,originalCount:14,affectedRelationCount:3});
+  const ui=render(<LocalMemoryScreen />);
+  await waitFor(()=>ui.getByLabelText("Открыть корзину"));
+  expect(ui.queryByLabelText("Очистить всю корзину")).toBeNull();
+  fireEvent.press(ui.getByLabelText("Открыть корзину"));
+  await waitFor(()=>ui.getByLabelText("Очистить всю корзину"));
+  expect(ui.getByText("Корзина · 205 записей")).toBeTruthy();
+  await act(async()=>fireEvent.press(ui.getByLabelText("Очистить всю корзину")));
+  expect(mockDb.trashPurgeSnapshot).toHaveBeenCalledTimes(1);
+  expect(ui.getByText(/весь список, а не только видимые 50/)).toBeTruthy();
+  expect(ui.queryByLabelText("Подтвердить очистку всей корзины")).toBeNull();
+  fireEvent.press(ui.getByLabelText("Проверить последствия очистки корзины"));
+  expect(ui.getByLabelText("Подтвердить очистку всей корзины")).toBeTruthy();
+  expect(ui.getByText(/Оригиналов: 14/)).toBeTruthy();
+  fireEvent.press(ui.getByLabelText("Отменить очистку корзины"));
+  expect(mockDb.purgeNotes).not.toHaveBeenCalled();
+  await waitFor(()=>ui.getByLabelText("Восстановить заметку Удалённая"));
+  fireEvent.changeText(ui.getByLabelText("Поиск по заметкам"),"нет");
+  await waitFor(()=>expect(ui.queryByLabelText("Очистить всю корзину")).toBeNull());
+});
+
+test("03.4: confirmed 101 note snapshot calls existing purge writer only in batches 100+1", async () => {
+  const items = Array.from({length:101},(_,i)=>({ id:"trash-"+i,record_version:7 }));
+  mockDb.trashNoteCount.mockResolvedValueOnce(101).mockResolvedValue(0);
+  mockDb.trashPurgeSnapshot.mockResolvedValue({items,originalCount:0,affectedRelationCount:0});
+  const ui=render(<LocalMemoryScreen />);
+  await waitFor(()=>ui.getByLabelText("Открыть корзину"));
+  fireEvent.press(ui.getByLabelText("Открыть корзину"));
+  await waitFor(()=>ui.getByLabelText("Очистить всю корзину"));
+  await act(async()=>fireEvent.press(ui.getByLabelText("Очистить всю корзину")));
+  fireEvent.press(ui.getByLabelText("Проверить последствия очистки корзины"));
+  await act(async()=>fireEvent.press(ui.getByLabelText("Подтвердить очистку всей корзины")));
+  await waitFor(()=>expect(mockDb.purgeNotes).toHaveBeenCalledTimes(2));
+  expect(mockDb.purgeNotes.mock.calls[0][0]).toEqual(items.slice(0,100));
+  expect(mockDb.purgeNotes.mock.calls[1][0]).toEqual(items.slice(100));
+  expect(ui.queryByLabelText("Подтвердить очистку всей корзины")).toBeNull();
 });
