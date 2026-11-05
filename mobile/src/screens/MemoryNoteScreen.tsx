@@ -76,7 +76,7 @@ export function MemoryNoteScreen() {
   useEffect(() => { const off = onLocalMemorySessionChange(unlocked => { if (!unlocked) { extraction.current?.abort(); repeatRequest.current++; repeatApproval.current = null; setRepeatMessage(null); setCandidate(null); setRepeatFiles([]); setConfirmKind(null); } }); return () => { off(); extraction.current?.abort(); }; }, []);
   const repository = useRef<SqliteMemoryRepository | null>(null); const alive = useRef(true); const pending = useRef(false);
   const loadSequence = useRef(0);
-  const [editing, setEditing] = useState(!route.params?.entityId);
+  const [editing, setEditing] = useState(!route.params?.entityId || route.params?.edit === true);
   const [aiField, setAiField] = useState<"body" | "extracted" | null>(null);
   const aiOpen = aiField !== null;
   const [noteMenu, setNoteMenu] = useState(false);
@@ -343,10 +343,14 @@ export function MemoryNoteScreen() {
   const readingTitle = selected ? memoryDisplayTitle({ ...selected, title, payload: { ...selected.payload, body } }) : title;
   const button = { minHeight: nebulaTouch.minimum, borderRadius: nebulaRadii.field, justifyContent: "center" as const, padding: nebulaSpacing.md };
   return <KeyboardAvoidingView style={{ flex: 1, backgroundColor: t.bg }} behavior={Platform.OS === "ios" ? "padding" : "height"} keyboardVerticalOffset={Platform.OS === "ios" ? headerHeight : 0}>
-    <ScrollView testID="note-editor-scroll" keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentContainerStyle={{ padding: nebulaSpacing.md, paddingBottom: nebulaSpacing.xl, gap: nebulaSpacing.sm }}>
+    <ScrollView testID="note-editor-scroll" keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentContainerStyle={{ padding: nebulaSpacing.md, paddingBottom: Math.max(insets.bottom, 24) + nebulaSpacing.xl, gap: nebulaSpacing.sm }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: nebulaSpacing.sm }}>
         <Text accessibilityRole="header" style={{ flex: 1, color: t.text, ...(editing ? nebulaTypography.heading : nebulaTypography.label), fontWeight: "600" }}>{editing ? selected ? "Редактирование" : "Новая запись" : collections.find(c => c.id === collectionId)?.name || "Заметка"}</Text>
-        {selected && !editing ? <Pressable accessibilityRole="button" accessibilityLabel="Меню записи" style={button} onPress={() => setNoteMenu(true)}><Feather name="more-vertical" size={22} color={t.text} /></Pressable> : null}
+        {selected && !editing && selected.record_status !== "trashed" ? <Pressable testID="note-edit-action" accessibilityRole="button" accessibilityLabel="Редактировать запись" disabled={busy} onPress={() => setEditing(true)}
+          style={{ minHeight: nebulaTouch.minimum, minWidth: nebulaTouch.minimum, alignItems: "center", justifyContent: "center", borderRadius: nebulaRadii.field, backgroundColor: t.soft }}>
+          <Feather name="edit-3" size={21} color={t.secondary} />
+        </Pressable> : null}
+        {selected && !editing ? <Pressable accessibilityRole="button" accessibilityLabel="Меню записи" style={{ ...button, minWidth: nebulaTouch.minimum, alignItems: "center" }} onPress={() => setNoteMenu(true)}><Feather name="more-vertical" size={22} color={t.text} /></Pressable> : null}
         {!loading && dirty ? <Text accessibilityLabel="Несохранённые изменения" style={{ color: t.muted, ...nebulaTypography.label }}>Не сохранено</Text> : null}
       </View>
       {!loading && repository.current && selected && !editing ? <View testID="note-quick-actions"
@@ -358,11 +362,7 @@ export function MemoryNoteScreen() {
             await db.changeNotes("restore", [selected], undefined);
             if (profile) scheduleVectors(profile);
             if (alive.current) setLeaving(true);
-          })} /> : <>
-          <NebulaAction icon="edit-3" label="Редактировать" accessibilityLabel="Редактировать запись"
-            onPress={() => setEditing(true)} disabled={busy} variant="primary" />
-
-        </>}
+          })} /> : null}
       </View> : null}
       {loading ? <ActivityIndicator accessibilityLabel="Загрузка записи" /> : null}
       {!loading && route.params?.chatReply && !selected ? <Text style={{color:t.muted,...nebulaTypography.label}}>
@@ -380,7 +380,7 @@ export function MemoryNoteScreen() {
         {!editing ? <>
           {selected && profile && route.params?.photoAttachmentId ? <AttachmentView key={selected.record_version + ":" + (route.params?.verifiedOriginal?.attachmentId || route.params?.photoAttachmentId || "")} profile={profile} entityId={selected.id} verifiedOriginal={route.params?.verifiedOriginal} photoAttachmentId={route.params?.photoAttachmentId} onRecognize={!editing && !busy && selected.record_status === "active" ? rerunAttachment : undefined} /> : null}
           {profile && selected && !route.params?.verifiedOriginal && !route.params?.photoAttachmentId && memoryNoteHasPhoto(selected) ? <View style={{ borderRadius: nebulaRadii.card, overflow: "hidden" }}><MemoryCover profile={profile} entityId={selected.id} height={210} label={title} /></View> : null}
-          <Text accessibilityRole="header" selectable style={{ color: t.text, fontSize: 28, lineHeight: 36, fontWeight: "800" }}>{readingTitle || "Без названия"}</Text>
+          <Text accessibilityRole="header" selectable style={{ color: t.text, fontSize: 23, lineHeight: 31, fontWeight: "700" }}>{readingTitle || "Без названия"}</Text>
           {body && body.trim() !== readingTitle ? <NoteReadPreview
             testID="note-read-body" text={body} fullTitle="Полный текст заметки"
             actionLabel="Читать полностью" maxLines={6} /> : null}
@@ -392,7 +392,11 @@ export function MemoryNoteScreen() {
             collections.some(c=>c.id===selected.collection_id&&c.sensitivity==="standard") ?
             <MemoryTemporalTimeline key={profile + ":" + selected.id + ":" + selected.record_version}
               profile={profile} subjectId={selected.id} collectionId={selected.collection_id}/> : null}
-          {selected && profile && !route.params?.photoAttachmentId ? <AttachmentView key={selected.record_version + ":" + (route.params?.verifiedOriginal?.attachmentId || route.params?.photoAttachmentId || "")} profile={profile} entityId={selected.id} verifiedOriginal={route.params?.verifiedOriginal} photoAttachmentId={route.params?.photoAttachmentId} onRecognize={!editing && !busy && selected.record_status === "active" ? rerunAttachment : undefined} /> : null}
+          {selected && profile && !route.params?.photoAttachmentId ? <AttachmentView key={selected.record_version + ":" + (route.params?.verifiedOriginal?.attachmentId || route.params?.photoAttachmentId || "")} profile={profile} entityId={selected.id} verifiedOriginal={route.params?.verifiedOriginal} photoAttachmentId={route.params?.photoAttachmentId} collapsedByDefault={!route.params?.verifiedOriginal && memoryNoteHasPhoto(selected)} onRecognize={!editing && !busy && selected.record_status === "active" ? rerunAttachment : undefined} /> : null}
+          {selected && profile && ["active", "archived"].includes(selected.record_status) ? <AppendNoteAttachments
+            key={profile + selected.id} profile={profile} note={selected} disabled={working || dirty || voiceActive}
+            onBusyChange={setAttachmentBusy} onDraftChange={setAttachmentDraft}
+            onSaved={updated => { setSelected(updated); setBeforeAi(null); scheduleVectors(profile); }} /> : null}
           {extractedText && extractedText.trim() !== body.trim() ? <NoteReadPreview
             testID="note-extracted-summary" text={extractedText}
             heading="Текст из файла" fullTitle="Полный распознанный текст"
@@ -510,10 +514,7 @@ export function MemoryNoteScreen() {
             })} />
         </> : null}
         </>}
-        {selected && profile && ["active", "archived"].includes(selected.record_status) ? <AppendNoteAttachments
-          key={profile + selected.id} profile={profile} note={selected} disabled={working || dirty || voiceActive}
-          onBusyChange={setAttachmentBusy} onDraftChange={setAttachmentDraft}
-          onSaved={updated => { setSelected(updated); setBeforeAi(null); scheduleVectors(profile); }} /> : null}
+
       </> : null}
       {error ? <Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text> : null}
       {!loading && !repository.current ? <NebulaAction icon="refresh-cw"
