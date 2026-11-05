@@ -1,4 +1,4 @@
-import React from "react";
+﻿import React from "react";
 import { Image } from "react-native";
 import Feather from "@expo/vector-icons/Feather";
 import { useTheme } from "../../theme";
@@ -19,6 +19,7 @@ const ARTWORK = {
   file: require("../../../assets/memory-icons/file.png"),
   archive: require("../../../assets/memory-icons/archive.png"),
   trash: require("../../../assets/memory-icons/trash.png"),
+  folder: require("../../../assets/memory-icons/folder.png"),
 } as const;
 
 export type MemoryArtworkName = keyof typeof ARTWORK;
@@ -43,3 +44,4 @@ export function MemoryTypeIcon({ feather, name, size = 28, dimmed = false }: {
   }
   return <Feather name={(feather || "file-text") as never} size={size} color={t.muted} />;
 }
+

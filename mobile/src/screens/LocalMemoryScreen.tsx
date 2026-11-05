@@ -20,6 +20,7 @@ import { nebulaSpacing, nebulaRadii, nebulaTouch } from "../design/nebula/tokens
 import { MemoryCover } from "../media/MemoryCover";
 import { memoryDisplayTitle, memoryNoteHasPhoto, memoryNoteType } from "../design/nebula/memoryNotePresentation";
 import { MemoryNoteCard, MEMORY_GRID_MEDIA_HEIGHT } from "../design/nebula/MemoryNoteCard";
+import { MemoryTypeIcon } from "../design/nebula/MemoryTypeIcon";
 import { NebulaAction } from "../design/nebula/components";
 import { loadMemoryLibraryView, saveMemoryLibraryView } from "../design/nebula/memoryViewPreference";
 
@@ -583,8 +584,7 @@ export function LocalMemoryScreen() {
                 borderRadius: nebulaRadii.field, backgroundColor: t.panel, borderWidth: 1, borderColor: t.line }}>
               <View style={{ width: 40, height: 40, flexShrink: 0, borderRadius: nebulaRadii.chip,
                 backgroundColor: t.soft, justifyContent: "center", alignItems: "center" }}>
-                <Feather name={c.slug === "people" ? "users" : c.slug === "preferences" ? "heart" : c.slug === "events" ? "calendar" : "folder"}
-                  size={21} color={t.secondary} />
+                <MemoryTypeIcon size={28} name={c.slug === "people" ? "person" : c.slug === "preferences" ? "preference" : c.slug === "events" ? "event" : "folder"} />
               </View>
               <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
                 <Text numberOfLines={2} style={{ color: t.text, fontWeight: "700", fontSize: 15 }}>{c.name}</Text>
@@ -979,6 +979,7 @@ export function LocalMemoryScreen() {
     </BottomSheet>
   </View>;
 }
+
 
 
 
