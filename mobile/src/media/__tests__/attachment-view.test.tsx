@@ -369,3 +369,19 @@ test("verified original and photo search keep their exact source without disclos
   expect(ui.queryByLabelText(/Показать остальные/)).toBeNull();
   expect(ui.queryByText("голос.mp3")).toBeNull();
 });
+
+test("photo notes hide duplicate JPG metadata until requested, without decrypting the original", async () => {
+ const screen = render(<AttachmentView profile="guest" entityId="note" collapsedByDefault />);
+ await waitFor(() => screen.getByLabelText("Показать оригиналы и распознавание"));
+ expect(screen.getByText("Оригиналы · 3")).toBeTruthy();
+ expect(screen.queryByText("снимок.jpg")).toBeNull();
+ expect(materializeAttachment).not.toHaveBeenCalled();
+ fireEvent.press(screen.getByLabelText("Показать оригиналы и распознавание"));
+ expect(screen.getByText("снимок.jpg")).toBeTruthy();
+ expect(materializeAttachment).not.toHaveBeenCalled();
+ fireEvent.press(screen.getByLabelText("Открыть фото снимок.jpg"));
+ await waitFor(() => screen.getByLabelText("Просмотр изображения снимок.jpg"));
+ fireEvent.press(screen.getByLabelText("Скрыть сведения о вложениях"));
+ await waitFor(() => expect(mockDelete).toHaveBeenCalledWith("file:///preview/photo"));
+ expect(screen.queryByText("снимок.jpg")).toBeNull();
+});

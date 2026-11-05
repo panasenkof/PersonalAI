@@ -441,3 +441,21 @@ test("03.4: entering search while a batch is in flight stops every subsequent de
   expect(ui.queryByLabelText("Подтвердить очистку всей корзины")).toBeNull();
   ui.unmount();
 });
+
+test("editing an active note from its menu opens the editor in one navigation, not the viewer", async () => {
+ const v = render(<LocalMemoryScreen />);
+ await waitFor(() => v.getByLabelText("Действия с заметкой Первая"));
+ fireEvent.press(v.getByLabelText("Действия с заметкой Первая"));
+ fireEvent.press(v.getByText("Редактировать"));
+ expect(mockNavigate).toHaveBeenCalledWith("MemoryNote", { entityId: "one", edit: true });
+ expect(mockNavigate).toHaveBeenCalledTimes(1);
+});
+test("trash menu opens the read-only note and never bypasses restore", async () => {
+ const v = render(<LocalMemoryScreen />);
+ await waitFor(() => v.getByLabelText("Открыть корзину"));
+ fireEvent.press(v.getByLabelText("Открыть корзину"));
+ await waitFor(() => v.getByLabelText("Действия с заметкой Удалённая"));
+ fireEvent.press(v.getByLabelText("Действия с заметкой Удалённая"));
+ fireEvent.press(v.getByText("Открыть запись"));
+ expect(mockNavigate).toHaveBeenCalledWith("MemoryNote", { entityId: "deleted" });
+});

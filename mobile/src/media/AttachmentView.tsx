@@ -247,7 +247,7 @@ function AudioPreview({ uri, profile, attachment, onError }: {
     </View>
   </View>;
 }
-export function AttachmentView({ profile, entityId, verifiedOriginal, photoAttachmentId, onRecognize }: { onRecognize?: (attachment: Attachment) => void; profile: string; entityId: string; verifiedOriginal?: VerifiedOriginalLocator; photoAttachmentId?: string }) {
+export function AttachmentView({ profile, entityId, verifiedOriginal, photoAttachmentId, onRecognize, collapsedByDefault = false }: { onRecognize?: (attachment: Attachment) => void; profile: string; entityId: string; verifiedOriginal?: VerifiedOriginalLocator; photoAttachmentId?: string; collapsedByDefault?: boolean }) {
   const t = useTheme();
   const focused = useIsFocused();
   const appVisible = useApplicationVisible();
@@ -255,19 +255,20 @@ export function AttachmentView({ profile, entityId, verifiedOriginal, photoAttac
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [openId, setOpenId] = useState<string | null>(null);
   const [allShown, setAllShown] = useState(false);
+  const [rowsExpanded, setRowsExpanded] = useState(!collapsedByDefault);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [retry, setRetry] = useState(0);
 
   useEffect(() => {
     let alive = true;
-    setOpenId(null); setAllShown(false); setAttachments([]); setError(""); setLoading(true);
+    setOpenId(null); setAllShown(false); setRowsExpanded(!collapsedByDefault); setAttachments([]); setError(""); setLoading(true);
     void attachmentsForEntity(profile, entityId)
       .then(items => { if (alive) setAttachments(items); })
       .catch(e => { if (alive) setError(memoryErrorMessage(e)); })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
-  }, [profile, entityId, retry]);
+  }, [profile, entityId, retry, collapsedByDefault]);
 
   // A search-proven source may display ONLY the original that the proof returned.
   // Missing/stale metadata never silently falls back to other note attachments.
@@ -286,7 +287,14 @@ export function AttachmentView({ profile, entityId, verifiedOriginal, photoAttac
 
   if (!loading && !error && scoped.length === 0 && !verifiedOriginal && !photoAttachmentId) return null;
   return <View style={{ gap: nebulaSpacing.sm }}>
-    <Text accessibilityRole="header" style={{ color: t.text, fontSize: 18, fontWeight: "700" }}>Вложения{scoped.length ? " · " + scoped.length : ""}</Text>
+    {collapsedByDefault && !missingVerified ? <Pressable testID="note-attachment-details" accessibilityRole="button"
+      accessibilityLabel={rowsExpanded ? "Скрыть сведения о вложениях" : "Показать оригиналы и распознавание"}
+      accessibilityState={{ expanded: rowsExpanded }} onPress={() => { setRowsExpanded(v => !v); setOpenId(null); }}
+      style={{ flexDirection: "row", alignItems: "center", minHeight: nebulaTouch.minimum, gap: nebulaSpacing.sm, paddingHorizontal: nebulaSpacing.sm, borderRadius: nebulaRadii.field, backgroundColor: t.soft }}>
+      <Feather name="paperclip" size={19} color={t.secondary} />
+      <Text style={{ flex: 1, color: t.secondary, fontWeight: "600" }}>Оригиналы{scoped.length ? " · " + scoped.length : ""}</Text>
+      <Feather name={rowsExpanded ? "chevron-up" : "chevron-down"} size={21} color={t.secondary} />
+    </Pressable> : <Text accessibilityRole="header" style={{ color: t.text, fontSize: 18, fontWeight: "700" }}>Вложения{scoped.length ? " · " + scoped.length : ""}</Text>}
     {loading ? <Text style={{ color: t.muted }}>Загружаю список вложений…</Text> : null}
     {error ? <>
       <Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text>
@@ -294,10 +302,10 @@ export function AttachmentView({ profile, entityId, verifiedOriginal, photoAttac
         accessibilityLabel="Повторить загрузку вложений" onPress={() => setRetry(x => x + 1)} />
     </> : null}
     {missingVerified ? <Text accessibilityRole="alert" style={{ color: t.err }}>Источник изменён или недоступен. Повторите поиск.</Text> : null}
-    {listed.map(attachment => <OneAttachment key={attachment.id} onRecognize={onRecognize} profile={profile} attachment={attachment} verified={verifiedOriginal}
+    {rowsExpanded ? listed.map(attachment => <OneAttachment key={attachment.id} onRecognize={onRecognize} profile={profile} attachment={attachment} verified={verifiedOriginal}
       expanded={visible && (openId === attachment.id || (openId === null && attachment.id === photoAttachmentId))} visible={visible}
-      onToggle={() => setOpenId(id => id === attachment.id || (id === null && attachment.id === photoAttachmentId) ? "" : attachment.id)} />)}
-    {hasMore ? <NebulaAction testID="note-attachments-expand"
+      onToggle={() => setOpenId(id => id === attachment.id || (id === null && attachment.id === photoAttachmentId) ? "" : attachment.id)} />) : null}
+    {rowsExpanded && hasMore ? <NebulaAction testID="note-attachments-expand"
       icon={allShown ? "chevron-up" : "layers"}
       label={allShown ? "Свернуть вложения" : `Показать остальные · ${scoped.length - 2}`}
       onPress={() => {

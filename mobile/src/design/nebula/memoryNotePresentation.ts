@@ -37,8 +37,13 @@ export function memoryNoteType(note: Pick<EntityRecord, "payload" | "kind">): { 
 }
 
 export function memoryNoteHasPhoto(note: Pick<EntityRecord, "payload">): boolean {
+  // Historic imports and later appends do not always carry source_media_types.
+  // Use only stored metadata here: listing must never decrypt original files.
+  const files = [note.payload.source_file,
+    ...(Array.isArray(note.payload.source_files) ? note.payload.source_files : [])];
   return note.payload.source_media === "image" ||
-    (Array.isArray(note.payload.source_media_types) && note.payload.source_media_types.includes("image"));
+    (Array.isArray(note.payload.source_media_types) && note.payload.source_media_types.includes("image")) ||
+    files.some(file => typeof file === "string" && /\.(?:jpe?g|png|heic|webp|gif)$/i.test(file.trim()));
 }
 
 export function memoryPlainText(source: string): string {
@@ -46,14 +51,14 @@ export function memoryPlainText(source: string): string {
 }
 /** Presentation only; never replace the stored title or source filename. */
 export function memoryDisplayTitle(note: Pick<EntityRecord, "title" | "payload">): string {
-  const title = note.title?.trim() || "";
+  const title = note.title?.trim() === "Фото без подписи" && memoryNoteHasPhoto(note) ? "Фото" : note.title?.trim() || "";
   const file = typeof note.payload.source_file === "string" ? note.payload.source_file : "";
   if (!title || title === "Распознанный текст" || title === file || (!file && /\.(jpg|jpeg|png|heic|webp|m4a|mp3|pdf|txt|docx|mp4)$/i.test(title))) {
     const body = typeof note.payload.body === "string" && note.payload.body.trim() ? note.payload.body : typeof note.payload.extracted_text === "string" ? note.payload.extracted_text : "";
     const first = memoryPlainText(body.split("\n").find(line => line.trim() && !/^(распознанный текст|результат распознавания)[:：]?$/i.test(memoryPlainText(line))) || "");
     if (first) return first.slice(0, 160);
     const filename = title || file;
-    if (/^(?:(?:img|dsc|pxl|photo|image)[_ -]?)?\d[\d_ -]*\.(?:jpe?g|png|heic|webp)$/i.test(filename)) return "Фото без подписи";
+    if (/^(?:(?:img|dsc|pxl|photo|image)[_ -]?)?\d[\d_ -]*\.(?:jpe?g|png|heic|webp)$/i.test(filename)) return "Фото";
     if (title) return title.replace(/\.[^.]+$/, "").replace(/_+/g, " ");
   }
   return memoryPlainText(title) || "Без названия";
