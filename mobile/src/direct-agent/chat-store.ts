@@ -239,7 +239,7 @@ export class DirectChatStore {
 
   /** Explicit internet photo action reuses the existing model and web tools,
    * without consuming the user's unrelated composer draft. */
-  async send(settings: DirectAgentSettings, internetPhotoId?:string, documentApprovalKey?:string) {
+  async send(settings: DirectAgentSettings, internetPhotoId?:string, documentApprovalKey?:string, rerun = false) {
     const id = this.snapshot.activeId;
     const current = this.snapshot.conversations.find(c => c.id === id);
     if (!id || !current || current.busy || current.deleting || this.disposed ||
@@ -300,7 +300,8 @@ export class DirectChatStore {
         : [],
       busy: true, progress: "Сохраняю вопрос…", updatedAt: new Date().toISOString(),
       title: current.rows.length ? current.title : displayPrompt.slice(0, 60),
-      rows: [...current.rows, { id: Crypto.randomUUID(), role: "user", text: displayPrompt, ...(attachments.length ? {attachments} : {}) }],
+      // A retry re-runs the same question: the user bubble already exists.
+      rows: rerun ? current.rows : [...current.rows, { id: Crypto.randomUUID(), role: "user", text: displayPrompt, ...(attachments.length ? {attachments} : {}) }],
     })!;
     let modelStarted = false;
     let beforeModelError = "Запрос не отправлен: не удалось сохранить историю.";
@@ -402,7 +403,7 @@ export class DirectChatStore {
           ...(!internetPhotoId && !modelStarted && !aborted ? { question: c.question || prompt, attachments } : {}),
           rows: [...c.rows,
             ...(partial ? [{ id: Crypto.randomUUID(), role: "assistant" as const, text: partial }] : []),
-            { id: Crypto.randomUUID(), role: "info",
+            { id: Crypto.randomUUID(), role: "info", ...(aborted ? {} : { error: true as const }),
               text: aborted ? (partial ? "Ответ остановлен" : "Запрос остановлен") : !modelStarted ? beforeModelError : String((e as Error).message) }],
         });
       }
@@ -413,6 +414,18 @@ export class DirectChatStore {
       const final = this.update(id, { busy: false, progress: "", progressSince: undefined, streamText: undefined });
       if (final) await this.persist(final).catch(() => {});
     }
+  }
+  /** Re-runs the last submitted question after a failed answer.
+   * The user bubble stays single: the question is put back into the draft slot
+   * and send() runs its normal guarded path with `rerun` set. */
+  async retry(settings: DirectAgentSettings) {
+    const id = this.snapshot.activeId;
+    const current = this.snapshot.conversations.find(c => c.id === id);
+    if (!id || !current || current.busy || current.deleting || this.disposed) return;
+    const lastUser = [...current.rows].reverse().find(r => r.role === "user");
+    if (!lastUser || !lastUser.text.trim()) return;
+    this.update(id, { question: lastUser.text, attachments: lastUser.attachments || [] });
+    await this.send(settings, undefined, undefined, true);
   }
   /** H-SAVE1b: explicit, bounded summary of a chosen history range. Only the
    * existing SQLCipher conversation writer persists the generated preview.

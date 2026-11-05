@@ -1,4 +1,4 @@
-import Feather from "@expo/vector-icons/Feather";
+﻿import Feather from "@expo/vector-icons/Feather";
 import React, { useLayoutEffect, useRef } from "react";
 import { Pressable, TextInput, View } from "react-native";
 import { useTheme } from "../theme";
@@ -48,8 +48,9 @@ export function PromptInput({ value, onChange, onClear, editable, onFocusChange 
         // Focus is restored after React commits the empty draft and settles
         // the clear-button removal; see the layout effect above.
       }}
-      style={{ minHeight: 46, minWidth: 44, alignItems: "center", justifyContent: "center", opacity: editable ? 1 : 0.5 }}>
+      style={{ minHeight: 48, minWidth: 48, alignItems: "center", justifyContent: "center", opacity: editable ? 1 : 0.5 }}>
       <Feather name="x" size={20} color={t.muted} />
     </Pressable> : null}
   </View>;
 }
+

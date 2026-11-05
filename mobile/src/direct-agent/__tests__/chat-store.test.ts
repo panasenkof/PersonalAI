@@ -107,6 +107,27 @@ test("Stop keeps the answer fragment that already arrived", async () => {
   expect(current.rows[1].role).toBe("assistant");
   store.dispose();
 });
+test("a failed answer is marked so the chat can offer a retry", async () => {
+  const { repo } = repository();
+  const runner = jest.fn((_options: any) => Promise.reject(new Error("Нет связи с сервером")));
+  const store = new DirectChatStore("guest", repo, runner); await store.initialize();
+  store.setQuestion("Вопрос"); await store.send(settings);
+  const rows = store.getSnapshot().conversations[0].rows;
+  expect(rows.at(-1)).toMatchObject({ role: "info", error: true });
+  store.dispose();
+});
+test("retry re-runs the same question without duplicating the user bubble", async () => {
+  const { repo } = repository();
+  const runner: jest.Mock = jest.fn((_options: any) => Promise.reject(new Error("Нет связи с сервером")));
+  const store = new DirectChatStore("guest", repo, runner); await store.initialize();
+  store.setQuestion("Вопрос"); await store.send(settings);
+  runner.mockImplementationOnce(() => Promise.resolve({ text: "Ответ после повтора", sources: [], requests: 1 }));
+  await store.retry(settings);
+  const current = store.getSnapshot().conversations[0];
+  expect(current.rows.filter(r => r.role === "user")).toHaveLength(1);
+  expect(current.rows.at(-1)).toMatchObject({ role: "assistant", text: "Ответ после повтора" });
+  store.dispose();
+});
 test("a completed answer remains in memory through expired auth and is saved on unlock", async () => {
   const { repo, records } = repository(); const answer = turn(); const unlocked = deferred<void>();
   const runner = jest.fn((_options: any) => answer.promise); const store = new DirectChatStore("guest", repo, runner); await store.initialize();

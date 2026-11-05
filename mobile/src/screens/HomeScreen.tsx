@@ -52,6 +52,23 @@ export function HomeScreen() {
   return <NebulaHomeThemeProvider><NebulaHomeContent /></NebulaHomeThemeProvider>;
 }
 
+/** A failed turn carries a raw transport tail after "Системное сообщение:".
+ * The bubble shows only the human part; the full text stays in diagnostics. */
+function errorHeadline(text: string) {
+  return text.split(/Системное сообщение:/i)[0].trim();
+}
+
+/** One source line: domain first, path muted and truncated by numberOfLines. */
+function sourceParts(url: string) {
+  try {
+    const parsed = new URL(url);
+    const rest = (parsed.pathname === "/" ? "" : parsed.pathname) + (parsed.search ? "?" + parsed.search.slice(1, 40) : "");
+    return { domain: parsed.hostname.replace(/^www\./, ""), rest };
+  } catch {
+    return { domain: url, rest: "" };
+  }
+}
+
 function NebulaHomeContent() {
   const t = useTheme();
   const isFocused = useIsFocused();
@@ -393,7 +410,17 @@ function NebulaHomeContent() {
           onLongPress={() => {if(!item.streaming)saveReplyToNotes(item.id);}}>
           <MarkdownText text={item.text} style={{ color: t.text, lineHeight: 23 }} />
         </Pressable> :
-          <Text selectable style={{ color: item.role === "user" ? t.userText : item.role === "info" ? t.muted : t.text, lineHeight: 23 }}>{item.text}</Text>}
+        (item.role === "info" && item.error ? <View style={{ gap: 10 }}>
+          <View style={{ flexDirection: "row", gap: 8, alignItems: "flex-start" }}>
+            <Feather name="alert-triangle" size={16} color={t.err} style={{ marginTop: 2 }} />
+            <Text selectable accessibilityRole="alert" style={{ flex: 1, color: t.err, lineHeight: 21 }}>{errorHeadline(item.text)}</Text>
+          </View>
+          {ready && !busy && settings ? <View style={{ alignSelf: "flex-start" }}>
+            <NebulaAction icon="refresh-cw" label="Повторить" accessibilityLabel="Повторить последний запрос"
+              onPress={() => void store.retry(settings)} />
+          </View> : null}
+        </View> :
+          <Text selectable style={{ color: item.role === "user" ? t.userText : item.role === "info" ? t.muted : t.text, lineHeight: 23 }}>{item.text}</Text>)}
         {item.role === "assistant" && !item.streaming && item.text.trim() ? <View style={{ alignSelf: "flex-end", borderWidth: 1, borderColor: t.line, backgroundColor: t.soft, borderRadius: 15 }}>
           <IconAction compact explainOnTap={false} icon="bookmark" label="Сохранить ответ"
             accessibilityLabel="Сохранить ответ в заметки" hint="Открыть черновик заметки без нового запроса ИИ"
@@ -415,9 +442,14 @@ function NebulaHomeContent() {
               <Text style={{color:t.accent}}>{m.title}<Text style={{color:t.muted,fontSize:12}}>{(m.section ? " · " + m.section : "") + (m.via === "rewrite" ? " · найдено другими словами" : m.via === "assistant" ? " · нашёл помощник" : "")}</Text></Text>
             </Pressable>)}
         </View> : null}
-        {item.sources?.length ? <View style={{ gap: 4 }}><Text style={{ color: t.muted, fontSize: 12 }}>Источники</Text>{item.sources.map(url => <Pressable key={url} accessibilityRole="link" onPress={() => void Linking.openURL(url).catch(() => setNotice("Не удалось открыть ссылку."))} style={{ minHeight: 44, justifyContent: "center" }}>
-          <Text numberOfLines={2} style={{ color: t.accent, textDecorationLine: "underline" }}>{url}</Text>
-        </Pressable>)}</View> : null}
+        {item.sources?.length ? <View style={{ gap: 2 }}><Text style={{ color: t.muted, fontSize: 12 }}>Источники</Text>{item.sources.map(url => {
+          const part = sourceParts(url);
+          return <Pressable key={url} accessibilityRole="link" accessibilityLabel={"Открыть источник " + part.domain}
+            onPress={() => void Linking.openURL(url).catch(() => setNotice("Не удалось открыть ссылку."))}
+            style={{ minHeight: 48, justifyContent: "center" }}>
+            <Text numberOfLines={1} style={{ color: t.accent }}>{part.domain}<Text style={{ color: t.muted }}>{part.rest}</Text></Text>
+          </Pressable>;
+        })}</View> : null}
       </View>}
       ListFooterComponent={<View style={{ gap: 10 }}>
         {active?.drafts.map(d => <View key={d.id} style={{ backgroundColor: t.panel, borderWidth: 1, borderColor: t.accent, borderRadius: 20, padding: 16, gap: 8 }}>

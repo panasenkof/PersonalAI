@@ -1,4 +1,4 @@
-import React from "react";
+﻿import React from "react";
 import { BackHandler } from "react-native";
 import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 import { LocalMemoryScreen } from "../screens/LocalMemoryScreen";
@@ -69,7 +69,7 @@ test("all-records clears collection, archive and search from either entry", asyn
  expect(v.queryByLabelText("Добавить в память")).toBeNull();
  expect(v.queryByLabelText("Меню памяти")).toBeNull();
  fireEvent.press(v.getByLabelText("Ко всем записям"));
- await waitFor(() => v.getByLabelText("Все коллекции")); fireEvent.press(v.getByLabelText("Все коллекции")); fireEvent.press(v.getByLabelText("Раздел Все записи"));
+ await waitFor(() => v.getByLabelText("Все разделы")); fireEvent.press(v.getByLabelText("Все разделы")); fireEvent.press(v.getByLabelText("Раздел Все записи"));
  await waitFor(() => v.getByLabelText("Открыть заметку Вторая")); expect(v.getByLabelText("Открыть заметку Первая")).toBeTruthy(); expect(v.queryByLabelText("Открыть заметку Архивная")).toBeNull();
 });
 test("compact collection rows are labelled, touchable and keep the canonical destination", async () => {
@@ -459,3 +459,4 @@ test("trash menu opens the read-only note and never bypasses restore", async () 
  fireEvent.press(v.getByText("Открыть запись"));
  expect(mockNavigate).toHaveBeenCalledWith("MemoryNote", { entityId: "deleted" });
 });
+
