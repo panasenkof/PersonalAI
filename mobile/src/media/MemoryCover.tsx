@@ -10,6 +10,7 @@ import { onLocalMemorySessionChange } from "../local-memory/storage";
 import { attachmentsForEntity, materializeAttachment } from "./attachments";
 import { attachmentPreviewKind } from "./attachmentPresentation";
 import { useTheme } from "../theme";
+import { MemoryTypeIcon } from "../design/nebula/MemoryTypeIcon";
 
 // Bound decryption/decoding across the visible grid and collection covers.
 let running = 0;
@@ -28,7 +29,7 @@ export function removeCoverFile(uri: string) {
 /** Local-only disposable thumbnail. No remote URL, no persistent plaintext cache.
  * Large/unsupported files remain readable through the explicit attachment viewer. */
 export function MemoryCover({ profile, entityId, photoAttachmentId, active = true, height = 132, label = "Обложка записи", compact = false, fit = "cover", icon = "image", expectPhoto = true }: {
-  profile: string; entityId: string; photoAttachmentId?: string; active?: boolean; height?: number; label?: string; compact?: boolean; fit?: "cover" | "contain"; icon?: keyof typeof Feather.glyphMap; expectPhoto?: boolean;
+  profile: string; entityId: string; photoAttachmentId?: string; active?: boolean; height?: number; label?: string; compact?: boolean; fit?: "cover" | "contain"; icon?: string; expectPhoto?: boolean;
 }) {
   const t = useTheme(); const focused = useIsFocused(); const visible = useApplicationVisible();
   const [unlocked, setUnlocked] = useState(true);
@@ -78,7 +79,7 @@ export function MemoryCover({ profile, entityId, photoAttachmentId, active = tru
   return <View testID={"memory-cover-" + entityId} style={{ height, minHeight: compact ? height : 64, paddingVertical: uri ? 0 : 8, backgroundColor: t.soft, justifyContent: "center", alignItems: "center", overflow: "hidden" }}>
     {enabled && uri && !failed ? <Image source={{ uri }} accessibilityLabel={label} resizeMode={fit}
       onError={() => { removeCoverFile(uri); setUri(""); setFailed(true); setMessage("Не удалось показать превью"); }} style={{ width: "100%", height: "100%" }} /> : <>
-      {loading ? <ActivityIndicator accessibilityLabel="Загрузка обложки" /> : <Feather name={icon} size={compact ? 24 : 28} color={t.muted} />}
+      {loading ? <ActivityIndicator accessibilityLabel="Загрузка обложки" /> : <MemoryTypeIcon feather={icon} size={compact ? 24 : 28} />}
       {!compact ? <Text style={{ color: t.muted, fontSize: 13, padding: 8, textAlign: "center" }}>{loading ? "Загружаю…" : message}</Text> : null}
       {failed && enabled ? <Pressable accessibilityRole="button" accessibilityLabel="Повторить загрузку обложки"
         onPress={event => { event?.stopPropagation?.(); setAttempt(value => value + 1); }}
@@ -90,5 +91,6 @@ export function MemoryCover({ profile, entityId, photoAttachmentId, active = tru
     </>}
   </View>;
 }
+
 
 
