@@ -716,7 +716,7 @@ export function LocalMemoryScreen() {
         {selectedNotes.length === 1 ? <NebulaAction icon={status === "trashed" ? "eye" : "edit-3"}
           label={status === "trashed" ? "Открыть запись" : "Редактировать"}
           disabled={busy} onPress={() => { setActionsOpen(false); setConfirmation(null); setContextNote(null);
-            navigation.navigate("MemoryNote", { entityId: selectedNotes[0].id }); }} /> : null}
+            navigation.navigate("MemoryNote", { entityId: selectedNotes[0].id, ...(status === "trashed" ? {} : { edit: true }) }); }} /> : null}
         {status === "trashed" ? <>
           <NebulaAction icon="rotate-ccw" label="Восстановить" disabled={busy}
             onPress={() => void act("restore")} />
