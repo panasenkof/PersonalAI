@@ -1,16 +1,23 @@
-import React, { useEffect, useRef, useState } from "react";
+﻿import React, { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Image, Pressable, Text, View } from "react-native";
 import Feather from "@expo/vector-icons/Feather";
 import { useIsFocused } from "@react-navigation/native";
 import { Directory, Paths, File } from "expo-file-system";
-import * as Crypto from "expo-crypto";
-import { manipulateAsync, SaveFormat } from "expo-image-manipulator";
 import { useApplicationVisible } from "../security/visibility";
 import { onLocalMemorySessionChange } from "../local-memory/storage";
 import { attachmentsForEntity, materializeAttachment } from "./attachments";
 import { attachmentPreviewKind } from "./attachmentPresentation";
 import { useTheme } from "../theme";
 import { MemoryTypeIcon } from "../design/nebula/MemoryTypeIcon";
+
+/** Older builds cached resized thumbnails here; covers now render the decrypted
+ * original, so the directory is only a leftover plaintext cache to remove. */
+export function purgeLegacyCoverCache() {
+  try {
+    const directory = new Directory(Paths.cache, "persai-previews");
+    if (directory.exists) directory.delete();
+  } catch { /* a locked cache dir is not worth failing the screen for */ }
+}
 
 // Bound decryption/decoding across the visible grid and collection covers.
 let running = 0;
@@ -57,28 +64,18 @@ export function MemoryCover({ profile, entityId, photoAttachmentId, active = tru
       }
       let original = "";
       try {
+        // Render the decrypted original directly. The resize+move step produced a
+        // file that existed but would not decode as an image on device — and it
+        // failed silently, leaving an empty card with no retry affordance. The
+        // note screen already renders this same file successfully, and the work
+        // stays bounded by coverSlot() plus the unmount/visibility cleanup below.
         original = await materializeAttachment(profile, image, controller.signal);
-        if (controller.signal.aborted) return;
-        // A decoder failure stays retryable. A resize that "succeeds" but leaves
-        // an unusable file must not blank the cover: the decrypted original is a
-        // local file the note screen already renders, so fall back to it.
-        const result = await manipulateAsync(original, [{ resize: { width: 480 } }], { compress: 0.7, format: SaveFormat.JPEG });
-        if (controller.signal.aborted) { removeCoverFile(result.uri); return; }
-        let moved = "";
-        try {
-          const directory = new Directory(Paths.cache, "persai-previews");
-          directory.create({ intermediates: true, idempotent: true });
-          const destination = new File(directory, Crypto.randomUUID() + ".jpg");
-          new File(result.uri).move(destination);
-          // A zero-byte destination renders as a blank card: fall back to the
-          // original instead of showing nothing.
-          const size = Number((destination as { size?: number }).size);
-          if (!(size === 0)) moved = destination.uri;
-        } catch { moved = ""; }
-        thumbnail = moved || original;
-        if (controller.signal.aborted) { if (thumbnail !== original) removeCoverFile(thumbnail); return; }
+        if (controller.signal.aborted) { removeCoverFile(original); return; }
+        thumbnail = original;
         setUri(thumbnail);
-      } finally { if (thumbnail !== original) removeCoverFile(original); }
+      } catch (error) {
+        if (!controller.signal.aborted) throw error;
+      }
     }).catch(() => { if (!controller.signal.aborted) { setFailed(true); setMessage("Не удалось загрузить превью"); } })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => { controller.abort(); removeCoverFile(thumbnail); };
@@ -100,6 +97,8 @@ export function MemoryCover({ profile, entityId, photoAttachmentId, active = tru
     </>}
   </View>;
 }
+
+
 
 
 

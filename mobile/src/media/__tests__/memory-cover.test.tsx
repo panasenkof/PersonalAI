@@ -1,12 +1,12 @@
-import React from "react";
-import { act, render, waitFor } from "@testing-library/react-native";
+﻿import React from "react";
+import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 import { MemoryCover, coverSlot } from "../MemoryCover";
 import { attachmentsForEntity, materializeAttachment } from "../attachments";
-import { manipulateAsync } from "expo-image-manipulator";
 const mockDelete = jest.fn();
 let mockVisible = true;
 let mockLock: (value: boolean) => void;
 jest.mock("@expo/vector-icons/Feather", () => () => null);
+jest.mock("../../design/nebula/MemoryTypeIcon", () => ({ MemoryTypeIcon: () => null }));
 jest.mock("@react-navigation/native", () => ({ useIsFocused: () => true }));
 jest.mock("../../security/visibility", () => ({ useApplicationVisible: () => mockVisible }));
 jest.mock("../../theme", () => ({ useTheme: () => ({}) }));
@@ -24,30 +24,28 @@ beforeEach(() => {
   jest.clearAllMocks(); mockVisible = true;
   (attachmentsForEntity as jest.Mock).mockResolvedValue(items);
   (materializeAttachment as jest.Mock).mockResolvedValue("file:///original");
-  (manipulateAsync as jest.Mock).mockResolvedValue({ uri: "file:///resized" });
 });
-test("offscreen cards never decrypt; visible cards resize locally and delete original", async () => {
+test("offscreen cards never decrypt; visible cards show the decrypted original", async () => {
   const screen = render(<MemoryCover profile="p" entityId="n" active={false} />);
   expect(materializeAttachment).not.toHaveBeenCalled();
   expect(screen.getByTestId("memory-cover-n").props.style.height).toBe(132);
   screen.rerender(<MemoryCover profile="p" entityId="n" active />);
   await waitFor(() => expect(screen.getByLabelText("Обложка записи")).toBeTruthy());
-  expect(manipulateAsync).toHaveBeenCalledWith("file:///original", [{ resize: { width: 480 } }], expect.anything());
-  expect(mockDelete).toHaveBeenCalledWith("file:///original");
+  expect(materializeAttachment).toHaveBeenCalledTimes(1);
+  expect(screen.getByLabelText("Обложка записи").props.source).toEqual({ uri: "file:///original" });
   act(() => mockLock(false));
   expect(screen.queryByLabelText("Обложка записи")).toBeNull();
-  expect(mockDelete).toHaveBeenCalledWith("file:///cache/persai-previews/thumb.jpg");
+  expect(mockDelete).toHaveBeenCalledWith("file:///original");
   expect(screen.getByTestId("memory-cover-n").props.style.height).toBe(132);
 });
-test("late image decoding after leaving the app is removed without appearing", async () => {
-  let finish!: (value: any) => void;
-  (manipulateAsync as jest.Mock).mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+test("late decryption after leaving the app removes the file and shows nothing", async () => {
+  let finish!: (value: string) => void;
+  (materializeAttachment as jest.Mock).mockImplementation(() => new Promise(resolve => { finish = resolve; }));
   const screen = render(<MemoryCover profile="p" entityId="n" />);
-  await waitFor(() => expect(manipulateAsync).toHaveBeenCalled());
+  await waitFor(() => expect(materializeAttachment).toHaveBeenCalled());
   mockVisible = false; screen.rerender(<MemoryCover profile="p" entityId="n" />);
-  await act(async () => finish({ uri: "file:///late" }));
+  await act(async () => finish("file:///late"));
   expect(mockDelete).toHaveBeenCalledWith("file:///late");
-  expect(mockDelete).toHaveBeenCalledWith("file:///original");
   expect(screen.queryByLabelText("Обложка записи")).toBeNull();
 });
 test("oversized pictures do not trigger automatic decoding", async () => {
@@ -63,11 +61,11 @@ test("compact thumbnail keeps 56dp in loading, missing-file and retry states", a
   await waitFor(() => expect(attachmentsForEntity).toHaveBeenCalledTimes(1));
   expect(screen.getByTestId("memory-cover-n").props.style.height).toBe(56);
   (attachmentsForEntity as jest.Mock).mockResolvedValue(items);
-  (manipulateAsync as jest.Mock).mockRejectedValueOnce(new Error("decoder"));
   screen.rerender(<MemoryCover profile="p" entityId="other" active compact height={56} />);
+  await waitFor(() => screen.getByLabelText("Обложка записи"));
+  act(() => fireEvent(screen.getByLabelText("Обложка записи"), "error"));
   await waitFor(() => screen.getByLabelText("Повторить загрузку обложки"));
   expect(screen.getByTestId("memory-cover-other").props.style.height).toBe(56);
-  const { fireEvent } = require("@testing-library/react-native");
   fireEvent.press(screen.getByLabelText("Повторить загрузку обложки"));
   await waitFor(() => screen.getByLabelText("Обложка записи"));
   expect(screen.getByTestId("memory-cover-other").props.style.height).toBe(56);
@@ -92,25 +90,26 @@ test("missing originals and large photos have explanations", async () => {
   await waitFor(() => expect(screen.getByText(/Большое фото/)).toBeTruthy());
   expect(materializeAttachment).not.toHaveBeenCalled();
 });
-test("decode failure can be retried", async () => {
-  const { fireEvent } = require("@testing-library/react-native");
-  (manipulateAsync as jest.Mock).mockRejectedValueOnce(new Error("decoder"));
+test("a broken image file can be retried and disposes what it decrypted", async () => {
   const screen = render(<MemoryCover profile="p" entityId="n" />);
+  await waitFor(() => screen.getByLabelText("Обложка записи"));
+  act(() => fireEvent(screen.getByLabelText("Обложка записи"), "error"));
   await waitFor(() => screen.getByLabelText("Повторить загрузку обложки"));
   expect(mockDelete).toHaveBeenCalledWith("file:///original");
   fireEvent.press(screen.getByLabelText("Повторить загрузку обложки"));
   await waitFor(() => screen.getByLabelText("Обложка записи"));
 });
 
-test("viewport changes retain a mounted thumbnail; background disposes it", async () => {
+test("viewport changes retain a mounted cover; background disposes it", async () => {
  const v = render(<MemoryCover profile="p" entityId="n" active />);
  await waitFor(() => v.getByLabelText("Обложка записи"));
  v.rerender(<MemoryCover profile="p" entityId="n" active={false} />);
  v.rerender(<MemoryCover profile="p" entityId="n" active />);
  expect(v.getByLabelText("Обложка записи")).toBeTruthy();
- expect(manipulateAsync).toHaveBeenCalledTimes(1);
- expect(mockDelete).not.toHaveBeenCalledWith("file:///cache/persai-previews/thumb.jpg");
+ expect(materializeAttachment).toHaveBeenCalledTimes(1);
+ expect(mockDelete).not.toHaveBeenCalledWith("file:///original");
  mockVisible = false; v.rerender(<MemoryCover profile="p" entityId="n" active />);
  expect(v.queryByLabelText("Обложка записи")).toBeNull();
- expect(mockDelete).toHaveBeenCalledWith("file:///cache/persai-previews/thumb.jpg");
+ expect(mockDelete).toHaveBeenCalledWith("file:///original");
 });
+

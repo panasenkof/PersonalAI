@@ -1,4 +1,4 @@
-import React from "react";
+﻿import React from "react";
 import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 import { LocalMemoryScreen } from "../LocalMemoryScreen";
 
@@ -61,7 +61,7 @@ jest.mock("../../local-memory/storage", () => ({
   },
 }));
 jest.mock("../../media/vector-runner", () => ({ scheduleVectors: jest.fn() }));
-jest.mock("../../media/MemoryCover", () => ({ MemoryCover: "MemoryCover" }));
+jest.mock("../../media/MemoryCover", () => ({ MemoryCover: "MemoryCover", purgeLegacyCoverCache: jest.fn() }));
 jest.mock("../../design/nebula/MemoryNoteCard", () => ({ MemoryNoteCard: () => null }));
 jest.mock("../../local-memory/errors", () => ({ memoryErrorMessage: (e: Error) => e.message }));
 jest.mock("../../theme", () => ({
@@ -148,3 +148,4 @@ test("U-M10: read-later group is described as an optional review, not useless co
   expect(mockRepo.changeNotes).not.toHaveBeenCalled();
   expect(ui.queryByText(/Анализ ограничен/)).toBeNull();
 });
+
