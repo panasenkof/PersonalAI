@@ -116,14 +116,9 @@ function NebulaHomeContent() {
     [active?.rows, active?.busy, active?.streamText]);
   const turnId = [...(active?.rows || [])].reverse().find(row => row.role === "user")?.id;
   const viewport = useChatBottomFollow(active?.id, isFocused, turnId, rows.length > 0);
-  const { onCell } = viewport;
-  // Measure the cell in list coordinates, not the inner bubble's local y=0.
   // Stable component identity is essential: recreating this on tokens remounts cells.
-  const ChatCell = useCallback(({ item, onLayout, children, style, onFocusCapture }: CellRendererProps<PresentedChatRow>) =>
-    <View {...{ style, onFocusCapture }} onLayout={event => {
-      onLayout?.(event);
-      onCell(item.id, event.nativeEvent.layout.y, event.nativeEvent.layout.height);
-    }}>{children}</View>, [onCell]);
+  const ChatCell = useCallback(({ onLayout, children, style, onFocusCapture }: CellRendererProps<PresentedChatRow>) =>
+    <View {...{ style, onFocusCapture }} onLayout={onLayout}>{children}</View>, []);
   useEffect(() => {
     // Browser QA / React Native Web may omit the native Keyboard module.
     // Native Android still reports keyboardDidShow/Hide; focus is the fallback.
@@ -361,7 +356,7 @@ function NebulaHomeContent() {
       onMomentumScrollBegin={viewport.beginDrag}
       onMomentumScrollEnd={event => viewport.endDrag(event.nativeEvent)}
       onContentSizeChange={viewport.onContent}
-      contentContainerStyle={{ padding: nebulaSpacing.md, gap: nebulaSpacing.sm, flexGrow: 1 }}
+      contentContainerStyle={{ padding: nebulaSpacing.md, paddingBottom: active?.rows.length ? nebulaTouch.minimum + nebulaSpacing.xxl : nebulaSpacing.md, gap: nebulaSpacing.sm, flexGrow: 1 }}
       ListEmptyComponent={ready && needsSetup ? <View style={{ flex: 1, justifyContent: "center", gap: 14, paddingVertical: 12 }}>
         <View style={{ alignItems: "center", gap: 10 }}><NebulaHomeArtwork size={136} phase={orbPhase} />
           <Text style={{ color: t.text, fontSize: 26, fontWeight: "800", textAlign: "center" }}>Подключите модель</Text>
@@ -447,13 +442,17 @@ function NebulaHomeContent() {
 
       </View>}
     />
-    {viewport.showJumpToLatest ? <Pressable testID="chat-jump-to-latest" accessibilityRole="button"
-      accessibilityLabel="К последнему сообщению" onPress={viewport.jumpToLatest}
-      style={{ position: "absolute", right: nebulaSpacing.md, bottom: nebulaSpacing.sm, zIndex: 4,
-        paddingHorizontal: nebulaSpacing.md, minHeight: nebulaTouch.minimum, justifyContent: "center",
-        borderRadius: 20, borderWidth: 1, borderColor: t.line, backgroundColor: t.panel }}>
-      <Text style={{ color: t.accent, fontSize: 12 }}>↓ К последнему</Text>
-    </Pressable> : null}
+    {viewport.showJumpToLatest ? <View pointerEvents="box-none" style={{ position: "absolute", left: 0, right: 0, bottom: nebulaSpacing.sm, zIndex: 4, alignItems: "center" }}>
+      <Pressable testID="chat-jump-to-latest" accessibilityRole="button"
+        accessibilityLabel="К последнему сообщению" accessibilityHint="Прокрутить чат к последнему сообщению"
+        onPress={viewport.jumpToLatest}
+        style={{ paddingHorizontal: nebulaSpacing.md, minWidth: nebulaTouch.minimum, minHeight: nebulaTouch.minimum,
+          justifyContent: "center", alignItems: "center",
+          borderRadius: 20, borderWidth: 1, borderColor: t.line, backgroundColor: t.panel,
+          elevation: 6, shadowColor: "#000", shadowOpacity: 0.35, shadowRadius: 8, shadowOffset: { width: 0, height: 2 } }}>
+        <Text style={{ color: t.accent, fontSize: 12 }}>↓ К последнему</Text>
+      </Pressable>
+    </View> : null}
     </View>
     {error || notice || historyNotice ? <View style={{ paddingHorizontal: 16, paddingVertical: 6 }}>
       <View style={{flexDirection:"row",alignItems:"center",gap:8}}>

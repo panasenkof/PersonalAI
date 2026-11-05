@@ -392,12 +392,20 @@ export class DirectChatStore {
         modelStarted, errorType: (e as Error)?.name || "Error" },
         { error: redactDiagnostic(String((e as Error)?.message || e)).slice(0, 500) });
       const c = this.snapshot.conversations.find(c => c.id === id);
-      if (c && !this.disposed) this.update(id, {
-        taskState: { ...(c.taskState || taskState), turnStatus: "interrupted" },
-        ...(!internetPhotoId && !modelStarted && !aborter.signal.aborted ? { question: c.question || prompt, attachments } : {}),
-        rows: [...c.rows, { id: Crypto.randomUUID(), role: "info",
-          text: aborter.signal.aborted ? "Запрос остановлен" : !modelStarted ? beforeModelError : String((e as Error).message) }],
-      });
+      if (c && !this.disposed) {
+        // Stop must not throw away what the model already produced: the user
+        // stops precisely when the needed fragment has arrived.
+        const aborted = aborter.signal.aborted;
+        const partial = aborted ? latest.trim() : "";
+        this.update(id, {
+          taskState: { ...(c.taskState || taskState), turnStatus: "interrupted" },
+          ...(!internetPhotoId && !modelStarted && !aborted ? { question: c.question || prompt, attachments } : {}),
+          rows: [...c.rows,
+            ...(partial ? [{ id: Crypto.randomUUID(), role: "assistant" as const, text: partial }] : []),
+            { id: Crypto.randomUUID(), role: "info",
+              text: aborted ? (partial ? "Ответ остановлен" : "Запрос остановлен") : !modelStarted ? beforeModelError : String((e as Error).message) }],
+        });
+      }
     } finally {
       trace("turn.finished", { elapsedMs: Date.now() - startedAt });
       this.requests.delete(id);

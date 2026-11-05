@@ -94,6 +94,19 @@ test("explicit Stop aborts the transport and stores an interrupted turn without 
   expect(current.busy).toBe(false); expect(current.rows.map(r => r.text)).toEqual(["Вопрос", "Запрос остановлен"]);
   expect(records.get(current.id)?.interrupted).toBe(false); store.dispose();
 });
+test("Stop keeps the answer fragment that already arrived", async () => {
+  const { repo } = repository();
+  const runner = jest.fn(options => new Promise<never>((_resolve, reject) => {
+    options.onText("Первые две мысли.");
+    options.signal.addEventListener("abort", () => reject(new Error("aborted")));
+  }));
+  const store = new DirectChatStore("guest", repo, runner); await store.initialize();
+  store.setQuestion("Вопрос"); const sending = store.send(settings); await started(runner); store.stop(); await sending;
+  const current = store.getSnapshot().conversations[0];
+  expect(current.rows.map(r => r.text)).toEqual(["Вопрос", "Первые две мысли.", "Ответ остановлен"]);
+  expect(current.rows[1].role).toBe("assistant");
+  store.dispose();
+});
 test("a completed answer remains in memory through expired auth and is saved on unlock", async () => {
   const { repo, records } = repository(); const answer = turn(); const unlocked = deferred<void>();
   const runner = jest.fn((_options: any) => answer.promise); const store = new DirectChatStore("guest", repo, runner); await store.initialize();

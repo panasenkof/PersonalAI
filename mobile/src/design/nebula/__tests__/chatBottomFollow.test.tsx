@@ -43,19 +43,14 @@ describe("single-owner chat viewport", () => {
     act(() => result.current.onViewport(600)); flush();
     expect(scrollToOffset).toHaveBeenLastCalledWith({ offset: 1000, animated: false });
   });
-  it.each([true, false])("anchors a large first chunk regardless of layout event order (cell first %s)", cellFirst => {
+  it("follows a streamed answer to its end instead of holding at the question", () => {
     const { result, rerender, scrollToOffset } = setup();
     rerender({ id: "a", focused: true, turn: "u2" });
-    const cell = () => result.current.onCell("u2", 1600, 60);
-    const content = () => result.current.onContent(390, 2600);
-    act(() => { if (cellFirst) cell(); else content(); }); flush();
-    act(() => { if (cellFirst) content(); else cell(); }); flush();
-    expect(scrollToOffset).toHaveBeenLastCalledWith({ offset: 1600, animated: false });
-    scrollToOffset.mockClear();
-    // Growth, citations and completion do not restart following.
+    act(() => result.current.onContent(390, 2600)); flush();
+    expect(scrollToOffset).toHaveBeenLastCalledWith({ offset: 2000, animated: false });
     act(() => result.current.onContent(390, 3100)); flush();
-    expect(scrollToOffset).not.toHaveBeenCalled();
-    expect(result.current.showJumpToLatest).toBe(true);
+    expect(scrollToOffset).toHaveBeenLastCalledWith({ offset: 2500, animated: false });
+    expect(result.current.showJumpToLatest).toBe(false);
   });
   it("holds a manual reading position through stream, IME and tab changes", () => {
     const { result, rerender, scrollToOffset } = setup();
@@ -67,25 +62,18 @@ describe("single-owner chat viewport", () => {
     expect(scrollToOffset).toHaveBeenLastCalledWith({ offset: 1900, animated: false });
     expect(result.current.showJumpToLatest).toBe(false);
   });
-  it("reveals the old tail when Send originates far up a virtualized history", () => {
+  it("a new question returns to following from a reading position", () => {
     const { result, rerender, scrollToOffset } = setup();
-    act(() => { result.current.beginDrag(); result.current.endDrag(metrics(100)); });
+    act(() => { result.current.beginDrag(); result.current.endDrag(metrics(100)); }); flush();
     rerender({ id: "a", focused: true, turn: "u2" }); flush();
-    expect(scrollToOffset).toHaveBeenLastCalledWith({ offset: 1000, animated: false });
-    act(() => { result.current.onCell("u2", 1600, 60); result.current.onContent(390, 1700); }); flush();
-    expect(scrollToOffset).toHaveBeenLastCalledWith({ offset: 1100, animated: false });
+    act(() => result.current.onContent(390, 1800)); flush();
+    expect(scrollToOffset).toHaveBeenLastCalledWith({ offset: 1200, animated: false });
   });
-  it("keeps the end of an oversized question above the answer", () => {
-    const { result, rerender, scrollToOffset } = setup();
-    rerender({ id: "a", focused: true, turn: "u2" });
-    act(() => { result.current.onCell("u2", 1600, 1000); result.current.onContent(390, 4000); }); flush();
-    expect(scrollToOffset).toHaveBeenLastCalledWith({ offset: 2420, animated: false });
-  });
-  it("new chat resets metrics and waits for its own layout; a stale old anchor is ignored", () => {
+  it("new chat resets metrics and follows only its own layout", () => {
     const { result, rerender, scrollToOffset } = setup();
     rerender({ id: "b", focused: true, turn: "b1" }); flush();
     expect(scrollToOffset).not.toHaveBeenCalled();
-    act(() => { result.current.onCell("u1", 2000, 70); result.current.onViewport(600); result.current.onContent(390, 900); }); flush();
+    act(() => { result.current.onViewport(600); result.current.onContent(390, 900); }); flush();
     expect(scrollToOffset).toHaveBeenLastCalledWith({ offset: 300, animated: false });
   });
   it("never scrolls in background or after unmount", () => {
