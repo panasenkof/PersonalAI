@@ -18,8 +18,8 @@ describe("neutral and factual agent status", () => {
     expect(resolveNebulaStatus({ ...idle, busy: true, progress: "Сохраняю вопрос…" })).toBe("Сохраняю запрос");
     expect(resolveNebulaStatus({ ...idle, busy: true, progress: "Ищу в памяти" })).toBe("Ищу в памяти");
     expect(resolveNebulaStatus({ ...idle, busy: true, progress: "Поиск в интернете" })).toBe("Ищу в интернете");
-    expect(resolveNebulaStatus({ ...idle, busy: true, progress: "Запрос к LLM (1/5): модель думает" })).toBe("Думаю (1/5)");
-    expect(resolveNebulaStatus({ ...idle, busy: true, progress: "Запрос к LLM (1/5): подключаюсь" })).toBe("Подключаюсь (1/5)");
+    expect(resolveNebulaStatus({ ...idle, busy: true, progress: "Запрос к LLM (1/5): модель думает" })).toBe("Думаю");
+    expect(resolveNebulaStatus({ ...idle, busy: true, progress: "Запрос к LLM (1/5): подключаюсь" })).toBe("Подключаюсь");
     expect(resolveNebulaStatus({ ...idle, busy: true, progress: "Запрос к LLM (8/3): модель думает" })).toBe("Думаю");
     expect(resolveNebulaStatus({ ...idle, busy: true, streamText: "Начало ответа" })).toBe("Пишу ответ");
     expect(resolveNebulaStatus({ ...idle, busy: true, progress: "" })).toBe("Обрабатываю");

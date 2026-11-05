@@ -18,8 +18,9 @@ import type { RootStackParams } from "../navigation";
 import { useTheme } from "../theme";
 import { nebulaSpacing, nebulaRadii, nebulaTouch } from "../design/nebula/tokens";
 import { MemoryCover } from "../media/MemoryCover";
-import { memoryDisplayTitle, memoryNoteHasPhoto } from "../design/nebula/memoryNotePresentation";
+import { memoryDisplayTitle, memoryNoteHasPhoto, memoryNoteType } from "../design/nebula/memoryNotePresentation";
 import { MemoryNoteCard, MEMORY_GRID_MEDIA_HEIGHT } from "../design/nebula/MemoryNoteCard";
+import { MemoryTypeIcon } from "../design/nebula/MemoryTypeIcon";
 import { NebulaAction } from "../design/nebula/components";
 import { loadMemoryLibraryView, saveMemoryLibraryView } from "../design/nebula/memoryViewPreference";
 
@@ -572,7 +573,7 @@ export function LocalMemoryScreen() {
         {!term && status === "active" && !collectionId ? <>
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
             <Text style={{ color: t.text, fontSize: 18, fontWeight: "700" }}>Коллекции</Text>
-            <NebulaAction icon="grid" label="Все разделы" accessibilityLabel="Все коллекции" disabled={selecting} onPress={() => setCollectionMenu(true)} />
+            <NebulaAction icon="grid" label="Все разделы" accessibilityLabel="Все разделы" disabled={selecting} onPress={() => setCollectionMenu(true)} />
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: nebulaSpacing.sm }}>
             {collectionCards.map(c => <Pressable key={c.id} accessibilityRole="button" accessibilityLabel={"Раздел " + c.name}
@@ -583,8 +584,7 @@ export function LocalMemoryScreen() {
                 borderRadius: nebulaRadii.field, backgroundColor: t.panel, borderWidth: 1, borderColor: t.line }}>
               <View style={{ width: 40, height: 40, flexShrink: 0, borderRadius: nebulaRadii.chip,
                 backgroundColor: t.soft, justifyContent: "center", alignItems: "center" }}>
-                <Feather name={c.slug === "people" ? "users" : c.slug === "preferences" ? "heart" : c.slug === "events" ? "calendar" : "folder"}
-                  size={21} color={t.secondary} />
+                <MemoryTypeIcon size={28} name={c.slug === "people" ? "person" : c.slug === "preferences" ? "preference" : c.slug === "events" ? "event" : "folder"} />
               </View>
               <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
                 <Text numberOfLines={2} style={{ color: t.text, fontWeight: "700", fontSize: 15 }}>{c.name}</Text>
@@ -644,13 +644,14 @@ export function LocalMemoryScreen() {
       contentContainerStyle={{ paddingHorizontal: nebulaSpacing.md, paddingBottom: nebulaSpacing.xl, gap: nebulaSpacing.sm, flexGrow: 1 }}
       ListEmptyComponent={!loading && !error ? <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24, gap: 12 }}><Feather name={term ? "search" : "book-open"} size={40} color={t.secondary} />
         <Text style={{ color: t.text, fontSize: 20, fontWeight: "700", textAlign: "center" }}>{term ? "Ничего не найдено" : status === "archived" ? "Архив пуст" : status === "trashed" ? "Корзина пуста" : "Начните с важного"}</Text>
-        <Text style={{ color: t.muted, textAlign: "center", lineHeight: 21 }}>{term ? "Попробуйте другое слово или раздел «Все записи»." : status === "trashed" ? "Здесь будут удалённые заметки, пока вы их не восстановите." : status === "archived" ? "Здесь хранятся записи, которые вы отправили в архив. Их можно вернуть в обычную память." : "Создайте запись или добавьте сведения из файла."}</Text>
+        <Text style={{ color: t.muted, textAlign: "center", lineHeight: 21 }}>{term ? "Попробуйте другое слово или откройте все разделы." : status === "trashed" ? "Здесь будут удалённые заметки, пока вы их не восстановите." : status === "archived" ? "Здесь хранятся записи, которые вы отправили в архив. Их можно вернуть в обычную память." : "Создайте запись или добавьте сведения из файла."}</Text>
         {!term && status !== "active" ? <NebulaAction icon="arrow-left" label="Вернуться в память" onPress={openAll} /> : null}
       </View> : null}
       renderItem={({ item }) => <View style={{ flex: 1, maxWidth: columns === 2 ? "50%" : "100%" }}><MemoryNoteCard note={item} grid={columns === 2}
-        cover={profile && memoryNoteHasPhoto(item)
+        cover={profile
           ? <MemoryCover profile={profile} entityId={item.id} active={visibleIds.has(item.id)}
-            height={columns === 2 ? MEMORY_GRID_MEDIA_HEIGHT : 56} compact={columns !== 2} label={"Обложка " + item.title} /> : undefined}
+            height={columns === 2 ? MEMORY_GRID_MEDIA_HEIGHT : 56} compact={columns !== 2} label={"Обложка " + item.title}
+            icon={memoryNoteType(item).icon} expectPhoto={memoryNoteHasPhoto(item)} /> : undefined}
         sectionName={collectionId ? "" : collections.find(c => c.id === item.collection_id)?.name || "Запись"}
         selected={selectedIds.includes(item.id)} selecting={selecting}
         onToggleSelection={() => toggleSelection(item.id)}
@@ -978,3 +979,7 @@ export function LocalMemoryScreen() {
     </BottomSheet>
   </View>;
 }
+
+
+
+

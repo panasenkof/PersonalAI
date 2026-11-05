@@ -1,4 +1,4 @@
-import { AppendNoteAttachments } from "../media/AppendNoteAttachments";
+﻿import { AppendNoteAttachments } from "../media/AppendNoteAttachments";
 import { useNavigation, usePreventRemove, useRoute } from "@react-navigation/native";
 import type { RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
@@ -109,6 +109,7 @@ export function MemoryNoteScreen() {
   const [retry, setRetry] = useState(0); const [leaving, setLeaving] = useState(false);
   const [sectionOpen, setSectionOpen] = useState(false); const [details, setDetails] = useState(false);
   const [metadataOpen, setMetadataOpen] = useState(false); const [fileContentOpen, setFileContentOpen] = useState(false);
+const [termsOpen, setTermsOpen] = useState(false);
   const [keyboardOpen, setKeyboardOpen] = useState(false);
   const [history, setHistory] = useState<RevisionRecord[]>([]); const [events, setEvents] = useState<ObservationRecord[]>([]);
   const [relations, setRelations] = useState<RelationRecord[]>([]); const [related, setRelated] = useState<EntityRecord[]>([]);
@@ -131,7 +132,7 @@ export function MemoryNoteScreen() {
   useEffect(() => {
     const sequence = ++loadSequence.current;
     const stillCurrent = () => alive.current && loadSequence.current === sequence && activeProfile.current === profile;
-    alive.current = true; setLoading(true); setAiField(null); setError(""); setMetadataOpen(false); setFileContentOpen(false); repeatRequest.current++; repeatApproval.current = null; setRepeatMessage(null); setCandidate(null); setRepeatFiles([]);
+    alive.current = true; setLoading(true); setAiField(null); setError(""); setMetadataOpen(false); setFileContentOpen(false); setTermsOpen(false); repeatRequest.current++; repeatApproval.current = null; setRepeatMessage(null); setCandidate(null); setRepeatFiles([]);
     void (async () => {
       if (!profile) throw new Error("profile_missing");
       const db = await localMemoryRepository(profile);
@@ -468,9 +469,10 @@ export function MemoryNoteScreen() {
         </View>
         <TextInput accessibilityLabel="Другие имена и прозвища" value={names} onChangeText={next => { namesForSave.current = next; setNames(next); }} editable={!busy} maxLength={600}
           placeholder={kind === "person" ? "Другие имена через запятую: Маша, Мария Петровна" : "Другие названия через запятую (по желанию)"} placeholderTextColor={t.muted} style={field} />
-        <Text style={{ color: t.muted, fontSize: 12 }}>По этим именам запись тоже находится в поиске.</Text>
-        <TextInput accessibilityLabel="Слова для поиска" value={terms} onChangeText={setTerms} editable={!busy} maxLength={600}
-          placeholder="Слова для поиска через запятую: автомобиль, шкода" placeholderTextColor={t.muted} style={field} />
+        <Text style={{ color: t.muted, fontSize: 12 }}>Необязательно. По этим именам запись тоже находится в поиске.</Text>
+        {termsOpen || terms.trim() ? <TextInput accessibilityLabel="Слова для поиска" value={terms} onChangeText={setTerms} editable={!busy} maxLength={600}
+          placeholder="Слова для поиска через запятую: автомобиль, шкода" placeholderTextColor={t.muted} style={field} /> :
+          <NebulaAction icon="plus" label="Добавить слова для поиска" disabled={busy} onPress={() => setTermsOpen(true)} />}
         {modelTerms.length ? <Text accessibilityLabel="Слова, подобранные моделью" style={{ color: t.muted, fontSize: 12, lineHeight: 18 }}>Поисковые слова ИИ: {modelTerms.join(", ")}. Пересчитываются после правки текста.</Text> : null}
         </NoteEditorSection>
         {selected && (selected.payload.source_file || selected.payload.extracted_text) ? <NoteEditorSection
@@ -639,3 +641,4 @@ export function MemoryNoteScreen() {
       }} />
   </KeyboardAvoidingView>;
 }
+

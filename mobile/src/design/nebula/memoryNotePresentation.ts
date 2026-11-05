@@ -13,7 +13,11 @@ export function memoryNotePreview(note: Pick<EntityRecord, "payload">): string {
 /** Treat an invalid legacy timestamp as an absent date rather than showing "Invalid Date". */
 export function memoryNoteDate(timestamp: string): string {
   const date = Date.parse(timestamp);
-  return Number.isFinite(date) ? new Date(date).toLocaleDateString("ru-RU", { day: "numeric", month: "short", year: "numeric" }) : "";
+  if (!Number.isFinite(date)) return "";
+  const value = new Date(date);
+  // The current year is noise in a list row and costs the width the date needs.
+  const sameYear = value.getFullYear() === new Date().getFullYear();
+  return value.toLocaleDateString("ru-RU", sameYear ? { day: "numeric", month: "short" } : { day: "numeric", month: "short", year: "numeric" });
 }
 
 /** Metadata only: never decrypt attachments or load remote previews while listing notes. */
@@ -61,5 +65,8 @@ export function memoryDisplayTitle(note: Pick<EntityRecord, "title" | "payload">
     if (/^(?:(?:img|dsc|pxl|photo|image)[_ -]?)?\d[\d_ -]*\.(?:jpe?g|png|heic|webp)$/i.test(filename)) return "Фото";
     if (title) return title.replace(/\.[^.]+$/, "").replace(/_+/g, " ");
   }
-  return memoryPlainText(title) || "Без названия";
+  // Imported titles sometimes keep the export decoration («── file.jpg ──»).
+  const plain = memoryPlainText(title).replace(/^[─—–-]{2,}\s*|\s*[─—–-]{2,}$/g, "").trim();
+  return plain || "Без названия";
 }
+

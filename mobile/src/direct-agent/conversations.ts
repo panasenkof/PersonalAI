@@ -12,7 +12,7 @@ export type DialogueSummaryOrigin = {
   omittedAttachments: number; sourceChars: number; parts: number;
   firstRowId: string; lastRowId: string; model: string; provider: string; createdAt: string;
 };
-export type ChatRow = { id: string; role: "user" | "assistant" | "info"; text: string; photoAction?: "model" | "import" | "prepare"; sources?: string[]; memory?: ChatMemoryRef[]; attachments?: ChatAttachment[]; dialogueSummary?: DialogueSummaryOrigin };
+export type ChatRow = { id: string; role: "user" | "assistant" | "info"; text: string; error?: boolean; photoAction?: "model" | "import" | "prepare"; sources?: string[]; memory?: ChatMemoryRef[]; attachments?: ChatAttachment[]; dialogueSummary?: DialogueSummaryOrigin };
 const VIA = new Set(["search", "rewrite", "assistant"]);
 export type ChatDraft = NoteProposal & { id: string };
 export type SavedConversation = {
@@ -59,7 +59,7 @@ export function parseConversation(json: string): SavedConversation | null {
         firstRowId:d.firstRowId,lastRowId:d.lastRowId,
         model:d.model,provider:d.provider,createdAt:d.createdAt,
       } : undefined;
-    return [{ id: r.id, role: r.role, text: r.text, ...(["model","import","prepare"].includes(r.photoAction) ? {photoAction:r.photoAction} : {}), ...(r.attachments?.length ? {attachments:checkedChatAttachments(r.attachments)} : {}), ...(sources?.length ? { sources } : {}), ...(memory?.length ? { memory } : {}), ...(dialogueSummary ? {dialogueSummary} : {}) }];
+    return [{ id: r.id, role: r.role, text: r.text, ...(r.error === true && r.role === "info" ? { error: true } : {}), ...(["model","import","prepare"].includes(r.photoAction) ? {photoAction:r.photoAction} : {}), ...(r.attachments?.length ? {attachments:checkedChatAttachments(r.attachments)} : {}), ...(sources?.length ? { sources } : {}), ...(memory?.length ? { memory } : {}), ...(dialogueSummary ? {dialogueSummary} : {}) }];
   });
   const drafts: ChatDraft[] = (Array.isArray(value.drafts) ? value.drafts : []).filter((d: any) =>
     d && typeof d.id === "string" && typeof d.title === "string" && typeof d.body === "string")

@@ -1,4 +1,4 @@
-import { useFocusEffect, useNavigation, usePreventRemove, useRoute } from "@react-navigation/native";
+﻿import { useFocusEffect, useNavigation, usePreventRemove, useRoute } from "@react-navigation/native";
 import type { RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useHeaderHeight } from "@react-navigation/elements";
@@ -245,7 +245,7 @@ export function DirectAgentSettingsScreen() {
           <TextInput editable={!busy} accessibilityLabel="Название модели" autoCapitalize="none" autoCorrect={false} value={selected.model}
             onChangeText={model => update({ model })} placeholder="Например, deepseek-flash" placeholderTextColor={t.muted} style={field} />
           <Pressable accessibilityRole="button" accessibilityLabel="Проверить связь" disabled={busy || checking} onPress={() => void runCheck()}
-            style={{ minHeight: 46, justifyContent: "center", alignItems: "center", borderRadius: 16, borderWidth: 1, borderColor: t.accent }}>
+            style={{ minHeight: 48, minWidth: 48, justifyContent: "center", alignItems: "center", borderRadius: 16, borderWidth: 1, borderColor: t.accent }}>
             {checking ? <ActivityIndicator accessibilityLabel="Проверка связи" /> : <Text style={{ color: t.secondary, fontWeight: "700" }}>Проверить связь</Text>}
           </Pressable>
           {check ? <Text selectable accessibilityRole="alert" style={{ color: check.ok ? t.ok : t.err }}>{check.ok ? "Связь есть. Модель ответила: «" + check.reply + "»" : check.message}</Text> : null}
@@ -279,7 +279,7 @@ export function DirectAgentSettingsScreen() {
                 value={selected.searchFolderId || ""} onChangeText={searchFolderId => update({ searchFolderId })} placeholder="Идентификатор каталога (b1g…)" placeholderTextColor={t.muted} style={field} />
             </> : null}
             {search !== "builtin" ? <Pressable accessibilityRole="button" accessibilityLabel="Проверить поиск" disabled={busy || searching} onPress={() => void runSearchCheck()}
-              style={{ minHeight: 46, justifyContent: "center", alignItems: "center", borderRadius: 16, borderWidth: 1, borderColor: t.accent }}>
+              style={{ minHeight: 48, minWidth: 48, justifyContent: "center", alignItems: "center", borderRadius: 16, borderWidth: 1, borderColor: t.accent }}>
               {searching ? <ActivityIndicator accessibilityLabel="Проверка поиска" /> : <Text style={{ color: t.secondary, fontWeight: "700" }}>Проверить поиск</Text>}
             </Pressable> : null}
             {searchCheck ? <Text selectable accessibilityRole="alert" style={{ color: searchCheck.ok ? t.ok : t.err }}>{searchCheck.ok ? "Поиск работает: найдено ссылок — " + searchCheck.count + (searchCheck.first ? ", первая: " + searchCheck.first : "") + "." : searchCheck.message}</Text> : null}
@@ -314,3 +314,4 @@ export function DirectAgentSettingsScreen() {
     </>
   );
 }
+

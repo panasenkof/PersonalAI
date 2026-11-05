@@ -1,4 +1,4 @@
-const fs = require('node:fs');
+﻿const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const http = require('node:http');
@@ -382,7 +382,13 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByLabel('Вкладка Главная', { exact: true }).click();
       await page.getByLabel('Остановить запрос', { exact: true }).waitFor();
       assert.equal(replyNumber, 1, 'Changing tabs must not restart the request');
-      await page.waitForFunction(() => document.querySelector('[data-testid="nebula-home-status"]')?.textContent?.includes('(1/5)'));
+      // Stages are shown to the person; agent-loop counters stay out of the UI.
+      await page.waitForFunction(() => {
+        const text = (document.querySelector('[data-testid="nebula-home-status"]')?.textContent || '').trim();
+        // Any real stage is fine; the invariant is that a stage is shown and no
+        // agent-loop counter leaks into it.
+        return text.length > 0 && text !== 'Готов' && text !== 'Ошибка' && !text.includes('(');
+      });
       releaseReply();
       await page.getByText('Ответ 1', { exact: true }).waitFor();
       const answerBubble = await page.getByTestId('chat-message-assistant').last().boundingBox();
@@ -418,7 +424,6 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       assert.equal(await page.getByLabel('Сообщение ассистенту', { exact: true }).inputValue(), '', 'New-chat action opens an empty usable conversation');
       await page.getByLabel('Сообщение ассистенту', { exact: true }).fill('Второй вопрос');
       await page.getByLabel('Отправить запрос', { exact: true }).click();
-      await page.waitForFunction(() => document.querySelector('[data-testid="nebula-home-status"]')?.textContent?.includes('(1/7)'));
       await page.waitForFunction(() => /Подключаюсь|Думаю|Обрабатываю|Пишу ответ/.test(document.querySelector('[data-testid="nebula-home-status"]')?.textContent || ''));
       const beforeHistory = await page.evaluate(() => window.__qa.modalShows || 0);
       await page.getByLabel('История диалогов', { exact: true }).click();
@@ -452,7 +457,7 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       } else {
         assert.equal(await page.getByLabel('Показать списком', { exact: true }).count(), 0);
       }
-      await page.getByLabel('Все коллекции', { exact: true }).click();
+      await page.getByLabel('Все разделы', { exact: true }).click();
 
       const beforeSection = await page.evaluate(() => window.__qa.modalShows || 0);
       await page.getByLabel('Новый раздел памяти', { exact: true }).click();
@@ -856,3 +861,5 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
   if (process.env.GITHUB_ACTIONS) console.log('::error title=Browser acceptance::' + String(error && (error.stack || error.message) || error).slice(0, 1800).replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A'));
   process.exitCode = 1;
 });
+
+

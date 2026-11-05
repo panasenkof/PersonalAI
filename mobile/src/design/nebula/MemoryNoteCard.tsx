@@ -1,4 +1,4 @@
-import React from "react";
+﻿import React from "react";
 import { Pressable, Text, View } from "react-native";
 import Feather from "@expo/vector-icons/Feather";
 import type { EntityRecord } from "../../local-memory/types";
@@ -6,6 +6,7 @@ import { useTheme } from "../../theme";
 import { nebulaRadii, nebulaSpacing, nebulaTouch } from "./tokens";
 import { NebulaAction } from "./components";
 import { memoryDisplayTitle, memoryNoteDate, memoryNotePreview, memoryNoteType } from "./memoryNotePresentation";
+import { MemoryTypeIcon } from "./MemoryTypeIcon";
 
 /** Shared with the FlatList cover: tiles keep identical footprints during thumbnail decoding. */
 export const MEMORY_GRID_MEDIA_HEIGHT = 108;
@@ -33,8 +34,9 @@ export function MemoryNoteCard({ note, sectionName, selected, selecting = false,
   const date = memoryNoteDate(note.updated_at);
   // Inside a collection, sectionName is blank and does not get repeated on every row.
   const context = type.label === "Заметка" ? sectionName : type.label;
-  const meta = [context, date].filter(Boolean).join(" · ");
-  const media = cover || <Feather name={type.icon} size={24} color={t.secondary} />;
+  // A photo note already says «Фото» in the title; repeating it in meta is noise.
+  const meta = [(context && context !== title ? context : ""), date].filter(Boolean).join(" · ");
+  const media = cover || <MemoryTypeIcon feather={type.icon} size={28} />;
 
   return <View style={{ position: "relative" }}>
     <Pressable testID={"memory-note-" + note.id}
@@ -87,3 +89,4 @@ export function MemoryNoteCard({ note, sectionName, selected, selecting = false,
     </View> : null}
   </View>;
 }
+
