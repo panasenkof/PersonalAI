@@ -1,4 +1,4 @@
-import { useFocusEffect, useNavigation, useRoute } from "@react-navigation/native";
+﻿import { useFocusEffect, useNavigation, useRoute } from "@react-navigation/native";
 import type { RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useHeaderHeight } from "@react-navigation/elements";
@@ -59,7 +59,7 @@ function SettingsDetailContent({ topic }: { topic: SettingsTopic }) {
         paddingBottom: insets.bottom + nebulaSpacing.xl }}>
       {topic === "voice" ? <VoiceModelCard defaultOpen /> : null}
       {topic === "smart-search" ? <SmartSearchCard defaultOpen /> : null}
-      {topic === "limits" ? <AgentLimitsCard key={profile} defaultOpen /> : null}
+      {topic === "limits" ? <AgentLimitsCard key={profile} defaultOpen title="Лимит обращений" /> : null}
       {topic === "photos" ? <>
         <VisionModelCard defaultOpen />
         <PhotoResultsSettings key={profile} defaultOpen />
@@ -81,3 +81,4 @@ function SettingsDetailContent({ topic }: { topic: SettingsTopic }) {
     </ScrollView>
   </KeyboardAvoidingView>;
 }
+
