@@ -566,9 +566,9 @@ export function LocalMemoryScreen() {
         </View>
         {status === "active" && !term && !collectionId && !selecting ? <View testID="memory-quick-sections"
           style={{ flexDirection: "row", flexWrap: "wrap", gap: nebulaSpacing.xs }}>
-          <NebulaAction testID="memory-open-archive" icon="archive" label="Архив"
+          <NebulaAction testID="memory-open-archive" icon="archive" label="Архив" size="compact"
             accessibilityLabel="Открыть архив" disabled={busy || loading} onPress={() => openStatus("archived")} />
-          <NebulaAction testID="memory-open-trash" icon="trash-2" label="Корзина"
+          <NebulaAction testID="memory-open-trash" icon="trash-2" label="Корзина" size="compact"
             accessibilityLabel="Открыть корзину" disabled={busy || loading} onPress={() => openStatus("trashed")} />
         </View> : null}
         {!term && status === "active" && !collectionId ? <>
@@ -596,18 +596,18 @@ export function LocalMemoryScreen() {
         </> : null}
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <Text testID={status === "trashed" ? "trash-total-counter" : undefined}
-            style={{ flex: 1, minWidth: status === "trashed" && width < 560 ? width - 32 : undefined,
+            style={{ flex: 1, minWidth: 80,
               color: t.text, fontSize: 18, fontWeight: "700" }}>
             {term ? "Результаты поиска" : status === "archived" ? "Записи в архиве" :
-              status === "trashed" ? "Корзина · " + trashPurgeCountLabel(trashCount) : collectionId ? "Записи раздела" : "Недавнее"}
+              status === "trashed" ? trashPurgeCountLabel(trashCount) : collectionId ? "Записи раздела" : "Недавнее"}
           </Text>
           {status === "trashed" && !term && !search && !selecting && !collectionId &&
             trashCount > 0 && !loading ? <NebulaAction testID="memory-empty-trash"
-              icon="trash-2" label="Очистить корзину" variant="danger"
+              icon="trash-2" label="Очистить корзину" variant="danger" size="compact"
               accessibilityLabel="Очистить всю корзину" disabled={busy}
               onPress={() => void inspectWholeTrash()} /> : null}
           {status === "active" && width >= 350 && fontScale < 1.4 ?
-            <NebulaAction icon={grid ? "list" : "grid"} label={grid ? "Список" : "Плитки"}
+            <NebulaAction icon={grid ? "list" : "grid"} label={grid ? "Список" : "Плитки"} size="compact"
               accessibilityLabel={grid ? "Показать списком" : "Показать плитками"}
               disabled={selecting} onPress={switchMemoryView} /> : null}
         </View>
@@ -620,12 +620,11 @@ export function LocalMemoryScreen() {
             <Text style={{ color: t.muted, fontSize: 13 }}>Сравнить источники и решить, что делать с прежними фактами</Text>
           </Pressable> : null}
         {notes.length && !selecting ? <View style={{ alignItems: "flex-start" }}>
-          <NebulaAction icon="check-square" label="Выбрать записи"
+          <NebulaAction icon="check-square" label="Выбрать записи" size="compact"
             disabled={loading || busy} onPress={() => { setContextNote(null); setSelecting(true); }} />
         </View> : null}
         {status === "trashed" && !term ? <Text style={{ color: t.muted, fontSize: 13, lineHeight: 19 }}>
-          Удалённые записи исключены из поиска агента. Их можно восстановить или удалить окончательно.
-          Команда «Очистить корзину» касается только этого профиля и требует отдельного подтверждения.
+          Удалённые записи не видны агенту. Их можно восстановить или окончательно удалить после подтверждения.
         </Text> : null}
         {status === "trashed" && !term && !selecting && trashMessage ? <View style={{ gap: 8 }}>
           <Text accessibilityLiveRegion="polite" style={{ color: t.text }}>{trashMessage}</Text>
@@ -635,7 +634,7 @@ export function LocalMemoryScreen() {
           </View>
         </View> : null}
       {undo ? <View style={{ alignItems: "flex-start" }}>
-        <NebulaAction icon="rotate-ccw" label={noteUndoLabel(undo)}
+        <NebulaAction icon="rotate-ccw" label={noteUndoLabel(undo)} size="compact"
           accessibilityLabel={noteUndoLabel(undo)} disabled={busy || selecting}
           onPress={() => { if (!repository.current) return; setBusy(true); void repository.current.undoNotes(undo).then(() => { setUndo(""); setRetry(n => n + 1); if (profile) scheduleVectors(profile); }).catch(e => setError(memoryErrorMessage(e))).finally(() => setBusy(false)); }} />
       </View> : null}
