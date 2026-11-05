@@ -498,7 +498,7 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByLabel('Открыть заметку Индейка', { exact: true }).click();
       assert.equal(await page.getByLabel('Текст заметки', { exact: true }).count(), 0, 'Opening a saved note shows reading, not a form');
       // Reader actions belong above the body/attachments, not below a long document.
-      const quickActions = page.getByTestId('note-quick-actions');
+      const quickActions = page.getByTestId('note-edit-action');
       await quickActions.waitFor();
       assert.equal(await page.getByLabel('Редактировать запись', { exact: true }).count(), 1, 'Reader has one Edit action');
       assert.equal(await page.getByLabel('Изменить заметку с ИИ', { exact: true }).count(), 1, 'Reader has one AI edit action');
@@ -544,8 +544,8 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByLabel('Текст заметки', { exact: true }).fill('Чеснок, паприка и перец');
       // Schema v3: advanced fields are accessible without crowding the text editor.
       assert.equal(await page.getByLabel('Тип записи: Факт', { exact: true }).count(), 0, 'Metadata starts collapsed');
-      await page.getByLabel('Параметры записи', { exact: true }).click();
-      assert.equal(await page.getByLabel('Параметры записи', { exact: true }).getAttribute('aria-expanded'), 'true');
+      await page.getByLabel('Дополнительно', { exact: true }).click();
+      assert.equal(await page.getByLabel('Дополнительно', { exact: true }).getAttribute('aria-expanded'), 'true');
       await page.getByLabel('Тип записи: Факт', { exact: true }).click();
       await page.getByLabel('Другие имена и прозвища', { exact: true }).fill('Индюшка, индюк');
       // Assert the field using its accessible locator. The real persistence
@@ -555,7 +555,7 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByLabel('Сохранить запись', { exact: true }).click();
       await page.getByLabel('Открыть заметку Индейка', { exact: true }).click();
       await page.getByLabel('Редактировать запись', { exact: true }).click();
-      await page.getByLabel('Параметры записи', { exact: true }).click();
+      await page.getByLabel('Дополнительно', { exact: true }).click();
       // Aliases arrive asynchronously after opening a note. Poll through the
       // accessible Playwright locator, which works for RN Web input AND
       // textarea; the old raw CSS selector was browser-implementation-specific.
