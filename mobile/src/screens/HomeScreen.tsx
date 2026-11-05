@@ -116,14 +116,9 @@ function NebulaHomeContent() {
     [active?.rows, active?.busy, active?.streamText]);
   const turnId = [...(active?.rows || [])].reverse().find(row => row.role === "user")?.id;
   const viewport = useChatBottomFollow(active?.id, isFocused, turnId, rows.length > 0);
-  const { onCell } = viewport;
-  // Measure the cell in list coordinates, not the inner bubble's local y=0.
   // Stable component identity is essential: recreating this on tokens remounts cells.
-  const ChatCell = useCallback(({ item, onLayout, children, style, onFocusCapture }: CellRendererProps<PresentedChatRow>) =>
-    <View {...{ style, onFocusCapture }} onLayout={event => {
-      onLayout?.(event);
-      onCell(item.id, event.nativeEvent.layout.y, event.nativeEvent.layout.height);
-    }}>{children}</View>, [onCell]);
+  const ChatCell = useCallback(({ onLayout, children, style, onFocusCapture }: CellRendererProps<PresentedChatRow>) =>
+    <View {...{ style, onFocusCapture }} onLayout={onLayout}>{children}</View>, []);
   useEffect(() => {
     // Browser QA / React Native Web may omit the native Keyboard module.
     // Native Android still reports keyboardDidShow/Hide; focus is the fallback.

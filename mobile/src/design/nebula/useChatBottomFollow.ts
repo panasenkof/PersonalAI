@@ -3,15 +3,17 @@ import type { FlatList } from "react-native";
 import type { PresentedChatRow } from "./chatPresentation";
 import { isNebulaChatNearBottom } from "./homeArtLayout";
 
-type Mode = "latest" | "turn" | "reading";
+type Mode = "latest" | "reading";
 type Metrics = { contentOffset: { y: number }; contentSize: { height: number }; layoutMeasurement: { height: number } };
 /** One owner for every scroll command. IME events never switch the reading mode.
- * Turn mode follows up to the submitted question, then holds that reading anchor.
+ * Owner decision 05.11.2026: a submitted turn follows the answer to its end, so a
+ * streamed answer is never left hidden below the fold. The reader keeps control
+ * from the first manual scroll until a deliberate return to the bottom.
  */
 export function useChatBottomFollow(conversationId: string | undefined, focused: boolean, turnId?: string, hasRows = true) {
   const list = useRef<FlatList<PresentedChatRow>>(null);
   const state = useRef({ mode: "latest" as Mode, content: 0, viewport: 0, offset: 0,
-    gesture: false, enabled: focused, turnId, locateOffset: null as number | null, anchor: null as null | { y: number; height: number } });
+    gesture: false, enabled: focused, turnId });
   const contentPresent = useRef(hasRows);
   contentPresent.current = hasRows;
   const frame = useRef<number | null>(null);
@@ -26,25 +28,11 @@ export function useChatBottomFollow(conversationId: string | undefined, focused:
       frame.current = null;
       const s = state.current;
       if (!s.enabled || s.gesture || s.viewport <= 0 || !contentPresent.current) return;
-      const bottom = Math.max(0, s.content - s.viewport);
-      if (s.mode !== "reading") {
-        // A long question may exceed the viewport: retain its last 30% above
-        // the answer. No thresholds based on a changing streamed bubble height.
-        if (s.mode === "turn" && !s.anchor) {
-          // A reader may send while hundreds of virtualized rows above the end.
-          // Reveal the previous tail once so the new question can be measured.
-          // Use the PRE-send geometry, never the bottom of a giant first chunk.
-          if (s.locateOffset !== null) {
-            list.current?.scrollToOffset({ offset: s.locateOffset, animated: false });
-            s.offset = s.locateOffset; s.locateOffset = null;
-          }
-          return;
-        }
-        const cap = s.anchor ? s.anchor.y + Math.max(0, s.anchor.height - s.viewport * 0.3) : bottom;
-        const offset = s.mode === "turn" ? Math.min(bottom, cap) : bottom;
-        if (Math.abs(offset - s.offset) > 1) {
-          list.current?.scrollToOffset({ offset, animated: false });
-          s.offset = offset;
+      if (s.mode === "latest") {
+        const bottom = Math.max(0, s.content - s.viewport);
+        if (Math.abs(bottom - s.offset) > 1) {
+          list.current?.scrollToOffset({ offset: bottom, animated: false });
+          s.offset = bottom;
         }
       }
       setShowJumpToLatest(!isNebulaChatNearBottom(s.content, s.offset, s.viewport));
@@ -52,14 +40,15 @@ export function useChatBottomFollow(conversationId: string | undefined, focused:
   }, []);
   useLayoutEffect(() => {
     cancel();
-    Object.assign(state.current, { mode: "latest", content: 0, viewport: 0, offset: 0, gesture: false, anchor: null, locateOffset: null, turnId });
+    Object.assign(state.current, { mode: "latest", content: 0, viewport: 0, offset: 0, gesture: false, turnId });
     setShowJumpToLatest(false);
   }, [conversationId, cancel]);
   useLayoutEffect(() => {
     const s = state.current;
     if (s.turnId !== turnId) {
-      s.locateOffset = Math.max(0, s.content - s.viewport);
-      s.turnId = turnId; s.anchor = null; s.mode = "turn"; s.gesture = false;
+      // A new question always returns to following; the reading position of a
+      // previous turn is not inherited.
+      s.turnId = turnId; s.mode = "latest"; s.gesture = false;
       schedule();
       setShowJumpToLatest(false);
     }
@@ -71,9 +60,6 @@ export function useChatBottomFollow(conversationId: string | undefined, focused:
   }, [conversationId, focused, cancel, schedule]);
   const onViewport = useCallback((height: number) => { state.current.viewport = height; schedule(); }, [schedule]);
   const onContent = useCallback((_width: number, height: number) => { state.current.content = height; schedule(); }, [schedule]);
-  const onCell = useCallback((id: string, y: number, height: number) => {
-    if (id === state.current.turnId) { state.current.anchor = { y, height }; schedule(); }
-  }, [schedule]);
   const beginDrag = useCallback(() => {
     cancel(); state.current.gesture = true; state.current.mode = "reading";
   }, [cancel]);
@@ -92,5 +78,5 @@ export function useChatBottomFollow(conversationId: string | undefined, focused:
   const jumpToLatest = useCallback(() => {
     state.current.mode = "latest"; state.current.gesture = false; schedule();
   }, [schedule]);
-  return { list, showJumpToLatest, onViewport, onContent, onCell, beginDrag, onScroll, endDrag, jumpToLatest };
+  return { list, showJumpToLatest, onViewport, onContent, beginDrag, onScroll, endDrag, jumpToLatest };
 }
