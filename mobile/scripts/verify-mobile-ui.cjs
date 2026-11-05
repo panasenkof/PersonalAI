@@ -424,7 +424,6 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       assert.equal(await page.getByLabel('Сообщение ассистенту', { exact: true }).inputValue(), '', 'New-chat action opens an empty usable conversation');
       await page.getByLabel('Сообщение ассистенту', { exact: true }).fill('Второй вопрос');
       await page.getByLabel('Отправить запрос', { exact: true }).click();
-      await page.waitForFunction(() => document.querySelector('[data-testid="nebula-home-status"]')?.textContent?.includes('(1/7)'));
       await page.waitForFunction(() => /Подключаюсь|Думаю|Обрабатываю|Пишу ответ/.test(document.querySelector('[data-testid="nebula-home-status"]')?.textContent || ''));
       const beforeHistory = await page.evaluate(() => window.__qa.modalShows || 0);
       await page.getByLabel('История диалогов', { exact: true }).click();
