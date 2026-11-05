@@ -26,7 +26,10 @@ describe("Android viewport regressions from real device recordings", () => {
     const endScroll = note.indexOf("</ScrollView>");
     const saveButton = note.indexOf('testID="note-save-button"');
     expect(saveButton).toBeGreaterThan(endScroll);
-    expect(note).toContain("Keyboard.dismiss(); if (editing) void save(); else setEditing(true);");
+    expect(note).toContain("Keyboard.dismiss(); void save();");
+    expect(note).toContain('testID="note-edit-action"');
+    expect(note).toContain("Math.max(insets.bottom, 24) + nebulaSpacing.xl");
+    expect(note).not.toContain("Keyboard.dismiss(); if (editing) void save(); else setEditing(true);");
     expect(note).toContain('testID="note-save-button"');
     expect(smoke).toContain('id: "note-save-button"');
     expect(smoke).not.toContain('element: "Сохранить запись"');
