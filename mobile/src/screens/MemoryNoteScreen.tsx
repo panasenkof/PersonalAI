@@ -46,6 +46,7 @@ import type { ImageExtractionMode } from "../media/extract";
 import { maySendOriginalToProvider } from "../media/recognitionPolicy";
 import { mediaConnections } from "../media/preferences";
 import { AttachmentView } from "../media/AttachmentView";
+import { attachmentPreviewKind } from "../media/attachmentPresentation";
 import { VerifiedRelativeConversations } from "./VerifiedRelativeConversations";
 import { MemoryTemporalTimeline } from "./MemoryTemporalTimeline";
 import { useTheme } from "../theme";
@@ -219,6 +220,16 @@ export function MemoryNoteScreen() {
     if (profile) { scheduleIndexTerms(profile); scheduleVectors(profile); }
     if (alive.current) setLeaving(true);
   });
+  const openPhotoOriginal = () => {
+    if (!selected || !profile || busy || !localMemorySessionUnlocked()) return;
+    const noteId = selected.id;
+    void attachmentsForEntity(profile, noteId).then(files => {
+      if (!alive.current || activeProfile.current !== profile || !localMemorySessionUnlocked()) return;
+      const image = files.find(file => attachmentPreviewKind(file) === "image");
+      if (image) navigation.push("MemoryNote", { entityId: noteId, photoAttachmentId: image.id });
+      else setError("Оригинал фотографии не найден.");
+    }).catch(e => { if (alive.current && activeProfile.current === profile) setError(memoryErrorMessage(e)); });
+  };
   const rerunAttachment = (attachment: Attachment) => {
     if (!selected || !profile || activeProfile.current !== profile || busy || dirty || selected.record_status !== "active") return;
     // The second original wins even if an earlier preferences read resolves later.
@@ -379,7 +390,11 @@ export function MemoryNoteScreen() {
       {!loading && repository.current ? <>
         {!editing ? <>
           {selected && profile && route.params?.photoAttachmentId ? <AttachmentView key={selected.record_version + ":" + (route.params?.verifiedOriginal?.attachmentId || route.params?.photoAttachmentId || "")} profile={profile} entityId={selected.id} verifiedOriginal={route.params?.verifiedOriginal} photoAttachmentId={route.params?.photoAttachmentId} onRecognize={!editing && !busy && selected.record_status === "active" ? rerunAttachment : undefined} /> : null}
-          {profile && selected && !route.params?.verifiedOriginal && !route.params?.photoAttachmentId && memoryNoteHasPhoto(selected) ? <View style={{ borderRadius: nebulaRadii.card, overflow: "hidden" }}><MemoryCover profile={profile} entityId={selected.id} height={210} label={title} /></View> : null}
+          {profile && selected && !route.params?.verifiedOriginal && !route.params?.photoAttachmentId && memoryNoteHasPhoto(selected) ? <Pressable
+            testID="note-photo-open" accessibilityRole="button" accessibilityLabel="Открыть оригинал фотографии"
+            disabled={busy} onPress={openPhotoOriginal} style={{ borderRadius: nebulaRadii.card, overflow: "hidden" }}>
+            <MemoryCover profile={profile} entityId={selected.id} height={210} label={readingTitle} />
+          </Pressable> : null}
           <Text accessibilityRole="header" selectable style={{ color: t.text, fontSize: 23, lineHeight: 31, fontWeight: "700" }}>{readingTitle || "Без названия"}</Text>
           {body && body.trim() !== readingTitle ? <NoteReadPreview
             testID="note-read-body" text={body} fullTitle="Полный текст заметки"
