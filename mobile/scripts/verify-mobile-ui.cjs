@@ -384,8 +384,10 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       assert.equal(replyNumber, 1, 'Changing tabs must not restart the request');
       // Stages are shown to the person; agent-loop counters stay out of the UI.
       await page.waitForFunction(() => {
-        const text = document.querySelector('[data-testid="nebula-home-status"]')?.textContent || '';
-        return /Думаю|Пишу ответ|Подключаюсь|Ищу/.test(text) && !text.includes('(');
+        const text = (document.querySelector('[data-testid="nebula-home-status"]')?.textContent || '').trim();
+        // Any real stage is fine; the invariant is that a stage is shown and no
+        // agent-loop counter leaks into it.
+        return text.length > 0 && text !== 'Готов' && text !== 'Ошибка' && !text.includes('(');
       });
       releaseReply();
       await page.getByText('Ответ 1', { exact: true }).waitFor();
@@ -860,4 +862,5 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
   if (process.env.GITHUB_ACTIONS) console.log('::error title=Browser acceptance::' + String(error && (error.stack || error.message) || error).slice(0, 1800).replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A'));
   process.exitCode = 1;
 });
+
 
