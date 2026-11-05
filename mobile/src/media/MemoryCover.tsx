@@ -82,7 +82,7 @@ export function MemoryCover({ profile, entityId, photoAttachmentId, active = tru
   }, [enabled, profile, entityId, photoAttachmentId, attempt]);
   // Keep the same bounded footprint during loading, missing originals and decoder errors.
   // A failed thumbnail must not push adjacent grid items or move the list anchor.
-  return <View testID={"memory-cover-" + entityId} style={{ height, minHeight: compact ? height : 64, paddingVertical: uri ? 0 : 8, backgroundColor: t.soft, justifyContent: "center", alignItems: "center", overflow: "hidden" }}>
+  return <View testID={"memory-cover-" + entityId} style={{ width: "100%", height, minHeight: compact ? height : 64, paddingVertical: uri ? 0 : 8, backgroundColor: t.soft, justifyContent: "center", alignItems: "center", overflow: "hidden" }}>
     {enabled && uri && !failed ? <Image source={{ uri }} accessibilityLabel={label} resizeMode={fit}
       onError={() => { removeCoverFile(uri); setUri(""); setFailed(true); setMessage("Не удалось показать превью"); }} style={{ width: "100%", height: "100%" }} /> : <>
       {loading ? <ActivityIndicator accessibilityLabel="Загрузка обложки" /> : <MemoryTypeIcon feather={icon} size={compact ? 24 : 28} />}
