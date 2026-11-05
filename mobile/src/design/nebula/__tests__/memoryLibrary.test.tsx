@@ -3,7 +3,7 @@ import { fireEvent, render } from "@testing-library/react-native";
 import { Text } from "react-native";
 import type { EntityRecord } from "../../../local-memory/types";
 import { MemoryNoteCard } from "../MemoryNoteCard";
-import { memoryNoteDate, memoryNotePreview } from "../memoryNotePresentation";
+import { memoryNoteDate, memoryNotePreview, memoryNoteHasRecognizedText } from "../memoryNotePresentation";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -32,6 +32,17 @@ describe("U2 Memory library note presentation", () => {
     expect(memoryNotePreview(note({ body: "", extracted_text: "Текст из фото\nстрока" }))).toBe("Текст из фото строка");
     expect(memoryNotePreview(note({ body: null, extracted_text: null }))).toBe("");
     expect(memoryNoteDate("not-a-date")).toBe("");
+  });
+  it("does not show an OCR editor just because an original photo or PDF was saved", () => {
+    const photo = note({ source_file: "portrait.jpg", source_media: "image", body: "" });
+    const pdf = note({ source_file: "scan.pdf", source_media: "document", body: "" });
+    expect(memoryNoteHasRecognizedText(photo)).toBe(false);
+    expect(memoryNoteHasRecognizedText(pdf)).toBe(false);
+    expect(memoryNoteHasRecognizedText(note({ extracted_text: "" }))).toBe(false);
+    expect(memoryNoteHasRecognizedText(note({ extracted_text: "  Найденный текст  " }))).toBe(true);
+    expect(memoryNoteHasRecognizedText(photo, "черновик распознанного текста")).toBe(true);
+    // Editing a recognized note back to empty keeps the section visible until saving.
+    expect(memoryNoteHasRecognizedText(note({ extracted_text: "Ранее распознано" }), "")).toBe(true);
   });
   it("opens a note on press and selects it on long press", () => {
     const onOpen = jest.fn(), onToggleSelection = jest.fn();
