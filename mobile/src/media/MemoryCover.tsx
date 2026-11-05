@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Image, Pressable, Text, View } from "react-native";
 import Feather from "@expo/vector-icons/Feather";
 import { useIsFocused } from "@react-navigation/native";
@@ -59,17 +59,26 @@ export function MemoryCover({ profile, entityId, photoAttachmentId, active = tru
       try {
         original = await materializeAttachment(profile, image, controller.signal);
         if (controller.signal.aborted) return;
+        // A decoder failure stays retryable. A resize that "succeeds" but leaves
+        // an unusable file must not blank the cover: the decrypted original is a
+        // local file the note screen already renders, so fall back to it.
         const result = await manipulateAsync(original, [{ resize: { width: 480 } }], { compress: 0.7, format: SaveFormat.JPEG });
-        thumbnail = result.uri;
-        if (controller.signal.aborted) removeCoverFile(thumbnail);
-        else {
+        if (controller.signal.aborted) { removeCoverFile(result.uri); return; }
+        let moved = "";
+        try {
           const directory = new Directory(Paths.cache, "persai-previews");
           directory.create({ intermediates: true, idempotent: true });
           const destination = new File(directory, Crypto.randomUUID() + ".jpg");
-          new File(thumbnail).move(destination); thumbnail = destination.uri;
-          setUri(thumbnail);
-        }
-      } finally { removeCoverFile(original); }
+          new File(result.uri).move(destination);
+          // A zero-byte destination renders as a blank card: fall back to the
+          // original instead of showing nothing.
+          const size = Number((destination as { size?: number }).size);
+          if (!(size === 0)) moved = destination.uri;
+        } catch { moved = ""; }
+        thumbnail = moved || original;
+        if (controller.signal.aborted) { if (thumbnail !== original) removeCoverFile(thumbnail); return; }
+        setUri(thumbnail);
+      } finally { if (thumbnail !== original) removeCoverFile(original); }
     }).catch(() => { if (!controller.signal.aborted) { setFailed(true); setMessage("Не удалось загрузить превью"); } })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => { controller.abort(); removeCoverFile(thumbnail); };
