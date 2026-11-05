@@ -240,7 +240,7 @@ export function DirectAgentSettingsScreen() {
           <Text style={small}>Только https://; http:// — для модели в вашей локальной сети. После смены адреса ключ нужно ввести заново.</Text>
           <Text style={label}>API-ключ (токен){selected.apiKey ? " — введён" : ""}</Text>
           <TextInput editable={!busy} accessibilityLabel="API-ключ LLM" secureTextEntry autoCapitalize="none" autoCorrect={false}
-            value={selected.apiKey} onChangeText={apiKey => update({ apiKey })} placeholder={/^http:\/\//.test(selected.baseUrl) ? "Не нужен для локальной модели" : "Ключ этого сервиса"} placeholderTextColor={t.muted} style={field} />
+            value={selected.apiKey} onChangeText={apiKey => update({ apiKey })} placeholder={/^http:\/\//.test(selected.baseUrl) ? "Не нужен" : "Ключ этого сервиса"} placeholderTextColor={t.muted} style={field} />
           <Text style={label}>Модель</Text>
           <TextInput editable={!busy} accessibilityLabel="Название модели" autoCapitalize="none" autoCorrect={false} value={selected.model}
             onChangeText={model => update({ model })} placeholder="Например, deepseek-flash" placeholderTextColor={t.muted} style={field} />
@@ -271,7 +271,7 @@ export function DirectAgentSettingsScreen() {
             {search === "tavily" && usage ? <Text selectable accessibilityLabel="Остаток запросов Tavily" style={{ color: usage.ok ? t.muted : t.err, fontSize: 13 }}>{usage.text}</Text> : null}
             {search === "deepseek" ? <TextInput editable={!busy} accessibilityLabel="Ключ DeepSeek для поиска" secureTextEntry autoCapitalize="none" autoCorrect={false}
               value={keys.deepseek || ""} onChangeText={key => setSearchKey("deepseek", key)}
-              placeholder={isDeepSeekApi(selected.baseUrl) ? "Не нужен: используется ключ подключения" : "Ключ DeepSeek (sk-…)"} placeholderTextColor={t.muted} style={field} /> : null}
+              placeholder={isDeepSeekApi(selected.baseUrl) ? "Ключ из подключения" : "Ключ DeepSeek (sk-…)"} placeholderTextColor={t.muted} style={field} /> : null}
             {search === "yandex" ? <>
               <TextInput editable={!busy} accessibilityLabel="API-ключ Yandex Cloud для поиска" secureTextEntry autoCapitalize="none" autoCorrect={false}
                 value={keys.yandex || ""} onChangeText={key => setSearchKey("yandex", key)} placeholder="API-ключ Yandex Cloud (AQVN…)" placeholderTextColor={t.muted} style={field} />
@@ -314,4 +314,6 @@ export function DirectAgentSettingsScreen() {
     </>
   );
 }
+
+
 

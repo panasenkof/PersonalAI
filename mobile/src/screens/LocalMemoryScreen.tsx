@@ -1,4 +1,4 @@
-﻿import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Feather from "@expo/vector-icons/Feather";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
@@ -623,7 +623,7 @@ export function LocalMemoryScreen() {
           <NebulaAction icon="check-square" label="Выбрать записи"
             disabled={loading || busy} onPress={() => { setContextNote(null); setSelecting(true); }} />
         </View> : null}
-        {status === "trashed" ? <Text style={{ color: t.muted, fontSize: 13, lineHeight: 19 }}>
+        {status === "trashed" && !term ? <Text style={{ color: t.muted, fontSize: 13, lineHeight: 19 }}>
           Удалённые записи исключены из поиска агента. Их можно восстановить или удалить окончательно.
           Команда «Очистить корзину» касается только этого профиля и требует отдельного подтверждения.
         </Text> : null}
