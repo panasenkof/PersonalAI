@@ -368,7 +368,7 @@ test("03.4: clear-trash is contextual, previews ALL 205 rows, cancel never calls
   expect(ui.queryByLabelText("Очистить всю корзину")).toBeNull();
   fireEvent.press(ui.getByLabelText("Открыть корзину"));
   await waitFor(()=>ui.getByLabelText("Очистить всю корзину"));
-  expect(ui.getByText("Корзина · 205 записей")).toBeTruthy();
+  expect(ui.getByTestId("trash-total-counter").props.children).toBe("205 записей");
   await act(async()=>fireEvent.press(ui.getByLabelText("Очистить всю корзину")));
   expect(mockDb.trashPurgeSnapshot).toHaveBeenCalledTimes(1);
   expect(ui.getByText(/Проверен весь список, а не только видимые 50/)).toBeTruthy();
