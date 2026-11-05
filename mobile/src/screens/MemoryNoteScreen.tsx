@@ -51,7 +51,7 @@ import { VerifiedRelativeConversations } from "./VerifiedRelativeConversations";
 import { MemoryTemporalTimeline } from "./MemoryTemporalTimeline";
 import { useTheme } from "../theme";
 import { nebulaRadii, nebulaSpacing, nebulaTouch, nebulaTypography } from "../design/nebula/tokens";
-import { memoryNoteHasPhoto, memoryDisplayTitle } from "../design/nebula/memoryNotePresentation";
+import { memoryNoteHasPhoto, memoryDisplayTitle, memoryNoteHasRecognizedText } from "../design/nebula/memoryNotePresentation";
 import { NoteEditorSection } from "../design/nebula/NoteEditorSection";
 import { NoteReadPreview } from "../design/nebula/NoteReadPreview";
 import { NebulaAction } from "../design/nebula/components";
@@ -353,6 +353,7 @@ const [termsOpen, setTermsOpen] = useState(false);
   const canEditWithAi = Boolean(body.trim());
   const saveDisabled = busy || voiceActive || (editing && !title.trim() && !body.trim());
   const readingTitle = selected ? memoryDisplayTitle({ ...selected, title, payload: { ...selected.payload, body } }) : title;
+  const hasRecognizedText = memoryNoteHasRecognizedText(selected, extractedText);
   const button = { minHeight: nebulaTouch.minimum, borderRadius: nebulaRadii.field, justifyContent: "center" as const, padding: nebulaSpacing.md };
   return <KeyboardAvoidingView style={{ flex: 1, backgroundColor: t.bg }} behavior={Platform.OS === "ios" ? "padding" : "height"} keyboardVerticalOffset={Platform.OS === "ios" ? headerHeight : 0}>
     <ScrollView testID="note-editor-scroll" keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentContainerStyle={{ padding: nebulaSpacing.md, paddingBottom: Math.max(insets.bottom, 24) + nebulaSpacing.xl, gap: nebulaSpacing.sm }}>
@@ -475,7 +476,7 @@ const [termsOpen, setTermsOpen] = useState(false);
           <NebulaAction icon="plus" label="Добавить слова для поиска" disabled={busy} onPress={() => setTermsOpen(true)} />}
         {modelTerms.length ? <Text accessibilityLabel="Слова, подобранные моделью" style={{ color: t.muted, fontSize: 12, lineHeight: 18 }}>Поисковые слова ИИ: {modelTerms.join(", ")}. Пересчитываются после правки текста.</Text> : null}
         </NoteEditorSection>
-        {selected && (selected.payload.source_file || selected.payload.extracted_text) ? <NoteEditorSection
+        {selected && hasRecognizedText ? <NoteEditorSection
           testID="note-extracted-toggle" title="Текст из файла"
           summary="Распознанное содержимое участвует в поиске по памяти"
           expanded={fileContentOpen} onToggle={() => { Keyboard.dismiss(); setFileContentOpen(open => !open); }}>
@@ -594,7 +595,7 @@ const [termsOpen, setTermsOpen] = useState(false);
       {selected?.record_status !== "trashed" ? <>
       <Pressable accessibilityRole="button" style={{...button,backgroundColor:t.soft}} onPress={() => { setNoteMenu(false); setEditing(true); setMetadataOpen(true); }}><Text style={{ color: t.text }}>Свойства и доступ</Text></Pressable>
       <Pressable accessibilityRole="button" style={{...button,backgroundColor:t.soft}} onPress={() => { setNoteMenu(false); setEditing(true); void loadDetails(); }}><Text style={{ color: t.text }}>История, события и связи</Text></Pressable>
-      <Pressable accessibilityRole="button" style={{...button,backgroundColor:t.soft}} onPress={() => { setNoteMenu(false); setEditing(true); setFileContentOpen(true); }}><Text style={{ color: t.text }}>Распознанный текст и оригиналы</Text></Pressable>
+      {hasRecognizedText ? <Pressable accessibilityRole="button" style={{...button,backgroundColor:t.soft}} onPress={() => { setNoteMenu(false); setEditing(true); setFileContentOpen(true); }}><Text style={{ color: t.text }}>Распознанный текст и оригиналы</Text></Pressable> : null}
       </> : <Text style={{ color: t.muted }}>Восстановите запись из корзины, чтобы редактировать её.</Text>}
     </BottomSheet>
     <BottomSheet visible={sectionOpen} title="Раздел записи" onClose={() => setSectionOpen(false)}>
