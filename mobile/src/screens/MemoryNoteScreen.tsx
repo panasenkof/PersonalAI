@@ -364,16 +364,16 @@ export function MemoryNoteScreen() {
         {selected && !editing ? <Pressable accessibilityRole="button" accessibilityLabel="Меню записи" style={{ ...button, minWidth: nebulaTouch.minimum, alignItems: "center" }} onPress={() => setNoteMenu(true)}><Feather name="more-vertical" size={22} color={t.text} /></Pressable> : null}
         {!loading && dirty ? <Text accessibilityLabel="Несохранённые изменения" style={{ color: t.muted, ...nebulaTypography.label }}>Не сохранено</Text> : null}
       </View>
-      {!loading && repository.current && selected && !editing ? <View testID="note-quick-actions"
+      {!loading && repository.current && selected && !editing && selected.record_status === "trashed" ? <View testID="note-quick-actions"
         style={{ flexDirection: "row", flexWrap: "wrap", gap: nebulaSpacing.sm }}>
-        {selected.record_status === "trashed" ? <NebulaAction
+        <NebulaAction
           icon="rotate-ccw" label="Восстановить" accessibilityLabel="Восстановить запись из корзины" disabled={busy}
           onPress={() => void run(async db => {
             // The existing versioned writer checks ACL and record_version atomically.
             await db.changeNotes("restore", [selected], undefined);
             if (profile) scheduleVectors(profile);
             if (alive.current) setLeaving(true);
-          })} /> : null}
+          })} />
       </View> : null}
       {loading ? <ActivityIndicator accessibilityLabel="Загрузка записи" /> : null}
       {!loading && route.params?.chatReply && !selected ? <Text style={{color:t.muted,...nebulaTypography.label}}>
@@ -589,9 +589,11 @@ export function MemoryNoteScreen() {
           </View> : null}
     </BottomSheet>
     <BottomSheet visible={noteMenu} title="Запись" onClose={() => setNoteMenu(false)}>
+      {selected?.record_status !== "trashed" ? <>
       <Pressable accessibilityRole="button" style={{...button,backgroundColor:t.soft}} onPress={() => { setNoteMenu(false); setEditing(true); setMetadataOpen(true); }}><Text style={{ color: t.text }}>Свойства и доступ</Text></Pressable>
       <Pressable accessibilityRole="button" style={{...button,backgroundColor:t.soft}} onPress={() => { setNoteMenu(false); setEditing(true); void loadDetails(); }}><Text style={{ color: t.text }}>История, события и связи</Text></Pressable>
       <Pressable accessibilityRole="button" style={{...button,backgroundColor:t.soft}} onPress={() => { setNoteMenu(false); setEditing(true); setFileContentOpen(true); }}><Text style={{ color: t.text }}>Распознанный текст и оригиналы</Text></Pressable>
+      </> : <Text style={{ color: t.muted }}>Восстановите запись из корзины, чтобы редактировать её.</Text>}
     </BottomSheet>
     <BottomSheet visible={sectionOpen} title="Раздел записи" onClose={() => setSectionOpen(false)}>
       {collections.length ? collections.map(c => <Pressable key={c.id} accessibilityRole="button" accessibilityLabel={"Поместить в раздел " + c.name} accessibilityState={{ selected: c.id === collectionId }} style={button} onPress={() => { setCollectionId(c.id); setSectionOpen(false); if (!selected && !kindTouched.current) setKind(defaultKind(c.slug)); }}><Text style={{ color: c.id === collectionId ? t.secondary : t.text }}>{c.name}</Text></Pressable>) : <Text style={{ color: t.muted }}>Первая запись будет в разделе «Заметки». Другие разделы можно создать на странице памяти.</Text>}
