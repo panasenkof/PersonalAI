@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+﻿import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 describe("Android viewport regressions from real device recordings", () => {
@@ -74,7 +74,8 @@ describe("Android viewport regressions from real device recordings", () => {
     expect(files).toContain('"Открыть заметку "');
     expect(files).toContain('title="Мои диалоги"');
     expect(files).toContain('"Закрыть панель " +');
-    expect(files).toContain('title="Работа ИИ"');
+    expect(files).toContain('title = "Работа ИИ"');
   });
 
 });
+
