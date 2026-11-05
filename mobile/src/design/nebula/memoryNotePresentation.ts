@@ -40,6 +40,12 @@ export function memoryNoteType(note: Pick<EntityRecord, "payload" | "kind">): { 
   }
 }
 
+/** A saved source is not proof that OCR/ASR was run. Hide the recognition editor
+ * for photo and file notes that only have an original attachment. */
+export function memoryNoteHasRecognizedText(note: Pick<EntityRecord, "payload"> | null | undefined, draft = ""): boolean {
+  return Boolean(draft.trim() || (typeof note?.payload.extracted_text === "string" && note.payload.extracted_text.trim()));
+}
+
 export function memoryNoteHasPhoto(note: Pick<EntityRecord, "payload">): boolean {
   // Historic imports and later appends do not always carry source_media_types.
   // Use only stored metadata here: listing must never decrypt original files.
