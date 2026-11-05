@@ -1,4 +1,4 @@
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+﻿import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Feather from "@expo/vector-icons/Feather";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
@@ -17,7 +17,7 @@ import { ensureSections, orderCollections } from "../local-memory/sections";
 import type { RootStackParams } from "../navigation";
 import { useTheme } from "../theme";
 import { nebulaSpacing, nebulaRadii, nebulaTouch } from "../design/nebula/tokens";
-import { MemoryCover } from "../media/MemoryCover";
+import { MemoryCover, purgeLegacyCoverCache } from "../media/MemoryCover";
 import { memoryDisplayTitle, memoryNoteHasPhoto, memoryNoteType } from "../design/nebula/memoryNotePresentation";
 import { MemoryNoteCard, MEMORY_GRID_MEDIA_HEIGHT } from "../design/nebula/MemoryNoteCard";
 import { MemoryTypeIcon } from "../design/nebula/MemoryTypeIcon";
@@ -145,6 +145,7 @@ export function LocalMemoryScreen() {
       return () => clearTimeout(timer);
     }
   }, [scope, columns, loading, notes]);
+  useEffect(() => { purgeLegacyCoverCache(); }, []);
   useEffect(() => { const timer = setTimeout(() => setTerm(search.trim()), 250); return () => clearTimeout(timer); }, [search]);
   useEffect(() => {
     // Invalidate a reviewed destructive action immediately when the user
@@ -979,6 +980,7 @@ export function LocalMemoryScreen() {
     </BottomSheet>
   </View>;
 }
+
 
 
 

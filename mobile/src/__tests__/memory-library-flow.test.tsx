@@ -39,7 +39,7 @@ jest.mock("../local-memory/storage", () => ({
 jest.mock("../local-memory/sections", () => ({ ensureSections: async () => sections, orderCollections: (v: any) => v }));
 jest.mock("../profile/ProfileContext", () => ({ useProfile: () => "p" }));
 jest.mock("../media/vector-runner", () => ({ scheduleVectors: jest.fn() }));
-jest.mock("../media/MemoryCover", () => ({ MemoryCover: () => null }));
+jest.mock("../media/MemoryCover", () => ({ MemoryCover: () => null, purgeLegacyCoverCache: jest.fn() }));
 jest.mock("../local-memory/note-actions", () => ({ mergeText: (items: { title: string }[]) => items.map(note => note.title + "\\n" + "Т".repeat(1000)).join("\\n"), noteUndoLabel: () => "Отменить архивирование" }));
 jest.mock("../local-memory/errors", () => ({ memoryErrorMessage: (e: Error) => e.message }));
 jest.mock("expo-crypto", () => ({ randomUUID: () => "id" }));
@@ -459,4 +459,5 @@ test("trash menu opens the read-only note and never bypasses restore", async () 
  fireEvent.press(v.getByText("Открыть запись"));
  expect(mockNavigate).toHaveBeenCalledWith("MemoryNote", { entityId: "deleted" });
 });
+
 

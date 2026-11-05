@@ -5,6 +5,7 @@
     "version": "0.3.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
+    "backgroundColor": "#070D20",
     "platforms": [
       "ios",
       "android"
