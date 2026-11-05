@@ -110,11 +110,12 @@ test('native note smoke navigates past the keyboard before targeting the body', 
 test('note edit waits for editor, not matching preview in the list (CI #410)', () => {
   const flow = fs.readFileSync(path.join(__dirname, '..', '.maestro', 'flows', 'smoke.yaml'), 'utf8');
   const open = flow.indexOf('- tapOn: "Открыть заметку Native smoke note"');
-  const wait = flow.indexOf('id: "note-save-button"', open);
   const body = flow.indexOf('- assertVisible: "Persisted offline content"', open);
-  const edit = flow.indexOf('id: "note-body-input"', body);
-  assert.ok(open >= 0 && wait > open && body > wait && edit > body,
-    'editor save control must be visible before checking body or editing');
-  assert.match(flow.slice(open, body), /timeout: 15000/,
-    'wait for asynchronous navigation rather than checking list preview immediately');
+  const pencil = flow.indexOf('id: "note-edit-action"', body);
+  const wait = flow.indexOf('id: "note-save-button"', pencil);
+  const edit = flow.indexOf('id: "note-body-input"', wait);
+  assert.ok(open >= 0 && body > open && pencil > body && wait > pencil && edit > wait,
+    'read-only note preview must lead to one edit action and then a visible editor save control');
+  assert.match(flow.slice(pencil, edit), /timeout: 15000/,
+    'wait for asynchronous edit navigation before typing in the editor');
 });
