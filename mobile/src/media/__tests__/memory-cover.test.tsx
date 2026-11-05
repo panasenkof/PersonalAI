@@ -1,5 +1,6 @@
 ﻿import React from "react";
 import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
+import { View } from "react-native";
 import { MemoryCover, coverSlot } from "../MemoryCover";
 import { attachmentsForEntity, materializeAttachment } from "../attachments";
 const mockDelete = jest.fn();
@@ -25,6 +26,23 @@ beforeEach(() => {
   (attachmentsForEntity as jest.Mock).mockResolvedValue(items);
   (materializeAttachment as jest.Mock).mockResolvedValue("file:///original");
 });
+test.each([
+  ["two-column tile", 160, 108, false],
+  ["compact list row", 56, 56, true],
+] as const)("photo cover fills its %s even when parent centers children", async (_mode, width, height, compact) => {
+  const screen = render(<View style={{ width, alignItems: "center" }}>
+    <MemoryCover profile="p" entityId="n" active height={height} compact={compact} />
+  </View>);
+  const container = screen.getByTestId("memory-cover-n");
+  // Parent alignItems:center prevents implicit stretch. Without an explicit
+  // width the Image's 100% width is relative to a zero-width cover.
+  expect(container.props.style.width).toBe("100%");
+  expect(container.props.style.height).toBe(height);
+  const photo = await waitFor(() => screen.getByLabelText("Обложка записи"));
+  expect(photo.props.source).toEqual({ uri: "file:///original" });
+  expect(photo.props.style).toEqual({ width: "100%", height: "100%" });
+});
+
 test("offscreen cards never decrypt; visible cards show the decrypted original", async () => {
   const screen = render(<MemoryCover profile="p" entityId="n" active={false} />);
   expect(materializeAttachment).not.toHaveBeenCalled();
