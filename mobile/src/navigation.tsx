@@ -33,7 +33,7 @@ export type RootStackParams = {
   Tabs: NavigatorScreenParams<TabParams> | undefined;
   /** `presetId` adds and selects a ready-made provider (first-run setup). */
   ModelConnections: { presetId?: string } | undefined;
-  MemoryNote: { entityId?: string; collectionId?: string; photoAttachmentId?: string; verifiedOriginal?: VerifiedOriginalLocator; chatReply?: ChatReplyLocator };
+  MemoryNote: { entityId?: string; collectionId?: string; photoAttachmentId?: string; verifiedOriginal?: VerifiedOriginalLocator; chatReply?: ChatReplyLocator; edit?: boolean };
   PhotoSearchSettings: undefined;
   SettingsDetail: { topic: SettingsTopic };
   MemoryBackup: undefined;
