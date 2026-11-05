@@ -1,4 +1,4 @@
-﻿import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Feather from "@expo/vector-icons/Feather";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
@@ -18,7 +18,7 @@ import type { RootStackParams } from "../navigation";
 import { useTheme } from "../theme";
 import { nebulaSpacing, nebulaRadii, nebulaTouch } from "../design/nebula/tokens";
 import { MemoryCover } from "../media/MemoryCover";
-import { memoryDisplayTitle, memoryNoteHasPhoto } from "../design/nebula/memoryNotePresentation";
+import { memoryDisplayTitle, memoryNoteHasPhoto, memoryNoteType } from "../design/nebula/memoryNotePresentation";
 import { MemoryNoteCard, MEMORY_GRID_MEDIA_HEIGHT } from "../design/nebula/MemoryNoteCard";
 import { NebulaAction } from "../design/nebula/components";
 import { loadMemoryLibraryView, saveMemoryLibraryView } from "../design/nebula/memoryViewPreference";
@@ -648,9 +648,10 @@ export function LocalMemoryScreen() {
         {!term && status !== "active" ? <NebulaAction icon="arrow-left" label="Вернуться в память" onPress={openAll} /> : null}
       </View> : null}
       renderItem={({ item }) => <View style={{ flex: 1, maxWidth: columns === 2 ? "50%" : "100%" }}><MemoryNoteCard note={item} grid={columns === 2}
-        cover={profile && memoryNoteHasPhoto(item)
+        cover={profile
           ? <MemoryCover profile={profile} entityId={item.id} active={visibleIds.has(item.id)}
-            height={columns === 2 ? MEMORY_GRID_MEDIA_HEIGHT : 56} compact={columns !== 2} label={"Обложка " + item.title} /> : undefined}
+            height={columns === 2 ? MEMORY_GRID_MEDIA_HEIGHT : 56} compact={columns !== 2} label={"Обложка " + item.title}
+            icon={memoryNoteType(item).icon} expectPhoto={memoryNoteHasPhoto(item)} /> : undefined}
         sectionName={collectionId ? "" : collections.find(c => c.id === item.collection_id)?.name || "Запись"}
         selected={selectedIds.includes(item.id)} selecting={selecting}
         onToggleSelection={() => toggleSelection(item.id)}
@@ -978,5 +979,6 @@ export function LocalMemoryScreen() {
     </BottomSheet>
   </View>;
 }
+
 
 

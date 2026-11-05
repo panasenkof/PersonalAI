@@ -33,7 +33,8 @@ export function MemoryNoteCard({ note, sectionName, selected, selecting = false,
   const date = memoryNoteDate(note.updated_at);
   // Inside a collection, sectionName is blank and does not get repeated on every row.
   const context = type.label === "Заметка" ? sectionName : type.label;
-  const meta = [context, date].filter(Boolean).join(" · ");
+  // A photo note already says «Фото» in the title; repeating it in meta is noise.
+  const meta = [(context && context !== title ? context : ""), date].filter(Boolean).join(" · ");
   const media = cover || <Feather name={type.icon} size={24} color={t.secondary} />;
 
   return <View style={{ position: "relative" }}>
