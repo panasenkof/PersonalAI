@@ -2,6 +2,7 @@ import Feather from "@expo/vector-icons/Feather";
 import React, { useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import type { ChatArticleReadReport } from "../direct-agent/conversations";
+import { articleCitationCounts } from "../direct-agent/article-citations";
 import { nebulaTouch } from "../design/nebula/tokens";
 import { useTheme } from "../theme";
 
@@ -27,11 +28,12 @@ const entryStatus=(e:ChatArticleReadReport["entries"][number])=>{
 
 /** Read-only historical provenance beneath one answer. Opening uses canonical
  * MemoryNote navigation and rechecks the source's access at that time. */
-export function ArticleReadSources({report,onOpen}:{
-  report:ChatArticleReadReport;onOpen:(id:string)=>void;
+export function ArticleReadSources({report,answerText,onOpen}:{
+  report:ChatArticleReadReport;answerText:string;onOpen:(id:string)=>void;
 }){
   const t=useTheme();
   const [open,setOpen]=useState(false);
+  const cited=articleCitationCounts(answerText,report);
   return <View style={{borderWidth:1,borderColor:t.line,borderRadius:14,
     backgroundColor:t.soft,paddingHorizontal:12,paddingVertical:6,gap:4}}>
     <Pressable accessibilityRole="button" accessibilityLabel={
@@ -50,6 +52,13 @@ export function ArticleReadSources({report,onOpen}:{
       <Text style={{color:t.muted,fontSize:12}}>
         Проверка на момент ответа. Это охват сохранённых заметок, а не подтверждение
         оригинальных веб-страниц или каждого утверждения модели. Сейчас доступ мог измениться.
+      </Text>
+      <Text style={{color:t.muted,fontSize:12}}>
+        {cited.valid
+          ? "Ссылок на действительно прочитанные диапазоны: "+cited.valid+
+            ". Смысл выводов не проверяется автоматически."
+          : "У выводов пока нет ссылок на конкретные прочитанные диапазоны."}
+        {cited.invalid ? " Ссылок без подтверждённого чтения: "+cited.invalid+" — они неактивны." : ""}
       </Text>
       {report.entries.map(e=><Pressable key={e.id} accessibilityRole="link"
         accessibilityLabel={`Открыть исходную запись ${e.selectedIndex+1}: ${e.title||"без названия"}`}

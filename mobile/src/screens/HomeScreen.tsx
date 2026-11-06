@@ -413,7 +413,9 @@ function NebulaHomeContent() {
               saveReplyToNotes(item.id);
           }}
           onLongPress={() => {if(!item.streaming)saveReplyToNotes(item.id);}}>
-          <MarkdownText text={item.text} style={{ color: t.text, lineHeight: 23 }} />
+          <MarkdownText text={item.text} style={{ color: t.text, lineHeight: 23 }}
+            articleReadReport={item.articleReadReport}
+            onArticleSourcePress={noteId=>navigation.navigate("MemoryNote",{entityId:noteId})} />
         </Pressable> :
         (item.role === "info" && item.error ? <View style={{ gap: 10 }}>
           <View style={{ flexDirection: "row", gap: 8, alignItems: "flex-start" }}>
@@ -449,7 +451,7 @@ function NebulaHomeContent() {
             </Pressable>)}
         </View> : null}
         {item.role === "assistant" && !item.streaming && item.articleReadReport ?
-          <ArticleReadSources report={item.articleReadReport}
+          <ArticleReadSources report={item.articleReadReport} answerText={item.text}
             onOpen={noteId=>navigation.navigate("MemoryNote",{entityId:noteId})} /> : null}
         {item.role === "assistant" && !item.streaming && item.articlePage?.nextCursor ?
           <View style={{ alignSelf: "flex-start" }}>

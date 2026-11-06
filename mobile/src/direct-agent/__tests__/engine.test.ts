@@ -480,7 +480,7 @@ test("9C: model tool loop returns host-verified read provenance with its answer"
     .mockResolvedValueOnce(toolResponse("read_selected_local_articles",
       {startIndex:0,count:2,charsPerNote:1000},"read_1"))
     .mockResolvedValueOnce(toolResponse("selected_article_read_coverage",{},"coverage_1"))
-    .mockResolvedValueOnce(final("Сравнение двух сохранённых заметок."));
+    .mockResolvedValueOnce(final("Первый материал [[S1:0-10]], второй — только ссылка [[S2:0-10]]."));
   const articleSelection={
     kind:"saved_topic_links",topic:"космос",queryTerms:["космос"],
     savedFrom:"2026-10-31T00:00:00.000Z",savedBefore:"2026-11-07T00:00:00.000Z",
@@ -498,17 +498,23 @@ test("9C: model tool loop returns host-verified read provenance with its answer"
     prompt:"Сделай выжимку из выбранных статей",
     articleSelection,selectArticles:jest.fn(),read,
   });
-  expect(result.text).toBe("Сравнение двух сохранённых заметок.");
+  expect(result.text).toBe("Первый материал [[S1:0-10]], второй — только ссылка [[S2:0-10]].");
   expect(read).toHaveBeenCalledTimes(2);
   expect(result.articleReadReport).toMatchObject({
     kind:"selected_saved_note_reads",selectedCount:2,
     entries:[
       {id:"source-a",version:2,status:"complete_saved_note_text",
-        title:"Первый материал"},
-      {id:"source-b",version:3,status:"link_only",title:"Ссылка"},
+        title:"Первый материал",
+        ranges:[{startChar:0,endChar:"Статья с сохранёнными фактами".length}]},
+      {id:"source-b",version:3,status:"link_only",title:"Ссылка",
+        ranges:[{startChar:0,endChar:"https://example.org/original".length}]},
     ],
   });
   expect(result.articlePage?.selected).toEqual(articleSelection.selected);
+  const {articleCitationCounts}=require("../article-citations");
+  expect(articleCitationCounts(result.text,result.articleReadReport)).toEqual({
+    valid:1,invalid:1,
+  });
   const next=JSON.parse(transport.mock.calls[2][1].body);
   expect(next.input).toContainEqual(expect.objectContaining({
     type:"function_call_output",call_id:"coverage_1",
