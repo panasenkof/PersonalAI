@@ -391,7 +391,6 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
         Number.isSafeInteger(r.selectedCount) && typeof r.hasMore==="boolean" &&
         r.entries.length<=6 ? r.entries.length ? "read" as const : "empty" as const : "failed" as const,
     },
-
       { definition:{name:"read_selected_article_chunk",
         description:"9B: дочитать ОДНУ длинную заметку из сохранённой подборки по selectedIndex, НЕ по ID модели. offset=nextOffset предыдущего фрагмента; до 6000 символов. Версия, права, AppLock и доказательства диапазона перепроверяются. Прочтение последнего фрагмента НЕ означает, что прочитаны все предыдущие или оригинальная веб-страница. При неполном охвате сообщи это явно.",
         parameters:{type:"object",properties:{
@@ -418,7 +417,7 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
           const result=await verifiedSelectedArticleRead(handle,Number(offset),Number(budget));
           const isSingleFullRead=Number(offset)===0 && !result.hasMore;
           const status=!result.content.trim() && result.totalChars===0 ? "empty_saved_note" :
-            isSingleFullRead && /^https?:\\/\\/\\S+$/iu.test(result.content.trim())
+            isSingleFullRead && /^https?:\/\/\S+$/iu.test(result.content.trim())
               ? "link_only" : "saved_note_chunk";
           if(status==="saved_note_chunk" && result.content.trim()){
             used.set(handle.id,{id:handle.id,title:result.title.slice(0,160),via:"assistant"});
