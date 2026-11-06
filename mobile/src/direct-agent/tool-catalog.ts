@@ -167,7 +167,8 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
       execute: async (args: Record<string, unknown>) => {
         if(Object.keys(args).length!==1 || typeof args.description!=="string" ||
           args.description.trim().length<3 || args.description.trim().length>160 ||
-          /https?:\\/\\/|(?:в интернете|из интернета|в сети|online|по ссылке)/iu.test(args.description))
+          (args.description.includes("://") ||
+          /(?:в интернете|из интернета|в сети|online|по ссылке)/iu.test(args.description)))
           return {error: "invalid_local_photo_search_args"};
         if(photoLookups>=2)return {error:"local_photo_turn_budget_exhausted"};
         photoLookups++;
