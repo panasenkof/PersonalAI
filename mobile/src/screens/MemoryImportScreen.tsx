@@ -7,7 +7,7 @@ import type { CollectionRecord } from "../local-memory/types";
 import { loadMediaPreferences, type FileAsrMode } from "../media/preferences";
 import { onLocalMemorySessionChange } from "../local-memory/storage";
 import * as ImagePicker from "expo-image-picker";
-import { importLink, linkImportErrorMessage, publicImportUrl } from "../media/link-import";
+import { importLink, linkImportErrorMessage, publicImportUrl, type HtmlPublicationClaim } from "../media/link-import";
 import { pdfCoverageMessage } from "../media/pdf-pages";
 import { useRussianOcrStatus } from "../media/russian-ocr";
 import { RussianOcrControls } from "../media/RussianOcrControls";
@@ -55,6 +55,7 @@ export function MemoryImportScreen() {
   const route = useRoute<RouteProp<RootStackParams, "MemoryImport">>();
   const incoming = route.params?.incoming;
   const [keepOriginal, setKeepOriginal] = useState(true);
+  const [publicationClaim,setPublicationClaim] = useState<HtmlPublicationClaim|null>(null);
   const [sourceUrl, setSourceUrl] = useState(""); // Confirmed provenance only.
   const [linkDraft, setLinkDraft] = useState(""); // Unconfirmed URL never changes saved provenance.
   const [linkOnly, setLinkOnly] = useState(false); // Confirmed draft without fetched content.
@@ -146,7 +147,7 @@ export function MemoryImportScreen() {
       cancelled = true; cleanup(); setFiles([]); setPreparing(false);
       setNotice("Подготовка прервана блокировкой. Повторите приём после разблокировки.");
     });
-    setPreparing(true); setTitle(""); setFiles([]); setRecognitionResults([]); setRecognizingIndex(-1); setBody(""); setExtractedText(""); setNotice(""); setSourceUrl(""); setLinkDraft(""); setLinkOnly(false); setSourcePickerOpen(false); setProcessingOptionsOpen(false); setKeepOriginal(true);
+    setPreparing(true); setTitle(""); setFiles([]); setRecognitionResults([]); setRecognizingIndex(-1); setBody(""); setExtractedText(""); setNotice(""); setSourceUrl(""); setPublicationClaim(null); setLinkDraft(""); setLinkOnly(false); setSourcePickerOpen(false); setProcessingOptionsOpen(false); setKeepOriginal(true);
     void (async () => {
       if (incoming!.length > 30) throw new Error("Отправляйте не более 30 файлов за один раз.");
       const text = payload.shareType === "text" || payload.shareType === "url";
@@ -236,7 +237,7 @@ export function MemoryImportScreen() {
       }
       if (!alive.current) { for (const copy of copies) await FileSystem.deleteAsync(copy.uri, { idempotent: true }); return; }
       ownedFiles.current.push(...copies.map(copy => copy.uri));
-      setFiles(copies); setRecognitionResults([]); setTitle(""); setSourceUrl(""); setLinkDraft(""); setLinkOnly(false); setSourcePickerOpen(false); setProcessingOptionsOpen(false); setKeepOriginal(true); setExtractedText(""); setBody("");
+      setFiles(copies); setRecognitionResults([]); setTitle(""); setSourceUrl(""); setPublicationClaim(null); setLinkDraft(""); setLinkOnly(false); setSourcePickerOpen(false); setProcessingOptionsOpen(false); setKeepOriginal(true); setExtractedText(""); setBody("");
     } catch (e) {
       for (const copy of copies) await FileSystem.deleteAsync(copy.uri, { idempotent: true }).catch(() => {});
       if (alive.current) setNotice(memoryErrorMessage(e));
@@ -259,7 +260,7 @@ export function MemoryImportScreen() {
       if (!alive.current) { if (target.exists) target.delete(); return; }
       ownedFiles.current.push(target.uri);
       setFiles([{ uri: target.uri, name: asset.fileName || "camera.jpg", mimeType: asset.mimeType || "image/jpeg" }]); setRecognitionResults([]);
-      setTitle("Снимок"); setSourceUrl(""); setLinkDraft(""); setLinkOnly(false); setSourcePickerOpen(false); setProcessingOptionsOpen(false); setKeepOriginal(true); setExtractedText(""); setBody("");
+      setTitle("Снимок"); setSourceUrl(""); setPublicationClaim(null); setLinkDraft(""); setLinkOnly(false); setSourcePickerOpen(false); setProcessingOptionsOpen(false); setKeepOriginal(true); setExtractedText(""); setBody("");
     } catch (e) { if (alive.current) setNotice(memoryErrorMessage(e)); }
     finally { if (alive.current) setPreparing(false); }
   }
@@ -306,7 +307,7 @@ export function MemoryImportScreen() {
     try {
       const source = publicImportUrl(linkDraft);
       const domain = new URL(source).hostname;
-      setSourceUrl(source);
+      setSourceUrl(source); setPublicationClaim(null);
       setLinkDraft(source);
       setLinkOnly(true);
       setFiles([]);
@@ -330,10 +331,11 @@ export function MemoryImportScreen() {
       if (result.file) { ownedFiles.current.push(result.file.uri); setFiles([result.file]); setExtractedText(""); setKeepOriginal(true); setTitle(result.file.name); }
       else { setFiles([]); setExtractedText(result.text || ""); setKeepOriginal(false); setTitle(result.title || "Материал по ссылке"); }
       setRecognitionResults([]);
-      setLinkOnly(false); setSourceUrl(result.source); setLinkDraft(result.source); setSourcePickerOpen(false); setProcessingOptionsOpen(false);
+      setLinkOnly(false); setPublicationClaim(result.publicationClaim || null); setSourceUrl(result.source); setLinkDraft(result.source); setSourcePickerOpen(false); setProcessingOptionsOpen(false);
       if (result.text) setNotice(result.partial
         ? "Получен фрагмент страницы: разметка обрывается. Проверьте текст перед сохранением."
-        : "Текст страницы извлечён. Проверьте заголовки и полноту: сайт мог предоставить только часть статьи.");
+        : "Текст страницы извлечён. Проверьте заголовки и полноту: сайт мог предоставить только часть статьи." +
+          (result.publicationClaim ? " Дата публикации по метаданным сайта: " + result.publicationClaim.date + " (не проверена независимо)." : ""));
     } catch (e) { if (alive.current) setNotice(linkImportErrorMessage(e)); }
     finally { if (controller.current === aborter) controller.current = null; if (alive.current) setBusy(false); }
   }
@@ -355,7 +357,7 @@ export function MemoryImportScreen() {
         if (FileSystem.cacheDirectory && asset.uri.startsWith(FileSystem.cacheDirectory)) ownedFiles.current.push(asset.uri);
       }
       setFiles(chosen); setRecognitionResults([]); setRecognizingIndex(-1);
-      setSourceUrl(""); setLinkDraft(""); setLinkOnly(false); setSourcePickerOpen(false); setProcessingOptionsOpen(false);
+      setSourceUrl(""); setPublicationClaim(null); setLinkDraft(""); setLinkOnly(false); setSourcePickerOpen(false); setProcessingOptionsOpen(false);
       setKeepOriginal(true); setTitle(chosen[0].name.slice(0, 160)); setBody(""); setExtractedText(""); setClassification("standard");
     } catch (e) { if (alive.current) setNotice((e as Error).message); }
     finally { if (alive.current) setPreparing(false); }
@@ -481,7 +483,9 @@ export function MemoryImportScreen() {
         ...(keepOriginal && files.length > 1 ? { files } : { file: keepOriginal ? file || undefined : undefined }),
         title, body, extractedText: content,
         ...(keepOriginal && sourceRecognitions.length ? { recognitions: sourceRecognitions } : {}),
-        sourceUrl: sourceUrl || undefined, sensitivity: classification, collectionId: collectionId || undefined,
+        sourceUrl: sourceUrl || undefined,
+        ...(sourceUrl && !linkOnly && publicationClaim && !keepOriginal ? {publicationClaim} : {}),
+        sensitivity: classification, collectionId: collectionId || undefined,
         ...(incoming ? { receipt: JSON.stringify(incoming[position]) } : {}),
       }, aborter.signal);
       scheduleIndexTerms(profile); scheduleVectors(profile);
