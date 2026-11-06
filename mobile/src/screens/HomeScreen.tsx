@@ -5,6 +5,7 @@ import Feather from "@expo/vector-icons/Feather";
 import { useChatAttachments } from "../media/useChatAttachments";
 import { capturePhotoDraft83, discardCameraPhotoDraft83, stageChatImageForNote83 } from "../media/vision-chat-camera";
 import { MAX_CHAT_FILES } from "../direct-agent/chat-attachments";
+import { savedAiArticleIntent } from "../direct-agent/article-selection";
 import { planDocumentSynthesis } from "../direct-agent/document-synthesis";
 import { loadModelCallLimit } from "../direct-agent/agent-preferences";
 import { imageCapability } from "../direct-agent/attachment-capabilities";
@@ -172,8 +173,9 @@ function NebulaHomeContent() {
   const draftImageSupport = settings ? imageCapability(settings,active?.attachments || []) : "no-images";
   const question = active?.question || "";
   const localPhotoSearch = localPhotoIntent83(question,active?.attachments || []);
+  const localArticles = savedAiArticleIntent(question,new Date(),Boolean(active?.attachments?.length));
   const suggestedPhotoSearch = localPhotoSuggestion83(question, active?.attachments || []);
-  const canSearchLocal = Boolean(ready && !cameraBusy && !pickingAttachment && !active?.deleting && localPhotoSearch);
+  const canSearchLocal = Boolean(ready && !cameraBusy && !pickingAttachment && !active?.deleting && (localPhotoSearch || localArticles));
   const busy = active?.busy || false;
   const statusSignals = { voicePhase, busy, streamText: active?.streamText, progress: active?.progress, error, ready };
   const orbPhase = resolveNebulaHomePhase(statusSignals);
@@ -275,12 +277,13 @@ function NebulaHomeContent() {
     if (busy) { store.stop(); return; }
     // Never send a partial draft while a selected file is being decoded/ASR.
     if (pickingAttachment) return;
-    if (!settings && !localPhotoSearch) return;
+    if (!settings && !localPhotoSearch && !localArticles) return;
     // Only a deliberate Send closes Gboard (not a pause in typing).
     Keyboard?.dismiss?.();
     setComposerFocused(false);
     setVoiceReset(n => n + 1);
     if(localPhotoSearch)void store.searchPhotosLocally();
+    else if(localArticles)void store.searchSavedArticlesLocally();
     else if(settings) {
       let plan;
       try {plan=planDocumentSynthesis(active?.attachments||[],settings.model);}
@@ -555,8 +558,8 @@ function NebulaHomeContent() {
           disabled={!ready || dictating || (!normalization.busy && (!question.trim() || (!normalization.alternate && !canSend)))}
           onPress={() => void normalization.toggle(settings)} /> : null}
         <View style={{ flex: 1, minWidth: 0 }} />
-        <IconAction compact explainOnTap={false} icon={busy ? "square" : "arrow-up"} label={busy ? "Стоп" : localPhotoSearch ? "Найти" : "Отправить"} accessibilityLabel={busy ? "Остановить запрос" : localPhotoSearch ? "Найти фотографии в памяти" : "Отправить запрос"}
-          hint={busy ? "Остановить ответ ИИ в этом диалоге." : localPhotoSearch ? "Найти фотографии на телефоне." : "Отправить написанное сообщение выбранной модели."} hintAbove emphasized={!busy}
+        <IconAction compact explainOnTap={false} icon={busy ? "square" : "arrow-up"} label={busy ? "Стоп" : localPhotoSearch || localArticles ? "Найти" : "Отправить"} accessibilityLabel={busy ? "Остановить запрос" : localPhotoSearch ? "Найти фотографии в памяти" : localArticles ? "Подобрать сохранённые статьи в памяти" : "Отправить запрос"}
+          hint={busy ? "Остановить ответ ИИ в этом диалоге." : localPhotoSearch ? "Найти фотографии на телефоне." : localArticles ? "Найти сохранённые ссылки по дате без вызова ИИ." : "Отправить написанное сообщение выбранной модели."} hintAbove emphasized={!busy}
           disabled={!busy && (pickingAttachment || !(canSend || canSearchLocal) || (!question.trim() && !active?.attachments?.length))} onPress={sendOrStop} />
       </View>
     </View>
