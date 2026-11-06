@@ -20,7 +20,7 @@ export type ResolvedArticleCitation = ArticleCitationPointer & {
   id:string;version:number;title:string;
 };
 
-export const ARTICLE_CITATION_RE = /\[\[S([0-9]{1,2}):([0-9]{1,7})-([0-9]{1,7})\]\]/g;
+export const ARTICLE_CITATION_RE = /\[\[S([0-9]{1,4}):([0-9]{1,9})-([0-9]{1,9})\]\]/g;
 
 export function resolveArticleCitation(
   report:ChatArticleReadReport | undefined, citation:ArticleCitationPointer,
