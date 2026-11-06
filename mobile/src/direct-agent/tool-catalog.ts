@@ -25,6 +25,7 @@ const text = (v: unknown, cap = 600) => typeof v === "string" ? v.slice(0, cap) 
 export function createToolCatalog(options: DirectAgentOptions, sources: string[], notes: MemorySnippet[], initialUsed: UsedNote[]) {
   const web = createWebTools(options, sources, notes);
   const used = new Map(initialUsed.map(n => [n.id, n]));
+  const readNotes = new Set<string>();
   let state = { ...beginTask(options.taskState, options.prompt), webPreference: webPreference(options) };
   const emit = () => { options.onTaskState?.(state); };
   const observe = (e: TaskEvidence) => { state = { ...recordEvidence(state, e), webPreference: state.webPreference }; emit(); };
@@ -96,9 +97,9 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
         return { notes: found };
       }, verify: r => Array.isArray(r.notes) ? r.notes.length ? "found" : "empty" : "failed" },
     ...(options.read ? [{
-      definition: { name: "read_local_note", description: "Дочитать разрешённую заметку по id и version из search_local_notes. Указать offset для следующей части; источник может измениться и чтение тогда откажет.", parameters: {
+      definition: { name: "read_local_note", description: "Дочитать разрешённую заметку по id/version из поиска или каталога. Полный текст НЕ ограничен начальным контекстом 24 000 символов. Читай до hasMore=false с offset=nextOffset; если бюджет вызовов кончился, явно говори о частичном охвате. Каждый вызов максимум 6000 символов; версия/ACL проверяются заново.", parameters: {
         type: "object", properties: { id: { type: "string" }, version: { type: "integer" },
-          offset: { type: ["integer", "null"] }, budget: { type: ["integer", "null"] } },
+          offset: { type: ["integer", "null"] }, budget: { type: ["integer", "null"], maximum: 6000 } },
         required: ["id", "version", "offset", "budget"], additionalProperties: false,
       } },
       effect: "read" as const,
@@ -109,8 +110,16 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
         const budget = args.budget ?? 4000;
         if (!id || !Number.isSafeInteger(version) || Number(version) < 1 ||
             !Number.isSafeInteger(offset) || Number(offset) < 0 ||
-            !Number.isSafeInteger(budget) || Number(budget) < 1) return { error: "invalid_memory_read_request" };
+            !Number.isSafeInteger(budget) || Number(budget) < 1 || Number(budget) > 6000)
+          return { error: "invalid_memory_read_request" };
         const result = await options.read!(id, Number(version), Number(offset), Number(budget));
+        // A successful ACL+revision-checked read is actual source use, even if
+        // the note was first discovered through a metadata catalogue.
+        if (result.id===id && result.revision===Number(version) &&
+            typeof result.content==="string" && typeof result.title==="string") {
+          used.set(id,{id,title:result.title.slice(0,160),via:"assistant"});
+          readNotes.add(id);
+        }
         return result;
       },
       verify: (r: Record<string, unknown>) => typeof r.content === "string" &&
@@ -331,5 +340,9 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
       ...(persistedArticle ? {articlePage:persistedArticle} : {}) };
   }
   const observeSources = (urls: string[]) => { if (urls.length) observe({ tool: "web_search", outcome: "found", subject: options.prompt.slice(0, 120), excerpt: urls.join("\n").slice(0, 600) }); };
-  return { definitions: specs.map(s => s.definition), run, finish, observeSources, memory: () => [...used.values()].slice(0, 8) };
+  return { definitions: specs.map(s => s.definition), run, finish, observeSources,
+    memory: () => {
+      const read=[...readNotes].reverse().flatMap(id=>used.has(id)?[used.get(id)!]:[]);
+      return [...read,...[...used.values()].filter(item=>!readNotes.has(item.id))].slice(0,8);
+    } };
 }

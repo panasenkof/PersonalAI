@@ -1,4 +1,4 @@
-import { saveApprovedNote, searchApprovedNotes } from "../memory";
+import { saveApprovedNote, searchApprovedNotes, readApprovedNote } from "../memory";
 import type { MemoryRepository } from "../../local-memory/types";
 
 function fake() {
@@ -93,7 +93,7 @@ test("a long record sends the chunk that matched, not its beginning", async () =
   repo.searchMemory.mockResolvedValueOnce([{ entity: { id: "long", collection_id: "standard", sensitivity: "standard", record_status: "active",
     title: "Дневник", payload: { body: long + "Ключи у соседа." } }, chunk: "Ключи у соседа.", score: 3 }] as never);
   expect(await searchApprovedNotes("guest", "где ключи", repo as unknown as MemoryRepository))
-    .toEqual([{ id: "long", title: "Дневник", body: "Ключи у соседа.", excerptOnly: true,
+    .toEqual([{ id: "long", title: "Дневник", body: "Ключи у соседа.", excerptOnly: true, excerptStartChar: long.length,
       totalChars: (long + "Ключи у соседа.").length, section: "Заметки" }]);
 });
 
@@ -317,4 +317,41 @@ test("TIME-05: a real leap day remains an exact source date after approval",asyn
     valid_from:"2024-02-29",
     payload:expect.objectContaining({date:"2024-02-29"}),
   }));
+});
+
+test("a 51k note stays excerpted in prefetch but is readable fully with verified 6k offsets",async()=>{
+  const repo=fake();
+  const marker="СЕКЦИЯ ПРОВЕРКИ ДАЛЁКО ОТ НАЧАЛА. ";
+  const body="а".repeat(31_000)+marker+"б".repeat(20_000);
+  const entity={id:"deep-note",collection_id:"standard",domain:"notes",sensitivity:"standard",
+    record_status:"active",record_version:9,title:"Длинный исходник",source_ref:null,payload:{body}};
+  repo.searchMemory.mockResolvedValueOnce([{
+    entity,chunk:body.slice(31_000,31_700),score:10,
+  }]) as never;
+  repo.entity=jest.fn().mockResolvedValue(entity);
+  const selected=await searchApprovedNotes("guest","проверка",repo as unknown as MemoryRepository);
+  expect(selected).toHaveLength(1);
+  expect(selected[0]).toMatchObject({
+    id:"deep-note",version:9,excerptOnly:true,totalChars:body.length,
+    excerptStartChar:31_000,
+  });
+  expect(selected[0].body).toContain(marker);
+  expect(selected[0].body.length).toBeLessThanOrEqual(900);
+  const fromHit=await readApprovedNote("guest","deep-note",9,selected[0].excerptStartChar!,700,
+    repo as unknown as MemoryRepository);
+  expect(fromHit.content).toContain(marker);
+  expect(fromHit.evidence).toMatchObject({startChar:31_000,coverage:"excerpt"});
+  let offset=0,read="",parts=0,done=false;
+  while(!done) {
+    const part=await readApprovedNote("guest","deep-note",9,offset,6000,
+      repo as unknown as MemoryRepository);
+    read+=part.content;
+    offset=part.nextOffset??offset+part.content.length;
+    done=!part.hasMore;
+    parts++;
+    expect(parts).toBeLessThan(20);
+  }
+  expect(parts).toBeGreaterThan(5);
+  expect(read).toBe(body);
+  expect(offset).toBe(body.length);
 });

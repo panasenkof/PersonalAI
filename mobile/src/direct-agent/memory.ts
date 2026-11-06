@@ -10,7 +10,7 @@ import { DEFAULT_SECTIONS, MAX_NOTE_BODY_CHARS, PROPOSABLE_KINDS, findSection, p
 import type { MemorySection, NoteProposal } from "./fact-tool";
 
 /** `section` is the name of the memory section the note lives in. */
-export type MemorySnippet = { id: string; title: string; body: string; section?: string; version?: number; excerptOnly?: boolean; totalChars?: number };
+export type MemorySnippet = { id: string; title: string; body: string; section?: string; version?: number; excerptOnly?: boolean; totalChars?: number; excerptStartChar?: number };
 /** Return complete ordinary notes when possible, but bound the total data sent to an external LLM. */
 const FULL_NOTE_CHARS = 12_000;
 const MAX_CONTEXT_NOTE_CHARS = 24_000;
@@ -83,6 +83,10 @@ export async function searchApprovedNotes(
       const available=Math.max(0,remaining-(allowed.length-index-1)*EXCERPT_CHARS);
       const complete=body.length<=FULL_NOTE_CHARS&&body.length<=available;
       const text=complete?body:(chunk||body).slice(0,Math.min(EXCERPT_CHARS,available));
+      // A hit in the tail of a 60k note must not force the LLM to read from
+      // offset zero blindly. Only advertise a source offset if exact text occurs
+      // in the saved body, never fabricate coordinates for derived text/OCR.
+      const sourceOffset=!complete && chunk ? body.indexOf(text) : -1;
       remaining-=text.length;
       return {
         id:entity.id,
@@ -90,6 +94,7 @@ export async function searchApprovedNotes(
         title:memoryDisplayTitle(entity).slice(0,160),
         body:text,
         ...(complete?{}:{excerptOnly:true,totalChars:body.length}),
+        ...(sourceOffset>=0 ? {excerptStartChar:sourceOffset} : {}),
         ...(section?{section:section.slice(0,60)}:{}),
       };
     });
