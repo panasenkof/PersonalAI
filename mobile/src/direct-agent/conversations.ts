@@ -63,9 +63,9 @@ export function parseConversation(json: string): SavedConversation | null {
       /^[а-яёa-z0-9][а-яёa-z0-9\s+.#-]*$/iu.test(ap.topic) &&
       Array.isArray(ap.queryTerms) && ap.queryTerms.length === 1 && ap.queryTerms[0] === ap.topic);
     const articlePage: ChatArticlePage | undefined = r.role === "assistant" && topicOk &&
-      ap?.kind === "saved_ai_links" && iso(ap.savedFrom) && iso(ap.savedBefore) &&
+      (ap?.kind === "saved_ai_links" || ap?.kind === "saved_topic_links") && iso(ap.savedFrom) && iso(ap.savedBefore) &&
       ap.savedFrom < ap.savedBefore && day(ap.startLocal) && day(ap.endLocal) &&
-      validCursor ? {kind:"saved_ai_links",savedFrom:ap.savedFrom,savedBefore:ap.savedBefore,
+      validCursor ? {kind:ap.kind,savedFrom:ap.savedFrom,savedBefore:ap.savedBefore,
         startLocal:ap.startLocal,endLocal:ap.endLocal,
         ...(ap.kind === "saved_topic_links" ? {topic:ap.topic,queryTerms:[ap.topic]} : {}),
         ...(cur ? {nextCursor:{beforeCreatedAt:cur.beforeCreatedAt,beforeId:cur.beforeId}} : {})} : undefined;
