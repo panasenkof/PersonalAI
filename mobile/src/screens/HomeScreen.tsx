@@ -451,7 +451,7 @@ function NebulaHomeContent() {
             </Pressable>)}
         </View> : null}
         {item.role === "assistant" && !item.streaming && item.articleReadReport ?
-          <ArticleReadSources report={item.articleReadReport}
+          <ArticleReadSources report={item.articleReadReport} answerText={item.text}
             onOpen={noteId=>navigation.navigate("MemoryNote",{entityId:noteId})} /> : null}
         {item.role === "assistant" && !item.streaming && item.articlePage?.nextCursor ?
           <View style={{ alignSelf: "flex-start" }}>
