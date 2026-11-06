@@ -26,7 +26,10 @@ export type ChatArticlePage = {
 export type ChatArticleReadReport = {
   kind:"selected_saved_note_reads"; selectedCount:number;
   entries:Array<{selectedIndex:number;id:string;version:number;status:ArticleCoverageStatus;
-    verifiedChars:number;totalChars?:number;title?:string}>;
+    verifiedChars:number;totalChars?:number;title?:string;
+    /** Merged non-overlapping UTF-16 offsets from actual canonical reads.
+     * Older answer reports may lack ranges and therefore cannot make inline links. */
+    ranges?:Array<{startChar:number;endChar:number}>}>;
 };
 export type ChatRow = { id: string; role: "user" | "assistant" | "info"; text: string; error?: boolean; photoAction?: "model" | "import" | "prepare"; sources?: string[]; memory?: ChatMemoryRef[]; attachments?: ChatAttachment[]; dialogueSummary?: DialogueSummaryOrigin; articlePage?: ChatArticlePage; articleReadReport?: ChatArticleReadReport };
 const VIA = new Set(["search", "rewrite", "assistant"]);
@@ -104,7 +107,20 @@ export function parseConversation(json: string): SavedConversation | null {
         const full=e?.status==="complete_saved_note_text" ||
           e?.status==="link_only" || e?.status==="empty_saved_note";
         const unknown=e?.status==="unread" || e?.status==="not_available_or_stale";
-        return e && e.selectedIndex===i && e.id===selectedHandle.id &&
+        const rs=e?.ranges;
+        const rangesValid=rs===undefined || (
+          Array.isArray(rs) && rs.length<=128 &&
+          (e.totalChars===undefined ? rs.length===0 : rs.every((range:any,j:number)=>
+            range && Number.isSafeInteger(range.startChar) &&
+            Number.isSafeInteger(range.endChar) && range.startChar>=0 &&
+            range.endChar>range.startChar && range.endChar<=e.totalChars &&
+            (j===0 || rs[j-1].endChar<range.startChar))) &&
+          rs.reduce((sum:number,range:any)=>sum+range.endChar-range.startChar,0)===e.verifiedChars &&
+          (!unknown || rs.length===0) &&
+          (!full || (e.totalChars===0 ? rs.length===0 :
+            rs.length===1 && rs[0].startChar===0 && rs[0].endChar===e.totalChars))
+        );
+        return e && rangesValid && e.selectedIndex===i && e.id===selectedHandle.id &&
           e.version===selectedHandle.version && validStatuses.has(e.status) &&
           Number.isSafeInteger(e.verifiedChars) && e.verifiedChars>=0 &&
           e.verifiedChars<=2_000_000 &&
@@ -120,6 +136,9 @@ export function parseConversation(json: string): SavedConversation | null {
           status:e.status,verifiedChars:e.verifiedChars,
           ...(e.totalChars!==undefined?{totalChars:e.totalChars}:{}),
           ...(e.title?{title:e.title}:{}),
+          ...(e.ranges!==undefined ? {ranges:e.ranges.map((range:any)=>({
+            startChar:range.startChar,endChar:range.endChar,
+          }))} : {}),
         })) : undefined;
     const articleReadReport:ChatArticleReadReport|undefined = validatedReportEntries ?
       {kind:"selected_saved_note_reads",selectedCount:rr.selectedCount,entries:validatedReportEntries} : undefined;
