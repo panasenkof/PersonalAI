@@ -32,6 +32,10 @@ export type DirectAgentOptions = {
   skipLocalMemory?: boolean;
   taskState?: TaskState;
   onTaskState?: (state: TaskState) => void;
+  /** Host confirms local active profile is unlocked; workspace never bypasses AppLock. */
+  workspaceAvailable?: () => boolean;
+  /** Durable serialized commit through the current conversation SQLCipher writer. */
+  saveWorkspace?: (state: TaskState) => Promise<void>;
   pendingNotes?: Array<NoteProposal & { id: string }>;
   /** Links of the sources shown under earlier answers of this conversation,
    * newest answer first: «открой первую ссылку» means the first of them. */
@@ -101,6 +105,7 @@ const systemPrompt = (sections?: MemorySection[]) =>
   "Для вопросов о предпочтениях и заметках используй search_local_notes, если он доступен. " +
   "Для выборки сохранённых статей по дате используй select_local_articles, если он доступен; ответ инструмента — только метаданные. Проверяй count/hasMore, дочитывай текст read_local_note по id/version перед обобщением и не выдавай ссылку без текста за прочитанную статью. " +
   "На уточнение «сделай выжимку из них» вызывай read_selected_local_articles, если он доступен: это точные ID/version прошлой подборки, исходники перечитываются с проверкой прав. Для всех выбранных материалов следуй nextIndex до hasMore=false в пределах бюджета; отдельно назови прочитанные, прочитанные частично, ссылки без тела и недоступные. Не приписывай факты статьям, текст которых не читался; ни summary заметки, ни URL не означают прочитанный оригинал статьи. " +
+  "Для сложной задачи с множеством источников можешь пользоваться workspace_put/list/get/clear, если они доступны: это ограниченные рабочие черновики текущей задачи, а не постоянная память и не подтверждённые источники. Держи там прогресс, сравнения и открытые вопросы, не копируй туда целые источники. При изменении цели очисти предыдущий scratchpad; для доказательных ответов перечитывай исходники через инструменты с ACL/версией. " +
   "Если найденного фрагмента недостаточно, используй read_local_note с id и version из поиска; не считай отрывок полным документом. " +
   "Если слова встречаются только внутри вложений, используй search_local_source_segments с 1–3 ключевыми словами, затем read_local_source_segment с найденными ID. " +
   "Если в заметке есть распознанный материал, можешь проверить list_local_sources по её id/version и затем read_local_source_segment по точным идентификаторам. " +

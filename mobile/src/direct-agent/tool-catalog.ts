@@ -4,7 +4,9 @@ import type { UsedNote } from "./context";
 import type { MemorySnippet } from "./memory";
 import { FACT_TOOL_NAME, FACT_TOOL_DESCRIPTION, factToolParameters, factProposal } from "./fact-tool";
 import { createWebTools } from "./web-tools";
-import { beginTask, recordEvidence, TASK_STATE_TOOL, updateTaskInterpretation } from "./task-state";
+import { beginTask, recordEvidence, TASK_STATE_TOOL, updateTaskInterpretation,
+  WORKSPACE_MAX_ENTRIES, WORKSPACE_ENTRY_MAX_CHARS } from "./task-state";
+import type { TaskWorkspaceEntry } from "./task-state";
 import type { TaskEvidence, ToolOutcome } from "./task-state";
 import { webPreference } from "./dialogue";
 import { savedArticleToolIntent, savedAiArticlePageIntent } from "./article-selection";
@@ -385,6 +387,89 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
         state = { ...updateTaskInterpretation(state, args), webPreference: state.webPreference }; emit();
         return { status: "state_updated", personalMemorySaved: false };
       }, verify: r => r.status === "state_updated" ? "state_updated" : "failed" },
+    ...(options.saveWorkspace && options.workspaceAvailable && !options.skipLocalMemory ? [
+      { definition:{name:"workspace_put",
+        description:"Сохранить ОДИН промежуточный черновик, задачу или сравнение в рабочей области ЭТОЙ задачи и зашифрованного диалога. Не личная память; не факт и не источник доказательства. Не копируй полный текст статей. До 16 ключей, по 1200 символов. Один и тот же key заменяется.",
+        parameters:{type:"object",properties:{
+          key:{type:"string",maxLength:32,pattern:"^[a-z][a-z0-9_-]*$"},
+          kind:{type:"string",enum:["finding","todo","question","comparison"]},
+          content:{type:"string",maxLength:WORKSPACE_ENTRY_MAX_CHARS},
+        },required:["key","kind","content"],additionalProperties:false},
+      },effect:"conversation" as const,
+      execute:async(args:Record<string,unknown>)=>{
+        if(!options.workspaceAvailable!())return {error:"workspace_locked"};
+        if(Object.keys(args).length!==3 || Object.keys(args).some(k=>!["key","kind","content"].includes(k)) ||
+            typeof args.key!=="string" || !/^[a-z][a-z0-9_-]{0,31}$/.test(args.key) ||
+            !["finding","todo","question","comparison"].includes(String(args.kind)) ||
+            typeof args.content!=="string" || !args.content.trim() ||
+            args.content.length>WORKSPACE_ENTRY_MAX_CHARS)
+          return {error:"invalid_workspace_entry"};
+        if(state.workspace && state.workspace.goal!==state.goal)return {error:"workspace_task_changed_clear_first"};
+        const entry={key:args.key,kind:args.kind,content:args.content} as TaskWorkspaceEntry;
+        const previous=state.workspace?.entries||[];
+        if(previous.length>=WORKSPACE_MAX_ENTRIES && !previous.some(e=>e.key===entry.key))
+          return {error:"workspace_capacity_reached"};
+        const entries=[...previous.filter(e=>e.key!==entry.key),entry];
+        const next={...state,workspace:{version:1 as const,goal:state.goal,entries}};
+        await options.saveWorkspace!(next);
+        state=next;
+        return {status:"workspace_written",scope:"current_task",
+          key:entry.key,kind:entry.kind,entries:entries.length,
+          personalMemorySaved:false,verifiedSource:false};
+      },
+      verify:(r:Record<string,unknown>)=>r.status==="workspace_written" &&
+        r.personalMemorySaved===false ? "state_updated" as const : "failed" as const,
+      },
+      { definition:{name:"workspace_list",
+        description:"Список коротких ключей рабочей области ТЕКУЩЕЙ задачи. Содержимое и оригиналы тут НЕ возвращаются; для них workspace_get/доказательный source-read.",
+        parameters:{type:"object",properties:{},required:[],additionalProperties:false},
+      },effect:"read" as const,
+      execute:async(args:Record<string,unknown>)=>{
+        if(!options.workspaceAvailable!())return {error:"workspace_locked"};
+        if(Object.keys(args).length)return {error:"invalid_workspace_args"};
+        if(state.workspace && state.workspace.goal!==state.goal)return {error:"workspace_task_changed_clear_first"};
+        const entries=state.workspace?.entries||[];
+        return {scope:"current_task",modelDraftsOnly:true,
+          entries:entries.map(e=>({key:e.key,kind:e.kind,chars:e.content.length})),
+          count:entries.length};
+      },
+      verify:(r:Record<string,unknown>)=>r.scope==="current_task"&&r.modelDraftsOnly===true&&
+        Array.isArray(r.entries)?(r.entries.length?"read" as const:"empty" as const):"failed" as const,
+      },
+      { definition:{name:"workspace_get",
+        description:"Прочитать ОДИН промежуточный черновик модели по ключу, не оригинал. Прежде чем приводить факты, перечитай исходный документ с версионированным source reader.",
+        parameters:{type:"object",properties:{key:{type:"string",maxLength:32}},required:["key"],additionalProperties:false},
+      },effect:"read" as const,
+      execute:async(args:Record<string,unknown>)=>{
+        if(!options.workspaceAvailable!())return {error:"workspace_locked"};
+        if(Object.keys(args).length!==1 || typeof args.key!=="string" ||
+            !/^[a-z][a-z0-9_-]{0,31}$/.test(args.key))return {error:"invalid_workspace_args"};
+        if(state.workspace && state.workspace.goal!==state.goal)return {error:"workspace_task_changed_clear_first"};
+        const entry=state.workspace?.entries.find(e=>e.key===args.key);
+        if(!entry)return {error:"workspace_key_missing"};
+        return {scope:"current_task",modelDraftOnly:true,verifiedSource:false,
+          entry:{...entry}};
+      },
+      verify:(r:Record<string,unknown>)=>r.scope==="current_task"&&r.modelDraftOnly===true&&
+        r.verifiedSource===false&&!!r.entry?"read" as const:"failed" as const,
+      },
+      { definition:{name:"workspace_clear",
+        description:"Очистить ТОЛЬКО рабочие черновики текущего диалога (например, при смене задачи). Оригинальные заметки, документы, подтверждённые действия и историю чата не трогает.",
+        parameters:{type:"object",properties:{},required:[],additionalProperties:false},
+      },effect:"conversation" as const,
+      execute:async(args:Record<string,unknown>)=>{
+        if(!options.workspaceAvailable!())return {error:"workspace_locked"};
+        if(Object.keys(args).length)return {error:"invalid_workspace_args"};
+        const discarded=state.workspace?.entries.length||0;
+        const next={...state,workspace:undefined};
+        await options.saveWorkspace!(next);
+        state=next;
+        return {status:"workspace_cleared",discarded,personalMemoryDeleted:false};
+      },
+      verify:(r:Record<string,unknown>)=>r.status==="workspace_cleared"&&
+        r.personalMemoryDeleted===false?"state_updated" as const:"failed" as const,
+      },
+    ] as ToolSpec[] : []),
     ...web.definitions.map((definition): ToolSpec => ({ definition, effect: "read", execute: args => web.run(definition.name, args) as Promise<Record<string, unknown>>,
       verify: r => definition.name === "search_web"
         ? Array.isArray(r.sources) && typeof r.context === "string" ? r.sources.length ? "found" : "empty" : "failed"
