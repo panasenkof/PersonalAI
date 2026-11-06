@@ -17,7 +17,7 @@ import { FACT_TOOL_NAME, factGuide } from "./fact-tool";
 import type { SavedArticleIntent, SavedArticleShortlist } from "./article-selection";
 import type { MemorySection } from "./fact-tool";
 import type { ChatArticlePage, ChatArticleReadReport } from "./conversations";
-import { ARTICLE_CITATION_GUIDE } from "./article-citations";
+import { ARTICLE_CITATION_GUIDE, ARTICLE_SYNTHESIS_GUIDE } from "./article-citations";
 
 export type AgentTurn = { role: "user" | "assistant"; content: string; attachments?: ChatAttachment[] };
 /** `notice` is shown to the user before the answer, e.g. why web search failed. */
@@ -106,7 +106,7 @@ const systemPrompt = (sections?: MemorySection[]) =>
   "Для вопросов о предпочтениях и заметках используй search_local_notes, если он доступен. " +
   "Для выборки сохранённых статей по дате используй select_local_articles, если он доступен; ответ инструмента — только метаданные. Проверяй count/hasMore, дочитывай текст read_local_note по id/version перед обобщением и не выдавай ссылку без текста за прочитанную статью. " +
   "На уточнение «сделай выжимку из них» вызывай read_selected_local_articles, если он доступен: это точные ID/version прошлой подборки, исходники перечитываются с проверкой прав. Для всех выбранных материалов следуй nextIndex до hasMore=false в пределах бюджета; отдельно назови прочитанные, прочитанные частично, ссылки без тела и недоступные. Не приписывай факты статьям, текст которых не читался; ни summary заметки, ни URL не означают прочитанный оригинал статьи. " +
-  ARTICLE_CITATION_GUIDE +
+  ARTICLE_CITATION_GUIDE + ARTICLE_SYNTHESIS_GUIDE +
   "Для выбранной длинной статьи используй read_selected_article_chunk с selectedIndex из списка и offset=nextOffset; дочитывай по 6000 символов. Сохраняй ссылки на точные диапазоны evidence, не считай дочитанный последний диапазон доказательством полного чтения без предыдущих диапазонов. Сохранённый текст заметки не является проверенным оригиналом веб-страницы. " +
   "Перед итоговой выжимкой выбранных статей вызови selected_article_read_coverage, если доступен: он считает только диапазоны, реально прочитанные в ТЕКУЩЕМ ходе, и сообщает пропуски, необработанные записи, link-only, недоступные и частичные. Количество выбранных НЕ равно общему числу найденных. Для nextUnreadOffset дочитай соответствующий фрагмент; при ограничении вызовов честно называй неполный охват. Рабочие черновики и прочтение в прошлом ходе сами по себе не подтверждают доступную текущую версию. " +
   "Для сложной задачи с множеством источников можешь пользоваться workspace_put/list/get/clear, если они доступны: это ограниченные рабочие черновики текущей задачи, а не постоянная память и не подтверждённые источники. Держи там прогресс, сравнения и открытые вопросы, не копируй туда целые источники. При изменении цели очисти предыдущий scratchpad; для доказательных ответов перечитывай исходники через инструменты с ACL/версией. " +

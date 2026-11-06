@@ -341,7 +341,7 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
     }] : []),
     ...(options.read && options.selectArticles ? [{
       definition:{ name:"read_selected_local_articles",
-        description:"9B: читать именно ранее показанные в этом чате сохранённые статьи (до 24 id/version) через проверяемый локальный reader. Модель НЕ передаёт ID. Фильтр и список остаются в SQLCipher истории; на каждом чтении ACL/версия проверяются заново. Читай следующие страницы с nextIndex, пока hasMore=false или не исчерпан бюджет. complete_note_text НЕ значит прочитанная оригинальная веб-страница; link_only не источник фактов статьи.",
+        description:"9B: читать именно ранее показанные в этом чате сохранённые статьи (до 24 id/version) через проверяемый локальный reader. Каждый элемент вернёт свой абсолютный selectedIndex для цитат S1=0, S2=1 и так далее (номер S = selectedIndex+1), даже если запись недоступна. Модель НЕ передаёт ID. Фильтр и список остаются в SQLCipher истории; на каждом чтении ACL/версия проверяются заново. Читай следующие страницы с nextIndex, пока hasMore=false или не исчерпан бюджет. complete_note_text НЕ значит прочитанная оригинальная веб-страница; link_only не источник фактов статьи.",
         parameters:{type:"object",properties:{
           startIndex:{type:["integer","null"]},count:{type:["integer","null"]},
           charsPerNote:{type:["integer","null"]},
@@ -361,7 +361,8 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
           return {error:"invalid_selected_article_args"};
         const chosen=selected.slice(Number(start),Number(start)+Number(count));
         const entries:Array<Record<string,unknown>>=[];
-        for(const handle of chosen){
+        for(const [localIndex,handle] of chosen.entries()){
+          const selectedIndex=Number(start)+localIndex;
           if(options.signal?.aborted)throw new Error("aborted");
           try {
             const result=await verifiedSelectedArticleRead(handle,0,Number(budget));
@@ -370,7 +371,7 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
             const status=!content.trim() && !result.hasMore ? "empty_saved_note" :
               !result.hasMore && /^https?:\/\/\S+$/iu.test(content.trim()) ? "link_only" :
               result.hasMore ? "partial_saved_note" : "complete_saved_note_text";
-            entries.push({id:handle.id,version:handle.version,status,
+            entries.push({selectedIndex,id:handle.id,version:handle.version,status,
               title:result.title.slice(0,160),content,
               totalChars:total,hasMore:result.hasMore,evidence});
             if(status==="partial_saved_note"||status==="complete_saved_note_text"){
@@ -384,7 +385,7 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
                 message==="memory_read_not_available_or_stale"){
               articleCoverage.unavailable(handle);
               used.delete(handle.id); readNotes.delete(handle.id);
-              entries.push({id:handle.id,version:handle.version,status:"not_available_or_stale"});
+              entries.push({selectedIndex,id:handle.id,version:handle.version,status:"not_available_or_stale"});
             }else throw e; // AppLock, damaged evidence and cancellation fail closed.
           }
         }
