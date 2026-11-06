@@ -86,3 +86,56 @@ test("9T1: empty is not invented as a read article", async () => {
   const result=await catalog.run("select_local_articles",{...request,dateMode:"saved"});
   expect(result).toMatchObject({outcome:"empty",count:0,records:[],contentIncluded:false});
 });
+
+test("9T1: an LLM shortlist saves its exact anchored continuation for the existing Show More flow",async()=>{
+  const {catalog}=harness();
+  const result=await catalog.run("select_local_articles",request);
+  expect(result).toMatchObject({outcome:"found",hasMore:true});
+  const saved=catalog.finish().articlePage;
+  expect(saved).toMatchObject({
+    kind:"saved_ai_links",dateMode:"published",savedFrom:expect.any(String),
+    savedBefore:expect.any(String),startLocal:expect.any(String),endLocal:expect.any(String),
+    nextCursor:page.nextCursor,
+  });
+});
+
+test("9T1: continue_local_articles keeps old topic, date mode and exact week across later model turns",async()=>{
+  const previous={
+    kind:"saved_topic_links" as const,dateMode:"published" as const,
+    topic:"космос",queryTerms:["космос"],
+    savedFrom:"2026-10-30T21:00:00.000Z",
+    savedBefore:"2026-11-06T21:00:00.000Z",
+    startLocal:"2026-10-31",endLocal:"2026-11-06",
+    nextCursor:{beforeCreatedAt:"2026-11-03T09:00:00.000Z",beforeId:"note-12"},
+  };
+  const selectArticles=jest.fn().mockResolvedValue(page);
+  const catalog=createToolCatalog({
+    settings,prompt:"Продолжи ту подборку",history:[],
+    lookup:jest.fn().mockResolvedValue([]),propose:jest.fn(),
+    articleContinuation:previous,selectArticles,
+  },[],[],[]);
+  expect(catalog.definitions.some(x=>x.name==="continue_local_articles")).toBe(true);
+  expect(await catalog.run("continue_local_articles",{topic:"другое"}))
+    .toMatchObject({error:"invalid_article_tool_arguments"});
+  const result=await catalog.run("continue_local_articles",{});
+  expect(result).toMatchObject({outcome:"found",selection:{topic:"космос",dateMode:"published"}});
+  expect(selectArticles).toHaveBeenCalledWith(expect.objectContaining({
+    topic:"космос",queryTerms:["космос"],dateMode:"published",
+    savedFrom:previous.savedFrom,savedBefore:previous.savedBefore,
+    publicationFrom:"2026-10-31",publicationBefore:"2026-11-07",
+  }),previous.nextCursor);
+  expect(catalog.finish().articlePage).toMatchObject({
+    kind:"saved_topic_links",topic:"космос",dateMode:"published",
+    savedFrom:previous.savedFrom,savedBefore:previous.savedBefore,nextCursor:page.nextCursor,
+  });
+});
+
+test("9T1: mixed LLM article themes cannot silently save an incorrect continuation",async()=>{
+  const selectArticles=jest.fn().mockResolvedValue(page);
+  const catalog=createToolCatalog({settings,prompt:"Две подборки",history:[],
+    lookup:jest.fn().mockResolvedValue([]),propose:jest.fn(),selectArticles,
+  },[],[],[]);
+  await catalog.run("select_local_articles",request);
+  await catalog.run("select_local_articles",{...request,topic:"космос"});
+  expect(catalog.finish().articlePage).toBeUndefined();
+});
