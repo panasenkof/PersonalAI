@@ -178,3 +178,36 @@ test("all verified photos in one note survive ranking and retain attachment-spec
     })).toEqual([]);
   } finally { db.close(); }
 });
+
+test("visual search scans beyond 5,000 IDs and ranks the last valid original",async()=>{
+  const db=new DB();
+  try {
+    const repo=new SqliteMemoryRepository(db as never);
+    const collection=await repo.createCollection({name:"Большая фототека",slug:"scale-photos",sensitivity:"standard"});
+    const note=await repo.createEntity({collection_id:collection.id,domain:"notes",title:"Photobook",payload:{body:""}});
+    const decoy=new Uint8Array(vector(0,1).buffer);
+    const now="2026-11-06T00:00:00.000Z";
+    // Synthetic index-only decoys (no original chunks); the last original is
+    // complete and authorized. This tests SQL keyset coverage, not model accuracy.
+    await db.execAsync("BEGIN");
+    for(let i=0;i<5001;i++) {
+      const id="img-"+String(i).padStart(5,"0");
+      await db.runAsync("INSERT INTO memory_attachments(id,entity_id,name,mime,size,created_at) VALUES(?,?,?,?,?,?)",
+        [id,note.id,id+".jpg","image/jpeg",4,now]);
+      await db.runAsync("INSERT INTO memory_attachment_vectors(attachment_id,model,dim,vector,source_version,created_at) VALUES(?,?,?,?,?,?)",
+        [id,MODEL,IMAGE_VECTOR_DIM,decoy,"a".repeat(64),now]);
+    }
+    await db.execAsync("COMMIT");
+    const last="img-05000", bytes=Uint8Array.from([1,2,3,4]);
+    const sha=require("node:crypto").createHash("sha256").update(bytes).digest("hex");
+    await db.runAsync("INSERT INTO memory_attachment_parts(attachment_id,ord,bytes,sha256) VALUES(?,?,?,?)",
+      [last,0,bytes,sha]);
+    expect(await save(db,repo,last,MODEL,vector(1,0))).toBe(true);
+    const found=await repo.searchMemory("",{
+      imageVector:{model:MODEL,values:vector(1,0)},
+      minImageSimilarity:0.95,limit:20,
+    });
+    expect(found).toHaveLength(1);
+    expect(found[0].originals?.map(p=>p.attachmentId)).toEqual([last]);
+  } finally {db.close();}
+});
