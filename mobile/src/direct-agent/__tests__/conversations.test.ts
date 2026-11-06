@@ -83,3 +83,43 @@ test("9B: article selection handles survive encrypted conversation reopen and re
   repeated.rows[0].articlePage.selected=[{id:"article-01",version:3},{id:"article-01",version:4}];
   expect(parseConversation(JSON.stringify(repeated))?.rows[0].articlePage?.selected).toBeUndefined();
 });
+
+
+test("9C: answer keeps validated selected-article provenance across conversation reopen",()=>{
+  const page={kind:"saved_topic_links",topic:"космос",queryTerms:["космос"],
+    savedFrom:"2026-10-31T00:00:00.000Z",savedBefore:"2026-11-07T00:00:00.000Z",
+    startLocal:"2026-10-31",endLocal:"2026-11-06",
+    selected:[{id:"note-1",version:2},{id:"note-2",version:4},{id:"note-3",version:1}],
+  };
+  const report={kind:"selected_saved_note_reads",selectedCount:3,
+    entries:[
+      {selectedIndex:0,id:"note-1",version:2,status:"complete_saved_note_text",
+        verifiedChars:7000,totalChars:7000,title:"Первая статья"},
+      {selectedIndex:1,id:"note-2",version:4,status:"partial_saved_note",
+        verifiedChars:6000,totalChars:13000,title:"Длинная статья"},
+      {selectedIndex:2,id:"note-3",version:1,status:"unread",verifiedChars:0},
+    ],
+  };
+  const fixture={id:"chat",title:"Сводка",createdAt:"2026-11-06",updatedAt:"2026-11-06",
+    question:"",drafts:[],rows:[{id:"answer",role:"assistant",text:"Выжимка",
+      articlePage:page,articleReadReport:report}]};
+  const saved=parseConversation(JSON.stringify(fixture));
+  expect(saved?.rows[0].articleReadReport).toEqual(report);
+  expect(saved?.rows[0].articlePage?.selected).toEqual(page.selected);
+
+  const tampered=(change:(value:any)=>void)=>{
+    const value=JSON.parse(JSON.stringify(fixture));change(value);
+    const restored=parseConversation(JSON.stringify(value));
+    expect(restored?.rows[0].text).toBe("Выжимка");
+    expect(restored?.rows[0].articleReadReport).toBeUndefined();
+  };
+  tampered(v=>{v.rows[0].articleReadReport.entries[0].id="private-note";});
+  tampered(v=>{v.rows[0].articleReadReport.entries[0].version=3;});
+  tampered(v=>{v.rows[0].articleReadReport.entries[1].status="complete_saved_note_text";});
+  tampered(v=>{v.rows[0].articleReadReport.entries[1].verifiedChars=99999;});
+  tampered(v=>{v.rows[0].articleReadReport.entries[2].verifiedChars=1;});
+  tampered(v=>{v.rows[0].articleReadReport.selectedCount=4;});
+  tampered(v=>{v.rows[0].articleReadReport.entries.reverse();});
+  tampered(v=>{v.rows[0].articlePage.selected[1].id="../escape";});
+  tampered(v=>{v.rows[0].articleReadReport.entries[0].title="x".repeat(200);});
+});
