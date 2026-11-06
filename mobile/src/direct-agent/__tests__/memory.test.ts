@@ -93,7 +93,7 @@ test("a long record sends the chunk that matched, not its beginning", async () =
   repo.searchMemory.mockResolvedValueOnce([{ entity: { id: "long", collection_id: "standard", sensitivity: "standard", record_status: "active",
     title: "Дневник", payload: { body: long + "Ключи у соседа." } }, chunk: "Ключи у соседа.", score: 3 }] as never);
   expect(await searchApprovedNotes("guest", "где ключи", repo as unknown as MemoryRepository))
-    .toEqual([{ id: "long", title: "Дневник", body: "Ключи у соседа.", excerptOnly: true,
+    .toEqual([{ id: "long", title: "Дневник", body: "Ключи у соседа.", excerptOnly: true, excerptStartChar: long.length,
       totalChars: (long + "Ключи у соседа.").length, section: "Заметки" }]);
 });
 
