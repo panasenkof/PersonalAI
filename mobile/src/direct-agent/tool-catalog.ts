@@ -89,6 +89,44 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
           ? "html_meta_source_claim" : "local_save_time"},
       contentIncluded:false};
   }
+
+  // Selection handles are already persisted by the encrypted conversation writer.
+  // Never accept a record ID supplied by the model for selection-specific tools.
+  const selectedArticleHandles = () => {
+    const selected=persistedArticle ? (persistedArticle.selected||[]) :
+      (options.articleSelection?.selected||[]);
+    if(!selected.length || selected.length>24 || selected.some(n=>!n ||
+        !/^[A-Za-z0-9:_-]{1,128}$/.test(n.id) ||
+        !Number.isSafeInteger(n.version) || n.version<1 ||
+        selected.filter(m=>m.id===n.id).length!==1)) return undefined;
+    return selected;
+  };
+  // Both batch selection and later chunks use the SAME canonical versioned reader
+  // and evidence contract. A chunk at the end is NOT proof earlier chunks were read.
+  const verifiedSelectedArticleRead = async (
+    handle:{id:string;version:number}, offset:number, budget:number,
+  ) => {
+    if(options.signal?.aborted)throw new Error("aborted");
+    const result=await options.read!(handle.id,handle.version,offset,budget);
+    if(options.signal?.aborted)throw new Error("aborted");
+    const evidence=result.evidence as Record<string,unknown>|undefined;
+    const content=result.content, total=result.totalChars;
+    const end=typeof content==="string" ? offset+content.length : -1;
+    if(result.id!==handle.id || result.revision!==handle.version ||
+        typeof result.title!=="string" || typeof content!=="string" ||
+        !Number.isSafeInteger(total) || Number(total)<0 ||
+        !Number.isSafeInteger(result.offset) || result.offset!==offset ||
+        offset>Number(total) || content.length>budget || end>Number(total) ||
+        typeof result.hasMore!=="boolean" ||
+        result.hasMore!==(end<Number(total)) ||
+        (result.hasMore && (result.nextOffset!==end || end===offset)) ||
+        !evidence || evidence.recordId!==handle.id ||
+        evidence.recordVersion!==handle.version ||
+        evidence.startChar!==offset || evidence.endChar!==end ||
+        (evidence.coverage!=="complete"&&evidence.coverage!=="excerpt"))
+      throw new Error("invalid_article_read_evidence");
+    return result;
+  };
   const specs: ToolSpec[] = [
     { definition: { name: "search_local_notes", description: "Найти заметки на телефоне по 1–3 ключевым словам. Найденный фрагмент не является полным чтением записи.", parameters: queryParameters }, effect: "read",
       execute: async args => {
@@ -302,13 +340,8 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
           return {error:"invalid_selected_article_args"};
         if(mixedArticleFilters)return {error:"ambiguous_article_selection"};
         usedSelectedArticleTool=true;
-        const selected=persistedArticle ? (persistedArticle.selected||[]) :
-          (options.articleSelection?.selected||[]);
-        if(!selected.length || selected.length>24 || selected.some(n=>!n ||
-            !/^[A-Za-z0-9:_-]{1,128}$/.test(n.id) ||
-            !Number.isSafeInteger(n.version) || n.version<1 ||
-            selected.filter(m=>m.id===n.id).length!==1))
-          return {error:"missing_or_invalid_article_selection"};
+        const selected=selectedArticleHandles();
+        if(!selected)return {error:"missing_or_invalid_article_selection"};
         const start=args.startIndex??0, count=args.count??6, budget=args.charsPerNote??1800;
         if(!Number.isSafeInteger(start)||Number(start)<0||Number(start)>=selected.length||
             !Number.isSafeInteger(count)||Number(count)<1||Number(count)>6||
@@ -319,22 +352,9 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
         for(const handle of chosen){
           if(options.signal?.aborted)throw new Error("aborted");
           try {
-            const result=await options.read!(handle.id,handle.version,0,Number(budget));
-            if(options.signal?.aborted)throw new Error("aborted");
-            const evidence=result.evidence as Record<string,unknown>|undefined;
+            const result=await verifiedSelectedArticleRead(handle,0,Number(budget));
+            const evidence=result.evidence;
             const content=result.content, total=result.totalChars;
-            if(result.id!==handle.id || result.revision!==handle.version ||
-                typeof result.title!=="string" || typeof content!=="string" ||
-                !Number.isSafeInteger(total) || Number(total)<0 ||
-                !Number.isSafeInteger(result.offset) || result.offset!==0 ||
-                content.length>Number(budget) || content.length>Number(total) ||
-                typeof result.hasMore!=="boolean" ||
-                result.hasMore!==(content.length<Number(total)) ||
-                !evidence || evidence.recordId!==handle.id ||
-                evidence.recordVersion!==handle.version ||
-                evidence.startChar!==0 || evidence.endChar!==content.length ||
-                (evidence.coverage!=="complete"&&evidence.coverage!=="excerpt"))
-              throw new Error("invalid_article_read_evidence");
             const status=!content.trim() ? "empty_saved_note" :
               /^https?:\/\/\S+$/iu.test(content.trim()) ? "link_only" :
               result.hasMore ? "partial_saved_note" : "complete_saved_note_text";
@@ -370,7 +390,64 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
         r.contentIncluded===true && Array.isArray(r.entries) &&
         Number.isSafeInteger(r.selectedCount) && typeof r.hasMore==="boolean" &&
         r.entries.length<=6 ? r.entries.length ? "read" as const : "empty" as const : "failed" as const,
-    }] : []),
+    },
+
+      { definition:{name:"read_selected_article_chunk",
+        description:"9B: дочитать ОДНУ длинную заметку из сохранённой подборки по selectedIndex, НЕ по ID модели. offset=nextOffset предыдущего фрагмента; до 6000 символов. Версия, права, AppLock и доказательства диапазона перепроверяются. Прочтение последнего фрагмента НЕ означает, что прочитаны все предыдущие или оригинальная веб-страница. При неполном охвате сообщи это явно.",
+        parameters:{type:"object",properties:{
+          selectedIndex:{type:"integer"},offset:{type:["integer","null"]},
+          budget:{type:["integer","null"],maximum:6000},
+        },required:["selectedIndex","offset","budget"],additionalProperties:false},
+      },effect:"read" as const,
+      execute:async(args:Record<string,unknown>)=>{
+        if(Object.keys(args).length!==3 ||
+            Object.keys(args).some(k=>!["selectedIndex","offset","budget"].includes(k)))
+          return {error:"invalid_selected_article_chunk_args"};
+        if(mixedArticleFilters)return {error:"ambiguous_article_selection"};
+        const selected=selectedArticleHandles();
+        if(!selected)return {error:"missing_or_invalid_article_selection"};
+        const index=args.selectedIndex, offset=args.offset??0, budget=args.budget??4000;
+        if(!Number.isSafeInteger(index) || Number(index)<0 ||
+            Number(index)>=selected.length || !Number.isSafeInteger(offset) ||
+            Number(offset)<0 || Number(offset)>20_000_000 ||
+            !Number.isSafeInteger(budget) || Number(budget)<100 ||
+            Number(budget)>6000)return {error:"invalid_selected_article_chunk_args"};
+        usedSelectedArticleTool=true;
+        const handle=selected[Number(index)];
+        try{
+          const result=await verifiedSelectedArticleRead(handle,Number(offset),Number(budget));
+          const isSingleFullRead=Number(offset)===0 && !result.hasMore;
+          const status=!result.content.trim() && result.totalChars===0 ? "empty_saved_note" :
+            isSingleFullRead && /^https?:\\/\\/\\S+$/iu.test(result.content.trim())
+              ? "link_only" : "saved_note_chunk";
+          if(status==="saved_note_chunk" && result.content.trim()){
+            used.set(handle.id,{id:handle.id,title:result.title.slice(0,160),via:"assistant"});
+            readNotes.add(handle.id);
+          }
+          return {scope:"standard_active_article_selection",selectedIndex:Number(index),
+            id:handle.id,version:handle.version,title:result.title.slice(0,160),
+            status,contentIncluded:true,content:result.content,
+            offset:result.offset,totalChars:result.totalChars,hasMore:result.hasMore,
+            ...(result.hasMore?{nextOffset:result.nextOffset}:{}),
+            evidence:result.evidence,sourceCoverage:"verified_chunk_only",
+            savedNoteFullyRead:isSingleFullRead,originalWebPageRead:false};
+        }catch(e){
+          if(options.signal?.aborted)throw e;
+          const message=(e as Error)?.message;
+          if(message==="memory_read_not_available" || message==="stale_memory_version" ||
+              message==="memory_read_not_available_or_stale")
+            return {scope:"standard_active_article_selection",selectedIndex:Number(index),
+              status:"not_available_or_stale",contentIncluded:false};
+          throw e; // Lock, cancellation or inconsistent evidence: fail closed.
+        }
+      },
+      verify:(r:Record<string,unknown>)=>r.scope==="standard_active_article_selection" &&
+        r.status==="not_available_or_stale" && r.contentIncluded===false ? "empty" as const :
+        r.scope==="standard_active_article_selection" &&
+        r.contentIncluded===true && r.sourceCoverage==="verified_chunk_only" &&
+        r.originalWebPageRead===false && !!r.evidence ? "read" as const : "failed" as const,
+      },
+    ] : []),
     { definition: { name: FACT_TOOL_NAME, description: FACT_TOOL_DESCRIPTION, parameters: factToolParameters(options.sections) }, effect: "proposal",
       execute: async args => {
         const proposal = factProposal(args, options.sections);
