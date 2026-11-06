@@ -61,7 +61,8 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
         const budget = args.budget ?? 4000;
         if (!id || !Number.isSafeInteger(version) || Number(version) < 1 ||
             !Number.isSafeInteger(offset) || Number(offset) < 0 ||
-            !Number.isSafeInteger(budget) || Number(budget) < 1) return { error: "invalid_memory_read_request" };
+            !Number.isSafeInteger(budget) || Number(budget) < 1 || Number(budget) > 6000)
+          return { error: "invalid_memory_read_request" };
         const result = await options.read!(id, Number(version), Number(offset), Number(budget));
         // A successful ACL+revision-checked read is actual source use, even if
         // the note was first discovered through a metadata catalogue.
