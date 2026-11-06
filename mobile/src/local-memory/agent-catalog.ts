@@ -49,7 +49,7 @@ function filters(options: AllowedListOptions, cursor: boolean): Filter {
      (options.publicationFrom !== undefined) !== (options.publicationBefore !== undefined) ||
      (options.publicationFrom && options.publicationBefore && options.publicationFrom>=options.publicationBefore) ||
      ((options.publicationFrom || options.publicationBefore) && (options.savedFrom || options.savedBefore)) ||
-     (options.unknownPublicationOnly && (options.publicationFrom || options.publicationBefore)))
+     (options.unknownPublicationOnly && (!options.linkedOnly || options.publicationFrom || options.publicationBefore)))
     throw new Error("invalid_catalog_publication_window");
   const where = ["e.record_status='active'", "e.domain='notes'", "c.sensitivity='standard'",
     "e.sensitivity IN ('standard','inherit')"];
@@ -66,14 +66,15 @@ function filters(options: AllowedListOptions, cursor: boolean): Filter {
   // confirmed HTML import, not independent verification of a publication day.
   const hasClaim="json_type(e.payload_json,'$.source_publication_date')='text' AND " +
     "json_extract(e.payload_json,'$.source_publication_evidence')='html_meta' AND " +
-    "length(json_extract(e.payload_json,'$.source_publication_date'))=10";
+    "length(json_extract(e.payload_json,'$.source_publication_date'))=10 AND " +
+    "json_extract(e.payload_json,'$.source_publication_attribute') IN ('article:published_time','datePublished')";
   if(options.publicationFrom && options.publicationBefore) {
     where.push(hasClaim);
     where.push("json_extract(e.payload_json,'$.source_publication_date')>=?");
     where.push("json_extract(e.payload_json,'$.source_publication_date')<?");
     params.push(options.publicationFrom,options.publicationBefore);
   }
-  if(options.unknownPublicationOnly)where.push("NOT ("+hasClaim+")");
+  if(options.unknownPublicationOnly)where.push("COALESCE(("+hasClaim+"),0)=0");
 
   if (options.linkedOnly) {
     where.push("json_type(e.payload_json,'$.source_url')='text' AND " +
