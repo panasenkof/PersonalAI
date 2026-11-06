@@ -13,6 +13,10 @@ export type AllowedListOptions = {
   queryTerms?: string[];
   /** UTC instants calculated from the DEVICE-local requested calendar window. */
   savedFrom?: string; savedBefore?: string;
+  /** Publication dates come only from source-claimed HTML meta, never saved_at. */
+  publicationFrom?: string; publicationBefore?: string;
+  /** Unknown publication date among otherwise matching authorized saved links. */
+  unknownPublicationOnly?: boolean;
   /** Limit the article shortlist to notes with a saved source URL. */
   linkedOnly?: boolean;
   /** Article selection sorts by when it was saved, not when later edited. */
@@ -20,7 +24,7 @@ export type AllowedListOptions = {
 };
 type Db = Pick<SQLite.SQLiteDatabase, "getAllAsync" | "getFirstAsync">;
 type Row = { id: string; record_version: number; title: string | null;
-  updated_at: string; created_at: string; collection_name: string; duplicate_count?: number };
+  updated_at: string; created_at: string; collection_name: string; duplicate_count?: number; publication_day?: string | null };
 type Filter = { where: string; params: (string | number)[] };
 const MATCH_SQL = "EXISTS (SELECT 1 FROM memory_search_fts WHERE " +
   "memory_search_fts.entity_id=e.id AND memory_search_fts MATCH ?)";
@@ -38,6 +42,15 @@ function filters(options: AllowedListOptions, cursor: boolean): Filter {
   if (!iso(options.savedFrom) || !iso(options.savedBefore) ||
       (options.savedFrom && options.savedBefore && options.savedFrom >= options.savedBefore))
     throw new Error("invalid_catalog_date_window");
+  const dateOnly=(v:string|undefined) => v===undefined || (/^\\d{4}-\\d{2}-\\d{2}$/.test(v) &&
+    Number.isFinite(Date.parse(v+"T00:00:00Z")) &&
+    new Date(v+"T00:00:00Z").toISOString().startsWith(v));
+  if(!dateOnly(options.publicationFrom) || !dateOnly(options.publicationBefore) ||
+     (options.publicationFrom !== undefined) !== (options.publicationBefore !== undefined) ||
+     (options.publicationFrom && options.publicationBefore && options.publicationFrom>=options.publicationBefore) ||
+     ((options.publicationFrom || options.publicationBefore) && (options.savedFrom || options.savedBefore)) ||
+     (options.unknownPublicationOnly && (options.publicationFrom || options.publicationBefore)))
+    throw new Error("invalid_catalog_publication_window");
   const where = ["e.record_status='active'", "e.domain='notes'", "c.sensitivity='standard'",
     "e.sensitivity IN ('standard','inherit')"];
   const params: (string | number)[] = [];
@@ -49,6 +62,19 @@ function filters(options: AllowedListOptions, cursor: boolean): Filter {
   }
   if (options.savedFrom) { where.push("e.created_at>=?"); params.push(options.savedFrom); }
   if (options.savedBefore) { where.push("e.created_at<?"); params.push(options.savedBefore); }
+  // No fallback to e.created_at. This is only a source assertion stored by
+  // confirmed HTML import, not independent verification of a publication day.
+  const hasClaim="json_type(e.payload_json,'$.source_publication_date')='text' AND " +
+    "json_extract(e.payload_json,'$.source_publication_evidence')='html_meta' AND " +
+    "length(json_extract(e.payload_json,'$.source_publication_date'))=10";
+  if(options.publicationFrom && options.publicationBefore) {
+    where.push(hasClaim);
+    where.push("json_extract(e.payload_json,'$.source_publication_date')>=?");
+    where.push("json_extract(e.payload_json,'$.source_publication_date')<?");
+    params.push(options.publicationFrom,options.publicationBefore);
+  }
+  if(options.unknownPublicationOnly)where.push("NOT ("+hasClaim+")");
+
   if (options.linkedOnly) {
     where.push("json_type(e.payload_json,'$.source_url')='text' AND " +
       "(json_extract(e.payload_json,'$.source_url') LIKE 'https://%' OR " +
@@ -95,6 +121,7 @@ export async function listAllowedNotes(db: Db, options: AllowedListOptions = {})
   // Read-only exact URL candidate count; never treat another note as mergeable or expose its metadata.
   const rows = await db.getAllAsync<Row>(
     "SELECT e.id,e.record_version,e.title,e.created_at,e.updated_at,c.name AS collection_name " +
+    (options.publicationFrom ? ", json_extract(e.payload_json,'$.source_publication_date') AS publication_day " : "") +
     (options.linkedOnly ? `, (SELECT count(*) FROM memory_entities d
       JOIN memory_collections dc ON dc.id=d.collection_id
       WHERE d.id<>e.id AND d.record_status='active' AND d.domain='notes'
@@ -111,7 +138,8 @@ export async function listAllowedNotes(db: Db, options: AllowedListOptions = {})
   return {
     records: visible.map(row => ({ id: row.id, version: row.record_version,
       title: row.title || "", section: row.collection_name, createdAt: row.created_at, updatedAt: row.updated_at,
-      ...(options.linkedOnly ? {duplicateCount: row.duplicate_count ?? 0} : {}) })),
+      ...(options.linkedOnly ? {duplicateCount: row.duplicate_count ?? 0} : {}),
+      ...(options.publicationFrom && typeof row.publication_day==="string" ? {publicationDay:row.publication_day} : {}) })),
     hasMore: rows.length > limit,
     ...(rows.length > limit && last ?
       { nextCursor: options.sortBySaved
