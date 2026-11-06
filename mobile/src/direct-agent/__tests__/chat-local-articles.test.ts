@@ -10,7 +10,7 @@ jest.mock("../../local-memory/storage",()=>({
 jest.mock("../article-selection",()=>({
   savedAiArticleIntent:jest.fn(),
   selectSavedAiArticles:jest.fn(),
-  savedAiArticlePageIntent:jest.fn((page:any)=>page.kind==="saved_topic_links" ? {...page,dateMode:"saved"} : {...page,dateMode:"saved",topic:"ai",queryTerms:["ИИ"]}),
+  savedAiArticlePageIntent:jest.fn((page:any)=>page.kind==="saved_topic_links" ? {...page,dateMode:page.dateMode||"saved"} : {...page,dateMode:page.dateMode||"saved",topic:"ai",queryTerms:["ИИ"]}),
 }));
 jest.mock("expo-crypto",()=>({randomUUID:()=>"id-"+Math.random().toString(36).slice(2)}));
 const intent=savedAiArticleIntent as jest.Mock;
@@ -196,6 +196,55 @@ test("exact-URL duplicate is only a read-only hint, both source links remain ope
   const row=store.getSnapshot().conversations[0].rows[1];
   expect(row.text).toContain("ещё доступных сохранений этого URL: 1");
   expect(row.memory?.map(x=>x.id)).toEqual(["a","b"]);
+  expect(runner).not.toHaveBeenCalled();
+  store.dispose();
+});
+
+test("9A5c: published-date shortlist says source-claimed, shows unknown count and never calls model",async()=>{
+  const {repo,records,runner}=fixture();
+  const store=new DirectChatStore("guest",repo,runner);await store.initialize();
+  intent.mockReturnValueOnce({dateMode:"published",topic:"ai",queryTerms:["ИИ"],
+    publicationFrom:"2026-10-31",publicationBefore:"2026-11-07",
+    savedFrom:"2026-10-31T00:00:00.000Z",savedBefore:"2026-11-07T00:00:00.000Z",
+    startLocal:"2026-10-31",endLocal:"2026-11-06"});
+  selection.mockResolvedValueOnce({count:1,hasMore:false,unknownPublicationCount:4,records:[
+    {id:"a",title:"ИИ сегодня",section:"Заметки",version:1,createdAt:"2026-09-01T10:00:00.000Z",
+      publicationDay:"2026-11-03",duplicateCount:0},
+  ]});
+  store.setQuestion("Найди статьи об ИИ, опубликованные за последние 7 дней");
+  await store.searchSavedArticlesLocally();
+  const answer=records.get(store.getSnapshot().activeId!)!.rows[1];
+  expect(answer.text).toContain("Период публикации по данным сайта");
+  expect(answer.text).toContain("не проверена независимо");
+  expect(answer.text).toContain("неизвестной датой публикации: 4");
+  expect(answer.text).toContain("2026-11-03");
+  expect(answer.articlePage?.dateMode).toBe("published");
+  expect(runner).not.toHaveBeenCalled();
+  store.dispose();
+});
+
+test("9A5c: published follow-up retains publication mode and does not leak to LLM",async()=>{
+  const {repo,runner}=fixture();
+  const store=new DirectChatStore("guest",repo,runner);await store.initialize();
+  intent.mockReturnValueOnce({dateMode:"published",topic:"ai",queryTerms:["ИИ"],
+    publicationFrom:"2026-10-31",publicationBefore:"2026-11-07",
+    savedFrom:"2026-10-31T00:00:00.000Z",savedBefore:"2026-11-07T00:00:00.000Z",
+    startLocal:"2026-10-31",endLocal:"2026-11-06"});
+  selection.mockResolvedValueOnce({count:9,hasMore:true,unknownPublicationCount:2,
+    nextCursor:{beforeCreatedAt:"2026-11-04T09:00:00.000Z",beforeId:"b"},
+    records:[{id:"b",title:"ИИ Android",section:"Заметки",version:1,
+      createdAt:"2026-11-04T09:00:00.000Z",publicationDay:"2026-11-03"}],
+  }).mockResolvedValueOnce({count:9,hasMore:false,unknownPublicationCount:2,records:[
+    {id:"c",title:"ИИ on device",section:"Заметки",version:1,
+      createdAt:"2026-11-03T09:00:00.000Z",publicationDay:"2026-11-02"}],
+  });
+  store.setQuestion("Найди статьи об ИИ, опубликованные за последние 7 дней");
+  await store.searchSavedArticlesLocally();
+  const first=store.getSnapshot().conversations[0].rows[1];
+  expect(parseConversation(JSON.stringify(store.getSnapshot().conversations[0]))?.rows[1].articlePage?.dateMode).toBe("published");
+  await store.loadMoreSavedArticlesLocally(first.id);
+  expect(store.getSnapshot().conversations[0].rows.at(-1)?.text).toContain("по данным сайтов");
+  expect(selection.mock.calls[1][1]).toMatchObject({dateMode:"published"});
   expect(runner).not.toHaveBeenCalled();
   store.dispose();
 });

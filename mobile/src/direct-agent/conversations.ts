@@ -14,7 +14,7 @@ export type DialogueSummaryOrigin = {
 };
 /** Lightweight saved-link shortlist continuation; content stays in existing SQLCipher notes. */
 export type ChatArticlePage = {
-  kind: "saved_ai_links" | "saved_topic_links"; topic?: string; queryTerms?: string[]; savedFrom: string; savedBefore: string;
+  kind: "saved_ai_links" | "saved_topic_links"; dateMode?: "saved" | "published"; topic?: string; queryTerms?: string[]; savedFrom: string; savedBefore: string;
   startLocal: string; endLocal: string;
   nextCursor?: {beforeCreatedAt:string;beforeId:string};
 };
@@ -62,11 +62,13 @@ export function parseConversation(json: string): SavedConversation | null {
       typeof ap.topic === "string" && ap.topic.length >= 2 && ap.topic.length <= 70 &&
       /^[а-яёa-z0-9][а-яёa-z0-9\s+.#-]*$/iu.test(ap.topic) &&
       Array.isArray(ap.queryTerms) && ap.queryTerms.length === 1 && ap.queryTerms[0] === ap.topic);
-    const articlePage: ChatArticlePage | undefined = r.role === "assistant" && topicOk &&
+    const articlePage: ChatArticlePage | undefined = r.role === "assistant" &&
+      (ap?.dateMode===undefined || ap.dateMode==="saved" || ap.dateMode==="published") && topicOk &&
       (ap?.kind === "saved_ai_links" || ap?.kind === "saved_topic_links") && iso(ap.savedFrom) && iso(ap.savedBefore) &&
       ap.savedFrom < ap.savedBefore && day(ap.startLocal) && day(ap.endLocal) &&
       validCursor ? {kind:ap.kind,savedFrom:ap.savedFrom,savedBefore:ap.savedBefore,
         startLocal:ap.startLocal,endLocal:ap.endLocal,
+        ...(ap.dateMode==="published" ? {dateMode:"published" as const} : {}),
         ...(ap.kind === "saved_topic_links" ? {topic:ap.topic,queryTerms:[ap.topic]} : {}),
         ...(cur ? {nextCursor:{beforeCreatedAt:cur.beforeCreatedAt,beforeId:cur.beforeId}} : {})} : undefined;
     const d = r.dialogueSummary;

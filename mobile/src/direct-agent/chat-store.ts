@@ -24,6 +24,12 @@ import { waitForApplicationSession, onLocalMemorySessionChange } from "../local-
 import { localPhotoIntent83, localPhotoSuggestion83, searchLocalPhotosFromChat83 } from "../media/vision-chat-search";
 import { savedAiArticleIntent, selectSavedAiArticles, savedAiArticlePageIntent } from "./article-selection";
 
+/** Publication days are site assertions, never independently verified facts. */
+function articleDateLabel(record:{createdAt:string;publicationDay?:string}, dateMode:"saved"|"published"):string {
+  if(dateMode==="published")return "дата публикации по сайту "+(record.publicationDay||"неизвестна");
+  return "сохранено "+(Number.isFinite(Date.parse(record.createdAt))
+    ? new Date(record.createdAt).toLocaleDateString("ru-RU") : "дата неизвестна");
+}
 /** `streamText` is the answer as it arrives; it is never persisted. */
 /** `progressSince` is when the current stage began, for the elapsed timer. */
 export type LiveConversation = SavedConversation & { retryPhoto?: {rowId:string; image:ChatAttachment}; busy: boolean; progress: string; progressSince?: number; streamText?: string; savingDraft?: string; deleting?: boolean };
@@ -267,22 +273,23 @@ export class DirectChatStore {
       if(!latest)return;
       const dates=intent.startLocal.split("-").reverse().join(".")+"–"+intent.endLocal.split("-").reverse().join(".");
       const titles=found.records.map((n,i)=>
-        (i+1)+". "+(n.title||"Без названия")+" · сохранено "+
-        (Number.isFinite(Date.parse(n.createdAt))?new Date(n.createdAt).toLocaleDateString("ru-RU"):"дата неизвестна")+
+        (i+1)+". "+(n.title||"Без названия")+" · "+articleDateLabel(n,intent.dateMode)+
         (typeof n.duplicateCount === "number" && Number.isSafeInteger(n.duplicateCount) && n.duplicateCount>0
           ? " · ещё доступных сохранений этого URL: "+n.duplicateCount : "")).join("\n");
       const subject=intent.topic==="ai" ? "по ключевым словам об ИИ" :
         "по точной фразе «"+intent.topic+"»";
       const head=found.count
-        ? "Найдено "+found.count+" сохранённых материалов со ссылкой "+subject+". Даты сохранения: "+dates+
+        ? "Найдено "+found.count+" сохранённых материалов со ссылкой "+subject+". "+(intent.dateMode==="published" ? "Период публикации по данным сайта: " : "Даты сохранения: ")+dates+
           ". Показано "+found.records.length+(found.hasMore?"; это только первая страница.":".")
-        : "За "+dates+" сохранённых материалов со ссылкой "+subject+" не найдено.";
+        : "За "+dates+" сохранённых материалов со ссылкой "+subject+" не найдено "+(intent.dateMode==="published" ? "с датой публикации по данным сайта." : "по дате сохранения.");
       this.update(id,{updatedAt:new Date().toISOString(),
         rows:[...latest.rows,{id:Crypto.randomUUID(),role:"assistant",
           text:head+(titles?"\n\n"+titles:"")+
+            (intent.dateMode==="published" ? "\n\nДата публикации заявлена сайтом, не проверена независимо. Материалов по теме с неизвестной датой публикации: "+(found.unknownPublicationCount??0)+"." : "")+
             "\n\nПоиск выполнен только в памяти телефона. Ссылки открывают оригинальные заметки. Сохранённая ссылка не означает, что полный текст статьи был прочитан; другие заметки без URL здесь не учитывались.",
           memory:found.records.map(n=>({id:n.id,title:n.title||"Без названия",section:n.section,via:"search" as const})),
           articlePage:{kind:intent.topic==="ai" ? "saved_ai_links" as const : "saved_topic_links" as const,
+            ...(intent.dateMode==="published" ? {dateMode:"published" as const} : {}),
             ...(intent.topic!=="ai" ? {topic:intent.topic,queryTerms:intent.queryTerms} : {}),
             savedFrom:intent.savedFrom,savedBefore:intent.savedBefore,
             startLocal:intent.startLocal,endLocal:intent.endLocal,
@@ -332,13 +339,13 @@ export class DirectChatStore {
       const latest=this.snapshot.conversations.find(c=>c.id===id);
       if(!latest)return;
       const titles=found.records.map((n,i)=>
-        (i+1)+". "+(n.title||"Без названия")+" · сохранено "+
-        (Number.isFinite(Date.parse(n.createdAt))?new Date(n.createdAt).toLocaleDateString("ru-RU"):"дата неизвестна")+
+        (i+1)+". "+(n.title||"Без названия")+" · "+articleDateLabel(n,page.dateMode||"saved")+
         (typeof n.duplicateCount === "number" && Number.isSafeInteger(n.duplicateCount) && n.duplicateCount>0
           ? " · ещё доступных сохранений этого URL: "+n.duplicateCount : "")).join("\n");
       const text=found.records.length
         ? "Следующая страница: "+found.records.length+" сохранённых материалов со ссылками. Сейчас по этому фильтру доступно "+found.count+
           (found.hasMore?"; есть следующие страницы.":".")+
+          (page.dateMode==="published" ? " Даты — по данным сайтов, не проверены независимо. С неизвестной датой: "+(found.unknownPublicationCount??0)+"." : "")+
           "\n\n"+titles+"\n\nПоиск локальный; полный текст ссылок не прочитан. Открывайте записи ниже."
         : "Больше доступных сохранённых материалов по этому фильтру нет. Состав памяти мог измениться с предыдущего запроса.";
       this.update(id,{updatedAt:new Date().toISOString(),rows:[
@@ -348,6 +355,7 @@ export class DirectChatStore {
           memory:found.records.map(n=>({id:n.id,title:n.title||"Без названия",
             section:n.section,via:"search" as const})),
           articlePage:{kind:page.kind,savedFrom:page.savedFrom,savedBefore:page.savedBefore,
+            ...(page.dateMode==="published" ? {dateMode:"published" as const} : {}),
             ...(page.kind==="saved_topic_links" ? {topic:page.topic,queryTerms:page.queryTerms} : {}),
             startLocal:page.startLocal,endLocal:page.endLocal,
             ...(found.nextCursor ? {nextCursor:found.nextCursor} : {})}},
