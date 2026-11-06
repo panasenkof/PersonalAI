@@ -382,7 +382,7 @@ export class DirectChatStore {
     }
     // A contextual "Покажи ещё" remains on-device; unrelated requests still use the usual runner.
     if (!internetPhotoId && !attachments.length &&
-        /^(?:покажи|показать)\\s+ещ[её](?:\\s+(?:материалы|статьи|записи))?[.!?]?$/iu.test(prompt)) {
+        /^(?:покажи|показать)\s+ещ[её](?:\s+(?:материалы|статьи|записи))?[.!?]?$/iu.test(prompt)) {
       const page=[...current.rows].reverse().find(row=>row.role==="assistant" && row.articlePage?.nextCursor);
       if(page){await this.loadMoreSavedArticlesLocally(page.id,true);return;}
     }
