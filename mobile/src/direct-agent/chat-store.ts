@@ -516,6 +516,17 @@ export class DirectChatStore {
         }, rewrite: true, signal: aborter.signal, onText, sections,
         diagnostic: trace,
         lookup: query => searchApprovedNotes(this.profile, query),
+        // 9T1: the same encrypted, ACL-scoped visual search used by the fast
+        // chat route. Only verified note/photo handles go back to the model.
+        searchPhotos: async description => {
+          if (aborter.signal.aborted || !localMemorySessionUnlocked() || this.disposed)
+            throw new Error("application_locked");
+          const found=await searchLocalPhotosFromChat83(this.profile,
+            {mode:"text",description},[],aborter.signal);
+          if (aborter.signal.aborted || !localMemorySessionUnlocked() || this.disposed)
+            throw new Error("application_locked");
+          return found;
+        },
         read: async (id, version, offset, budget) => {
           if (aborter.signal.aborted || !localMemorySessionUnlocked()) throw new Error("application_locked");
           const evidence=await readApprovedNote(this.profile, id, version, offset, budget);
@@ -578,6 +589,7 @@ export class DirectChatStore {
         ...(result.notice ? [{ id: Crypto.randomUUID(), role: "info" as const, text: result.notice }] : []),
         { id: Crypto.randomUUID(), role: "assistant", text: result.text, sources: result.sources,
           ...(result.memory?.length ? { memory: result.memory } : {}),
+          ...(result.photoAction ? {photoAction:result.photoAction} : {}),
           ...(result.articlePage ? {articlePage:result.articlePage} : {}),
           ...(result.articleReadReport ? {articleReadReport:result.articleReadReport} : {}) }],
         updatedAt: new Date().toISOString() });
