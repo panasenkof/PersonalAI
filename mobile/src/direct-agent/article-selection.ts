@@ -46,20 +46,23 @@ type ArticleDb = Parameters<typeof listAllowedNotes>[0];
 export type SavedArticleShortlist = {
   count: number;
   records: Array<{id:string;version:number;title:string;section:string;createdAt:string}>;
-  hasMore: boolean; scope: "standard_active_saved_links"; matchMode: "one_of_fts_phrases";
+  hasMore: boolean; nextCursor?: {beforeCreatedAt:string;beforeId:string}; scope: "standard_active_saved_links"; matchMode: "one_of_fts_phrases";
 };
 
 /** The count and first page share a single unlocked SQLCipher snapshot. */
 export async function selectSavedAiArticles(profile: string, intent: SavedArticleIntent,
-  db?: ArticleDb): Promise<SavedArticleShortlist> {
+  db?: ArticleDb, cursor?: {beforeCreatedAt:string;beforeId:string}): Promise<SavedArticleShortlist> {
   const run = async (reader: ArticleDb): Promise<SavedArticleShortlist> => {
     const filters = { queryTerms:intent.queryTerms, savedFrom:intent.savedFrom,
       savedBefore:intent.savedBefore, linkedOnly:true, sortBySaved:true };
     const counted = await countAllowedNotes(reader,filters);
-    const page = await listAllowedNotes(reader,{...filters,limit:8});
+    const page = await listAllowedNotes(reader,{...filters,...cursor,limit:8});
     return { count:counted.count,records:page.records.map(({id,version,title,section,createdAt})=>({
       id,version,title,section,createdAt,
-    })),hasMore:page.hasMore,scope:"standard_active_saved_links",matchMode:"one_of_fts_phrases" };
+    })),hasMore:page.hasMore,
+      ...(page.nextCursor?.beforeCreatedAt ? {nextCursor:{
+        beforeCreatedAt:page.nextCursor.beforeCreatedAt,beforeId:page.nextCursor.beforeId,
+      }} : {}),scope:"standard_active_saved_links",matchMode:"one_of_fts_phrases" };
   };
   if(db) return run(db); // SQL test fixture only.
   let result!: SavedArticleShortlist;
