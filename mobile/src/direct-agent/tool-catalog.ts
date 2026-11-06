@@ -636,6 +636,12 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
           {totalChars:entry.totalChars} : {}),
         ...("title" in entry && typeof entry.title==="string" ?
           {title:entry.title} : {}),
+        // Ranges are read-only source coordinates, not a copy of article text.
+        // Very fragmented notes retain aggregate coverage but lose inline links.
+        ...("ranges" in entry && Array.isArray(entry.ranges) && entry.ranges.length<=128 ?
+          {ranges:entry.ranges.filter(r=>r.endChar>r.startChar).map(r=>({
+            startChar:r.startChar,endChar:r.endChar,
+          }))} : {}),
       })),
     } : undefined;
     return { taskState: state, proposalIds: [...proposalIds],
