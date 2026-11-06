@@ -16,13 +16,15 @@ import type { MemorySnippet, NoteProposal } from "./memory";
 import { FACT_TOOL_NAME, factGuide } from "./fact-tool";
 import type { SavedArticleIntent, SavedArticleShortlist } from "./article-selection";
 import type { MemorySection } from "./fact-tool";
-import type { ChatArticlePage, ChatArticleReadReport } from "./conversations";
+import type { ChatArticlePage, ChatArticleReadReport, ChatMemoryRef } from "./conversations";
 import { ARTICLE_CITATION_GUIDE, ARTICLE_SYNTHESIS_GUIDE } from "./article-citations";
 
 export type AgentTurn = { role: "user" | "assistant"; content: string; attachments?: ChatAttachment[] };
 /** `notice` is shown to the user before the answer, e.g. why web search failed. */
 /** `memory`: the records the answer was based on, shown under it («Из памяти»). */
-export type DirectResult = { text: string; sources: string[]; requests: number; notice?: string; memory?: UsedNote[]; taskState?: TaskState; proposalIds?: string[]; articlePage?: ChatArticlePage; articleReadReport?: ChatArticleReadReport };
+export type DirectResult = { text: string; sources: string[]; requests: number; notice?: string;
+  memory?: Array<UsedNote | ChatMemoryRef>; photoAction?: "model" | "import" | "prepare";
+  taskState?: TaskState; proposalIds?: string[]; articlePage?: ChatArticlePage; articleReadReport?: ChatArticleReadReport };
 
 export type DirectAgentOptions = {
   settings: DirectAgentSettings;
@@ -45,6 +47,12 @@ export type DirectAgentOptions = {
   rewrite?: boolean;
   signal?: AbortSignal;
   lookup: (query: string) => Promise<MemorySnippet[]>;
+  /** 9T1: optional host-only bridge to the existing ACL-scoped text-to-photo
+   * search. No image bytes, vectors or duplicate search index reach the LLM. */
+  searchPhotos?: (description: string) => Promise<{
+    text: string; memory: ChatMemoryRef[];
+    photoAction?: "model" | "import" | "prepare";
+  }>;
   /** Recheck access and record version before reading a source excerpt. */
   read?: (id: string, version: number, offset?: number, budget?: number) => Promise<Record<string, unknown>>;
   /** List metadata/short previews from source-attached extraction records for
@@ -104,6 +112,7 @@ export { MAX_DIRECT_REPLY_TOKENS, MAX_REASONING_REPLY_TOKENS, TRUNCATED_NOTE, is
 const systemPrompt = (sections?: MemorySection[]) =>
   "Ты персональный помощник PersAI, работающий на телефоне пользователя. " +
   "Для вопросов о предпочтениях и заметках используй search_local_notes, если он доступен. " +
+  "Если нужно найти реальные фотографии в памяти и доступен search_local_photos, вызывай его с кратким описанием на естественном языке. Он ищет только на телефоне через действующий фотоиндекс; результат — метаданные найденных фото, а не сами пиксели, и не подтверждает, что ты видел или распознал исходное изображение. Не придумывай снимки, не объявляй отсутствие модели/индекса пустым результатом, не загружай фото в интернет без прямого согласия. Обычный поиск текста не заменяй фото-поиском без причины. " +
   "Для выборки сохранённых статей по дате используй select_local_articles, если он доступен; ответ инструмента — только метаданные. Проверяй count/hasMore, дочитывай текст read_local_note по id/version перед обобщением и не выдавай ссылку без текста за прочитанную статью. " +
   "На уточнение «сделай выжимку из них» вызывай read_selected_local_articles, если он доступен: это точные ID/version прошлой подборки, исходники перечитываются с проверкой прав. Для всех выбранных материалов следуй nextIndex до hasMore=false в пределах бюджета; отдельно назови прочитанные, прочитанные частично, ссылки без тела и недоступные. Не приписывай факты статьям, текст которых не читался; ни summary заметки, ни URL не означают прочитанный оригинал статьи. " +
   ARTICLE_CITATION_GUIDE + ARTICLE_SYNTHESIS_GUIDE +
