@@ -54,7 +54,7 @@ export async function selectSavedAiArticles(profile: string, intent: SavedArticl
   db?: ArticleDb): Promise<SavedArticleShortlist> {
   const run = async (reader: ArticleDb): Promise<SavedArticleShortlist> => {
     const filters = { queryTerms:intent.queryTerms, savedFrom:intent.savedFrom,
-      savedBefore:intent.savedBefore, linkedOnly:true };
+      savedBefore:intent.savedBefore, linkedOnly:true, sortBySaved:true };
     const counted = await countAllowedNotes(reader,filters);
     const page = await listAllowedNotes(reader,{...filters,limit:8});
     return { count:counted.count,records:page.records.map(({id,version,title,section,createdAt})=>({
