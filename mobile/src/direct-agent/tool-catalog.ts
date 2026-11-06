@@ -41,6 +41,7 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
   let persistedArticle: ChatArticlePage | undefined;
   let articleFilterKey: string | undefined;
   let mixedArticleFilters = false;
+  let usedSelectedArticleTool = false;
   async function readArticleSelection(
     intent: SavedArticleIntent, cursor?: {beforeCreatedAt:string;beforeId:string},
   ): Promise<Record<string, unknown>> {
@@ -286,6 +287,88 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
         typeof r.hasMore==="boolean" ? (r.records as unknown[]).length
         ? "found" as const : "empty" as const : "failed" as const,
     }] : []),
+    ...(options.read && options.selectArticles ? [{
+      definition:{ name:"read_selected_local_articles",
+        description:"9B: читать именно ранее показанные в этом чате сохранённые статьи (до 24 id/version) через проверяемый локальный reader. Модель НЕ передаёт ID. Фильтр и список остаются в SQLCipher истории; на каждом чтении ACL/версия проверяются заново. Читай следующие страницы с nextIndex, пока hasMore=false или не исчерпан бюджет. complete_note_text НЕ значит прочитанная оригинальная веб-страница; link_only не источник фактов статьи.",
+        parameters:{type:"object",properties:{
+          startIndex:{type:["integer","null"]},count:{type:["integer","null"]},
+          charsPerNote:{type:["integer","null"]},
+        },required:["startIndex","count","charsPerNote"],additionalProperties:false},
+      },effect:"read" as const,
+      execute:async(args:Record<string,unknown>)=>{
+        if(Object.keys(args).some(k=>!["startIndex","count","charsPerNote"].includes(k)))
+          return {error:"invalid_selected_article_args"};
+        if(mixedArticleFilters)return {error:"ambiguous_article_selection"};
+        usedSelectedArticleTool=true;
+        const selected=persistedArticle ? (persistedArticle.selected||[]) :
+          (options.articleSelection?.selected||[]);
+        if(!selected.length || selected.length>24 || selected.some(n=>!n ||
+            !/^[A-Za-z0-9:_-]{1,128}$/.test(n.id) ||
+            !Number.isSafeInteger(n.version) || n.version<1 ||
+            selected.filter(m=>m.id===n.id).length!==1))
+          return {error:"missing_or_invalid_article_selection"};
+        const start=args.startIndex??0, count=args.count??6, budget=args.charsPerNote??1800;
+        if(!Number.isSafeInteger(start)||Number(start)<0||Number(start)>=selected.length||
+            !Number.isSafeInteger(count)||Number(count)<1||Number(count)>6||
+            !Number.isSafeInteger(budget)||Number(budget)<100||Number(budget)>2200)
+          return {error:"invalid_selected_article_args"};
+        const chosen=selected.slice(Number(start),Number(start)+Number(count));
+        const entries:Array<Record<string,unknown>>=[];
+        for(const handle of chosen){
+          if(options.signal?.aborted)throw new Error("aborted");
+          try {
+            const result=await options.read!(handle.id,handle.version,0,Number(budget));
+            if(options.signal?.aborted)throw new Error("aborted");
+            const evidence=result.evidence as Record<string,unknown>|undefined;
+            const content=result.content, total=result.totalChars;
+            if(result.id!==handle.id || result.revision!==handle.version ||
+                typeof result.title!=="string" || typeof content!=="string" ||
+                !Number.isSafeInteger(total) || Number(total)<0 ||
+                !Number.isSafeInteger(result.offset) || result.offset!==0 ||
+                content.length>Number(budget) || content.length>Number(total) ||
+                typeof result.hasMore!=="boolean" ||
+                result.hasMore!==(content.length<Number(total)) ||
+                !evidence || evidence.recordId!==handle.id ||
+                evidence.recordVersion!==handle.version ||
+                evidence.startChar!==0 || evidence.endChar!==content.length ||
+                (evidence.coverage!=="complete"&&evidence.coverage!=="excerpt"))
+              throw new Error("invalid_article_read_evidence");
+            const status=!content.trim() ? "empty_saved_note" :
+              /^https?:\/\/\S+$/iu.test(content.trim()) ? "link_only" :
+              result.hasMore ? "partial_saved_note" : "complete_saved_note_text";
+            entries.push({id:handle.id,version:handle.version,status,
+              title:result.title.slice(0,160),content,
+              totalChars:total,hasMore:result.hasMore,evidence});
+            if(status==="partial_saved_note"||status==="complete_saved_note_text"){
+              used.set(handle.id,{id:handle.id,title:result.title.slice(0,160),via:"assistant"});
+              readNotes.add(handle.id);
+            }
+          }catch(e){
+            if(options.signal?.aborted)throw e;
+            const message=(e as Error)?.message;
+            if(message==="memory_read_not_available" || message==="stale_memory_version" ||
+                message==="memory_read_not_available_or_stale"){
+              entries.push({id:handle.id,version:handle.version,status:"not_available_or_stale"});
+            }else throw e; // AppLock, damaged evidence and cancellation fail closed.
+          }
+        }
+        const nextIndex=Number(start)+chosen.length;
+        return {scope:"standard_active_article_selection",contentIncluded:true,
+          selectedCount:selected.length,checked:entries.length,startIndex:Number(start),
+          hasMore:nextIndex<selected.length,
+          ...(nextIndex<selected.length?{nextIndex}:{}),
+          readTextCount:entries.filter(n=>n.status==="partial_saved_note"||
+              n.status==="complete_saved_note_text").length,
+          partialCount:entries.filter(n=>n.status==="partial_saved_note").length,
+          linkOnlyCount:entries.filter(n=>n.status==="link_only").length,
+          unavailableCount:entries.filter(n=>n.status==="not_available_or_stale").length,
+          entries};
+      },
+      verify:(r:Record<string,unknown>)=>r.scope==="standard_active_article_selection" &&
+        r.contentIncluded===true && Array.isArray(r.entries) &&
+        Number.isSafeInteger(r.selectedCount) && typeof r.hasMore==="boolean" &&
+        r.entries.length<=6 ? r.entries.length ? "read" as const : "empty" as const : "failed" as const,
+    }] : []),
     { definition: { name: FACT_TOOL_NAME, description: FACT_TOOL_DESCRIPTION, parameters: factToolParameters(options.sections) }, effect: "proposal",
       execute: async args => {
         const proposal = factProposal(args, options.sections);
@@ -340,7 +423,8 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
   function finish(): Pick<DirectResult, "taskState" | "proposalIds" | "articlePage"> {
     state = { ...state, turnStatus: "answered" }; emit();
     return { taskState: state, proposalIds: [...proposalIds],
-      ...(persistedArticle ? {articlePage:persistedArticle} : {}) };
+      ...(persistedArticle ? {articlePage:persistedArticle} :
+        usedSelectedArticleTool && options.articleSelection ? {articlePage:options.articleSelection} : {}) };
   }
   const observeSources = (urls: string[]) => { if (urls.length) observe({ tool: "web_search", outcome: "found", subject: options.prompt.slice(0, 120), excerpt: urls.join("\n").slice(0, 600) }); };
   return { definitions: specs.map(s => s.definition), run, finish, observeSources,
