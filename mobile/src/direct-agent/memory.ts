@@ -71,7 +71,7 @@ export async function searchApprovedNotes(
     const standards=collections.filter(c=>c.sensitivity==="standard").map(c=>c.id);
     if(!standards.length)return [];
     const hits=await db.searchMemory(query,{
-      collectionIds:standards,sensitivities:["standard","inherit"],limit:5,
+      collectionIds:standards,sensitivities:["standard","inherit"],limit:12,
       ...(values&&space?{vector:{model:space,values}}:{}),
     });
     const allowed=hits.filter(({entity})=>standards.includes(entity.collection_id)&&
