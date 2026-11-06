@@ -58,3 +58,37 @@ test("list is keyset-paged, no bodies leave SQLCipher and count ignores cursor",
   await expect(listAllowedNotes(db as never, { limit: 100 })).rejects.toThrow("invalid_catalog_limit");
   await expect(listAllowedNotes(db as never, { beforeId: "1" })).rejects.toThrow("invalid_catalog_cursor");
 });
+
+test("stage 9A searches only dated active standard saved links with an exact scoped count", async () => {
+  const db = new Db();
+  for (const [id,col,status,sensitivity,title,created,source] of [
+    ["a","c-standard","active","inherit","Нейросети сегодня","2026-11-06T10:00:00.000Z","https://example.org/a"],
+    ["b","c-standard","active","standard","Искусственный интеллект вчера","2026-11-04T10:00:00.000Z","https://example.org/b"],
+    ["c","c-standard","active","standard","Нейросети старые","2026-10-25T10:00:00.000Z","https://example.org/c"],
+    ["d","c-secret","active","standard","Нейросети тайна","2026-11-06T10:00:00.000Z","https://example.org/d"],
+    ["e","c-standard","active","sensitive","Нейросети секрет","2026-11-06T10:00:00.000Z","https://example.org/e"],
+    ["f","c-standard","trashed","standard","Нейросети мусор","2026-11-06T10:00:00.000Z","https://example.org/f"],
+    ["g","c-standard","active","standard","Нейросети без ссылки","2026-11-06T10:00:00.000Z",""],
+    ["h","c-standard","active","standard","Ремонт автомобиля","2026-11-06T10:00:00.000Z","https://example.org/h"],
+  ] as string[][]) {
+    db.add(id,col,status,sensitivity,title,"2026-11-06T11:00:00.000Z");
+    db.sqlite.prepare("UPDATE memory_entities SET created_at=?,payload_json=? WHERE id=?")
+      .run(created,JSON.stringify({body:title,...(source?{source_url:source}:{})}),id);
+  }
+  const filters = {queryTerms:["ИИ","AI","нейросети","искусственный интеллект"],
+    savedFrom:"2026-10-31T00:00:00.000Z",savedBefore:"2026-11-07T00:00:00.000Z",
+    linkedOnly:true};
+  expect(await countAllowedNotes(db as never,filters)).toMatchObject({count:2,matchMode:"one_of_fts_phrases"});
+  const page=await listAllowedNotes(db as never,{...filters,limit:8});
+  expect(page.records.map(x=>x.id)).toEqual(["a","b"]);
+  expect(page.records[0].createdAt).toBe("2026-11-06T10:00:00.000Z");
+  expect(JSON.stringify(page)).not.toContain("payload_json");
+});
+
+test("bounded OR-FTS rejects unsafe query terms and inconsistent date windows", async () => {
+  const db = new Db();
+  await expect(listAllowedNotes(db as never,{queryTerms:[]})).rejects.toThrow("invalid_catalog_query_terms");
+  await expect(listAllowedNotes(db as never,{queryTerms:["neural", " "]})).rejects.toThrow("invalid_catalog_query_terms");
+  await expect(listAllowedNotes(db as never,{query:"AI",queryTerms:["ИИ"]})).rejects.toThrow("invalid_catalog_query_terms");
+  await expect(listAllowedNotes(db as never,{savedFrom:"2026-11-07T00:00:00.000Z",savedBefore:"2026-11-06T00:00:00.000Z"})).rejects.toThrow("invalid_catalog_date_window");
+});
