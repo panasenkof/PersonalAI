@@ -366,7 +366,7 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
             const result=await verifiedSelectedArticleRead(handle,0,Number(budget));
             const evidence=result.evidence;
             const content=result.content, total=result.totalChars;
-            const status=!content.trim() && total===0 ? "empty_saved_note" :
+            const status=!content.trim() && !result.hasMore ? "empty_saved_note" :
               !result.hasMore && /^https?:\/\/\S+$/iu.test(content.trim()) ? "link_only" :
               result.hasMore ? "partial_saved_note" : "complete_saved_note_text";
             entries.push({id:handle.id,version:handle.version,status,
@@ -429,7 +429,7 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
         try{
           const result=await verifiedSelectedArticleRead(handle,Number(offset),Number(budget));
           const isSingleFullRead=Number(offset)===0 && !result.hasMore;
-          const status=!result.content.trim() && result.totalChars===0 ? "empty_saved_note" :
+          const status=!result.content.trim() && isSingleFullRead ? "empty_saved_note" :
             isSingleFullRead && /^https?:\/\/\S+$/iu.test(result.content.trim())
               ? "link_only" : "saved_note_chunk";
           if(status==="saved_note_chunk" && result.content.trim()){
