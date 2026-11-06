@@ -22,7 +22,7 @@ import type { ChatDraft, ConversationRepository, SavedConversation } from "./con
 import type { DirectAgentSettings } from "./settings";
 import { waitForApplicationSession, onLocalMemorySessionChange } from "../local-memory/storage";
 import { localPhotoIntent83, localPhotoSuggestion83, searchLocalPhotosFromChat83 } from "../media/vision-chat-search";
-import { savedAiArticleIntent, selectSavedAiArticles } from "./article-selection";
+import { savedAiArticleIntent, selectSavedAiArticles, savedAiArticlePageIntent } from "./article-selection";
 
 /** `streamText` is the answer as it arrives; it is never persisted. */
 /** `progressSince` is when the current stage began, for the elapsed timer. */
@@ -271,19 +271,83 @@ export class DirectChatStore {
         (Number.isFinite(Date.parse(n.createdAt))?new Date(n.createdAt).toLocaleDateString("ru-RU"):"дата неизвестна")).join("\n");
       const head=found.count
         ? "Найдено "+found.count+" сохранённых материалов со ссылкой по ключевым словам об ИИ. Даты сохранения: "+dates+
-          ". Показано "+found.records.length+(found.hasMore?"; это только первая страница (подгрузка следующих пока недоступна).":".")
+          ". Показано "+found.records.length+(found.hasMore?"; это только первая страница.":".")
         : "За "+dates+" сохранённых материалов со ссылкой по ключевым словам об ИИ не найдено.";
       this.update(id,{updatedAt:new Date().toISOString(),
         rows:[...latest.rows,{id:Crypto.randomUUID(),role:"assistant",
           text:head+(titles?"\n\n"+titles:"")+
             "\n\nПоиск выполнен только в памяти телефона. Ссылки открывают оригинальные заметки. Сохранённая ссылка не означает, что полный текст статьи был прочитан; другие заметки без URL здесь не учитывались.",
-          memory:found.records.map(n=>({id:n.id,title:n.title||"Без названия",section:n.section,via:"search" as const}))}],
+          memory:found.records.map(n=>({id:n.id,title:n.title||"Без названия",section:n.section,via:"search" as const})),
+          articlePage:{kind:"saved_ai_links",savedFrom:intent.savedFrom,savedBefore:intent.savedBefore,
+            startLocal:intent.startLocal,endLocal:intent.endLocal,
+            ...(found.nextCursor ? {nextCursor:found.nextCursor} : {})}}],
       });
     }catch(e){
       if(this.disposed)return;
       const latest=this.snapshot.conversations.find(c=>c.id===id);
       if(latest)this.update(id,{
         ...(!aborter.signal.aborted&&latest.question===""?{question:prompt}:{}),
+        rows:[...latest.rows,{id:Crypto.randomUUID(),role:"info",
+          text:aborter.signal.aborted?"Подборка остановлена":memoryErrorMessage(e),
+          ...(!aborter.signal.aborted?{error:true as const}:{})}],
+      });
+    }finally{
+      this.requests.delete(id);
+      const latest=this.update(id,{busy:false,progress:"",progressSince:undefined});
+      if(latest)await this.persist(latest).catch(()=>{});
+    }
+  }
+
+  /** Continue an existing shortlist in the ordinary chat without a model call.
+   * Each page re-runs the same ACL-scoped SQL query; only the cursor and time
+   * window are persisted, never copied source contents.
+   */
+  async loadMoreSavedArticlesLocally(sourceRowId:string, fromComposer=false):Promise<void> {
+    const id=this.snapshot.activeId;
+    const current=this.snapshot.conversations.find(c=>c.id===id);
+    const previous=current?.rows.find(row=>row.id===sourceRowId && row.role==="assistant");
+    const page=previous?.articlePage;
+    if(!id || !current || !page?.nextCursor || current.busy || current.deleting ||
+      this.disposed || !this.snapshot.ready || (fromComposer && Boolean(current.attachments?.length)))return;
+    const aborter=new AbortController();
+    this.requests.set(id,aborter);
+    const pending=this.update(id,{
+      busy:true,progress:"Загружаю следующую страницу…",updatedAt:new Date().toISOString(),
+      question:fromComposer?"":current.question,
+      rows:[...current.rows,{id:Crypto.randomUUID(),role:"user",text:"Показать ещё"}],
+    })!;
+    try {
+      await this.persist(pending);
+      if(aborter.signal.aborted || this.disposed)throw new Error("aborted");
+      const found=await selectSavedAiArticles(this.profile,savedAiArticlePageIntent(page),
+        undefined,page.nextCursor);
+      if(!localMemorySessionUnlocked())throw new Error("application_locked");
+      if(aborter.signal.aborted || this.disposed)throw new Error("aborted");
+      const latest=this.snapshot.conversations.find(c=>c.id===id);
+      if(!latest)return;
+      const titles=found.records.map((n,i)=>
+        (i+1)+". "+(n.title||"Без названия")+" · сохранено "+
+        (Number.isFinite(Date.parse(n.createdAt))?new Date(n.createdAt).toLocaleDateString("ru-RU"):"дата неизвестна")).join("\n");
+      const text=found.records.length
+        ? "Следующая страница: "+found.records.length+" сохранённых материалов со ссылками. Сейчас по этому фильтру доступно "+found.count+
+          (found.hasMore?"; есть следующие страницы.":".")+
+          "\n\n"+titles+"\n\nПоиск локальный; полный текст ссылок не прочитан. Открывайте записи ниже."
+        : "Больше доступных сохранённых материалов по этому фильтру нет. Состав памяти мог измениться с предыдущего запроса.";
+      this.update(id,{updatedAt:new Date().toISOString(),rows:[
+        ...latest.rows.map(row=>row.id===sourceRowId && row.articlePage
+          ? {...row,articlePage:{...row.articlePage,nextCursor:undefined}} : row),
+        {id:Crypto.randomUUID(),role:"assistant",text,
+          memory:found.records.map(n=>({id:n.id,title:n.title||"Без названия",
+            section:n.section,via:"search" as const})),
+          articlePage:{kind:"saved_ai_links" as const,savedFrom:page.savedFrom,savedBefore:page.savedBefore,
+            startLocal:page.startLocal,endLocal:page.endLocal,
+            ...(found.nextCursor ? {nextCursor:found.nextCursor} : {})}},
+      ]});
+    }catch(e){
+      if(this.disposed)return;
+      const latest=this.snapshot.conversations.find(c=>c.id===id);
+      if(latest)this.update(id,{
+        ...(fromComposer && !aborter.signal.aborted && latest.question==="" ? {question:current.question} : {}),
         rows:[...latest.rows,{id:Crypto.randomUUID(),role:"info",
           text:aborter.signal.aborted?"Подборка остановлена":memoryErrorMessage(e),
           ...(!aborter.signal.aborted?{error:true as const}:{})}],
@@ -315,6 +379,12 @@ export class DirectChatStore {
     if(documentPlan && documentApprovalKey!==documentPlan.approvalKey) {
       this.publish({notice:"Для отправки большого документа подтвердите объём и вызовы ИИ в окне отправки."});
       return;
+    }
+    // A contextual "Покажи ещё" remains on-device; unrelated requests still use the usual runner.
+    if (!internetPhotoId && !attachments.length &&
+        /^(?:покажи|показать)\s+ещ[её](?:\s+(?:материалы|статьи|записи))?[.!?]?$/iu.test(prompt)) {
+      const page=[...current.rows].reverse().find(row=>row.role==="assistant" && row.articlePage?.nextCursor);
+      if(page){await this.loadMoreSavedArticlesLocally(page.id,true);return;}
     }
     // Explicit photo intent runs only against encrypted device memory.
     // Do not send user image bytes or photo search text to the remote LLM.
