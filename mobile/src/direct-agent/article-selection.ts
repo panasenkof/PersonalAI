@@ -87,6 +87,8 @@ export type SavedArticleShortlist = {
 /** The count and first page share a single unlocked SQLCipher snapshot. */
 export async function selectSavedAiArticles(profile: string, intent: SavedArticleIntent,
   db?: ArticleDb, cursor?: {beforeCreatedAt:string;beforeId:string}): Promise<SavedArticleShortlist> {
+  if(intent.dateMode==="published" && (!intent.publicationFrom || !intent.publicationBefore))
+    throw new Error("invalid_catalog_publication_window");
   const run = async (reader: ArticleDb): Promise<SavedArticleShortlist> => {
     const filters = { queryTerms:intent.queryTerms, linkedOnly:true, sortBySaved:true,
       ...(intent.dateMode==="published"
