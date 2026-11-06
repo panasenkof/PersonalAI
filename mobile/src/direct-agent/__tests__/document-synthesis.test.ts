@@ -83,3 +83,37 @@ test("H-DOC1b2: truncated intermediate response must never be promoted to full f
   await expect(runDocumentSynthesis(options(files,5),plan,runner)).rejects.toThrow("оборвала");
   expect(runner).toHaveBeenCalledTimes(1);
 });
+
+test("large multi-part synthesis keeps question focus and budgets every final metadata wrapper",async()=>{
+  const files=[text("manual","А".repeat(216_000))];
+  const plan=planDocumentSynthesis(files,settings.model)!;
+  expect(plan.parts.length).toBe(18);
+  expect(plan.calls).toBe(19);
+  const prompts:string[]=[];
+  const runner=jest.fn(async(args:DirectAgentOptions)=>{
+    prompts.push(args.prompt);
+    return {text:args.prompt.includes("ПРОВЕРЕННЫЕ МЕТКИ")
+      ? "Итог по всем 18 частям" : "Найден релевантный проверяемый факт.",
+      sources:[],requests:1};
+  });
+  const answer=await runDocumentSynthesis({
+    ...options(files,20),prompt:"Какие конкретно ограничения и исключения описаны?",
+  },plan,runner);
+  expect(answer.requests).toBe(19);
+  expect(runner).toHaveBeenCalledTimes(19);
+  expect(prompts[0]).toContain("Вопрос пользователя");
+  expect(prompts[0]).toContain("Какие конкретно ограничения");
+  expect(prompts[18].length).toBeLessThanOrEqual(24_000);
+  expect(prompts[18]).toContain("part");
+  expect(answer.text).toContain("всем 18 частям");
+});
+
+test("final-size preflight rejects impossible question before any paid document calls",async()=>{
+  const files=[text("manual","Б".repeat(36_000))];
+  const plan=planDocumentSynthesis(files,settings.model)!;
+  const runner=jest.fn();
+  await expect(runDocumentSynthesis({
+    ...options(files,20),prompt:"В".repeat(23_000),
+  },plan,runner)).rejects.toThrow("Недостаточно места");
+  expect(runner).not.toHaveBeenCalled();
+});
