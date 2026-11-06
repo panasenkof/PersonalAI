@@ -150,7 +150,8 @@ export function articleText(html: string): ArticleText {
 export type HtmlPublicationClaim = { date: string; evidence: "html_meta"; sourceAttribute: "article:published_time" | "datePublished" };
 export function htmlPublicationClaim(html: string): HtmlPublicationClaim | undefined {
   const values: HtmlPublicationClaim[]=[];
-  const tags=html.match(/<meta\b[^>]{0,2000}>/gi) || [];
+  const head=/<head\b[^>]*>([\s\S]{0,100000}?)<\/head\s*>/i.exec(html)?.[1] || "";
+  const tags=head.match(/<meta\b[^>]{0,2000}>/gi) || [];
   for(const tag of tags.slice(0,150)) {
     const attributes=new Map<string,string>();
     const pattern=/([a-z][a-z0-9:_-]*)\s*=\s*(?:"([^"]{0,250})"|'([^']{0,250})')/gi;
@@ -165,7 +166,7 @@ export function htmlPublicationClaim(html: string): HtmlPublicationClaim | undef
     if(!matchDay) return undefined;
     const [year,month,day]=matchDay[1].split("-").map(Number);
     const exact=new Date(Date.UTC(year,month-1,day));
-    if(exact.getUTCFullYear()!==year || exact.getUTCMonth()!==month-1 || exact.getUTCDate()!==day)
+    if(year<1000 || exact.getUTCFullYear()!==year || exact.getUTCMonth()!==month-1 || exact.getUTCDate()!==day)
       return undefined;
     values.push({date:matchDay[1],evidence:"html_meta",sourceAttribute:name==="datepublished"?"datePublished":"article:published_time"});
   }
@@ -242,7 +243,8 @@ export async function importLink(raw: string, signal?: AbortSignal): Promise<{ f
       }
       const content = page ? page.text : rawText;
       if (!content.trim() || content.length > 60_000) throw new Error('Текст пуст или длиннее 60 000 символов. Сохраните нужный фрагмент вручную.');
-      file.delete(); return { text: content, source, ...(page?.title ? { title: page.title } : {}), ...(page ? { partial: page.partial } : {}), ...(html && htmlPublicationClaim(rawText) ? {publicationClaim:htmlPublicationClaim(rawText)} : {}) };
+      const publicationClaim=html ? htmlPublicationClaim(rawText) : undefined;
+      file.delete(); return { text: content, source, ...(page?.title ? { title: page.title } : {}), ...(page ? { partial: page.partial } : {}), ...(publicationClaim ? {publicationClaim} : {}) };
     }
     return { file: { uri: file.uri, name, mimeType: mime }, source };
   } catch (error) {
