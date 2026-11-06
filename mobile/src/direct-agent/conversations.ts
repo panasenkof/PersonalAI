@@ -12,7 +12,13 @@ export type DialogueSummaryOrigin = {
   omittedAttachments: number; sourceChars: number; parts: number;
   firstRowId: string; lastRowId: string; model: string; provider: string; createdAt: string;
 };
-export type ChatRow = { id: string; role: "user" | "assistant" | "info"; text: string; error?: boolean; photoAction?: "model" | "import" | "prepare"; sources?: string[]; memory?: ChatMemoryRef[]; attachments?: ChatAttachment[]; dialogueSummary?: DialogueSummaryOrigin };
+/** Lightweight saved-link shortlist continuation; content stays in existing SQLCipher notes. */
+export type ChatArticlePage = {
+  kind: "saved_ai_links"; savedFrom: string; savedBefore: string;
+  startLocal: string; endLocal: string;
+  nextCursor?: {beforeCreatedAt:string;beforeId:string};
+};
+export type ChatRow = { id: string; role: "user" | "assistant" | "info"; text: string; error?: boolean; photoAction?: "model" | "import" | "prepare"; sources?: string[]; memory?: ChatMemoryRef[]; attachments?: ChatAttachment[]; dialogueSummary?: DialogueSummaryOrigin; articlePage?: ChatArticlePage };
 const VIA = new Set(["search", "rewrite", "assistant"]);
 export type ChatDraft = NoteProposal & { id: string };
 export type SavedConversation = {
@@ -44,6 +50,20 @@ export function parseConversation(json: string): SavedConversation | null {
     const sources = Array.isArray(r.sources) ? r.sources.filter((url: unknown) => typeof url === "string" && url.startsWith("https://")) : undefined;
     const memory = Array.isArray(r.memory) ? r.memory.filter((m: any) => m && typeof m.id === "string" && typeof m.title === "string" && VIA.has(m.via))
       .slice(0, r.memory.some((m: any) => m?.photo === true) ? 40 : 8).map((m: any) => ({ id: m.id, title: m.title.slice(0, 160), via: m.via, ...(m.photo === true ? { photo: true } : {}), ...(typeof m.photoAttachmentId === "string" && /^[A-Za-z0-9-]{1,128}$/.test(m.photoAttachmentId) ? { photoAttachmentId: m.photoAttachmentId } : {}), ...(typeof m.section === "string" ? { section: m.section.slice(0, 60) } : {}) })) : undefined;
+    const ap = r.articlePage;
+    const iso = (v:unknown) => typeof v === "string" &&
+      /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$/.test(v) &&
+      Number.isFinite(Date.parse(v));
+    const day = (v:unknown) => typeof v === "string" && /^\\d{4}-\\d{2}-\\d{2}$/.test(v);
+    const cur = ap?.nextCursor;
+    const validCursor = cur === undefined || (cur && iso(cur.beforeCreatedAt) &&
+      typeof cur.beforeId === "string" && /^[A-Za-z0-9:_-]{1,128}$/.test(cur.beforeId));
+    const articlePage: ChatArticlePage | undefined = r.role === "assistant" &&
+      ap?.kind === "saved_ai_links" && iso(ap.savedFrom) && iso(ap.savedBefore) &&
+      ap.savedFrom < ap.savedBefore && day(ap.startLocal) && day(ap.endLocal) &&
+      validCursor ? {kind:"saved_ai_links",savedFrom:ap.savedFrom,savedBefore:ap.savedBefore,
+        startLocal:ap.startLocal,endLocal:ap.endLocal,
+        ...(cur ? {nextCursor:{beforeCreatedAt:cur.beforeCreatedAt,beforeId:cur.beforeId}} : {})} : undefined;
     const d = r.dialogueSummary;
     const dialogueSummary: DialogueSummaryOrigin | undefined = r.role === "assistant" && d &&
       (d.scope === "all" || d.scope === "last10") &&
@@ -59,7 +79,7 @@ export function parseConversation(json: string): SavedConversation | null {
         firstRowId:d.firstRowId,lastRowId:d.lastRowId,
         model:d.model,provider:d.provider,createdAt:d.createdAt,
       } : undefined;
-    return [{ id: r.id, role: r.role, text: r.text, ...(r.error === true && r.role === "info" ? { error: true } : {}), ...(["model","import","prepare"].includes(r.photoAction) ? {photoAction:r.photoAction} : {}), ...(r.attachments?.length ? {attachments:checkedChatAttachments(r.attachments)} : {}), ...(sources?.length ? { sources } : {}), ...(memory?.length ? { memory } : {}), ...(dialogueSummary ? {dialogueSummary} : {}) }];
+    return [{ id: r.id, role: r.role, text: r.text, ...(r.error === true && r.role === "info" ? { error: true } : {}), ...(["model","import","prepare"].includes(r.photoAction) ? {photoAction:r.photoAction} : {}), ...(r.attachments?.length ? {attachments:checkedChatAttachments(r.attachments)} : {}), ...(sources?.length ? { sources } : {}), ...(memory?.length ? { memory } : {}), ...(articlePage ? {articlePage} : {}), ...(dialogueSummary ? {dialogueSummary} : {}) }];
   });
   const drafts: ChatDraft[] = (Array.isArray(value.drafts) ? value.drafts : []).filter((d: any) =>
     d && typeof d.id === "string" && typeof d.title === "string" && typeof d.body === "string")
