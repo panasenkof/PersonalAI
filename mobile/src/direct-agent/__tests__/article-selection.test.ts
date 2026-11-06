@@ -19,11 +19,35 @@ test.each([
   "Найди статьи про ИИ за неделю в интернете",
   "Найди фото ИИ за неделю",
   "Сделай выжимку статей про ИИ за последнюю неделю",
-  "Выбери статьи про автомобили за последнюю неделю",
   "Покажи статьи про ИИ без даты",
 ])("do not misroute unsupported or publication-date requests to local saved-date picker: %s", q => {
   expect(savedAiArticleIntent(q,new Date(2026,10,6))).toBeNull();
 });
 test("attachments are never consumed by a text-only shortlist",()=>{
   expect(savedAiArticleIntent("Найди статьи про ИИ за неделю",new Date(2026,10,6),true)).toBeNull();
+});
+
+test.each([
+  ["Выбери статьи про автомобили за последнюю неделю","автомобили"],
+  ["Покажи сохранённые материалы про ремонт автомобиля на этой неделе","ремонт автомобиля"],
+  ["Найди статьи о MiniLM на этой неделе","MiniLM"],
+  ["Выбери материалы на тему EmbeddingGemma 2 за неделю","EmbeddingGemma 2"],
+])("literal topic saved-date intent: %s", (q,topic)=>{
+  const intent=savedAiArticleIntent(q,new Date(2026,10,6));
+  expect(intent).toMatchObject({topic,queryTerms:[topic],dateMode:"saved"});
+});
+test.each([
+  "Найди статьи про автомобили кроме электромобилей за неделю",
+  "Найди статьи про велосипеды за последние 3 дня",
+  "Выбери статьи про автомобили опубликованные за неделю",
+  "Покажи материалы про API/ключи на этой неделе",
+  "Найди статьи про ????????? за неделю",
+  "Выбери статьи о ИИ без ссылок за неделю",
+])("do not silently reinterpret unsupported syntax or exclusion: %s", q=>{
+  expect(savedAiArticleIntent(q,new Date(2026,10,6))).toBeNull();
+});
+test("AI synonyms retain existing local query terms, not unrelated literal topics",()=>{
+  expect(savedAiArticleIntent("Найди статьи об ИИ за неделю",new Date(2026,10,6))?.queryTerms)
+    .toContain("нейросеть");
+  expect(savedAiArticleIntent("Найди статьи об AI за неделю",new Date(2026,10,6))?.topic).toBe("ai");
 });

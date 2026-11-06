@@ -269,16 +269,20 @@ export class DirectChatStore {
       const titles=found.records.map((n,i)=>
         (i+1)+". "+(n.title||"Без названия")+" · сохранено "+
         (Number.isFinite(Date.parse(n.createdAt))?new Date(n.createdAt).toLocaleDateString("ru-RU"):"дата неизвестна")).join("\n");
+      const subject=intent.topic==="ai" ? "по ключевым словам об ИИ" :
+        "по точной фразе «"+intent.topic+"»";
       const head=found.count
-        ? "Найдено "+found.count+" сохранённых материалов со ссылкой по ключевым словам об ИИ. Даты сохранения: "+dates+
+        ? "Найдено "+found.count+" сохранённых материалов со ссылкой "+subject+". Даты сохранения: "+dates+
           ". Показано "+found.records.length+(found.hasMore?"; это только первая страница.":".")
-        : "За "+dates+" сохранённых материалов со ссылкой по ключевым словам об ИИ не найдено.";
+        : "За "+dates+" сохранённых материалов со ссылкой "+subject+" не найдено.";
       this.update(id,{updatedAt:new Date().toISOString(),
         rows:[...latest.rows,{id:Crypto.randomUUID(),role:"assistant",
           text:head+(titles?"\n\n"+titles:"")+
             "\n\nПоиск выполнен только в памяти телефона. Ссылки открывают оригинальные заметки. Сохранённая ссылка не означает, что полный текст статьи был прочитан; другие заметки без URL здесь не учитывались.",
           memory:found.records.map(n=>({id:n.id,title:n.title||"Без названия",section:n.section,via:"search" as const})),
-          articlePage:{kind:"saved_ai_links",savedFrom:intent.savedFrom,savedBefore:intent.savedBefore,
+          articlePage:{kind:intent.topic==="ai" ? "saved_ai_links" as const : "saved_topic_links" as const,
+            ...(intent.topic!=="ai" ? {topic:intent.topic,queryTerms:intent.queryTerms} : {}),
+            savedFrom:intent.savedFrom,savedBefore:intent.savedBefore,
             startLocal:intent.startLocal,endLocal:intent.endLocal,
             ...(found.nextCursor ? {nextCursor:found.nextCursor} : {})}}],
       });
@@ -339,7 +343,8 @@ export class DirectChatStore {
         {id:Crypto.randomUUID(),role:"assistant",text,
           memory:found.records.map(n=>({id:n.id,title:n.title||"Без названия",
             section:n.section,via:"search" as const})),
-          articlePage:{kind:"saved_ai_links" as const,savedFrom:page.savedFrom,savedBefore:page.savedBefore,
+          articlePage:{kind:page.kind,savedFrom:page.savedFrom,savedBefore:page.savedBefore,
+            ...(page.kind==="saved_topic_links" ? {topic:page.topic,queryTerms:page.queryTerms} : {}),
             startLocal:page.startLocal,endLocal:page.endLocal,
             ...(found.nextCursor ? {nextCursor:found.nextCursor} : {})}},
       ]});
