@@ -57,25 +57,26 @@ export function NebulaAction({ icon, label, accessibilityLabel, onPress, disable
     : variant === "danger" ? c.danger : c.text;
   return <Pressable testID={testID} accessibilityRole="button" accessibilityLabel={accessibilityLabel || label}
     accessibilityState={{ disabled }} disabled={disabled} onPress={onPress}
-    hitSlop={compact ? 4 : undefined}
+    hitSlop={compact ? 10 : undefined}
     style={({ pressed }) => ({
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "center",
-      gap: compact ? 6 : nebulaSpacing.xs,
-      minHeight: compact ? 40 : nebulaTouch.minimum,
-      minWidth: compact ? 40 : nebulaTouch.minimum,
-      paddingHorizontal: compact ? nebulaSpacing.sm : nebulaSpacing.md,
-      borderRadius: compact ? nebulaRadii.chip : nebulaRadii.field,
+      gap: compact ? 4 : nebulaSpacing.xs,
+      minHeight: compact ? 28 : nebulaTouch.minimum,
+      minWidth: compact ? 28 : nebulaTouch.minimum,
+      paddingHorizontal: compact ? nebulaSpacing.xs : nebulaSpacing.md,
+      paddingVertical: compact ? 3 : 0,
+      borderRadius: compact ? 10 : nebulaRadii.field,
       borderWidth: variant === "primary" || variant === "danger-solid" ? 0 : 1,
       borderColor: c.actionOutline,
       backgroundColor: variant === "primary" ? c.accent
         : variant === "danger-solid" ? c.danger : c.surfaceElevated,
       opacity: disabled ? 0.5 : pressed ? 0.85 : 1,
     })}>
-    {icon ? <Feather name={icon} size={compact ? 16 : 20} color={foreground} /> : null}
-    <Text style={{ ...nebulaTypography.label, fontSize: compact ? 12 : nebulaTypography.label.fontSize,
-      lineHeight: compact ? 18 : nebulaTypography.label.lineHeight,
+    {icon ? <Feather name={icon} size={compact ? 14 : 20} color={foreground} /> : null}
+    <Text style={{ ...nebulaTypography.label, fontSize: compact ? 11 : nebulaTypography.label.fontSize,
+      lineHeight: compact ? 16 : nebulaTypography.label.lineHeight,
       color: foreground, fontWeight: "600", flexShrink: 1 }}>
       {label}
     </Text>
