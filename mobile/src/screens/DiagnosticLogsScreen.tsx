@@ -139,11 +139,12 @@ export function DiagnosticLogsScreen() {
         <Text style={{ color: t.secondary, fontWeight: "700" }}>{file.name} ↗</Text>
         <Text style={{ color: t.muted }}>{Math.max(1, Math.ceil(file.size / 1024))} КБ · нажмите, чтобы передать файл</Text>
       </Pressable>)}
-    <Pressable accessibilityRole="button" accessibilityLabel="Обновить список журналов" disabled={busy}
-      onPress={() => void run(async () => {})} style={{ ...card, alignItems: "center" }}>
-      <Text style={{ color: t.secondary, fontWeight: "700" }}>Обновить список</Text>
-    </Pressable>
-    {logs.length ? <NebulaAction testID="diagnostics-clear-open" icon="trash-2" label="Удалить все журналы"
+    <View style={{ alignItems: "flex-start" }}>
+      <NebulaAction icon="refresh-cw" size="compact" label="Обновить"
+        accessibilityLabel="Обновить список журналов" disabled={busy}
+        onPress={() => void run(async () => {})} />
+    </View>
+    {logs.length ? <NebulaAction testID="diagnostics-clear-open" icon="trash-2" label="Удалить все журналы" size="compact"
       accessibilityLabel="Удалить все журналы" variant="danger" disabled={busy || !ready} onPress={confirmClear} /> : null}
     {notice ? <Text accessibilityRole="alert" style={{ color: t.muted }}>{notice}</Text> : null}
   </ScrollView>
