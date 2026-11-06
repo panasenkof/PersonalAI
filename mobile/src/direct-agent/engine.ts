@@ -16,11 +16,12 @@ import type { MemorySnippet, NoteProposal } from "./memory";
 import { FACT_TOOL_NAME, factGuide } from "./fact-tool";
 import type { SavedArticleIntent, SavedArticleShortlist } from "./article-selection";
 import type { MemorySection } from "./fact-tool";
+import type { ChatArticlePage } from "./conversations";
 
 export type AgentTurn = { role: "user" | "assistant"; content: string; attachments?: ChatAttachment[] };
 /** `notice` is shown to the user before the answer, e.g. why web search failed. */
 /** `memory`: the records the answer was based on, shown under it («Из памяти»). */
-export type DirectResult = { text: string; sources: string[]; requests: number; notice?: string; memory?: UsedNote[]; taskState?: TaskState; proposalIds?: string[] };
+export type DirectResult = { text: string; sources: string[]; requests: number; notice?: string; memory?: UsedNote[]; taskState?: TaskState; proposalIds?: string[]; articlePage?: ChatArticlePage };
 
 export type DirectAgentOptions = {
   settings: DirectAgentSettings;
@@ -51,6 +52,8 @@ export type DirectAgentOptions = {
     extractionId: string, segmentId: string, offset?: number, budget?: number) => Promise<Record<string, unknown>>;
   list?: (options: { collectionId?: string; query?: string; limit?: number; beforeUpdatedAt?: string; beforeId?: string }) => Promise<Record<string, unknown>>;
   count?: (options: { collectionId?: string; query?: string }) => Promise<Record<string, unknown>>;
+  /** Persisted authorized article cursor from this conversation, not model text. */
+  articleContinuation?: ChatArticlePage;
   /** 9T1: read-only selection via existing SQLCipher article reader, scoped by the host. */
   selectArticles?: (intent: SavedArticleIntent, cursor?: { beforeCreatedAt: string; beforeId: string }) => Promise<SavedArticleShortlist>;
   propose: (note: NoteProposal) => string | void;

@@ -481,7 +481,10 @@ export class DirectChatStore {
       if (this.disposed || aborter.signal.aborted) throw new Error("aborted");
       if(documentPlan && documentPlan.calls>maxRequests)throw new Error("Для полного анализа требуется "+documentPlan.calls+" обращений к модели, но в настройках разрешено "+maxRequests+". Измените лимит перед отправкой.");
       modelStarted = true;
+      const articleContinuation=[...current.rows].reverse().find(row=>
+        row.role==="assistant" && row.articlePage?.nextCursor)?.articlePage;
       const agentOptions: Parameters<typeof runDirectAgent>[0] = { settings, maxRequests, prompt, attachments, skipLocalMemory:Boolean(internetPhotoId), history, previousSources, taskState, pendingNotes: internetPhotoId ? [] : current.drafts,
+        ...(!internetPhotoId && articleContinuation ? {articleContinuation} : {}),
         onTaskState: next => {
           const active = this.snapshot.conversations.find(c => c.id === id);
           if (active && !aborter.signal.aborted) this.update(id, { taskState: mergeTaskReceipts(next, active.taskState) }, true);
@@ -543,7 +546,9 @@ export class DirectChatStore {
       this.update(id, { taskState: mergeTaskReceipts({ ...(result.taskState || c.taskState || taskState), turnStatus: "answered" }, c.taskState), rows: [...c.rows,
         ...(result.proposalIds?.some(id => c.drafts.some(d => d.id === id)) ? [{ id: Crypto.randomUUID(), role: "info" as const, text: "Запись подготовлена, но ещё не сохранена. Подтвердите её в карточке предложения." }] : []),
         ...(result.notice ? [{ id: Crypto.randomUUID(), role: "info" as const, text: result.notice }] : []),
-        { id: Crypto.randomUUID(), role: "assistant", text: result.text, sources: result.sources, ...(result.memory?.length ? { memory: result.memory } : {}) }],
+        { id: Crypto.randomUUID(), role: "assistant", text: result.text, sources: result.sources,
+          ...(result.memory?.length ? { memory: result.memory } : {}),
+          ...(result.articlePage ? {articlePage:result.articlePage} : {}) }],
         updatedAt: new Date().toISOString() });
     } catch (e) {
       trace("turn.failed", { elapsedMs: Date.now() - startedAt, aborted: aborter.signal.aborted,
