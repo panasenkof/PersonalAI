@@ -11,7 +11,7 @@ import type { TaskEvidence, ToolOutcome } from "./task-state";
 import { webPreference } from "./dialogue";
 import { savedArticleToolIntent, savedAiArticlePageIntent } from "./article-selection";
 import type { SavedArticleIntent } from "./article-selection";
-import type { ChatArticlePage } from "./conversations";
+import type { ChatArticlePage, ChatMemoryRef } from "./conversations";
 import { createArticleReadCoverage } from "./article-read-coverage";
 
 export type ToolDefinition = { name: string; description: string; parameters: object };
@@ -31,6 +31,11 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
   // Derived from this turn's ACL/version-checked reads; NEVER persisted as source truth.
   const articleCoverage = createArticleReadCoverage();
   const readNotes = new Set<string>();
+  // A model turn only keeps ACL-scoped handles returned by the existing local
+  // visual search. The bytes/vectors never go into LLM tools or TaskState.
+  const photoMatches: ChatMemoryRef[] = [];
+  let photoRecovery: "model" | "import" | "prepare" | undefined;
+  let photoLookups = 0;
   let state = { ...beginTask(options.taskState, options.prompt), webPreference: webPreference(options) };
   const emit = () => { options.onTaskState?.(state); };
   const observe = (e: TaskEvidence) => { state = { ...recordEvidence(state, e), webPreference: state.webPreference }; emit(); };
@@ -152,6 +157,60 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
         options.diagnostic?.("memory.tool_search", { queryChars: query.length, found: found.length, noteIds: found.map(n => n.id), excerptCount: found.filter(n => n.excerptOnly).length }, { query });
         return { notes: found };
       }, verify: r => Array.isArray(r.notes) ? r.notes.length ? "found" : "empty" : "failed" },
+    ...(options.searchPhotos && !options.skipLocalMemory ? [{
+      definition: {name: "search_local_photos",
+        description: "9T1: найти фотографии по короткому ТЕКСТОВОМУ описанию в уже существующем локальном фотоиндексе. Только стандартная доступная память телефона, не интернет. Результат: реальные ID заметки и ID фото-вложения для показа карточек; содержимое/векторы изображений НЕ передаются модели. До двух поисков на ход; неполная индексация или отсутствие модели — не отсутствие фото.",
+        parameters: {type: "object", properties: {
+          description: {type: "string", minLength: 3, maxLength: 160},
+        }, required: ["description"], additionalProperties: false},
+      }, effect: "read" as const,
+      execute: async (args: Record<string, unknown>) => {
+        if(Object.keys(args).length!==1 || typeof args.description!=="string" ||
+          args.description.trim().length<3 || args.description.trim().length>160 ||
+          /https?:\\/\\/|(?:в интернете|из интернета|в сети|online|по ссылке)/iu.test(args.description))
+          return {error: "invalid_local_photo_search_args"};
+        if(photoLookups>=2)return {error:"local_photo_turn_budget_exhausted"};
+        photoLookups++;
+        options.status?.("Ищу фотографии в памяти");
+        const found=await options.searchPhotos!(args.description.trim());
+        if(options.signal?.aborted)throw new Error("aborted");
+        if(!found || typeof found.text!=="string" || !Array.isArray(found.memory) ||
+            found.memory.length>20 ||
+            found.memory.some(item=>!item || item.photo!==true || item.via!=="search" ||
+              typeof item.id!=="string" || !/^[A-Za-z0-9:_-]{1,128}$/.test(item.id) ||
+              typeof item.photoAttachmentId!=="string" ||
+              !/^[A-Za-z0-9:_-]{1,128}$/.test(item.photoAttachmentId) ||
+              typeof item.title!=="string" || !item.title.trim() || item.title.length>160) ||
+            new Set(found.memory.map(item=>item.id+":"+item.photoAttachmentId)).size!==found.memory.length ||
+            (found.photoAction!==undefined && !["model","import","prepare"].includes(found.photoAction)) ||
+            (found.memory.length>0 && found.photoAction!==undefined))
+          return {error:"invalid_local_photo_search_result"};
+        for(const item of found.memory){
+          if(!photoMatches.some(prev=>prev.id===item.id &&
+            prev.photoAttachmentId===item.photoAttachmentId) && photoMatches.length<20)
+            photoMatches.push({id:item.id,title:item.title,via:"search",photo:true,
+              photoAttachmentId:item.photoAttachmentId});
+        }
+        if(!photoMatches.length)photoRecovery=found.photoAction;
+        const status=found.memory.length?"found":found.photoAction==="model"?"model_missing":
+          found.photoAction==="import"?"no_photos":
+          found.photoAction==="prepare"?"unprepared":"no_matches";
+        return {scope:"standard_active_local_photos",status,
+          count:found.memory.length,
+          photos:found.memory.map(item=>({id:item.id,title:item.title,
+            photoAttachmentId:item.photoAttachmentId})),
+          notice:found.text.slice(0,400),
+          imageBytesIncluded:false,originalImagesInspectedByLLM:false,
+          ...(found.photoAction?{photoAction:found.photoAction}:{})};
+      },
+      verify:(r:Record<string,unknown>)=>r.scope==="standard_active_local_photos" &&
+        typeof r.status==="string" &&
+        ["found","model_missing","no_photos","unprepared","no_matches"].includes(r.status) &&
+        Number.isSafeInteger(r.count) && Array.isArray(r.photos) &&
+        r.photos.length===r.count && r.photos.length<=20 &&
+        r.imageBytesIncluded===false && r.originalImagesInspectedByLLM===false ?
+        r.count ? "found" as const : "empty" as const : "failed" as const,
+    }] : []),
     ...(options.read ? [{
       definition: { name: "read_local_note", description: "Дочитать разрешённую заметку по id/version из поиска или каталога. Полный текст НЕ ограничен начальным контекстом 24 000 символов. Читай до hasMore=false с offset=nextOffset; если бюджет вызовов кончился, явно говори о частичном охвате. Каждый вызов максимум 6000 символов; версия/ACL проверяются заново.", parameters: {
         type: "object", properties: { id: { type: "string" }, version: { type: "integer" },
@@ -615,14 +674,16 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
     }
     // A coverage snapshot is valid ONLY for this model turn. Do not persist it
     // as task evidence that a later turn could mistake for a reauthorized read.
-    if (outcome !== "state_updated" && canonical !== "selected_article_read_coverage")
+    if (outcome !== "state_updated" &&
+        canonical !== "selected_article_read_coverage" &&
+        canonical !== "search_local_photos")
       observe({ tool: canonical, outcome,
       subject: text(result.proposalId || args?.url || args?.query || args?.title || name),
       excerpt: outcome === "read" ? text(result.content) : outcome === "found" && canonical === "search_web" ? text((result.sources as string[]).join("\n")) : text(JSON.stringify(result)) });
     options.diagnostic?.("tool.outcome_verified", { name: canonical, effect: spec?.effect || "unknown", outcome });
     return { ...result, ...(outcome !== "failed" ? { outcome } : {}) };
   }
-  function finish(): Pick<DirectResult, "taskState" | "proposalIds" | "articlePage" | "articleReadReport"> {
+  function finish(): Pick<DirectResult, "taskState" | "proposalIds" | "articlePage" | "articleReadReport" | "photoAction"> {
     state = { ...state, turnStatus: "answered" }; emit();
     const selected = !mixedArticleFilters && usedSelectedArticleTool ? selectedArticleHandles() : undefined;
     const checked = selected && articleCoverage.summary(selected);
@@ -648,12 +709,17 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
     return { taskState: state, proposalIds: [...proposalIds],
       ...(persistedArticle ? {articlePage:persistedArticle} :
         usedSelectedArticleTool && options.articleSelection ? {articlePage:options.articleSelection} : {}),
-      ...(articleReadReport ? {articleReadReport} : {}) };
+      ...(articleReadReport ? {articleReadReport} : {}),
+      ...(!photoMatches.length && photoRecovery ? {photoAction:photoRecovery} : {}) };
   }
   const observeSources = (urls: string[]) => { if (urls.length) observe({ tool: "web_search", outcome: "found", subject: options.prompt.slice(0, 120), excerpt: urls.join("\n").slice(0, 600) }); };
   return { definitions: specs.map(s => s.definition), run, finish, observeSources,
     memory: () => {
       const read=[...readNotes].reverse().flatMap(id=>used.has(id)?[used.get(id)!]:[]);
-      return [...read,...[...used.values()].filter(item=>!readNotes.has(item.id))].slice(0,8);
+      // Photo originals are per attachment, not per note. Do not deduplicate
+      // photos sharing a note ID, and let existing PhotoSearchResults render
+      // the top match + collapsible alternatives without a second photo UI.
+      return [...photoMatches,...read,
+        ...[...used.values()].filter(item=>!readNotes.has(item.id))].slice(0,28);
     } };
 }
