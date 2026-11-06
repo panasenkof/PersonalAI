@@ -316,11 +316,12 @@ export class DirectChatStore {
     }
     // Explicit photo intent runs only against encrypted device memory.
     // Do not send user image bytes or photo search text to the remote LLM.
-    if (!internetPhotoId && localPhotoIntent83(prompt,attachments)) {
-      await this.searchPhotosLocally(); return;
-    }
+    // Specific saved-article intent precedes generic object/photo search.
     if (!internetPhotoId && savedAiArticleIntent(prompt,new Date(),attachments.length>0)) {
       await this.searchSavedArticlesLocally(); return;
+    }
+    if (!internetPhotoId && localPhotoIntent83(prompt,attachments)) {
+      await this.searchPhotosLocally(); return;
     }
     // Recheck the ACTIVE model at the moment of Send (not the model selected
     // when a draft photo was picked). Refuse known text-only routes before
