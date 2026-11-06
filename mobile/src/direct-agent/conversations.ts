@@ -52,9 +52,9 @@ export function parseConversation(json: string): SavedConversation | null {
       .slice(0, r.memory.some((m: any) => m?.photo === true) ? 40 : 8).map((m: any) => ({ id: m.id, title: m.title.slice(0, 160), via: m.via, ...(m.photo === true ? { photo: true } : {}), ...(typeof m.photoAttachmentId === "string" && /^[A-Za-z0-9-]{1,128}$/.test(m.photoAttachmentId) ? { photoAttachmentId: m.photoAttachmentId } : {}), ...(typeof m.section === "string" ? { section: m.section.slice(0, 60) } : {}) })) : undefined;
     const ap = r.articlePage;
     const iso = (v:unknown) => typeof v === "string" &&
-      /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$/.test(v) &&
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(v) &&
       Number.isFinite(Date.parse(v));
-    const day = (v:unknown) => typeof v === "string" && /^\\d{4}-\\d{2}-\\d{2}$/.test(v);
+    const day = (v:unknown) => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
     const cur = ap?.nextCursor;
     const validCursor = cur === undefined || (cur && iso(cur.beforeCreatedAt) &&
       typeof cur.beforeId === "string" && /^[A-Za-z0-9:_-]{1,128}$/.test(cur.beforeId));
