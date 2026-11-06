@@ -10,6 +10,7 @@ jest.mock("../../local-memory/storage",()=>({
 jest.mock("../article-selection",()=>({
   savedAiArticleIntent:jest.fn(),
   selectSavedAiArticles:jest.fn(),
+  savedAiArticlePageIntent:jest.fn((page:any)=>({...page,dateMode:"saved",topic:"ai",queryTerms:["ИИ"]})),
 }));
 jest.mock("expo-crypto",()=>({randomUUID:()=>"id-"+Math.random().toString(36).slice(2)}));
 const intent=savedAiArticleIntent as jest.Mock;
@@ -143,6 +144,7 @@ test("article cursor survives encrypted conversation reload; malformed cursor is
   });
   store.setQuestion("Выбери статьи об ИИ за неделю");await store.searchSavedArticlesLocally();
   const raw=JSON.stringify(records.get(store.getSnapshot().activeId!)!);
+  expect(JSON.parse(raw).rows[1].articlePage?.nextCursor?.beforeId).toBe("b");
   const restored=parseConversation(raw)!;
   expect(restored.rows[1].articlePage?.nextCursor?.beforeId).toBe("b");
   const tampered=JSON.parse(raw);
