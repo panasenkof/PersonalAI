@@ -227,3 +227,22 @@ test("9T1-R2: model absence produces an actionable assistant row",async()=>{
   expect(parseConversation(JSON.stringify(fixture))?.rows[0].photoAction)
     .toBe("model");
 });
+
+
+test("9T1-R2 regression: ordinary memory references retain the previous eight-note limit",async()=>{
+  const ordinary=Array.from({length:14},(_,i)=>({
+    id:"note-"+i,title:"Ordinary note "+i,via:"assistant" as const,
+  }));
+  const options:DirectAgentOptions={
+    settings,prompt:"Как меняется выбор фото?",history:[],
+    lookup:jest.fn().mockResolvedValue([]),propose:jest.fn(),
+    searchPhotos:jest.fn().mockResolvedValue({text:"Нашёл",memory:found}),
+  };
+  const catalog=createToolCatalog(options,[],[],ordinary);
+  expect(catalog.memory()).toHaveLength(8);
+  await catalog.run("search_local_photos",query());
+  const refs=catalog.memory();
+  expect(refs).toHaveLength(found.length+8);
+  expect(refs.slice(0,found.length)).toEqual(found);
+  expect(refs.filter(r=>!("photo" in r))).toHaveLength(8);
+});
