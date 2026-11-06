@@ -124,3 +124,20 @@ test("stage 9A2: saved-date paging handles tied timestamps without duplicates or
   await expect(listAllowedNotes(db as never,{beforeCreatedAt:"2026-11-05T12:00:00.000Z",beforeId:"p00"}))
     .rejects.toThrow("invalid_catalog_cursor");
 });
+
+test("stage 9A3 arbitrary-topic phrase is scoped and excludes other subjects",async()=>{
+  const db=new Db();
+  for(const [id,col,title] of [
+    ["car","c-standard","Ремонт автомобиля — замена масла"],
+    ["unrelated","c-standard","Модели ИИ для телефона"],
+    ["secret","c-secret","Ремонт автомобиля тайный"],
+  ] as string[][]){
+    db.add(id,col,"active","standard",title,"2026-11-06T10:00:00.000Z");
+    db.sqlite.prepare("UPDATE memory_entities SET created_at=?,payload_json=? WHERE id=?")
+      .run("2026-11-06T10:00:00.000Z",JSON.stringify({body:title,source_url:"https://example.org/"+id}),id);
+  }
+  const opts={queryTerms:["Ремонт автомобиля"],savedFrom:"2026-11-01T00:00:00.000Z",
+    savedBefore:"2026-11-07T00:00:00.000Z",linkedOnly:true,sortBySaved:true};
+  expect((await countAllowedNotes(db as never,opts)).count).toBe(1);
+  expect((await listAllowedNotes(db as never,{...opts,limit:8})).records.map(x=>x.id)).toEqual(["car"]);
+});
