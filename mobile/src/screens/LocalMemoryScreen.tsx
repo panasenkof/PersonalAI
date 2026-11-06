@@ -782,7 +782,7 @@ export function LocalMemoryScreen() {
           <Text style={{color:t.secondary,fontSize:13}}>Записей: {group.targets.length} · Проверить и исключить</Text>
         </Pressable>)}
       {error?<Text accessibilityRole="alert" style={{color:t.err}}>{error}</Text>:null}
-      <NebulaAction icon="x" label="Закрыть без изменений"
+      <NebulaAction icon="x" label="Закрыть без изменений" size="compact"
         accessibilityLabel="Закрыть предложения для ревизии" onPress={closeHygieneSuggestions} />
     </BottomSheet>
 
@@ -888,7 +888,7 @@ export function LocalMemoryScreen() {
           variant={hygieneAction==="trash"?"danger":"quiet"}
           label={(hygieneAction==="archive"?"Архивировать":"В корзину")+" · "+hygienePreview.eligibleIds.length}
           onPress={()=>setHygieneConfirm(true)} />) : null}
-      <NebulaAction icon="x" label="Закрыть без изменений"
+      <NebulaAction icon="x" label="Закрыть без изменений" size="compact"
         accessibilityLabel="Закрыть предпросмотр без изменений" onPress={closeHygiene} />
     </BottomSheet>
 
@@ -948,7 +948,7 @@ export function LocalMemoryScreen() {
         </Text>
       </View>)}
       </ScrollView>
-      {selectedNotes.length > 3 ? <NebulaAction icon={mergeItemsExpanded ? "chevron-up" : "list"}
+      {selectedNotes.length > 3 ? <NebulaAction icon={mergeItemsExpanded ? "chevron-up" : "list"} size="compact"
         label={mergeItemsExpanded ? "Свернуть список записей" : "Показать все выбранные записи · " + selectedNotes.length}
         onPress={() => setMergeItemsExpanded(value => !value)} /> : null}
       <Text style={{ color: t.muted, lineHeight: 20 }}>
@@ -963,7 +963,7 @@ export function LocalMemoryScreen() {
       {mergeExpanded ? <ScrollView style={{ maxHeight: 260 }} nestedScrollEnabled>
         <Text selectable style={{ color: t.text, lineHeight: 21 }}>{mergePreview}</Text>
       </ScrollView> : null}
-      <NebulaAction icon={mergeExpanded ? "chevron-up" : "book-open"}
+      <NebulaAction icon={mergeExpanded ? "chevron-up" : "book-open"} size="compact"
         label={mergeExpanded ? "Свернуть предпросмотр" : "Проверить полный текст"}
         onPress={() => setMergeExpanded(value => !value)} />
       <NebulaAction icon="check" label="Подтвердить объединение" variant="primary"
