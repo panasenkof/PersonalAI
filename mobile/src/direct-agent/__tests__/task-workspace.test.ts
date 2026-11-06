@@ -75,6 +75,8 @@ test("9B: workspace is isolated after a goal change until explicit clear",async(
   await catalog.run("update_task_state",{goal:"Другой вопрос",selection:"",openQuestions:[]});
   expect(await catalog.run("workspace_get",{key:"comparison"}))
     .toMatchObject({error:"workspace_task_changed_clear_first"});
+  expect(taskContext(catalog.finish().taskState)).not.toContain('"key":"comparison"');
+  expect(taskContext(catalog.finish().taskState)).toContain('"requiresClear":true');
   expect(await catalog.run("workspace_put",put("next","new data")))
     .toMatchObject({error:"workspace_task_changed_clear_first"});
   expect(await catalog.run("workspace_clear",{})).toMatchObject({status:"workspace_cleared"});
