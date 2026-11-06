@@ -20,7 +20,7 @@ export function NoteReadPreview({ text, heading, fullTitle, actionLabel, maxLine
     {heading ? <Text accessibilityRole="header" style={{ color: t.text, ...nebulaTypography.subtitle, fontWeight: "700" }}>{heading}</Text> : null}
     <MarkdownText text={preview} numberOfLines={maxLines} style={{ color: t.text, ...nebulaTypography.body }} />
     {needsFullReading ? <View style={{ alignItems: "flex-start" }}>
-      <NebulaAction icon="book-open" label={actionLabel} onPress={() => setOpen(true)} />
+      <NebulaAction icon="book-open" label={actionLabel} size="compact" onPress={() => setOpen(true)} />
     </View> : null}
     {open ? <BottomSheet visible title={fullTitle} onClose={() => setOpen(false)}>
       <Text style={{ color: t.muted, ...nebulaTypography.label }}>Полный текст · можно выделить и скопировать</Text>
