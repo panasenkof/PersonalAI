@@ -143,3 +143,15 @@ test("9B: failed durable clear retains the prior workspace for safe retry",async
   expect(await catalog.run("workspace_get",{key:"checkpoint"}))
     .toMatchObject({entry:{content:"Intermediate draft"}});
 });
+
+test("9B: explicit isolated photo-to-web turns do not advertise the scratchpad",async()=>{
+  const saveWorkspace=jest.fn(async()=>{});
+  const catalog=createToolCatalog({settings,prompt:"Найди это фото в интернете",
+    history:[],skipLocalMemory:true,lookup:jest.fn().mockResolvedValue([]),
+    propose:jest.fn(),onTaskState:jest.fn(),
+    workspaceAvailable:()=>true,saveWorkspace,
+  },[],[],[]);
+  expect(catalog.definitions.some(d=>d.name.startsWith("workspace_"))).toBe(false);
+  expect(await catalog.run("workspace_list",{})).toEqual({error:"tool_not_allowed"});
+  expect(saveWorkspace).not.toHaveBeenCalled();
+});
