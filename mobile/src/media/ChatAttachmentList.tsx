@@ -75,10 +75,10 @@ export function ChatAttachmentList({files, onRemove, onSearch, onSelectImage, se
       {file.kind === "text" && file.name.startsWith("Транскрипт аудио: ") ? <Text style={{color:t.muted,fontSize:12,lineHeight:17}}>
         Текст Whisper · аудио не отправится
       </Text> : null}
-      {onSearch && file.kind==="image" ? <NebulaAction label="Найти похожие"
+      {onSearch && file.kind==="image" ? <NebulaAction label="Найти похожие" size="compact"
         accessibilityLabel={"Найти похожие в памяти по фото "+file.name} disabled={disabled}
         onPress={()=>onSearch(file)} /> : null}
-      {onRemove ? <NebulaAction icon="x" label="Убрать"
+      {onRemove ? <NebulaAction icon="x" label="Убрать" size="compact"
         accessibilityLabel={"Убрать вложение "+file.name} disabled={disabled}
         onPress={()=>onRemove(file.id)} /> : null}
     </View>)}
