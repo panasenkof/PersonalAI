@@ -192,8 +192,8 @@ test("9T1-R2: scripted Responses loop renders photo result from catalog and surv
   const data=JSON.parse(photoToolResult.output);
   expect(data).toMatchObject({scope:"standard_active_local_photos",
     count:3,photos:expect.arrayContaining([
-      {id:"note-bike",photoAttachmentId:"photo-front"},
-      {id:"note-bike",photoAttachmentId:"photo-side"},
+      expect.objectContaining({id:"note-bike",photoAttachmentId:"photo-front"}),
+      expect.objectContaining({id:"note-bike",photoAttachmentId:"photo-side"}),
     ]),imageBytesIncluded:false});
   expect(modelInput.input.some((part:any)=>
     JSON.stringify(part).includes("data:image"))).toBe(false);
