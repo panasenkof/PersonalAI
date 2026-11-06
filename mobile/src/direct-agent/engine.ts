@@ -16,12 +16,12 @@ import type { MemorySnippet, NoteProposal } from "./memory";
 import { FACT_TOOL_NAME, factGuide } from "./fact-tool";
 import type { SavedArticleIntent, SavedArticleShortlist } from "./article-selection";
 import type { MemorySection } from "./fact-tool";
-import type { ChatArticlePage } from "./conversations";
+import type { ChatArticlePage, ChatArticleReadReport } from "./conversations";
 
 export type AgentTurn = { role: "user" | "assistant"; content: string; attachments?: ChatAttachment[] };
 /** `notice` is shown to the user before the answer, e.g. why web search failed. */
 /** `memory`: the records the answer was based on, shown under it («Из памяти»). */
-export type DirectResult = { text: string; sources: string[]; requests: number; notice?: string; memory?: UsedNote[]; taskState?: TaskState; proposalIds?: string[]; articlePage?: ChatArticlePage };
+export type DirectResult = { text: string; sources: string[]; requests: number; notice?: string; memory?: UsedNote[]; taskState?: TaskState; proposalIds?: string[]; articlePage?: ChatArticlePage; articleReadReport?: ChatArticleReadReport };
 
 export type DirectAgentOptions = {
   settings: DirectAgentSettings;
