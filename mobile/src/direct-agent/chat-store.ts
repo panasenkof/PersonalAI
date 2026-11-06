@@ -269,7 +269,7 @@ export class DirectChatStore {
         (Number.isFinite(Date.parse(n.createdAt))?new Date(n.createdAt).toLocaleDateString("ru-RU"):"дата неизвестна")).join("\n");
       const head=found.count
         ? "Найдено "+found.count+" сохранённых материалов со ссылкой по ключевым словам об ИИ. Даты сохранения: "+dates+
-          ". Показано "+found.records.length+"; остальные материалы можно найти следующим запросом."
+          ". Показано "+found.records.length+(found.hasMore?"; это только первая страница (подгрузка следующих пока недоступна).":".")
         : "За "+dates+" сохранённых материалов со ссылкой по ключевым словам об ИИ не найдено.";
       this.update(id,{updatedAt:new Date().toISOString(),
         rows:[...latest.rows,{id:Crypto.randomUUID(),role:"assistant",
