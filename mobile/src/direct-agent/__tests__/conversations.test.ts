@@ -123,3 +123,56 @@ test("9C: answer keeps validated selected-article provenance across conversation
   tampered(v=>{v.rows[0].articlePage.selected[1].id="../escape";});
   tampered(v=>{v.rows[0].articleReadReport.entries[0].title="x".repeat(200);});
 });
+
+
+test("9C: in-text source offsets survive SQLCipher reopening only with valid read spans",()=>{
+  const page={kind:"saved_topic_links",topic:"космос",queryTerms:["космос"],
+    savedFrom:"2026-10-31T00:00:00.000Z",savedBefore:"2026-11-07T00:00:00.000Z",
+    startLocal:"2026-10-31",endLocal:"2026-11-06",
+    selected:[{id:"first",version:2},{id:"second",version:4},{id:"third",version:6}],
+  };
+  const report={kind:"selected_saved_note_reads",selectedCount:3,
+    entries:[
+      {selectedIndex:0,id:"first",version:2,title:"Первая",status:"complete_saved_note_text",
+        verifiedChars:7000,totalChars:7000,ranges:[{startChar:0,endChar:7000}]},
+      {selectedIndex:1,id:"second",version:4,title:"Вторая",status:"partial_saved_note",
+        verifiedChars:5500,totalChars:9000,ranges:[
+          {startChar:0,endChar:1500},{startChar:5000,endChar:9000}]},
+      {selectedIndex:2,id:"third",version:6,status:"link_only",
+        verifiedChars:20,totalChars:20,ranges:[{startChar:0,endChar:20}]},
+    ],
+  };
+  const fixture={id:"chat",title:"Источники",createdAt:"2026-11-06",
+    updatedAt:"2026-11-06",question:"",drafts:[],
+    rows:[{id:"answer",role:"assistant",
+      text:"Первое [[S1:100-200]] и второе [[S2:6000-7000]]",articlePage:page,
+      articleReadReport:report}]};
+  const restored=parseConversation(JSON.stringify(fixture));
+  expect(restored?.rows[0].articleReadReport).toEqual(report);
+  const mutates=[
+    (v:any)=>{v.rows[0].articleReadReport.entries[1].ranges[1].startChar=1400;},
+    (v:any)=>{v.rows[0].articleReadReport.entries[1].ranges[0].endChar=6500;},
+    (v:any)=>{v.rows[0].articleReadReport.entries[1].ranges[1].endChar=9001;},
+    (v:any)=>{v.rows[0].articleReadReport.entries[1].ranges[0].endChar=-3;},
+    (v:any)=>{v.rows[0].articleReadReport.entries[0].ranges[0].startChar=50;},
+    (v:any)=>{v.rows[0].articleReadReport.entries[0].ranges[0].endChar=6999;},
+    (v:any)=>{v.rows[0].articleReadReport.entries[1].ranges[1].startChar=5001;},
+    (v:any)=>{v.rows[0].articleReadReport.entries[1].ranges=Array.from({length:129},(_,i)=>(
+      {startChar:i*2,endChar:i*2+1}));},
+    (v:any)=>{v.rows[0].articleReadReport.entries[1].ranges=[{startChar:0,endChar:9000}];},
+    (v:any)=>{v.rows[0].articleReadReport.entries[2].ranges=[{startChar:0,endChar:21}];},
+  ];
+  for(const mutate of mutates){
+    const copy=JSON.parse(JSON.stringify(fixture));
+    mutate(copy);
+    const row=parseConversation(JSON.stringify(copy))?.rows[0];
+    expect(row?.text).toBe(fixture.rows[0].text);
+    expect(row?.articleReadReport).toBeUndefined();
+  }
+  // Old answers without detailed ranges are preserved, but cannot produce
+  // clickable claim references until a real new canonical read.
+  const legacy=JSON.parse(JSON.stringify(fixture));
+  for(const e of legacy.rows[0].articleReadReport.entries)delete e.ranges;
+  expect(parseConversation(JSON.stringify(legacy))?.rows[0].articleReadReport)
+    .toMatchObject({selectedCount:3});
+});
