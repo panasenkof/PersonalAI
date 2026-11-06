@@ -125,3 +125,19 @@ test("9B: a failed durable write never returns a false success or updates the sc
   expect(await catalog.run("workspace_list",{}))
     .toMatchObject({count:0,entries:[]});
 });
+
+test("9B: failed durable clear retains the prior workspace for safe retry",async()=>{
+  const saveWorkspace=jest.fn(async(state:TaskState)=>{
+    if(state.workspace===undefined)throw new Error("db_write_failed");
+  });
+  const catalog=createToolCatalog({settings,prompt:"Сравнить статьи",history:[],
+    lookup:jest.fn().mockResolvedValue([]),propose:jest.fn(),
+    onTaskState:jest.fn(),workspaceAvailable:()=>true,saveWorkspace,
+  },[],[],[]);
+  expect(await catalog.run("workspace_put",put("checkpoint","Intermediate draft")))
+    .toMatchObject({status:"workspace_written"});
+  expect(await catalog.run("workspace_clear",{}))
+    .toEqual({error:"tool_failed_or_unavailable"});
+  expect(await catalog.run("workspace_get",{key:"checkpoint"}))
+    .toMatchObject({entry:{content:"Intermediate draft"}});
+});
