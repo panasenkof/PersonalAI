@@ -1,6 +1,6 @@
 import { DirectChatStore } from "../chat-store";
 import { savedAiArticleIntent, selectSavedAiArticles } from "../article-selection";
-import type { ConversationRepository, SavedConversation } from "../conversations";
+import { parseConversation, type ConversationRepository, type SavedConversation } from "../conversations";
 import { waitForApplicationSession } from "../../local-memory/storage";
 
 jest.mock("../../local-memory/storage",()=>({
@@ -131,5 +131,22 @@ test("failed page leaves cursor available for retry and does not use model",asyn
   await store.loadMoreSavedArticlesLocally(id);
   expect(store.getSnapshot().conversations[0].rows.find(x=>x.id===id)?.articlePage?.nextCursor).toMatchObject({beforeId:"b"});
   expect(runner).not.toHaveBeenCalled();
+  store.dispose();
+});
+
+test("article cursor survives encrypted conversation reload; malformed cursor is ignored",async()=>{
+  const {repo,records}=fixture();
+  const store=new DirectChatStore("guest",repo);await store.initialize();
+  selection.mockResolvedValueOnce({
+    count:20,hasMore:true,nextCursor:{beforeCreatedAt:"2026-11-04T09:00:00.000Z",beforeId:"b"},
+    records:[{id:"b",title:"Статьи ИИ",section:"Заметки",version:1,createdAt:"2026-11-04T09:00:00.000Z"}],
+  });
+  store.setQuestion("Выбери статьи об ИИ за неделю");await store.searchSavedArticlesLocally();
+  const raw=JSON.stringify(records.get(store.getSnapshot().activeId!)!);
+  const restored=parseConversation(raw)!;
+  expect(restored.rows[1].articlePage?.nextCursor?.beforeId).toBe("b");
+  const tampered=JSON.parse(raw);
+  tampered.rows[1].articlePage.nextCursor.beforeId="untrusted cursor with spaces";
+  expect(parseConversation(JSON.stringify(tampered))!.rows[1].articlePage).toBeUndefined();
   store.dispose();
 });
