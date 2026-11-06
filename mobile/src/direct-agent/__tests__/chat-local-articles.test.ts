@@ -5,6 +5,7 @@ import { waitForApplicationSession } from "../../local-memory/storage";
 
 jest.mock("../../local-memory/storage",()=>({
   waitForApplicationSession:jest.fn(async()=>{}),withLocalMemoryDatabase:jest.fn(),
+  localMemorySessionUnlocked:jest.fn(()=>true),
 }));
 jest.mock("../article-selection",()=>({
   savedAiArticleIntent:jest.fn(),
