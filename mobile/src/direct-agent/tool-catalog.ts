@@ -611,7 +611,10 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
       if (options.signal?.aborted) throw new Error("Запрос остановлен");
       result = { error: "tool_failed_or_unavailable" };
     }
-    if (outcome !== "state_updated") observe({ tool: canonical, outcome,
+    // A coverage snapshot is valid ONLY for this model turn. Do not persist it
+    // as task evidence that a later turn could mistake for a reauthorized read.
+    if (outcome !== "state_updated" && canonical !== "selected_article_read_coverage")
+      observe({ tool: canonical, outcome,
       subject: text(result.proposalId || args?.url || args?.query || args?.title || name),
       excerpt: outcome === "read" ? text(result.content) : outcome === "found" && canonical === "search_web" ? text((result.sources as string[]).join("\n")) : text(JSON.stringify(result)) });
     options.diagnostic?.("tool.outcome_verified", { name: canonical, effect: spec?.effect || "unknown", outcome });
