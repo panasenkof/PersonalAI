@@ -70,7 +70,7 @@ export function savedAiArticleIntent(text: string, now = new Date(), hasAttachme
 type ArticleDb = Parameters<typeof listAllowedNotes>[0];
 export type SavedArticleShortlist = {
   count: number;
-  records: Array<{id:string;version:number;title:string;section:string;createdAt:string}>;
+  records: Array<{id:string;version:number;title:string;section:string;createdAt:string;duplicateCount?:number}>;
   hasMore: boolean; nextCursor?: {beforeCreatedAt:string;beforeId:string}; scope: "standard_active_saved_links"; matchMode: "one_of_fts_phrases";
 };
 
@@ -82,8 +82,8 @@ export async function selectSavedAiArticles(profile: string, intent: SavedArticl
       savedBefore:intent.savedBefore, linkedOnly:true, sortBySaved:true };
     const counted = await countAllowedNotes(reader,filters);
     const page = await listAllowedNotes(reader,{...filters,...cursor,limit:8});
-    return { count:counted.count,records:page.records.map(({id,version,title,section,createdAt})=>({
-      id,version,title,section,createdAt,
+    return { count:counted.count,records:page.records.map(({id,version,title,section,createdAt,duplicateCount})=>({
+      id,version,title,section,createdAt,...(duplicateCount !== undefined ? {duplicateCount} : {}),
     })),hasMore:page.hasMore,
       ...(page.nextCursor?.beforeCreatedAt ? {nextCursor:{
         beforeCreatedAt:page.nextCursor.beforeCreatedAt,beforeId:page.nextCursor.beforeId,
