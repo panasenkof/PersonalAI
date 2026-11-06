@@ -387,7 +387,7 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
         state = { ...updateTaskInterpretation(state, args), webPreference: state.webPreference }; emit();
         return { status: "state_updated", personalMemorySaved: false };
       }, verify: r => r.status === "state_updated" ? "state_updated" : "failed" },
-    ...(options.saveWorkspace && options.workspaceAvailable ? [
+    ...(options.saveWorkspace && options.workspaceAvailable && !options.skipLocalMemory ? [
       { definition:{name:"workspace_put",
         description:"Сохранить ОДИН промежуточный черновик, задачу или сравнение в рабочей области ЭТОЙ задачи и зашифрованного диалога. Не личная память; не факт и не источник доказательства. Не копируй полный текст статей. До 16 ключей, по 1200 символов. Один и тот же key заменяется.",
         parameters:{type:"object",properties:{
