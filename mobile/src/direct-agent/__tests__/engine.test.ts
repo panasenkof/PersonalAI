@@ -473,3 +473,47 @@ test("list/count schemas are strict OpenAI functions with nullable optional filt
   expect(lists.parameters.required).toEqual(["query", "collectionId", "limit", "beforeUpdatedAt", "beforeId"]);
   expect(count).toHaveBeenCalledWith({});
 });
+
+
+test("9C: model tool loop returns host-verified read provenance with its answer",async()=>{
+  const transport=jest.fn()
+    .mockResolvedValueOnce(toolResponse("read_selected_local_articles",
+      {startIndex:0,count:2,charsPerNote:1000},"read_1"))
+    .mockResolvedValueOnce(toolResponse("selected_article_read_coverage",{},"coverage_1"))
+    .mockResolvedValueOnce(final("Сравнение двух сохранённых заметок."));
+  const articleSelection={
+    kind:"saved_topic_links",topic:"космос",queryTerms:["космос"],
+    savedFrom:"2026-10-31T00:00:00.000Z",savedBefore:"2026-11-07T00:00:00.000Z",
+    startLocal:"2026-10-31",endLocal:"2026-11-06",
+    selected:[{id:"source-a",version:2},{id:"source-b",version:3}],
+  };
+  const read=jest.fn(async(id:string,version:number,offset=0,budget=1000)=>{
+    const body=id==="source-b"?"https://example.org/original":"Статья с сохранёнными фактами";
+    const content=body.slice(offset,offset+budget),end=offset+content.length;
+    return {id,revision:version,title:id==="source-a"?"Первый материал":"Ссылка",content,
+      offset,totalChars:body.length,hasMore:end<body.length,
+      evidence:{recordId:id,recordVersion:version,startChar:offset,endChar:end,coverage:"complete"}};
+  });
+  const result=await start({},transport,{
+    prompt:"Сделай выжимку из выбранных статей",
+    articleSelection,selectArticles:jest.fn(),read,
+  });
+  expect(result.text).toBe("Сравнение двух сохранённых заметок.");
+  expect(read).toHaveBeenCalledTimes(2);
+  expect(result.articleReadReport).toMatchObject({
+    kind:"selected_saved_note_reads",selectedCount:2,
+    entries:[
+      {id:"source-a",version:2,status:"complete_saved_note_text",
+        title:"Первый материал"},
+      {id:"source-b",version:3,status:"link_only",title:"Ссылка"},
+    ],
+  });
+  expect(result.articlePage?.selected).toEqual(articleSelection.selected);
+  const next=JSON.parse(transport.mock.calls[2][1].body);
+  expect(next.input).toContainEqual(expect.objectContaining({
+    type:"function_call_output",call_id:"coverage_1",
+    output:expect.stringContaining('"linkOnlyCount":1'),
+  }));
+  expect(result.taskState?.evidence?.some(e=>e.tool==="selected_article_read_coverage"))
+    .toBe(false);
+});
