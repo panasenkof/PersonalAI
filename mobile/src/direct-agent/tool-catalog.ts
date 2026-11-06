@@ -7,6 +7,7 @@ import { createWebTools } from "./web-tools";
 import { beginTask, recordEvidence, TASK_STATE_TOOL, updateTaskInterpretation } from "./task-state";
 import type { TaskEvidence, ToolOutcome } from "./task-state";
 import { webPreference } from "./dialogue";
+import { savedArticleToolIntent } from "./article-selection";
 
 export type ToolDefinition = { name: string; description: string; parameters: object };
 export type ToolSpec = {
@@ -28,6 +29,10 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
   const fingerprint = (p: { title: string; body: string; section?: string; newSection?: string; kind?: string; person?: string; date?: string }) => JSON.stringify([p.title, p.body, p.section, p.newSection, p.kind, p.person, p.date]);
   const pending = new Map((options.pendingNotes || []).map(n => [fingerprint(n), n.id as string | undefined]));
   const proposalIds = new Set<string>();
+  // 9T1: one request/turn uses a fixed local calendar anchor; never an extra agent runtime.
+  const articleClock = new Date();
+  let articlePages = 0;
+  const articleRequests = new Set<string>();
   const specs: ToolSpec[] = [
     { definition: { name: "search_local_notes", description: "Найти заметки на телефоне по 1–3 ключевым словам. Найденный фрагмент не является полным чтением записи.", parameters: queryParameters }, effect: "read",
       execute: async args => {
@@ -170,6 +175,57 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
       },
       verify: (r: Record<string, unknown>) => typeof r.count === "number" &&
         r.scope === "standard_active_notes" ? "read" as const : "failed" as const,
+    }] : []),
+    ...(options.selectArticles ? [{
+      definition: { name: "select_local_articles",
+        description: "Постранично выбрать СОХРАНЁННЫЕ ссылки на статьи по теме и календарной неделе из разрешённых стандартных заметок. Дата по умолчанию — сохранение; published = только дата, указанная самим сайтом, не независимо проверенная. Результат — МЕТАДАННЫЕ, не прочитанный текст. Для выжимки дочитай read_local_note по id/version. Не путай count с числом прочитанных материалов. Максимум 3 страницы за сообщение.",
+        parameters: { type: "object", properties: {
+          topic: { type: "string" },
+          period: { type: "string", enum: ["last7days", "thisweek"] },
+          dateMode: { type: "string", enum: ["saved", "published"] },
+          beforeCreatedAt: { type: ["string", "null"] },
+          beforeId: { type: ["string", "null"] },
+        }, required: ["topic", "period", "dateMode", "beforeCreatedAt", "beforeId"],
+        additionalProperties: false },
+      }, effect: "read" as const,
+      execute: async (args: Record<string, unknown>) => {
+        if (Object.keys(args).length !== 5 ||
+            Object.keys(args).some(key => !["topic","period","dateMode","beforeCreatedAt","beforeId"].includes(key)))
+          return { error: "invalid_article_tool_arguments" };
+        const intent = savedArticleToolIntent(args.topic, args.period, args.dateMode, articleClock);
+        if (!intent) return { error: "invalid_article_tool_arguments" };
+        const t = args.beforeCreatedAt, id = args.beforeId;
+        if (!((t === null && id === null) ||
+          (typeof t === "string" && /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$/.test(t) &&
+            Number.isFinite(Date.parse(t)) && new Date(t).toISOString() === t &&
+            typeof id === "string" && id.length > 0 && id.length <= 128)))
+          return { error: "invalid_article_cursor" };
+        const key = JSON.stringify([intent.topic, intent.dateMode, intent.savedFrom, intent.savedBefore, t, id]);
+        if (articleRequests.has(key)) return { error: "article_page_already_requested" };
+        if (articlePages >= 3) return { error: "article_page_budget_exhausted", hint: "Покажи частичный результат и попроси пользователя продолжить." };
+        articlePages++; articleRequests.add(key);
+        options.status?.("Выбираю сохранённые статьи");
+        const page = await options.selectArticles!(intent, id === null ? undefined : { beforeCreatedAt: t as string, beforeId: id as string });
+        if (page.scope !== "standard_active_saved_links" || !Array.isArray(page.records) ||
+            !Number.isSafeInteger(page.count) || page.count < 0 || typeof page.hasMore !== "boolean")
+          return { error: "invalid_article_reader_result" };
+        return { scope: page.scope, matchMode: page.matchMode, count: page.count,
+          records: page.records.slice(0, 8).map(n => ({
+            id: n.id, version: n.version, title: n.title.slice(0, 160),
+            section: n.section.slice(0, 80), createdAt: n.createdAt,
+            ...(n.publicationDay ? { publicationDay: n.publicationDay } : {}),
+            ...(n.duplicateCount !== undefined ? { duplicateCount: n.duplicateCount } : {}),
+          })),
+          hasMore: page.hasMore, ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
+          ...(page.unknownPublicationCount !== undefined ? { unknownPublicationCount: page.unknownPublicationCount } : {}),
+          selection: { topic: intent.topic, dateMode: intent.dateMode, fromLocal: intent.startLocal,
+            throughLocal: intent.endLocal, dateEvidence: intent.dateMode === "published" ? "html_meta_source_claim" : "local_save_time" },
+          contentIncluded: false };
+      },
+      verify: (r: Record<string, unknown>) => r.scope === "standard_active_saved_links" &&
+        r.matchMode === "one_of_fts_phrases" && r.contentIncluded === false &&
+        Number.isSafeInteger(r.count) && Array.isArray(r.records) && typeof r.hasMore === "boolean"
+        ? (r.records as unknown[]).length ? "found" as const : "empty" as const : "failed" as const,
     }] : []),
     { definition: { name: FACT_TOOL_NAME, description: FACT_TOOL_DESCRIPTION, parameters: factToolParameters(options.sections) }, effect: "proposal",
       execute: async args => {
