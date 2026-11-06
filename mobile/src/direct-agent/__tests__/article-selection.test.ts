@@ -1,4 +1,4 @@
-import { savedAiArticleIntent } from "../article-selection";
+import { savedAiArticleIntent, savedAiArticlePageIntent } from "../article-selection";
 
 test("saved AI articles: 7 calendar days including today, not rolling 168 hours", () => {
   const at = new Date(2026,10,6,23,57,0);
@@ -39,7 +39,6 @@ test.each([
 test.each([
   "Найди статьи про автомобили кроме электромобилей за неделю",
   "Найди статьи про велосипеды за последние 3 дня",
-  "Выбери статьи про автомобили опубликованные за неделю",
   "Покажи материалы про API/ключи на этой неделе",
   "Найди статьи про ????????? за неделю",
   "Выбери статьи о ИИ без ссылок за неделю",
@@ -50,4 +49,24 @@ test("AI synonyms retain existing local query terms, not unrelated literal topic
   expect(savedAiArticleIntent("Найди статьи об ИИ за неделю",new Date(2026,10,6))?.queryTerms)
     .toContain("нейросеть");
   expect(savedAiArticleIntent("Найди статьи об AI за неделю",new Date(2026,10,6))?.topic).toBe("ai");
+});
+
+test("9A5c: explicitly published requests filter by source publication day, never saved day",()=>{
+  const at=new Date(2026,10,6,15);
+  const request=savedAiArticleIntent("Найди статьи об ИИ, опубликованные за последние 7 дней",at);
+  expect(request).toMatchObject({dateMode:"published",topic:"ai",
+    publicationFrom:"2026-10-31",publicationBefore:"2026-11-07"});
+  expect(savedAiArticleIntent("Найди статьи об ИИ за последние 7 дней",at)?.dateMode).toBe("saved");
+  expect(savedAiArticleIntent("Выбери статьи про автомобили опубликованные за неделю",at))
+    .toMatchObject({dateMode:"published",topic:"автомобили"});
+  expect(savedAiArticleIntent("Покажи материалы про автомобили, вышедшие на этой неделе",at))
+    .toMatchObject({dateMode:"published",topic:"автомобили",publicationFrom:"2026-11-02"});
+});
+test("9A5c: next page retains the original publication period across changes of today's date",()=>{
+  const page=savedAiArticlePageIntent({kind:"saved_topic_links",topic:"автомобили",
+    queryTerms:["автомобили"],dateMode:"published",
+    savedFrom:"2026-10-31T00:00:00.000Z",savedBefore:"2026-11-07T00:00:00.000Z",
+    startLocal:"2026-10-31",endLocal:"2026-11-06"});
+  expect(page).toMatchObject({dateMode:"published",topic:"автомобили",
+    publicationFrom:"2026-10-31",publicationBefore:"2026-11-07"});
 });
