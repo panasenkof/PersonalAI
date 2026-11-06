@@ -14,6 +14,7 @@ import { onLocalMemorySessionChange } from "../local-memory/storage";
 import { memoryErrorMessage } from "../local-memory/errors";
 import { useTheme } from "../theme";
 import { nebulaRadii, nebulaSpacing, nebulaTouch } from "../design/nebula/tokens";
+import { NebulaAction } from "../design/nebula/components";
 
 type UndoAction =
   | (TemporalDecisionExpected & { kind: "temporal"; decisionId: string })
@@ -199,10 +200,11 @@ export function MemoryTemporalReviewScreen() {
       Слова и даты взяты из источников. Ничего не изменяется без вашего действия.
       Закрытые и неподтверждённые источники не показываются.</Text>
     {notice?<Text accessibilityLiveRegion="polite" style={{color:t.secondary}}>{notice}</Text>:null}
-    {undo?<Pressable accessibilityRole="button" accessibilityLabel="Отменить последнее решение памяти"
-      disabled={busy} style={action(busy)} onPress={()=>void undoLast()}>
-      <Text style={{color:t.secondary,fontWeight:"700"}}>Отменить последнее решение</Text>
-    </Pressable>:null}
+    {undo?<View style={{alignItems:"flex-start"}}>
+      <NebulaAction icon="rotate-ccw" size="compact" label="Отменить решение"
+        accessibilityLabel="Отменить последнее решение памяти" disabled={busy}
+        onPress={()=>void undoLast()}/>
+    </View>:null}
     {error?<Text accessibilityRole="alert" style={{color:t.err}}>{error}</Text>:null}
     {loading?<ActivityIndicator accessibilityLabel="Загрузка предложений памяти" />:null}
     {!loading&&!error&&items.length===0&&relations.length===0?<Text style={{color:t.muted}}>
@@ -242,10 +244,11 @@ export function MemoryTemporalReviewScreen() {
         </Pressable>
       </View>
     </View>)}
-    {relationCursor?<Pressable accessibilityRole="button" accessibilityLabel="Показать ещё связи памяти"
-      disabled={busy||loading} style={action(busy||loading)} onPress={()=>void moreRelations()}>
-      <Text style={{color:t.secondary}}>Показать ещё связи</Text>
-    </Pressable>:null}
+    {relationCursor?<View style={{alignItems:"flex-start"}}>
+      <NebulaAction icon="chevron-down" size="compact" label="Ещё связи"
+        accessibilityLabel="Показать ещё связи памяти" disabled={busy||loading}
+        onPress={()=>void moreRelations()}/>
+    </View>:null}
     {items.length>0?<Text accessibilityRole="header" style={{color:t.text,fontSize:18,fontWeight:"700"}}>
       Возможные изменения состояния
     </Text>:null}
@@ -309,9 +312,11 @@ export function MemoryTemporalReviewScreen() {
         </View>
       </View>:null}
     </View>)}
-    {cursor?<Pressable accessibilityRole="button" accessibilityLabel="Показать ещё предложения памяти"
-      disabled={busy||loading} style={action(busy||loading)} onPress={()=>void more()}>
-      <Text style={{color:t.secondary}}>{busy?"Загружаю…":"Показать ещё"}</Text>
-    </Pressable>:null}
+    {cursor?<View style={{alignItems:"flex-start"}}>
+      <NebulaAction icon="chevron-down" size="compact"
+        label={busy?"Загружаю…":"Показать ещё"}
+        accessibilityLabel="Показать ещё предложения памяти" disabled={busy||loading}
+        onPress={()=>void more()}/>
+    </View>:null}
   </ScrollView>;
 }
