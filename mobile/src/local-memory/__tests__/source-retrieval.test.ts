@@ -257,3 +257,35 @@ test("C3 source ACL: stale search results cannot bypass revised note version",as
       .toContain("информация со страницы");
   }finally{db.close();}
 });
+
+test("FTS attachment search continues past 80 candidates without duplicate or hidden segments",async()=>{
+  const {db}=await fixture();
+  try {
+    const segments=Array.from({length:96},(_,i)=>({
+      text:"маркер источника "+String(i).padStart(3,"0"),location:{kind:"unknown" as const},
+    }));
+    await saveExtractionRun(db as never,{
+      attachmentId:"a1",producerKind:"pdf",producerId:"pdf-text-v1",
+      producerRevision:"2.0",coverage:"partial",status:"partial",language:"ru",segments,
+    });
+    const seen=new Set<string>();
+    let offset=0,turns=0;
+    for(;;) {
+      const page=await searchApprovedSourceSegments(db as never,"маркер",8,offset);
+      expect(page.segments.length).toBeLessThanOrEqual(8);
+      for (const row of page.segments) {
+        expect(seen.has(row.segmentId)).toBe(false);
+        seen.add(row.segmentId);
+      }
+      turns++;
+      if (!page.hasMore) break;
+      expect(page.nextOffset).toBeGreaterThan(offset);
+      offset=page.nextOffset!;
+      expect(turns).toBeLessThan(20);
+    }
+    expect(seen.size).toBe(96);
+    expect(turns).toBe(12);
+    await expect(searchApprovedSourceSegments(db as never,"маркер",8,-1))
+      .rejects.toThrow("invalid_source_search_cursor");
+  } finally { db.close(); }
+});

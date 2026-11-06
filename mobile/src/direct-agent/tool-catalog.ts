@@ -69,19 +69,22 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
     }] : []),
     ...(options.searchSources ? [{
       definition: { name: "search_local_source_segments",
-        description: "Искать точную последовательность 1–3 ключевых слов внутри распознанного текста оригинальных вложений. Возвращает лишь разрешённые активные заметки и короткие превью; не является поиском по закрытым документам, а страница/таймкод только по данным обработчика.",
+        description: "Искать точную последовательность 1–3 ключевых слов внутри распознанных вложений. При hasMore=true передать nextOffset как offset для следующей страницы ТОГО ЖЕ query. Разрешённые активные заметки и короткие превью, не весь документ; страница/таймкод только по данным обработчика.",
         parameters: { type: "object", properties: {
           query: { type: "string" }, limit: { type: ["integer","null"] },
-        }, required: ["query","limit"], additionalProperties: false },
+          offset: { type: ["integer","null"] },
+        }, required: ["query","limit","offset"], additionalProperties: false },
       }, effect: "read" as const,
       execute: async (args: Record<string,unknown>) => {
         const query = typeof args.query === "string" ? args.query.trim() : "";
         const limit = args.limit ?? 8;
+        const offset = args.offset ?? 0;
         if (query.length < 2 || query.length > 120 ||
-            !Number.isSafeInteger(limit) || Number(limit) < 1 || Number(limit) > 20) {
+            !Number.isSafeInteger(limit) || Number(limit) < 1 || Number(limit) > 20 ||
+            !Number.isSafeInteger(offset) || Number(offset) < 0 || Number(offset) > 2_000_000) {
           return { error: "invalid_source_search_request" };
         }
-        return options.searchSources!(query, Number(limit));
+        return options.searchSources!(query, Number(limit), Number(offset));
       },
       verify: (r: Record<string,unknown>) => Array.isArray(r.segments) &&
         r.scope === "standard_active_notes" &&

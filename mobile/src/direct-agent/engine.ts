@@ -44,7 +44,7 @@ export type DirectAgentOptions = {
   /** List metadata/short previews from source-attached extraction records for
    * an already authorized record/version; all ACL checks repeat on the phone. */
   /** Searches only FTS-indexed source segments that independently pass note ACL. */
-  searchSources?: (query: string, limit?: number) => Promise<Record<string, unknown>>;
+  searchSources?: (query: string, limit?: number, offset?: number) => Promise<Record<string, unknown>>;
   listSources?: (id: string, version: number, limit?: number) => Promise<Record<string, unknown>>;
   /** Read exactly one verified-source-version segment, with bounded cursor. */
   readSource?: (id: string, version: number, attachmentId: string,
