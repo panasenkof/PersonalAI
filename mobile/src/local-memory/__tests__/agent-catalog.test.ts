@@ -77,7 +77,7 @@ test("stage 9A searches only dated active standard saved links with an exact sco
   }
   const filters = {queryTerms:["ИИ","AI","нейросети","искусственный интеллект"],
     savedFrom:"2026-10-31T00:00:00.000Z",savedBefore:"2026-11-07T00:00:00.000Z",
-    linkedOnly:true};
+    linkedOnly:true,sortBySaved:true};
   expect(await countAllowedNotes(db as never,filters)).toMatchObject({count:2,matchMode:"one_of_fts_phrases"});
   const page=await listAllowedNotes(db as never,{...filters,limit:8});
   expect(page.records.map(x=>x.id)).toEqual(["a","b"]);
