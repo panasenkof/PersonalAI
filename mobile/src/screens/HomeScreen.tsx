@@ -172,8 +172,9 @@ function NebulaHomeContent() {
   const canSend = Boolean(ready && !pickingAttachment && !cameraBusy && !active?.deleting && settings && (settings.apiKey || anonymousLocalAllowed(settings)));
   const draftImageSupport = settings ? imageCapability(settings,active?.attachments || []) : "no-images";
   const question = active?.question || "";
-  const localPhotoSearch = localPhotoIntent83(question,active?.attachments || []);
   const localArticles = savedAiArticleIntent(question,new Date(),Boolean(active?.attachments?.length));
+  // The generic visual object-finder must not swallow the article selection.
+  const localPhotoSearch = localArticles ? null : localPhotoIntent83(question,active?.attachments || []);
   const suggestedPhotoSearch = localPhotoSuggestion83(question, active?.attachments || []);
   const canSearchLocal = Boolean(ready && !cameraBusy && !pickingAttachment && !active?.deleting && (localPhotoSearch || localArticles));
   const busy = active?.busy || false;
