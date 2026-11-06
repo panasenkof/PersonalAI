@@ -7,6 +7,8 @@ import { ftsPhrase } from "./query";
 export type AllowedListOptions = {
   collectionId?: string; query?: string; limit?: number;
   beforeUpdatedAt?: string; beforeId?: string;
+  /** Keyset for saved-time order. Must be supplied as a pair. */
+  beforeCreatedAt?: string;
   /** Stage 9A: bounded OR of literal FTS phrases, not a second search index. */
   queryTerms?: string[];
   /** UTC instants calculated from the DEVICE-local requested calendar window. */
@@ -52,9 +54,20 @@ function filters(options: AllowedListOptions, cursor: boolean): Filter {
       "(json_extract(e.payload_json,'$.source_url') LIKE 'https://%' OR " +
       "json_extract(e.payload_json,'$.source_url') LIKE 'http://%')");
   }
-  if (cursor && options.sortBySaved && (options.beforeUpdatedAt !== undefined || options.beforeId !== undefined))
-    throw new Error("invalid_catalog_saved_cursor");
-  if (cursor && (options.beforeUpdatedAt !== undefined || options.beforeId !== undefined)) {
+  if (cursor && options.sortBySaved) {
+    if (options.beforeUpdatedAt !== undefined) throw new Error("invalid_catalog_saved_cursor");
+    if (options.beforeCreatedAt !== undefined || options.beforeId !== undefined) {
+      if (!options.beforeCreatedAt || !/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$/.test(options.beforeCreatedAt) ||
+          !Number.isFinite(Date.parse(options.beforeCreatedAt)) || !options.beforeId ||
+          !/^[a-zA-Z0-9:_-]{1,128}$/.test(options.beforeId))
+        throw new Error("invalid_catalog_saved_cursor");
+      where.push("(e.created_at < ? OR (e.created_at = ? AND e.id < ?))");
+      params.push(options.beforeCreatedAt, options.beforeCreatedAt, options.beforeId);
+    }
+  }
+  if (cursor && !options.sortBySaved && options.beforeCreatedAt !== undefined)
+    throw new Error("invalid_catalog_cursor");
+  if (cursor && !options.sortBySaved && (options.beforeUpdatedAt !== undefined || options.beforeId !== undefined)) {
     if (!options.beforeUpdatedAt || !/^\d{4}-\d{2}-\d{2}T/.test(options.beforeUpdatedAt) ||
         options.beforeUpdatedAt.length > 40 || !options.beforeId ||
         options.beforeId.length > 128) throw new Error("invalid_catalog_cursor");
@@ -67,7 +80,7 @@ const FROM = "FROM memory_entities e JOIN memory_collections c ON c.id=e.collect
 
 /** This count is *exact FTS phrase* and only the permitted scope, never all
  * private or semantically related notes. User-facing metadata says so. */
-export async function countAllowedNotes(db: Db, options: Omit<AllowedListOptions, "limit" | "beforeUpdatedAt" | "beforeId"> = {}) {
+export async function countAllowedNotes(db: Db, options: Omit<AllowedListOptions, "limit" | "beforeUpdatedAt" | "beforeCreatedAt" | "beforeId"> = {}) {
   const q = filters(options, false);
   const row = await db.getFirstAsync<{ n: number }>(
     "SELECT count(*) AS n " + FROM + " WHERE " + q.where, q.params);
@@ -91,8 +104,10 @@ export async function listAllowedNotes(db: Db, options: AllowedListOptions = {})
     records: visible.map(row => ({ id: row.id, version: row.record_version,
       title: row.title || "", section: row.collection_name, createdAt: row.created_at, updatedAt: row.updated_at })),
     hasMore: rows.length > limit,
-    ...(rows.length > limit && last && !options.sortBySaved ?
-      { nextCursor: { beforeUpdatedAt: last.updated_at, beforeId: last.id } } : {}),
+    ...(rows.length > limit && last ?
+      { nextCursor: options.sortBySaved
+        ? { beforeCreatedAt: last.created_at, beforeId: last.id }
+        : { beforeUpdatedAt: last.updated_at, beforeId: last.id } } : {}),
     scope: "standard_active_notes",
     matchMode: options.queryTerms ? "one_of_fts_phrases" : options.query ? "exact_fts_phrase" : "all_allowed",
     // Never conflate a paged metadata list with a full content read.
