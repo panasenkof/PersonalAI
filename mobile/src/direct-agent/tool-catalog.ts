@@ -136,7 +136,7 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
       evidence:Record<string,unknown>;
     };
     articleCoverage.record(handle,{offset:verified.offset,content:verified.content,
-      totalChars:verified.totalChars,hasMore:verified.hasMore});
+      totalChars:verified.totalChars,hasMore:verified.hasMore,title:verified.title});
     return verified;
   };
   const specs: ToolSpec[] = [
@@ -621,11 +621,27 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
     options.diagnostic?.("tool.outcome_verified", { name: canonical, effect: spec?.effect || "unknown", outcome });
     return { ...result, ...(outcome !== "failed" ? { outcome } : {}) };
   }
-  function finish(): Pick<DirectResult, "taskState" | "proposalIds" | "articlePage"> {
+  function finish(): Pick<DirectResult, "taskState" | "proposalIds" | "articlePage" | "articleReadReport"> {
     state = { ...state, turnStatus: "answered" }; emit();
+    const selected = !mixedArticleFilters && usedSelectedArticleTool ? selectedArticleHandles() : undefined;
+    const checked = selected && articleCoverage.summary(selected);
+    // This is a historic, read-only answer annotation. It is NOT promoted into
+    // TaskState evidence and cannot authorize a future read or preserve source text.
+    const articleReadReport = selected && checked && checked.checkedCount>0 ? {
+      kind:"selected_saved_note_reads" as const,selectedCount:selected.length,
+      entries:checked.entries.map((entry,index)=>({
+        selectedIndex:index,id:selected[index].id,version:selected[index].version,
+        status:entry.status,verifiedChars:entry.verifiedChars,
+        ...("totalChars" in entry && typeof entry.totalChars==="number" ?
+          {totalChars:entry.totalChars} : {}),
+        ...("title" in entry && typeof entry.title==="string" ?
+          {title:entry.title} : {}),
+      })),
+    } : undefined;
     return { taskState: state, proposalIds: [...proposalIds],
       ...(persistedArticle ? {articlePage:persistedArticle} :
-        usedSelectedArticleTool && options.articleSelection ? {articlePage:options.articleSelection} : {}) };
+        usedSelectedArticleTool && options.articleSelection ? {articlePage:options.articleSelection} : {}),
+      ...(articleReadReport ? {articleReadReport} : {}) };
   }
   const observeSources = (urls: string[]) => { if (urls.length) observe({ tool: "web_search", outcome: "found", subject: options.prompt.slice(0, 120), excerpt: urls.join("\n").slice(0, 600) }); };
   return { definitions: specs.map(s => s.definition), run, finish, observeSources,

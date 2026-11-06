@@ -578,7 +578,8 @@ export class DirectChatStore {
         ...(result.notice ? [{ id: Crypto.randomUUID(), role: "info" as const, text: result.notice }] : []),
         { id: Crypto.randomUUID(), role: "assistant", text: result.text, sources: result.sources,
           ...(result.memory?.length ? { memory: result.memory } : {}),
-          ...(result.articlePage ? {articlePage:result.articlePage} : {}) }],
+          ...(result.articlePage ? {articlePage:result.articlePage} : {}),
+          ...(result.articleReadReport ? {articleReadReport:result.articleReadReport} : {}) }],
         updatedAt: new Date().toISOString() });
     } catch (e) {
       trace("turn.failed", { elapsedMs: Date.now() - startedAt, aborted: aborter.signal.aborted,

@@ -3,11 +3,11 @@
 export type ArticleSelectionHandle = { id:string; version:number };
 export type VerifiedArticleSpan = { startChar:number; endChar:number };
 export type ArticleReadReceipt = {
-  offset:number; content:string; totalChars:number; hasMore:boolean;
+  offset:number; content:string; totalChars:number; hasMore:boolean; title?:string;
 };
 type Reading = {
   totalChars:number; ranges:VerifiedArticleSpan[];
-  sawContent:boolean; linkOnly:boolean; unavailable:boolean;
+  sawContent:boolean; linkOnly:boolean; unavailable:boolean; title?:string;
 };
 export type ArticleCoverageStatus =
   "unread" | "partial_saved_note" | "complete_saved_note_text" |
@@ -56,6 +56,7 @@ export function createArticleReadCoverage(){
       {startChar:read.offset,endChar:end}]);
     const isWhole=read.offset===0 && end===read.totalChars;
     byHandle.set(key,{totalChars:read.totalChars,ranges,
+      ...(read.title ? {title:read.title.slice(0,160)} : old?.title ? {title:old.title} : {}),
       sawContent:Boolean(read.content.trim()) || Boolean(old&&!old.unavailable&&old.sawContent),
       linkOnly:Boolean(old&&!old.unavailable&&old.linkOnly) ||
         (isWhole && /^https?:\/\/\S+$/iu.test(read.content.trim())),
@@ -78,6 +79,7 @@ export function createArticleReadCoverage(){
         !read.sawContent?"empty_saved_note":
         read.linkOnly?"link_only":"complete_saved_note_text";
       return {selectedIndex,status,totalChars:read.totalChars,
+        ...(read.title ? {title:read.title} : {}),
         verifiedChars:read.ranges.reduce((sum,r)=>sum+r.endChar-r.startChar,0),
         ranges:read.ranges.map(r=>({...r})),
         ...(!complete?{nextUnreadOffset:firstGap}:{}),

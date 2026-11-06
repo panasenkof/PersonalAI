@@ -3,6 +3,7 @@ import { withLocalMemoryDatabase } from "../local-memory/storage";
 import type { NoteProposal } from "./memory";
 import { parseTaskState } from "./task-state";
 import type { TaskState } from "./task-state";
+import type { ArticleCoverageStatus } from "./article-read-coverage";
 import { restoredProposal } from "./fact-tool";
 
 /** `memory`: records the answer used, with how each was found («Из памяти»). */
@@ -20,7 +21,14 @@ export type ChatArticlePage = {
   /** Actual IDs and revisions displayed by the canonical article reader; no copied article text. */
   selected?: Array<{id:string;version:number}>;
 };
-export type ChatRow = { id: string; role: "user" | "assistant" | "info"; text: string; error?: boolean; photoAction?: "model" | "import" | "prepare"; sources?: string[]; memory?: ChatMemoryRef[]; attachments?: ChatAttachment[]; dialogueSummary?: DialogueSummaryOrigin; articlePage?: ChatArticlePage };
+/** Historical snapshot of canonical reads in one answer, NOT proof of current access.
+ * Source text remains in versioned SQLCipher notes; links recheck ACL on opening. */
+export type ChatArticleReadReport = {
+  kind:"selected_saved_note_reads"; selectedCount:number;
+  entries:Array<{selectedIndex:number;id:string;version:number;status:ArticleCoverageStatus;
+    verifiedChars:number;totalChars?:number;title?:string}>;
+};
+export type ChatRow = { id: string; role: "user" | "assistant" | "info"; text: string; error?: boolean; photoAction?: "model" | "import" | "prepare"; sources?: string[]; memory?: ChatMemoryRef[]; attachments?: ChatAttachment[]; dialogueSummary?: DialogueSummaryOrigin; articlePage?: ChatArticlePage; articleReadReport?: ChatArticleReadReport };
 const VIA = new Set(["search", "rewrite", "assistant"]);
 export type ChatDraft = NoteProposal & { id: string };
 export type SavedConversation = {
@@ -79,6 +87,42 @@ export function parseConversation(json: string): SavedConversation | null {
       new Set(ap.selected.map((n:any)=>n.id)).size===ap.selected.length
       ? (ap.selected as Array<{id:string;version:number}>).map(n=>({id:n.id,version:n.version})) : undefined;
     if(articlePage && selected?.length)articlePage.selected=selected;
+    // Do not trust serialized report pointers/counts. A report is valid only if
+    // it maps one-to-one onto the same assistant row's validated selection.
+    const rr = r.articleReadReport;
+    const validStatuses = new Set<ArticleCoverageStatus>([
+      "unread","partial_saved_note","complete_saved_note_text","link_only",
+      "empty_saved_note","not_available_or_stale",
+    ]);
+    const validatedReportEntries: ChatArticleReadReport["entries"]|undefined =
+      r.role==="assistant" && articlePage?.selected?.length &&
+      rr?.kind==="selected_saved_note_reads" &&
+      Number.isSafeInteger(rr.selectedCount) && rr.selectedCount===articlePage.selected.length &&
+      Array.isArray(rr.entries) && rr.entries.length===rr.selectedCount &&
+      rr.entries.every((e:any,i:number)=>{
+        const selectedHandle=articlePage.selected![i];
+        const full=e?.status==="complete_saved_note_text" ||
+          e?.status==="link_only" || e?.status==="empty_saved_note";
+        const unknown=e?.status==="unread" || e?.status==="not_available_or_stale";
+        return e && e.selectedIndex===i && e.id===selectedHandle.id &&
+          e.version===selectedHandle.version && validStatuses.has(e.status) &&
+          Number.isSafeInteger(e.verifiedChars) && e.verifiedChars>=0 &&
+          e.verifiedChars<=2_000_000 &&
+          (e.totalChars===undefined || (Number.isSafeInteger(e.totalChars) &&
+            e.totalChars>=0 && e.totalChars<=2_000_000)) &&
+          (!unknown || (e.verifiedChars===0 && e.totalChars===undefined)) &&
+          (!full || (e.totalChars!==undefined && e.verifiedChars===e.totalChars)) &&
+          (e.status!=="partial_saved_note" || (e.totalChars!==undefined &&
+            e.verifiedChars>0 && e.verifiedChars<e.totalChars)) &&
+          (e.title===undefined || (typeof e.title==="string" && e.title.length<=160));
+      })
+      ? rr.entries.map((e:any)=>({selectedIndex:e.selectedIndex,id:e.id,version:e.version,
+          status:e.status,verifiedChars:e.verifiedChars,
+          ...(e.totalChars!==undefined?{totalChars:e.totalChars}:{}),
+          ...(e.title?{title:e.title}:{}),
+        })) : undefined;
+    const articleReadReport:ChatArticleReadReport|undefined = validatedReportEntries ?
+      {kind:"selected_saved_note_reads",selectedCount:rr.selectedCount,entries:validatedReportEntries} : undefined;
     const d = r.dialogueSummary;
     const dialogueSummary: DialogueSummaryOrigin | undefined = r.role === "assistant" && d &&
       (d.scope === "all" || d.scope === "last10") &&
@@ -94,7 +138,7 @@ export function parseConversation(json: string): SavedConversation | null {
         firstRowId:d.firstRowId,lastRowId:d.lastRowId,
         model:d.model,provider:d.provider,createdAt:d.createdAt,
       } : undefined;
-    return [{ id: r.id, role: r.role, text: r.text, ...(r.error === true && r.role === "info" ? { error: true } : {}), ...(["model","import","prepare"].includes(r.photoAction) ? {photoAction:r.photoAction} : {}), ...(r.attachments?.length ? {attachments:checkedChatAttachments(r.attachments)} : {}), ...(sources?.length ? { sources } : {}), ...(memory?.length ? { memory } : {}), ...(articlePage ? {articlePage} : {}), ...(dialogueSummary ? {dialogueSummary} : {}) }];
+    return [{ id: r.id, role: r.role, text: r.text, ...(r.error === true && r.role === "info" ? { error: true } : {}), ...(["model","import","prepare"].includes(r.photoAction) ? {photoAction:r.photoAction} : {}), ...(r.attachments?.length ? {attachments:checkedChatAttachments(r.attachments)} : {}), ...(sources?.length ? { sources } : {}), ...(memory?.length ? { memory } : {}), ...(articlePage ? {articlePage} : {}), ...(articleReadReport ? {articleReadReport} : {}), ...(dialogueSummary ? {dialogueSummary} : {}) }];
   });
   const drafts: ChatDraft[] = (Array.isArray(value.drafts) ? value.drafts : []).filter((d: any) =>
     d && typeof d.id === "string" && typeof d.title === "string" && typeof d.body === "string")
