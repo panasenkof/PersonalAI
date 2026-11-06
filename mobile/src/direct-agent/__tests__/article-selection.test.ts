@@ -1,4 +1,4 @@
-import { savedAiArticleIntent, savedAiArticlePageIntent } from "../article-selection";
+import { savedAiArticleIntent, savedAiArticlePageIntent, selectSavedAiArticles } from "../article-selection";
 
 test("saved AI articles: 7 calendar days including today, not rolling 168 hours", () => {
   const at = new Date(2026,10,6,23,57,0);
@@ -69,4 +69,10 @@ test("9A5c: next page retains the original publication period across changes of 
     startLocal:"2026-10-31",endLocal:"2026-11-06"});
   expect(page).toMatchObject({dateMode:"published",topic:"автомобили",
     publicationFrom:"2026-10-31",publicationBefore:"2026-11-07"});
+});
+
+test("9A5c: incomplete publication bounds must never silently widen the search",async()=>{
+  const valid=savedAiArticleIntent("Найди статьи об ИИ, опубликованные за неделю",new Date(2026,10,6))!;
+  await expect(selectSavedAiArticles("guest",{...valid,publicationFrom:undefined}))
+    .rejects.toThrow("invalid_catalog_publication_window");
 });
