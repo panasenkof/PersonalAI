@@ -65,7 +65,7 @@ export function ShareDestinationScreen(){
       </View> : !material.attachments.length ? material.files.map((f,i)=><Text key={i} style={{color:t.text}}>{f.name}</Text>) : null}
       {material.chatStatuses?.some(item=>item.state==='error') ? <>
         <Text style={{color:t.muted}}>В чат попадут только готовые материалы. Неудавшиеся файлы можно проверить повторно или сохранить оригиналы в память.</Text>
-        <NebulaAction icon="refresh-cw" label="Повторить подготовку"
+        <NebulaAction icon="refresh-cw" label="Повторить подготовку" size="compact"
           accessibilityLabel="Повторить подготовку файлов" disabled={!available || handled.current}
           onPress={()=>setAttempt(n=>n+1)}/>
       </> : null}
@@ -80,7 +80,7 @@ export function ShareDestinationScreen(){
       <Text style={{color:t.muted}}>Предпросмотр новой заметки и выбор коллекции. Сохранение — отдельной кнопкой.</Text>
     </Pressable>
     {material?.memoryError ? <Text style={{color:t.muted}}>{material.memoryError}</Text> : null}
-    {error ? <><Text accessibilityRole="alert" style={{color:t.err}}>{error}</Text><NebulaAction icon="refresh-cw" label="Повторить проверку" accessibilityLabel="Повторить проверку входящего" onPress={()=>setAttempt(n=>n+1)}/></> : null}
-    <NebulaAction icon="x" label="Отмена" accessibilityLabel="Отменить приём материала" onPress={()=>navigation.goBack()}/>
+    {error ? <><Text accessibilityRole="alert" style={{color:t.err}}>{error}</Text><NebulaAction icon="refresh-cw" label="Повторить проверку" size="compact" accessibilityLabel="Повторить проверку входящего" onPress={()=>setAttempt(n=>n+1)}/></> : null}
+    <NebulaAction icon="x" label="Отмена" size="compact" accessibilityLabel="Отменить приём материала" onPress={()=>navigation.goBack()}/>
   </ScrollView>;
 }
