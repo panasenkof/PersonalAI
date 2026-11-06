@@ -163,7 +163,7 @@ export async function saveMediaNote(profile: string, input: { file?: ImportFile;
     check(signal);
     if (input.publicationClaim) {
       const claim=input.publicationClaim;
-      const m=/^(\\d{4})-(\\d{2})-(\\d{2})$/.exec(claim.date);
+      const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(claim.date);
       if (!input.sourceUrl || !/^https:\/\//.test(input.sourceUrl) ||
           claim.evidence!=="html_meta" ||
           !["article:published_time","datePublished"].includes(claim.sourceAttribute) || !m)
