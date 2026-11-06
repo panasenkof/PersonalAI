@@ -125,7 +125,12 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
         evidence.startChar!==offset || evidence.endChar!==end ||
         (evidence.coverage!=="complete"&&evidence.coverage!=="excerpt"))
       throw new Error("invalid_article_read_evidence");
-    return result;
+    // Narrow unknown fields only AFTER the complete source/evidence contract passed.
+    return result as typeof result & {
+      id:string;revision:number;title:string;content:string;offset:number;
+      totalChars:number;hasMore:boolean;nextOffset?:number;
+      evidence:Record<string,unknown>;
+    };
   };
   const specs: ToolSpec[] = [
     { definition: { name: "search_local_notes", description: "Найти заметки на телефоне по 1–3 ключевым словам. Найденный фрагмент не является полным чтением записи.", parameters: queryParameters }, effect: "read",
@@ -408,7 +413,7 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
         const index=args.selectedIndex, offset=args.offset??0, budget=args.budget??4000;
         if(!Number.isSafeInteger(index) || Number(index)<0 ||
             Number(index)>=selected.length || !Number.isSafeInteger(offset) ||
-            Number(offset)<0 || Number(offset)>20_000_000 ||
+            Number(offset)<0 || Number(offset)>2_000_000 ||
             !Number.isSafeInteger(budget) || Number(budget)<100 ||
             Number(budget)>6000)return {error:"invalid_selected_article_chunk_args"};
         usedSelectedArticleTool=true;
