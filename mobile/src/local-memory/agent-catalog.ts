@@ -13,6 +13,8 @@ export type AllowedListOptions = {
   savedFrom?: string; savedBefore?: string;
   /** Limit the article shortlist to notes with a saved source URL. */
   linkedOnly?: boolean;
+  /** Article selection sorts by when it was saved, not when later edited. */
+  sortBySaved?: boolean;
 };
 type Db = Pick<SQLite.SQLiteDatabase, "getAllAsync" | "getFirstAsync">;
 type Row = { id: string; record_version: number; title: string | null;
@@ -50,6 +52,8 @@ function filters(options: AllowedListOptions, cursor: boolean): Filter {
       "(json_extract(e.payload_json,'$.source_url') LIKE 'https://%' OR " +
       "json_extract(e.payload_json,'$.source_url') LIKE 'http://%')");
   }
+  if (cursor && options.sortBySaved && (options.beforeUpdatedAt !== undefined || options.beforeId !== undefined))
+    throw new Error("invalid_catalog_saved_cursor");
   if (cursor && (options.beforeUpdatedAt !== undefined || options.beforeId !== undefined)) {
     if (!options.beforeUpdatedAt || !/^\d{4}-\d{2}-\d{2}T/.test(options.beforeUpdatedAt) ||
         options.beforeUpdatedAt.length > 40 || !options.beforeId ||
@@ -77,7 +81,8 @@ export async function listAllowedNotes(db: Db, options: AllowedListOptions = {})
   const q = filters(options, true);
   const rows = await db.getAllAsync<Row>(
     "SELECT e.id,e.record_version,e.title,e.created_at,e.updated_at,c.name AS collection_name " +
-    FROM + " WHERE " + q.where + " ORDER BY e.updated_at DESC,e.id DESC LIMIT ?",
+    FROM + " WHERE " + q.where +
+    (options.sortBySaved ? " ORDER BY e.created_at DESC,e.id DESC LIMIT ?" : " ORDER BY e.updated_at DESC,e.id DESC LIMIT ?"),
     [...q.params, limit + 1],
   );
   const visible = rows.slice(0, limit);
@@ -86,7 +91,8 @@ export async function listAllowedNotes(db: Db, options: AllowedListOptions = {})
     records: visible.map(row => ({ id: row.id, version: row.record_version,
       title: row.title || "", section: row.collection_name, createdAt: row.created_at, updatedAt: row.updated_at })),
     hasMore: rows.length > limit,
-    ...(rows.length > limit && last ? { nextCursor: { beforeUpdatedAt: last.updated_at, beforeId: last.id } } : {}),
+    ...(rows.length > limit && last && !options.sortBySaved ?
+      { nextCursor: { beforeUpdatedAt: last.updated_at, beforeId: last.id } } : {}),
     scope: "standard_active_notes",
     matchMode: options.queryTerms ? "one_of_fts_phrases" : options.query ? "exact_fts_phrase" : "all_allowed",
     // Never conflate a paged metadata list with a full content read.
