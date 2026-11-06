@@ -45,7 +45,7 @@ export function createArticleReadCoverage(){
       !Number.isSafeInteger(read.totalChars)||read.totalChars<0 ||
       end>read.totalChars || read.hasMore!==(end<read.totalChars))
       throw new Error("invalid_article_coverage_receipt");
-    const old=byHandle.get(key);
+    // Reading an already reached EOF returns no bytes, not evidence of text.\n    if(read.content.length===0 && read.totalChars>0)return;\n    const old=byHandle.get(key);
     if(old && !old.unavailable && old.totalChars!==read.totalChars){
       byHandle.delete(key); // Conflicting lengths in the same revision are not evidence.
       throw new Error("inconsistent_article_total_chars");
