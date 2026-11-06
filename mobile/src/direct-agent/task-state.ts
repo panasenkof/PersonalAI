@@ -65,8 +65,9 @@ export function taskContext(state?: TaskState): string {
     "Временная рабочая область хранит только недоказанные заметки самой модели, не доказательства, не постоянные пользовательские записи. Читай её отдельным workspace_get, проверяй выводы по оригинальным источникам. " +
     "Наблюдения — сокращённые выдержки; found не означает прочтение страницы, pending_confirmation не означает сохранение. " +
     "Старые источники могут устареть. При смене темы обнови цель и сбрось выбор/открытые вопросы через update_task_state.\n" +
-    JSON.stringify({ ...valid, ...(valid.workspace ? {workspace:{version:1,goal:valid.workspace.goal,
-      entries:valid.workspace.entries.map(e=>({key:e.key,kind:e.kind,chars:e.content.length}))}} : {}) }) : "";
+    JSON.stringify({ ...valid, ...(valid.workspace ? {workspace:valid.workspace.goal===valid.goal
+      ? {version:1,goal:valid.workspace.goal,entries:valid.workspace.entries.map(e=>({key:e.key,kind:e.kind,chars:e.content.length}))}
+      : {stale:true,requiresClear:true}} : {}) }) : "";
 }
 export const TASK_STATE_TOOL = {
   name: "update_task_state", description: "Уточнить рабочую цель, выбранный вариант и открытые вопросы этого диалога. Не сохраняет личные факты и не подтверждает успех инструментов. Используй при смене темы/выбора, по возможности вместе с нужным инструментом в одном ходе; для простого ответа не требуется.",
