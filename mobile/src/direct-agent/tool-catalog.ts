@@ -196,7 +196,7 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
         if (!intent) return { error: "invalid_article_tool_arguments" };
         const t = args.beforeCreatedAt, id = args.beforeId;
         if (!((t === null && id === null) ||
-          (typeof t === "string" && /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$/.test(t) &&
+          (typeof t === "string" && t.length === 24 &&
             Number.isFinite(Date.parse(t)) && new Date(t).toISOString() === t &&
             typeof id === "string" && id.length > 0 && id.length <= 128)))
           return { error: "invalid_article_cursor" };
