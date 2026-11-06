@@ -45,34 +45,39 @@ export function NebulaSection({ title, children }: { title: string; children: Re
   </View>;
 }
 
-export function NebulaAction({ icon, label, accessibilityLabel, onPress, disabled = false, variant = "quiet", testID }: {
+export function NebulaAction({ icon, label, accessibilityLabel, onPress, disabled = false, variant = "quiet", size = "regular", testID }: {
   icon?: React.ComponentProps<typeof Feather>["name"];
   label: string; accessibilityLabel?: string; onPress: () => void; disabled?: boolean;
-  variant?: "quiet" | "primary" | "danger" | "danger-solid"; testID?: string;
+  variant?: "quiet" | "primary" | "danger" | "danger-solid"; size?: "regular" | "compact"; testID?: string;
 }) {
   const c = useNebulaColors();
+  const compact = size === "compact";
   const foreground = variant === "primary" ? c.textOnAccent
     : variant === "danger-solid" ? c.canvas
     : variant === "danger" ? c.danger : c.text;
   return <Pressable testID={testID} accessibilityRole="button" accessibilityLabel={accessibilityLabel || label}
     accessibilityState={{ disabled }} disabled={disabled} onPress={onPress}
+    hitSlop={compact ? 12 : undefined}
     style={({ pressed }) => ({
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "center",
-      gap: nebulaSpacing.xs,
-      minHeight: nebulaTouch.minimum,
-      minWidth: nebulaTouch.minimum,
-      paddingHorizontal: nebulaSpacing.md,
-      borderRadius: nebulaRadii.field,
+      gap: compact ? 3 : nebulaSpacing.xs,
+      minHeight: compact ? 24 : nebulaTouch.minimum,
+      minWidth: compact ? 24 : nebulaTouch.minimum,
+      paddingHorizontal: compact ? 6 : nebulaSpacing.md,
+      paddingVertical: compact ? 2 : 0,
+      borderRadius: compact ? 10 : nebulaRadii.field,
       borderWidth: variant === "primary" || variant === "danger-solid" ? 0 : 1,
       borderColor: c.actionOutline,
       backgroundColor: variant === "primary" ? c.accent
         : variant === "danger-solid" ? c.danger : c.surfaceElevated,
       opacity: disabled ? 0.5 : pressed ? 0.85 : 1,
     })}>
-    {icon ? <Feather name={icon} size={20} color={foreground} /> : null}
-    <Text style={{ ...nebulaTypography.label, color: foreground, fontWeight: "600", flexShrink: 1 }}>
+    {icon ? <Feather name={icon} size={compact ? 13 : 20} color={foreground} /> : null}
+    <Text style={{ ...nebulaTypography.label, fontSize: compact ? 10 : nebulaTypography.label.fontSize,
+      lineHeight: compact ? 14 : nebulaTypography.label.lineHeight,
+      color: foreground, fontWeight: "600", flexShrink: 1 }}>
       {label}
     </Text>
   </Pressable>;

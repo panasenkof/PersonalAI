@@ -355,7 +355,7 @@ function NebulaHomeContent() {
       showOrb={ready} orbPhase={orbPhase}
       newChatEnabled={ready} onNewChat={() => store.create()} />
     {!ready ? <View style={{ padding: 20, gap: 12 }}>{!error ? <ActivityIndicator accessibilityLabel="Загрузка диалогов" /> : null}
-      {error ? <NebulaAction icon="refresh-cw" label="Повторить загрузку" onPress={() => void store.initialize()} /> : null}</View> : null}
+      {error ? <NebulaAction icon="refresh-cw" label="Повторить загрузку" size="compact" onPress={() => void store.initialize()} /> : null}</View> : null}
     <View style={{ flex: 1 }}>
     <FlatList key={active?.id || "empty"} ref={viewport.list} data={rows} keyExtractor={item => item.viewKey}
       testID="chat-message-list" style={{ flex: 1 }} removeClippedSubviews={false}
@@ -416,7 +416,7 @@ function NebulaHomeContent() {
             <Text selectable accessibilityRole="alert" style={{ flex: 1, color: t.err, lineHeight: 21 }}>{errorHeadline(item.text)}</Text>
           </View>
           {ready && !busy && settings ? <View style={{ alignSelf: "flex-start" }}>
-            <NebulaAction icon="refresh-cw" label="Повторить" accessibilityLabel="Повторить последний запрос"
+            <NebulaAction icon="refresh-cw" label="Повторить" size="compact" accessibilityLabel="Повторить последний запрос"
               onPress={() => void store.retry(settings)} />
           </View> : null}
         </View> :
@@ -427,7 +427,7 @@ function NebulaHomeContent() {
             onPress={() => saveReplyToNotes(item.id)} />
         </View> : null}
         {active?.retryPhoto?.rowId === item.id && active?.retryPhoto ?
-          <NebulaAction icon="refresh-cw" label="Повторить поиск по фото"
+          <NebulaAction icon="refresh-cw" label="Повторить поиск по фото" size="compact"
             disabled={busy} onPress={() => void store.searchPhotosLocally(active.retryPhoto!.image,active.id)} /> : null}
         {item.photoAction ? <NebulaAction
           icon={item.photoAction === "import" ? "plus-circle" : "settings"}
@@ -467,7 +467,7 @@ function NebulaHomeContent() {
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: nebulaSpacing.sm }}>
             <NebulaAction icon="check" label={active.savingDraft === d.id ? "Сохранение…" : "Сохранить"}
               variant="primary" disabled={Boolean(active.savingDraft)} onPress={() => void store.approve(d)} />
-            <NebulaAction icon="x" label="Отклонить" disabled={Boolean(active.savingDraft)}
+            <NebulaAction icon="x" label="Отклонить" size="compact" disabled={Boolean(active.savingDraft)}
               onPress={() => store.dismiss(d)} />
           </View>
         </View>)}
@@ -564,13 +564,13 @@ function NebulaHomeContent() {
       <View style={{flex:1,backgroundColor:"rgba(0,0,0,0.94)",justifyContent:"center",padding:16,gap:12}}>
         {previewPhoto ? <Image source={{uri:`data:${previewPhoto.mime};base64,${previewPhoto.data}`}}
           style={{width:"100%",height:"75%"}} resizeMode="contain" accessibilityLabel="Просмотр фотографии"/> : null}
-        <NebulaAction icon="x" label="Закрыть" accessibilityLabel="Закрыть просмотр фото"
+        <NebulaAction icon="x" label="Закрыть" size="compact" accessibilityLabel="Закрыть просмотр фото"
           onPress={()=>setPreviewPhotoId(null)} />
       </View>
     </Modal>
     <BottomSheet visible={Boolean(summaryId)} title="Итог диалога" onClose={() => setSummaryId(null)}>
       {summary.plan && summary.plan.totalRows <= 10 ? null :
-        <NebulaAction icon="list" label={summaryScope === "all" ? "Выбрать последние 10 сообщений" : "Выбрать весь диалог"}
+        <NebulaAction icon="list" size="compact" label={summaryScope === "all" ? "Выбрать последние 10 сообщений" : "Выбрать весь диалог"}
           onPress={() => setSummaryScope(summaryScope === "all" ? "last10" : "all")} />}
       {summary.plan ? <View style={{gap:8}}>
         <Text style={{color:t.text, fontWeight:"700"}}>
@@ -586,7 +586,7 @@ function NebulaHomeContent() {
       <NebulaAction icon="check" label="Создать итог" variant="primary"
         disabled={!summary.plan || summaryLimit === null || summary.plan.calls > summaryLimit || summaryConversation?.busy}
         onPress={createSummary} />
-      <NebulaAction icon="x" label="Отмена" onPress={() => setSummaryId(null)} />
+      <NebulaAction icon="x" label="Отмена" size="compact" onPress={() => setSummaryId(null)} />
     </BottomSheet>
     <ConversationHistorySheet visible={historyOpen} conversations={conversations} activeId={active?.id}
       onClose={() => setHistoryOpen(false)}

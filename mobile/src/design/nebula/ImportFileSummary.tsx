@@ -31,7 +31,7 @@ export function ImportFileSummary({ files, preview }: {
           <Text numberOfLines={1} style={{ color: t.muted, fontSize: 12 }}>{file.kind}</Text>
         </View>
       </View>)}
-      {files.length > 2 ? <NebulaAction icon={expanded ? "chevron-up" : "list"}
+      {files.length > 2 ? <NebulaAction icon={expanded ? "chevron-up" : "list"} size="compact"
         label={expanded ? "Свернуть вложения" : "Все вложения (" + files.length + ")"}
         accessibilityLabel={expanded ? "Свернуть список вложений" : "Показать все вложения"}
         onPress={() => setExpanded(v => !v)} /> : null}

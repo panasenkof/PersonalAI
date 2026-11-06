@@ -106,7 +106,7 @@ export function AppendNoteAttachments({ profile, note, disabled, onBusyChange, o
       <Text style={{ color: t.muted }}>До 10 файлов и 80 МБ вместе с сохранёнными. Оригиналы останутся на телефоне; распознавание и отправка модели не запускаются.</Text>
       {files.map((item, index) => <View key={item.uri} style={{ flexDirection: "row", alignItems: "center", gap: nebulaSpacing.sm }}>
         <Text style={{ flex: 1, color: t.text }}>{item.name}{item.size ? ` · ${readableAttachmentSize(item.size)}` : ""}</Text>
-        <NebulaAction icon="x" label="Убрать" accessibilityLabel={"Убрать из добавления " + item.name}
+        <NebulaAction icon="x" label="Убрать" size="compact" accessibilityLabel={"Убрать из добавления " + item.name}
           disabled={stage === "saving"} onPress={() => {
             cleanup([item]); const next = files.filter((_, i) => i !== index); owned.current = next;
             setFiles(next); callbacks.current.onDraftChange(next.length > 0);

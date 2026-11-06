@@ -78,7 +78,7 @@ function PdfOriginalPages({ uri }: { uri: string }) {
     </Text>
     {loading ? <Text accessibilityLiveRegion="polite" style={{ color: t.muted }}>Открываю страницу {page}…</Text> : null}
     {error ? <Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text> : null}
-    {error ? <NebulaAction icon="refresh-cw" label="Повторить просмотр"
+    {error ? <NebulaAction icon="refresh-cw" label="Повторить просмотр" size="compact"
       accessibilityLabel="Повторить просмотр страницы PDF"
       onPress={() => setAttempt(v => v + 1)} /> : null}
     {imageUri && !loading && !error ? <Image source={{ uri: imageUri }}
@@ -86,10 +86,10 @@ function PdfOriginalPages({ uri }: { uri: string }) {
       onError={() => setError("Не удалось показать страницу PDF. Оригинал сохранён.")}
       style={{ width: "100%", height: 390, borderRadius: nebulaRadii.field }} /> : null}
     {pageCount !== null ? <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-      <NebulaAction icon="chevron-left" label="Назад" accessibilityLabel="Предыдущая страница PDF"
+      <NebulaAction icon="chevron-left" label="Назад" size="compact" accessibilityLabel="Предыдущая страница PDF"
         disabled={page <= 1 || loading} onPress={() => setPage(p => Math.max(1, p - 1))} />
       <Text style={{ color: t.text, fontWeight: "700" }}>Страница {page} из {pageCount}</Text>
-      <NebulaAction icon="chevron-right" label="Далее" accessibilityLabel="Следующая страница PDF"
+      <NebulaAction icon="chevron-right" label="Далее" size="compact" accessibilityLabel="Следующая страница PDF"
         disabled={page >= pageCount || loading} onPress={() => setPage(p => Math.min(pageCount, p + 1))} />
     </View> : null}
   </View>;
@@ -239,7 +239,7 @@ function AudioPreview({ uri, profile, attachment, onError }: {
               <Text style={{ color: t.text, lineHeight: 22 }}>{segment.text}</Text>
             </Pressable>;
         })}
-        {segments.length > 5 ? <NebulaAction icon={showAllSegments ? "chevron-up" : "chevron-down"}
+        {segments.length > 5 ? <NebulaAction icon={showAllSegments ? "chevron-up" : "chevron-down"} size="compact"
           label={showAllSegments ? "Свернуть" : "Показать все фрагменты · " + segments.length}
           accessibilityLabel={showAllSegments ? "Свернуть транскрипт" : "Показать весь транскрипт"}
           onPress={() => setShowAllSegments(value => !value)} /> : null}
@@ -298,14 +298,14 @@ export function AttachmentView({ profile, entityId, verifiedOriginal, photoAttac
     {loading ? <Text style={{ color: t.muted }}>Загружаю список вложений…</Text> : null}
     {error ? <>
       <Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text>
-      <NebulaAction icon="refresh-cw" label="Повторить загрузку"
+      <NebulaAction icon="refresh-cw" label="Повторить загрузку" size="compact"
         accessibilityLabel="Повторить загрузку вложений" onPress={() => setRetry(x => x + 1)} />
     </> : null}
     {missingVerified ? <Text accessibilityRole="alert" style={{ color: t.err }}>Источник изменён или недоступен. Повторите поиск.</Text> : null}
     {rowsExpanded ? listed.map(attachment => <OneAttachment key={attachment.id} onRecognize={onRecognize} profile={profile} attachment={attachment} verified={verifiedOriginal}
       expanded={visible && (openId === attachment.id || (openId === null && attachment.id === photoAttachmentId))} visible={visible}
       onToggle={() => setOpenId(id => id === attachment.id || (id === null && attachment.id === photoAttachmentId) ? "" : attachment.id)} />) : null}
-    {rowsExpanded && hasMore ? <NebulaAction testID="note-attachments-expand"
+    {rowsExpanded && hasMore ? <NebulaAction size="compact" testID="note-attachments-expand"
       icon={allShown ? "chevron-up" : "layers"}
       label={allShown ? "Свернуть вложения" : `Показать остальные · ${scoped.length - 2}`}
       onPress={() => {
@@ -379,7 +379,7 @@ function OneAttachment({ profile, attachment, expanded, visible, onToggle, verif
         color={t.secondary} size={19} />
       <Text style={{ color: t.secondary, fontWeight: "700" }}>{expanded ? error ? "Повторить просмотр" : "Закрыть просмотр" : action}</Text>
     </Pressable> : <Text style={{ color: t.muted }}>Оригинал сохранён в зашифрованной памяти. Встроенный просмотр этого формата пока не поддерживается.</Text>}
-    {onRecognize ? <NebulaAction icon="refresh-cw" label="Распознать заново"
+    {onRecognize ? <NebulaAction icon="refresh-cw" label="Распознать заново" size="compact"
       accessibilityLabel={"Распознать заново " + attachment.name} onPress={() => onRecognize(attachment)} /> : null}
     {active && loading ? <Text style={{ color: t.muted }}>Подготавливаю защищённый просмотр…</Text> : null}
     {active && uri && !loading && !error ? kind === "image" ? <Image accessibilityLabel={"Просмотр изображения " + attachment.name}

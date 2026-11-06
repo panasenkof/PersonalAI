@@ -23,7 +23,8 @@ test("H4: rejected items are independently actionable and no original data is re
   const removeButton=ui.getByLabelText("Убрать ошибку meeting.mp3");
   for (const button of [retryButton,removeButton]) {
     const style=typeof button.props.style==="function" ? button.props.style({pressed:false}) : button.props.style;
-    expect(style.minHeight).toBeGreaterThanOrEqual(48);
+    expect(style.minHeight).toBe(24);
+    expect(button.props.hitSlop).toBe(12);
     expect(style.borderWidth).toBe(1);
     expect(style.borderColor).toBeTruthy();
     expect(style.backgroundColor).toBeTruthy();

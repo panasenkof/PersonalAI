@@ -51,7 +51,7 @@ import { VerifiedRelativeConversations } from "./VerifiedRelativeConversations";
 import { MemoryTemporalTimeline } from "./MemoryTemporalTimeline";
 import { useTheme } from "../theme";
 import { nebulaRadii, nebulaSpacing, nebulaTouch, nebulaTypography } from "../design/nebula/tokens";
-import { memoryNoteHasPhoto, memoryDisplayTitle } from "../design/nebula/memoryNotePresentation";
+import { memoryNoteHasPhoto, memoryDisplayTitle, memoryNoteHasRecognizedText } from "../design/nebula/memoryNotePresentation";
 import { NoteEditorSection } from "../design/nebula/NoteEditorSection";
 import { NoteReadPreview } from "../design/nebula/NoteReadPreview";
 import { NebulaAction } from "../design/nebula/components";
@@ -353,6 +353,7 @@ const [termsOpen, setTermsOpen] = useState(false);
   const canEditWithAi = Boolean(body.trim());
   const saveDisabled = busy || voiceActive || (editing && !title.trim() && !body.trim());
   const readingTitle = selected ? memoryDisplayTitle({ ...selected, title, payload: { ...selected.payload, body } }) : title;
+  const hasRecognizedText = memoryNoteHasRecognizedText(selected, extractedText);
   const button = { minHeight: nebulaTouch.minimum, borderRadius: nebulaRadii.field, justifyContent: "center" as const, padding: nebulaSpacing.md };
   return <KeyboardAvoidingView style={{ flex: 1, backgroundColor: t.bg }} behavior={Platform.OS === "ios" ? "padding" : "height"} keyboardVerticalOffset={Platform.OS === "ios" ? headerHeight : 0}>
     <ScrollView testID="note-editor-scroll" keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentContainerStyle={{ padding: nebulaSpacing.md, paddingBottom: Math.max(insets.bottom, 24) + nebulaSpacing.xl, gap: nebulaSpacing.sm }}>
@@ -400,7 +401,7 @@ const [termsOpen, setTermsOpen] = useState(false);
           {body && body.trim() !== readingTitle ? <NoteReadPreview
             testID="note-read-body" text={body} fullTitle="Полный текст заметки"
             actionLabel="Читать полностью" maxLines={6} /> : null}
-          {body.trim() ? <NebulaAction icon="zap" label="Изменить с ИИ" accessibilityLabel="Изменить заметку с ИИ"
+          {body.trim() ? <NebulaAction icon="zap" label="Изменить с ИИ" size="compact" accessibilityLabel="Изменить заметку с ИИ"
             disabled={busy || !canEditWithAi} onPress={() => setAiField("body")} /> : null}
           {profile && selected?.kind === "person" && selected.record_status === "active" ? <VerifiedRelativeConversations key={profile + ":" + selected.id + ":" + selected.record_version} profile={profile} personId={selected.id} personTitle={readingTitle} /> : null}
           {profile && selected?.kind === "person" && selected.record_status === "active" &&
@@ -417,7 +418,7 @@ const [termsOpen, setTermsOpen] = useState(false);
             testID="note-extracted-summary" text={extractedText}
             heading="Текст из файла" fullTitle="Полный распознанный текст"
             actionLabel="Читать текст файла" maxLines={4} /> : null}
-          {extractedText.trim() ? <NebulaAction icon="zap" label="Улучшить текст файла с ИИ"
+          {extractedText.trim() ? <NebulaAction icon="zap" label="Улучшить текст файла с ИИ" size="compact"
             disabled={busy} onPress={() => setAiField("extracted")} /> : null}
           {typeof selected?.payload.source_url === "string" && /^https:\/\//.test(selected.payload.source_url) ? <Pressable accessibilityRole="link" style={button} onPress={() => void Linking.openURL(String(selected.payload.source_url)).catch(() => setError("Не удалось открыть источник."))}><Text style={{ color: t.secondary }}>Открыть источник</Text></Pressable> : null}
         </> : <>
@@ -432,7 +433,7 @@ const [termsOpen, setTermsOpen] = useState(false);
           onBusyChange={setAttachmentBusy} onDraftChange={setAttachmentDraft}
           onSaved={updated => { setSelected(updated); setBeforeAi(null); scheduleVectors(profile); }} /> : null}
         <TextInput testID="note-body-input" accessibilityLabel="Текст заметки" multiline value={body} onChangeText={value => { setBeforeAi(null); setBody(value); }} editable={!busy && !voiceActive} placeholder="Что нужно запомнить?" placeholderTextColor={t.muted} style={{ ...field, minHeight: 200, textAlignVertical: "top", lineHeight: 23 }} />
-        {!body && extractedText ? <NebulaAction icon="file-text" label="Вставить распознанный текст"
+        {!body && extractedText ? <NebulaAction icon="file-text" label="Вставить распознанный текст" size="compact"
           onPress={() => setBody(extractedText)} /> : null}
         <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: nebulaSpacing.sm }}>
           <VoiceInput value={body} onChange={value => { setBeforeAi(null); setBody(value); }} maxLength={60000}
@@ -455,7 +456,7 @@ const [termsOpen, setTermsOpen] = useState(false);
           <Text numberOfLines={2} style={{ flex: 1, color: t.secondary, ...nebulaTypography.body }}>Раздел: {collections.find(c => c.id === collectionId)?.name || "Заметки"}</Text>
           <Feather name="chevron-down" size={20} color={t.secondary} />
         </Pressable>
-        {beforeAi ? <NebulaAction icon="rotate-ccw" label="Отменить правку ИИ"
+        {beforeAi ? <NebulaAction icon="rotate-ccw" label="Отменить правку ИИ" size="compact"
           accessibilityLabel="Вернуть текст до правки ИИ"
           onPress={() => { if (beforeAi.extracted !== undefined) setExtractedText(beforeAi.extracted); else { setTitle(beforeAi.title); setBody(beforeAi.body); } setBeforeAi(null); }} /> : null}
         <NoteEditorSection testID="note-metadata-toggle" title="Дополнительно" summary="Тип, другие названия и поиск"
@@ -472,10 +473,10 @@ const [termsOpen, setTermsOpen] = useState(false);
         <Text style={{ color: t.muted, fontSize: 12 }}>Необязательно. По этим именам запись тоже находится в поиске.</Text>
         {termsOpen || terms.trim() ? <TextInput accessibilityLabel="Слова для поиска" value={terms} onChangeText={setTerms} editable={!busy} maxLength={600}
           placeholder="Слова для поиска через запятую: автомобиль, шкода" placeholderTextColor={t.muted} style={field} /> :
-          <NebulaAction icon="plus" label="Добавить слова для поиска" disabled={busy} onPress={() => setTermsOpen(true)} />}
+          <NebulaAction icon="plus" label="Добавить слова для поиска" size="compact" disabled={busy} onPress={() => setTermsOpen(true)} />}
         {modelTerms.length ? <Text accessibilityLabel="Слова, подобранные моделью" style={{ color: t.muted, fontSize: 12, lineHeight: 18 }}>Поисковые слова ИИ: {modelTerms.join(", ")}. Пересчитываются после правки текста.</Text> : null}
         </NoteEditorSection>
-        {selected && (selected.payload.source_file || selected.payload.extracted_text) ? <NoteEditorSection
+        {selected && hasRecognizedText ? <NoteEditorSection
           testID="note-extracted-toggle" title="Текст из файла"
           summary="Распознанное содержимое участвует в поиске по памяти"
           expanded={fileContentOpen} onToggle={() => { Keyboard.dismiss(); setFileContentOpen(open => !open); }}>
@@ -483,7 +484,7 @@ const [termsOpen, setTermsOpen] = useState(false);
           <TextInput accessibilityLabel="Распознанное содержимое файла" multiline scrollEnabled
             editable={!busy} value={extractedText} onChangeText={value => {setBeforeAi(null); setExtractedText(value);}} maxLength={60_000}
             style={{ ...field, height: 184, maxHeight: 220, textAlignVertical: "top" }} />
-          {extractedText.trim() ? <NebulaAction icon="zap" label="Улучшить текст файла с ИИ" disabled={busy} onPress={() => setAiField("extracted")} /> : null}
+          {extractedText.trim() ? <NebulaAction icon="zap" label="Улучшить текст файла с ИИ" size="compact" disabled={busy} onPress={() => setAiField("extracted")} /> : null}
           <Pressable disabled={busy || dirty || selected.record_status !== "active"} accessibilityRole="button"
             accessibilityLabel="Распознать сохранённый файл заново"
             style={{...button,borderWidth:1,borderColor:t.secondary,backgroundColor:t.panel}}
@@ -508,7 +509,7 @@ const [termsOpen, setTermsOpen] = useState(false);
               style={{...button,backgroundColor:t.soft}}>
               <Text numberOfLines={2} style={{color:t.secondary}}>{file.name}</Text>
             </Pressable>)}
-            <NebulaAction icon="x" label="Отмена выбора" onPress={()=>setRepeatFiles([])} />
+            <NebulaAction icon="x" label="Отмена выбора" size="compact" onPress={()=>setRepeatFiles([])} />
           </View> : null}
         </NoteEditorSection> : null}
         {selected && (selected.sensitivity === "sensitive" || collections.find(c => c.id === selected.collection_id)?.sensitivity !== "standard") ? <>
@@ -528,7 +529,7 @@ const [termsOpen, setTermsOpen] = useState(false);
             <Text style={{ color: t.text, fontWeight: "700" }}>События</Text>
             {events.map(e => <Text key={e.id} style={{ color: t.muted }}>{new Date(e.occurred_at).toLocaleDateString()} · {String(e.payload.text || e.kind)}</Text>)}
             <TextInput accessibilityLabel="Новое событие" value={eventText} onChangeText={setEventText} placeholder="Что произошло?" placeholderTextColor={t.muted} style={field} />
-            <NebulaAction icon="plus" label="Добавить событие" disabled={busy || !eventText.trim()}
+            <NebulaAction icon="plus" label="Добавить событие" size="compact" disabled={busy || !eventText.trim()}
               onPress={() => void run(async db => {
               await db.createObservation({ entity_id: selected.id, kind: "note_event", occurred_at: new Date().toISOString(), payload: { text: eventText.trim() }, sensitivity: "inherit", source_kind: "user", source_ref: "device" });
               if (alive.current) { setEvents(await db.observations(selected.id)); setEventText(""); }
@@ -536,7 +537,7 @@ const [termsOpen, setTermsOpen] = useState(false);
             <Text style={{ color: t.text, fontWeight: "700" }}>Связанные записи ({relations.length})</Text>
             {relations.map(r => { const other = related.find(e => e.id === (r.source_entity_id === selected.id ? r.target_entity_id : r.source_entity_id));
               return <Text key={r.id} style={{ color: t.muted }}>{(other?.title || "Другая запись") + (other?.kind ? " · " + KIND_NAMES[other.kind] : "") + (r.kind === "about" ? (r.source_entity_id === selected.id ? " — о ком запись" : " — запись об этом человеке") : "")}</Text>; })}
-            <NebulaAction icon="link-2" label="Связать с другой записью"
+            <NebulaAction icon="link-2" label="Связать с другой записью" size="compact"
               onPress={() => setLinkOpen(true)} />
           </View> : null}
           <NebulaAction icon="archive"
@@ -594,7 +595,7 @@ const [termsOpen, setTermsOpen] = useState(false);
       {selected?.record_status !== "trashed" ? <>
       <Pressable accessibilityRole="button" style={{...button,backgroundColor:t.soft}} onPress={() => { setNoteMenu(false); setEditing(true); setMetadataOpen(true); }}><Text style={{ color: t.text }}>Свойства и доступ</Text></Pressable>
       <Pressable accessibilityRole="button" style={{...button,backgroundColor:t.soft}} onPress={() => { setNoteMenu(false); setEditing(true); void loadDetails(); }}><Text style={{ color: t.text }}>История, события и связи</Text></Pressable>
-      <Pressable accessibilityRole="button" style={{...button,backgroundColor:t.soft}} onPress={() => { setNoteMenu(false); setEditing(true); setFileContentOpen(true); }}><Text style={{ color: t.text }}>Распознанный текст и оригиналы</Text></Pressable>
+      {hasRecognizedText ? <Pressable accessibilityRole="button" style={{...button,backgroundColor:t.soft}} onPress={() => { setNoteMenu(false); setEditing(true); setFileContentOpen(true); }}><Text style={{ color: t.text }}>Распознанный текст и оригиналы</Text></Pressable> : null}
       </> : <Text style={{ color: t.muted }}>Восстановите запись из корзины, чтобы редактировать её.</Text>}
     </BottomSheet>
     <BottomSheet visible={sectionOpen} title="Раздел записи" onClose={() => setSectionOpen(false)}>

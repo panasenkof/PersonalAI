@@ -354,8 +354,8 @@ test("CLEAN-08: policy CAS conflict never implicitly approves a group action",as
 test("C3: returning from a note card exposes the canonical archive undo", async () => {
   mockLastNoteOperation.mockResolvedValueOnce("notes:archive:card-click");
   const view = render(<LocalMemoryScreen />);
-  await waitFor(() => view.getByText("Отменить архивирование"));
-  await act(async () => { fireEvent.press(view.getByText("Отменить архивирование")); });
+  await waitFor(() => view.getByLabelText("Отменить архивирование"));
+  await act(async () => { fireEvent.press(view.getByLabelText("Отменить архивирование")); });
   expect(mockDb.undoNotes).toHaveBeenCalledWith("notes:archive:card-click");
 });
 
@@ -368,7 +368,7 @@ test("03.4: clear-trash is contextual, previews ALL 205 rows, cancel never calls
   expect(ui.queryByLabelText("Очистить всю корзину")).toBeNull();
   fireEvent.press(ui.getByLabelText("Открыть корзину"));
   await waitFor(()=>ui.getByLabelText("Очистить всю корзину"));
-  expect(ui.getByText("Корзина · 205 записей")).toBeTruthy();
+  expect(ui.getByTestId("trash-total-counter").props.children).toBe("205 записей");
   await act(async()=>fireEvent.press(ui.getByLabelText("Очистить всю корзину")));
   expect(mockDb.trashPurgeSnapshot).toHaveBeenCalledTimes(1);
   expect(ui.getByText(/Проверен весь список, а не только видимые 50/)).toBeTruthy();

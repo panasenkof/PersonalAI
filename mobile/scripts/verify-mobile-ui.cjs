@@ -196,8 +196,10 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       const shareCancel = page.getByLabel('Отменить приём материала', {exact:true});
       const shareCancelBox = await shareCancel.boundingBox();
       const shareCancelBorder = await shareCancel.evaluate(el => parseFloat(getComputedStyle(el).borderTopWidth));
-      assert(shareCancelBox && shareCancelBox.height >= 48 && shareCancelBorder >= 1,
-        'Share Cancel is a visible Nebula button, not unframed text');
+      assert(shareCancelBox && shareCancelBox.height >= 22 && shareCancelBox.height <= 30 &&
+        shareCancelBorder >= 1 && shareCancelBox.x >= 0 &&
+        shareCancelBox.x + shareCancelBox.width <= width,
+        'Share Cancel is a visible, framed half-height secondary button inside the viewport');
       if(process.env.SCREENSHOT_DIR) await page.screenshot({animations:'disabled',path:path.join(process.env.SCREENSHOT_DIR,`share-choice-${width}.png`)});
       assert.equal(replyNumber,0,'Share preview does not send');
       await page.getByLabel('Добавить входящее в чат',{exact:true}).click();
@@ -287,9 +289,10 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       const removeButton = page.getByLabel('Убрать вложение note.txt', { exact: true });
       const attachmentRemoveBox = await removeButton.boundingBox();
       const removeBorder = await removeButton.evaluate(el => parseFloat(getComputedStyle(el).borderTopWidth));
-      assert(attachmentRemoveBox && attachmentRemoveBox.height >= 48 && removeBorder >= 1 &&
-        attachmentRemoveBox.x >= 0 && attachmentRemoveBox.x + attachmentRemoveBox.width <= width,
-        'Remove must be a visible, reachable attachment-local Nebula button');
+      assert(attachmentRemoveBox && attachmentRemoveBox.height >= 22 && attachmentRemoveBox.height <= 30 &&
+        removeBorder >= 1 && attachmentRemoveBox.x >= 0 &&
+        attachmentRemoveBox.x + attachmentRemoveBox.width <= width,
+        'Attachment Remove is a framed half-height secondary button inside the viewport');
       await page.clock.runFor(6000);
       if (process.env.SCREENSHOT_DIR) await page.screenshot({animations:'disabled', path:path.join(process.env.SCREENSHOT_DIR, `chat-attachment-${width}.png`)});
 
@@ -440,6 +443,18 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByLabel('Поиск диалогов', { exact: true }).waitFor({ state: 'hidden' });
       await page.getByTestId('chat-message-list').getByText('Ответ 2', { exact: true }).waitFor();
       await page.getByLabel('Вкладка Память', { exact: true }).click();
+      // Vivo report 06.11: helpers must be roughly HALF the screenshot buttons,
+      // not merely a few dp smaller than the previous PR. Regular CTAs stay 48dp.
+      await page.getByLabel('Открыть архив', { exact: true }).waitFor();
+      for (const [label, maxWidth] of [
+        ['Открыть архив', 80], ['Открыть корзину', 90], ['Все разделы', 110],
+      ]) {
+        const bounds = await page.getByLabel(label, {exact:true}).boundingBox();
+        assert(bounds && bounds.height >= 22 && bounds.height <= 30 && bounds.width < maxWidth,
+          `Half-size secondary action ${label} fits 24dp visual and expected short width`);
+      }
+      if (process.env.SCREENSHOT_DIR) await page.screenshot({animations:'disabled',
+        path:path.join(process.env.SCREENSHOT_DIR,`memory-small-actions-${width}.png`)});
       // List/grid is a labelled real button only when two columns can actually fit.
       if (width >= 350) {
         const viewSwitch = page.getByLabel('Показать списком', { exact: true });
@@ -759,6 +774,8 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       if (width < 560) {
         const counterBox = await page.getByTestId('trash-total-counter').boundingBox();
         const buttonBox = await page.getByLabel('Очистить всю корзину', { exact: true }).boundingBox();
+        assert(buttonBox && buttonBox.height >= 22 && buttonBox.height <= 30,
+          'Trash clear shows a half-height visual action; final irreversible confirmation stays full-size');
         assert(counterBox && buttonBox && buttonBox.y >= counterBox.y + counterBox.height - 1,
           'The full-trash button is below the readable count on a narrow screen');
         assert(buttonBox.x >= 0 && buttonBox.x + buttonBox.width <= width,

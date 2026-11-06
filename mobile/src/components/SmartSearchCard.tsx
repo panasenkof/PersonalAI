@@ -74,7 +74,7 @@ export function SmartSearchCard({ defaultOpen = false }: { defaultOpen?: boolean
       </> : model.state === "downloading" ? <View style={{ gap: 8 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}><ActivityIndicator /><Text style={{ color: t.text }}>Скачивается: {model.progress}%</Text></View>
         <View style={{ height: 6, borderRadius: 3, backgroundColor: t.soft, overflow: "hidden" }}><View style={{ width: `${model.progress}%`, height: 6, backgroundColor: t.accent }} /></View>
-        <NebulaAction icon="x" label="Отменить скачивание" accessibilityLabel="Отменить скачивание модели поиска"
+        <NebulaAction icon="x" label="Отменить скачивание" size="compact" accessibilityLabel="Отменить скачивание модели поиска"
           onPress={cancelEmbedderDownload} />
       </View> : <>
         {model.state === "error" ? <Text selectable accessibilityRole="alert" style={{ color: t.err }}>{model.message}</Text> : null}

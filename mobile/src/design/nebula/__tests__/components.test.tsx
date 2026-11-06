@@ -46,6 +46,22 @@ describe("Nebula base components", () => {
     expect(style.borderWidth).toBe(1);
     expect(style.borderColor).toBe(nebulaColors("dark").actionOutline);
   });
+  it("compacts secondary actions without losing the accessible label or tap area", () => {
+    const pressed = jest.fn();
+    const view = render(<NebulaAction label="Очистить корзину" icon="trash-2"
+      size="compact" variant="danger" onPress={pressed} />);
+    const action = view.getByLabelText("Очистить корзину");
+    const style = typeof action.props.style === "function"
+      ? action.props.style({ pressed: false }) : action.props.style;
+    expect(style.minHeight).toBe(24);
+    expect(style.minWidth).toBe(24);
+    expect(style.paddingHorizontal).toBe(6);
+    expect(action.props.hitSlop).toBe(12); // 24dp visual + 12dp each side = 48dp target
+    expect(style.borderWidth).toBe(1);
+    expect(style.borderColor).toBe(nebulaColors("dark").actionOutline);
+    fireEvent.press(action);
+    expect(pressed).toHaveBeenCalledTimes(1);
+  });
   it("presents settings as one navigable summary, not an inline settings form", () => {
     const open = jest.fn();
     const v = render(<NebulaSettingRow title="Подключения" summary="Модели и API" icon="link" onPress={open} />);

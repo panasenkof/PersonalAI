@@ -55,7 +55,7 @@ export function NoteAiEditor({ profile, draft, allowed, onApply, onClose }: {
     {result ? <>
       <Text style={{ color: t.muted }}>Предпросмотр · ещё не сохранено</Text>
       <View style={{ alignItems: "flex-start" }}>
-        <NebulaAction icon="columns" label={showOriginal ? "Показать результат" : "Сравнить с исходным"}
+        <NebulaAction icon="columns" size="compact" label={showOriginal ? "Показать результат" : "Сравнить с исходным"}
           accessibilityLabel={showOriginal ? "Показать результат" : "Сравнить с исходным"}
           onPress={() => setShowOriginal(v => !v)} />
       </View>
@@ -69,14 +69,14 @@ export function NoteAiEditor({ profile, draft, allowed, onApply, onClose }: {
           onApply(result); onClose();
         }} />
       <View style={{ alignItems: "flex-start" }}>
-        <NebulaAction icon="edit-3" label="Изменить команду" onPress={() => {
+        <NebulaAction icon="edit-3" label="Изменить команду" size="compact" onPress={() => {
           setResult(null); setShowOriginal(false);
         }} />
       </View>
     </> : !busy ? <NebulaAction icon="zap" variant="primary" label="Показать результат"
       accessibilityLabel="Запросить правку ИИ" disabled={!allowed || !instruction.trim() || voice}
       onPress={() => void run()} /> : null}
-    <NebulaAction icon="x" label="Отменить" accessibilityLabel="Отменить правку ИИ"
+    <NebulaAction icon="x" label="Отменить" size="compact" accessibilityLabel="Отменить правку ИИ"
       onPress={() => { stop(); onClose(); }} />
   </BottomSheet>;
 }
