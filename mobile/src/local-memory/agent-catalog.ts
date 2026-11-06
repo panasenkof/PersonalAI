@@ -92,6 +92,7 @@ export async function listAllowedNotes(db: Db, options: AllowedListOptions = {})
   const limit = options.limit ?? 20;
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50) throw new Error("invalid_catalog_limit");
   const q = filters(options, true);
+  // Read-only exact URL candidate count; never treat another note as mergeable or expose its metadata.
   const rows = await db.getAllAsync<Row>(
     "SELECT e.id,e.record_version,e.title,e.created_at,e.updated_at,c.name AS collection_name " +
     (options.linkedOnly ? `, (SELECT count(*) FROM memory_entities d
