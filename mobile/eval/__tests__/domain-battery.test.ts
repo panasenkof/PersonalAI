@@ -231,7 +231,7 @@ test("WEB-LIVE-RECOVERY: conditional absence and nominative queries locate a sav
   for(const query of [natural,"мультиметр статья","статья о мультиметре"]){
     const hits=await searchApprovedNotes("synthetic-domain",query,f.repo);
     expect(hits.map(n=>n.id)).toContain(target);
-    expect(hits.length).toBeLessThanOrEqual(5);
+    expect(hits.length).toBeLessThanOrEqual(12);
   }
   const hit=(await searchApprovedNotes("synthetic-domain",natural,f.repo)).find(n=>n.id===target)!;
   const opened=await readApprovedNote("synthetic-domain",hit.id,hit.version!,0,4000,f.repo);

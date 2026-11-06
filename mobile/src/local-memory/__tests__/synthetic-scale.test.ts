@@ -63,12 +63,12 @@ test("synthetic 1k/10k: bounded vector inputs, accurate counts, private records 
     const statusMs = Number(process.hrtime.bigint() - statusStart) / 1e6;
     const queryStart = process.hrtime.bigint();
     const visible = await repo.searchMemory("масштабный", {
-      collectionIds: ["visible"], sensitivities: ["standard"], limit: 10,
+      collectionIds: ["visible"], sensitivities: ["standard"], limit: 40,
     });
     const searchMs = Number(process.hrtime.bigint() - queryStart) / 1e6;
     expect(status).toEqual({ done: 0, total: scale });
     expect(pending).toHaveLength(24);
-    expect(visible.length).toBeGreaterThan(0);
+    expect(visible).toHaveLength(40);
     expect(visible.every(h => h.entity.collection_id === "visible" && h.entity.sensitivity === "standard")).toBe(true);
     // Only anonymized aggregate metrics. No personal data, content, original
     // files, or durable benchmark profiles are created.
