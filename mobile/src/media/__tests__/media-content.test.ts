@@ -133,13 +133,14 @@ describe('step 8 C: local main-content HTML extraction', () => {
 });
 
 test("9A5 only accepts explicit, valid source-asserted HTML publication days",()=>{
-  const date='<meta content="2026-11-03T18:02:00+03:00" property="article:published_time">';
+  const date='<html><head><meta content="2026-11-03T18:02:00+03:00" property="article:published_time"></head></html>';
   expect(htmlPublicationClaim(date)).toEqual({
     date:"2026-11-03",evidence:"html_meta",sourceAttribute:"article:published_time",
   });
-  expect(htmlPublicationClaim("<meta name='datePublished' content='2026-02-28'>")).toMatchObject({
+  expect(htmlPublicationClaim("<head><meta name='datePublished' content='2026-02-28'></head>")).toMatchObject({
     date:"2026-02-28",sourceAttribute:"datePublished",
   });
+  expect(htmlPublicationClaim("<body><meta property='article:published_time' content='2026-11-01'></body>")).toBeUndefined();
   for(const html of [
     "<time datetime='2026-11-01'>1 November</time>",
     "<meta property='article:published_time' content='2026-11-03T18:02:00'>",
@@ -147,5 +148,5 @@ test("9A5 only accepts explicit, valid source-asserted HTML publication days",()
     "<meta property='article:published_time' content='2026-11-03'><meta name='datePublished' content='2026-11-04'>",
     "<meta property='article:published_time' content='yesterday'>",
     "<meta property='article:modified_time' content='2026-11-03'>",
-  ])expect(htmlPublicationClaim(html)).toBeUndefined();
+  ])expect(htmlPublicationClaim("<head>"+html+"</head>")).toBeUndefined();
 });
