@@ -14,7 +14,7 @@ import { proposableMemorySections, saveApprovedNote, searchApprovedNotes, readAp
 import { memoryErrorMessage } from "../local-memory/errors";
 import { searchLocalApprovedSourceSegments, listLocalApprovedSourceSegments, readLocalApprovedSourceSegment } from "../local-memory/source-retrieval";
 import { listAllowedNotes, countAllowedNotes } from "../local-memory/agent-catalog";
-import { withLocalMemoryDatabase } from "../local-memory/storage";
+import { withLocalMemoryDatabase, localMemorySessionUnlocked } from "../local-memory/storage";
 import { DEFAULT_SECTIONS } from "./fact-tool";
 import type { MemorySection } from "./fact-tool";
 import { conversationRepository } from "./conversations";
@@ -260,6 +260,8 @@ export class DirectChatStore {
       await this.persist(pending);
       if(aborter.signal.aborted||this.disposed)throw new Error("aborted");
       const found=await selectSavedAiArticles(this.profile,intent);
+      // A lock after the SQL snapshot must prevent a delayed chat update.
+      if(!localMemorySessionUnlocked())throw new Error("application_locked");
       if(aborter.signal.aborted||this.disposed)throw new Error("aborted");
       const latest=this.snapshot.conversations.find(c=>c.id===id);
       if(!latest)return;
