@@ -25,7 +25,7 @@ export function savedAiArticleIntent(text: string, now = new Date(), hasAttachme
   if (hasAttachments || text.length > 500 ||
       !/^\s*(?:выбери|подбери|найди|покажи)(?:\s|[,:])/iu.test(text)) return null;
   if (!/(?:стат(?:ьи|ей|ью|ья|ей)|материал(?:ы|ов)?)/iu.test(text)) return null;
-  if (!/(?:^|[^а-яёa-z\d])(?:ии|ai|искусственн[а-яё]* интеллект[а-яё]*|нейросет\w*)(?=$|[^а-яёa-z\d])/iu.test(text)) return null;
+  if (!/(?:^|[^а-яёa-z\d])(?:ии|ai|искусственн[а-яё]* интеллект[а-яё]*|нейросет[а-яё]*)(?=$|[^а-яёa-z\d])/iu.test(text)) return null;
   if (/(?:опубликован|вышедш|публикаци|в интернете|в сети|онлайн|добавь из интернета|из интернета)/iu.test(text)) return null;
   if (!Number.isFinite(now.getTime())) return null;
   let start: Date;
