@@ -10,7 +10,7 @@ jest.mock("../../local-memory/storage",()=>({
 jest.mock("../article-selection",()=>({
   savedAiArticleIntent:jest.fn(),
   selectSavedAiArticles:jest.fn(),
-  savedAiArticlePageIntent:jest.fn((page:any)=>({...page,dateMode:"saved",topic:"ai",queryTerms:["ИИ"]})),
+  savedAiArticlePageIntent:jest.fn((page:any)=>page.kind==="saved_topic_links" ? {...page,dateMode:"saved"} : {...page,dateMode:"saved",topic:"ai",queryTerms:["ИИ"]}),
 }));
 jest.mock("expo-crypto",()=>({randomUUID:()=>"id-"+Math.random().toString(36).slice(2)}));
 const intent=savedAiArticleIntent as jest.Mock;
@@ -150,5 +150,34 @@ test("article cursor survives encrypted conversation reload; malformed cursor is
   const tampered=JSON.parse(raw);
   tampered.rows[1].articlePage.nextCursor.beforeId="untrusted cursor with spaces";
   expect(parseConversation(JSON.stringify(tampered))!.rows[1].articlePage).toBeUndefined();
+  store.dispose();
+});
+
+test("literal-topic shortlist survives history reload and uses identical local FTS phrase on the next page",async()=>{
+  const {repo,records,runner}=fixture();
+  const store=new DirectChatStore("guest",repo,runner);await store.initialize();
+  intent.mockReturnValueOnce({savedFrom:"2026-10-31T00:00:00.000Z",savedBefore:"2026-11-07T00:00:00.000Z",
+    startLocal:"2026-10-31",endLocal:"2026-11-06",dateMode:"saved",topic:"ремонт автомобиля",
+    queryTerms:["ремонт автомобиля"]});
+  selection.mockResolvedValueOnce({count:15,hasMore:true,
+    nextCursor:{beforeCreatedAt:"2026-11-04T09:00:00.000Z",beforeId:"b"},
+    records:[{id:"b",title:"Ремонт автомобиля",section:"Заметки",version:1,createdAt:"2026-11-04T09:00:00.000Z"}],
+  }).mockResolvedValueOnce({count:15,hasMore:false,records:[
+    {id:"c",title:"Сервис",section:"Заметки",version:1,createdAt:"2026-11-03T09:00:00.000Z"},
+  ]});
+  store.setQuestion("Найди статьи про ремонт автомобиля на этой неделе");
+  await store.searchSavedArticlesLocally();
+  const conversation=store.getSnapshot().conversations[0];
+  expect(conversation.rows[1].text).toContain("по точной фразе «ремонт автомобиля»");
+  const raw=JSON.stringify(records.get(conversation.id)!);
+  const restored=parseConversation(raw)!;
+  expect(restored.rows[1].articlePage).toMatchObject({kind:"saved_topic_links",
+    topic:"ремонт автомобиля",queryTerms:["ремонт автомобиля"]});
+  await store.loadMoreSavedArticlesLocally(conversation.rows[1].id);
+  expect(selection.mock.calls[1][1]).toMatchObject({topic:"ремонт автомобиля",queryTerms:["ремонт автомобиля"]});
+  expect(runner).not.toHaveBeenCalled();
+  const damaged=JSON.parse(raw);
+  damaged.rows[1].articlePage.queryTerms=["не связанная тема"];
+  expect(parseConversation(JSON.stringify(damaged))!.rows[1].articlePage).toBeUndefined();
   store.dispose();
 });
