@@ -111,6 +111,8 @@ test("9B: coverage tool checks authorization, input and stays within one model t
   const read=jest.fn(async(id:string,v:number,o:number=0,b:number=6000)=>evidence(id,v,o,b,"Факт"));
   const first=harness(read);
   await first.run("read_selected_article_chunk",chunks(0,0));
+  // Derived coverage is deliberately absent from persisted TaskState evidence.
+  expect(JSON.stringify(first.finish().taskState)).not.toContain('"tool":"selected_article_read_coverage"');
   const next=harness(read);
   expect(entry(await next.run("selected_article_read_coverage",{}),0))
     .toMatchObject({status:"unread"});
