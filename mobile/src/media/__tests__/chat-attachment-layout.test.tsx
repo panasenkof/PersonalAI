@@ -45,14 +45,15 @@ test("H3b: a transcript card explains that only text, not original audio, is sen
   expect(screen.getByLabelText('Убрать вложение Транскрипт аудио: lecture.mp3')).toBeTruthy();
 });
 
-test("draft text attachment is compact, with a visible 48dp Nebula remove button", () => {
+test("draft text attachment has a half-height visual remove button with a large touch area", () => {
   const note:any={id:"text-1",name:"note.txt",kind:"text",mime:"text/plain",data:"hello",size:5};
   const remove=jest.fn();
   const screen=render(<ChatAttachmentList files={[note]} onRemove={remove}/>);
   expect(screen.getByLabelText("Вложения сообщения").props.style.height).toBe(chatAttachmentRailHeight([note],true,false,testFontScale));
   const action=screen.getByLabelText("Убрать вложение note.txt");
   const style=typeof action.props.style==="function" ? action.props.style({pressed:false}) : action.props.style;
-  expect(style.minHeight).toBeGreaterThanOrEqual(48);
+  expect(style.minHeight).toBe(24);
+  expect(action.props.hitSlop).toBe(12);
   expect(style.borderWidth).toBe(1);
   expect(style.backgroundColor).toBeTruthy();
   fireEvent.press(action);
@@ -75,8 +76,8 @@ test("large Android font reserves space for both photo buttons without unbounded
   const large=chatAttachmentRailHeight([file],true,true,1.5);
   const extraLarge=chatAttachmentRailHeight([file],true,true,2);
   expect(chatAttachmentRailHeight([file],false,false,1)).toBe(160);
-  expect(chatAttachmentRailHeight([file],true,false,1)).toBe(216);
-  expect(normal).toBe(272);
+  expect(chatAttachmentRailHeight([file],true,false,1)).toBe(192);
+  expect(normal).toBe(224);
   expect(large).toBeGreaterThan(normal);
   expect(extraLarge).toBeGreaterThan(large);
   expect(Number.isFinite(extraLarge)).toBe(true);
@@ -87,7 +88,7 @@ test("PDF transcript and mixed cards reserve the tallest actual content height",
     mime:"text/plain",data:"Расшифровка",size:12};
   const textHeight=chatAttachmentRailHeight([transcript],true,false,1);
   const photoHeight=chatAttachmentRailHeight([file],true,true,1);
-  expect(textHeight).toBe(140);
+  expect(textHeight).toBe(116);
   expect(chatAttachmentRailHeight([transcript],true,false,2)).toBeGreaterThan(textHeight);
   expect(chatAttachmentRailHeight([transcript,file],true,true,1)).toBe(photoHeight);
   expect(chatAttachmentRailHeight([transcript],true,false,1.5)).toBeGreaterThan(textHeight);
