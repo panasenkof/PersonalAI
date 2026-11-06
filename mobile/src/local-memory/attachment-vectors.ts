@@ -59,7 +59,7 @@ export async function saveAttachmentImageVector(db: SQL, input: ModelSpace & {
   return stored;
 }
 
-/** Bounded candidate retrieval. No default similarity threshold: users of this
+/** Paged exhaustive candidate retrieval. No default similarity threshold: users of this
  * adapter can opt into a mode-specific provisional gate backed by device QA.
  * Filters are the SAME scope as searchMemory.
  * A stale image fingerprint or damaged byte/part manifest is never returned.
@@ -87,25 +87,38 @@ export async function attachmentImageMatches(db: SQL, input: ModelSpace & {
     filters.push("e.sensitivity IN ("+input.sensitivities.map(()=>"?").join(",")+")");
     params.push(...input.sensitivities);
   }
-  // Preliminary bounded scan, with stable ID order. This is deliberately
-  // not advertised as exhaustive for collections larger than 5,000 images.
-  const rows = await db.getAllAsync<{
+  // Keyset scan ALL authorized visual vectors, including images after ID 5,000.
+  // Bound native SQLCipher row materialization and retain only ranked metadata,
+  // never thousands of full 768-dimension vectors in JS at once.
+  const PAGE_SIZE = 256;
+  type Row = {
     entityId:string;attachmentId:string;name:string;mime:string;size:number;
     recordVersion:number;vector:Uint8Array;sourceVersion:string;
-  }>(`SELECT e.id AS entityId,a.id AS attachmentId,a.name,a.mime,a.size,
+  };
+  const candidates: Array<{row:Omit<Row,"vector">;similarity:number}> = [];
+  let afterId = "";
+  while (true) {
+    const rows = await db.getAllAsync<Row>(`SELECT e.id AS entityId,a.id AS attachmentId,a.name,a.mime,a.size,
          e.record_version AS recordVersion,v.vector,v.source_version AS sourceVersion
       FROM memory_attachment_vectors v JOIN memory_attachments a ON a.id=v.attachment_id
       JOIN memory_entities e ON e.id=a.entity_id
       JOIN memory_collections c ON c.id=e.collection_id
-      WHERE ${filters.join(" AND ")}
-      ORDER BY a.id LIMIT 5000`, params);
-  const candidates = rows.flatMap(row => {
-    const vector = fromBlob(row.vector);
-    if (!vector || vector.length!==IMAGE_VECTOR_DIM || !vector.every(Number.isFinite)) return [];
-    return [{row,similarity:cosine(input.values,vector)}];
-  }).filter(x=>Number.isFinite(x.similarity) &&
-    (input.minSimilarity === undefined || x.similarity >= input.minSimilarity))
-    .sort((a,b)=>b.similarity-a.similarity||a.row.attachmentId.localeCompare(b.row.attachmentId));
+      WHERE ${filters.join(" AND ")} AND a.id>?
+      ORDER BY a.id LIMIT ?`, [...params,afterId,PAGE_SIZE]);
+    if (!rows.length) break;
+    for (const row of rows) {
+      const vector = fromBlob(row.vector);
+      if (!vector || vector.length!==IMAGE_VECTOR_DIM || !vector.every(Number.isFinite)) continue;
+      const similarity=cosine(input.values,vector);
+      if (!Number.isFinite(similarity) ||
+          (input.minSimilarity !== undefined && similarity < input.minSimilarity)) continue;
+      const {vector: _vector, ...metadata} = row;
+      candidates.push({row:metadata,similarity});
+    }
+    afterId=rows[rows.length-1].attachmentId;
+    if (rows.length<PAGE_SIZE) break;
+  }
+  candidates.sort((a,b)=>b.similarity-a.similarity||a.row.attachmentId.localeCompare(b.row.attachmentId));
   const limit = Math.min(20,Math.max(1,Math.trunc(input.limit??8)));
   const out:ImageVectorHit[] = [];
   for (const {row,similarity} of candidates) {
