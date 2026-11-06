@@ -12,6 +12,7 @@ import { webPreference } from "./dialogue";
 import { savedArticleToolIntent, savedAiArticlePageIntent } from "./article-selection";
 import type { SavedArticleIntent } from "./article-selection";
 import type { ChatArticlePage } from "./conversations";
+import { createArticleReadCoverage } from "./article-read-coverage";
 
 export type ToolDefinition = { name: string; description: string; parameters: object };
 export type ToolSpec = {
@@ -27,6 +28,8 @@ const text = (v: unknown, cap = 600) => typeof v === "string" ? v.slice(0, cap) 
 export function createToolCatalog(options: DirectAgentOptions, sources: string[], notes: MemorySnippet[], initialUsed: UsedNote[]) {
   const web = createWebTools(options, sources, notes);
   const used = new Map(initialUsed.map(n => [n.id, n]));
+  // Derived from this turn's ACL/version-checked reads; NEVER persisted as source truth.
+  const articleCoverage = createArticleReadCoverage();
   const readNotes = new Set<string>();
   let state = { ...beginTask(options.taskState, options.prompt), webPreference: webPreference(options) };
   const emit = () => { options.onTaskState?.(state); };
@@ -117,6 +120,7 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
         !Number.isSafeInteger(total) || Number(total)<0 ||
         !Number.isSafeInteger(result.offset) || result.offset!==offset ||
         offset>Number(total) || content.length>budget || end>Number(total) ||
+        (content.length===0 && Number(total)>0) ||
         typeof result.hasMore!=="boolean" ||
         result.hasMore!==(end<Number(total)) ||
         (result.hasMore && (result.nextOffset!==end || end===offset)) ||
@@ -126,11 +130,14 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
         (evidence.coverage!=="complete"&&evidence.coverage!=="excerpt"))
       throw new Error("invalid_article_read_evidence");
     // Narrow unknown fields only AFTER the complete source/evidence contract passed.
-    return result as typeof result & {
+    const verified = result as typeof result & {
       id:string;revision:number;title:string;content:string;offset:number;
       totalChars:number;hasMore:boolean;nextOffset?:number;
       evidence:Record<string,unknown>;
     };
+    articleCoverage.record(handle,{offset:verified.offset,content:verified.content,
+      totalChars:verified.totalChars,hasMore:verified.hasMore});
+    return verified;
   };
   const specs: ToolSpec[] = [
     { definition: { name: "search_local_notes", description: "Найти заметки на телефоне по 1–3 ключевым словам. Найденный фрагмент не является полным чтением записи.", parameters: queryParameters }, effect: "read",
@@ -360,8 +367,8 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
             const result=await verifiedSelectedArticleRead(handle,0,Number(budget));
             const evidence=result.evidence;
             const content=result.content, total=result.totalChars;
-            const status=!content.trim() ? "empty_saved_note" :
-              /^https?:\/\/\S+$/iu.test(content.trim()) ? "link_only" :
+            const status=!content.trim() && !result.hasMore ? "empty_saved_note" :
+              !result.hasMore && /^https?:\/\/\S+$/iu.test(content.trim()) ? "link_only" :
               result.hasMore ? "partial_saved_note" : "complete_saved_note_text";
             entries.push({id:handle.id,version:handle.version,status,
               title:result.title.slice(0,160),content,
@@ -375,6 +382,8 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
             const message=(e as Error)?.message;
             if(message==="memory_read_not_available" || message==="stale_memory_version" ||
                 message==="memory_read_not_available_or_stale"){
+              articleCoverage.unavailable(handle);
+              used.delete(handle.id); readNotes.delete(handle.id);
               entries.push({id:handle.id,version:handle.version,status:"not_available_or_stale"});
             }else throw e; // AppLock, damaged evidence and cancellation fail closed.
           }
@@ -421,7 +430,7 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
         try{
           const result=await verifiedSelectedArticleRead(handle,Number(offset),Number(budget));
           const isSingleFullRead=Number(offset)===0 && !result.hasMore;
-          const status=!result.content.trim() && result.totalChars===0 ? "empty_saved_note" :
+          const status=!result.content.trim() && isSingleFullRead ? "empty_saved_note" :
             isSingleFullRead && /^https?:\/\/\S+$/iu.test(result.content.trim())
               ? "link_only" : "saved_note_chunk";
           if(status==="saved_note_chunk" && result.content.trim()){
@@ -439,9 +448,12 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
           if(options.signal?.aborted)throw e;
           const message=(e as Error)?.message;
           if(message==="memory_read_not_available" || message==="stale_memory_version" ||
-              message==="memory_read_not_available_or_stale")
+              message==="memory_read_not_available_or_stale"){
+            articleCoverage.unavailable(handle);
+            used.delete(handle.id); readNotes.delete(handle.id);
             return {scope:"standard_active_article_selection",selectedIndex:Number(index),
               status:"not_available_or_stale",contentIncluded:false};
+          }
           throw e; // Lock, cancellation or inconsistent evidence: fail closed.
         }
       },
@@ -450,6 +462,26 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
         r.scope==="standard_active_article_selection" &&
         r.contentIncluded===true && r.sourceCoverage==="verified_chunk_only" &&
         r.originalWebPageRead===false && !!r.evidence ? "read" as const : "failed" as const,
+      },
+      { definition:{name:"selected_article_read_coverage",
+        description:"Проверить ФАКТИЧЕСКИЙ охват выбранных статей за текущий ход агента. Только диапазоны из проверенных ACL/version source-read, не черновики workspace и не результаты прошлых ходов. Вернёт полностью/частично/не прочитано, link-only, недоступно, границы и nextUnreadOffset; количество выбранных записей НЕ равно общему числу найденных. Полная сохранённая заметка НЕ является оригинальной веб-страницей.",
+        parameters:{type:"object",properties:{},required:[],additionalProperties:false},
+      },effect:"read" as const,
+      execute:async(args:Record<string,unknown>)=>{
+        if(Object.keys(args).length)return {error:"invalid_article_coverage_args"};
+        if(options.signal?.aborted)throw new Error("aborted");
+        if(options.workspaceAvailable && !options.workspaceAvailable())
+          return {error:"application_locked"};
+        if(mixedArticleFilters)return {error:"ambiguous_article_selection"};
+        const selected=selectedArticleHandles();
+        if(!selected)return {error:"missing_or_invalid_article_selection"};
+        usedSelectedArticleTool=true;
+        return articleCoverage.summary(selected);
+      },
+      verify:(r:Record<string,unknown>)=>r.scope==="current_agent_turn_verified_reads" &&
+        Number.isSafeInteger(r.selectedCount) && Array.isArray(r.entries) &&
+        r.entries.length===r.selectedCount &&
+        r.originalWebPagesVerified===0 ? "read" as const : "failed" as const,
       },
     ] : []),
     { definition: { name: FACT_TOOL_NAME, description: FACT_TOOL_DESCRIPTION, parameters: factToolParameters(options.sections) }, effect: "proposal",
@@ -580,7 +612,10 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
       if (options.signal?.aborted) throw new Error("Запрос остановлен");
       result = { error: "tool_failed_or_unavailable" };
     }
-    if (outcome !== "state_updated") observe({ tool: canonical, outcome,
+    // A coverage snapshot is valid ONLY for this model turn. Do not persist it
+    // as task evidence that a later turn could mistake for a reauthorized read.
+    if (outcome !== "state_updated" && canonical !== "selected_article_read_coverage")
+      observe({ tool: canonical, outcome,
       subject: text(result.proposalId || args?.url || args?.query || args?.title || name),
       excerpt: outcome === "read" ? text(result.content) : outcome === "found" && canonical === "search_web" ? text((result.sources as string[]).join("\n")) : text(JSON.stringify(result)) });
     options.diagnostic?.("tool.outcome_verified", { name: canonical, effect: spec?.effect || "unknown", outcome });
