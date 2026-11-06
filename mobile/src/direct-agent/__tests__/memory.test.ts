@@ -42,7 +42,7 @@ test("only standard active notes can leave the device", async () => {
   const repo = fake();
   const found = await searchApprovedNotes("guest", "паста", repo as unknown as MemoryRepository);
   expect(found).toEqual([{ id: "ok", title: "Любимое", body: "Паста", section: "Заметки" }]);
-  expect(repo.searchMemory).toHaveBeenCalledWith("паста", { collectionIds: ["standard"], sensitivities: ["standard", "inherit"], limit: 5 });
+  expect(repo.searchMemory).toHaveBeenCalledWith("паста", { collectionIds: ["standard"], sensitivities: ["standard", "inherit"], limit: 12 });
 });
 
 test("short queries never bulk-export the database", async () => {
