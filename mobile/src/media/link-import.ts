@@ -143,6 +143,38 @@ export function articleText(html: string): ArticleText {
   return { text, title, partial, scope: selected?.candidate.tag || "fallback" };
 }
 
+/** A source-asserted publication DAY, not an independently verified event date.
+ * Only explicit <meta> attributes are considered. Conflicts/ambiguous dates are
+ * unknown, so the saved timestamp is never silently substituted.
+ */
+export type HtmlPublicationClaim = { date: string; evidence: "html_meta"; sourceAttribute: "article:published_time" | "datePublished" };
+export function htmlPublicationClaim(html: string): HtmlPublicationClaim | undefined {
+  const values: HtmlPublicationClaim[]=[];
+  const head=/<head\b[^>]*>([\s\S]{0,100000}?)<\/head\s*>/i.exec(html)?.[1] || "";
+  const safeHead=head.replace(/<!--[\s\S]*?-->/g,"").replace(/<(script|style|noscript|template)\b[^>]*>[\s\S]*?<\/\1\s*>/gi,"");
+  const tags=safeHead.match(/<meta\b[^>]{0,2000}>/gi) || [];
+  for(const tag of tags.slice(0,150)) {
+    const attributes=new Map<string,string>();
+    const pattern=/([a-z][a-z0-9:_-]*)\s*=\s*(?:"([^"]{0,250})"|'([^']{0,250})')/gi;
+    let match:RegExpExecArray|null;
+    while((match=pattern.exec(tag)))attributes.set(match[1].toLowerCase(),htmlEntities(match[2]??match[3]));
+    const name=(attributes.get("property")||attributes.get("name")||"").toLowerCase();
+    if(name!=="article:published_time" && name!=="datepublished")continue;
+    const raw=(attributes.get("content")||"").trim();
+    // Explicit ISO calendar day or ISO datetime with timezone. Never accept
+    // locale-dependent Date.parse or timezone-less timestamps.
+    const matchDay=/^(\d{4}-\d{2}-\d{2})(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2}))?$/i.exec(raw);
+    if(!matchDay || (raw.includes("T") && !Number.isFinite(Date.parse(raw)))) return undefined;
+    const [year,month,day]=matchDay[1].split("-").map(Number);
+    const exact=new Date(Date.UTC(year,month-1,day));
+    if(year<1000 || exact.getUTCFullYear()!==year || exact.getUTCMonth()!==month-1 || exact.getUTCDate()!==day)
+      return undefined;
+    values.push({date:matchDay[1],evidence:"html_meta",sourceAttribute:name==="datepublished"?"datePublished":"article:published_time"});
+  }
+  if(!values.length || values.some(v=>v.date!==values[0].date))return undefined;
+  return values[0];
+}
+
 /** Backwards-compatible text-only entry point for existing callers/tests. */
 export function pageText(html: string): string {
   return articleText(html).text;
@@ -159,7 +191,7 @@ export function articleReadError(html: string, result: ArticleText): string | nu
 }
 
 /** Explicit user action only; no cookies/keys; streaming bound before allocation. */
-export async function importLink(raw: string, signal?: AbortSignal): Promise<{ file?: ImportFile; text?: string; source: string; title?: string; partial?: boolean }> {
+export async function importLink(raw: string, signal?: AbortSignal): Promise<{ file?: ImportFile; text?: string; source: string; title?: string; partial?: boolean; publicationClaim?: HtmlPublicationClaim }> {
   const source = publicImportUrl(raw);
   const controller = new AbortController();
   const cancel = () => controller.abort(); signal?.addEventListener('abort', cancel);
@@ -212,7 +244,8 @@ export async function importLink(raw: string, signal?: AbortSignal): Promise<{ f
       }
       const content = page ? page.text : rawText;
       if (!content.trim() || content.length > 60_000) throw new Error('Текст пуст или длиннее 60 000 символов. Сохраните нужный фрагмент вручную.');
-      file.delete(); return { text: content, source, ...(page?.title ? { title: page.title } : {}), ...(page ? { partial: page.partial } : {}) };
+      const publicationClaim=html ? htmlPublicationClaim(rawText) : undefined;
+      file.delete(); return { text: content, source, ...(page?.title ? { title: page.title } : {}), ...(page ? { partial: page.partial } : {}), ...(publicationClaim ? {publicationClaim} : {}) };
     }
     return { file: { uri: file.uri, name, mimeType: mime }, source };
   } catch (error) {
