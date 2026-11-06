@@ -778,20 +778,31 @@ export class SqliteMemoryRepository implements MemoryRepository {
       filters.push(`e.collection_id IN (${options.collectionIds.map(() => "?").join(",")})`); params.push(...options.collectionIds);
     }
     if (options.sensitivities) { filters.push(`e.sensitivity IN (${options.sensitivities.map(() => "?").join(",")})`); params.push(...options.sensitivities); }
-    const rows = await this.db.getAllAsync<Row>(
-      `SELECT v.chunk_id, v.vector, v.content_hash, c.entity_id, c.text, e.title FROM memory_vectors v JOIN memory_chunks c ON c.id=v.chunk_id
-       JOIN memory_entities e ON e.id=c.entity_id WHERE v.model=? AND v.dim=? AND length(v.vector)=4*v.dim AND ${filters.join(" AND ")}`, params);
+    // The previous full-table materialization loaded every Float32 blob into JS
+    // at once. Scan the same authorized rows in keyset pages instead, retaining
+    // only the best (small) metadata per record, never the source vectors.
     const best = new Map<string, { chunkId: string; similarity: number }>();
-    for (const r of rows) {
-      if (r.content_hash !== embeddingHash(TEXT(r.title), String(r.text))) continue;
-      const vector = fromBlob(r.vector);
-      if (!vector || !vector.length || !vector.every(Number.isFinite)) continue;
-      const similarity = cosine(query, vector);
-      if (similarity < MIN_SIMILARITY) continue;
-      const id = String(r.entity_id);
-      if ((best.get(id)?.similarity ?? -1) < similarity) best.set(id, { chunkId: String(r.chunk_id), similarity });
+    const PAGE_SIZE = 256;
+    let afterChunk = "";
+    while (true) {
+      const rows = await this.db.getAllAsync<Row>(
+        `SELECT v.chunk_id, v.vector, v.content_hash, c.entity_id, c.text, e.title FROM memory_vectors v JOIN memory_chunks c ON c.id=v.chunk_id
+         JOIN memory_entities e ON e.id=c.entity_id WHERE v.model=? AND v.dim=? AND length(v.vector)=4*v.dim AND ${filters.join(" AND ")}
+         AND v.chunk_id>? ORDER BY v.chunk_id LIMIT ?`, [...params,afterChunk,PAGE_SIZE]);
+      if (!rows.length) break;
+      for (const r of rows) {
+        if (r.content_hash !== embeddingHash(TEXT(r.title), String(r.text))) continue;
+        const vector = fromBlob(r.vector);
+        if (!vector || !vector.length || !vector.every(Number.isFinite)) continue;
+        const similarity = cosine(query, vector);
+        if (similarity < MIN_SIMILARITY) continue;
+        const id = String(r.entity_id);
+        if ((best.get(id)?.similarity ?? -1) < similarity) best.set(id, { chunkId: String(r.chunk_id), similarity });
+      }
+      afterChunk=String(rows[rows.length-1].chunk_id);
+      if (rows.length<PAGE_SIZE) break;
     }
-    const top = [...best.entries()].sort((a, b) => b[1].similarity - a[1].similarity).slice(0, options.limit ?? 8);
+    const top = [...best.entries()].sort((a, b) => b[1].similarity - a[1].similarity).slice(0, Math.min(100,Math.max(1,Math.trunc(options.limit??8))));
     const out: Array<{ row: Row; chunkId: string; similarity: number }> = [];
     for (const [id, hit] of top) {
       const row = await this.db.getFirstAsync<Row>("SELECT * FROM memory_entities WHERE id=?", [id]);
@@ -906,7 +917,9 @@ export class SqliteMemoryRepository implements MemoryRepository {
     /** Stable owner ID and exact confirmed role, never a name heuristic. */
     verifiedRelative?: { ownerPersonId: string; relationKind: DirectPersonRelation };
   } = {}): Promise<MemoryHit[]> {
-    const limit = Math.min(20, Math.max(1, Math.trunc(options.limit ?? 5)));
+    // A ranked shortlist is not a completeness limit. Callers choosing a
+    // broader synthesis may ask for more candidates while keeping each query bounded.
+    const limit = Math.min(100, Math.max(1, Math.trunc(options.limit ?? 5)));
     const verifiedRelative=options.verifiedRelative;
     if (verifiedRelative) {
       // The relation evidence, all source/endpoint ACL checks and the final
@@ -985,9 +998,14 @@ export class SqliteMemoryRepository implements MemoryRepository {
       return verifiedHits;
     }
     const scored = new Map<string, { row: Row; score: number; order: number; chunk: string | null; weight: number }>();
+    // 8 FTS hits for each word prematurely pruned records that became relevant
+    // after evidence was fused across multiple query terms. Keep recall depth
+    // proportional to the requested result set, with a fixed per-step ceiling.
+    const lexicalCandidates = Math.min(300,Math.max(32,limit * 3));
     for (const step of searchSteps(query)) {
       const rows = await this.matches(step.term, { prefix: step.prefix, column: step.column }, {
-        status: "active", collectionIds: options.collectionIds, sensitivities: options.sensitivities, limit: 8, offset: 0,
+        status: "active", collectionIds: options.collectionIds, sensitivities: options.sensitivities,
+        limit: lexicalCandidates, offset: 0,
       });
       for (const row of rows) {
         const id = String(row.id);
@@ -1016,7 +1034,9 @@ export class SqliteMemoryRepository implements MemoryRepository {
     // Meaning (п. 13): the closest chunks join through rank fusion. Without the
     // model, or when nothing is close enough, the word search stands as it is.
     if (options.vector) {
-      const near = await this.vectorMatches(options.vector.model, options.vector.values, { ...options, limit: 8 });
+      const near = await this.vectorMatches(options.vector.model, options.vector.values, {
+        ...options, limit: Math.min(100,Math.max(24,limit * 2)),
+      });
       if (near.length) {
         for (const n of near) {
           const id = String(n.row.id);
