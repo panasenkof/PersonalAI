@@ -141,3 +141,27 @@ test("stage 9A3 arbitrary-topic phrase is scoped and excludes other subjects",as
   expect((await countAllowedNotes(db as never,opts)).count).toBe(1);
   expect((await listAllowedNotes(db as never,{...opts,limit:8})).records.map(x=>x.id)).toEqual(["car"]);
 });
+
+test("9A4 exact-link duplicate candidates count only accessible active notes",async()=>{
+  const db=new Db();
+  for(const [id,col,status,sens,url] of [
+    ["a","c-standard","active","standard","https://example.org/article?ref=1"],
+    ["b","c-standard","active","inherit","https://example.org/article?ref=1"],
+    ["c","c-standard","active","standard","https://example.org/article?ref=2"],
+    ["s","c-secret","active","standard","https://example.org/article?ref=1"],
+    ["p","c-standard","active","sensitive","https://example.org/article?ref=1"],
+    ["t","c-standard","trashed","standard","https://example.org/article?ref=1"],
+  ] as string[][]) {
+    db.add(id,col,status,sens,"Нейросети "+id,"2026-11-06T12:00:00.000Z");
+    db.sqlite.prepare("UPDATE memory_entities SET created_at=?,payload_json=? WHERE id=?")
+      .run("2026-11-06T10:00:00.000Z",JSON.stringify({body:"Нейросети",source_url:url}),id);
+  }
+  const opts={queryTerms:["Нейросети"],savedFrom:"2026-11-01T00:00:00.000Z",
+    savedBefore:"2026-11-07T00:00:00.000Z",linkedOnly:true,sortBySaved:true};
+  const page=await listAllowedNotes(db as never,{...opts,limit:8});
+  const duplicates=Object.fromEntries(page.records.map(n=>[n.id,n.duplicateCount]));
+  expect(duplicates).toEqual({a:1,b:1,c:0});
+  expect((await countAllowedNotes(db as never,opts)).count).toBe(3);
+  expect(JSON.stringify(page)).not.toContain("source_url");
+  expect(JSON.stringify(page)).not.toContain("example.org");
+});
