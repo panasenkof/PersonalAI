@@ -17,6 +17,8 @@ export type ChatArticlePage = {
   kind: "saved_ai_links" | "saved_topic_links"; dateMode?: "saved" | "published"; topic?: string; queryTerms?: string[]; savedFrom: string; savedBefore: string;
   startLocal: string; endLocal: string;
   nextCursor?: {beforeCreatedAt:string;beforeId:string};
+  /** Actual IDs and revisions displayed by the canonical article reader; no copied article text. */
+  selected?: Array<{id:string;version:number}>;
 };
 export type ChatRow = { id: string; role: "user" | "assistant" | "info"; text: string; error?: boolean; photoAction?: "model" | "import" | "prepare"; sources?: string[]; memory?: ChatMemoryRef[]; attachments?: ChatAttachment[]; dialogueSummary?: DialogueSummaryOrigin; articlePage?: ChatArticlePage };
 const VIA = new Set(["search", "rewrite", "assistant"]);
@@ -71,6 +73,12 @@ export function parseConversation(json: string): SavedConversation | null {
         ...(ap.dateMode==="published" ? {dateMode:"published" as const} : {}),
         ...(ap.kind === "saved_topic_links" ? {topic:ap.topic,queryTerms:[ap.topic]} : {}),
         ...(cur ? {nextCursor:{beforeCreatedAt:cur.beforeCreatedAt,beforeId:cur.beforeId}} : {})} : undefined;
+    const selected=Array.isArray(ap?.selected) && ap.selected.length<=24 &&
+      ap.selected.every((n:any)=>n && typeof n.id==="string" && /^[A-Za-z0-9:_-]{1,128}$/.test(n.id) &&
+        Number.isSafeInteger(n.version) && n.version>0) &&
+      new Set(ap.selected.map((n:any)=>n.id)).size===ap.selected.length
+      ? (ap.selected as Array<{id:string;version:number}>).map(n=>({id:n.id,version:n.version})) : undefined;
+    if(articlePage && selected?.length)articlePage.selected=selected;
     const d = r.dialogueSummary;
     const dialogueSummary: DialogueSummaryOrigin | undefined = r.role === "assistant" && d &&
       (d.scope === "all" || d.scope === "last10") &&
