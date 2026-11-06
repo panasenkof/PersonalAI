@@ -42,7 +42,7 @@ function filters(options: AllowedListOptions, cursor: boolean): Filter {
   if (!iso(options.savedFrom) || !iso(options.savedBefore) ||
       (options.savedFrom && options.savedBefore && options.savedFrom >= options.savedBefore))
     throw new Error("invalid_catalog_date_window");
-  const dateOnly=(v:string|undefined) => v===undefined || (/^\\d{4}-\\d{2}-\\d{2}$/.test(v) &&
+  const dateOnly=(v:string|undefined) => v===undefined || (/^\d{4}-\d{2}-\d{2}$/.test(v) &&
     Number.isFinite(Date.parse(v+"T00:00:00Z")) &&
     new Date(v+"T00:00:00Z").toISOString().startsWith(v));
   if(!dateOnly(options.publicationFrom) || !dateOnly(options.publicationBefore) ||
