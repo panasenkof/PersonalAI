@@ -12,7 +12,7 @@ export type Block =
   | { kind: "paragraph"; spans: Span[] }
   | { kind: "blank" };
 
-const INLINE = /(\*\*|__)(.+?)\1|`([^`\n]+)`|\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)|(?<![\w*])\*(?!\s)([^*\n]+?)\*(?![\w*])|\[\[S([0-9]{1,2}):([0-9]{1,7})-([0-9]{1,7})\]\]/g;
+const INLINE = /(\*\*|__)(.+?)\1|`([^`\n]+)`|\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)|(?<![\w*])\*(?!\s)([^*\n]+?)\*(?![\w*])|\[\[S([0-9]{1,4}):([0-9]{1,9})-([0-9]{1,9})\]\]/g;
 
 export function parseInline(text: string, base: Omit<Span, "text"> = {}, citationsEnabled = false): Span[] {
   const spans: Span[] = [];
@@ -60,4 +60,4 @@ export function parseMarkdown(source: string, citationsEnabled = false): Block[]
 
 /** Plain answers keep the original single-text rendering. */
 export const hasMarkdown = (text: string, citationsEnabled = false) => (citationsEnabled &&
-  /\[\[S[0-9]{1,2}:[0-9]{1,7}-[0-9]{1,7}\]\]/.test(text)) || /(\*\*|__|`|\[[^\]\n]+\]\(https?:|^\s*(#{1,6}\s|[-*+•]\s|\d{1,3}[.)]\s|>|```)|(?<![\w*])\*(?!\s)[^*\n]+?\*(?![\w*]))/m.test(text);
+  /\[\[S[0-9]{1,4}:[0-9]{1,9}-[0-9]{1,9}\]\]/.test(text)) || /(\*\*|__|`|\[[^\]\n]+\]\(https?:|^\s*(#{1,6}\s|[-*+•]\s|\d{1,3}[.)]\s|>|```)|(?<![\w*])\*(?!\s)[^*\n]+?\*(?![\w*]))/m.test(text);
