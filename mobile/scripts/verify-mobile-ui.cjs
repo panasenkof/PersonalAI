@@ -196,8 +196,10 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       const shareCancel = page.getByLabel('Отменить приём материала', {exact:true});
       const shareCancelBox = await shareCancel.boundingBox();
       const shareCancelBorder = await shareCancel.evaluate(el => parseFloat(getComputedStyle(el).borderTopWidth));
-      assert(shareCancelBox && shareCancelBox.height >= 48 && shareCancelBorder >= 1,
-        'Share Cancel is a visible Nebula button, not unframed text');
+      assert(shareCancelBox && shareCancelBox.height >= 22 && shareCancelBox.height <= 30 &&
+        shareCancelBorder >= 1 && shareCancelBox.x >= 0 &&
+        shareCancelBox.x + shareCancelBox.width <= width,
+        'Share Cancel is a visible, framed half-height secondary button inside the viewport');
       if(process.env.SCREENSHOT_DIR) await page.screenshot({animations:'disabled',path:path.join(process.env.SCREENSHOT_DIR,`share-choice-${width}.png`)});
       assert.equal(replyNumber,0,'Share preview does not send');
       await page.getByLabel('Добавить входящее в чат',{exact:true}).click();
@@ -287,9 +289,10 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       const removeButton = page.getByLabel('Убрать вложение note.txt', { exact: true });
       const attachmentRemoveBox = await removeButton.boundingBox();
       const removeBorder = await removeButton.evaluate(el => parseFloat(getComputedStyle(el).borderTopWidth));
-      assert(attachmentRemoveBox && attachmentRemoveBox.height >= 48 && removeBorder >= 1 &&
-        attachmentRemoveBox.x >= 0 && attachmentRemoveBox.x + attachmentRemoveBox.width <= width,
-        'Remove must be a visible, reachable attachment-local Nebula button');
+      assert(attachmentRemoveBox && attachmentRemoveBox.height >= 22 && attachmentRemoveBox.height <= 30 &&
+        removeBorder >= 1 && attachmentRemoveBox.x >= 0 &&
+        attachmentRemoveBox.x + attachmentRemoveBox.width <= width,
+        'Attachment Remove is a framed half-height secondary button inside the viewport');
       await page.clock.runFor(6000);
       if (process.env.SCREENSHOT_DIR) await page.screenshot({animations:'disabled', path:path.join(process.env.SCREENSHOT_DIR, `chat-attachment-${width}.png`)});
 
