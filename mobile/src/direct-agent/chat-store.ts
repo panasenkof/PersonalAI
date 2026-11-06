@@ -22,6 +22,7 @@ import type { ChatDraft, ConversationRepository, SavedConversation } from "./con
 import type { DirectAgentSettings } from "./settings";
 import { waitForApplicationSession, onLocalMemorySessionChange } from "../local-memory/storage";
 import { localPhotoIntent83, localPhotoSuggestion83, searchLocalPhotosFromChat83 } from "../media/vision-chat-search";
+import { savedAiArticleIntent, selectSavedAiArticles } from "./article-selection";
 
 /** `streamText` is the answer as it arrives; it is never persisted. */
 /** `progressSince` is when the current stage began, for the elapsed timer. */
@@ -237,6 +238,61 @@ export class DirectChatStore {
     }
   }
 
+  /** Stage 9A1: ordinary chat selection is a local READ, not a paid model turn.
+   * The saved URL is not proof of a fully read article; only the linked note
+   * can be opened. Follow-up summaries and more pages belong to 9A2/9B.
+   */
+  async searchSavedArticlesLocally(): Promise<void> {
+    const id=this.snapshot.activeId;
+    const current=this.snapshot.conversations.find(c=>c.id===id);
+    if(!id || !current || current.busy || current.deleting || this.disposed || !this.snapshot.ready)return;
+    const prompt=current.question.trim();
+    const intent=savedAiArticleIntent(prompt,new Date(),Boolean(current.attachments?.length));
+    if(!intent)return;
+    const aborter=new AbortController();
+    this.requests.set(id,aborter);
+    const pending=this.update(id,{
+      busy:true,progress:"Подбираю сохранённые материалы…",updatedAt:new Date().toISOString(),
+      question:"",title:current.rows.length?current.title:prompt.slice(0,60),
+      rows:[...current.rows,{id:Crypto.randomUUID(),role:"user",text:prompt}],
+    })!;
+    try {
+      await this.persist(pending);
+      if(aborter.signal.aborted||this.disposed)throw new Error("aborted");
+      const found=await selectSavedAiArticles(this.profile,intent);
+      if(aborter.signal.aborted||this.disposed)throw new Error("aborted");
+      const latest=this.snapshot.conversations.find(c=>c.id===id);
+      if(!latest)return;
+      const dates=intent.startLocal.split("-").reverse().join(".")+"–"+intent.endLocal.split("-").reverse().join(".");
+      const titles=found.records.map((n,i)=>
+        (i+1)+". "+(n.title||"Без названия")+" · сохранено "+
+        (Number.isFinite(Date.parse(n.createdAt))?new Date(n.createdAt).toLocaleDateString("ru-RU"):"дата неизвестна")).join("\n");
+      const head=found.count
+        ? "Найдено "+found.count+" сохранённых материалов со ссылкой по ключевым словам об ИИ. Даты сохранения: "+dates+
+          ". Показано "+found.records.length+"; остальные материалы можно найти следующим запросом."
+        : "За "+dates+" сохранённых материалов со ссылкой по ключевым словам об ИИ не найдено.";
+      this.update(id,{updatedAt:new Date().toISOString(),
+        rows:[...latest.rows,{id:Crypto.randomUUID(),role:"assistant",
+          text:head+(titles?"\n\n"+titles:"")+
+            "\n\nПоиск выполнен только в памяти телефона. Ссылки открывают оригинальные заметки. Сохранённая ссылка не означает, что полный текст статьи был прочитан; другие заметки без URL здесь не учитывались.",
+          memory:found.records.map(n=>({id:n.id,title:n.title||"Без названия",section:n.section,via:"search" as const}))}],
+      });
+    }catch(e){
+      if(this.disposed)return;
+      const latest=this.snapshot.conversations.find(c=>c.id===id);
+      if(latest)this.update(id,{
+        ...(!aborter.signal.aborted&&latest.question===""?{question:prompt}:{}),
+        rows:[...latest.rows,{id:Crypto.randomUUID(),role:"info",
+          text:aborter.signal.aborted?"Подборка остановлена":memoryErrorMessage(e),
+          ...(!aborter.signal.aborted?{error:true as const}:{})}],
+      });
+    }finally{
+      this.requests.delete(id);
+      const latest=this.update(id,{busy:false,progress:"",progressSince:undefined});
+      if(latest)await this.persist(latest).catch(()=>{});
+    }
+  }
+
   /** Explicit internet photo action reuses the existing model and web tools,
    * without consuming the user's unrelated composer draft. */
   async send(settings: DirectAgentSettings, internetPhotoId?:string, documentApprovalKey?:string, rerun = false) {
@@ -262,6 +318,9 @@ export class DirectChatStore {
     // Do not send user image bytes or photo search text to the remote LLM.
     if (!internetPhotoId && localPhotoIntent83(prompt,attachments)) {
       await this.searchPhotosLocally(); return;
+    }
+    if (!internetPhotoId && savedAiArticleIntent(prompt,new Date(),attachments.length>0)) {
+      await this.searchSavedArticlesLocally(); return;
     }
     // Recheck the ACTIVE model at the moment of Send (not the model selected
     // when a draft photo was picked). Refuse known text-only routes before
