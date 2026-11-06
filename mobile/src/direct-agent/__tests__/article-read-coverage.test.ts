@@ -95,6 +95,18 @@ test("9B: total length conflict with same revision invalidates all accumulated c
   expect(entry(coverage,0)).toMatchObject({status:"unread",verifiedChars:0});
 });
 
+test("9B: a zero-byte EOF request never counts as read text",async()=>{
+  const read=jest.fn(async(id:string,v:number,o:number=0,b:number=6000)=>
+    evidence(id,v,o,b,text));
+  const tools=harness(read);
+  expect(await tools.run("read_selected_article_chunk",chunks(0,text.length,1000)))
+    .toEqual({error:"tool_failed_or_unavailable"});
+  const report=await tools.run("selected_article_read_coverage",{});
+  expect(report).toMatchObject({fullyReadCount:0,partialCount:0,unreadCount:4,
+    readTextCount:0});
+  expect(entry(report,0)).toMatchObject({status:"unread",verifiedChars:0});
+});
+
 test("9B: coverage tool checks authorization, input and stays within one model turn",async()=>{
   const read=jest.fn(async(id:string,v:number,o:number=0,b:number=6000)=>evidence(id,v,o,b,"Факт"));
   const first=harness(read);
