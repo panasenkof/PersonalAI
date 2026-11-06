@@ -128,11 +128,11 @@ export function MemoryTemporalTimeline({profile,subjectId,collectionId}:{
           item.claim.modality==="hypothetical"?"Гипотеза, не факт":
           item.claim.negated?"Отрицательное утверждение источника":"Не подтверждено как текущий факт"}</Text>
         <Text numberOfLines={4} style={{color:t.muted}}>Из источника: «{item.claim.evidence.quote}»</Text>
-        <NebulaAction icon="file-text" label="Открыть источник"
+        <NebulaAction icon="file-text" label="Открыть источник" size="compact"
           accessibilityLabel={"Открыть источник для "+item.claim.value}
           disabled={busy} onPress={()=>void showSource(item)} />
       </View>)}
-      {cursor&&!busy?<NebulaAction icon="chevron-down" label="Показать ещё"
+      {cursor&&!busy?<NebulaAction icon="chevron-down" label="Показать ещё" size="compact"
         accessibilityLabel="Показать ещё периоды и события"
         onPress={()=>void load(mode,cursor)} />:null}
     </View>:null}
