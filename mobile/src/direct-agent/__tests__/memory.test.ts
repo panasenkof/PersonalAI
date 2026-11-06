@@ -1,4 +1,4 @@
-import { saveApprovedNote, searchApprovedNotes } from "../memory";
+import { saveApprovedNote, searchApprovedNotes, readApprovedNote } from "../memory";
 import type { MemoryRepository } from "../../local-memory/types";
 
 function fake() {
