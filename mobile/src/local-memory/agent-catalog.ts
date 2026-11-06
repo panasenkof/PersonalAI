@@ -20,7 +20,7 @@ export type AllowedListOptions = {
 };
 type Db = Pick<SQLite.SQLiteDatabase, "getAllAsync" | "getFirstAsync">;
 type Row = { id: string; record_version: number; title: string | null;
-  updated_at: string; created_at: string; collection_name: string };
+  updated_at: string; created_at: string; collection_name: string; duplicate_count?: number };
 type Filter = { where: string; params: (string | number)[] };
 const MATCH_SQL = "EXISTS (SELECT 1 FROM memory_search_fts WHERE " +
   "memory_search_fts.entity_id=e.id AND memory_search_fts MATCH ?)";
@@ -92,8 +92,16 @@ export async function listAllowedNotes(db: Db, options: AllowedListOptions = {})
   const limit = options.limit ?? 20;
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50) throw new Error("invalid_catalog_limit");
   const q = filters(options, true);
+  // Read-only exact URL candidate count; never treat another note as mergeable or expose its metadata.
   const rows = await db.getAllAsync<Row>(
     "SELECT e.id,e.record_version,e.title,e.created_at,e.updated_at,c.name AS collection_name " +
+    (options.linkedOnly ? `, (SELECT count(*) FROM memory_entities d
+      JOIN memory_collections dc ON dc.id=d.collection_id
+      WHERE d.id<>e.id AND d.record_status='active' AND d.domain='notes'
+        AND dc.sensitivity='standard' AND d.sensitivity IN ('standard','inherit')
+        AND json_type(d.payload_json,'$.source_url')='text'
+        AND json_extract(d.payload_json,'$.source_url')=json_extract(e.payload_json,'$.source_url')
+      ) AS duplicate_count ` : "") +
     FROM + " WHERE " + q.where +
     (options.sortBySaved ? " ORDER BY e.created_at DESC,e.id DESC LIMIT ?" : " ORDER BY e.updated_at DESC,e.id DESC LIMIT ?"),
     [...q.params, limit + 1],
@@ -102,7 +110,8 @@ export async function listAllowedNotes(db: Db, options: AllowedListOptions = {})
   const last = visible[visible.length - 1];
   return {
     records: visible.map(row => ({ id: row.id, version: row.record_version,
-      title: row.title || "", section: row.collection_name, createdAt: row.created_at, updatedAt: row.updated_at })),
+      title: row.title || "", section: row.collection_name, createdAt: row.created_at, updatedAt: row.updated_at,
+      ...(options.linkedOnly ? {duplicateCount: row.duplicate_count ?? 0} : {}) })),
     hasMore: rows.length > limit,
     ...(rows.length > limit && last ?
       { nextCursor: options.sortBySaved

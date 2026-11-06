@@ -181,3 +181,21 @@ test("literal-topic shortlist survives history reload and uses identical local F
   expect(parseConversation(JSON.stringify(damaged))!.rows[1].articlePage).toBeUndefined();
   store.dispose();
 });
+
+test("exact-URL duplicate is only a read-only hint, both source links remain openable",async()=>{
+  const {repo,runner}=fixture();const store=new DirectChatStore("guest",repo,runner);
+  await store.initialize();
+  selection.mockResolvedValueOnce({count:2,hasMore:false,records:[
+    {id:"a",title:"Сохранение с комментарием",section:"Заметки",version:1,
+      createdAt:"2026-11-06T09:00:00.000Z",duplicateCount:1},
+    {id:"b",title:"Другой комментарий",section:"Проекты",version:1,
+      createdAt:"2026-11-04T09:00:00.000Z",duplicateCount:1},
+  ]});
+  store.setQuestion("Найди статьи об ИИ за неделю");
+  await store.searchSavedArticlesLocally();
+  const row=store.getSnapshot().conversations[0].rows[1];
+  expect(row.text).toContain("ещё доступных сохранений этого URL: 1");
+  expect(row.memory?.map(x=>x.id)).toEqual(["a","b"]);
+  expect(runner).not.toHaveBeenCalled();
+  store.dispose();
+});

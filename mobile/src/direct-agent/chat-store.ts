@@ -268,7 +268,9 @@ export class DirectChatStore {
       const dates=intent.startLocal.split("-").reverse().join(".")+"–"+intent.endLocal.split("-").reverse().join(".");
       const titles=found.records.map((n,i)=>
         (i+1)+". "+(n.title||"Без названия")+" · сохранено "+
-        (Number.isFinite(Date.parse(n.createdAt))?new Date(n.createdAt).toLocaleDateString("ru-RU"):"дата неизвестна")).join("\n");
+        (Number.isFinite(Date.parse(n.createdAt))?new Date(n.createdAt).toLocaleDateString("ru-RU"):"дата неизвестна")+
+        (typeof n.duplicateCount === "number" && Number.isSafeInteger(n.duplicateCount) && n.duplicateCount>0
+          ? " · ещё доступных сохранений этого URL: "+n.duplicateCount : "")).join("\n");
       const subject=intent.topic==="ai" ? "по ключевым словам об ИИ" :
         "по точной фразе «"+intent.topic+"»";
       const head=found.count
@@ -331,7 +333,9 @@ export class DirectChatStore {
       if(!latest)return;
       const titles=found.records.map((n,i)=>
         (i+1)+". "+(n.title||"Без названия")+" · сохранено "+
-        (Number.isFinite(Date.parse(n.createdAt))?new Date(n.createdAt).toLocaleDateString("ru-RU"):"дата неизвестна")).join("\n");
+        (Number.isFinite(Date.parse(n.createdAt))?new Date(n.createdAt).toLocaleDateString("ru-RU"):"дата неизвестна")+
+        (typeof n.duplicateCount === "number" && Number.isSafeInteger(n.duplicateCount) && n.duplicateCount>0
+          ? " · ещё доступных сохранений этого URL: "+n.duplicateCount : "")).join("\n");
       const text=found.records.length
         ? "Следующая страница: "+found.records.length+" сохранённых материалов со ссылками. Сейчас по этому фильтру доступно "+found.count+
           (found.hasMore?"; есть следующие страницы.":".")+
