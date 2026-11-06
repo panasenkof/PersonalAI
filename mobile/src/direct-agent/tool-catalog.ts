@@ -720,7 +720,8 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
       // Photo originals are per attachment, not per note. Do not deduplicate
       // photos sharing a note ID, and let existing PhotoSearchResults render
       // the top match + collapsible alternatives without a second photo UI.
-      return [...photoMatches,...read,
-        ...[...used.values()].filter(item=>!readNotes.has(item.id))].slice(0,28);
+      const ordinary=[...read,
+        ...[...used.values()].filter(item=>!readNotes.has(item.id))].slice(0,8);
+      return [...photoMatches,...ordinary];
     } };
 }
