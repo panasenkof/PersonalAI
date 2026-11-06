@@ -68,6 +68,19 @@ test("9B: verified ranges merge but disjoint read cannot claim full saved note",
     linkOnlyCount:1,unavailableCount:1,unreadCount:1,readTextCount:1});
   expect(entry(result,0)).toMatchObject({status:"complete_saved_note_text",
     totalChars:13000,verifiedChars:13000,ranges:[{startChar:0,endChar:13000}]});
+  // Host-generated snapshot is independent of the model's wording or whether it
+  // remembered to call the coverage tool; unread sources stay explicitly unread.
+  expect(tools.finish().articleReadReport).toMatchObject({
+    kind:"selected_saved_note_reads",selectedCount:4,entries:[
+      {selectedIndex:0,id:"note-0",version:2,title:"note-0",
+        status:"complete_saved_note_text",verifiedChars:13000,totalChars:13000},
+      {selectedIndex:1,id:"note-1",version:3,title:"note-1",
+        status:"link_only",verifiedChars:27,totalChars:27},
+      {selectedIndex:2,id:"note-2",version:4,status:"not_available_or_stale",verifiedChars:0},
+      {selectedIndex:3,id:"note-3",version:5,status:"unread",verifiedChars:0},
+    ],
+  });
+  expect(JSON.stringify(tools.finish().articleReadReport)).not.toContain("AAAAAA");
 });
 
 test("9B: verified old ranges are discarded when source is reclassified inaccessible",async()=>{
@@ -113,7 +126,11 @@ test("9B: coverage tool checks authorization, input and stays within one model t
   await first.run("read_selected_article_chunk",chunks(0,0));
   // Derived coverage is deliberately absent from persisted TaskState evidence.
   expect(JSON.stringify(first.finish().taskState)).not.toContain('"tool":"selected_article_read_coverage"');
+  expect(first.finish().articleReadReport?.entries[0]).toMatchObject({
+    status:"complete_saved_note_text",title:"note-0",
+  });
   const next=harness(read);
+  expect(next.finish().articleReadReport).toBeUndefined();
   expect(entry(await next.run("selected_article_read_coverage",{}),0))
     .toMatchObject({status:"unread"});
   expect(await first.run("selected_article_read_coverage",{id:"private"}))
