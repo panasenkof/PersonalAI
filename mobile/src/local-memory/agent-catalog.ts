@@ -57,7 +57,7 @@ function filters(options: AllowedListOptions, cursor: boolean): Filter {
   if (cursor && options.sortBySaved) {
     if (options.beforeUpdatedAt !== undefined) throw new Error("invalid_catalog_saved_cursor");
     if (options.beforeCreatedAt !== undefined || options.beforeId !== undefined) {
-      if (!options.beforeCreatedAt || !/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$/.test(options.beforeCreatedAt) ||
+      if (!options.beforeCreatedAt || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(options.beforeCreatedAt) ||
           !Number.isFinite(Date.parse(options.beforeCreatedAt)) || !options.beforeId ||
           !/^[a-zA-Z0-9:_-]{1,128}$/.test(options.beforeId))
         throw new Error("invalid_catalog_saved_cursor");
