@@ -489,8 +489,8 @@ export class DirectChatStore {
         diagnostic: trace,
         lookup: query => searchApprovedNotes(this.profile, query),
         read: async (id, version, offset, budget) => ({ ...await readApprovedNote(this.profile, id, version, offset, budget) }),
-        searchSources: async (query, limit) => ({
-          ...await searchLocalApprovedSourceSegments(this.profile, query, limit),
+        searchSources: async (query, limit, offset) => ({
+          ...await searchLocalApprovedSourceSegments(this.profile, query, limit, offset),
         }),
         listSources: async (id, version, limit) => ({
           ...await listLocalApprovedSourceSegments(this.profile, id, version, limit),
