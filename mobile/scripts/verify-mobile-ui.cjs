@@ -440,6 +440,18 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByLabel('Поиск диалогов', { exact: true }).waitFor({ state: 'hidden' });
       await page.getByTestId('chat-message-list').getByText('Ответ 2', { exact: true }).waitFor();
       await page.getByLabel('Вкладка Память', { exact: true }).click();
+      // Vivo report 06.11: helpers must be roughly HALF the screenshot buttons,
+      // not merely a few dp smaller than the previous PR. Regular CTAs stay 48dp.
+      await page.getByLabel('Открыть архив', { exact: true }).waitFor();
+      for (const [label, maxWidth] of [
+        ['Открыть архив', 80], ['Открыть корзину', 90], ['Все разделы', 110],
+      ]) {
+        const bounds = await page.getByLabel(label, {exact:true}).boundingBox();
+        assert(bounds && bounds.height >= 22 && bounds.height <= 30 && bounds.width < maxWidth,
+          `Half-size secondary action ${label} fits 24dp visual and expected short width`);
+      }
+      if (process.env.SCREENSHOT_DIR) await page.screenshot({animations:'disabled',
+        path:path.join(process.env.SCREENSHOT_DIR,`memory-small-actions-${width}.png`)});
       // List/grid is a labelled real button only when two columns can actually fit.
       if (width >= 350) {
         const viewSwitch = page.getByLabel('Показать списком', { exact: true });
@@ -759,6 +771,8 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       if (width < 560) {
         const counterBox = await page.getByTestId('trash-total-counter').boundingBox();
         const buttonBox = await page.getByLabel('Очистить всю корзину', { exact: true }).boundingBox();
+        assert(buttonBox && buttonBox.height >= 22 && buttonBox.height <= 30,
+          'Trash clear shows a half-height visual action; final irreversible confirmation stays full-size');
         assert(counterBox && buttonBox && buttonBox.y >= counterBox.y + counterBox.height - 1,
           'The full-trash button is below the readable count on a narrow screen');
         assert(buttonBox.x >= 0 && buttonBox.x + buttonBox.width <= width,
