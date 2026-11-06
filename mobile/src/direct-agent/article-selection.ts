@@ -21,13 +21,12 @@ const localDay = (d: Date) => `${String(d.getFullYear()).padStart(4,"0")}-${Stri
 
 /** Exclude publication-date requests: e.created_at is a SAVE timestamp. */
 export function savedAiArticleIntent(text: string, now = new Date(), hasAttachments = false): SavedArticleIntent | null {
-  if (hasAttachments || text.length > 500 || !/^(?:\s*)(?:выбери|подбери|найди|покажи)\b/iu.test(text)) {
-    // JS \b does not reliably handle Cyrillic words; check again below.
-    if (hasAttachments || text.length > 500 || !/^\s*(?:выбери|подбери|найди|покажи)(?:\s|[,:])/iu.test(text)) return null;
-  }
+  // Regex word-boundary \\b is ASCII-centric; explicit whitespace is safer for Russian.
+  if (hasAttachments || text.length > 500 ||
+      !/^\s*(?:выбери|подбери|найди|покажи)(?:\s|[,:])/iu.test(text)) return null;
   if (!/(?:стат(?:ьи|ей|ью|ья|ей)|материал(?:ы|ов)?)/iu.test(text)) return null;
-  if (!/(?:^|[^а-яёa-z\d])(?:ии|ai|искусственн\w* интеллект\w*|нейросет\w*)(?=$|[^а-яёa-z\d])/iu.test(text)) return null;
-  if (/(?:опубликован|вышедш|публикаци|найди в интернете|ищи в интернете|найди онлайн)/iu.test(text)) return null;
+  if (!/(?:^|[^а-яёa-z\d])(?:ии|ai|искусственн[а-яё]* интеллект[а-яё]*|нейросет\w*)(?=$|[^а-яёa-z\d])/iu.test(text)) return null;
+  if (/(?:опубликован|вышедш|публикаци|в интернете|в сети|онлайн|добавь из интернета|из интернета)/iu.test(text)) return null;
   if (!Number.isFinite(now.getTime())) return null;
   let start: Date;
   const end = new Date(now.getFullYear(),now.getMonth(),now.getDate()+1);
