@@ -14,6 +14,11 @@ const selected:ChatArticlePage={
     {id:"note-2",version:4},{id:"note-3",version:5}],
 };
 const text="A".repeat(13_000);
+function entry(result:Record<string,unknown>,index:number):Record<string,unknown>{
+  if(!Array.isArray(result.entries))throw new Error("missing_coverage_entries");
+  return result.entries[index] as Record<string,unknown>;
+}
+
 function evidence(id:string,version:number,offset:number,budget:number,body:string) {
   const content=body.slice(offset,offset+budget), end=offset+content.length;
   return {id,revision:version,title:id,content,offset,totalChars:body.length,
@@ -52,7 +57,7 @@ test("9B: verified ranges merge but disjoint read cannot claim full saved note",
 
   await tools.run("read_selected_article_chunk",chunks(0,6000,6000));
   result=await tools.run("selected_article_read_coverage",{});
-  expect(result.entries[0]).toMatchObject({status:"partial_saved_note",
+  expect(entry(result,0)).toMatchObject({status:"partial_saved_note",
     verifiedChars:7000,nextUnreadOffset:1000,
     ranges:[{startChar:0,endChar:1000},{startChar:6000,endChar:12000}]});
 
@@ -61,12 +66,12 @@ test("9B: verified ranges merge but disjoint read cannot claim full saved note",
   result=await tools.run("selected_article_read_coverage",{});
   expect(result).toMatchObject({fullyReadCount:1,partialCount:0,
     linkOnlyCount:1,unavailableCount:1,unreadCount:1,readTextCount:1});
-  expect(result.entries[0]).toMatchObject({status:"complete_saved_note_text",
+  expect(entry(result,0)).toMatchObject({status:"complete_saved_note_text",
     totalChars:13000,verifiedChars:13000,ranges:[{startChar:0,endChar:13000}]});
 });
 
 test("9B: verified old ranges are discarded when source is reclassified inaccessible",async()=>{
-  const read=jest.fn(async(id:string,v:number,o:number,b:number)=>evidence(id,v,o,b,text));
+  const read=jest.fn(async(id:string,v:number,o:number=0,b:number=6000)=>evidence(id,v,o,b,text));
   const tools=harness(read);
   expect(await tools.run("read_selected_article_chunk",chunks(0,0,6000)))
     .toMatchObject({outcome:"read"});
@@ -74,28 +79,28 @@ test("9B: verified old ranges are discarded when source is reclassified inaccess
   expect(await tools.run("read_selected_article_chunk",chunks(0,6000)))
     .toMatchObject({outcome:"empty",status:"not_available_or_stale"});
   const coverage=await tools.run("selected_article_read_coverage",{});
-  expect(coverage.entries[0]).toMatchObject({status:"not_available_or_stale",
+  expect(entry(coverage,0)).toMatchObject({status:"not_available_or_stale",
     verifiedChars:0,ranges:[]});
   expect(tools.memory().map(n=>n.id)).not.toContain("note-0");
 });
 
 test("9B: total length conflict with same revision invalidates all accumulated coverage",async()=>{
-  const read=jest.fn(async(id:string,v:number,o:number,b:number)=>evidence(id,v,o,b,text));
+  const read=jest.fn(async(id:string,v:number,o:number=0,b:number=6000)=>evidence(id,v,o,b,text));
   const tools=harness(read);
   await tools.run("read_selected_article_chunk",chunks(0,0,6000));
-  read.mockImplementation(async(id:string,v:number,o:number,b:number)=>evidence(id,v,o,b,text+"Z"));
+  read.mockImplementation(async(id:string,v:number,o:number=0,b:number=6000)=>evidence(id,v,o,b,text+"Z"));
   expect(await tools.run("read_selected_article_chunk",chunks(0,6000)))
     .toEqual({error:"tool_failed_or_unavailable"});
   const coverage=await tools.run("selected_article_read_coverage",{});
-  expect(coverage.entries[0]).toMatchObject({status:"unread",verifiedChars:0});
+  expect(entry(coverage,0)).toMatchObject({status:"unread",verifiedChars:0});
 });
 
 test("9B: coverage tool checks authorization, input and stays within one model turn",async()=>{
-  const read=jest.fn(async(id:string,v:number,o:number,b:number)=>evidence(id,v,o,b,"Факт"));
+  const read=jest.fn(async(id:string,v:number,o:number=0,b:number=6000)=>evidence(id,v,o,b,"Факт"));
   const first=harness(read);
   await first.run("read_selected_article_chunk",chunks(0,0));
   const next=harness(read);
-  expect((await next.run("selected_article_read_coverage",{})).entries[0])
+  expect(entry(await next.run("selected_article_read_coverage",{}),0))
     .toMatchObject({status:"unread"});
   expect(await first.run("selected_article_read_coverage",{id:"private"}))
     .toMatchObject({error:"invalid_article_coverage_args"});
@@ -111,13 +116,13 @@ test("9B: coverage tool checks authorization, input and stays within one model t
 });
 
 test("9B: invalid evidence cannot certify even a single source",async()=>{
-  const read=jest.fn(async(id:string,v:number,o:number,b:number)=>({
+  const read=jest.fn(async(id:string,v:number,o:number=0,b:number=6000)=>({
     ...evidence(id,v,o,b,text),
     evidence:{recordId:id,recordVersion:v,startChar:o,endChar:999999,coverage:"excerpt"},
   }));
   const tools=harness(read);
   expect(await tools.run("read_selected_article_chunk",chunks(0,0)))
     .toEqual({error:"tool_failed_or_unavailable"});
-  expect((await tools.run("selected_article_read_coverage",{})).entries[0])
+  expect(entry(await tools.run("selected_article_read_coverage",{}),0))
     .toMatchObject({status:"unread",verifiedChars:0});
 });
