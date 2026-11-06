@@ -139,3 +139,17 @@ test("9T1: mixed LLM article themes cannot silently save an incorrect continuati
   await catalog.run("select_local_articles",{...request,topic:"космос"});
   expect(catalog.finish().articlePage).toBeUndefined();
 });
+
+test("9B: selected article handles contain only ID/version and deduplicate across model pages",async()=>{
+  const {catalog,selectArticles}=harness();
+  await catalog.run("select_local_articles",request);
+  selectArticles.mockResolvedValueOnce({...page,records:[
+    {id:"note-1",version:3,title:"Повтор",section:"ИИ",createdAt:"2026-09-01T12:00:00.000Z"},
+    {id:"note-2",version:1,title:"Новая",section:"ИИ",createdAt:"2026-08-30T12:00:00.000Z"},
+  ]});
+  await catalog.run("select_local_articles",{...request,beforeCreatedAt:"2026-09-01T12:00:00.000Z",beforeId:"note-1"});
+  expect(catalog.finish().articlePage?.selected).toEqual([
+    {id:"note-1",version:3},{id:"note-2",version:1},
+  ]);
+  expect(JSON.stringify(catalog.finish().articlePage?.selected)).not.toContain("Повтор");
+});

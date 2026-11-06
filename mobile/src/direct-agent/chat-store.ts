@@ -293,7 +293,8 @@ export class DirectChatStore {
             ...(intent.topic!=="ai" ? {topic:intent.topic,queryTerms:intent.queryTerms} : {}),
             savedFrom:intent.savedFrom,savedBefore:intent.savedBefore,
             startLocal:intent.startLocal,endLocal:intent.endLocal,
-            ...(found.nextCursor ? {nextCursor:found.nextCursor} : {})}}],
+            ...(found.nextCursor ? {nextCursor:found.nextCursor} : {}),
+            selected:found.records.map(n=>({id:n.id,version:n.version}))}}],
       });
     }catch(e){
       if(this.disposed)return;
@@ -358,7 +359,9 @@ export class DirectChatStore {
             ...(page.dateMode==="published" ? {dateMode:"published" as const} : {}),
             ...(page.kind==="saved_topic_links" ? {topic:page.topic,queryTerms:page.queryTerms} : {}),
             startLocal:page.startLocal,endLocal:page.endLocal,
-            ...(found.nextCursor ? {nextCursor:found.nextCursor} : {})}},
+            ...(found.nextCursor ? {nextCursor:found.nextCursor} : {}),
+            selected:[...(page.selected||[]),...found.records.map(n=>({id:n.id,version:n.version}))]
+              .filter((n,i,all)=>all.findIndex(m=>m.id===n.id)===i).slice(-24)}},
       ]});
     }catch(e){
       if(this.disposed)return;

@@ -63,3 +63,23 @@ test("photo search turn retains up to 20 distinct originals across reopen",()=>{
   }));
   expect(c?.rows[0].memory?.map(m=>m.photoAttachmentId)).toEqual(memory.map(m=>m.photoAttachmentId));
 });
+
+test("9B: article selection handles survive encrypted conversation reopen and reject unsafe IDs",()=>{
+  const page={kind:"saved_topic_links",topic:"космос",queryTerms:["космос"],
+    savedFrom:"2026-10-31T00:00:00.000Z",savedBefore:"2026-11-07T00:00:00.000Z",
+    startLocal:"2026-10-31",endLocal:"2026-11-06",
+    selected:[{id:"article-01",version:3},{id:"article-02",version:7}],
+  };
+  const chat={id:"articles",title:"Подборка",createdAt:"2026-11-06",updatedAt:"2026-11-06",
+    question:"",drafts:[],rows:[{id:"answer",role:"assistant",text:"Две статьи",articlePage:page}]};
+  const restored=parseConversation(JSON.stringify(chat));
+  expect(restored?.rows[0].articlePage).toMatchObject(page);
+  const altered=JSON.parse(JSON.stringify(chat));
+  altered.rows[0].articlePage.selected=[{id:"article-01",version:3},{id:"../sensitive",version:1}];
+  const unsafe=parseConversation(JSON.stringify(altered));
+  expect(unsafe?.rows[0].articlePage?.selected).toBeUndefined();
+  expect(unsafe?.rows[0].articlePage?.topic).toBe("космос");
+  const repeated=JSON.parse(JSON.stringify(chat));
+  repeated.rows[0].articlePage.selected=[{id:"article-01",version:3},{id:"article-01",version:4}];
+  expect(parseConversation(JSON.stringify(repeated))?.rows[0].articlePage?.selected).toBeUndefined();
+});

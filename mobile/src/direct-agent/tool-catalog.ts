@@ -66,6 +66,9 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
         savedFrom:intent.savedFrom,savedBefore:intent.savedBefore,
         startLocal:intent.startLocal,endLocal:intent.endLocal,
         ...(page.nextCursor ? {nextCursor:page.nextCursor} : {}),
+        selected:[...(persistedArticle && articleFilterKey===filterKey ? persistedArticle.selected||[] : []),
+          ...page.records.map(n=>({id:n.id,version:n.version}))]
+          .filter((n,i,all)=>all.findIndex(m=>m.id===n.id)===i).slice(-24),
       };
     } else persistedArticle=undefined;
     return {scope:page.scope,matchMode:page.matchMode,count:page.count,
