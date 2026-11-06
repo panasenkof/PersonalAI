@@ -14,7 +14,8 @@ export function MarkdownText({ text, style, numberOfLines, articleReadReport, on
 }) {
   const t = useTheme();
   const mono = Platform.OS === "ios" ? "Menlo" : "monospace";
-  const citationMode=!!articleReadReport && !!onArticleSourcePress;
+  // Even without a trusted report, an invented marker must not look clickable.
+  const citationMode=!!onArticleSourcePress;
   if (!hasMarkdown(text,citationMode)) return <Text selectable numberOfLines={numberOfLines} style={style}>{text}</Text>;
   const plain = (s: Span) => !s.bold && !s.italic && !s.code && !s.url && !s.citation;
   const spans = (items: Span[], prefix: string) => items.length === 1 && plain(items[0]) ? items[0].text : items.map((s, i) => {
