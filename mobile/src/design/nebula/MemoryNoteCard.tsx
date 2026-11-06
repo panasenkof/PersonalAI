@@ -84,7 +84,7 @@ export function MemoryNoteCard({ note, sectionName, selected, selecting = false,
       <Feather name="more-vertical" size={22} color={t.secondary} />
     </Pressable> : null}
     {!selecting && onRestore ? <View style={{ marginTop: nebulaSpacing.xs, alignItems: "flex-end" }}>
-      <NebulaAction testID={"memory-restore-" + note.id} icon="rotate-ccw" label="Восстановить" size="compact"
+      <NebulaAction testID={"memory-restore-" + note.id} icon="rotate-ccw" label="Вернуть" size="compact"
         accessibilityLabel={"Восстановить заметку " + title} disabled={restoreDisabled} onPress={onRestore} />
     </View> : null}
   </View>;
