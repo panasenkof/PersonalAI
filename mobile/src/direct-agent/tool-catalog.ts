@@ -7,7 +7,9 @@ import { createWebTools } from "./web-tools";
 import { beginTask, recordEvidence, TASK_STATE_TOOL, updateTaskInterpretation } from "./task-state";
 import type { TaskEvidence, ToolOutcome } from "./task-state";
 import { webPreference } from "./dialogue";
-import { savedArticleToolIntent } from "./article-selection";
+import { savedArticleToolIntent, savedAiArticlePageIntent } from "./article-selection";
+import type { SavedArticleIntent } from "./article-selection";
+import type { ChatArticlePage } from "./conversations";
 
 export type ToolDefinition = { name: string; description: string; parameters: object };
 export type ToolSpec = {
@@ -33,6 +35,53 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
   const articleClock = new Date();
   let articlePages = 0;
   const articleRequests = new Set<string>();
+  // Persist the same authorized filter+calendar window+cursor already used by
+  // the no-LLM chat picker. The LLM cannot invent the next-page state.
+  let persistedArticle: ChatArticlePage | undefined;
+  let articleFilterKey: string | undefined;
+  let mixedArticleFilters = false;
+  async function readArticleSelection(
+    intent: SavedArticleIntent, cursor?: {beforeCreatedAt:string;beforeId:string},
+  ): Promise<Record<string, unknown>> {
+    const key = JSON.stringify([intent.topic,intent.dateMode,intent.savedFrom,intent.savedBefore,
+      cursor?.beforeCreatedAt??null,cursor?.beforeId??null]);
+    if (articleRequests.has(key)) return { error:"article_page_already_requested" };
+    if (articlePages >= 3) return { error:"article_page_budget_exhausted",
+      hint:"Попроси пользователя «Показать ещё»: исходные тема, даты и курсор сохранятся в диалоге." };
+    articlePages++; articleRequests.add(key);
+    options.status?.("Выбираю сохранённые статьи");
+    const page = await options.selectArticles!(intent,cursor);
+    if (page.scope!=="standard_active_saved_links" || !Array.isArray(page.records) ||
+        !Number.isSafeInteger(page.count) || page.count<0 || typeof page.hasMore!=="boolean" ||
+        (page.hasMore && !page.nextCursor)) return { error:"invalid_article_reader_result" };
+    const filterKey=JSON.stringify([intent.topic,intent.dateMode,intent.savedFrom,intent.savedBefore]);
+    if (articleFilterKey !== undefined && articleFilterKey !== filterKey) mixedArticleFilters=true;
+    articleFilterKey=filterKey;
+    if (!mixedArticleFilters) {
+      persistedArticle={
+        kind:intent.topic==="ai" ? "saved_ai_links" : "saved_topic_links",
+        ...(intent.dateMode==="published" ? {dateMode:"published" as const} : {}),
+        ...(intent.topic==="ai" ? {} : {topic:intent.topic,queryTerms:intent.queryTerms}),
+        savedFrom:intent.savedFrom,savedBefore:intent.savedBefore,
+        startLocal:intent.startLocal,endLocal:intent.endLocal,
+        ...(page.nextCursor ? {nextCursor:page.nextCursor} : {}),
+      };
+    } else persistedArticle=undefined;
+    return {scope:page.scope,matchMode:page.matchMode,count:page.count,
+      records:page.records.slice(0,8).map(n=>({
+        id:n.id,version:n.version,title:n.title.slice(0,160),
+        section:n.section.slice(0,80),createdAt:n.createdAt,
+        ...(n.publicationDay ? {publicationDay:n.publicationDay} : {}),
+        ...(n.duplicateCount!==undefined ? {duplicateCount:n.duplicateCount} : {}),
+      })),
+      hasMore:page.hasMore,...(page.nextCursor ? {nextCursor:page.nextCursor} : {}),
+      ...(page.unknownPublicationCount!==undefined
+        ? {unknownPublicationCount:page.unknownPublicationCount} : {}),
+      selection:{topic:intent.topic,dateMode:intent.dateMode,fromLocal:intent.startLocal,
+        throughLocal:intent.endLocal,dateEvidence:intent.dateMode==="published"
+          ? "html_meta_source_claim" : "local_save_time"},
+      contentIncluded:false};
+  }
   const specs: ToolSpec[] = [
     { definition: { name: "search_local_notes", description: "Найти заметки на телефоне по 1–3 ключевым словам. Найденный фрагмент не является полным чтением записи.", parameters: queryParameters }, effect: "read",
       execute: async args => {
@@ -200,32 +249,27 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
             Number.isFinite(Date.parse(t)) && new Date(t).toISOString() === t &&
             typeof id === "string" && id.length > 0 && id.length <= 128)))
           return { error: "invalid_article_cursor" };
-        const key = JSON.stringify([intent.topic, intent.dateMode, intent.savedFrom, intent.savedBefore, t, id]);
-        if (articleRequests.has(key)) return { error: "article_page_already_requested" };
-        if (articlePages >= 3) return { error: "article_page_budget_exhausted", hint: "Покажи частичный результат и попроси пользователя продолжить." };
-        articlePages++; articleRequests.add(key);
-        options.status?.("Выбираю сохранённые статьи");
-        const page = await options.selectArticles!(intent, id === null ? undefined : { beforeCreatedAt: t as string, beforeId: id as string });
-        if (page.scope !== "standard_active_saved_links" || !Array.isArray(page.records) ||
-            !Number.isSafeInteger(page.count) || page.count < 0 || typeof page.hasMore !== "boolean")
-          return { error: "invalid_article_reader_result" };
-        return { scope: page.scope, matchMode: page.matchMode, count: page.count,
-          records: page.records.slice(0, 8).map(n => ({
-            id: n.id, version: n.version, title: n.title.slice(0, 160),
-            section: n.section.slice(0, 80), createdAt: n.createdAt,
-            ...(n.publicationDay ? { publicationDay: n.publicationDay } : {}),
-            ...(n.duplicateCount !== undefined ? { duplicateCount: n.duplicateCount } : {}),
-          })),
-          hasMore: page.hasMore, ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
-          ...(page.unknownPublicationCount !== undefined ? { unknownPublicationCount: page.unknownPublicationCount } : {}),
-          selection: { topic: intent.topic, dateMode: intent.dateMode, fromLocal: intent.startLocal,
-            throughLocal: intent.endLocal, dateEvidence: intent.dateMode === "published" ? "html_meta_source_claim" : "local_save_time" },
-          contentIncluded: false };
+        return readArticleSelection(intent,id===null?undefined:{beforeCreatedAt:t as string,beforeId:id as string});
       },
       verify: (r: Record<string, unknown>) => r.scope === "standard_active_saved_links" &&
         r.matchMode === "one_of_fts_phrases" && r.contentIncluded === false &&
         Number.isSafeInteger(r.count) && Array.isArray(r.records) && typeof r.hasMore === "boolean"
         ? (r.records as unknown[]).length ? "found" as const : "empty" as const : "failed" as const,
+    }] : []),
+    ...(options.selectArticles && options.articleContinuation?.nextCursor ? [{
+      definition: {name:"continue_local_articles",
+        description:"Продолжить прежнюю сохранённую подборку статей: ИСХОДНАЯ тема, режим дат и зафиксированное календарное окно из зашифрованного диалога. Не пересчитывать неделю и не начинать с первой страницы. Только метаданные, полный текст дочитывать отдельно.",
+        parameters:{type:"object",properties:{},required:[],additionalProperties:false},
+      },effect:"read" as const,
+      execute:async(args:Record<string,unknown>)=>{
+        if (Object.keys(args).length) return {error:"invalid_article_tool_arguments"};
+        const previous=options.articleContinuation!;
+        return readArticleSelection(savedAiArticlePageIntent(previous),previous.nextCursor);
+      },
+      verify:(r:Record<string,unknown>)=>r.scope==="standard_active_saved_links" &&
+        r.contentIncluded===false && Array.isArray(r.records) &&
+        typeof r.hasMore==="boolean" ? (r.records as unknown[]).length
+        ? "found" as const : "empty" as const : "failed" as const,
     }] : []),
     { definition: { name: FACT_TOOL_NAME, description: FACT_TOOL_DESCRIPTION, parameters: factToolParameters(options.sections) }, effect: "proposal",
       execute: async args => {
@@ -278,9 +322,10 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
     options.diagnostic?.("tool.outcome_verified", { name: canonical, effect: spec?.effect || "unknown", outcome });
     return { ...result, ...(outcome !== "failed" ? { outcome } : {}) };
   }
-  function finish(): Pick<DirectResult, "taskState" | "proposalIds"> {
+  function finish(): Pick<DirectResult, "taskState" | "proposalIds" | "articlePage"> {
     state = { ...state, turnStatus: "answered" }; emit();
-    return { taskState: state, proposalIds: [...proposalIds] };
+    return { taskState: state, proposalIds: [...proposalIds],
+      ...(persistedArticle ? {articlePage:persistedArticle} : {}) };
   }
   const observeSources = (urls: string[]) => { if (urls.length) observe({ tool: "web_search", outcome: "found", subject: options.prompt.slice(0, 120), excerpt: urls.join("\n").slice(0, 600) }); };
   return { definitions: specs.map(s => s.definition), run, finish, observeSources, memory: () => [...used.values()].slice(0, 8) };
