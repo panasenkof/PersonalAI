@@ -92,3 +92,35 @@ test("bounded OR-FTS rejects unsafe query terms and inconsistent date windows", 
   await expect(listAllowedNotes(db as never,{query:"AI",queryTerms:["ИИ"]})).rejects.toThrow("invalid_catalog_query_terms");
   await expect(listAllowedNotes(db as never,{savedFrom:"2026-11-07T00:00:00.000Z",savedBefore:"2026-11-06T00:00:00.000Z"})).rejects.toThrow("invalid_catalog_date_window");
 });
+
+test("stage 9A2: saved-date paging handles tied timestamps without duplicates or omissions", async () => {
+  const db = new Db();
+  for (let i = 0; i < 23; i++) {
+    db.add("p" + String(i).padStart(2,"0"), "c-standard", "active", "standard",
+      "Нейросети " + i, "2026-11-06T13:00:00.000Z");
+    db.sqlite.prepare("UPDATE memory_entities SET created_at=?,payload_json=? WHERE id=?")
+      .run(i < 14 ? "2026-11-05T12:00:00.000Z" : "2026-11-04T12:00:00.000Z",
+        JSON.stringify({body:"Нейросети",source_url:"https://example.org/" + i}),
+        "p" + String(i).padStart(2,"0"));
+  }
+  const filters = {queryTerms:["нейросети"], linkedOnly:true,sortBySaved:true,
+    savedFrom:"2026-11-01T00:00:00.000Z",savedBefore:"2026-11-07T00:00:00.000Z"};
+  const seen: string[] = [];
+  let cursor: {beforeCreatedAt:string;beforeId:string}|undefined;
+  for (let pageNum=0;pageNum<4;pageNum++) {
+    const page=await listAllowedNotes(db as never,{...filters,...cursor,limit:8});
+    seen.push(...page.records.map(x=>x.id));
+    if (!page.hasMore) { expect(page.nextCursor).toBeUndefined(); break; }
+    expect(page.nextCursor?.beforeCreatedAt).toBeDefined();
+    cursor=page.nextCursor as {beforeCreatedAt:string;beforeId:string};
+  }
+  expect(seen).toHaveLength(23);
+  expect(new Set(seen).size).toBe(23);
+  expect((await countAllowedNotes(db as never,filters)).count).toBe(23);
+  await expect(listAllowedNotes(db as never,{...filters,beforeCreatedAt:"bad",beforeId:"p00"}))
+    .rejects.toThrow("invalid_catalog_saved_cursor");
+  await expect(listAllowedNotes(db as never,{...filters,beforeId:"p00"}))
+    .rejects.toThrow("invalid_catalog_saved_cursor");
+  await expect(listAllowedNotes(db as never,{beforeCreatedAt:"2026-11-05T12:00:00.000Z",beforeId:"p00"}))
+    .rejects.toThrow("invalid_catalog_cursor");
+});
