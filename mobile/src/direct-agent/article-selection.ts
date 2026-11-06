@@ -17,6 +17,15 @@ export type SavedArticleIntent = {
 };
 
 const AI_TERMS = ["ИИ", "AI", "искусственный интеллект", "нейросети", "нейросеть", "LLM"];
+/** Continue a previous saved-time window, never reinterpret it using today's date. */
+export function savedAiArticlePageIntent(page: {
+  savedFrom:string;savedBefore:string;startLocal:string;endLocal:string;
+}): SavedArticleIntent {
+  return {dateMode:"saved",topic:"ai",savedFrom:page.savedFrom,
+    savedBefore:page.savedBefore,startLocal:page.startLocal,
+    endLocal:page.endLocal,queryTerms:AI_TERMS};
+}
+
 const localDay = (d: Date) => `${String(d.getFullYear()).padStart(4,"0")}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 
 /** Exclude publication-date requests: e.created_at is a SAVE timestamp. */
