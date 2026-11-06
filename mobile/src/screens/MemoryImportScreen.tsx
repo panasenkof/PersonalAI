@@ -552,15 +552,15 @@ export function MemoryImportScreen() {
           onPress={() => controller.current?.abort()} />
       </View> : null}
       {incoming && !preparing ? <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-        <NebulaAction icon="refresh-cw" label="Повторить подготовку" disabled={busy}
+        <NebulaAction icon="refresh-cw" label="Повторить подготовку" size="compact" disabled={busy}
           onPress={() => setPrepareAttempt(n => n + 1)} />
-        {position + 1 < incoming.length ? <NebulaAction icon="skip-forward" label="Пропустить материал"
+        {position + 1 < incoming.length ? <NebulaAction icon="skip-forward" label="Пропустить материал" size="compact"
           disabled={busy || preparing} onPress={() => { if (profile) setSkipApproval({ profile, position }); }} /> : null}
       </View> : null}
       {notice ? <Text accessibilityRole="alert" style={{ color: t.muted }}>{notice}</Text> : null}
       {hasMaterial ? <>
         <TextInput accessibilityLabel="Сведения из файла" editable={!busy} multiline value={body} onChangeText={setBody} maxLength={60_000} style={[field, { minHeight: 96, textAlignVertical: "top" }]} placeholder={linkOnly ? "Моя заметка — что важно сохранить? (необязательно)" : "Добавьте подпись — необязательно"} placeholderTextColor={t.muted} />
-        {body.trim() ? <NebulaAction icon="zap" label="Улучшить подпись с ИИ" disabled={busy} onPress={() => setAiField("body")} /> : null}
+        {body.trim() ? <NebulaAction icon="zap" label="Улучшить подпись с ИИ" size="compact" disabled={busy} onPress={() => setAiField("body")} /> : null}
         <Pressable accessibilityRole="button" accessibilityLabel="Выбрать коллекцию" disabled={busy} onPress={() => { Keyboard.dismiss(); setSectionOpen(true); }} style={{ ...button, backgroundColor: t.panel, alignItems: "flex-start" }}><Text style={{ color: t.text }}>Коллекция: {collections.find(c => c.id === collectionId)?.name || "Заметки"} · Изменить</Text></Pressable>
         <View testID="import-access-options" style={{ gap: 8 }}>
           <Text accessibilityRole="header" style={{ color: t.text, fontWeight: "700" }}>Доступ к записи</Text>
@@ -683,8 +683,8 @@ export function MemoryImportScreen() {
           <TextInput accessibilityLabel="Распознанное содержимое файла" editable={!busy} multiline
             scrollEnabled value={extractedText} onChangeText={setExtractedText} maxLength={60_000}
             style={[field, { minHeight: 140, maxHeight: 188, textAlignVertical: "top" }]} />
-          <NebulaAction icon="zap" label="Улучшить текст файла с ИИ" disabled={busy} onPress={() => setAiField("extracted")} />
-          {files.map((source, index) => <NebulaAction key={source.uri} icon="refresh-cw"
+          <NebulaAction icon="zap" label="Улучшить текст файла с ИИ" size="compact" disabled={busy} onPress={() => setAiField("extracted")} />
+          {files.map((source, index) => <NebulaAction key={source.uri} icon="refresh-cw" size="compact"
             label={files.length === 1 ? "Распознать заново" : "Распознать заново · " + source.name}
             disabled={busy || !canExtractFile(source)} onPress={() => void extract(index)} />)}
         </> : null}
