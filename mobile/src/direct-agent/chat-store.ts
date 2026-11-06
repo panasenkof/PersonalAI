@@ -491,6 +491,25 @@ export class DirectChatStore {
       const agentOptions: Parameters<typeof runDirectAgent>[0] = { settings, maxRequests, prompt, attachments, skipLocalMemory:Boolean(internetPhotoId), history, previousSources, taskState, pendingNotes: internetPhotoId ? [] : current.drafts,
         ...(!internetPhotoId && articleContinuation ? {articleContinuation} : {}),
         ...(!internetPhotoId && articleSelection ? {articleSelection} : {}),
+        // Scratchpad belongs to this unlocked conversation and is serialized by
+        // the existing SQLCipher conversation writer, not the personal-note writer.
+        workspaceAvailable: () => !aborter.signal.aborted && localMemorySessionUnlocked() &&
+          !this.disposed && Boolean(this.snapshot.conversations.find(c=>c.id===id && !c.deleting)),
+        saveWorkspace: async next => {
+          if (aborter.signal.aborted || !localMemorySessionUnlocked() || this.disposed)
+            throw new Error("workspace_locked");
+          const active=this.snapshot.conversations.find(c=>c.id===id && !c.deleting);
+          if(!active)throw new Error("workspace_conversation_unavailable");
+          const state=mergeTaskReceipts(next,active.taskState);
+          // Reuse the serialized SQLCipher conversation writer. An in-memory
+          // update is NOT a successful workspace tool receipt.
+          await this.persist({...active,taskState:state});
+          if(aborter.signal.aborted || !localMemorySessionUnlocked() || this.disposed)
+            throw new Error("workspace_locked");
+          const latest=this.snapshot.conversations.find(c=>c.id===id && !c.deleting);
+          if(!latest)throw new Error("workspace_conversation_unavailable");
+          this.update(id,{taskState:mergeTaskReceipts(state,latest.taskState)});
+        },
         onTaskState: next => {
           const active = this.snapshot.conversations.find(c => c.id === id);
           if (active && !aborter.signal.aborted) this.update(id, { taskState: mergeTaskReceipts(next, active.taskState) }, true);
