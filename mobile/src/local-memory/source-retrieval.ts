@@ -214,6 +214,7 @@ export async function searchApprovedSourceSegments(db: SQL, query: string, limit
     const revisions=new Map<string,string|null>();
     let offset=startOffset, exhausted=false;
     for (let window=0;window<MAX_WINDOWS;window++) {
+      const pageStart=offset;
       const candidates = await tx.getAllAsync<Row>(
         `SELECT e.id AS record_id,e.record_version,e.title AS record_title,
               a.id AS attachment_id,a.name AS attachment_name,a.mime AS attachment_mime,
@@ -259,7 +260,7 @@ export async function searchApprovedSourceSegments(db: SQL, query: string, limit
       // Cursor points immediately AFTER the last returned/checked candidate.
       // The next tool call resumes without repeating any already sent segment.
       if (result.segments.length>=limit) {
-        exhausted=offset === startOffset+batch.length && candidates.length<=PAGE_SIZE;
+        exhausted=offset === pageStart+batch.length && candidates.length<=PAGE_SIZE;
         break;
       }
       if (candidates.length<=PAGE_SIZE) { exhausted=true; break; }
