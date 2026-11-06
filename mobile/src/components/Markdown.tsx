@@ -26,7 +26,7 @@ export function MarkdownText({ text, style, numberOfLines, articleReadReport, on
           "Открыть сохранённую заметку "+verified.title+", прочитанный диапазон "+
           verified.startChar+"–"+verified.endChar : "Источник не проверен"}
         onPress={verified ? ()=>onArticleSourcePress?.(verified.id) : undefined}
-        style={verified ? {color:t.accent,textDecorationLine:"underline"} : {color:t.muted}}>
+        style={verified ? {color:t.accent,textDecorationLine:"underline" as const} : {color:t.muted}}>
         {verified ? "〔"+verified.index+"〕" : "〔источник не проверен〕"}
       </Text>;
     }
