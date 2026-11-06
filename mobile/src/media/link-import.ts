@@ -150,10 +150,10 @@ export function articleText(html: string): ArticleText {
 export type HtmlPublicationClaim = { date: string; evidence: "html_meta"; sourceAttribute: "article:published_time" | "datePublished" };
 export function htmlPublicationClaim(html: string): HtmlPublicationClaim | undefined {
   const values: HtmlPublicationClaim[]=[];
-  const tags=html.match(/<meta\\b[^>]{0,2000}>/gi) || [];
+  const tags=html.match(/<meta\b[^>]{0,2000}>/gi) || [];
   for(const tag of tags.slice(0,150)) {
     const attributes=new Map<string,string>();
-    const pattern=/([a-z][a-z0-9:_-]*)\\s*=\\s*(?:"([^"]{0,250})"|'([^']{0,250})')/gi;
+    const pattern=/([a-z][a-z0-9:_-]*)\s*=\s*(?:"([^"]{0,250})"|'([^']{0,250})')/gi;
     let match:RegExpExecArray|null;
     while((match=pattern.exec(tag)))attributes.set(match[1].toLowerCase(),htmlEntities(match[2]??match[3]));
     const name=(attributes.get("property")||attributes.get("name")||"").toLowerCase();
@@ -161,7 +161,7 @@ export function htmlPublicationClaim(html: string): HtmlPublicationClaim | undef
     const raw=(attributes.get("content")||"").trim();
     // Explicit ISO calendar day or ISO datetime with timezone. Never accept
     // locale-dependent Date.parse or timezone-less timestamps.
-    const matchDay=/^(\\d{4}-\\d{2}-\\d{2})(?:T\\d{2}:\\d{2}(?::\\d{2}(?:\\.\\d{1,3})?)?(?:Z|[+-]\\d{2}:\\d{2}))?$/i.exec(raw);
+    const matchDay=/^(\d{4}-\d{2}-\d{2})(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2}))?$/i.exec(raw);
     if(!matchDay) return undefined;
     const [year,month,day]=matchDay[1].split("-").map(Number);
     const exact=new Date(Date.UTC(year,month-1,day));
