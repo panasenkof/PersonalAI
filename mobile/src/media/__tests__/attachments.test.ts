@@ -676,3 +676,21 @@ test("G: trashed or unrelated sources cannot re-recognize a note",async()=>{
   sqlite.prepare("UPDATE memory_entities SET record_status='trashed' WHERE id=?").run(note.id);
   await expect(savedOriginalRevision("guest",attachment)).rejects.toThrow("stale_memory_version");
 });
+
+test("9A5: save site-claimed publication date with source provenance, never infer a date for link-only notes",async()=>{
+  const sourceUrl="https://example.org/articles/ai";
+  const claim={date:"2026-11-03",evidence:"html_meta" as const,sourceAttribute:"article:published_time" as const};
+  const id=await saveMediaNote("guest",{title:"Статья ИИ",body:"Текст",sensitivity:"standard",sourceUrl,publicationClaim:claim});
+  const entity=(await new SqliteMemoryRepository(mockDb).entity(id))!;
+  expect(entity.payload).toMatchObject({
+    source_url:sourceUrl,source_publication_date:"2026-11-03",
+    source_publication_evidence:"html_meta",source_publication_attribute:"article:published_time",
+  });
+  const other=await saveMediaNote("guest",{title:"Только ссылка",body:"Пометка",sensitivity:"standard",sourceUrl:"https://example.org/link-only"});
+  const link=(await new SqliteMemoryRepository(mockDb).entity(other))!;
+  expect(link.payload).not.toHaveProperty("source_publication_date");
+  await expect(saveMediaNote("guest",{title:"Bad",body:"",sensitivity:"standard",publicationClaim:claim}))
+    .rejects.toThrow("invalid_source_publication_claim");
+  await expect(saveMediaNote("guest",{title:"Bad",body:"",sensitivity:"standard",sourceUrl,
+    publicationClaim:{...claim,date:"2026-02-30"}})).rejects.toThrow("invalid_source_publication_claim");
+});
