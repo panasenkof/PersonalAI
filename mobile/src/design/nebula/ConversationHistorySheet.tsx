@@ -95,13 +95,12 @@ export function ConversationHistorySheet({
         </Pressable>
       </View>;
     })}
-    {shown.length < results.length ? <Pressable testID="chat-history-more"
-      accessibilityRole="button" accessibilityLabel="Показать ещё диалоги"
-      onPress={() => setLimit(previous => previous + PAGE_SIZE)}
-      style={{ minHeight: nebulaTouch.minimum, justifyContent: "center", alignItems: "center", borderWidth: 1,
-        borderRadius: 16, borderColor: t.line }}>
-      <Text style={{ color: t.accent, fontWeight: "600" }}>{`Показать ещё · ${shown.length} из ${results.length}`}</Text>
-    </Pressable> : null}
+    {shown.length < results.length ? <View style={{ alignItems: "flex-start" }}>
+      <NebulaAction testID="chat-history-more" size="compact" icon="chevron-down"
+        label={`Показать ещё · ${shown.length} из ${results.length}`}
+        accessibilityLabel="Показать ещё диалоги"
+        onPress={() => setLimit(previous => previous + PAGE_SIZE)} />
+    </View> : null}
     <NebulaAction icon="plus" label="Новый диалог"
       accessibilityLabel="Создать новый диалог" onPress={onNewChat} />
   </BottomSheet>;
