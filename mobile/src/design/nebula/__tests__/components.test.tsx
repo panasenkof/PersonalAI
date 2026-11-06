@@ -53,10 +53,10 @@ describe("Nebula base components", () => {
     const action = view.getByLabelText("Очистить корзину");
     const style = typeof action.props.style === "function"
       ? action.props.style({ pressed: false }) : action.props.style;
-    expect(style.minHeight).toBe(40);
-    expect(style.minWidth).toBe(40);
-    expect(style.paddingHorizontal).toBe(12);
-    expect(action.props.hitSlop).toBe(4); // 40dp visual + 4dp each side
+    expect(style.minHeight).toBe(28);
+    expect(style.minWidth).toBe(28);
+    expect(style.paddingHorizontal).toBe(8);
+    expect(action.props.hitSlop).toBe(10); // 28dp visual + 10dp each side = 48dp target
     expect(style.borderWidth).toBe(1);
     expect(style.borderColor).toBe(nebulaColors("dark").actionOutline);
     fireEvent.press(action);
