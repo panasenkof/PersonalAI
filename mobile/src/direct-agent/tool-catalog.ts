@@ -119,7 +119,8 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
         typeof result.title!=="string" || typeof content!=="string" ||
         !Number.isSafeInteger(total) || Number(total)<0 ||
         !Number.isSafeInteger(result.offset) || result.offset!==offset ||
-        offset>Number(total) || content.length>budget || end>Number(total) ||\n        (content.length===0 && Number(total)>0) ||
+        offset>Number(total) || content.length>budget || end>Number(total) ||
+        (content.length===0 && Number(total)>0) ||
         typeof result.hasMore!=="boolean" ||
         result.hasMore!==(end<Number(total)) ||
         (result.hasMore && (result.nextOffset!==end || end===offset)) ||
