@@ -14,6 +14,7 @@ import type { DiagnosticTrace } from "./diagnostics";
 import { DEFAULT_MODEL_CALL_LIMIT, MAX_DIRECT_REPLY_TOKENS, MAX_REASONING_REPLY_TOKENS, MAX_USER_PROMPT_CHARS, TRUNCATED_NOTE, isReasoningModel, validateModelCallLimit } from "./limits";
 import type { MemorySnippet, NoteProposal } from "./memory";
 import { FACT_TOOL_NAME, factGuide } from "./fact-tool";
+import type { SavedArticleIntent, SavedArticleShortlist } from "./article-selection";
 import type { MemorySection } from "./fact-tool";
 
 export type AgentTurn = { role: "user" | "assistant"; content: string; attachments?: ChatAttachment[] };
@@ -50,6 +51,8 @@ export type DirectAgentOptions = {
     extractionId: string, segmentId: string, offset?: number, budget?: number) => Promise<Record<string, unknown>>;
   list?: (options: { collectionId?: string; query?: string; limit?: number; beforeUpdatedAt?: string; beforeId?: string }) => Promise<Record<string, unknown>>;
   count?: (options: { collectionId?: string; query?: string }) => Promise<Record<string, unknown>>;
+  /** 9T1: read-only selection via existing SQLCipher article reader, scoped by the host. */
+  selectArticles?: (intent: SavedArticleIntent, cursor?: { beforeCreatedAt: string; beforeId: string }) => Promise<SavedArticleShortlist>;
   propose: (note: NoteProposal) => string | void;
   /** The user's memory sections the assistant may propose records for. */
   sections?: MemorySection[];
@@ -91,6 +94,7 @@ export { MAX_DIRECT_REPLY_TOKENS, MAX_REASONING_REPLY_TOKENS, TRUNCATED_NOTE, is
 const systemPrompt = (sections?: MemorySection[]) =>
   "Ты персональный помощник PersAI, работающий на телефоне пользователя. " +
   "Для вопросов о предпочтениях и заметках используй search_local_notes, если он доступен. " +
+  "Для выборки сохранённых статей по дате используй select_local_articles, если он доступен; ответ инструмента — только метаданные. Проверяй count/hasMore, дочитывай текст read_local_note по id/version перед обобщением и не выдавай ссылку без текста за прочитанную статью. " +
   "Если найденного фрагмента недостаточно, используй read_local_note с id и version из поиска; не считай отрывок полным документом. " +
   "Если слова встречаются только внутри вложений, используй search_local_source_segments с 1–3 ключевыми словами, затем read_local_source_segment с найденными ID. " +
   "Если в заметке есть распознанный материал, можешь проверить list_local_sources по её id/version и затем read_local_source_segment по точным идентификаторам. " +

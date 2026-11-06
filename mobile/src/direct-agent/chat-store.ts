@@ -501,6 +501,14 @@ export class DirectChatStore {
         }),
         list: async filters => ({ ...await withLocalMemoryDatabase(this.profile, db => listAllowedNotes(db, filters)) }),
         count: async filters => ({ ...await withLocalMemoryDatabase(this.profile, db => countAllowedNotes(db, filters)) }),
+        selectArticles: async (intent, cursor) => {
+          // Reuse the same SQLCipher reader as the no-model article picker.
+          // A mid-call lock, profile suspension or cancellation must not leak its result.
+          if (aborter.signal.aborted || !localMemorySessionUnlocked()) throw new Error("application_locked");
+          const page = await selectSavedAiArticles(this.profile, intent, undefined, cursor);
+          if (aborter.signal.aborted || !localMemorySessionUnlocked()) throw new Error("application_locked");
+          return page;
+        },
         notify: text => {
           trace("turn.notice", { chars: text.length }, { notice: text });
           const c = this.snapshot.conversations.find(c => c.id === id);

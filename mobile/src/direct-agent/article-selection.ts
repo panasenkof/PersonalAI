@@ -76,6 +76,20 @@ export function savedAiArticleIntent(text: string, now = new Date(), hasAttachme
     endLocal:localDay(new Date(now.getFullYear(),now.getMonth(),now.getDate()))};
 }
 
+/** LLM tool input goes through the SAME finite intent parser and calendar rules as the
+ * chat's free read-only article picker. Unsupported topics are rejected, never widened. */
+export function savedArticleToolIntent(
+  topic: unknown, period: unknown, dateMode: unknown, now = new Date(),
+): SavedArticleIntent | null {
+  if (typeof topic !== "string" || topic.trim().length < 2 || topic.length > 70 ||
+      (period !== "last7days" && period !== "thisweek") ||
+      (dateMode !== "saved" && dateMode !== "published")) return null;
+  const phrase = "Найди статьи про " + topic.trim() +
+    (dateMode === "published" ? ", опубликованные" : "") +
+    (period === "thisweek" ? " на этой неделе" : " за последние 7 дней");
+  return savedAiArticleIntent(phrase, now);
+}
+
 type ArticleDb = Parameters<typeof listAllowedNotes>[0];
 export type SavedArticleShortlist = {
   count: number;

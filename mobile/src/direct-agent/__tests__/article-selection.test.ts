@@ -1,4 +1,4 @@
-import { savedAiArticleIntent, savedAiArticlePageIntent, selectSavedAiArticles } from "../article-selection";
+import { savedAiArticleIntent, savedAiArticlePageIntent, savedArticleToolIntent, selectSavedAiArticles } from "../article-selection";
 
 test("saved AI articles: 7 calendar days including today, not rolling 168 hours", () => {
   const at = new Date(2026,10,6,23,57,0);
@@ -75,4 +75,25 @@ test("9A5c: incomplete publication bounds must never silently widen the search",
   const valid=savedAiArticleIntent("Найди статьи об ИИ, опубликованные за неделю",new Date(2026,10,6))!;
   await expect(selectSavedAiArticles("guest",{...valid,publicationFrom:undefined}))
     .rejects.toThrow("invalid_catalog_publication_window");
+});
+
+test("9T1 model-tool input reuses the existing seven local calendar days and publication claim filter",()=>{
+  const now=new Date(2026,10,6,15);
+  expect(savedArticleToolIntent("ИИ","last7days","saved",now))
+    .toMatchObject({topic:"ai",dateMode:"saved",startLocal:"2026-10-31",endLocal:"2026-11-06"});
+  expect(savedArticleToolIntent("локальные LLM","last7days","published",now))
+    .toMatchObject({dateMode:"published",topic:"локальные LLM",
+      publicationFrom:"2026-10-31",publicationBefore:"2026-11-07"});
+  expect(savedArticleToolIntent("MiniLM","thisweek","saved",now))
+    .toMatchObject({startLocal:"2026-11-02",endLocal:"2026-11-06"});
+});
+
+test.each([
+  ["автомобили кроме электромобилей","saved","last7days"],
+  ["несуществующая/тема","saved","last7days"],
+  ["ИИ","unknown","last7days"],
+  ["ИИ","published","month"],
+  ["ИИ".repeat(50),"saved","last7days"],
+])("9T1 rejects requests the canonical parser does not support: %s", (topic,mode,period)=>{
+  expect(savedArticleToolIntent(topic,period,mode,new Date(2026,10,6))).toBeNull();
 });
