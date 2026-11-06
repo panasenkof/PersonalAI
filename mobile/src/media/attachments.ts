@@ -158,9 +158,22 @@ function checkedRecognitions(originals: ImportFile[], values?: FileRecognition[]
   });
 }
 /** Note + original + receipt commit together. Cancellation never leaves a partial note. */
-export async function saveMediaNote(profile: string, input: { file?: ImportFile; files?: ImportFile[]; title: string; body: string; extractedText?: string; recognitions?: FileRecognition[]; sensitivity: 'sensitive' | 'standard'; receipt?: string; collectionId?: string; sourceUrl?: string }, signal?: AbortSignal): Promise<string> {
+export async function saveMediaNote(profile: string, input: { file?: ImportFile; files?: ImportFile[]; title: string; body: string; extractedText?: string; recognitions?: FileRecognition[]; sensitivity: 'sensitive' | 'standard'; receipt?: string; collectionId?: string; sourceUrl?: string; publicationClaim?: {date:string;evidence:'html_meta';sourceAttribute:'article:published_time'|'datePublished'} }, signal?: AbortSignal): Promise<string> {
   return withLocalMemoryDatabase(profile, async db => {
     check(signal);
+    if (input.publicationClaim) {
+      const claim=input.publicationClaim;
+      const m=/^(\\d{4})-(\\d{2})-(\\d{2})$/.exec(claim.date);
+      if (!input.sourceUrl || !/^https:\/\//.test(input.sourceUrl) ||
+          claim.evidence!=="html_meta" ||
+          !["article:published_time","datePublished"].includes(claim.sourceAttribute) || !m)
+        throw new Error("invalid_source_publication_claim");
+      const year=Number(m[1]),month=Number(m[2]),day=Number(m[3]);
+      const date=new Date(Date.UTC(year,month-1,day));
+      if(year<1000 || date.getUTCFullYear()!==year ||
+         date.getUTCMonth()!==month-1 || date.getUTCDate()!==day)
+        throw new Error("invalid_source_publication_claim");
+    }
     // One canonical list for old single-file clients and future multi-picker UI.
     // Keep the single-file fingerprint identical to older app versions.
     if (input.file && input.files !== undefined) throw new Error('Передайте оригиналы одним способом.');
@@ -200,7 +213,7 @@ export async function saveMediaNote(profile: string, input: { file?: ImportFile;
     if (!col) col = await repo.createCollection({ name: input.receipt ? 'Входящие' : 'Заметки', slug, sensitivity: input.receipt ? 'sensitive' : 'standard' });
     const title = input.title.trim().slice(0, 160) || originals[0]?.name || 'Входящая запись';
     const entity = await repo.createEntity({ collection_id: col.id, domain: 'notes', title,
-      payload: { type: 'note', title, ...(input.sourceUrl ? { source_url: input.sourceUrl } : {}), ...(pdfCoverage?.length ? { source_pdf_coverage: pdfCoverage } : {}), body: input.body.trim(), ...(input.extractedText ? { extracted_text: input.extractedText.trim() } : {}), ...(originals.length ? { source_file: originals[0].name, source_media: mediaKind(originals[0]),
+      payload: { type: 'note', title, ...(input.sourceUrl ? { source_url: input.sourceUrl } : {}), ...(input.publicationClaim ? { source_publication_date:input.publicationClaim.date, source_publication_evidence:input.publicationClaim.evidence, source_publication_attribute:input.publicationClaim.sourceAttribute } : {}), ...(pdfCoverage?.length ? { source_pdf_coverage: pdfCoverage } : {}), body: input.body.trim(), ...(input.extractedText ? { extracted_text: input.extractedText.trim() } : {}), ...(originals.length ? { source_file: originals[0].name, source_media: mediaKind(originals[0]),
         ...(originals.length > 1 ? { source_files: originals.map(f => f.name), source_media_types: originals.map(mediaKind) } : {}) } : {}) },
       sensitivity: input.sensitivity, source_kind: 'user', source_ref: input.receipt ? 'android-share' : 'device-import',
     }, async (tx, entityId) => {
