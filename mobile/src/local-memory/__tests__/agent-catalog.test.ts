@@ -165,3 +165,37 @@ test("9A4 exact-link duplicate candidates count only accessible active notes",as
   expect(JSON.stringify(page)).not.toContain("source_url");
   expect(JSON.stringify(page)).not.toContain("example.org");
 });
+
+test("9A5b: publication-day window uses only explicit source metadata, not note save time",async()=>{
+  const db=new Db();
+  for(const [id,col,status,sensitivity,created,pub,evidence] of [
+    ["pub-in","c-standard","active","standard","2026-10-01T12:00:00.000Z","2026-11-03","html_meta"],
+    ["pub-old","c-standard","active","standard","2026-11-06T12:00:00.000Z","2026-10-25","html_meta"],
+    ["unknown","c-standard","active","standard","2026-11-06T12:00:00.000Z","",""],
+    ["untrusted","c-standard","active","standard","2026-11-06T12:00:00.000Z","2026-11-03",""],
+    ["private","c-secret","active","standard","2026-11-06T12:00:00.000Z","2026-11-03","html_meta"],
+    ["trashed","c-standard","trashed","standard","2026-11-06T12:00:00.000Z","2026-11-03","html_meta"],
+  ] as string[][]){
+    db.add(id,col,status,sensitivity,"Нейросети "+id,"2026-11-06T12:00:00.000Z");
+    db.sqlite.prepare("UPDATE memory_entities SET created_at=?,payload_json=? WHERE id=?")
+      .run(created,JSON.stringify({body:"Нейросети",source_url:"https://example.org/"+id,
+        ...(pub?{source_publication_date:pub,source_publication_evidence:evidence,
+          source_publication_attribute:"article:published_time"}:{})}),id);
+  }
+  const base={queryTerms:["Нейросети"],linkedOnly:true,sortBySaved:true};
+  const pub={...base,publicationFrom:"2026-10-31",publicationBefore:"2026-11-07"};
+  expect((await countAllowedNotes(db as never,pub)).count).toBe(1);
+  const found=await listAllowedNotes(db as never,{...pub,limit:8});
+  expect(found.records.map(x=>x.id)).toEqual(["pub-in"]);
+  expect(found.records[0].publicationDay).toBe("2026-11-03");
+  expect((await countAllowedNotes(db as never,{...base,unknownPublicationOnly:true})).count).toBe(2);
+  expect((await countAllowedNotes(db as never,base)).count).toBe(4);
+  await expect(countAllowedNotes(db as never,{...base,publicationFrom:"2026-02-30",publicationBefore:"2026-11-07"}))
+    .rejects.toThrow("invalid_catalog_publication_window");
+  await expect(listAllowedNotes(db as never,{...base,publicationFrom:"2026-10-31"}))
+    .rejects.toThrow("invalid_catalog_publication_window");
+  await expect(listAllowedNotes(db as never,{...pub,savedFrom:"2026-11-01T00:00:00.000Z"}))
+    .rejects.toThrow("invalid_catalog_publication_window");
+  await expect(countAllowedNotes(db as never,{unknownPublicationOnly:true}))
+    .rejects.toThrow("invalid_catalog_publication_window");
+});
