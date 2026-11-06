@@ -446,6 +446,12 @@ function NebulaHomeContent() {
               <Text style={{color:t.accent}}>{m.title}<Text style={{color:t.muted,fontSize:12}}>{(m.section ? " · " + m.section : "") + (m.via === "rewrite" ? " · найдено другими словами" : m.via === "assistant" ? " · нашёл помощник" : "")}</Text></Text>
             </Pressable>)}
         </View> : null}
+        {item.role === "assistant" && !item.streaming && item.articlePage?.nextCursor ?
+          <View style={{ alignSelf: "flex-start" }}>
+            <NebulaAction icon="chevron-down" label="Показать ещё" size="compact"
+              accessibilityLabel="Показать следующую страницу сохранённых материалов"
+              disabled={busy} onPress={() => void store.loadMoreSavedArticlesLocally(item.id)} />
+          </View> : null}
         {item.sources?.length ? <View style={{ gap: 2 }}><Text style={{ color: t.muted, fontSize: 12 }}>Источники</Text>{item.sources.map(url => {
           const part = sourceParts(url);
           return <Pressable key={url} accessibilityRole="link" accessibilityLabel={"Открыть источник " + part.domain}
