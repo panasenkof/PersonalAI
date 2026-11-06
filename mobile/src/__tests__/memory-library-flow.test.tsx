@@ -354,8 +354,8 @@ test("CLEAN-08: policy CAS conflict never implicitly approves a group action",as
 test("C3: returning from a note card exposes the canonical archive undo", async () => {
   mockLastNoteOperation.mockResolvedValueOnce("notes:archive:card-click");
   const view = render(<LocalMemoryScreen />);
-  await waitFor(() => view.getByText("Отменить архивирование"));
-  await act(async () => { fireEvent.press(view.getByText("Отменить архивирование")); });
+  await waitFor(() => view.getByLabelText("Отменить архивирование"));
+  await act(async () => { fireEvent.press(view.getByLabelText("Отменить архивирование")); });
   expect(mockDb.undoNotes).toHaveBeenCalledWith("notes:archive:card-click");
 });
 
