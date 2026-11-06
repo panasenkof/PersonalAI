@@ -72,3 +72,64 @@ test("failure restores draft for retry and does not call remote LLM",async()=>{
   expect(runner).not.toHaveBeenCalled();
   store.dispose();
 });
+
+test("next saved-article page is read locally, keeps old references, and persists continuation",async()=>{
+  const {repo,records,runner}=fixture();
+  const store=new DirectChatStore("guest",repo,runner);await store.initialize();
+  selection.mockResolvedValueOnce({
+    count:11,hasMore:true,nextCursor:{beforeCreatedAt:"2026-11-04T09:00:00.000Z",beforeId:"b"},
+    records:[{id:"a",title:"ИИ и Android",section:"Заметки",version:1,createdAt:"2026-11-06T09:00:00.000Z"},
+      {id:"b",title:"Локальные модели",section:"Проекты",version:2,createdAt:"2026-11-04T09:00:00.000Z"}],
+  }).mockResolvedValueOnce({count:11,hasMore:false,records:[
+    {id:"c",title:"Нейросети для телефона",section:"Заметки",version:1,createdAt:"2026-11-03T09:00:00.000Z"},
+  ]});
+  store.setQuestion("Выбери статьи на тему ИИ за последнюю неделю");
+  await store.searchSavedArticlesLocally();
+  const id=store.getSnapshot().activeId!;
+  const first=store.getSnapshot().conversations[0].rows[1];
+  expect(first.articlePage?.nextCursor).toMatchObject({beforeId:"b"});
+  await store.loadMoreSavedArticlesLocally(first.id);
+  const rows=records.get(id)!.rows;
+  expect(rows.map(x=>x.role)).toEqual(["user","assistant","user","assistant"]);
+  expect(rows[1].memory?.map(x=>x.id)).toEqual(["a","b"]);
+  expect(rows[1].articlePage?.nextCursor).toBeUndefined();
+  expect(rows[3].memory?.map(x=>x.id)).toEqual(["c"]);
+  expect(rows[3].articlePage?.nextCursor).toBeUndefined();
+  expect(selection.mock.calls[1][3]).toEqual({beforeCreatedAt:"2026-11-04T09:00:00.000Z",beforeId:"b"});
+  expect(runner).not.toHaveBeenCalled();
+  store.dispose();
+});
+
+test("typed Покажи ещё follows the same page without the remote runner or extra query",async()=>{
+  const {repo,runner}=fixture();
+  const store=new DirectChatStore("guest",repo,runner);await store.initialize();
+  selection.mockResolvedValueOnce({
+    count:9,hasMore:true,nextCursor:{beforeCreatedAt:"2026-11-04T09:00:00.000Z",beforeId:"b"},
+    records:[{id:"b",title:"ИИ Android",section:"Заметки",version:1,createdAt:"2026-11-04T09:00:00.000Z"}],
+  }).mockResolvedValueOnce({count:9,hasMore:false,records:[
+    {id:"c",title:"ИИ on device",section:"Заметки",version:1,createdAt:"2026-11-03T09:00:00.000Z"}],
+  });
+  store.setQuestion("Найди статьи об ИИ за неделю");
+  await store.searchSavedArticlesLocally();
+  store.setQuestion("Покажи ещё");
+  await store.send(settings);
+  expect(store.getSnapshot().conversations[0].question).toBe("");
+  expect(selection).toHaveBeenCalledTimes(2);
+  expect(runner).not.toHaveBeenCalled();
+  store.dispose();
+});
+
+test("failed page leaves cursor available for retry and does not use model",async()=>{
+  const {repo,runner}=fixture();
+  const store=new DirectChatStore("guest",repo,runner);await store.initialize();
+  selection.mockResolvedValueOnce({
+    count:9,hasMore:true,nextCursor:{beforeCreatedAt:"2026-11-04T09:00:00.000Z",beforeId:"b"},
+    records:[{id:"b",title:"ИИ Android",section:"Заметки",version:1,createdAt:"2026-11-04T09:00:00.000Z"}],
+  }).mockRejectedValueOnce(new Error("application_locked"));
+  store.setQuestion("Выбери статьи про ИИ за неделю");await store.searchSavedArticlesLocally();
+  const id=store.getSnapshot().conversations[0].rows[1].id;
+  await store.loadMoreSavedArticlesLocally(id);
+  expect(store.getSnapshot().conversations[0].rows.find(x=>x.id===id)?.articlePage?.nextCursor).toMatchObject({beforeId:"b"});
+  expect(runner).not.toHaveBeenCalled();
+  store.dispose();
+});
