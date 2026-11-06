@@ -31,10 +31,10 @@ export function ChatAttachmentIssues({issues, onReselect, onDismiss, disabled=fa
         <Text numberOfLines={3} accessibilityRole="alert"
           style={{color:t.muted,fontSize:13,lineHeight:19}}>{issue.reason}</Text>
         <View style={{flexDirection:"row",flexWrap:"wrap",gap:nebulaSpacing.xs}}>
-          <NebulaAction icon="refresh-cw" label="Выбрать заново"
+          <NebulaAction icon="refresh-cw" label="Выбрать заново" size="compact"
             accessibilityLabel={"Выбрать заново "+issue.name}
             disabled={disabled} onPress={onReselect} />
-          <NebulaAction icon="x" label="Убрать"
+          <NebulaAction icon="x" label="Убрать" size="compact"
             accessibilityLabel={"Убрать ошибку "+issue.name}
             onPress={()=>onDismiss(index)} />
         </View>
