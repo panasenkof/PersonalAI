@@ -5,7 +5,7 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useHeaderHeight } from "@react-navigation/elements";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import Feather from "@expo/vector-icons/Feather";
-import { ActivityIndicator, Keyboard, KeyboardAvoidingView, Linking, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Keyboard, KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useProfile } from "../profile/ProfileContext";
 import { BottomSheet } from "../components/BottomSheet";
@@ -54,6 +54,8 @@ import { nebulaRadii, nebulaSpacing, nebulaTouch, nebulaTypography } from "../de
 import { memoryNoteHasPhoto, memoryDisplayTitle, memoryNoteHasRecognizedText } from "../design/nebula/memoryNotePresentation";
 import { NoteEditorSection } from "../design/nebula/NoteEditorSection";
 import { NoteReadPreview } from "../design/nebula/NoteReadPreview";
+import { SourceProvenanceCard } from "../design/nebula/SourceProvenanceCard";
+import { describeSourceProvenance } from "../media/source-provenance";
 import { NebulaAction } from "../design/nebula/components";
 import { recognitionApprovalMatches } from "../design/nebula/recognitionApproval";
 
@@ -353,6 +355,15 @@ const [termsOpen, setTermsOpen] = useState(false);
   const canEditWithAi = Boolean(body.trim());
   const saveDisabled = busy || voiceActive || (editing && !title.trim() && !body.trim());
   const readingTitle = selected ? memoryDisplayTitle({ ...selected, title, payload: { ...selected.payload, body } }) : title;
+  // A persisted note owns the same provenance fields as its import draft.
+  // Old notes without coverage remain explicitly "unknown", never upgraded.
+  const sourceDescription = selected ? describeSourceProvenance({
+    sourceUrl:selected.payload.source_url,coverage:selected.payload.source_text_coverage,
+    sourceRef:selected.source_ref,
+    publicationDate:selected.payload.source_publication_date,
+    publicationEvidence:selected.payload.source_publication_evidence,
+    publicationAttribute:selected.payload.source_publication_attribute,
+  }) : null;
   const hasRecognizedText = memoryNoteHasRecognizedText(selected, extractedText);
   const button = { minHeight: nebulaTouch.minimum, borderRadius: nebulaRadii.field, justifyContent: "center" as const, padding: nebulaSpacing.md };
   return <KeyboardAvoidingView style={{ flex: 1, backgroundColor: t.bg }} behavior={Platform.OS === "ios" ? "padding" : "height"} keyboardVerticalOffset={Platform.OS === "ios" ? headerHeight : 0}>
@@ -420,7 +431,7 @@ const [termsOpen, setTermsOpen] = useState(false);
             actionLabel="Читать текст файла" maxLines={4} /> : null}
           {extractedText.trim() ? <NebulaAction icon="zap" label="Улучшить текст файла с ИИ" size="compact"
             disabled={busy} onPress={() => setAiField("extracted")} /> : null}
-          {typeof selected?.payload.source_url === "string" && /^https:\/\//.test(selected.payload.source_url) ? <Pressable accessibilityRole="link" style={button} onPress={() => void Linking.openURL(String(selected.payload.source_url)).catch(() => setError("Не удалось открыть источник."))}><Text style={{ color: t.secondary }}>Открыть источник</Text></Pressable> : null}
+          {sourceDescription ? <SourceProvenanceCard source={sourceDescription} onOpenError={()=>setError("Не удалось открыть источник.")}/> : null}
         </> : <>
         <TextInput testID="note-title-input" accessibilityLabel="Заголовок заметки" value={title} onChangeText={value => { setBeforeAi(null); setTitle(value); }} editable={!busy} maxLength={160} placeholder="Заголовок — необязательно" placeholderTextColor={t.muted} style={field} />
         {selected && profile && !route.params?.photoAttachmentId && memoryNoteHasPhoto(selected) ? <Pressable
@@ -517,7 +528,7 @@ const [termsOpen, setTermsOpen] = useState(false);
           <NebulaAction icon="shield" label={allowAgent ? "Доступ будет разрешён после сохранения" : "Разрешить агенту находить запись"}
             disabled={busy} onPress={() => setConfirmKind("agent")} />
         </> : null}
-        {typeof selected?.payload.source_url === "string" ? <Pressable accessibilityRole="link" style={button} onPress={() => { const url = String(selected.payload.source_url); if (/^https:\/\//.test(url)) void Linking.openURL(url).catch(() => setError("Не удалось открыть ссылку.")); }}><Text style={{ color: t.secondary }}>Источник: {selected.payload.source_url}</Text></Pressable> : null}
+        {sourceDescription ? <SourceProvenanceCard source={sourceDescription} onOpenError={()=>setError("Не удалось открыть источник.")}/> : null}
         {Array.isArray(selected?.payload.merged_sources) ? <View><Text style={{ color: t.muted }}>Исходные записи, их даты и связи сохранены:</Text>{(selected.payload.merged_sources as { id: string; title: string }[]).filter(n => n.id !== selected.id).map(n => <Pressable key={n.id} style={button} onPress={() => navigation.push("MemoryNote", { entityId: n.id })}><Text style={{ color: t.secondary }}>{n.title || "Исходная запись"}</Text></Pressable>)}</View> : null}
         {selected && profile && !route.params?.photoAttachmentId ? <AttachmentView key={selected.record_version + ":" + (route.params?.verifiedOriginal?.attachmentId || route.params?.photoAttachmentId || "")} profile={profile} entityId={selected.id} verifiedOriginal={route.params?.verifiedOriginal} photoAttachmentId={route.params?.photoAttachmentId} collapsedByDefault={!route.params?.verifiedOriginal && memoryNoteHasPhoto(selected)} /> : null}
         {selected ? <>

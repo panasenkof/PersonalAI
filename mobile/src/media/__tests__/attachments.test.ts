@@ -807,3 +807,44 @@ test('MSG-6.B: explicit user confirmation permits a separate identical note with
   expect(sqlite.prepare("SELECT count(*) AS n FROM memory_attachments").get().n).toBe(2);
   expect(sqlite.prepare("SELECT count(*) AS n FROM memory_received_shares").get().n).toBe(2);
 });
+
+test("MSG-6.C provenance coverage survives the canonical SQLCipher note transaction",async()=>{
+  const id=await saveMediaNote("guest",{
+    title:"Публичный пост",body:"Мой комментарий",
+    extractedText:"Проверенный текст",
+    sourceUrl:"https://t.me/public_news/123",sourceCoverage:"telegram_post_text_only",
+    sensitivity:"standard",
+  });
+  const row=sqlite.prepare("SELECT payload_json,source_kind,source_ref FROM memory_entities WHERE id=?").get(id);
+  const payload=JSON.parse(row.payload_json);
+  expect(payload.source_url).toBe("https://t.me/public_news/123");
+  expect(payload.source_text_coverage).toBe("telegram_post_text_only");
+  expect(payload.extracted_text).toBe("Проверенный текст");
+  expect(row.source_kind).toBe("user");
+  expect(row.source_ref).toBe("device-import");
+});
+
+test("MSG-6.C declared website date is stored only as an explicit attributed claim",async()=>{
+  const id=await saveMediaNote("guest",{
+    title:"Статья",body:"",extractedText:"Содержимое",
+    sourceUrl:"https://example.org/article",sourceCoverage:"web_text_unverified",
+    publicationClaim:{date:"2026-11-07",evidence:"html_meta",sourceAttribute:"article:published_time"},
+    sensitivity:"standard",
+  });
+  const payload=JSON.parse(sqlite.prepare("SELECT payload_json FROM memory_entities WHERE id=?").get(id).payload_json);
+  expect(payload).toMatchObject({source_url:"https://example.org/article",
+    source_text_coverage:"web_text_unverified",source_publication_date:"2026-11-07",
+    source_publication_evidence:"html_meta",source_publication_attribute:"article:published_time"});
+});
+
+test("MSG-6.C invalid/misattributed source coverage fails before any DB write",async()=>{
+  const count=()=>sqlite.prepare("SELECT count(*) n FROM memory_entities").get().n;
+  await expect(saveMediaNote("guest",{
+    title:"Bad",body:"",sourceCoverage:"url_only",sensitivity:"standard",
+  })).rejects.toThrow("invalid_source_coverage");
+  await expect(saveMediaNote("guest",{
+    title:"Bad",body:"",sourceUrl:"https://example.org/article",
+    sourceCoverage:"telegram_post_text_only",sensitivity:"standard",
+  })).rejects.toThrow("invalid_source_coverage");
+  expect(count()).toBe(0);
+});
