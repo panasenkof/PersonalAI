@@ -107,7 +107,7 @@ test('MSG-1: explicit Telegram fetch uses existing importLink and leaves user ca
   (importLink as jest.Mock).mockResolvedValueOnce({
     source:'https://t.me/public_news/124',title:'Текст публичного поста',
     text:'Проверенный содержательный текст публичного поста',
-    partial:false,
+    partial:true,textCoverage:"telegram_post_text_only",
   });
   mockParams={incoming:[{shareType:'url',value:'https://t.me/public_news/124'}]};
   const screen=render(<MemoryImportScreen/>);
