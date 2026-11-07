@@ -12,6 +12,7 @@ import { webPreference } from "./dialogue";
 import { savedArticleToolIntent, savedAiArticlePageIntent } from "./article-selection";
 import type { SavedArticleIntent } from "./article-selection";
 import type { ChatArticlePage, ChatMemoryRef } from "./conversations";
+import { validMoveProposal, type ChatMoveProposal } from "./move-proposal";
 import { createArticleReadCoverage } from "./article-read-coverage";
 
 export type ToolDefinition = { name: string; description: string; parameters: object };
@@ -28,6 +29,16 @@ const text = (v: unknown, cap = 600) => typeof v === "string" ? v.slice(0, cap) 
 export function createToolCatalog(options: DirectAgentOptions, sources: string[], notes: MemorySnippet[], initialUsed: UsedNote[]) {
   const web = createWebTools(options, sources, notes);
   const used = new Map(initialUsed.map(n => [n.id, n]));
+  // IDs/versions are admitted ONLY from verified current-turn memory readers.
+  // The model cannot invent a record ID and submit it directly to a move tool.
+  const moveHandles = new Map<string,number>();
+  function admitMoveHandle(n:{id:string;version?:number}) {
+    if(typeof n.id==="string" && /^[A-Za-z0-9:_-]{1,128}$/.test(n.id) &&
+       Number.isSafeInteger(n.version) && (n.version??0)>0)
+      moveHandles.set(n.id,n.version!);
+  }
+  notes.forEach(admitMoveHandle);
+  let movePreview:ChatMoveProposal|undefined;
   // Derived from this turn's ACL/version-checked reads; NEVER persisted as source truth.
   const articleCoverage = createArticleReadCoverage();
   const readNotes = new Set<string>();
@@ -159,6 +170,7 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
         const found = await options.lookup(query);
         if (!Array.isArray(found) || found.some(n => !n || typeof n.id !== "string" || typeof n.body !== "string")) return { error: "invalid_memory_result" };
         for (const n of usedNotes(found, "assistant")) used.set(n.id, n);
+        found.forEach(admitMoveHandle);
         web.addNotes(found);
         options.diagnostic?.("memory.tool_search", { queryChars: query.length, found: found.length, noteIds: found.map(n => n.id), excerptCount: found.filter(n => n.excerptOnly).length }, { query });
         return { notes: found };
@@ -342,7 +354,12 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
         };
         if (Object.keys(args).some(key => !["query","collectionId","limit","beforeUpdatedAt","beforeId"].includes(key) ||
           (args[key] !== null && !(key in opts)))) return { error: "invalid_catalog_arguments" };
-        return options.list!(opts);
+        const page=await options.list!(opts);
+        if(page.scope==="standard_active_notes" && Array.isArray(page.records) &&
+           page.records.every(row=>row && typeof row==="object" &&
+             typeof row.id==="string" && Number.isSafeInteger(row.version) && row.version>0))
+          (page.records as Array<{id:string;version:number}>).forEach(admitMoveHandle);
+        return page;
       },
       verify: (r: Record<string, unknown>) => Array.isArray(r.records) &&
         typeof r.hasMore === "boolean" && r.contentIncluded === false ? "read" as const : "failed" as const,
@@ -558,6 +575,47 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
         r.originalWebPagesVerified===0 ? "read" as const : "failed" as const,
       },
     ] : []),
+    ...(options.previewMove && !options.skipLocalMemory ? [{
+      definition: {name:"propose_move_local_note",
+        description:"9T2: ТОЛЬКО предпросмотр переноса ОДНОЙ найденной активной заметки между двумя существующими стандартными разделами. Сначала search_local_notes/list_local_notes, возьми точный ID и record version. Пользователь отдельно подтверждает карточку. Не создавать копию заметки, не выполнять запись/merge, не трогать Документы и закрытые разделы.",
+        parameters:{type:"object",properties:{
+          noteId:{type:"string",minLength:1,maxLength:128},
+          expectedVersion:{type:"integer",minimum:1},
+          targetSectionSlug:{type:"string",minLength:1,maxLength:80},
+          reason:{type:"string",minLength:5,maxLength:240},
+        },required:["noteId","expectedVersion","targetSectionSlug","reason"],
+          additionalProperties:false},
+      },effect:"proposal" as const,
+      execute:async(args:Record<string,unknown>)=>{
+        if(movePreview)return {error:"move_preview_already_proposed_this_turn"};
+        const id=args.noteId, version=args.expectedVersion, to=args.targetSectionSlug, reason=args.reason;
+        if(Object.keys(args).length!==4 ||
+           typeof id!=="string"||!/^[A-Za-z0-9:_-]{1,128}$/.test(id) ||
+           !Number.isSafeInteger(version)||(version as number)<1 ||
+           typeof to!=="string"|| !/^[a-z0-9_-]{1,80}$/.test(to) ||
+           typeof reason!=="string"||reason.trim().length<5||reason.length>240)
+          return {error:"invalid_move_arguments"};
+        if(moveHandles.get(id)!==version)
+          return {error:"note_not_selected_for_move"};
+        if(options.signal?.aborted)throw new Error("Запрос остановлен");
+        options.status?.("Проверяю предложение переноса");
+        const proposed=await options.previewMove!({
+          noteId:id,expectedVersion:version as number,targetSectionSlug:to,reason:reason.trim(),
+        });
+        if(options.signal?.aborted)throw new Error("Запрос остановлен");
+        if(!validMoveProposal(proposed)||proposed.noteId!==id||
+           proposed.expectedVersion!==version)
+          return {error:"invalid_move_preview"};
+        movePreview=proposed;
+        return {status:"awaiting_user_confirmation",saved:false,
+          noteId:proposed.noteId,version:proposed.expectedVersion,
+          title:proposed.title,fromSection:proposed.fromName,toSection:proposed.toName,
+          attachmentsPreserved:proposed.attachmentCount,sourceLinksPreserved:proposed.hasSource,
+          reason:proposed.reason,requiresUserTap:true};
+      },
+      verify:(r:Record<string,unknown>)=>r.status==="awaiting_user_confirmation" &&
+        r.saved===false && r.requiresUserTap===true ? "pending_confirmation" as const : "failed" as const,
+    }] : []),
     { definition: { name: FACT_TOOL_NAME, description: FACT_TOOL_DESCRIPTION, parameters: factToolParameters(options.sections) }, effect: "proposal",
       execute: async args => {
         const proposal = factProposal(args, options.sections);
@@ -697,7 +755,7 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
     options.diagnostic?.("tool.outcome_verified", { name: canonical, effect: spec?.effect || "unknown", outcome });
     return { ...result, ...(outcome !== "failed" ? { outcome } : {}) };
   }
-  function finish(): Pick<DirectResult, "taskState" | "proposalIds" | "articlePage" | "articleReadReport" | "photoAction"> {
+  function finish(): Pick<DirectResult, "taskState" | "proposalIds" | "articlePage" | "articleReadReport" | "photoAction" | "moveProposal"> {
     state = { ...state, turnStatus: "answered" }; emit();
     const selected = !mixedArticleFilters && usedSelectedArticleTool ? selectedArticleHandles() : undefined;
     const checked = selected && articleCoverage.summary(selected);
@@ -724,7 +782,8 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
       ...(persistedArticle ? {articlePage:persistedArticle} :
         usedSelectedArticleTool && options.articleSelection ? {articlePage:options.articleSelection} : {}),
       ...(articleReadReport ? {articleReadReport} : {}),
-      ...(!photoMatches.length && photoRecovery ? {photoAction:photoRecovery} : {}) };
+      ...(!photoMatches.length && photoRecovery ? {photoAction:photoRecovery} : {}),
+      ...(movePreview ? {moveProposal:movePreview} : {}) };
   }
   const observeSources = (urls: string[]) => { if (urls.length) observe({ tool: "web_search", outcome: "found", subject: options.prompt.slice(0, 120), excerpt: urls.join("\n").slice(0, 600) }); };
   return { definitions: specs.map(s => s.definition), run, finish, observeSources,
