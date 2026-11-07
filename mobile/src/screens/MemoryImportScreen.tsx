@@ -126,6 +126,9 @@ export function MemoryImportScreen() {
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [extractedText, setExtractedText] = useState("");
+  // An LLM suggestion is evidence about the PREVIOUS visible text. Any later
+  // local OCR/edit/title change invalidates it without moving the draft.
+  useEffect(() => { setModelCollectionHint(null); }, [body, extractedText, title]);
   const [notice, setNotice] = useState("");
   const [aiField, setAiField] = useState<"body" | "extracted" | null>(null);
   const [comparison, setComparison] = useState<{ scope: string; result: FileRecognition; updated: string } | null>(null);
@@ -334,7 +337,7 @@ export function MemoryImportScreen() {
   }
 
   async function classifyWithModel(connection: DirectConnection) {
-    if (!profile || busy || preparing || controller.current || classification !== "standard" ||
+    if (!profile || !alive.current || busy || preparing || controller.current || classification !== "standard" ||
         (collectionId && collections.find(c=>c.id===collectionId)?.sensitivity !== "standard") ||
         !localMemorySessionUnlocked()) return;
     const aborter=new AbortController(); controller.current=aborter;
