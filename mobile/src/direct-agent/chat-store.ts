@@ -21,15 +21,9 @@ import { conversationRepository } from "./conversations";
 import type { ChatDraft, ConversationRepository, SavedConversation } from "./conversations";
 import type { DirectAgentSettings } from "./settings";
 import { waitForApplicationSession, onLocalMemorySessionChange } from "../local-memory/storage";
-import { localPhotoIntent83, localPhotoSuggestion83, searchLocalPhotosFromChat83 } from "../media/vision-chat-search";
-import { savedAiArticleIntent, selectSavedAiArticles, savedAiArticlePageIntent } from "./article-selection";
+import { localPhotoIntent83, searchLocalPhotosFromChat83 } from "../media/vision-chat-search";
+import { selectSavedAiArticles } from "./article-selection";
 
-/** Publication days are site assertions, never independently verified facts. */
-function articleDateLabel(record:{createdAt:string;publicationDay?:string}, dateMode:"saved"|"published"):string {
-  if(dateMode==="published")return "дата публикации по сайту "+(record.publicationDay||"неизвестна");
-  return "сохранено "+(Number.isFinite(Date.parse(record.createdAt))
-    ? new Date(record.createdAt).toLocaleDateString("ru-RU") : "дата неизвестна");
-}
 /** `streamText` is the answer as it arrives; it is never persisted. */
 /** `progressSince` is when the current stage began, for the elapsed timer. */
 export type LiveConversation = SavedConversation & { retryPhoto?: {rowId:string; image:ChatAttachment}; busy: boolean; progress: string; progressSince?: number; streamText?: string; savingDraft?: string; deleting?: boolean };
@@ -185,214 +179,65 @@ export class DirectChatStore {
     this.writes = work;
     try { await work; } catch { this.update(id, { deleting: false }); this.publish({ error: "Не удалось удалить диалог." }); }
   }
-  /** Local visual retrieval is a chat turn, not a remote LLM request.
-   * A captured camera image is *never* stored in a conversation or in Memory.
-   * A normal attached photo also remains local for explicit photo-search turns.
-   */
-  async searchPhotosLocally(camera?: ChatAttachment, expectedConversationId?:string, suggested = false):Promise<void> {
-    const id=expectedConversationId || this.snapshot.activeId;
+  /** A camera/gallery photo action is a normal model turn whose private image
+   * is exposed ONLY to the on-device photo tool, never to the provider payload.
+   * Unrelated draft text and attachments remain in the composer. */
+  async searchPhotosWithAgent(settings: DirectAgentSettings, camera: ChatAttachment,
+    expectedConversationId?: string): Promise<void> {
+    const id=expectedConversationId||this.snapshot.activeId;
     const current=this.snapshot.conversations.find(c=>c.id===id);
-    if(!id || !current || id!==this.snapshot.activeId || current.busy ||
-      current.deleting || this.disposed || !this.snapshot.ready)return;
-    const prompt=camera ? "Найди похожие фотографии в моей памяти" : current.question.trim();
-    const attachments=camera ? [camera] : checkedChatAttachments(current.attachments);
-    const intent=suggested ? localPhotoSuggestion83(prompt,attachments) : localPhotoIntent83(prompt,attachments);
-    if(!intent) return;
-    const aborter=new AbortController();
-    this.requests.set(id,aborter);
-    const pending=this.update(id,{
-      retryPhoto:undefined,busy:true,progress:"Ищу фотографии в памяти…",updatedAt:new Date().toISOString(),
-      // An explicit sent text query consumes its draft, like normal send().
-      // One-tap camera/gallery searches preserve any unrelated unsent draft.
-      // On failure restore the consumed draft only if the user has not typed a replacement.
-      question:camera ? current.question : "",
-      // A one-tap image search consumes only its selected image, not other
-      // draft files or the user's unsent text. Hide the action panel immediately.
-      attachments:camera
-        ? (current.attachments || []).filter(file=>file.id!==camera.id)
-        : [],
-      title:current.rows.length?current.title:prompt.slice(0,60),
-      rows:[...current.rows,{id:Crypto.randomUUID(),role:"user",text:prompt}],
-    })!;
-    try {
-      // Preserve the turn BEFORE running native inference, just like send().
-      await this.persist(pending);
-      if(aborter.signal.aborted || this.disposed)throw new Error("vision_query_cancelled");
-      const result=await searchLocalPhotosFromChat83(this.profile,intent,attachments,aborter.signal);
-      if(aborter.signal.aborted || this.disposed)throw new Error("vision_query_cancelled");
-      const latest=this.snapshot.conversations.find(c=>c.id===id);
-      const rowId = Crypto.randomUUID();
-      if(latest)this.update(id,{
-        retryPhoto:camera && result.photoAction ? {rowId,image:camera} : undefined,
-        rows:[...latest.rows,{id:rowId,role:"assistant",
-          text:result.text,memory:result.memory,photoAction:result.photoAction}],updatedAt:new Date().toISOString(),
-      });
-    } catch(e) {
-      if(this.disposed)return;
-      const rowId = Crypto.randomUUID();
-      const latest=this.snapshot.conversations.find(c=>c.id===id);
-      if(latest)this.update(id,{
-        ...(camera && !aborter.signal.aborted ? {retryPhoto:{rowId,image:camera}} : {}),
-        ...(!camera && latest.question === "" ? {question:current.question,attachments:current.attachments} : {}),
-        rows:[...latest.rows,{id:rowId,role:"info",
-          text:aborter.signal.aborted?"Поиск фотографий остановлен":memoryErrorMessage(e)}],
-      });
-    } finally {
-      this.requests.delete(id);
-      const latest=this.update(id,{busy:false,progress:"",progressSince:undefined});
-      if(latest)await this.persist(latest).catch(()=>{});
-    }
+    if(!id||!current||id!==this.snapshot.activeId||current.busy||current.deleting||
+      this.disposed||!this.snapshot.ready||camera.kind!=="image"||
+      !(current.attachments?.some(f=>f.id===camera.id && f.kind==="image")||
+        current.retryPhoto?.image.id===camera.id))return;
+    await this.send(settings,undefined,undefined,false,{
+      prompt:"Найди похожие фотографии в моей памяти",
+      privatePhoto:camera,conversationId:id,preserveDraft:true,
+    });
   }
 
-  /** Stage 9A1: ordinary chat selection is a local READ, not a paid model turn.
-   * The saved URL is not proof of a fully read article; only the linked note
-   * can be opened. Follow-up summaries and more pages belong to 9A2/9B.
-   */
-  async searchSavedArticlesLocally(): Promise<void> {
+  /** Follow the pinned article cursor through the LLM's existing
+   * continue_local_articles tool; never do a hidden local chat reply. */
+  async continueArticlesWithAgent(settings:DirectAgentSettings,sourceRowId:string):Promise<void>{
     const id=this.snapshot.activeId;
     const current=this.snapshot.conversations.find(c=>c.id===id);
-    if(!id || !current || current.busy || current.deleting || this.disposed || !this.snapshot.ready)return;
-    const prompt=current.question.trim();
-    const intent=savedAiArticleIntent(prompt,new Date(),Boolean(current.attachments?.length));
-    if(!intent)return;
-    const aborter=new AbortController();
-    this.requests.set(id,aborter);
-    const pending=this.update(id,{
-      busy:true,progress:"Подбираю сохранённые материалы…",updatedAt:new Date().toISOString(),
-      question:"",title:current.rows.length?current.title:prompt.slice(0,60),
-      rows:[...current.rows,{id:Crypto.randomUUID(),role:"user",text:prompt}],
-    })!;
-    try {
-      await this.persist(pending);
-      if(aborter.signal.aborted||this.disposed)throw new Error("aborted");
-      const found=await selectSavedAiArticles(this.profile,intent);
-      // A lock after the SQL snapshot must prevent a delayed chat update.
-      if(!localMemorySessionUnlocked())throw new Error("application_locked");
-      if(aborter.signal.aborted||this.disposed)throw new Error("aborted");
-      const latest=this.snapshot.conversations.find(c=>c.id===id);
-      if(!latest)return;
-      const dates=intent.startLocal.split("-").reverse().join(".")+"–"+intent.endLocal.split("-").reverse().join(".");
-      const titles=found.records.map((n,i)=>
-        (i+1)+". "+(n.title||"Без названия")+" · "+articleDateLabel(n,intent.dateMode)+
-        (typeof n.duplicateCount === "number" && Number.isSafeInteger(n.duplicateCount) && n.duplicateCount>0
-          ? " · ещё доступных сохранений этого URL: "+n.duplicateCount : "")).join("\n");
-      const subject=intent.topic==="ai" ? "по ключевым словам об ИИ" :
-        "по точной фразе «"+intent.topic+"»";
-      const head=found.count
-        ? "Найдено "+found.count+" сохранённых материалов со ссылкой "+subject+". "+(intent.dateMode==="published" ? "Период публикации по данным сайта: " : "Даты сохранения: ")+dates+
-          ". Показано "+found.records.length+(found.hasMore?"; это только первая страница.":".")
-        : "За "+dates+" сохранённых материалов со ссылкой "+subject+" не найдено "+(intent.dateMode==="published" ? "с датой публикации по данным сайта." : "по дате сохранения.");
-      this.update(id,{updatedAt:new Date().toISOString(),
-        rows:[...latest.rows,{id:Crypto.randomUUID(),role:"assistant",
-          text:head+(titles?"\n\n"+titles:"")+
-            (intent.dateMode==="published" ? "\n\nДата публикации заявлена сайтом, не проверена независимо. Материалов по теме с неизвестной датой публикации: "+(found.unknownPublicationCount??0)+"." : "")+
-            "\n\nПоиск выполнен только в памяти телефона. Ссылки открывают оригинальные заметки. Сохранённая ссылка не означает, что полный текст статьи был прочитан; другие заметки без URL здесь не учитывались.",
-          memory:found.records.map(n=>({id:n.id,title:n.title||"Без названия",section:n.section,via:"search" as const})),
-          articlePage:{kind:intent.topic==="ai" ? "saved_ai_links" as const : "saved_topic_links" as const,
-            ...(intent.dateMode==="published" ? {dateMode:"published" as const} : {}),
-            ...(intent.topic!=="ai" ? {topic:intent.topic,queryTerms:intent.queryTerms} : {}),
-            savedFrom:intent.savedFrom,savedBefore:intent.savedBefore,
-            startLocal:intent.startLocal,endLocal:intent.endLocal,
-            ...(found.nextCursor ? {nextCursor:found.nextCursor} : {}),
-            selected:found.records.map(n=>({id:n.id,version:n.version}))}}],
-      });
-    }catch(e){
-      if(this.disposed)return;
-      const latest=this.snapshot.conversations.find(c=>c.id===id);
-      if(latest)this.update(id,{
-        ...(!aborter.signal.aborted&&latest.question===""?{question:prompt}:{}),
-        rows:[...latest.rows,{id:Crypto.randomUUID(),role:"info",
-          text:aborter.signal.aborted?"Подборка остановлена":memoryErrorMessage(e),
-          ...(!aborter.signal.aborted?{error:true as const}:{})}],
-      });
-    }finally{
-      this.requests.delete(id);
-      const latest=this.update(id,{busy:false,progress:"",progressSince:undefined});
-      if(latest)await this.persist(latest).catch(()=>{});
-    }
-  }
-
-  /** Continue an existing shortlist in the ordinary chat without a model call.
-   * Each page re-runs the same ACL-scoped SQL query; only the cursor and time
-   * window are persisted, never copied source contents.
-   */
-  async loadMoreSavedArticlesLocally(sourceRowId:string, fromComposer=false):Promise<void> {
-    const id=this.snapshot.activeId;
-    const current=this.snapshot.conversations.find(c=>c.id===id);
-    const previous=current?.rows.find(row=>row.id===sourceRowId && row.role==="assistant");
-    const page=previous?.articlePage;
-    if(!id || !current || !page?.nextCursor || current.busy || current.deleting ||
-      this.disposed || !this.snapshot.ready || (fromComposer && Boolean(current.attachments?.length)))return;
-    const aborter=new AbortController();
-    this.requests.set(id,aborter);
-    const pending=this.update(id,{
-      busy:true,progress:"Загружаю следующую страницу…",updatedAt:new Date().toISOString(),
-      question:fromComposer?"":current.question,
-      rows:[...current.rows,{id:Crypto.randomUUID(),role:"user",text:"Показать ещё"}],
-    })!;
-    try {
-      await this.persist(pending);
-      if(aborter.signal.aborted || this.disposed)throw new Error("aborted");
-      const found=await selectSavedAiArticles(this.profile,savedAiArticlePageIntent(page),
-        undefined,page.nextCursor);
-      if(!localMemorySessionUnlocked())throw new Error("application_locked");
-      if(aborter.signal.aborted || this.disposed)throw new Error("aborted");
-      const latest=this.snapshot.conversations.find(c=>c.id===id);
-      if(!latest)return;
-      const titles=found.records.map((n,i)=>
-        (i+1)+". "+(n.title||"Без названия")+" · "+articleDateLabel(n,page.dateMode||"saved")+
-        (typeof n.duplicateCount === "number" && Number.isSafeInteger(n.duplicateCount) && n.duplicateCount>0
-          ? " · ещё доступных сохранений этого URL: "+n.duplicateCount : "")).join("\n");
-      const text=found.records.length
-        ? "Следующая страница: "+found.records.length+" сохранённых материалов со ссылками. Сейчас по этому фильтру доступно "+found.count+
-          (found.hasMore?"; есть следующие страницы.":".")+
-          (page.dateMode==="published" ? " Даты — по данным сайтов, не проверены независимо. С неизвестной датой: "+(found.unknownPublicationCount??0)+"." : "")+
-          "\n\n"+titles+"\n\nПоиск локальный; полный текст ссылок не прочитан. Открывайте записи ниже."
-        : "Больше доступных сохранённых материалов по этому фильтру нет. Состав памяти мог измениться с предыдущего запроса.";
-      this.update(id,{updatedAt:new Date().toISOString(),rows:[
-        ...latest.rows.map(row=>row.id===sourceRowId && row.articlePage
-          ? {...row,articlePage:{...row.articlePage,nextCursor:undefined}} : row),
-        {id:Crypto.randomUUID(),role:"assistant",text,
-          memory:found.records.map(n=>({id:n.id,title:n.title||"Без названия",
-            section:n.section,via:"search" as const})),
-          articlePage:{kind:page.kind,savedFrom:page.savedFrom,savedBefore:page.savedBefore,
-            ...(page.dateMode==="published" ? {dateMode:"published" as const} : {}),
-            ...(page.kind==="saved_topic_links" ? {topic:page.topic,queryTerms:page.queryTerms} : {}),
-            startLocal:page.startLocal,endLocal:page.endLocal,
-            ...(found.nextCursor ? {nextCursor:found.nextCursor} : {}),
-            selected:[...(page.selected||[]),...found.records.map(n=>({id:n.id,version:n.version}))]
-              .filter((n,i,all)=>all.findIndex(m=>m.id===n.id)===i).slice(-24)}},
-      ]});
-    }catch(e){
-      if(this.disposed)return;
-      const latest=this.snapshot.conversations.find(c=>c.id===id);
-      if(latest)this.update(id,{
-        ...(fromComposer && !aborter.signal.aborted && latest.question==="" ? {question:current.question} : {}),
-        rows:[...latest.rows,{id:Crypto.randomUUID(),role:"info",
-          text:aborter.signal.aborted?"Подборка остановлена":memoryErrorMessage(e),
-          ...(!aborter.signal.aborted?{error:true as const}:{})}],
-      });
-    }finally{
-      this.requests.delete(id);
-      const latest=this.update(id,{busy:false,progress:"",progressSince:undefined});
-      if(latest)await this.persist(latest).catch(()=>{});
-    }
+    if(!id||!current||current.busy||current.deleting||this.disposed||
+      !current.rows.some(r=>r.id===sourceRowId&&Boolean(r.articlePage?.nextCursor)))return;
+    await this.send(settings,undefined,undefined,false,{
+      prompt:"Покажи ещё сохранённые статьи из этой подборки",
+      articleRowId:sourceRowId,conversationId:id,preserveDraft:true,
+    });
   }
 
   /** Explicit internet photo action reuses the existing model and web tools,
    * without consuming the user's unrelated composer draft. */
-  async send(settings: DirectAgentSettings, internetPhotoId?:string, documentApprovalKey?:string, rerun = false) {
+  async send(settings: DirectAgentSettings, internetPhotoId?:string, documentApprovalKey?:string,
+    rerun = false, intent?:{prompt:string;privatePhoto?:ChatAttachment;articleRowId?:string;
+      conversationId:string;preserveDraft:true}) {
     const id = this.snapshot.activeId;
     const current = this.snapshot.conversations.find(c => c.id === id);
     if (!id || !current || current.busy || current.deleting || this.disposed ||
-      (!internetPhotoId && !current.question.trim() && !current.attachments?.length)) return;
+      (!internetPhotoId && !intent && !current.question.trim() && !current.attachments?.length) ||
+      (intent && intent.conversationId!==id)) return;
     const selected=internetPhotoId ? current.attachments?.find(f=>f.id===internetPhotoId && f.kind==="image") : undefined;
     if(internetPhotoId && (!selected || !settings.allowWeb))return;
     const prompt = internetPhotoId
       ? "Найди в интернете сведения о том, что изображено на приложенной фотографии. Определи объект по фото, затем воспользуйся разрешённым веб-поиском. Ответь по-русски, приведи проверяемые факты и ссылки на реальные источники. Если изображение или поиск недоступны, сообщи об этом, не выдумывай источники."
-      : current.question.trim() || "Посмотри приложенные файлы.";
+      : intent?.prompt || current.question.trim() || "Посмотри приложенные файлы.";
     const displayPrompt = internetPhotoId ? "Что изображено на фото? Найти информацию в интернете" : prompt;
-    const attachments = checkedChatAttachments(internetPhotoId ? [selected!] : current.attachments);
+    const draftFiles = checkedChatAttachments(internetPhotoId ? [selected!] :
+      intent?.preserveDraft ? [] : current.attachments);
+    const localPhotoMatch=!internetPhotoId&&!intent ? localPhotoIntent83(prompt,draftFiles):null;
+    const imageQueryFiles=localPhotoMatch?.mode==="image"
+      ? draftFiles.filter(f=>f.kind==="image") : [];
+    if(imageQueryFiles.length>1){
+      this.publish({notice:"Для поиска похожих фотографий выберите один снимок."});return;
+    }
+    const privatePhoto=intent?.privatePhoto||imageQueryFiles[0];
+    // The model is responsible for deciding which tool to call. The app only
+    // keeps image bytes out of the provider request for local-photo intents.
+    const attachments=privatePhoto
+      ? draftFiles.filter(f=>f.id!==privatePhoto.id):draftFiles;
     let documentPlan;
     try { documentPlan = internetPhotoId ? null : planDocumentSynthesis(attachments,settings.model); }
     catch(e) { this.publish({error:String((e as Error).message)}); return; }
@@ -400,21 +245,9 @@ export class DirectChatStore {
       this.publish({notice:"Для отправки большого документа подтвердите объём и вызовы ИИ в окне отправки."});
       return;
     }
-    // A contextual "Покажи ещё" remains on-device; unrelated requests still use the usual runner.
-    if (!internetPhotoId && !attachments.length &&
-        /^(?:покажи|показать)\s+ещ[её](?:\s+(?:материалы|статьи|записи))?[.!?]?$/iu.test(prompt)) {
-      const page=[...current.rows].reverse().find(row=>row.role==="assistant" && row.articlePage?.nextCursor);
-      if(page){await this.loadMoreSavedArticlesLocally(page.id,true);return;}
-    }
-    // Explicit photo intent runs only against encrypted device memory.
-    // Do not send user image bytes or photo search text to the remote LLM.
-    // Specific saved-article intent precedes generic object/photo search.
-    if (!internetPhotoId && savedAiArticleIntent(prompt,new Date(),attachments.length>0)) {
-      await this.searchSavedArticlesLocally(); return;
-    }
-    if (!internetPhotoId && localPhotoIntent83(prompt,attachments)) {
-      await this.searchPhotosLocally(); return;
-    }
+    // All chat messages now run through the model and its allowed tools.
+    // No regex or shortcut may directly answer for photos, saved articles or
+    // a contextual "Покажи ещё".
     // Recheck the ACTIVE model at the moment of Send (not the model selected
     // when a draft photo was picked). Refuse known text-only routes before
     // consuming the draft, persisting a user turn, or making a network call.
@@ -444,12 +277,14 @@ export class DirectChatStore {
     const taskState = { ...beginTask(previousTaskState, prompt), webPreference: webPreference({ prompt, history, taskState: previousTaskState }) };
     this.publish({ error: "" });
     const pending = this.update(id, {
-      taskState, question: internetPhotoId ? current.question : "",
-      // Once the user confirms web lookup, the chosen photo is submitted in
-      // the user turn and leaves the draft. Other files are never uploaded.
+      taskState, question: (internetPhotoId||intent?.preserveDraft) ? current.question : "",
+      // Camera/selected-photo and article-more actions preserve unrelated
+      // drafts. A local query photo is never persisted as a chat attachment.
       attachments: internetPhotoId
         ? (current.attachments || []).filter(file=>file.id!==internetPhotoId)
-        : [],
+        : intent?.privatePhoto
+          ? (current.attachments||[]).filter(file=>file.id!==intent.privatePhoto!.id)
+          : intent?.preserveDraft ? current.attachments : [],
       busy: true, progress: "Сохраняю вопрос…", updatedAt: new Date().toISOString(),
       title: current.rows.length ? current.title : displayPrompt.slice(0, 60),
       // A retry re-runs the same question: the user bubble already exists.
@@ -486,9 +321,13 @@ export class DirectChatStore {
       modelStarted = true;
       const articleSelection=[...current.rows].reverse().find(row=>
         row.role==="assistant" && row.articlePage?.selected?.length)?.articlePage;
-      const articleContinuation=[...current.rows].reverse().find(row=>
-        row.role==="assistant" && row.articlePage?.nextCursor)?.articlePage;
-      const agentOptions: Parameters<typeof runDirectAgent>[0] = { settings, maxRequests, prompt, attachments, skipLocalMemory:Boolean(internetPhotoId), history, previousSources, taskState, pendingNotes: internetPhotoId ? [] : current.drafts,
+      const articleContinuation=(intent?.articleRowId
+        ? current.rows.find(row=>row.id===intent.articleRowId &&
+          row.role==="assistant" && row.articlePage?.nextCursor)
+        : [...current.rows].reverse().find(row=>
+          row.role==="assistant" && row.articlePage?.nextCursor))?.articlePage;
+      const agentOptions: Parameters<typeof runDirectAgent>[0] = { settings, maxRequests, prompt, attachments, skipLocalMemory:Boolean(internetPhotoId), history:privatePhoto ? history.map(turn=>({...turn,attachments:undefined})) : history, previousSources, taskState, pendingNotes: internetPhotoId ? [] : current.drafts,
+        photoQueryAvailable:Boolean(privatePhoto),
         ...(!internetPhotoId && articleContinuation ? {articleContinuation} : {}),
         ...(!internetPhotoId && articleSelection ? {articleSelection} : {}),
         // Scratchpad belongs to this unlocked conversation and is serialized by
@@ -518,11 +357,13 @@ export class DirectChatStore {
         lookup: query => searchApprovedNotes(this.profile, query),
         // 9T1: the same encrypted, ACL-scoped visual search used by the fast
         // chat route. Only verified note/photo handles go back to the model.
-        searchPhotos: async description => {
+        searchPhotos: async query => {
           if (aborter.signal.aborted || !localMemorySessionUnlocked() || this.disposed)
             throw new Error("application_locked");
+          if(query.mode==="image" && !privatePhoto)
+            throw new Error("vision_query_one_image");
           const found=await searchLocalPhotosFromChat83(this.profile,
-            {mode:"text",description},[],aborter.signal);
+            query,query.mode==="image" ? [privatePhoto!] : [],aborter.signal);
           if (aborter.signal.aborted || !localMemorySessionUnlocked() || this.disposed)
             throw new Error("application_locked");
           return found;
@@ -584,10 +425,14 @@ export class DirectChatStore {
       trace("turn.completed", { elapsedMs: Date.now() - startedAt, requests: result.requests,
         answerChars: result.text.length, sources: result.sources.length, memoryRefs: result.memory?.length || 0 },
         { answer: result.text, sources: result.sources.join("\n") });
-      this.update(id, { taskState: mergeTaskReceipts({ ...(result.taskState || c.taskState || taskState), turnStatus: "answered" }, c.taskState), rows: [...c.rows,
+      const answerRowId=Crypto.randomUUID();
+      this.update(id, {
+        retryPhoto: privatePhoto && result.photoAction
+          ? {rowId:answerRowId,image:privatePhoto} : undefined,
+        taskState: mergeTaskReceipts({ ...(result.taskState || c.taskState || taskState), turnStatus: "answered" }, c.taskState), rows: [...c.rows,
         ...(result.proposalIds?.some(id => c.drafts.some(d => d.id === id)) ? [{ id: Crypto.randomUUID(), role: "info" as const, text: "Запись подготовлена, но ещё не сохранена. Подтвердите её в карточке предложения." }] : []),
         ...(result.notice ? [{ id: Crypto.randomUUID(), role: "info" as const, text: result.notice }] : []),
-        { id: Crypto.randomUUID(), role: "assistant", text: result.text, sources: result.sources,
+        { id: answerRowId, role: "assistant", text: result.text, sources: result.sources,
           ...(result.memory?.length ? { memory: result.memory } : {}),
           ...(result.photoAction ? {photoAction:result.photoAction} : {}),
           ...(result.articlePage ? {articlePage:result.articlePage} : {}),
@@ -605,7 +450,8 @@ export class DirectChatStore {
         const partial = aborted ? latest.trim() : "";
         this.update(id, {
           taskState: { ...(c.taskState || taskState), turnStatus: "interrupted" },
-          ...(!internetPhotoId && !modelStarted && !aborted ? { question: c.question || prompt, attachments } : {}),
+          ...(!internetPhotoId && !intent?.preserveDraft && !modelStarted && !aborted
+            ? { question: c.question || prompt, attachments:draftFiles } : {}),
           rows: [...c.rows,
             ...(partial ? [{ id: Crypto.randomUUID(), role: "assistant" as const, text: partial }] : []),
             { id: Crypto.randomUUID(), role: "info", ...(aborted ? {} : { error: true as const }),
