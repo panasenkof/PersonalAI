@@ -848,3 +848,37 @@ test("MSG-6.C invalid/misattributed source coverage fails before any DB write",a
   })).rejects.toThrow("invalid_source_coverage");
   expect(count()).toBe(0);
 });
+
+test("MSG-6.C: exact Telegram HTML observation survives canonical note transaction and keeps user annotations distinct",async()=>{
+  const snapshot={messageKey:"public_news/123",textSha256:"f".repeat(64),
+    textLength:19,evidence:"telegram_html_data_post_v1" as const};
+  const id=await saveMediaNote("guest",{
+    title:"Telegram",body:"Мой собственный комментарий",
+    extractedText:"Пост после ручной правки",
+    sourceUrl:"https://t.me/public_news/123",sourceCoverage:"telegram_post_text_only",
+    telegramObservation:snapshot,sensitivity:"standard",
+  });
+  const payload=JSON.parse(sqlite.prepare("SELECT payload_json FROM memory_entities WHERE id=?").get(id).payload_json);
+  expect(payload).toMatchObject({body:"Мой собственный комментарий",
+    extracted_text:"Пост после ручной правки",source_observation:snapshot,
+    source_text_coverage:"telegram_post_text_only"});
+  expect(sqlite.prepare("SELECT count(*) n FROM memory_entities").get().n).toBe(1);
+});
+test("MSG-6.C: fabricated/local-only/mismatched observations do not write a note",async()=>{
+  const snapshot={messageKey:"public_news/123",textSha256:"f".repeat(64),
+    textLength:19,evidence:"telegram_html_data_post_v1" as const};
+  const baseline={title:"Bad",body:"",extractedText:"Текст",
+    sourceUrl:"https://t.me/public_news/123",sourceCoverage:"telegram_post_text_only" as const,
+    sensitivity:"standard" as const};
+  for(const sample of [
+    {...baseline,sourceCoverage:"url_only" as const,telegramObservation:snapshot},
+    {...baseline,sourceUrl:"https://t.me/public_news/124",telegramObservation:snapshot},
+    {...baseline,extractedText:"",telegramObservation:snapshot},
+    {...baseline,telegramObservation:{...snapshot,textSha256:"wrong"}},
+    {...baseline,telegramObservation:{...snapshot,evidence:"guessed"}},
+    {...baseline,telegramObservation:{...snapshot,textLength:60001}},
+  ]){
+    await expect(saveMediaNote("guest",sample as any)).rejects.toThrow("invalid_source_observation");
+  }
+  expect(sqlite.prepare("SELECT count(*) n FROM memory_entities").get().n).toBe(0);
+});
