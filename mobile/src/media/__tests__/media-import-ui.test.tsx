@@ -84,6 +84,113 @@ test('shared text opens an unsaved draft with a section selector and saves only 
   await waitFor(() => expect(screen.getByLabelText('Сведения из файла').props.value).toBe('https://example.org/recipe'));
   expect(mockBack).not.toHaveBeenCalled();
 });
+test('MSG-1: Telegram text+link Share opens URL-only preview; caption remains, no automatic model or network',async()=>{
+  const caption='Это мой комментарий к статье';
+  mockParams={incoming:[{shareType:'text',value:caption+'\\nhttps://t.me/public_news/123'}]};
+  const screen=render(<MemoryImportScreen/>);
+  await waitFor(()=>expect(screen.getByLabelText('Сведения из файла').props.value)
+    .toContain(caption));
+  expect(screen.getByText('Ссылка · без текста страницы')).toBeTruthy();
+  expect(screen.getByText(/Формат публичного поста/)).toBeTruthy();
+  expect(screen.getByLabelText('Загрузить содержимое публичной ссылки после согласия')).toBeTruthy();
+  expect(importLink).not.toHaveBeenCalled();
+  expect(saveMediaNote).not.toHaveBeenCalled();
+  fireEvent.press(screen.getByLabelText('Сохранить сведения в память'));
+  await waitFor(()=>expect(saveMediaNote).toHaveBeenCalledWith('guest',
+    expect.objectContaining({sourceUrl:'https://t.me/public_news/123',
+      body:caption+'\\nhttps://t.me/public_news/123',
+      extractedText:'',file:undefined}),expect.anything()));
+  expect(importLink).not.toHaveBeenCalled();
+});
+
+test('MSG-1: explicit Telegram fetch uses existing importLink and leaves user caption untouched',async()=>{
+  (importLink as jest.Mock).mockResolvedValueOnce({
+    source:'https://t.me/public_news/124',title:'Текст публичного поста',
+    text:'Проверенный содержательный текст публичного поста',
+    partial:false,
+  });
+  mockParams={incoming:[{shareType:'url',value:'https://t.me/public_news/124'}]};
+  const screen=render(<MemoryImportScreen/>);
+  await waitFor(()=>expect(screen.getByLabelText('Загрузить содержимое публичной ссылки после согласия')).toBeTruthy());
+  expect(importLink).not.toHaveBeenCalled();
+  fireEvent.press(screen.getByLabelText('Загрузить содержимое публичной ссылки после согласия'));
+  await waitFor(()=>expect(importLink).toHaveBeenCalledWith('https://t.me/public_news/124',
+    expect.anything()));
+  await waitFor(()=>expect(screen.getByLabelText('Распознанное содержимое файла').props.value)
+    .toBe('Проверенный содержательный текст публичного поста'));
+  expect(screen.getByLabelText('Сведения из файла').props.value)
+    .toBe('https://t.me/public_news/124');
+  expect(saveMediaNote).not.toHaveBeenCalled();
+  fireEvent.press(screen.getByLabelText('Сохранить сведения в память'));
+  await waitFor(()=>expect(saveMediaNote).toHaveBeenCalledWith('guest',
+    expect.objectContaining({sourceUrl:'https://t.me/public_news/124',
+      extractedText:'Проверенный содержательный текст публичного поста',
+      body:'https://t.me/public_news/124'}),expect.anything()));
+});
+
+test('MSG-1: MAX channel link is URL-only, never falsely shown as fetched post',async()=>{
+  mockParams={incoming:[{shareType:'text',value:'Читайте у нас!\\nhttps://max.ru/channel_news'}]};
+  const screen=render(<MemoryImportScreen/>);
+  await waitFor(()=>expect(screen.getByText('Ссылка · без текста страницы')).toBeTruthy());
+  expect(screen.getByText(/MAX · Сохранится только ссылка/)).toBeTruthy();
+  expect(screen.queryByLabelText('Загрузить содержимое публичной ссылки после согласия')).toBeNull();
+  expect(importLink).not.toHaveBeenCalled();
+  fireEvent.press(screen.getByLabelText('Сохранить сведения в память'));
+  await waitFor(()=>expect(saveMediaNote).toHaveBeenCalledWith('guest',
+    expect.objectContaining({sourceUrl:'https://max.ru/channel_news',
+      body:'Читайте у нас!\\nhttps://max.ru/channel_news',extractedText:''}),expect.anything()));
+});
+
+test('MSG-0: multi-URL Share is text only; never chooses a random source URL',async()=>{
+  mockParams={incoming:[{shareType:'text',
+    value:'Две версии: https://t.me/public_news/123 и https://t.me/public_news/124'}]};
+  const screen=render(<MemoryImportScreen/>);
+  await waitFor(()=>expect(screen.getByLabelText('Сведения из файла').props.value).toContain('Две версии'));
+  expect(screen.queryByText('Ссылка · без текста страницы')).toBeNull();
+  expect(importLink).not.toHaveBeenCalled();
+  fireEvent.press(screen.getByLabelText('Сохранить сведения в память'));
+  await waitFor(()=>expect(saveMediaNote).toHaveBeenCalledWith('guest',
+    expect.objectContaining({sourceUrl:undefined,extractedText:''}),expect.anything()));
+});
+
+test('MSG-0: private Telegram share is text-only, no public fetch or verified source',async()=>{
+  mockParams={incoming:[{shareType:'url',value:'https://t.me/c/123/345'}]};
+  const screen=render(<MemoryImportScreen/>);
+  await waitFor(()=>expect(screen.getByText(/не является публичным постом/)).toBeTruthy());
+  expect(screen.queryByLabelText('Загрузить содержимое публичной ссылки после согласия')).toBeNull();
+  expect(importLink).not.toHaveBeenCalled();
+  fireEvent.press(screen.getByLabelText('Сохранить сведения в память'));
+  await waitFor(()=>expect(saveMediaNote).toHaveBeenCalledWith('guest',
+    expect.objectContaining({sourceUrl:undefined,
+      body:'https://t.me/c/123/345'}),expect.anything()));
+});
+
+test('MSG-0: invalid or local Share URL stays as text without unsafe origin attribution',async()=>{
+  mockParams={incoming:[{shareType:'url',value:'http://127.0.0.1/private'}]};
+  const screen=render(<MemoryImportScreen/>);
+  await waitFor(()=>expect(screen.getByText(/не прошёл проверку публичной HTTPS/)).toBeTruthy());
+  expect(screen.queryByText('Ссылка · без текста страницы')).toBeNull();
+  expect(importLink).not.toHaveBeenCalled();
+  fireEvent.press(screen.getByLabelText('Сохранить сведения в память'));
+  await waitFor(()=>expect(saveMediaNote).toHaveBeenCalledWith('guest',
+    expect.objectContaining({sourceUrl:undefined}),expect.anything()));
+});
+
+test('MSG-1: failed public fetch retains original URL-only draft, not a false successful read',async()=>{
+  (importLink as jest.Mock).mockRejectedValueOnce(new Error('Доступ к материалу закрыт (HTTP 403).'));
+  mockParams={incoming:[{shareType:'url',value:'https://t.me/public_news/199'}]};
+  const screen=render(<MemoryImportScreen/>);
+  await waitFor(()=>expect(screen.getByLabelText('Загрузить содержимое публичной ссылки после согласия')).toBeTruthy());
+  fireEvent.press(screen.getByLabelText('Загрузить содержимое публичной ссылки после согласия'));
+  await waitFor(()=>expect(screen.getByText(/HTTP 403/)).toBeTruthy());
+  expect(screen.getByText('Ссылка · без текста страницы')).toBeTruthy();
+  expect(saveMediaNote).not.toHaveBeenCalled();
+  fireEvent.press(screen.getByLabelText('Сохранить сведения в память'));
+  await waitFor(()=>expect(saveMediaNote).toHaveBeenCalledWith('guest',
+    expect.objectContaining({sourceUrl:'https://t.me/public_news/199',
+      extractedText:''}),expect.anything()));
+});
+
 test('recognition does not overwrite the user annotation', async () => {
   (extractMedia as jest.Mock).mockResolvedValueOnce('На фото гарантия холодильника');
   const screen = render(<MemoryImportScreen />);
