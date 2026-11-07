@@ -25,9 +25,13 @@ export function suggestIncomingCollection(
   if (!caption || caption.length > 60_000) return null;
 
   // Do not derive tags from URL fragments or untrusted remote query strings.
-  const text = caption.replace(/https?:\/\/\S+/giu, " ");
+  const text = caption.replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/giu, " ");
   const tags = [...text.matchAll(/(?:^|[^\p{L}\p{N}_])#([\p{L}\p{N}_-]{2,40})/gu)]
     .map(x => ({ raw: "#" + x[1], key: compact(x[1]) }));
+  // A protected-section hashtag is a privacy warning, not a reason to
+  // propose routing to an unrelated standard collection.
+  if (tags.some(tag => collections.some(c => c.sensitivity !== "standard" &&
+    (tag.key === compact(c.name) || tag.key === compact(c.slug))))) return null;
   const options = collections.filter(c => c.id && c.name.trim() &&
     c.sensitivity === "standard" && !["notes", "inbox"].includes(c.slug));
   const hashtagMatches = options.flatMap(c => {
