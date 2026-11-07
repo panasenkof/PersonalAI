@@ -21,7 +21,7 @@
 
 **C0-A/C3-B:** canonical storage = `local-memory/repository.ts` + `media/attachments.ts:saveMediaNote`, один `direct_conversations` для чата, локальные оригиналы в SQLCipher, provenance `sourceUrl` только после проверки; `publicImportUrl/importLink` не заменены, запрет автоматических redirects оставлен; нет нового index, таблицы входящих, background watcher, внешнего API Telegram/MAX, бота или сервера.
 
-**Проверки этого среза:** URL fixtures, несколько/приватная/неверная ссылка, подпись, explicit network consent, 403, сохранение link-only через прежний writer и отсутствие автосохранения. **Открытые gate:** реальный Android Share из последних версий Telegram и MAX, 0–3 настоящих публичных поста с проверенной DOM/медиа-структурой, блокировки/редиректы в реальной сети, 여러-file Share в одну заметку, exact duplicate/version, «Входящие»/теги — MSG-1/2/6 следующими малыми PR. Нельзя объявлять поддержку MAX media-by-link или приватных Telegram постов только по этим синтетическим тестам. Vivo `NOT_RUN_PHYSICAL`.
+**Проверки этого среза:** URL fixtures, несколько/приватная/неверная ссылка, подпись, explicit network consent, 403, сохранение link-only через прежний writer и отсутствие автосохранения. **Открытые gate:** реальный Android Share из последних версий Telegram и MAX, 0–3 настоящих публичных поста с проверенной DOM/медиа-структурой, блокировки/редиректы в реальной сети, многофайловый Share в одну заметку, exact duplicate/version, «Входящие»/теги — MSG-1/2/6 следующими малыми PR. Нельзя объявлять поддержку MAX media-by-link или приватных Telegram постов только по этим синтетическим тестам. Vivo `NOT_RUN_PHYSICAL`.
 
 ## Уточнение ред. 75 — зависимости и небольшой первый выпуск
 
