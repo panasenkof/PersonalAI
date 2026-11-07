@@ -1,4 +1,4 @@
-import { describeSourceProvenance, validSourceCoverage } from "../source-provenance";
+import { describeSourceProvenance, validSourceCoverage, validTelegramTextObservation } from "../source-provenance";
 
 test("source card: URL-only Telegram is syntactic, never a verified post",()=>{
   const source=describeSourceProvenance({
@@ -89,4 +89,34 @@ test("source card: private/invalid/untrusted URLs are never external buttons",()
     "file:///data/secret","https://user:pw@example.org/"]) {
     expect(describeSourceProvenance({sourceUrl:raw})).toBeNull();
   }
+});
+
+test("MSG-6.C: verified HTML data-post observation labels ID and local snapshot, never Telegram revision",()=>{
+  const observation={messageKey:"public_news/123",
+    textSha256:"a".repeat(64),textLength:24,
+    evidence:"telegram_html_data_post_v1" as const};
+  const url="https://t.me/public_news/123";
+  expect(validTelegramTextObservation(url,"telegram_post_text_only",observation)).toBe(true);
+  const card=describeSourceProvenance({sourceUrl:url,coverage:"telegram_post_text_only",observation});
+  expect(card?.details).toContain("ID сообщения по data-post: public_news/123");
+  expect(card?.details).toContain("Отпечаток полученного текста SHA-256: aaaaaaaaaaaa");
+  expect(card?.details).toContain("не версия Telegram");
+});
+test("MSG-6.C: URL syntax, other message or unverified body cannot impersonate HTML observation",()=>{
+  const observation={messageKey:"public_news/123",textSha256:"b".repeat(64),
+    textLength:12,evidence:"telegram_html_data_post_v1" as const};
+  for(const [url,coverage,obs] of [
+    ["https://t.me/public_news/123","url_only",observation],
+    ["https://t.me/public_news/124","telegram_post_text_only",observation],
+    ["https://example.org/story","telegram_post_text_only",observation],
+    ["https://t.me/public_news/123","telegram_post_text_only",{...observation,textSha256:"wrong"}],
+    ["https://t.me/public_news/123","telegram_post_text_only",{...observation,evidence:"guessed"}],
+    ["https://t.me/public_news/123","telegram_post_text_only",{...observation,textLength:60001}],
+  ] as const){
+    expect(validTelegramTextObservation(url,coverage,obs)).toBe(false);
+    const card=describeSourceProvenance({sourceUrl:url,coverage,observation:obs});
+    expect(card?.details).not.toContain("ID сообщения по data-post");
+  }
+  expect(describeSourceProvenance({sourceUrl:"https://t.me/public_news/123",
+    coverage:"telegram_post_text_only"})?.details).not.toContain("Отпечаток");
 });
