@@ -55,6 +55,11 @@ const IMPORT_KIND_LABELS: Record<string, string> = {
 export function MemoryImportScreen() {
   const route = useRoute<RouteProp<RootStackParams, "MemoryImport">>();
   const incoming = route.params?.incoming;
+  // One Android Share event containing files (including an optional caption)
+  // is one proposed note. Text-only multi-item Share keeps the existing
+  // sequential confirmation workflow.
+  const groupedIncoming = Boolean(incoming && incoming.length > 1 &&
+    incoming.some(item => item.shareType !== "text" && item.shareType !== "url"));
   const [keepOriginal, setKeepOriginal] = useState(true);
   const [publicationClaim,setPublicationClaim] = useState<HtmlPublicationClaim|null>(null);
   const [sourceUrl, setSourceUrl] = useState(""); // Confirmed provenance only.
@@ -141,8 +146,10 @@ export function MemoryImportScreen() {
   }).catch(() => { if (alive.current) setNotice("Не удалось загрузить разделы."); }); }, [profile]);
   useEffect(() => {
     const payload = incoming?.[position]; if (!payload) return;
-    let cancelled = false; let staged: File | undefined;
-    const cleanup = () => { try { if (staged?.exists) staged.delete(); } catch { /* Cache may already be removed. */ } };
+    let cancelled = false; const staged: File[] = [];
+    const cleanup = () => { for (const copy of staged) {
+      try { if (copy.exists) copy.delete(); } catch { /* Only our private cache. */ }
+    } };
     const off = onLocalMemorySessionChange(unlocked => {
       if (unlocked) return;
       cancelled = true; cleanup(); setFiles([]); setPreparing(false);
@@ -150,7 +157,53 @@ export function MemoryImportScreen() {
     });
     setPreparing(true); setTitle(""); setFiles([]); setRecognitionResults([]); setRecognizingIndex(-1); setBody(""); setExtractedText(""); setNotice(""); setSourceUrl(""); setPublicationClaim(null); setLinkDraft(""); setLinkOnly(false); setSourcePickerOpen(false); setProcessingOptionsOpen(false); setKeepOriginal(true);
     void (async () => {
-      if (incoming!.length > 30) throw new Error("Отправляйте не более 30 файлов за один раз.");
+      if (incoming!.length > 30) throw new Error("Отправляйте не более 30 материалов за один раз.");
+      if (groupedIncoming) {
+        // MSG-2.A: the existing canonical saveMediaNote(files) handles every
+        // original in ONE note. No per-file note writes, no external fetch.
+        const captions: string[] = [];
+        const assets: ImportFile[] = [];
+        const dir = new Directory(Paths.cache, "persai-incoming");
+        dir.create({ intermediates: true, idempotent: true });
+        let bytes = 0;
+        for (const item of incoming!) {
+          if (cancelled) { cleanup(); return; }
+          const isText = item.shareType === "text" || item.shareType === "url";
+          if (!item.value || (isText && item.value.length > 60_000))
+            throw new Error("Пустой или слишком длинный входящий материал.");
+          if (isText) { captions.push(item.value); continue; }
+          if (!["file", "image", "audio", "video"].includes(item.shareType) ||
+              !/^(content|file):\/\//.test(item.value))
+            throw new Error("Оригинал недоступен. Отправьте файлы из приложения ещё раз.");
+          if (assets.length >= MAX_ORIGINALS_PER_NOTE)
+            throw new Error("Не более 10 файлов в одной заметке. Отправьте альбом частями.");
+          const source = new File(item.value);
+          const target = new File(dir, Crypto.randomUUID());
+          staged.push(target);
+          await FileSystem.copyAsync({ from: item.value, to: target.uri });
+          if (cancelled) { cleanup(); return; }
+          const size = target.size;
+          if (!Number.isFinite(size) || size < 0 || (bytes += size) > MAX_TOTAL_ORIGINAL_BYTES)
+            throw new Error("Суммарный размер оригиналов превышает 80 МБ.");
+          const asset: ImportFile = {
+            uri: target.uri, name: source.name || "Входящий файл", mimeType: item.mimeType,
+          };
+          mediaKind(asset);
+          assets.push(asset);
+        }
+        const caption = captions.join("\n\n");
+        if (caption.length > 60_000) throw new Error("Общая подпись длиннее 60 000 символов.");
+        if (cancelled) { cleanup(); return; }
+        // Do not mark any URL within the caption as verified source metadata
+        // for every file in the album. It remains ordinary user-provided text.
+        ownedFiles.current.push(...staged.map(copy => copy.uri));
+        setFiles(assets);
+        setBody(caption);
+        setTitle(caption.split("\n").find(line => line.trim())?.slice(0, 160) ||
+          (assets.length > 1 ? "Полученные материалы" : assets[0]?.name.slice(0, 160) || "Материал"));
+        setNotice("Один черновик для всех файлов и подписи. Сохранение только после подтверждения.");
+        return;
+      }
       const text = payload.shareType === "text" || payload.shareType === "url";
       if (!payload.value || (text && payload.value.length > 60_000)) throw new Error("Пустой или слишком длинный материал.");
       if (text) {
@@ -178,7 +231,7 @@ export function MemoryImportScreen() {
       }
       const source = new File(payload.value);
       const dir = new Directory(Paths.cache, "persai-incoming"); dir.create({ intermediates: true, idempotent: true });
-      const target = new File(dir, Crypto.randomUUID()); staged = target;
+      const target = new File(dir, Crypto.randomUUID()); staged.push(target);
       await FileSystem.copyAsync({ from: payload.value, to: target.uri });
       if (cancelled) { cleanup(); return; }
       ownedFiles.current.push(target.uri);
@@ -511,7 +564,7 @@ export function MemoryImportScreen() {
         sourceUrl: sourceUrl || undefined,
         ...(sourceUrl && !linkOnly && publicationClaim && !keepOriginal ? {publicationClaim} : {}),
         sensitivity: classification, collectionId: collectionId || undefined,
-        ...(incoming ? { receipt: JSON.stringify(incoming[position]) } : {}),
+        ...(incoming ? { receipt: JSON.stringify(groupedIncoming ? incoming : incoming[position]) } : {}),
       }, aborter.signal);
       scheduleIndexTerms(profile); scheduleVectors(profile);
       // Derived visual vectors are written only after the note commits.
@@ -527,7 +580,7 @@ export function MemoryImportScreen() {
         }
       }
       if (!keepOriginal) for (const item of files) { await FileSystem.deleteAsync(item.uri, { idempotent: true }).catch(() => {}); }
-      if (alive.current) { if (incoming && position + 1 < incoming.length) setPosition(p => p + 1); else setLeaving(true); }
+      if (alive.current) { if (incoming && !groupedIncoming && position + 1 < incoming.length) setPosition(p => p + 1); else setLeaving(true); }
     } catch (e) { if (alive.current) setNotice("Не удалось сохранить: " + memoryErrorMessage(e)); }
     finally { if (controller.current === aborter) controller.current = null; if (alive.current) setBusy(false); }
   }
@@ -594,10 +647,13 @@ export function MemoryImportScreen() {
         <NebulaAction icon="square" label="Остановить разбор" variant="danger"
           onPress={() => controller.current?.abort()} />
       </View> : null}
+      {groupedIncoming && files.length ? <Text style={{ color: t.muted, fontSize: 13 }}>
+        Файлов в одной заметке: {files.length}. Подпись можно отредактировать перед сохранением.
+      </Text> : null}
       {incoming && !preparing ? <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
         <NebulaAction icon="refresh-cw" label="Повторить подготовку" size="compact" disabled={busy}
           onPress={() => setPrepareAttempt(n => n + 1)} />
-        {position + 1 < incoming.length ? <NebulaAction icon="skip-forward" label="Пропустить материал" size="compact"
+        {!groupedIncoming && position + 1 < incoming.length ? <NebulaAction icon="skip-forward" label="Пропустить материал" size="compact"
           disabled={busy || preparing} onPress={() => { if (profile) setSkipApproval({ profile, position }); }} /> : null}
       </View> : null}
       {notice ? <Text accessibilityRole="alert" style={{ color: t.muted }}>{notice}</Text> : null}
