@@ -83,7 +83,6 @@ export function MemoryImportScreen() {
   const [position, setPosition] = useState(0);
   const [collections, setCollections] = useState<CollectionRecord[]>([]);
   const [collectionId, setCollectionId] = useState("");
-  const [collectionChosen, setCollectionChosen] = useState(false);
   const [modelCollectionHint, setModelCollectionHint] = useState<ImportClassification | null>(null);
   const [leaving, setLeaving] = useState(false);
   const leaveAction = useRef<NavigationAction | null>(null);
@@ -275,7 +274,7 @@ export function MemoryImportScreen() {
     leaveAction.current = null; setLeaveApproval(false);
     setSkipApproval(null); setAudioApproval(null); setComparison(null); setAiField(null);
   }, [profile]);
-  useEffect(() => { setSkipApproval(null); setAudioApproval(null); setComparison(null); setAiField(null); setCollectionChosen(false); setModelCollectionHint(null); }, [position, prepareAttempt, profile]);
+  useEffect(() => { setSkipApproval(null); setAudioApproval(null); setComparison(null); setAiField(null); setModelCollectionHint(null); }, [position, prepareAttempt, profile]);
   // Both target record AND collection must permit provider egress.
   const inboxCollection = collections.find(c => c.slug === "inbox");
   const collectionAllowsProvider = (collectionId
@@ -355,8 +354,7 @@ export function MemoryImportScreen() {
       }
       // The model is only allowed to select an existing standard collection.
       // Manual selection still overrides it; no note is created yet.
-      setCollectionId(proposal.collectionId);setCollectionChosen(true);
-      setModelCollectionHint(proposal);
+      setCollectionId(proposal.collectionId);      setModelCollectionHint(proposal);
       setNotice("ИИ предложил раздел «"+proposal.sectionName+"». Проверьте перед сохранением.");
     } catch(e) {
       if (alive.current && !aborter.signal.aborted)
@@ -668,15 +666,21 @@ export function MemoryImportScreen() {
       scheduleIndexTerms(profile); scheduleVectors(profile);
       // Derived visual vectors are written only after the note commits.
       // A failed model must never imply the original note was not saved.
+      let photoIndexPending = false;
       if (keepOriginal && files.length) {
         try {
           const indexed = await autoIndexNotePhotos83(profile, savedId, aborter.signal);
           if (indexed.pending || indexed.failed) {
+            photoIndexPending = true;
             Alert.alert("Заметка сохранена", "Не все фотографии удалось подготовить для поиска. Повторите индексацию в настройках фото.");
           }
         } catch {
+          photoIndexPending = true;
           Alert.alert("Заметка сохранена", "Фото сохранено, но индексация не завершена. Повторите её в настройках.");
         }
+      }
+      if (modelCollectionHint && collectionId === modelCollectionHint.collectionId && !photoIndexPending) {
+        Alert.alert("Заметка сохранена", "Раздел определён ИИ: «"+modelCollectionHint.sectionName+"». Тема: «"+modelCollectionHint.topic+"». Запись сохранена только после вашего подтверждения.");
       }
       if (!keepOriginal) for (const item of files) { await FileSystem.deleteAsync(item.uri, { idempotent: true }).catch(() => {}); }
       if (alive.current) { if (incoming && !groupedIncoming && position + 1 < incoming.length) setPosition(p => p + 1); else setLeaving(true); }
@@ -966,7 +970,7 @@ export function MemoryImportScreen() {
   <BottomSheet visible={sectionOpen} title="Коллекция для записи" onClose={() => setSectionOpen(false)}>
         {incoming ? <Pressable disabled={busy} accessibilityRole="button"
           accessibilityLabel={"Коллекция: " + (inboxCollection?.name || "Входящие")}
-          onPress={() => { setCollectionId(""); setCollectionChosen(true); setModelCollectionHint(null); setSectionOpen(false); }}
+          onPress={() => { setCollectionId(""); setModelCollectionHint(null); setSectionOpen(false); }}
           style={choiceStyle(!collectionId, busy)}>
           <Text style={{ color: !collectionId ? t.secondary : t.text }}>
             {!collectionId ? "● " : "○ "}{inboxCollection?.name || "Входящие"} · по умолчанию
@@ -975,7 +979,7 @@ export function MemoryImportScreen() {
         {collections.filter(c => !(incoming && c.slug === "inbox")).map(c =>
           <Pressable key={c.id} disabled={busy} accessibilityRole="button"
             accessibilityLabel={"Коллекция: " + c.name}
-            onPress={() => { setCollectionId(c.id); setCollectionChosen(true); setModelCollectionHint(null); setSectionOpen(false); }}
+            onPress={() => { setCollectionId(c.id);  setModelCollectionHint(null); setSectionOpen(false); }}
             style={choiceStyle(c.id === collectionId, busy)}>
             <Text style={{ color: c.id === collectionId ? t.secondary : t.text }}>
               {c.id === collectionId ? "● " : "○ "}{c.name}
