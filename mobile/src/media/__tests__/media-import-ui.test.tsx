@@ -871,3 +871,59 @@ test.each([
   expect(ui.getByLabelText('Сведения из файла').props.value).toBe('Сохранённый материал');
   expect(require('../../direct-agent/enrich-runner').scheduleIndexTerms).not.toHaveBeenCalled();
 });
+
+test('MSG-6.C1: exact hashtag suggests but never auto-selects a collection or saves before tap',async()=>{
+  (ensureSections as jest.Mock).mockResolvedValue([
+    {id:'notes',name:'Заметки',slug:'notes',sensitivity:'standard'},
+    {id:'recipes',name:'Рецепты',slug:'recipes',sensitivity:'standard'},
+    {id:'inbox',name:'Получено',slug:'inbox',sensitivity:'sensitive'},
+  ]);
+  mockParams={incoming:[{shareType:'text',value:'Лазанья на ужин #рецепты'}]};
+  const ui=render(<MemoryImportScreen/>);
+  await waitFor(()=>expect(ui.getByLabelText('Выбрать предложенный раздел «Рецепты»')).toBeTruthy());
+  expect(ui.getByText(/Коллекция: Получено/)).toBeTruthy();
+  expect(saveMediaNote).not.toHaveBeenCalled();
+  expect(extractMedia).not.toHaveBeenCalled();
+  expect(importLink).not.toHaveBeenCalled();
+
+  fireEvent.press(ui.getByLabelText('Выбрать предложенный раздел «Рецепты»'));
+  expect(ui.getByText(/Коллекция: Рецепты/)).toBeTruthy();
+  expect(ui.queryByLabelText('Выбрать предложенный раздел «Рецепты»')).toBeNull();
+  expect(saveMediaNote).not.toHaveBeenCalled();
+  fireEvent.press(ui.getByLabelText('Сохранить сведения в память'));
+  await waitFor(()=>expect(saveMediaNote).toHaveBeenCalledWith('guest',expect.objectContaining({
+    body:'Лазанья на ужин #рецепты',collectionId:'recipes',
+  }),expect.anything()));
+});
+
+test('MSG-6.C1: ambiguous or private-only tags do not suggest or silently change Inbox', async()=>{
+  (ensureSections as jest.Mock).mockResolvedValue([
+    {id:'notes',name:'Заметки',slug:'notes',sensitivity:'standard'},
+    {id:'recipes',name:'Рецепты',slug:'recipes',sensitivity:'standard'},
+    {id:'cars',name:'Авто',slug:'cars',sensitivity:'standard'},
+    {id:'docs',name:'Документы',slug:'documents',sensitivity:'sensitive'},
+  ]);
+  mockParams={incoming:[{shareType:'text',value:'Фото #авто #рецепты и #документы'}]};
+  const ui=render(<MemoryImportScreen/>);
+  await waitFor(()=>expect(ui.getByText(/Коллекция: Входящие/)).toBeTruthy());
+  expect(ui.queryByText(/Возможный раздел/)).toBeNull();
+  fireEvent.press(ui.getByLabelText('Сохранить сведения в память'));
+  await waitFor(()=>expect(saveMediaNote).toHaveBeenCalledWith('guest',expect.objectContaining({
+    collectionId:undefined,body:'Фото #авто #рецепты и #документы',
+  }),expect.anything()));
+});
+
+test('MSG-6.C1: user selecting Inbox manually suppresses suggestion without altering caption',async()=>{
+  (ensureSections as jest.Mock).mockResolvedValue([
+    {id:'notes',name:'Заметки',slug:'notes',sensitivity:'standard'},
+    {id:'recipes',name:'Рецепты',slug:'recipes',sensitivity:'standard'},
+  ]);
+  mockParams={incoming:[{shareType:'text',value:'#рецепты Торт'}]};
+  const ui=render(<MemoryImportScreen/>);
+  await waitFor(()=>expect(ui.getByLabelText('Выбрать предложенный раздел «Рецепты»')).toBeTruthy());
+  fireEvent.press(ui.getByLabelText('Выбрать коллекцию'));
+  fireEvent.press(ui.getByLabelText('Коллекция: Входящие'));
+  expect(ui.queryByLabelText('Выбрать предложенный раздел «Рецепты»')).toBeNull();
+  expect(ui.getByLabelText('Сведения из файла').props.value).toBe('#рецепты Торт');
+  expect(saveMediaNote).not.toHaveBeenCalled();
+});

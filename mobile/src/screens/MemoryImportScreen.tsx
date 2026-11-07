@@ -9,6 +9,7 @@ import { onLocalMemorySessionChange } from "../local-memory/storage";
 import * as ImagePicker from "expo-image-picker";
 import { importLink, linkImportErrorMessage, publicImportUrl, type HtmlPublicationClaim } from "../media/link-import";
 import { sharedLinkPreview } from "../media/messenger-share-links";
+import { suggestIncomingCollection } from "../media/share-collection-suggestion";
 import { pdfCoverageMessage } from "../media/pdf-pages";
 import { useRussianOcrStatus } from "../media/russian-ocr";
 import { RussianOcrControls } from "../media/RussianOcrControls";
@@ -81,6 +82,7 @@ export function MemoryImportScreen() {
   const [position, setPosition] = useState(0);
   const [collections, setCollections] = useState<CollectionRecord[]>([]);
   const [collectionId, setCollectionId] = useState("");
+  const [collectionChosen, setCollectionChosen] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const leaveAction = useRef<NavigationAction | null>(null);
   const leaveDispatched = useRef(false);
@@ -271,9 +273,11 @@ export function MemoryImportScreen() {
     leaveAction.current = null; setLeaveApproval(false);
     setSkipApproval(null); setAudioApproval(null); setComparison(null); setAiField(null);
   }, [profile]);
-  useEffect(() => { setSkipApproval(null); setAudioApproval(null); setComparison(null); setAiField(null); }, [position, prepareAttempt]);
+  useEffect(() => { setSkipApproval(null); setAudioApproval(null); setComparison(null); setAiField(null); setCollectionChosen(false); }, [position, prepareAttempt, profile]);
   // Both target record AND collection must permit provider egress.
   const inboxCollection = collections.find(c => c.slug === "inbox");
+  const collectionHint = incoming && !collectionChosen && !collectionId && !preparing
+    ? suggestIncomingCollection(body, collections) : null;
   const collectionAllowsProvider = (collectionId
     ? collections.find(c => c.id === collectionId)?.sensitivity
     : incoming ? inboxCollection?.sensitivity : undefined) === "standard";
@@ -691,6 +695,17 @@ export function MemoryImportScreen() {
         <TextInput accessibilityLabel="Сведения из файла" editable={!busy} multiline value={body} onChangeText={setBody} maxLength={60_000} style={[field, { minHeight: 96, textAlignVertical: "top" }]} placeholder={linkOnly ? "Моя заметка — что важно сохранить? (необязательно)" : "Добавьте подпись — необязательно"} placeholderTextColor={t.muted} />
         {body.trim() ? <NebulaAction icon="zap" label="Улучшить подпись с ИИ" size="compact" disabled={busy} onPress={() => setAiField("body")} /> : null}
         <Pressable accessibilityRole="button" accessibilityLabel="Выбрать коллекцию" disabled={busy} onPress={() => { Keyboard.dismiss(); setSectionOpen(true); }} style={{ ...button, backgroundColor: t.panel, alignItems: "flex-start" }}><Text style={{ color: t.text }}>Коллекция: {collections.find(c => c.id === collectionId)?.name || (incoming ? inboxCollection?.name || "Входящие" : "Заметки")} · Изменить</Text></Pressable>
+        {collectionHint ? <View style={{ gap: 4 }}>
+          <Text style={{ color: t.muted, fontSize: 13 }}>
+            Возможный раздел «{collectionHint.name}» — {collectionHint.reason}. Без выбора останутся «Входящие».
+          </Text>
+          <NebulaAction icon="folder" label={"Выбрать предложенный раздел «" + collectionHint.name + "»"}
+            size="compact" disabled={busy || preparing}
+            onPress={() => {
+              // Never route based on untrusted Share text without explicit choice.
+              setCollectionId(collectionHint.collectionId); setCollectionChosen(true);
+            }} />
+        </View> : null}
         <View testID="import-access-options" style={{ gap: 8 }}>
           <Text accessibilityRole="header" style={{ color: t.text, fontWeight: "700" }}>Доступ к записи</Text>
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
@@ -885,7 +900,7 @@ export function MemoryImportScreen() {
   <BottomSheet visible={sectionOpen} title="Коллекция для записи" onClose={() => setSectionOpen(false)}>
         {incoming ? <Pressable disabled={busy} accessibilityRole="button"
           accessibilityLabel={"Коллекция: " + (inboxCollection?.name || "Входящие")}
-          onPress={() => { setCollectionId(""); setSectionOpen(false); }}
+          onPress={() => { setCollectionId(""); setCollectionChosen(true); setSectionOpen(false); }}
           style={choiceStyle(!collectionId, busy)}>
           <Text style={{ color: !collectionId ? t.secondary : t.text }}>
             {!collectionId ? "● " : "○ "}{inboxCollection?.name || "Входящие"} · по умолчанию
@@ -894,7 +909,7 @@ export function MemoryImportScreen() {
         {collections.filter(c => !(incoming && c.slug === "inbox")).map(c =>
           <Pressable key={c.id} disabled={busy} accessibilityRole="button"
             accessibilityLabel={"Коллекция: " + c.name}
-            onPress={() => { setCollectionId(c.id); setSectionOpen(false); }}
+            onPress={() => { setCollectionId(c.id); setCollectionChosen(true); setSectionOpen(false); }}
             style={choiceStyle(c.id === collectionId, busy)}>
             <Text style={{ color: c.id === collectionId ? t.secondary : t.text }}>
               {c.id === collectionId ? "● " : "○ "}{c.name}
