@@ -56,6 +56,8 @@ import { NoteEditorSection } from "../design/nebula/NoteEditorSection";
 import { NoteReadPreview } from "../design/nebula/NoteReadPreview";
 import { SourceProvenanceCard } from "../design/nebula/SourceProvenanceCard";
 import { describeSourceProvenance } from "../media/source-provenance";
+import { canRecheckTelegramText, recheckTelegramText, telegramRecheckMessage } from "../media/telegram-recheck";
+import { linkImportErrorMessage } from "../media/link-import";
 import { NebulaAction } from "../design/nebula/components";
 import { recognitionApprovalMatches } from "../design/nebula/recognitionApproval";
 
@@ -68,6 +70,11 @@ export function MemoryNoteScreen() {
   const sourceAtOpen = useRef<{profile:string;body:string;kind:"assistant_reply"|"dialogue_summary"}|null>(null);
   const activeProfile = useRef(profile); activeProfile.current = profile;
   const extraction = useRef<AbortController | null>(null);
+  const sourceCheckController = useRef<AbortController | null>(null);
+  const sourceCheckSequence = useRef(0);
+  const sourceCheckIdentity = useRef("");
+  const [sourceCheckBusy, setSourceCheckBusy] = useState(false);
+  const [sourceCheckMessage, setSourceCheckMessage] = useState<string | null>(null);
   const repeatRequest = useRef(0);
   // Keep consent ephemeral and tied to ONE original + one expected record
   // version. Never persist providers, files or secrets in navigation params.
@@ -76,7 +83,7 @@ export function MemoryNoteScreen() {
     start: () => void;
   }>(null);
   const [repeatMessage, setRepeatMessage] = useState<string | null>(null);
-  useEffect(() => { const off = onLocalMemorySessionChange(unlocked => { if (!unlocked) { extraction.current?.abort(); repeatRequest.current++; repeatApproval.current = null; setRepeatMessage(null); setCandidate(null); setRepeatFiles([]); setConfirmKind(null); } }); return () => { off(); extraction.current?.abort(); }; }, []);
+  useEffect(() => { const off = onLocalMemorySessionChange(unlocked => { if (!unlocked) { extraction.current?.abort(); sourceCheckController.current?.abort(); sourceCheckController.current=null; sourceCheckSequence.current++; setSourceCheckBusy(false); setSourceCheckMessage(null); repeatRequest.current++; repeatApproval.current = null; setRepeatMessage(null); setCandidate(null); setRepeatFiles([]); setConfirmKind(null); } }); return () => { off(); extraction.current?.abort(); sourceCheckController.current?.abort(); sourceCheckSequence.current++; }; }, []);
   const repository = useRef<SqliteMemoryRepository | null>(null); const alive = useRef(true); const pending = useRef(false);
   const loadSequence = useRef(0);
   const [editing, setEditing] = useState(!route.params?.entityId || route.params?.edit === true);
@@ -134,7 +141,7 @@ const [termsOpen, setTermsOpen] = useState(false);
   useEffect(() => {
     const sequence = ++loadSequence.current;
     const stillCurrent = () => alive.current && loadSequence.current === sequence && activeProfile.current === profile;
-    alive.current = true; setLoading(true); setAiField(null); setError(""); setMetadataOpen(false); setFileContentOpen(false); setTermsOpen(false); repeatRequest.current++; repeatApproval.current = null; setRepeatMessage(null); setCandidate(null); setRepeatFiles([]);
+    alive.current = true; sourceCheckController.current?.abort(); sourceCheckController.current=null; sourceCheckSequence.current++; setSourceCheckBusy(false); setSourceCheckMessage(null); setLoading(true); setAiField(null); setError(""); setMetadataOpen(false); setFileContentOpen(false); setTermsOpen(false); repeatRequest.current++; repeatApproval.current = null; setRepeatMessage(null); setCandidate(null); setRepeatFiles([]);
     void (async () => {
       if (!profile) throw new Error("profile_missing");
       const db = await localMemoryRepository(profile);
@@ -164,9 +171,18 @@ const [termsOpen, setTermsOpen] = useState(false);
       kindTouched.current = false;
       setTitle(initialTitle); setBody(initialBody); setCollectionId(initialCollection); setKind(initialKind); namesForSave.current = initialNames; setNames(initialNames);
     })().catch(e => { if (stillCurrent()) setError(memoryErrorMessage(e)); }).finally(() => { if (stillCurrent()) setLoading(false); });
-    return () => { loadSequence.current++; alive.current = false; repository.current = null; };
+    return () => { loadSequence.current++; sourceCheckController.current?.abort(); sourceCheckSequence.current++; alive.current = false; repository.current = null; };
   }, [profile, chatStore, route.params?.entityId, route.params?.collectionId,
     route.params?.chatReply?.conversationId, route.params?.chatReply?.rowId, retry]);
+  // A recheck result belongs only to the exact saved record/version. Editing
+  // or opening a different note invalidates the outstanding request and label.
+  useEffect(() => {
+    sourceCheckController.current?.abort();
+    sourceCheckController.current = null;
+    sourceCheckSequence.current++;
+    setSourceCheckBusy(false);
+    setSourceCheckMessage(null);
+  }, [profile, selected?.id, selected?.record_version]);
   const run = useCallback(async (work: (db: SqliteMemoryRepository) => Promise<void>) => {
     if (!repository.current || pending.current) return;
     pending.current = true; setBusy(true); setError("");
@@ -351,6 +367,58 @@ const [termsOpen, setTermsOpen] = useState(false);
     const timer = setTimeout(() => { void repository.current?.searchNotes(linkSearch, 30).then(items => { if (!cancelled) setRelated(items); }).catch(e => { if (!cancelled) setError(memoryErrorMessage(e)); }); }, 200);
     return () => { cancelled = true; clearTimeout(timer); };
   }, [linkOpen, linkSearch]);
+  // Explicit network read through the EXISTING bounded HTTPS importer.
+  // Never overwrite the original note or infer Telegram upstream revision.
+  async function checkSavedSourceText() {
+    if (!selected || !profile || !localMemorySessionUnlocked() ||
+        sourceCheckController.current) return;
+    const source = {
+      sourceUrl: selected.payload.source_url,
+      coverage: selected.payload.source_text_coverage,
+      observation: selected.payload.source_observation,
+    };
+    if (!canRecheckTelegramText(source)) return;
+    const identity = profile + ":" + selected.id + ":" + selected.record_version;
+    const aborter = new AbortController();
+    const sequence = ++sourceCheckSequence.current;
+    sourceCheckController.current = aborter;
+    setSourceCheckBusy(true);
+    setSourceCheckMessage(null);
+    const stillCurrent = () => !aborter.signal.aborted &&
+      sourceCheckSequence.current === sequence && alive.current &&
+      activeProfile.current === profile && sourceCheckIdentity.current === identity &&
+      localMemorySessionUnlocked();
+    try {
+      const result = await recheckTelegramText(source, aborter.signal);
+      if (!stillCurrent()) return;
+      const now = await repository.current?.entity(selected.id);
+      if (!stillCurrent()) return;
+      if (!now || now.record_version !== selected.record_version ||
+          now.record_status !== selected.record_status ||
+          now.payload.source_url !== source.sourceUrl ||
+          JSON.stringify(now.payload.source_observation) !== JSON.stringify(source.observation)) {
+        setSourceCheckMessage("Запись изменилась во время проверки. Откройте её заново; сравнение не применено.");
+        return;
+      }
+      setSourceCheckMessage(telegramRecheckMessage(result));
+    } catch (error) {
+      if (stillCurrent()) setSourceCheckMessage(
+        "Не удалось сверить текст: " + linkImportErrorMessage(error) +
+        " Сохранённая заметка не изменена.");
+    } finally {
+      if (sourceCheckSequence.current === sequence) {
+        sourceCheckController.current = null;
+        if (alive.current) setSourceCheckBusy(false);
+      }
+    }
+  }
+  function cancelSourceTextCheck() {
+    sourceCheckSequence.current++;
+    sourceCheckController.current?.abort();
+    sourceCheckController.current = null;
+    setSourceCheckBusy(false);
+    setSourceCheckMessage("Проверка отменена. Сохранённая заметка не изменена.");
+  }
   const field = { borderWidth: 1, borderColor: t.line, borderRadius: nebulaRadii.field, backgroundColor: t.panel, minHeight: nebulaTouch.minimum, padding: nebulaSpacing.md, color: t.text, ...nebulaTypography.body };
   const canEditWithAi = Boolean(body.trim());
   const saveDisabled = busy || voiceActive || (editing && !title.trim() && !body.trim());
@@ -365,6 +433,11 @@ const [termsOpen, setTermsOpen] = useState(false);
     publicationAttribute:selected.payload.source_publication_attribute,
     observation:selected.payload.source_observation,
   }) : null;
+  sourceCheckIdentity.current = profile + ":" + (selected?.id || "") + ":" + (selected?.record_version || "");
+  const sourceCheckEligible = Boolean(selected && canRecheckTelegramText({
+    sourceUrl:selected.payload.source_url,coverage:selected.payload.source_text_coverage,
+    observation:selected.payload.source_observation,
+  }));
   const hasRecognizedText = memoryNoteHasRecognizedText(selected, extractedText);
   const button = { minHeight: nebulaTouch.minimum, borderRadius: nebulaRadii.field, justifyContent: "center" as const, padding: nebulaSpacing.md };
   return <KeyboardAvoidingView style={{ flex: 1, backgroundColor: t.bg }} behavior={Platform.OS === "ios" ? "padding" : "height"} keyboardVerticalOffset={Platform.OS === "ios" ? headerHeight : 0}>
@@ -432,7 +505,13 @@ const [termsOpen, setTermsOpen] = useState(false);
             actionLabel="Читать текст файла" maxLines={4} /> : null}
           {extractedText.trim() ? <NebulaAction icon="zap" label="Улучшить текст файла с ИИ" size="compact"
             disabled={busy} onPress={() => setAiField("extracted")} /> : null}
-          {sourceDescription ? <SourceProvenanceCard source={sourceDescription} onOpenError={()=>setError("Не удалось открыть источник.")}/> : null}
+          {sourceDescription ? <SourceProvenanceCard source={sourceDescription}
+            onOpenError={()=>setError("Не удалось открыть источник.")}
+            onRecheck={!editing && sourceCheckEligible && selected &&
+              ["active","archived"].includes(selected.record_status) ? () => {void checkSavedSourceText();} : undefined}
+            recheckDisabled={busy || voiceActive || dirty}
+            recheckBusy={sourceCheckBusy} recheckMessage={sourceCheckMessage}
+            onCancelRecheck={cancelSourceTextCheck}/> : null}
         </> : <>
         <TextInput testID="note-title-input" accessibilityLabel="Заголовок заметки" value={title} onChangeText={value => { setBeforeAi(null); setTitle(value); }} editable={!busy} maxLength={160} placeholder="Заголовок — необязательно" placeholderTextColor={t.muted} style={field} />
         {selected && profile && !route.params?.photoAttachmentId && memoryNoteHasPhoto(selected) ? <Pressable
