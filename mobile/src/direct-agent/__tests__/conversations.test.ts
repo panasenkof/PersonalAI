@@ -176,3 +176,24 @@ test("9C: in-text source offsets survive SQLCipher reopening only with valid rea
   expect(parseConversation(JSON.stringify(legacy))?.rows[0].articleReadReport)
     .toMatchObject({selectedCount:3});
 });
+
+test("chat context is backward compatible and each turn preserves its own historical section",()=>{
+  const old={id:"old",title:"Диалог",createdAt:"2026-11-07T10:00:00Z",
+    updatedAt:"2026-11-07T11:00:00Z",rows:[{id:"u",role:"user",text:"Привет"}],drafts:[],question:""};
+  expect(parseConversation(JSON.stringify(old))?.context).toBeUndefined();
+  const mixed={...old,context:{topic:"Лазанья",sectionSlug:"recipes",pinned:true},
+    rows:[...old.rows,{id:"a",role:"assistant",text:"Аккумулятор",contextChange:{
+      topic:"Аккумулятор",sectionSlug:"cars",previousTopic:null,
+      previousSectionSlug:null,sectionName:"Авто",previousSectionName:null,
+      reason:"Вопрос про автомобиль",at:"2026-11-07T10:10:00Z"}},
+      {id:"b",role:"assistant",text:"Рецепт",contextChange:{
+        topic:"Лазанья",sectionSlug:"recipes",previousTopic:"Аккумулятор",
+        previousSectionSlug:"cars",sectionName:"Рецепты",previousSectionName:"Авто",
+        reason:"Смена темы",at:"2026-11-07T11:00:00Z"}}]};
+  const restored=parseConversation(JSON.stringify(mixed))!;
+  expect(restored.context).toEqual(mixed.context);
+  expect(restored.rows.filter(r=>r.contextChange)).toHaveLength(2);
+  const malformed={...mixed,context:{topic:"",sectionSlug:"../../docs",pinned:true}};
+  expect(parseConversation(JSON.stringify(malformed))?.context).toBeUndefined();
+  expect(parseConversation(JSON.stringify(malformed))?.rows).toHaveLength(3);
+});
