@@ -57,7 +57,8 @@ test("MSG-1: importLink still uses native HTTPS/no-redirect and returns only sco
   expect(reader.cancel).toHaveBeenCalled();
   expect(mockDelete).toHaveBeenCalledTimes(1);
   expect(result).toMatchObject({source:"https://t.me/s/public_news/42",
-    title:"Telegram · public_news/42",partial:true});
+    title:"Telegram · public_news/42",partial:true,
+    textCoverage:"telegram_post_text_only"});
   expect(result.text).toContain("Нужный пост");
   expect(result.text).toContain("Вторая строка");
   expect(result.text).not.toMatch(/Другая публикация|Не имеет отношения/);
