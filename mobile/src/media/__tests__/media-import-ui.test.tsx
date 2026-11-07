@@ -806,7 +806,7 @@ test('MSG-6.A: Android Share defaults to Inbox without creating it before confir
   fireEvent.press(ui.getByLabelText('Коллекция: Входящие'));
   fireEvent.press(ui.getByLabelText('Сохранить сведения в память'));
   await waitFor(()=>expect(saveMediaNote).toHaveBeenCalledWith('guest',expect.objectContaining({
-    body:'Письмо из Telegram',collectionId:undefined,receipt:JSON.stringify(mockParams.incoming),
+    body:'Письмо из Telegram',collectionId:undefined,receipt:JSON.stringify(mockParams.incoming[0]),
   }),expect.anything()));
 });
 
