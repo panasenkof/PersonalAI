@@ -5,11 +5,12 @@ import { localMemoryRepository } from "../local-memory/repository";
 import { ensureSections } from "../local-memory/sections";
 import type { CollectionRecord } from "../local-memory/types";
 import { loadMediaPreferences, type FileAsrMode } from "../media/preferences";
-import { onLocalMemorySessionChange } from "../local-memory/storage";
+import { onLocalMemorySessionChange, localMemorySessionUnlocked } from "../local-memory/storage";
 import * as ImagePicker from "expo-image-picker";
 import { importLink, linkImportErrorMessage, publicImportUrl, type HtmlPublicationClaim } from "../media/link-import";
 import { sharedLinkPreview } from "../media/messenger-share-links";
-import { suggestIncomingCollection } from "../media/share-collection-suggestion";
+import { classifyImportCollectionWithAgent, classificationExcerpt, type ImportClassification } from "../media/import-llm-classifier";
+import { loadModelCallLimit } from "../direct-agent/agent-preferences";
 import { pdfCoverageMessage } from "../media/pdf-pages";
 import { useRussianOcrStatus } from "../media/russian-ocr";
 import { RussianOcrControls } from "../media/RussianOcrControls";
@@ -82,7 +83,7 @@ export function MemoryImportScreen() {
   const [position, setPosition] = useState(0);
   const [collections, setCollections] = useState<CollectionRecord[]>([]);
   const [collectionId, setCollectionId] = useState("");
-  const [collectionChosen, setCollectionChosen] = useState(false);
+  const [modelCollectionHint, setModelCollectionHint] = useState<ImportClassification | null>(null);
   const [leaving, setLeaving] = useState(false);
   const leaveAction = useRef<NavigationAction | null>(null);
   const leaveDispatched = useRef(false);
@@ -125,6 +126,9 @@ export function MemoryImportScreen() {
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [extractedText, setExtractedText] = useState("");
+  // An LLM suggestion is evidence about the PREVIOUS visible text. Any later
+  // local OCR/edit/title change invalidates it without moving the draft.
+  useEffect(() => { setModelCollectionHint(null); }, [body, extractedText, title]);
   const [notice, setNotice] = useState("");
   const [aiField, setAiField] = useState<"body" | "extracted" | null>(null);
   const [comparison, setComparison] = useState<{ scope: string; result: FileRecognition; updated: string } | null>(null);
@@ -273,11 +277,9 @@ export function MemoryImportScreen() {
     leaveAction.current = null; setLeaveApproval(false);
     setSkipApproval(null); setAudioApproval(null); setComparison(null); setAiField(null);
   }, [profile]);
-  useEffect(() => { setSkipApproval(null); setAudioApproval(null); setComparison(null); setAiField(null); setCollectionChosen(false); }, [position, prepareAttempt, profile]);
+  useEffect(() => { setSkipApproval(null); setAudioApproval(null); setComparison(null); setAiField(null); setModelCollectionHint(null); }, [position, prepareAttempt, profile]);
   // Both target record AND collection must permit provider egress.
   const inboxCollection = collections.find(c => c.slug === "inbox");
-  const collectionHint = incoming && !collectionChosen && !collectionId && !preparing
-    ? suggestIncomingCollection(body, collections) : null;
   const collectionAllowsProvider = (collectionId
     ? collections.find(c => c.id === collectionId)?.sensitivity
     : incoming ? inboxCollection?.sensitivity : undefined) === "standard";
@@ -299,8 +301,72 @@ export function MemoryImportScreen() {
         (currentKind !== "audio" || (fileAsrMode === "online" && officialAudioProvider(currentProcessor))));
   };
   const canExtract = files.some(canExtractFile);
+  const canClassifyWithModel = classification === "standard" &&
+    (!collectionId || collections.find(c=>c.id===collectionId)?.sensitivity === "standard") &&
+    classificationExcerpt(body, extractedText).substantive && collections.some(c => c.sensitivity === "standard" && c.slug !== "inbox");
   const field = { color: t.text, backgroundColor: t.panel, borderWidth: 1, borderColor: t.line, borderRadius: 16, padding: 14, minHeight: 50 };
   const button = { backgroundColor: t.accent, padding: 14, borderRadius: 17, minHeight: 50, justifyContent: "center" as const, alignItems: "center" as const };
+
+  /** Separate Android Share/import classification: opt-in provider egress,
+   * no original, screenshot, URI or external web content is transmitted.
+   * The user still has to press the canonical Save button afterwards. */
+  function askModelForCollection() {
+    if (!profile || !alive.current || busy || preparing || controller.current) return;
+    if (!localMemorySessionUnlocked()) { setNotice("Разблокируйте память перед отправкой текста модели."); return; }
+    if (classification !== "standard" || (collectionId && collections.find(c=>c.id===collectionId)?.sensitivity !== "standard")) {
+      setNotice("Личные материалы нельзя передавать модели для определения раздела.");
+      return;
+    }
+    if (!classificationExcerpt(body, extractedText).substantive) {
+      setNotice("Для определения раздела добавьте подпись или распознайте текст. ИИ не читает оригиналы автоматически.");
+      return;
+    }
+    const connection = selected;
+    if (!connection || (!connection.apiKey && !anonymousLocalAllowed(connection))) {
+      setNotice("Сначала настройте подключение модели в настройках.");
+      return;
+    }
+    Alert.alert("Разрешить ИИ выбрать раздел?",
+      "Модели будет отправлен только видимый текст подписи/распознавания (не более 6000 символов), заголовок и названия обычных разделов. "+
+      "Оригиналы фото, документов и другие файлы не отправляются. Возможно до 2 платных обращений к модели. "+
+      "Предложенный раздел можно исправить до сохранения.",
+      [
+        {text:"Отмена",style:"cancel"},
+        {text:"Разрешить один подбор",onPress:()=>{void classifyWithModel(connection);}},
+      ]);
+  }
+
+  async function classifyWithModel(connection: DirectConnection) {
+    if (!profile || !alive.current || busy || preparing || controller.current || classification !== "standard" ||
+        (collectionId && collections.find(c=>c.id===collectionId)?.sensitivity !== "standard") ||
+        !localMemorySessionUnlocked()) return;
+    const aborter=new AbortController(); controller.current=aborter;
+    setBusy(true);setNotice("ИИ определяет раздел по разрешённому тексту…");
+    try {
+      const limit=await loadModelCallLimit(profile);
+      if (aborter.signal.aborted || !alive.current || !localMemorySessionUnlocked()) return;
+      const proposal=await classifyImportCollectionWithAgent({
+        title,body,extractedText,collections,settings:connection,
+        explicitConsent:true,sensitivity:classification,modelCallLimit:limit,signal:aborter.signal,
+      });
+      if (aborter.signal.aborted || !alive.current || !localMemorySessionUnlocked()) return;
+      if (!proposal) {
+        setModelCollectionHint(null);
+        setNotice("ИИ не смог уверенно подобрать существующий раздел. Ничего не изменено; можно сохранить во «Входящие».");
+        return;
+      }
+      // The model is only allowed to select an existing standard collection.
+      // Manual selection still overrides it; no note is created yet.
+      setCollectionId(proposal.collectionId);      setModelCollectionHint(proposal);
+      setNotice("ИИ предложил раздел «"+proposal.sectionName+"». Проверьте перед сохранением.");
+    } catch(e) {
+      if (alive.current && !aborter.signal.aborted)
+        setNotice("Раздел не определён: "+((e as Error).message || "Ошибка модели")+". Можно сохранить без ИИ.");
+    } finally {
+      if (controller.current===aborter)controller.current=null;
+      if (alive.current)setBusy(false);
+    }
+  }
 
   function cancelPicker() {
     if (!alive.current) return;
@@ -603,15 +669,21 @@ export function MemoryImportScreen() {
       scheduleIndexTerms(profile); scheduleVectors(profile);
       // Derived visual vectors are written only after the note commits.
       // A failed model must never imply the original note was not saved.
+      let photoIndexPending = false;
       if (keepOriginal && files.length) {
         try {
           const indexed = await autoIndexNotePhotos83(profile, savedId, aborter.signal);
           if (indexed.pending || indexed.failed) {
+            photoIndexPending = true;
             Alert.alert("Заметка сохранена", "Не все фотографии удалось подготовить для поиска. Повторите индексацию в настройках фото.");
           }
         } catch {
+          photoIndexPending = true;
           Alert.alert("Заметка сохранена", "Фото сохранено, но индексация не завершена. Повторите её в настройках.");
         }
+      }
+      if (modelCollectionHint && collectionId === modelCollectionHint.collectionId && !photoIndexPending) {
+        Alert.alert("Заметка сохранена", "Раздел определён ИИ: «"+modelCollectionHint.sectionName+"». Тема: «"+modelCollectionHint.topic+"». Запись сохранена только после вашего подтверждения.");
       }
       if (!keepOriginal) for (const item of files) { await FileSystem.deleteAsync(item.uri, { idempotent: true }).catch(() => {}); }
       if (alive.current) { if (incoming && !groupedIncoming && position + 1 < incoming.length) setPosition(p => p + 1); else setLeaving(true); }
@@ -692,20 +764,21 @@ export function MemoryImportScreen() {
       </View> : null}
       {notice ? <Text accessibilityRole="alert" style={{ color: t.muted }}>{notice}</Text> : null}
       {hasMaterial ? <>
-        <TextInput accessibilityLabel="Сведения из файла" editable={!busy} multiline value={body} onChangeText={setBody} maxLength={60_000} style={[field, { minHeight: 96, textAlignVertical: "top" }]} placeholder={linkOnly ? "Моя заметка — что важно сохранить? (необязательно)" : "Добавьте подпись — необязательно"} placeholderTextColor={t.muted} />
+        <TextInput accessibilityLabel="Сведения из файла" editable={!busy} multiline value={body} onChangeText={value=>{setBody(value);setModelCollectionHint(null);}} maxLength={60_000} style={[field, { minHeight: 96, textAlignVertical: "top" }]} placeholder={linkOnly ? "Моя заметка — что важно сохранить? (необязательно)" : "Добавьте подпись — необязательно"} placeholderTextColor={t.muted} />
         {body.trim() ? <NebulaAction icon="zap" label="Улучшить подпись с ИИ" size="compact" disabled={busy} onPress={() => setAiField("body")} /> : null}
         <Pressable accessibilityRole="button" accessibilityLabel="Выбрать коллекцию" disabled={busy} onPress={() => { Keyboard.dismiss(); setSectionOpen(true); }} style={{ ...button, backgroundColor: t.panel, alignItems: "flex-start" }}><Text style={{ color: t.text }}>Коллекция: {collections.find(c => c.id === collectionId)?.name || (incoming ? inboxCollection?.name || "Входящие" : "Заметки")} · Изменить</Text></Pressable>
-        {collectionHint ? <View style={{ gap: 4 }}>
-          <Text style={{ color: t.muted, fontSize: 13 }}>
-            Возможный раздел «{collectionHint.name}» — {collectionHint.reason}. Без выбора останутся «Входящие».
-          </Text>
-          <NebulaAction icon="folder" label={"Выбрать предложенный раздел «" + collectionHint.name + "»"}
-            size="compact" disabled={busy || preparing}
-            onPress={() => {
-              // Never route based on untrusted Share text without explicit choice.
-              setCollectionId(collectionHint.collectionId); setCollectionChosen(true);
-            }} />
-        </View> : null}
+        <View style={{ gap: 4 }}>
+          <NebulaAction icon="cpu" label="Определить раздел с ИИ" size="compact"
+            disabled={busy || preparing || !canClassifyWithModel}
+            onPress={askModelForCollection} />
+          {modelCollectionHint ? <Text accessibilityLabel="Предложенный ИИ раздел"
+            style={{ color: t.secondary, fontSize: 13 }}>
+            ИИ определил: «{modelCollectionHint.sectionName}» · тема «{modelCollectionHint.topic}». Можно изменить раздел перед сохранением.
+            {modelCollectionHint.excerptTruncated ? " Использован только фрагмент текста." : ""}
+          </Text> : <Text style={{ color: t.muted, fontSize: 12 }}>
+            В отличие от прежней подсказки по хэштегам раздел выбирает LLM. Текст передаётся только после отдельного разрешения; личные записи и оригиналы не отправляются. Без ИИ действует текущий выбор раздела.
+          </Text>}
+        </View>
         <View testID="import-access-options" style={{ gap: 8 }}>
           <Text accessibilityRole="header" style={{ color: t.text, fontWeight: "700" }}>Доступ к записи</Text>
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
@@ -716,7 +789,7 @@ export function MemoryImportScreen() {
               const checked = classification === id;
               return <Pressable key={id} accessibilityRole="radio" accessibilityLabel={label}
                 accessibilityState={{ checked, disabled: busy }} aria-checked={checked} disabled={busy}
-                onPress={() => { setClassification(id); if (id === "sensitive") setRecognitionMode("sequential"); }}
+                onPress={() => { setClassification(id); setModelCollectionHint(null); if (id === "sensitive") setRecognitionMode("sequential"); }}
                 style={{ flexGrow: 1, flexBasis: 130, minHeight: 84, padding: 10, gap: 5,
                   borderRadius: 14, borderWidth: checked ? 2 : 1,
                   borderColor: checked ? t.accent : t.line, backgroundColor: checked ? t.soft : t.panel }}>
@@ -900,7 +973,7 @@ export function MemoryImportScreen() {
   <BottomSheet visible={sectionOpen} title="Коллекция для записи" onClose={() => setSectionOpen(false)}>
         {incoming ? <Pressable disabled={busy} accessibilityRole="button"
           accessibilityLabel={"Коллекция: " + (inboxCollection?.name || "Входящие")}
-          onPress={() => { setCollectionId(""); setCollectionChosen(true); setSectionOpen(false); }}
+          onPress={() => { setCollectionId(""); setModelCollectionHint(null); setSectionOpen(false); }}
           style={choiceStyle(!collectionId, busy)}>
           <Text style={{ color: !collectionId ? t.secondary : t.text }}>
             {!collectionId ? "● " : "○ "}{inboxCollection?.name || "Входящие"} · по умолчанию
@@ -909,7 +982,7 @@ export function MemoryImportScreen() {
         {collections.filter(c => !(incoming && c.slug === "inbox")).map(c =>
           <Pressable key={c.id} disabled={busy} accessibilityRole="button"
             accessibilityLabel={"Коллекция: " + c.name}
-            onPress={() => { setCollectionId(c.id); setCollectionChosen(true); setSectionOpen(false); }}
+            onPress={() => { setCollectionId(c.id);  setModelCollectionHint(null); setSectionOpen(false); }}
             style={choiceStyle(c.id === collectionId, busy)}>
             <Text style={{ color: c.id === collectionId ? t.secondary : t.text }}>
               {c.id === collectionId ? "● " : "○ "}{c.name}

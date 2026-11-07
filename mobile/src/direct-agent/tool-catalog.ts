@@ -739,7 +739,11 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
         ? Array.isArray(r.sources) && typeof r.context === "string" ? r.sources.length ? "found" : "empty" : "failed"
         : typeof r.content === "string" && r.content.trim() && typeof r.url === "string" ? "read" : "failed" })),
   ];
-  const registry = new Map(specs.map(s => [s.definition.name, s]));
+  // Import classification uses THIS catalog/engine, but no memory/web/workspace tools.
+  // The host must separately authorize transmission before setting contextOnly.
+  const activeSpecs = options.contextOnly
+    ? specs.filter(s => s.definition.name === "set_conversation_context") : specs;
+  const registry = new Map(activeSpecs.map(s => [s.definition.name, s]));
   emit();
   if (notes.length) observe({ tool: "search_local_notes", outcome: "found", subject: options.prompt.slice(0, 120), excerpt: JSON.stringify(notes.map(n => ({ id: n.id, title: n.title }))).slice(0, 600) });
   if (sources.length) observe({ tool: "search_web", outcome: "found", subject: options.prompt.slice(0, 120), excerpt: sources.join("\n").slice(0, 600) });
@@ -806,7 +810,7 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
       ...(contextCandidate ? {contextCandidate} : {}) };
   }
   const observeSources = (urls: string[]) => { if (urls.length) observe({ tool: "web_search", outcome: "found", subject: options.prompt.slice(0, 120), excerpt: urls.join("\n").slice(0, 600) }); };
-  return { definitions: specs.map(s => s.definition), run, finish, observeSources,
+  return { definitions: activeSpecs.map(s => s.definition), run, finish, observeSources,
     memory: () => {
       const read=[...readNotes].reverse().flatMap(id=>used.has(id)?[used.get(id)!]:[]);
       // Photo originals are per attachment, not per note. Do not deduplicate
