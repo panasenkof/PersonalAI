@@ -17,6 +17,7 @@ import { FACT_TOOL_NAME, factGuide } from "./fact-tool";
 import type { SavedArticleIntent, SavedArticleShortlist } from "./article-selection";
 import type { MemorySection } from "./fact-tool";
 import type { ChatArticlePage, ChatArticleReadReport, ChatMemoryRef } from "./conversations";
+import type { ChatMoveProposal, MoveRequest } from "./move-proposal";
 import { ARTICLE_CITATION_GUIDE, ARTICLE_SYNTHESIS_GUIDE } from "./article-citations";
 
 export type AgentTurn = { role: "user" | "assistant"; content: string; attachments?: ChatAttachment[] };
@@ -24,7 +25,8 @@ export type AgentTurn = { role: "user" | "assistant"; content: string; attachmen
 /** `memory`: the records the answer was based on, shown under it («Из памяти»). */
 export type DirectResult = { text: string; sources: string[]; requests: number; notice?: string;
   memory?: Array<UsedNote | ChatMemoryRef>; photoAction?: "model" | "import" | "prepare";
-  taskState?: TaskState; proposalIds?: string[]; articlePage?: ChatArticlePage; articleReadReport?: ChatArticleReadReport };
+  taskState?: TaskState; proposalIds?: string[]; articlePage?: ChatArticlePage; articleReadReport?: ChatArticleReadReport;
+  moveProposal?: ChatMoveProposal };
 
 export type DirectAgentOptions = {
   settings: DirectAgentSettings;
@@ -47,6 +49,8 @@ export type DirectAgentOptions = {
   rewrite?: boolean;
   signal?: AbortSignal;
   lookup: (query: string) => Promise<MemorySnippet[]>;
+  /** Safe 9T2 read-only proposal; this callback NEVER writes a note. */
+  previewMove?: (request:MoveRequest) => Promise<ChatMoveProposal>;
   /** 9T1: optional host-only bridge to the existing ACL-scoped text-to-photo
    * search. No image bytes, vectors or duplicate search index reach the LLM. */
   /** The model sees only that a selected local photo exists, never its bytes. */
@@ -114,6 +118,7 @@ export { MAX_DIRECT_REPLY_TOKENS, MAX_REASONING_REPLY_TOKENS, TRUNCATED_NOTE, is
 const systemPrompt = (sections?: MemorySection[]) =>
   "Ты персональный помощник PersAI, работающий на телефоне пользователя. " +
   "Для вопросов о предпочтениях и заметках используй search_local_notes, если он доступен. " +
+  "Если пользователь просит ПЕРЕНЕСТИ уже существующую заметку между разделами, сначала найди точную запись и версию через search_local_notes/list_local_notes, а затем вызови propose_move_local_note с noteId, expectedVersion, targetSectionSlug и объяснением. Инструмент ТОЛЬКО создаёт карточку для подтверждения; не заявляй, что перенос уже сделан. Не вызывай draft_memory_fact вместо перемещения существующей записи. Пользователь отдельно подтверждает или отменяет карточку; сам ты никогда не выполняешь запись или удаление. " +
   "Все запросы чата проходят через тебя и функции инструментов: не подменяй вызов инструмента воображаемым результатом. Для поиска фотографий в памяти вызывай search_local_photos. mode=text ищет по описанию, mode=image использует прикреплённую локальную фотографию, если этот режим разрешён каталогом; description при mode=image — пустая строка. Вызывай инструмент даже для простых запросов «найди фото», а для сложных сочетай его с другими средствами памяти. Для продолжения прежней подборки «Покажи ещё» используй continue_local_articles с сохранёнными фильтрами и курсором, а не новую подборку. Он ищет только на телефоне через действующий фотоиндекс; результат — метаданные найденных фото, а не сами пиксели, и не подтверждает, что ты видел или распознал исходное изображение. Не придумывай снимки, не объявляй отсутствие модели/индекса пустым результатом, не загружай фото в интернет без прямого согласия. Обычный поиск текста не заменяй фото-поиском без причины. " +
   "Для выборки сохранённых статей по дате используй select_local_articles, если он доступен; ответ инструмента — только метаданные. Проверяй count/hasMore, дочитывай текст read_local_note по id/version перед обобщением и не выдавай ссылку без текста за прочитанную статью. " +
   "На уточнение «сделай выжимку из них» вызывай read_selected_local_articles, если он доступен: это точные ID/version прошлой подборки, исходники перечитываются с проверкой прав. Для всех выбранных материалов следуй nextIndex до hasMore=false в пределах бюджета; отдельно назови прочитанные, прочитанные частично, ссылки без тела и недоступные. Не приписывай факты статьям, текст которых не читался; ни summary заметки, ни URL не означают прочитанный оригинал статьи. " +
