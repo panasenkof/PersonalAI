@@ -1,3 +1,4 @@
+import { checkedNoteTags } from "../local-memory/note-tags";
 import { replaceFileText } from "./batch-recognition";
 import * as Crypto from 'expo-crypto';
 import { Directory, File, FileMode, Paths } from 'expo-file-system';
@@ -193,9 +194,10 @@ function checkedRecognitions(originals: ImportFile[], values?: FileRecognition[]
   });
 }
 /** Note + original + receipt commit together. Cancellation never leaves a partial note. */
-export async function saveMediaNote(profile: string, input: { file?: ImportFile; files?: ImportFile[]; title: string; body: string; extractedText?: string; recognitions?: FileRecognition[]; sensitivity: 'sensitive' | 'standard'; receipt?: string; onReplay?: ShareReplayCallback; allowSeparateCopy?: boolean; collectionId?: string; sourceUrl?: string; sourceCoverage?: SourceCoverage; telegramObservation?: TelegramTextObservation; publicationClaim?: {date:string;evidence:'html_meta';sourceAttribute:'article:published_time'|'datePublished'} }, signal?: AbortSignal): Promise<string> {
+export async function saveMediaNote(profile: string, input: { file?: ImportFile; files?: ImportFile[]; title: string; body: string; extractedText?: string; recognitions?: FileRecognition[]; sensitivity: 'sensitive' | 'standard'; receipt?: string; onReplay?: ShareReplayCallback; allowSeparateCopy?: boolean; collectionId?: string; sourceUrl?: string; sourceCoverage?: SourceCoverage; tags?: string[]; telegramObservation?: TelegramTextObservation; publicationClaim?: {date:string;evidence:'html_meta';sourceAttribute:'article:published_time'|'datePublished'} }, signal?: AbortSignal): Promise<string> {
   return withLocalMemoryDatabase(profile, async db => {
     check(signal);
+    const tags = checkedNoteTags(input.tags);
     if (input.publicationClaim) {
       const claim=input.publicationClaim;
       const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(claim.date);
@@ -258,7 +260,8 @@ export async function saveMediaNote(profile: string, input: { file?: ImportFile;
     const legacyReceipt = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256,
       JSON.stringify([input.receipt || 'device-import', contentHash, input.title, input.body,
         input.extractedText || "", input.sensitivity, input.collectionId || "", input.sourceUrl || "",
-        ...(recognitionSignature ? [recognitionSignature] : [])]));
+        ...(recognitionSignature ? [recognitionSignature] : []),
+        ...(tags.length ? [tags] : [])]));
     const preview = input.receipt && input.sourceUrl ?
       sharedLinkPreview({ shareType: 'url', value: input.sourceUrl }) : null;
     const postKey = preview?.platform === 'telegram' &&
@@ -280,6 +283,7 @@ export async function saveMediaNote(profile: string, input: { file?: ImportFile;
           normalizedTitle, normalizedBody,
           input.extractedText || "", input.sensitivity, input.collectionId || "",
           postKey || input.sourceUrl || "", recognitionSignature,
+          ...(tags.length ? [tags] : []),
         ]))
       : legacyReceipt;
     async function replayIfFound(): Promise<string | null> {
@@ -311,7 +315,7 @@ export async function saveMediaNote(profile: string, input: { file?: ImportFile;
     let entity: EntityRecord;
     try {
       entity = await repo.createEntity({ collection_id: col.id, domain: 'notes', title,
-      payload: { type: 'note', title,  ...(input.sourceUrl ? { source_url: input.sourceUrl } : {}), ...(input.sourceCoverage ? { source_text_coverage: input.sourceCoverage } : {}), ...(input.telegramObservation ? {source_observation:input.telegramObservation} : {}), ...(input.publicationClaim ? { source_publication_date:input.publicationClaim.date, source_publication_evidence:input.publicationClaim.evidence, source_publication_attribute:input.publicationClaim.sourceAttribute } : {}), ...(pdfCoverage?.length ? { source_pdf_coverage: pdfCoverage } : {}), body: input.body.trim(), ...(input.extractedText ? { extracted_text: input.extractedText.trim() } : {}), ...(originals.length ? { source_file: originals[0].name, source_media: mediaKind(originals[0]),
+      payload: { type: 'note', title, ...(tags.length ? {tags} : {}),  ...(input.sourceUrl ? { source_url: input.sourceUrl } : {}), ...(input.sourceCoverage ? { source_text_coverage: input.sourceCoverage } : {}), ...(input.telegramObservation ? {source_observation:input.telegramObservation} : {}), ...(input.publicationClaim ? { source_publication_date:input.publicationClaim.date, source_publication_evidence:input.publicationClaim.evidence, source_publication_attribute:input.publicationClaim.sourceAttribute } : {}), ...(pdfCoverage?.length ? { source_pdf_coverage: pdfCoverage } : {}), body: input.body.trim(), ...(input.extractedText ? { extracted_text: input.extractedText.trim() } : {}), ...(originals.length ? { source_file: originals[0].name, source_media: mediaKind(originals[0]),
         ...(originals.length > 1 ? { source_files: originals.map(f => f.name), source_media_types: originals.map(mediaKind) } : {}) } : {}) },
       sensitivity: input.sensitivity, source_kind: 'user', source_ref: input.receipt ? 'android-share' : 'device-import',
     }, async (tx, entityId) => {
