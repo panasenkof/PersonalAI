@@ -41,7 +41,7 @@ test("serverless requests always provide memory tools and keep web off until ena
   // gpt-4.1-mini is not a reasoning model: OpenAI rejects reasoning.encrypted_content for it.
   expect(body.include).not.toContain("reasoning.encrypted_content");
   expect(body.max_output_tokens).toBe(4000);
-  expect(body.tools.map((tool: any) => tool.name)).toEqual(["search_local_notes", "draft_memory_fact", "update_task_state"]);
+  expect(body.tools.map((tool: any) => tool.name)).toEqual(["set_conversation_context", "search_local_notes", "draft_memory_fact", "update_task_state"]);
   expect(request.mock.calls[0][1].headers.Authorization).toBe("Bearer test-key-only");
   expect(JSON.stringify(body)).not.toContain("test-key-only");
 });
