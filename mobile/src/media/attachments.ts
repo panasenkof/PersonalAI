@@ -12,7 +12,7 @@ import type { ImportFile } from './kinds';
 import type { FileRecognition } from './batch-recognition';
 import { mediaKind } from './kinds';
 import { sharedLinkPreview } from './messenger-share-links';
-import { validSourceCoverage, type SourceCoverage } from './source-provenance';
+import { validSourceCoverage, validTelegramTextObservation, type SourceCoverage, type TelegramTextObservation } from './source-provenance';
 
 export const MAX_ORIGINAL_BYTES = 80 * 1024 * 1024;
 export const MAX_ORIGINALS_PER_NOTE = 10;
@@ -193,7 +193,7 @@ function checkedRecognitions(originals: ImportFile[], values?: FileRecognition[]
   });
 }
 /** Note + original + receipt commit together. Cancellation never leaves a partial note. */
-export async function saveMediaNote(profile: string, input: { file?: ImportFile; files?: ImportFile[]; title: string; body: string; extractedText?: string; recognitions?: FileRecognition[]; sensitivity: 'sensitive' | 'standard'; receipt?: string; onReplay?: ShareReplayCallback; allowSeparateCopy?: boolean; collectionId?: string; sourceUrl?: string; sourceCoverage?: SourceCoverage; publicationClaim?: {date:string;evidence:'html_meta';sourceAttribute:'article:published_time'|'datePublished'} }, signal?: AbortSignal): Promise<string> {
+export async function saveMediaNote(profile: string, input: { file?: ImportFile; files?: ImportFile[]; title: string; body: string; extractedText?: string; recognitions?: FileRecognition[]; sensitivity: 'sensitive' | 'standard'; receipt?: string; onReplay?: ShareReplayCallback; allowSeparateCopy?: boolean; collectionId?: string; sourceUrl?: string; sourceCoverage?: SourceCoverage; telegramObservation?: TelegramTextObservation; publicationClaim?: {date:string;evidence:'html_meta';sourceAttribute:'article:published_time'|'datePublished'} }, signal?: AbortSignal): Promise<string> {
   return withLocalMemoryDatabase(profile, async db => {
     check(signal);
     if (input.publicationClaim) {
@@ -209,6 +209,9 @@ export async function saveMediaNote(profile: string, input: { file?: ImportFile;
          date.getUTCMonth()!==month-1 || date.getUTCDate()!==day)
         throw new Error("invalid_source_publication_claim");
     }
+    if (input.telegramObservation &&
+        (!validTelegramTextObservation(input.sourceUrl,input.sourceCoverage,input.telegramObservation) ||
+          !input.extractedText?.trim())) throw new Error("invalid_source_observation");
     if (input.sourceCoverage) {
       if (!input.sourceUrl || !validSourceCoverage(input.sourceCoverage))
         throw new Error("invalid_source_coverage");
@@ -308,7 +311,7 @@ export async function saveMediaNote(profile: string, input: { file?: ImportFile;
     let entity: EntityRecord;
     try {
       entity = await repo.createEntity({ collection_id: col.id, domain: 'notes', title,
-      payload: { type: 'note', title,  ...(input.sourceUrl ? { source_url: input.sourceUrl } : {}), ...(input.sourceCoverage ? { source_text_coverage: input.sourceCoverage } : {}), ...(input.publicationClaim ? { source_publication_date:input.publicationClaim.date, source_publication_evidence:input.publicationClaim.evidence, source_publication_attribute:input.publicationClaim.sourceAttribute } : {}), ...(pdfCoverage?.length ? { source_pdf_coverage: pdfCoverage } : {}), body: input.body.trim(), ...(input.extractedText ? { extracted_text: input.extractedText.trim() } : {}), ...(originals.length ? { source_file: originals[0].name, source_media: mediaKind(originals[0]),
+      payload: { type: 'note', title,  ...(input.sourceUrl ? { source_url: input.sourceUrl } : {}), ...(input.sourceCoverage ? { source_text_coverage: input.sourceCoverage } : {}), ...(input.telegramObservation ? {source_observation:input.telegramObservation} : {}), ...(input.publicationClaim ? { source_publication_date:input.publicationClaim.date, source_publication_evidence:input.publicationClaim.evidence, source_publication_attribute:input.publicationClaim.sourceAttribute } : {}), ...(pdfCoverage?.length ? { source_pdf_coverage: pdfCoverage } : {}), body: input.body.trim(), ...(input.extractedText ? { extracted_text: input.extractedText.trim() } : {}), ...(originals.length ? { source_file: originals[0].name, source_media: mediaKind(originals[0]),
         ...(originals.length > 1 ? { source_files: originals.map(f => f.name), source_media_types: originals.map(mediaKind) } : {}) } : {}) },
       sensitivity: input.sensitivity, source_kind: 'user', source_ref: input.receipt ? 'android-share' : 'device-import',
     }, async (tx, entityId) => {

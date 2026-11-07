@@ -4,6 +4,7 @@ import * as Crypto from 'expo-crypto';
 import { mediaKind, type ImportFile } from './kinds';
 import { sharedLinkPreview } from './messenger-share-links';
 import { verifiedTelegramMessageMarkup } from './telegram-post';
+import type { TelegramTextObservation } from './source-provenance';
 
 export function publicImportUrl(raw: string): string {
   let u: URL;
@@ -194,7 +195,7 @@ export function articleReadError(html: string, result: ArticleText): string | nu
 
 /** Explicit user action only; no cookies/keys; streaming bound before allocation. */
 export async function importLink(raw: string, signal?: AbortSignal): Promise<{ file?: ImportFile; text?: string; source: string; title?: string; partial?: boolean;
-  textCoverage?: "telegram_post_text_only"; publicationClaim?: HtmlPublicationClaim }> {
+  textCoverage?: "telegram_post_text_only"; publicationClaim?: HtmlPublicationClaim; telegramObservation?: TelegramTextObservation }> {
   const source = publicImportUrl(raw);
   // Source identity is URL-form only; the HTML must independently identify
   // the EXACT Telegram message. Generic page text is not post evidence.
@@ -268,7 +269,15 @@ export async function importLink(raw: string, signal?: AbortSignal): Promise<{ f
       // Telegram post. No guessed source author/date. Media in the post is
       // NOT downloaded; public HTML extraction is always partial coverage.
       const publicationClaim=html && !telegram ? htmlPublicationClaim(rawText) : undefined;
+      // A digest of the scoped, retrieved text at fetch time, NOT an upstream
+      // Telegram edit number. User annotations may be edited separately.
+      const telegramObservation: TelegramTextObservation | undefined = telegram ? {
+        messageKey: telegram.messageKey.toLowerCase(), evidence:"telegram_html_data_post_v1",
+        textLength:content.length,
+        textSha256:await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256,content),
+      } : undefined;
       file.delete(); return { text: content, source,
+        ...(telegramObservation ? {telegramObservation} : {}),
         ...(telegram ? {title:telegram.title,partial:true,
           textCoverage:"telegram_post_text_only" as const} :
           {...(page?.title ? { title: page.title } : {}),

@@ -1009,6 +1009,8 @@ test("MSG-6.C: explicit Telegram HTML extraction records text-only coverage, nev
     source:"https://t.me/public_news/123",title:"Telegram · public_news/123",
     text:"Точное сообщение публичного канала",partial:true,
     textCoverage:"telegram_post_text_only",
+    telegramObservation:{messageKey:"public_news/123",textSha256:"a".repeat(64),
+      textLength:36,evidence:"telegram_html_data_post_v1"},
   });
   mockParams={incoming:[{shareType:"url",value:"https://t.me/public_news/123"}]};
   const ui=render(<MemoryImportScreen/>);
@@ -1016,10 +1018,13 @@ test("MSG-6.C: explicit Telegram HTML extraction records text-only coverage, nev
   fireEvent.press(ui.getByLabelText("Загрузить содержимое публичной ссылки после согласия"));
   await waitFor(()=>expect(ui.getByText(/Прочитан текст именно этого публичного поста Telegram/)).toBeTruthy());
   expect(ui.getByTestId("source-provenance-card")).toBeTruthy();
+  expect(ui.getByText(/ID сообщения по data-post: public_news\/123/)).toBeTruthy();
   expect(ui.queryByText(/Дата по метаданным/)).toBeNull();
   fireEvent.press(ui.getByLabelText("Сохранить сведения в память"));
   await waitFor(()=>expect(saveMediaNote).toHaveBeenCalledWith("guest",
-    expect.objectContaining({sourceCoverage:"telegram_post_text_only",sourceUrl:"https://t.me/public_news/123"}),
+    expect.objectContaining({sourceCoverage:"telegram_post_text_only",
+      sourceUrl:"https://t.me/public_news/123",
+      telegramObservation:expect.objectContaining({messageKey:"public_news/123",textSha256:"a".repeat(64)})}),
     expect.anything()));
 });
 

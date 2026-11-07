@@ -363,6 +363,7 @@ const [termsOpen, setTermsOpen] = useState(false);
     publicationDate:selected.payload.source_publication_date,
     publicationEvidence:selected.payload.source_publication_evidence,
     publicationAttribute:selected.payload.source_publication_attribute,
+    observation:selected.payload.source_observation,
   }) : null;
   const hasRecognizedText = memoryNoteHasRecognizedText(selected, extractedText);
   const button = { minHeight: nebulaTouch.minimum, borderRadius: nebulaRadii.field, justifyContent: "center" as const, padding: nebulaSpacing.md };
