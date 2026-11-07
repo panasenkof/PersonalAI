@@ -25,7 +25,7 @@ import { ActivityIndicator, Alert, Image, Keyboard, KeyboardAvoidingView, Platfo
 import { useProfile } from "../profile/ProfileContext";
 import { loadDirectConnections, anonymousLocalAllowed, defaultDirectPreferences } from "../direct-agent/settings";
 import type { DirectConnection } from "../direct-agent/settings";
-import { MAX_ORIGINALS_PER_NOTE, MAX_TOTAL_ORIGINAL_BYTES, saveMediaNote } from "../media/attachments";
+import { MAX_ORIGINALS_PER_NOTE, MAX_TOTAL_ORIGINAL_BYTES, saveMediaNote, type ShareReplay } from "../media/attachments";
 import { NoteAiEditor } from "../components/NoteAiEditor";
 import { replaceFileText, combinedRecognitionText, recognizeFilesSequentially, type FileRecognition } from "../media/batch-recognition";
 import { analyzeFilesTogether } from "../media/joint-recognition";
@@ -550,7 +550,7 @@ export function MemoryImportScreen() {
     } catch (e) { if (alive.current) setNotice(aborter.signal.aborted ? "Разбор остановлен." : (e as Error).message); }
     finally { if (alive.current) { setBusy(false); setRecognizingIndex(-1); } if (controller.current === aborter) controller.current = null; }
   }
-  async function save() {
+  async function save(allowSeparateCopy = false) {
     if (!keepOriginal && !body.trim() && !extractedText.trim() && !linkOnly) { setNotice("Добавьте текст или распознайте материал перед сохранением без оригинала."); return; }
     if (!profile || (!file && !body.trim() && !extractedText.trim() && !(linkOnly && sourceUrl)) || busy || preparing || controller.current) return;
     const aborter = new AbortController(); controller.current = aborter;
@@ -568,6 +568,7 @@ export function MemoryImportScreen() {
         : keepOriginal && files.length === 1 && file && mediaKind(file) === "text" && content.trim()
           ? [{ index: 0, name: file.name, status: "success", text: content }]
           : [];
+      let replay: ShareReplay | null = null;
       const savedId = await saveMediaNote(profile, {
         ...(keepOriginal && files.length > 1 ? { files } : { file: keepOriginal ? file || undefined : undefined }),
         title, body, extractedText: content,
@@ -575,8 +576,26 @@ export function MemoryImportScreen() {
         sourceUrl: sourceUrl || undefined,
         ...(sourceUrl && !linkOnly && publicationClaim && !keepOriginal ? {publicationClaim} : {}),
         sensitivity: classification, collectionId: collectionId || undefined,
-        ...(incoming ? { receipt: JSON.stringify(groupedIncoming ? incoming : incoming[position]) } : {}),
+        ...(incoming ? {
+          receipt: JSON.stringify(groupedIncoming ? incoming : incoming[position]),
+          ...(allowSeparateCopy ? { allowSeparateCopy: true } : {}),
+          onReplay: (existing: ShareReplay) => { replay = existing; },
+        } : {}),
       }, aborter.signal);
+      if (replay) {
+        const status: ShareReplay['recordStatus'] = (replay as ShareReplay).recordStatus;
+        const location = status === "trashed" ? "в корзине" :
+          status === "archived" ? "в архиве" : "в памяти";
+        setNotice("Совпадающий материал уже " + location +
+          ". Новая запись не создана. Можно сохранить отдельную копию.");
+        Alert.alert("Материал уже " + location,
+          "Совпали текст и содержимое вложений. Это может быть повторная отправка или отдельное сообщение с тем же файлом.",
+          [
+            {text:"Оставить черновик",style:"cancel"},
+            {text:"Сохранить отдельно",onPress:()=>{void save(true);}},
+          ]);
+        return;
+      }
       scheduleIndexTerms(profile); scheduleVectors(profile);
       // Derived visual vectors are written only after the note commits.
       // A failed model must never imply the original note was not saved.

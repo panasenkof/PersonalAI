@@ -11,12 +11,16 @@ import type { ExtractionSegmentInput } from '../local-memory/extractions';
 import type { ImportFile } from './kinds';
 import type { FileRecognition } from './batch-recognition';
 import { mediaKind } from './kinds';
+import { sharedLinkPreview } from './messenger-share-links';
 
 export const MAX_ORIGINAL_BYTES = 80 * 1024 * 1024;
 export const MAX_ORIGINALS_PER_NOTE = 10;
 export const MAX_TOTAL_ORIGINAL_BYTES = 80 * 1024 * 1024;
 const PART_BYTES = 256 * 1024;
 export type Attachment = { id: string; entity_id: string; name: string; mime: string; size: number };
+export type ShareReplay = { entityId: string; recordStatus: 'active' | 'archived' | 'trashed' };
+/** This is a notification only: the canonical saveMediaNote writer remains the only note writer. */
+export type ShareReplayCallback = (replay: ShareReplay) => void;
 const previewDirectory = () => new Directory(Paths.cache, 'persai-previews');
 export function clearAttachmentPreviews() {
   for (const dir of [previewDirectory(), new Directory(Paths.cache, 'persai-incoming'),
@@ -32,10 +36,32 @@ async function hash(bytes: Uint8Array<ArrayBuffer>) {
   const result = await Crypto.digest(Crypto.CryptoDigestAlgorithm.SHA256, bytes);
   return Array.from(new Uint8Array(result), b => b.toString(16).padStart(2, '0')).join('');
 }
+/** Snapshot content with bounded 256 KiB reads, independent of ephemeral Android URI.
+ * Fingerprints are SHA-256 of the ordered SHA-256 part digests and byte count.
+ * writeOriginal rechecks the snapshot before the DB transaction commits.
+ */
+async function incomingOriginalDigest(file: ImportFile, signal?: AbortSignal): Promise<string> {
+  const handle = new File(file.uri).open(FileMode.ReadOnly);
+  try {
+    const size = handle.size;
+    if (!size || size > MAX_ORIGINAL_BYTES) throw new Error('Выберите непустой файл размером до 80 МБ.');
+    const parts: string[] = [];
+    let read = 0;
+    while (read < size) {
+      check(signal);
+      const bytes = handle.readBytes(Math.min(PART_BYTES, size - read));
+      if (!bytes.length) throw new Error('Не удалось прочитать оригинал целиком.');
+      parts.push(await hash(bytes));
+      read += bytes.length;
+    }
+    check(signal);
+    return Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, JSON.stringify([size, parts]));
+  } finally { handle.close(); }
+}
 function originalKind(file: ImportFile) {
   return file.mimeType === 'application/pdf' || /\.pdf$/i.test(file.name) ? 'document' : mediaKind(file);
 }
-export async function writeOriginal(db: Pick<SQLiteDatabase, 'runAsync'>, entityId: string, file: ImportFile, signal?: AbortSignal) {
+export async function writeOriginal(db: Pick<SQLiteDatabase, 'runAsync'>, entityId: string, file: ImportFile, signal?: AbortSignal, expectedShareDigest?: string) {
   if (!/^(file|content):\/\//.test(file.uri)) throw new Error('Для оригинала нужен локальный файл.');
   originalKind(file);
   const source = new File(file.uri);
@@ -47,14 +73,22 @@ export async function writeOriginal(db: Pick<SQLiteDatabase, 'runAsync'>, entity
     await db.runAsync('INSERT INTO memory_attachments(id,entity_id,name,mime,size,created_at) VALUES (?,?,?,?,?,?)',
       [id, entityId, file.name.slice(0, 240), file.mimeType || 'application/octet-stream', size, new Date().toISOString()]);
     let total = 0, ord = 0;
+    const shareParts: string[] = [];
     while (total < size) {
       check(signal);
       const bytes = handle.readBytes(Math.min(PART_BYTES, size - total));
       if (!bytes.length) throw new Error('Не удалось прочитать оригинал целиком.');
-      await db.runAsync('INSERT INTO memory_attachment_parts(attachment_id,ord,bytes,sha256) VALUES (?,?,?,?)', [id, ord++, bytes, await hash(bytes)]);
+      const partHash = await hash(bytes);
+      if (expectedShareDigest) shareParts.push(partHash);
+      await db.runAsync('INSERT INTO memory_attachment_parts(attachment_id,ord,bytes,sha256) VALUES (?,?,?,?)', [id, ord++, bytes, partHash]);
       total += bytes.length;
     }
     check(signal);
+    if (expectedShareDigest) {
+      const actual = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256,
+        JSON.stringify([size, shareParts]));
+      if (actual !== expectedShareDigest) throw new Error('Оригинал изменился при сохранении. Поделитесь им ещё раз.');
+    }
     return id;
   } finally { handle.close(); }
 }
@@ -158,7 +192,7 @@ function checkedRecognitions(originals: ImportFile[], values?: FileRecognition[]
   });
 }
 /** Note + original + receipt commit together. Cancellation never leaves a partial note. */
-export async function saveMediaNote(profile: string, input: { file?: ImportFile; files?: ImportFile[]; title: string; body: string; extractedText?: string; recognitions?: FileRecognition[]; sensitivity: 'sensitive' | 'standard'; receipt?: string; collectionId?: string; sourceUrl?: string; publicationClaim?: {date:string;evidence:'html_meta';sourceAttribute:'article:published_time'|'datePublished'} }, signal?: AbortSignal): Promise<string> {
+export async function saveMediaNote(profile: string, input: { file?: ImportFile; files?: ImportFile[]; title: string; body: string; extractedText?: string; recognitions?: FileRecognition[]; sensitivity: 'sensitive' | 'standard'; receipt?: string; onReplay?: ShareReplayCallback; allowSeparateCopy?: boolean; collectionId?: string; sourceUrl?: string; publicationClaim?: {date:string;evidence:'html_meta';sourceAttribute:'article:published_time'|'datePublished'} }, signal?: AbortSignal): Promise<string> {
   return withLocalMemoryDatabase(profile, async db => {
     check(signal);
     if (input.publicationClaim) {
@@ -181,6 +215,7 @@ export async function saveMediaNote(profile: string, input: { file?: ImportFile;
     if (originals.length > MAX_ORIGINALS_PER_NOTE) throw new Error('Не более 10 вложений в одной заметке.');
     const verified = checkedRecognitions(originals, input.recognitions);
     const originalHashes: string[] = [];
+    const receivedDigests: string[] = [];
     let combinedSize = 0;
     // Native MD5 is only a deduplication fingerprint; per-part SHA-256 verifies
     // decrypted originals. File bytes are never loaded into JS all at once.
@@ -194,6 +229,7 @@ export async function saveMediaNote(profile: string, input: { file?: ImportFile;
       const fingerprint = source.md5;
       if (!fingerprint) throw new Error('Не удалось прочитать оригинал. Выберите файл повторно.');
       originalHashes.push(fingerprint);
+      if (input.receipt) receivedDigests.push(await incomingOriginalDigest(original, signal));
     }
     const contentHash: string | string[] | null = originals.length > 1 ? originalHashes : originalHashes[0] || null;
     const pdfCoverage = verified?.flatMap(x => x.status === 'success' && x.pdfCoverage
@@ -201,24 +237,73 @@ export async function saveMediaNote(profile: string, input: { file?: ImportFile;
         extracted_page_count: x.pdfCoverage.extractedPageCount,
         missing_pages: x.pdfCoverage.missingPages }]
       : []);
-    const receipt = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, JSON.stringify([input.receipt || 'device-import', contentHash, input.title, input.body, input.extractedText || "", input.sensitivity, input.collectionId || "", input.sourceUrl || "", ...(verified ? [verified.filter(x => x.status === 'success').map(x => [x.index, x.text, x.segments || null, x.pdfCoverage || null, x.imageMode || null, ...(x.asrProducerId ? [x.asrProducerId] : [])])] : [])]));
-    {
-      const old = await db.getFirstAsync<{ entity_id: string }>('SELECT entity_id FROM memory_received_shares WHERE fingerprint=?', [receipt]);
-      if (old) return old.entity_id;
+    const recognitionSignature = verified ? verified.filter(x => x.status === 'success').map(x =>
+      [x.index, x.text, x.segments || null, x.pdfCoverage || null, x.imageMode || null,
+        ...(x.asrProducerId ? [x.asrProducerId] : [])]) : null;
+    // The old key is still checked so identical imports saved before MSG-6.B
+    // remain idempotent. Only Android Share gets a new content-derived key.
+    const legacyReceipt = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256,
+      JSON.stringify([input.receipt || 'device-import', contentHash, input.title, input.body,
+        input.extractedText || "", input.sensitivity, input.collectionId || "", input.sourceUrl || "",
+        ...(recognitionSignature ? [recognitionSignature] : [])]));
+    const preview = input.receipt && input.sourceUrl ?
+      sharedLinkPreview({ shareType: 'url', value: input.sourceUrl }) : null;
+    const postKey = preview?.platform === 'telegram' &&
+      preview.kind === 'public_post_candidate' && preview.messageKey
+      ? 'telegram:' + preview.messageKey.toLowerCase() : null;
+    // URL aliases identify the same syntactic public Telegram message, NOT
+    // verified post content. Keep authored captions and original provenance.
+    const onlyPostUrl = Boolean(postKey && input.sourceUrl &&
+      input.body.trim() === input.sourceUrl.trim());
+    const normalizedBody = onlyPostUrl ? postKey : input.body;
+    const inferredFileTitle = originals.length === 1 && !input.body.trim() &&
+      input.title.trim() === originals[0].name.slice(0, 160);
+    const normalizedTitle = onlyPostUrl && (input.title === 'Ссылка' ||
+      input.title === input.body.trim()) ? 'telegram-link' :
+      inferredFileTitle ? 'incoming-file-untitled' : input.title;
+    const receivedReceipt = input.receipt
+      ? await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, JSON.stringify([
+          'android-share-content-v2', receivedDigests, originals.map(mediaKind),
+          normalizedTitle, normalizedBody,
+          input.extractedText || "", input.sensitivity, input.collectionId || "",
+          postKey || input.sourceUrl || "", recognitionSignature,
+        ]))
+      : legacyReceipt;
+    async function replayIfFound(): Promise<string | null> {
+      const old = await db.getFirstAsync<{ entity_id: string; record_status: ShareReplay['recordStatus'] }>(
+        'SELECT r.entity_id,e.record_status FROM memory_received_shares r ' +
+        'JOIN memory_entities e ON e.id=r.entity_id ' +
+        'WHERE r.fingerprint IN (?,?) ORDER BY CASE WHEN r.fingerprint=? THEN 0 ELSE 1 END LIMIT 1',
+        [receivedReceipt, legacyReceipt, receivedReceipt]);
+      if (!old) return null;
+      check(signal);
+      input.onReplay?.({ entityId: old.entity_id, recordStatus: old.record_status });
+      return old.entity_id;
     }
+    // Never silently suppress intentional separate copies of the same media
+    // (e.g. a photo sent in two different chats). This flag is set only after
+    // the user's additional explicit confirmation in the import UI.
+    const repeated = input.allowSeparateCopy ? null : await replayIfFound();
+    if (repeated) return repeated;
+    const receipt = input.allowSeparateCopy && input.receipt
+      ? await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256,
+          JSON.stringify([receivedReceipt, 'confirmed-separate-copy', Crypto.randomUUID()]))
+      : receivedReceipt;
     const repo = new SqliteMemoryRepository(db);
     const slug = input.receipt ? 'inbox' : 'notes';
     let col = (await repo.listCollections()).find(c => input.collectionId ? c.id === input.collectionId : c.slug === slug);
     if (input.collectionId && !col) throw new Error("Раздел не найден.");
     if (!col) col = await repo.createCollection({ name: input.receipt ? 'Входящие' : 'Заметки', slug, sensitivity: input.receipt ? 'sensitive' : 'standard' });
     const title = input.title.trim().slice(0, 160) || originals[0]?.name || 'Входящая запись';
-    const entity = await repo.createEntity({ collection_id: col.id, domain: 'notes', title,
+    let entity: EntityRecord;
+    try {
+      entity = await repo.createEntity({ collection_id: col.id, domain: 'notes', title,
       payload: { type: 'note', title, ...(input.sourceUrl ? { source_url: input.sourceUrl } : {}), ...(input.publicationClaim ? { source_publication_date:input.publicationClaim.date, source_publication_evidence:input.publicationClaim.evidence, source_publication_attribute:input.publicationClaim.sourceAttribute } : {}), ...(pdfCoverage?.length ? { source_pdf_coverage: pdfCoverage } : {}), body: input.body.trim(), ...(input.extractedText ? { extracted_text: input.extractedText.trim() } : {}), ...(originals.length ? { source_file: originals[0].name, source_media: mediaKind(originals[0]),
         ...(originals.length > 1 ? { source_files: originals.map(f => f.name), source_media_types: originals.map(mediaKind) } : {}) } : {}) },
       sensitivity: input.sensitivity, source_kind: 'user', source_ref: input.receipt ? 'android-share' : 'device-import',
     }, async (tx, entityId) => {
       const attachmentIds: string[] = [];
-      for (const original of originals) attachmentIds.push(await writeOriginal(tx, entityId, original, signal));
+      for (const [index, original] of originals.entries()) attachmentIds.push(await writeOriginal(tx, entityId, original, signal, receivedDigests[index]));
       // Use only indexed recognition results that were captured separately
       // for the very same ORIGINAL selection. A failed file has no evidence.
       // The user-edited/joint text in payload remains a distinct summary.
@@ -261,6 +346,16 @@ export async function saveMediaNote(profile: string, input: { file?: ImportFile;
       check(signal);
       await tx.runAsync('INSERT INTO memory_received_shares(fingerprint,entity_id) VALUES (?,?)', [receipt, entityId]);
     });
+    } catch (error) {
+      // A concurrent identical Share may win the unique receipt insert.
+      // createEntity already rolled back its complete transaction. Never
+      // leave a partially written note or report an unexplained failure.
+      if (input.receipt && !input.allowSeparateCopy) {
+        const winner = await replayIfFound();
+        if (winner) return winner;
+      }
+      throw error;
+    }
     return entity.id;
   });
 }

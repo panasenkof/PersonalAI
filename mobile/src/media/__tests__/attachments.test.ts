@@ -694,3 +694,116 @@ test("9A5: save site-claimed publication date with source provenance, never infe
   await expect(saveMediaNote("guest",{title:"Bad",body:"",sensitivity:"standard",sourceUrl,
     publicationClaim:{...claim,date:"2026-02-30"}})).rejects.toThrow("invalid_source_publication_claim");
 });
+
+test('MSG-6.B: resending the same Android file under another ephemeral URI is an exact replay', async () => {
+  const another = 'file:///share-again-photo.png';
+  mockFiles.set(another, new Uint8Array(mockFiles.get(input.file.uri)!));
+  const firstReceipt = JSON.stringify({shareType:'image',value:'content://sender/old-11',mimeType:'image/png'});
+  const nextReceipt = JSON.stringify({shareType:'image',value:'content://sender/new-20',mimeType:'image/png'});
+  const one = await saveMediaNote('guest', {...input,receipt:firstReceipt});
+  const replays: any[] = [];
+  const two = await saveMediaNote('guest', {...input,
+    file:{...input.file,uri:another},receipt:nextReceipt,onReplay:r=>replays.push(r)});
+  expect(two).toBe(one);
+  expect(replays).toEqual([{entityId:one,recordStatus:'active'}]);
+  expect(sqlite.prepare("SELECT count(*) AS n FROM memory_entities").get().n).toBe(1);
+  expect(sqlite.prepare("SELECT count(*) AS n FROM memory_attachments").get().n).toBe(1);
+  expect(sqlite.prepare("SELECT count(*) AS n FROM memory_received_shares").get().n).toBe(1);
+});
+
+test('MSG-6.B: same album content and caption with fresh Android URI grants is one note', async () => {
+  const uriA='file:///one.jpg',uriB='file:///two.jpg';
+  mockFiles.set(uriA,new Uint8Array([5,9,2,9]));
+  mockFiles.set(uriB,new Uint8Array([1,2,3,4]));
+  const album={title:'Домашнее задание',body:'Завтра математика 24–25',
+    sensitivity:'sensitive' as const,
+    files:[{uri:uriA,name:'one.jpg',mimeType:'image/jpeg'},
+      {uri:uriB,name:'two.jpg',mimeType:'image/jpeg'}],
+    receipt:'[{"shareType":"image","value":"content://old"}]'};
+  const id=await saveMediaNote('guest',album);
+  mockFiles.set('file:///new-one.jpg',new Uint8Array(mockFiles.get(uriA)!));
+  mockFiles.set('file:///new-two.jpg',new Uint8Array(mockFiles.get(uriB)!));
+  const duplicate=await saveMediaNote('guest',{...album,
+    files:[{...album.files[0],uri:'file:///new-one.jpg'},{...album.files[1],uri:'file:///new-two.jpg'}],
+    receipt:'[{"shareType":"image","value":"content://new"}]'});
+  expect(duplicate).toBe(id);
+  expect(sqlite.prepare("SELECT count(*) AS n FROM memory_attachments").get().n).toBe(2);
+  // Same originals but revised caption is NOT a replay: user edits are data.
+  const revised=await saveMediaNote('guest',{...album,body:'Другое пояснение'});
+  expect(revised).not.toBe(id);
+  expect(sqlite.prepare("SELECT count(*) AS n FROM memory_entities").get().n).toBe(2);
+});
+
+test('MSG-6.B: Telegram public post URL aliases are only syntactic source identity; changed content is a separate note',async()=>{
+  const one='https://t.me/public_news/123';
+  const alias='https://telegram.me/public_news/123?single';
+  const base={title:'Ссылка',body:one,sensitivity:'standard' as const,
+    sourceUrl:one,receipt:JSON.stringify({shareType:'url',value:one})};
+  const id=await saveMediaNote('guest',base);
+  const replay=await saveMediaNote('guest',{...base,body:alias,sourceUrl:alias,
+    receipt:JSON.stringify({shareType:'url',value:alias})});
+  expect(replay).toBe(id);
+  const changed=await saveMediaNote('guest',{...base,extractedText:'Содержимое поста, версия 2'});
+  expect(changed).not.toBe(id);
+  const repo=new SqliteMemoryRepository(mockDb);
+  expect((await repo.entity(id))!.payload).not.toHaveProperty('extracted_text');
+  expect((await repo.entity(changed))!.payload.extracted_text).toBe('Содержимое поста, версия 2');
+});
+
+test('MSG-6.B: replay never overwrites edited text, restored data or archived/trashed status',async()=>{
+  const share={...input,body:'Пояснение пользователя',receipt:'sender-old-uri'};
+  const id=await saveMediaNote('guest',share);
+  const repo=new SqliteMemoryRepository(mockDb);
+  const before=(await repo.entity(id))!;
+  await repo.reviseEntity(id,before.record_version,{...before.payload,body:'Моё исправление, не заменять'},'manual_edit');
+  const duplicate=await saveMediaNote('guest',{...share,receipt:'sender-new-uri'});
+  expect(duplicate).toBe(id);
+  expect((await repo.entity(id))!.payload.body).toBe('Моё исправление, не заменять');
+  sqlite.prepare("UPDATE memory_entities SET record_status='trashed' WHERE id=?").run(id);
+  const status: any[]=[];
+  expect(await saveMediaNote('guest',{...share,receipt:'sender-third-uri',onReplay:x=>status.push(x)})).toBe(id);
+  expect(status).toEqual([{entityId:id,recordStatus:'trashed'}]);
+  expect(sqlite.prepare('SELECT count(*) AS n FROM memory_entities').get().n).toBe(1);
+});
+
+test('MSG-6.B: legacy receipt fingerprints still identify old notes after upgrade',async()=>{
+  const saved=await saveMediaNote('guest',input);
+  const receipt='{"shareType":"image","value":"content://old"}';
+  const md5=crypto.createHash('md5').update(mockFiles.get(input.file.uri)).digest('hex');
+  const legacy=crypto.createHash('sha256').update(JSON.stringify([
+    receipt,md5,input.title,input.body,'',input.sensitivity,'','',
+  ])).digest('hex');
+  sqlite.prepare('INSERT INTO memory_received_shares(fingerprint,entity_id) VALUES (?,?)').run(legacy,saved);
+  const replays:any[]=[];
+  expect(await saveMediaNote('guest',{...input,receipt,onReplay:r=>replays.push(r)})).toBe(saved);
+  expect(replays).toHaveLength(1);
+  expect(sqlite.prepare('SELECT count(*) AS n FROM memory_entities').get().n).toBe(1);
+});
+
+test('MSG-6.B: auto-derived incoming filename may change while bytes still match',async()=>{
+  const src=input.file.uri;
+  const next='file:///provider-temporary-rename.jpeg';
+  mockFiles.set(next,new Uint8Array(mockFiles.get(src)!));
+  const saved=await saveMediaNote('guest',{...input,title:'original-filename.png',
+    file:{...input.file,name:'original-filename.png'},receipt:'file-scope-a'});
+  const replays:any[]=[];
+  const repeated=await saveMediaNote('guest',{...input,title:'provider-temporary-rename.jpeg',
+    file:{...input.file,uri:next,name:'provider-temporary-rename.jpeg'},
+    receipt:'file-scope-b',onReplay:r=>replays.push(r)});
+  expect(repeated).toBe(saved);
+  expect(replays).toHaveLength(1);
+  expect(sqlite.prepare("SELECT count(*) AS n FROM memory_entities").get().n).toBe(1);
+});
+
+test('MSG-6.B: explicit user confirmation permits a separate identical note without overwriting the first',async()=>{
+  const share={...input,receipt:'incoming-original'};
+  const first=await saveMediaNote('guest',share);
+  const replayId=await saveMediaNote('guest',{...share,receipt:'incoming-another-uri'});
+  expect(replayId).toBe(first);
+  const second=await saveMediaNote('guest',{...share,receipt:'incoming-another-uri',
+    allowSeparateCopy:true});
+  expect(second).not.toBe(first);
+  expect(sqlite.prepare("SELECT count(*) AS n FROM memory_entities").get().n).toBe(2);
+  expect(sqlite.prepare("SELECT count(*) AS n FROM memory_attachments").get().n).toBe(2);
+  expect(sqlite.prepare("SELECT count(*) AS n FROM memory_received_shares").get().n).toBe(2);
+});
