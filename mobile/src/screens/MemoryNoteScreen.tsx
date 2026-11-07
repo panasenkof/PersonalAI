@@ -174,6 +174,15 @@ const [termsOpen, setTermsOpen] = useState(false);
     return () => { loadSequence.current++; sourceCheckController.current?.abort(); sourceCheckSequence.current++; alive.current = false; repository.current = null; };
   }, [profile, chatStore, route.params?.entityId, route.params?.collectionId,
     route.params?.chatReply?.conversationId, route.params?.chatReply?.rowId, retry]);
+  // A recheck result belongs only to the exact saved record/version. Editing
+  // or opening a different note invalidates the outstanding request and label.
+  useEffect(() => {
+    sourceCheckController.current?.abort();
+    sourceCheckController.current = null;
+    sourceCheckSequence.current++;
+    setSourceCheckBusy(false);
+    setSourceCheckMessage(null);
+  }, [profile, selected?.id, selected?.record_version]);
   const run = useCallback(async (work: (db: SqliteMemoryRepository) => Promise<void>) => {
     if (!repository.current || pending.current) return;
     pending.current = true; setBusy(true); setError("");
