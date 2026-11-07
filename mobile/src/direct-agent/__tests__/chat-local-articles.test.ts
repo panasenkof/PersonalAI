@@ -115,6 +115,21 @@ test("typed 'Покажи ещё' also uses the agent and receives the prior cur
   store.dispose();
 });
 
+test("typed continuation cannot reuse an older cursor once the latest page is exhausted",async()=>{
+  const {repo,runner}=fixture();
+  const store=new DirectChatStore("guest",repo,runner);await store.initialize();
+  store.setQuestion("Выбери статьи о ремонте автомобиля за неделю");
+  await store.send(settings);
+  store.setQuestion("Покажи ещё");
+  runner.mockResolvedValueOnce({text:"Последняя страница",sources:[],requests:2,
+    articlePage:{...page,nextCursor:undefined}});
+  await store.send(settings);
+  store.setQuestion("Покажи ещё");
+  await store.send(settings);
+  expect(runner.mock.calls[2][0].articleContinuation).toBeUndefined();
+  store.dispose();
+});
+
 test("no contextual article continuation without a verified saved cursor",async()=>{
   const {repo,runner}=fixture();
   const store=new DirectChatStore("guest",repo,runner);await store.initialize();
