@@ -9,6 +9,8 @@ import { onLocalMemorySessionChange, localMemorySessionUnlocked } from "../local
 import * as ImagePicker from "expo-image-picker";
 import { importLink, linkImportErrorMessage, publicImportUrl, type HtmlPublicationClaim } from "../media/link-import";
 import { sharedLinkPreview } from "../media/messenger-share-links";
+import { describeSourceProvenance, type SourceCoverage } from "../media/source-provenance";
+import { SourceProvenanceCard } from "../design/nebula/SourceProvenanceCard";
 import { classifyImportCollectionWithAgent, classificationExcerpt, type ImportClassification } from "../media/import-llm-classifier";
 import { loadModelCallLimit } from "../direct-agent/agent-preferences";
 import { pdfCoverageMessage } from "../media/pdf-pages";
@@ -65,6 +67,7 @@ export function MemoryImportScreen() {
   const [keepOriginal, setKeepOriginal] = useState(true);
   const [publicationClaim,setPublicationClaim] = useState<HtmlPublicationClaim|null>(null);
   const [sourceUrl, setSourceUrl] = useState(""); // Confirmed provenance only.
+  const [sourceCoverage, setSourceCoverage] = useState<SourceCoverage | null>(null);
   const [linkDraft, setLinkDraft] = useState(""); // Unconfirmed URL never changes saved provenance.
   const [linkOnly, setLinkOnly] = useState(false); // Confirmed draft without fetched content.
   const [sourceChoice, setSourceChoice] = useState(route.params?.source);
@@ -169,7 +172,7 @@ export function MemoryImportScreen() {
       cancelled = true; cleanup(); setFiles([]); setPreparing(false);
       setNotice("Подготовка прервана блокировкой. Повторите приём после разблокировки.");
     });
-    setPreparing(true); setTitle(""); setFiles([]); setRecognitionResults([]); setRecognizingIndex(-1); setBody(""); setExtractedText(""); setNotice(""); setSourceUrl(""); setPublicationClaim(null); setLinkDraft(""); setLinkOnly(false); setSourcePickerOpen(false); setProcessingOptionsOpen(false); setKeepOriginal(true);
+    setPreparing(true); setTitle(""); setFiles([]); setRecognitionResults([]); setRecognizingIndex(-1); setBody(""); setExtractedText(""); setNotice(""); setSourceUrl(""); setSourceCoverage(null); setPublicationClaim(null); setLinkDraft(""); setLinkOnly(false); setSourcePickerOpen(false); setProcessingOptionsOpen(false); setKeepOriginal(true);
     void (async () => {
       if (incoming!.length > 30) throw new Error("Отправляйте не более 30 материалов за один раз.");
       if (groupedIncoming) {
@@ -230,7 +233,7 @@ export function MemoryImportScreen() {
             // Reuse the existing canonical HTTPS/SSRF gate even for Share text.
             const checked=publicImportUrl(link.url);
             if(link.kind!=="restricted"){
-              setSourceUrl(checked);setLinkDraft(checked);setLinkOnly(true);
+              setSourceUrl(checked);setSourceCoverage("url_only");setLinkDraft(checked);setLinkOnly(true);
               setKeepOriginal(false);
             }else{
               setNotice("Ссылка-приглашение или закрытая ссылка не является публичным постом. Откройте сообщение и выберите «Поделиться». Содержимое не загружено.");
@@ -394,7 +397,7 @@ export function MemoryImportScreen() {
       }
       if (!alive.current) { for (const copy of copies) await FileSystem.deleteAsync(copy.uri, { idempotent: true }); return; }
       ownedFiles.current.push(...copies.map(copy => copy.uri));
-      setFiles(copies); setRecognitionResults([]); setTitle(""); setSourceUrl(""); setPublicationClaim(null); setLinkDraft(""); setLinkOnly(false); setSourcePickerOpen(false); setProcessingOptionsOpen(false); setKeepOriginal(true); setExtractedText(""); setBody("");
+      setFiles(copies); setRecognitionResults([]); setTitle(""); setSourceUrl(""); setSourceCoverage(null); setPublicationClaim(null); setLinkDraft(""); setLinkOnly(false); setSourcePickerOpen(false); setProcessingOptionsOpen(false); setKeepOriginal(true); setExtractedText(""); setBody("");
     } catch (e) {
       for (const copy of copies) await FileSystem.deleteAsync(copy.uri, { idempotent: true }).catch(() => {});
       if (alive.current) setNotice(memoryErrorMessage(e));
@@ -417,7 +420,7 @@ export function MemoryImportScreen() {
       if (!alive.current) { if (target.exists) target.delete(); return; }
       ownedFiles.current.push(target.uri);
       setFiles([{ uri: target.uri, name: asset.fileName || "camera.jpg", mimeType: asset.mimeType || "image/jpeg" }]); setRecognitionResults([]);
-      setTitle("Снимок"); setSourceUrl(""); setPublicationClaim(null); setLinkDraft(""); setLinkOnly(false); setSourcePickerOpen(false); setProcessingOptionsOpen(false); setKeepOriginal(true); setExtractedText(""); setBody("");
+      setTitle("Снимок"); setSourceUrl(""); setSourceCoverage(null); setPublicationClaim(null); setLinkDraft(""); setLinkOnly(false); setSourcePickerOpen(false); setProcessingOptionsOpen(false); setKeepOriginal(true); setExtractedText(""); setBody("");
     } catch (e) { if (alive.current) setNotice(memoryErrorMessage(e)); }
     finally { if (alive.current) setPreparing(false); }
   }
@@ -464,7 +467,7 @@ export function MemoryImportScreen() {
     try {
       const source = publicImportUrl(linkDraft);
       const domain = new URL(source).hostname;
-      setSourceUrl(source); setPublicationClaim(null);
+      setSourceUrl(source); setSourceCoverage("url_only"); setPublicationClaim(null);
       setLinkDraft(source);
       setLinkOnly(true);
       setFiles([]);
@@ -488,7 +491,10 @@ export function MemoryImportScreen() {
       if (result.file) { ownedFiles.current.push(result.file.uri); setFiles([result.file]); setExtractedText(""); setKeepOriginal(true); setTitle(result.file.name); }
       else { setFiles([]); setExtractedText(result.text || ""); setKeepOriginal(false); setTitle(result.title || "Материал по ссылке"); }
       setRecognitionResults([]);
-      setLinkOnly(false); setPublicationClaim(result.publicationClaim || null); setSourceUrl(result.source); setLinkDraft(result.source); setSourcePickerOpen(false); setProcessingOptionsOpen(false);
+      setLinkOnly(false); setPublicationClaim(result.publicationClaim || null);
+      setSourceCoverage(result.file ? "file_downloaded" :
+        result.textCoverage === "telegram_post_text_only" ? "telegram_post_text_only" : "web_text_unverified");
+      setSourceUrl(result.source); setLinkDraft(result.source); setSourcePickerOpen(false); setProcessingOptionsOpen(false);
       if (result.text) setNotice((result.textCoverage === "telegram_post_text_only"
         ? "Текст именно этого сообщения Telegram найден в публичном HTML. Фото, видео, вложения, автор и дата не подтверждены и не загружены. Сохранится только доступный текст и ссылка."
         : result.partial
@@ -516,7 +522,7 @@ export function MemoryImportScreen() {
         if (FileSystem.cacheDirectory && asset.uri.startsWith(FileSystem.cacheDirectory)) ownedFiles.current.push(asset.uri);
       }
       setFiles(chosen); setRecognitionResults([]); setRecognizingIndex(-1);
-      setSourceUrl(""); setPublicationClaim(null); setLinkDraft(""); setLinkOnly(false); setSourcePickerOpen(false); setProcessingOptionsOpen(false);
+      setSourceUrl(""); setSourceCoverage(null); setPublicationClaim(null); setLinkDraft(""); setLinkOnly(false); setSourcePickerOpen(false); setProcessingOptionsOpen(false);
       setKeepOriginal(true); setTitle(chosen[0].name.slice(0, 160)); setBody(""); setExtractedText(""); setClassification("standard");
     } catch (e) { if (alive.current) setNotice((e as Error).message); }
     finally { if (alive.current) setPreparing(false); }
@@ -643,7 +649,7 @@ export function MemoryImportScreen() {
         ...(keepOriginal && files.length > 1 ? { files } : { file: keepOriginal ? file || undefined : undefined }),
         title, body, extractedText: content,
         ...(keepOriginal && sourceRecognitions.length ? { recognitions: sourceRecognitions } : {}),
-        sourceUrl: sourceUrl || undefined,
+        sourceUrl: sourceUrl || undefined, sourceCoverage: sourceCoverage || undefined,
         ...(sourceUrl && !linkOnly && publicationClaim && !keepOriginal ? {publicationClaim} : {}),
         sensitivity: classification, collectionId: collectionId || undefined,
         ...(incoming ? {
@@ -724,24 +730,25 @@ export function MemoryImportScreen() {
         </> : null}
         {hasMaterial ? <Pressable accessibilityRole="button" disabled={busy || preparing} style={button} onPress={cancelPicker}><Text style={{color:t.userText}}>Оставить текущее</Text></Pressable> : null}
       </View> : null}
-      {sourceUrl ? <View style={{ padding: 14, borderWidth: 1, borderColor: t.line, borderRadius: 20, backgroundColor: t.panel, gap: 6 }}>
-        <Text style={{ color: t.text, fontWeight: "700" }}>{linkOnly ? "Ссылка · без текста страницы" : "Источник · загружен"}</Text>
-        <Text numberOfLines={2} selectable style={{ color: t.secondary, fontSize: 14 }}>{sourceUrl}</Text>
-        {linkOnly ? <Text style={{ color: t.muted, fontSize: 13 }}>Содержание сайта не получено. Поиск сможет учитывать название и вашу заметку, но не текст статьи.</Text> : null}
-        {incoming && incomingLink && incomingLink.url===sourceUrl ? <>
-          <Text style={{color:t.muted,fontSize:13}}>
-            {incomingLink.platform==="telegram"?"Telegram":incomingLink.platform==="max"?"MAX":"Веб-ссылка"}
-            {" · "}{incomingLink.kind==="public_post_candidate"
-              ?"Формат публичного поста. Доступность и автор не проверены."
-              :"Сохранится только ссылка. Это не подтверждённый текст публикации."}
-          </Text>
-          {incomingLink.canFetch && linkOnly ?
-            <NebulaAction icon="download" label="Загрузить публичное содержимое"
-              size="compact" disabled={busy || preparing}
-              accessibilityLabel="Загрузить содержимое публичной ссылки после согласия"
-              onPress={()=>void readLink()} /> : null}
-        </> : null}
-      </View> : null}
+      {sourceUrl ? <View style={{gap:7}}>
+        {describeSourceProvenance({sourceUrl,coverage:sourceCoverage,
+          publicationDate:publicationClaim?.date,
+          publicationEvidence:publicationClaim?.evidence,
+          publicationAttribute:publicationClaim?.sourceAttribute,
+          sourceRef:incoming?"android-share":"device-import"}) ? <SourceProvenanceCard
+            source={describeSourceProvenance({sourceUrl,coverage:sourceCoverage,
+              publicationDate:publicationClaim?.date,
+              publicationEvidence:publicationClaim?.evidence,
+              publicationAttribute:publicationClaim?.sourceAttribute})!}
+            onOpenError={()=>setNotice("Не удалось открыть источник в браузере.")}/> : null}
+        {incoming && incomingLink?.url===sourceUrl && incomingLink.canFetch && linkOnly ?
+          <NebulaAction icon="download" label="Загрузить публичное содержимое"
+            size="compact" disabled={busy || preparing}
+            accessibilityLabel="Загрузить содержимое публичной ссылки после согласия"
+            onPress={()=>void readLink()}/> : null}
+      </View> : incoming && hasMaterial ? <SourceProvenanceCard
+        source={describeSourceProvenance({sourceRef:"android-share"})!}
+        onOpenError={()=>setNotice("Не удалось открыть источник.")}/> : null}
       {!file && extractedText ? <Text style={{ color: t.muted, fontSize: 12 }}>Выбранный источник: текст по ссылке</Text> : null}
       {preparing ? <ActivityIndicator accessibilityLabel="Подготовка входящего файла" /> : null}
 
