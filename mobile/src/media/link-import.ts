@@ -201,6 +201,12 @@ export async function importLink(raw: string, signal?: AbortSignal): Promise<{ f
   const messenger=sharedLinkPreview({shareType:'url',value:source});
   const telegramMessage=messenger?.platform==='telegram' &&
     messenger.kind==='public_post_candidate';
+  // Standard t.me/<channel>/<post> can be a landing page. The documented
+  // public /s/ view is the ONLY fixed, same-service alternate reader URL;
+  // never follow arbitrary HTTP redirects or user-controlled hostnames.
+  const readerUrl=telegramMessage&&messenger?.messageKey
+    ? "https://t.me/s/"+messenger.messageKey
+    : source;
   const controller = new AbortController();
   const cancel = () => controller.abort(); signal?.addEventListener('abort', cancel);
   const timer = setTimeout(cancel, 60_000);
@@ -211,7 +217,7 @@ export async function importLink(raw: string, signal?: AbortSignal): Promise<{ f
     // Deliberately reject HTTP redirects: native URL following could reach a
     // private host or send a user-selected URL to an unexpected endpoint.
     // Do not add cookies, Referer spoofing or site-specific VPN workarounds.
-    const response = await nativeFetch(source, { signal: controller.signal, credentials: 'omit', redirect: 'error' });
+    const response = await nativeFetch(readerUrl, { signal: controller.signal, credentials: 'omit', redirect: 'error' });
     stage = 'получение ответа';
     if (response.status >= 300 && response.status < 400 || response.status === 0)
       throw new Error('Сайт перенаправляет запрос на другой адрес. Автоматические перенаправления для импорта отключены.');
