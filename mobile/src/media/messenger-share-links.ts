@@ -9,6 +9,8 @@ export type SharedLinkPreview = {
   kind: "public_post_candidate" | "link_only" | "restricted";
   /** Enabled only for a possible public web document, never a chat invite. */
   canFetch: boolean;
+  /** Verified only as URL syntax, NOT a claim that the remote post exists. */
+  messageKey?: string;
 };
 type ShareText = { shareType: string; value: string };
 const linkToken = /https:\/\/[^\s<>"'\u201c\u201d]+/gi;
@@ -54,7 +56,7 @@ export function sharedLinkPreview(payload:ShareText):SharedLinkPreview|null{
     const isPost=Boolean(channel&&telegramHandle.test(channel)&&message&&postId.test(message)&&
       (host.endsWith(".t.me")&&host!=="www.t.me"?segments.length===1:publicSegments.length===2));
     return {url:source,platform:"telegram",kind:isPost?"public_post_candidate":"link_only",
-      canFetch:isPost};
+      canFetch:isPost,...(isPost?{messageKey:channel+"/"+message}:{})};
   }
   if(["max.ru","www.max.ru","web.max.ru"].includes(host)){
     const leading=segments[0]?.toLowerCase();
