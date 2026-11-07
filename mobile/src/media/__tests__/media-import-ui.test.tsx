@@ -830,3 +830,36 @@ test('MSG-6.A: existing renamed Inbox remains one default choice and user can ex
     collectionId:'notes',files:expect.arrayContaining([expect.objectContaining({name:'a.jpg'})]),
   }),expect.anything()));
 });
+
+test('MSG-6.B: exact Share replay shows truthful existing status and does not run reindexing',async()=>{
+  mockParams={incoming:[{shareType:'text',value:'Мой рецепт от 7 ноября'}]};
+  (saveMediaNote as jest.Mock).mockImplementationOnce(async (_profile:any,options:any)=>{
+    options.onReplay({entityId:'already',recordStatus:'active'});return 'already';
+  });
+  const alert=jest.spyOn(Alert,'alert').mockImplementation(()=>{});
+  try {
+    const ui=render(<MemoryImportScreen/>);
+    await waitFor(()=>expect(ui.getByText(/Коллекция: Входящие/)).toBeTruthy());
+    fireEvent.press(ui.getByLabelText('Сохранить сведения в память'));
+    await waitFor(()=>expect(alert).toHaveBeenCalledWith('Уже в памяти',expect.stringContaining('Повторная запись не создана.')));
+    expect(require('../../direct-agent/enrich-runner').scheduleIndexTerms).not.toHaveBeenCalled();
+    expect(mockBack).toHaveBeenCalledTimes(1);
+  }finally{alert.mockRestore();}
+});
+
+test.each([
+  ['trashed','корзине'],
+  ['archived','архиве'],
+] as const)('MSG-6.B: replay pointing at %s retains draft and explains existing location',async(status,word)=>{
+  mockParams={incoming:[{shareType:'text',value:'Сохранённый материал'}]};
+  (saveMediaNote as jest.Mock).mockImplementationOnce(async (_profile:any,options:any)=>{
+    options.onReplay({entityId:'already',recordStatus:status});return 'already';
+  });
+  const ui=render(<MemoryImportScreen/>);
+  await waitFor(()=>expect(ui.getByText(/Коллекция: Входящие/)).toBeTruthy());
+  fireEvent.press(ui.getByLabelText('Сохранить сведения в память'));
+  await waitFor(()=>expect(ui.getByText(new RegExp(word))).toBeTruthy());
+  expect(mockBack).not.toHaveBeenCalled();
+  expect(ui.getByLabelText('Сведения из файла').props.value).toBe('Сохранённый материал');
+  expect(require('../../direct-agent/enrich-runner').scheduleIndexTerms).not.toHaveBeenCalled();
+});
