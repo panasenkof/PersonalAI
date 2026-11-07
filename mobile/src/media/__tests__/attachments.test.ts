@@ -771,7 +771,7 @@ test('MSG-6.B: legacy receipt fingerprints still identify old notes after upgrad
   const receipt='{"shareType":"image","value":"content://old"}';
   const md5=crypto.createHash('md5').update(mockFiles.get(input.file.uri)).digest('hex');
   const legacy=crypto.createHash('sha256').update(JSON.stringify([
-    receipt,md5,input.title,input.body,'',input.sensitivity,'','','',
+    receipt,md5,input.title,input.body,'',input.sensitivity,'','',
   ])).digest('hex');
   sqlite.prepare('INSERT INTO memory_received_shares(fingerprint,entity_id) VALUES (?,?)').run(legacy,saved);
   const replays:any[]=[];
