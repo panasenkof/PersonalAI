@@ -23,10 +23,11 @@ import type { DirectAgentSettings } from "./settings";
 import { waitForApplicationSession, onLocalMemorySessionChange } from "../local-memory/storage";
 import { localPhotoIntent83, searchLocalPhotosFromChat83 } from "../media/vision-chat-search";
 import { selectSavedAiArticles } from "./article-selection";
+import { previewMove, confirmMove, undoMove } from "./move-proposal";
 
 /** `streamText` is the answer as it arrives; it is never persisted. */
 /** `progressSince` is when the current stage began, for the elapsed timer. */
-export type LiveConversation = SavedConversation & { retryPhoto?: {rowId:string; image:ChatAttachment}; busy: boolean; progress: string; progressSince?: number; streamText?: string; savingDraft?: string; deleting?: boolean };
+export type LiveConversation = SavedConversation & { retryPhoto?: {rowId:string; image:ChatAttachment}; busy: boolean; progress: string; progressSince?: number; streamText?: string; savingDraft?: string; movingRowId?: string; deleting?: boolean };
 /** `notice` is informational (e.g. unreadable old chats), unlike `error`. */
 /** `sections` are the memory sections a proposal can go to, the user's own included. */
 export type ChatSnapshot = { ready: boolean; error: string; notice: string; conversations: LiveConversation[]; activeId: string | null; sections: MemorySection[] };
@@ -35,7 +36,7 @@ const newConversation = (): LiveConversation => {
   return { id: Crypto.randomUUID(), title: "Новый диалог", createdAt: timestamp, updatedAt: timestamp,
     rows: [], drafts: [], question: "", busy: false, progress: "" };
 };
-const saved = ({ busy, progress, progressSince, streamText, savingDraft, deleting, retryPhoto, ...conversation }: LiveConversation): SavedConversation =>
+const saved = ({ busy, progress, progressSince, streamText, savingDraft, movingRowId, deleting, retryPhoto, ...conversation }: LiveConversation): SavedConversation =>
   ({ ...conversation, interrupted: busy });
 
 /** Where a proposal will be saved: its section, the new one, or «Заметки». */
@@ -358,6 +359,15 @@ export class DirectChatStore {
         }, rewrite: true, signal: aborter.signal, onText, sections,
         diagnostic: trace,
         lookup: query => searchApprovedNotes(this.profile, query),
+        previewMove: async request => {
+          if(aborter.signal.aborted || this.disposed || !localMemorySessionUnlocked())
+            throw new Error("application_locked");
+          const preview=await previewMove(this.profile,request);
+          if(aborter.signal.aborted || this.disposed || !localMemorySessionUnlocked() ||
+             !this.snapshot.conversations.some(row=>row.id===id && !row.deleting))
+            throw new Error("application_locked");
+          return preview;
+        },
         // 9T1: the same encrypted, ACL-scoped visual search used by the fast
         // chat route. Only verified note/photo handles go back to the model.
         searchPhotos: async query => {
@@ -438,6 +448,7 @@ export class DirectChatStore {
         { id: answerRowId, role: "assistant", text: result.text, sources: result.sources,
           ...(result.memory?.length ? { memory: result.memory } : {}),
           ...(result.photoAction ? {photoAction:result.photoAction} : {}),
+          ...(result.moveProposal ? {moveProposal:result.moveProposal} : {}),
           ...(result.articlePage ? {articlePage:result.articlePage} : {}),
           ...(result.articleReadReport ? {articleReadReport:result.articleReadReport} : {}) }],
         updatedAt: new Date().toISOString() });
@@ -563,6 +574,75 @@ export class DirectChatStore {
       ...(c.taskState ? { taskState: recordEvidence(c.taskState, { tool: "draft_memory_fact", outcome: "dismissed", subject: draft.id, excerpt: draft.title }) } : {}),
     }, true);
   }
+  /** A button, never an LLM tool. Source and target are CAS/ACL-checked by
+   * the canonical SQLCipher note-actions transaction. */
+  async confirmMoveProposal(rowId:string):Promise<void>{
+    const c=this.snapshot.conversations.find(x=>x.id===this.snapshot.activeId);
+    const row=c?.rows.find(x=>x.id===rowId&&x.role==="assistant"&&x.moveProposal);
+    if(!c||!row?.moveProposal||c.busy||c.movingRowId||c.deleting||this.disposed)return;
+    const proposal=row.moveProposal;
+    this.update(c.id,{movingRowId:rowId});
+    try{
+      const receipt=await confirmMove(this.profile,proposal);
+      const latest=this.snapshot.conversations.find(x=>x.id===c.id);
+      if(!latest||this.disposed)return;
+      const rows=latest.rows.map(r=>{
+        if(r.id!==rowId||!r.moveProposal)return r;
+        const {moveProposal:_discard,...rest}=r;
+        return {...rest,moveReceipt:receipt};
+      });
+      const patch=this.update(c.id,{rows:[...rows,{
+        id:Crypto.randomUUID(),role:"info" as const,
+        text:receipt.verified
+          ? "Перенос подтверждён: «"+receipt.title+"» → «"+receipt.toName+"». Доступна отмена."
+          : "Перенос записан, но проверка результата не удалась. Доступна отмена; проверьте запись.",
+      }]});
+      if(patch)await this.persist(patch);
+      this.afterSave?.();
+    }catch(error){
+      this.publish({error:memoryErrorMessage(error)+
+        " Проверьте запись и повторите поиск, если её версия или права изменились."});
+    }finally{this.update(c.id,{movingRowId:undefined});}
+  }
+  cancelMoveProposal(rowId:string):void{
+    const c=this.snapshot.conversations.find(x=>x.id===this.snapshot.activeId);
+    if(!c||c.busy||c.movingRowId||c.deleting||this.disposed)return;
+    const original=c.rows.find(r=>r.id===rowId&&r.role==="assistant"&&r.moveProposal);
+    if(!original)return;
+    const rows=c.rows.map(r=>{
+      if(r.id!==rowId)return r;
+      const {moveProposal:_discard,...rest}=r;
+      return rest;
+    });
+    this.update(c.id,{rows:[...rows,{
+      id:Crypto.randomUUID(),role:"info",text:"Предложение переноса отменено. Запись не изменена.",
+    }]},true);
+  }
+  async undoConfirmedMove(rowId:string):Promise<void>{
+    const c=this.snapshot.conversations.find(x=>x.id===this.snapshot.activeId);
+    const row=c?.rows.find(r=>r.id===rowId&&r.role==="assistant"&&
+      r.moveReceipt&&!r.moveReceipt.undone);
+    if(!c||!row?.moveReceipt||c.busy||c.movingRowId||c.deleting||this.disposed)return;
+    const receipt=row.moveReceipt;
+    this.update(c.id,{movingRowId:rowId});
+    try{
+      await undoMove(this.profile,receipt);
+      const latest=this.snapshot.conversations.find(x=>x.id===c.id);
+      if(!latest||this.disposed)return;
+      const rows=latest.rows.map(r=>r.id===rowId&&r.moveReceipt
+        ? {...r,moveReceipt:{...r.moveReceipt,undone:true}}:r);
+      const patch=this.update(c.id,{rows:[...rows,{
+        id:Crypto.randomUUID(),role:"info" as const,
+        text:"Перенос отменён. «"+receipt.title+"» возвращена в раздел «"+receipt.fromName+"».",
+      }]});
+      if(patch)await this.persist(patch);
+      this.afterSave?.();
+    }catch(error){
+      this.publish({error:memoryErrorMessage(error)+
+        " Отмена не выполнена; проверьте актуальную версию и доступность разделов."});
+    }finally{this.update(c.id,{movingRowId:undefined});}
+  }
+
   async approve(draft: ChatDraft) {
     const c = this.snapshot.conversations.find(c => c.id === this.snapshot.activeId);
     if (!c || c.savingDraft || c.deleting || !c.drafts.some(d => d.id === draft.id)) return;

@@ -433,6 +433,44 @@ function NebulaHomeContent() {
           icon={item.photoAction === "import" ? "plus-circle" : "settings"}
           label={item.photoAction === "model" ? "Выбрать модель" : item.photoAction === "import" ? "Добавить фото в память" : "Подготовить фото"}
           onPress={() => item.photoAction === "import" ? navigation.navigate("MemoryImport", {source:"photo"}) : navigation.navigate("PhotoSearchSettings")} /> : null}
+        {item.role==="assistant" && !item.streaming && item.moveProposal ?
+          <View style={{ borderWidth:1,borderColor:t.line,borderRadius:16,padding:12,
+            backgroundColor:t.panel,gap:8 }}>
+            <Text style={{color:t.text,fontWeight:"700"}}>Предложение переноса — требуется подтверждение</Text>
+            <Pressable accessibilityRole="link"
+              accessibilityLabel={"Открыть запись "+item.moveProposal.title}
+              onPress={()=>navigation.navigate("MemoryNote",{entityId:item.moveProposal!.noteId})}
+              style={{minHeight:40,justifyContent:"center"}}>
+              <Text style={{color:t.accent,fontWeight:"600"}}>{item.moveProposal.title}</Text>
+            </Pressable>
+            <Text style={{color:t.text}}>Из «{item.moveProposal.fromName}» → в «{item.moveProposal.toName}»</Text>
+            <Text style={{color:t.muted,fontSize:12}}>Обоснование: {item.moveProposal.reason}</Text>
+            <Text style={{color:t.muted,fontSize:12}}>Изменится только раздел и версия записи.
+              Содержимое, {item.moveProposal.attachmentCount} вложений, комментарии, связи и история сохранятся.
+              {item.moveProposal.hasSource ? " Источник сохранится." : ""}
+              Предыдущие ограничения доступа сохраняются — перенос допустим только между обычными разделами.</Text>
+            <View style={{flexDirection:"row",flexWrap:"wrap",gap:8}}>
+              <NebulaAction icon="check" label={active?.movingRowId===item.id?"Переношу…":"Подтвердить перенос"}
+                variant="primary" disabled={busy || Boolean(active?.movingRowId)}
+                onPress={()=>void store.confirmMoveProposal(item.id)} />
+              <NebulaAction icon="x" label="Отмена" size="compact"
+                disabled={busy || Boolean(active?.movingRowId)}
+                onPress={()=>store.cancelMoveProposal(item.id)} />
+            </View>
+          </View> : null}
+        {item.role==="assistant" && !item.streaming && item.moveReceipt ?
+          <View style={{borderWidth:1,borderColor:t.line,borderRadius:16,padding:12,
+            backgroundColor:t.panel,gap:8}}>
+            <Text style={{color:t.text,fontWeight:"700"}}>
+              {item.moveReceipt.undone?"Перенос отменён":item.moveReceipt.verified?"Перенос выполнен":"Перенос записан — проверьте результат"}
+            </Text>
+            <Text style={{color:t.muted}}>«{item.moveReceipt.title}»:
+              «{item.moveReceipt.fromName}» → «{item.moveReceipt.toName}»</Text>
+            {!item.moveReceipt.undone ?
+              <NebulaAction icon="rotate-ccw" label={active?.movingRowId===item.id?"Отмена…":"Отменить перенос"}
+                size="compact" disabled={busy || Boolean(active?.movingRowId)}
+                onPress={()=>void store.undoConfirmedMove(item.id)} /> : null}
+          </View> : null}
         {item.attachments?.length ? <ChatAttachmentList files={item.attachments}/> : null}
         {item.memory?.filter(m=>m.photo || !item.articleReadReport?.entries.some(e=>e.id===m.id)).length ?
           <View style={{ gap: 4 }}><Text style={{ color: t.muted, fontSize: 12 }}>Из памяти</Text>

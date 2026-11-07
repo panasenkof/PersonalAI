@@ -10,6 +10,8 @@ type SQL = Pick<SQLiteDatabase, 'getFirstAsync' | 'getAllAsync' | 'runAsync' | '
 type Row = Record<string, any>;
 export type NoteSelection = { id: string; record_version: number };
 export type NoteAction = 'move' | 'trash' | 'restore' | 'merge' | 'archive' | 'unarchive';
+/** 9T2: gate in canonical write transaction, not a new writer. */
+export type ChatMoveGuard = {noteId:string;fromCollectionId:string;toCollectionId:string};
 /** Optional reviewed-cleanup guard, executed by this SAME canonical writer. */
 export type NoteHygieneGuard = { expectedPreferences: Array<{ id:string; preferenceVersion:number }> };
 export function mergeText(notes: { title: string | null; payload: Record<string, unknown> }[]): string {
@@ -30,7 +32,11 @@ async function write(db: SQL, before: Row, after: Row, reason: string) {
   await indexEntity(db, before.id, timestamp);
 }
 /** One atomic operation; metadata and originals remain recoverable. */
-export async function changeNotes(db: SQL, action: NoteAction, selection: NoteSelection[], collectionId?: string, hygiene?: NoteHygieneGuard): Promise<string> {
+export async function changeNotes(db: SQL, action: NoteAction, selection: NoteSelection[], collectionId?: string, hygiene?: NoteHygieneGuard, moveGuard?: ChatMoveGuard): Promise<string> {
+  if(moveGuard && (action!=="move" || selection.length!==1 ||
+     selection[0].id!==moveGuard.noteId || collectionId!==moveGuard.toCollectionId ||
+     moveGuard.fromCollectionId===moveGuard.toCollectionId))
+    throw new MemoryConflictError("invalid_confirmed_move");
   if(hygiene){
     if(!['archive','trash'].includes(action) || !Array.isArray(hygiene.expectedPreferences) ||
        hygiene.expectedPreferences.length!==selection.length ||
@@ -42,7 +48,8 @@ export async function changeNotes(db: SQL, action: NoteAction, selection: NoteSe
   if (!selection.length || selection.length > 100 || new Set(selection.map(n => n.id)).size !== selection.length) throw new Error('Выберите от 1 до 100 разных записей.');
   const batch = 'notes:' + action + ':' + Crypto.randomUUID();
   await withUnlockedTransaction(db, async tx => {
-    if(hygiene && !localMemorySessionUnlocked()) throw new MemoryConflictError('application_locked');
+    if((hygiene || moveGuard) && !localMemorySessionUnlocked())
+      throw new MemoryConflictError('application_locked');
     const rows: Row[] = [];
     for (const selected of selection) {
       const row = await snapshot(tx, selected.id);
@@ -71,6 +78,20 @@ export async function changeNotes(db: SQL, action: NoteAction, selection: NoteSe
       }
     }
     if (action === 'move' && (!collectionId || !await tx.getFirstAsync('SELECT id FROM memory_collections WHERE id=?', [collectionId]))) throw new Error('Выберите раздел.');
+    if(moveGuard){
+      const note=rows[0];
+      const sections=await tx.getAllAsync<Row>(
+        "SELECT id,sensitivity FROM memory_collections WHERE id IN (?,?)",
+        [moveGuard.fromCollectionId,moveGuard.toCollectionId]);
+      if(note.id!==moveGuard.noteId || note.domain!=="notes" ||
+         note.record_status!=="active" ||
+         !["standard","inherit"].includes(note.sensitivity) ||
+         note.collection_id!==moveGuard.fromCollectionId ||
+         sections.length!==2 || sections.some(row=>row.sensitivity!=="standard") ||
+         !sections.some(row=>row.id===moveGuard.fromCollectionId) ||
+         !sections.some(row=>row.id===moveGuard.toCollectionId))
+        throw new MemoryConflictError("move_review_changed_repeat_preview");
+    }
     const levels = await Promise.all(rows.map(r => tx.getFirstAsync<Row>('SELECT sensitivity FROM memory_collections WHERE id=?', [r.collection_id])));
     const effective = rows.map((r, i) => [r.sensitivity, levels[i]?.sensitivity]);
     const mergedSensitivity = effective.some(v => v.includes('secret') || v.includes('unclassified')) ? 'secret' : effective.some(v => v.includes('sensitive')) ? 'sensitive' : 'standard';
@@ -99,24 +120,49 @@ export async function changeNotes(db: SQL, action: NoteAction, selection: NoteSe
         }
       }
       after.payload_json = JSON.stringify(payload);
-      if(hygiene && !localMemorySessionUnlocked()) throw new MemoryConflictError('application_locked');
+      if((hygiene || moveGuard) && !localMemorySessionUnlocked())
+      throw new MemoryConflictError('application_locked');
       await write(tx, before, after, batch);
     }
   });
   return batch;
 }
-export async function undoNotes(db: SQL, batch: string): Promise<void> {
+export async function undoNotes(db: SQL, batch: string, moveGuard?: ChatMoveGuard): Promise<void> {
+  if(moveGuard && (!/^notes:move:/.test(batch) ||
+      moveGuard.fromCollectionId===moveGuard.toCollectionId))
+    throw new MemoryConflictError("invalid_move_undo");
   if (!/^notes:(move|trash|restore|merge|archive|unarchive):/.test(batch)) throw new Error('Неизвестная операция.');
   await withUnlockedTransaction(db, async tx => {
     const revisions = await tx.getAllAsync<Row>('SELECT before_json,after_json FROM memory_revisions WHERE reason=? ORDER BY created_at,id', [batch]);
     if (!revisions.length) throw new Error('Операция не найдена.');
+    if(moveGuard){
+      if(!localMemorySessionUnlocked() || revisions.length!==1)
+        throw new MemoryConflictError("move_undo_locked_or_ambiguous");
+      const before=JSON.parse(revisions[0].before_json);
+      const after=JSON.parse(revisions[0].after_json);
+      const sections=await tx.getAllAsync<Row>(
+        "SELECT id,sensitivity FROM memory_collections WHERE id IN (?,?)",
+        [moveGuard.fromCollectionId,moveGuard.toCollectionId]);
+      if(before.id!==moveGuard.noteId || after.id!==moveGuard.noteId ||
+         before.collection_id!==moveGuard.fromCollectionId ||
+         after.collection_id!==moveGuard.toCollectionId ||
+         before.domain!=="notes" || after.domain!=="notes" ||
+         before.record_status!=="active" || after.record_status!=="active" ||
+         !["standard","inherit"].includes(before.sensitivity) ||
+         !["standard","inherit"].includes(after.sensitivity) ||
+         sections.length!==2 || sections.some(row=>row.sensitivity!=="standard"))
+        throw new MemoryConflictError("move_undo_review_changed");
+    }
     const participants = JSON.parse(revisions[0].after_json).batch_participants;
     if (!Array.isArray(participants) || participants.length !== revisions.length) throw new Error('Часть записей удалена навсегда; полная отмена недоступна.');
     // Check every version before touching any row. Later edits must never be lost.
     for (const revision of revisions) {
       const expected = JSON.parse(revision.after_json);
       const current = await snapshot(tx, expected.id);
-      if (current.record_version !== expected.record_version) throw new MemoryConflictError('stale_memory_version');
+      if (current.record_version !== expected.record_version ||
+          (moveGuard && (!localMemorySessionUnlocked() || current.collection_id!==moveGuard.toCollectionId ||
+            current.record_status!=="active" || !["standard","inherit"].includes(current.sensitivity))))
+        throw new MemoryConflictError('stale_memory_version');
     }
     for (const revision of revisions) {
       const before = JSON.parse(revision.before_json), current = await snapshot(tx, before.id);
