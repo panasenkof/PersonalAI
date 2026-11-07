@@ -14,6 +14,7 @@ import type { SavedArticleIntent } from "./article-selection";
 import type { ChatArticlePage, ChatMemoryRef } from "./conversations";
 import { validMoveProposal, type ChatMoveProposal } from "./move-proposal";
 import { createArticleReadCoverage } from "./article-read-coverage";
+import { validateContextCandidate, type ContextCandidate } from "./conversation-context";
 
 export type ToolDefinition = { name: string; description: string; parameters: object };
 export type ToolSpec = {
@@ -39,6 +40,7 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
   }
   notes.forEach(admitMoveHandle);
   let movePreview:ChatMoveProposal|undefined;
+  let contextCandidate:ContextCandidate|undefined;
   // Derived from this turn's ACL/version-checked reads; NEVER persisted as source truth.
   const articleCoverage = createArticleReadCoverage();
   const readNotes = new Set<string>();
@@ -161,7 +163,24 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
       totalChars:verified.totalChars,hasMore:verified.hasMore,title:verified.title});
     return verified;
   };
+  const contextTool:ToolSpec = { definition:{name:"set_conversation_context",
+      description:"Определить или исправить ТЕМУ и РАЗДЕЛ текущего диалога — не переносит, не сохраняет и не читает записи памяти. Вызывай при первой содержательной теме и при явном изменении темы/раздела, включая запрос пользователя исправить классификацию. Не вызывай из-за короткого уточнения. Раздел — только существующий slug; если не уверен, null. При закреплённом разделе менять можно только тему. Приложение покажет изменение в конце ответа ПОСЛЕ успешного сохранения истории, не повторяй статус в тексте.",
+      parameters:{type:"object",properties:{
+        topic:{type:"string",minLength:2,maxLength:80,description:"Короткое содержательное название темы на языке пользователя."},
+        sectionSlug:{type:["string","null"],description:"Точный slug уже существующей коллекции: "+(options.sections||[]).map(s=>s.slug+"="+s.name).join("; ")+". null при отсутствии основания."},
+        reason:{type:"string",minLength:2,maxLength:180,description:"Одно короткое основание по текущему пользовательскому сообщению или реально прочитанным вложениям."},
+      },required:["topic","sectionSlug","reason"],additionalProperties:false},
+    },effect:"conversation",
+    execute:async args=>{
+      if(contextCandidate)return {error:"conversation_context_already_proposed_this_turn"};
+      const checked=validateContextCandidate(args,options.sections||[],options.context);
+      if("error" in checked)return {error:checked.error};
+      contextCandidate=checked.candidate;
+      return {status:"pending_conversation_commit",saved:false,sectionSlug:contextCandidate.sectionSlug,topic:contextCandidate.topic,
+        memoryRecordChanged:false};
+    },verify:r=>r.status==="pending_conversation_commit"&&r.saved===false?"pending_confirmation":"failed" };
   const specs: ToolSpec[] = [
+    ...(options.contextClassificationEnabled ? [contextTool] : []),
     { definition: { name: "search_local_notes", description: "Найти заметки на телефоне по 1–3 ключевым словам. Найденный фрагмент не является полным чтением записи.", parameters: queryParameters }, effect: "read",
       execute: async args => {
         const query = text(args.query, 120).trim();
@@ -755,7 +774,7 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
     options.diagnostic?.("tool.outcome_verified", { name: canonical, effect: spec?.effect || "unknown", outcome });
     return { ...result, ...(outcome !== "failed" ? { outcome } : {}) };
   }
-  function finish(): Pick<DirectResult, "taskState" | "proposalIds" | "articlePage" | "articleReadReport" | "photoAction" | "moveProposal"> {
+  function finish(): Pick<DirectResult, "taskState" | "proposalIds" | "articlePage" | "articleReadReport" | "photoAction" | "moveProposal" | "contextCandidate"> {
     state = { ...state, turnStatus: "answered" }; emit();
     const selected = !mixedArticleFilters && usedSelectedArticleTool ? selectedArticleHandles() : undefined;
     const checked = selected && articleCoverage.summary(selected);
@@ -783,7 +802,8 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
         usedSelectedArticleTool && options.articleSelection ? {articlePage:options.articleSelection} : {}),
       ...(articleReadReport ? {articleReadReport} : {}),
       ...(!photoMatches.length && photoRecovery ? {photoAction:photoRecovery} : {}),
-      ...(movePreview ? {moveProposal:movePreview} : {}) };
+      ...(movePreview ? {moveProposal:movePreview} : {}),
+      ...(contextCandidate ? {contextCandidate} : {}) };
   }
   const observeSources = (urls: string[]) => { if (urls.length) observe({ tool: "web_search", outcome: "found", subject: options.prompt.slice(0, 120), excerpt: urls.join("\n").slice(0, 600) }); };
   return { definitions: specs.map(s => s.definition), run, finish, observeSources,

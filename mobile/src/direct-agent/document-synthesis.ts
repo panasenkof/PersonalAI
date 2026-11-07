@@ -86,7 +86,7 @@ export async function runDocumentSynthesis(
     pendingNotes:[],previousSources:[],skipLocalMemory:true,rewrite:false,
     lookup:async()=>[],propose:()=>undefined,searchSources:undefined,
     read:undefined,readSource:undefined,listSources:undefined,list:undefined,count:undefined,
-    onText:undefined,maxRequests:1,
+    onText:undefined,maxRequests:1,contextClassificationEnabled:false,
   };
   for(let i=0;i<plan.parts.length;i++){
     check(options.signal);

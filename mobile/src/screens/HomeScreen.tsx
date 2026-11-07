@@ -22,6 +22,7 @@ import { ActivityIndicator, Alert, FlatList, Image, Keyboard, KeyboardAvoidingVi
 import { useProfile } from "../profile/ProfileContext";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useDirectChat } from "../direct-agent/ChatContext";
+import { contextChangeLabel } from "../direct-agent/conversation-context";
 import { PROVIDER_PRESETS, anonymousLocalAllowed, loadDirectConnections, searchKeyOf } from "../direct-agent/settings";
 import { searchProviderOf } from "../direct-agent/web-search";
 import type { DirectAgentSettings } from "../direct-agent/settings";
@@ -351,6 +352,17 @@ function NebulaHomeContent() {
     <NebulaHomeHeader statusText={statusText} onHistory={() => setHistoryOpen(true)}
       showOrb={ready} orbPhase={orbPhase}
       newChatEnabled={ready} onNewChat={() => store.create()} />
+    {active?.context ? <View testID="chat-current-context" style={{paddingHorizontal:14,paddingVertical:5,
+      borderBottomWidth:1,borderColor:t.line,flexDirection:"row",alignItems:"center",gap:8}}>
+      <Text numberOfLines={2} style={{flex:1,color:t.secondary,fontSize:12}}>
+        {active.context.topic} · {sections.find(s=>s.slug===active.context?.sectionSlug)?.name || "Раздел не определён"}
+      </Text>
+      <NebulaAction icon={active.context.pinned?"lock":"unlock"} size="compact"
+        label={active.context.pinned?"Открепить":"Закрепить"}
+        accessibilityLabel={active.context.pinned?"Открепить раздел диалога":"Закрепить раздел диалога"}
+        disabled={busy || !active.context.sectionSlug}
+        onPress={()=>store.setContextPinned(!active.context!.pinned)} />
+    </View> : null}
     {!ready ? <View style={{ padding: 20, gap: 12 }}>{!error ? <ActivityIndicator accessibilityLabel="Загрузка диалогов" /> : null}
       {error ? <NebulaAction icon="refresh-cw" label="Повторить загрузку" size="compact" onPress={() => void store.initialize()} /> : null}</View> : null}
     <View style={{ flex: 1 }}>
@@ -420,6 +432,9 @@ function NebulaHomeContent() {
           </View> : null}
         </View> :
           <Text selectable style={{ color: item.role === "user" ? t.userText : item.role === "info" ? t.muted : t.text, lineHeight: 23 }}>{item.text}</Text>)}
+        {item.role === "assistant" && !item.streaming && item.contextChange ? <Text
+          testID="chat-context-change" accessibilityRole="text"
+          style={{color:t.secondary,fontSize:12,lineHeight:18}}>{contextChangeLabel(item.contextChange)}</Text> : null}
         {item.role === "assistant" && !item.streaming && item.text.trim() ? <View style={{ alignSelf: "flex-end", borderWidth: 1, borderColor: t.line, backgroundColor: t.soft, borderRadius: 15 }}>
           <IconAction compact explainOnTap={false} icon="bookmark" label="Сохранить ответ"
             accessibilityLabel="Сохранить ответ в заметки" hint="Открыть черновик заметки без нового запроса ИИ"

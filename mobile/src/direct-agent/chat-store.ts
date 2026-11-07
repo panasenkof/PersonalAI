@@ -24,6 +24,7 @@ import { waitForApplicationSession, onLocalMemorySessionChange } from "../local-
 import { localPhotoIntent83, searchLocalPhotosFromChat83 } from "../media/vision-chat-search";
 import { selectSavedAiArticles } from "./article-selection";
 import { previewMove, confirmMove, undoMove } from "./move-proposal";
+import { applyContextCandidate } from "./conversation-context";
 
 /** `streamText` is the answer as it arrives; it is never persisted. */
 /** `progressSince` is when the current stage began, for the elapsed timer. */
@@ -356,7 +357,8 @@ export class DirectChatStore {
         onTaskState: next => {
           const active = this.snapshot.conversations.find(c => c.id === id);
           if (active && !aborter.signal.aborted) this.update(id, { taskState: mergeTaskReceipts(next, active.taskState) }, true);
-        }, rewrite: true, signal: aborter.signal, onText, sections,
+        }, rewrite: true, signal: aborter.signal, onText, sections, context:current.context,
+        contextClassificationEnabled: !Boolean(internetPhotoId),
         diagnostic: trace,
         lookup: query => searchApprovedNotes(this.profile, query),
         previewMove: async request => {
@@ -439,7 +441,13 @@ export class DirectChatStore {
         answerChars: result.text.length, sources: result.sources.length, memoryRefs: result.memory?.length || 0 },
         { answer: result.text, sources: result.sources.join("\n") });
       const answerRowId=Crypto.randomUUID();
-      this.update(id, {
+      const updatedAt=new Date().toISOString();
+      // No second classifier or writer: the LLM tool only returns an in-turn
+      // suggestion, rechecked against the latest sections and pinned state.
+      const proposed=result.contextCandidate && !internetPhotoId
+        ? applyContextCandidate(c.context,result.contextCandidate,sections,updatedAt) : undefined;
+      const applied=proposed && "context" in proposed ? proposed : undefined;
+      const patch: Partial<LiveConversation> = {
         retryPhoto: privatePhoto && result.photoAction
           ? {rowId:answerRowId,image:privatePhoto} : undefined,
         taskState: mergeTaskReceipts({ ...(result.taskState || c.taskState || taskState), turnStatus: "answered" }, c.taskState), rows: [...c.rows,
@@ -450,8 +458,19 @@ export class DirectChatStore {
           ...(result.photoAction ? {photoAction:result.photoAction} : {}),
           ...(result.moveProposal ? {moveProposal:result.moveProposal} : {}),
           ...(result.articlePage ? {articlePage:result.articlePage} : {}),
-          ...(result.articleReadReport ? {articleReadReport:result.articleReadReport} : {}) }],
-        updatedAt: new Date().toISOString() });
+          ...(result.articleReadReport ? {articleReadReport:result.articleReadReport} : {}),
+          ...(applied?.change ? {contextChange:applied.change} : {}) }],
+        ...(applied ? {context:applied.context,title:applied.context.topic} : {}),
+        updatedAt };
+      if (applied?.change) {
+        // Commit metadata and the answer atomically in the existing encrypted
+        // conversation snapshot BEFORE UI claims that the section changed.
+        await this.persist({...c,...patch});
+        if(this.disposed || aborter.signal.aborted ||
+          !this.snapshot.conversations.some(row=>row.id===id&&!row.deleting))
+          throw new Error("conversation_unavailable_after_context_commit");
+      }
+      this.update(id,patch);
     } catch (e) {
       trace("turn.failed", { elapsedMs: Date.now() - startedAt, aborted: aborter.signal.aborted,
         modelStarted, errorType: (e as Error)?.name || "Error" },
@@ -482,6 +501,13 @@ export class DirectChatStore {
       if (final) await this.persist(final).catch(() => {});
     }
   }
+  /** Explicit UI pin: never changes memory-record sensitivity or moves notes. */
+  setContextPinned(pinned:boolean, conversationId=this.snapshot.activeId):void{
+    const c=this.snapshot.conversations.find(row=>row.id===conversationId);
+    if(!c || !c.context || c.busy || c.deleting || this.disposed)return;
+    this.update(c.id,{context:{...c.context,pinned}},true);
+  }
+
   /** Re-runs the last submitted question after a failed answer.
    * The user bubble stays single: the question is put back into the draft slot
    * and send() runs its normal guarded path with `rerun` set. */

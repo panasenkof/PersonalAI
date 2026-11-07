@@ -523,3 +523,37 @@ test("9C: model tool loop returns host-verified read provenance with its answer"
   expect(result.taskState?.evidence?.some(e=>e.tool==="selected_article_read_coverage"))
     .toBe(false);
 });
+
+test("model tool call proposes dialogue context without extra classifier or memory write",async()=>{
+  const transport=jest.fn()
+    .mockResolvedValueOnce(toolResponse("set_conversation_context",{
+      topic:"Аккумулятор",sectionSlug:"projects",reason:"Вопрос про автомобиль",
+    }))
+    .mockResolvedValueOnce(final("Рекомендую 70 Ач"));
+  const propose=jest.fn();
+  const result=await start({},transport,{
+    sections:[{slug:"projects",name:"Дела и проекты"}],
+    contextClassificationEnabled:true,propose,
+  });
+  expect(result.contextCandidate).toEqual({
+    topic:"Аккумулятор",sectionSlug:"projects",reason:"Вопрос про автомобиль",
+  });
+  expect(result.text).toBe("Рекомендую 70 Ач");
+  expect(result.requests).toBe(2);
+  expect(propose).not.toHaveBeenCalled();
+  const second=JSON.parse(transport.mock.calls[1][1].body);
+  expect(JSON.stringify(second.input)).toContain("pending_conversation_commit");
+  expect(JSON.stringify(second.input)).toContain("saved");
+});
+
+test("context model instructions include saved topic and pin, not previous history outside this chat",async()=>{
+  const transport=jest.fn().mockResolvedValue(final());
+  await start({},transport,{contextClassificationEnabled:true,sections:[{slug:"projects",name:"Проекты"}],
+    context:{topic:"PersAI",sectionSlug:"projects",pinned:true}});
+  const body=JSON.parse(transport.mock.calls[0][1].body);
+  const system=body.input[0].content;
+  expect(system).toContain("Текущая тема диалога");
+  expect(system).toContain("PersAI");
+  expect(system).toContain("закреплён пользователем");
+  expect(system).toContain("set_conversation_context");
+});
