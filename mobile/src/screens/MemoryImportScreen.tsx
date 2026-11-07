@@ -9,7 +9,7 @@ import { onLocalMemorySessionChange, localMemorySessionUnlocked } from "../local
 import * as ImagePicker from "expo-image-picker";
 import { importLink, linkImportErrorMessage, publicImportUrl, type HtmlPublicationClaim } from "../media/link-import";
 import { sharedLinkPreview } from "../media/messenger-share-links";
-import { describeSourceProvenance, type SourceCoverage } from "../media/source-provenance";
+import { describeSourceProvenance, type SourceCoverage, type TelegramTextObservation } from "../media/source-provenance";
 import { SourceProvenanceCard } from "../design/nebula/SourceProvenanceCard";
 import { classifyImportCollectionWithAgent, classificationExcerpt, type ImportClassification } from "../media/import-llm-classifier";
 import { loadModelCallLimit } from "../direct-agent/agent-preferences";
@@ -68,6 +68,7 @@ export function MemoryImportScreen() {
   const [publicationClaim,setPublicationClaim] = useState<HtmlPublicationClaim|null>(null);
   const [sourceUrl, setSourceUrl] = useState(""); // Confirmed provenance only.
   const [sourceCoverage, setSourceCoverage] = useState<SourceCoverage | null>(null);
+  const [telegramObservation,setTelegramObservation] = useState<TelegramTextObservation|null>(null);
   const [linkDraft, setLinkDraft] = useState(""); // Unconfirmed URL never changes saved provenance.
   const [linkOnly, setLinkOnly] = useState(false); // Confirmed draft without fetched content.
   const [sourceChoice, setSourceChoice] = useState(route.params?.source);
@@ -172,7 +173,7 @@ export function MemoryImportScreen() {
       cancelled = true; cleanup(); setFiles([]); setPreparing(false);
       setNotice("Подготовка прервана блокировкой. Повторите приём после разблокировки.");
     });
-    setPreparing(true); setTitle(""); setFiles([]); setRecognitionResults([]); setRecognizingIndex(-1); setBody(""); setExtractedText(""); setNotice(""); setSourceUrl(""); setSourceCoverage(null); setPublicationClaim(null); setLinkDraft(""); setLinkOnly(false); setSourcePickerOpen(false); setProcessingOptionsOpen(false); setKeepOriginal(true);
+    setPreparing(true); setTitle(""); setFiles([]); setRecognitionResults([]); setRecognizingIndex(-1); setBody(""); setExtractedText(""); setNotice(""); setSourceUrl(""); setSourceCoverage(null); setTelegramObservation(null); setPublicationClaim(null); setLinkDraft(""); setLinkOnly(false); setSourcePickerOpen(false); setProcessingOptionsOpen(false); setKeepOriginal(true);
     void (async () => {
       if (incoming!.length > 30) throw new Error("Отправляйте не более 30 материалов за один раз.");
       if (groupedIncoming) {
@@ -467,7 +468,7 @@ export function MemoryImportScreen() {
     try {
       const source = publicImportUrl(linkDraft);
       const domain = new URL(source).hostname;
-      setSourceUrl(source); setSourceCoverage("url_only"); setPublicationClaim(null);
+      setSourceUrl(source); setSourceCoverage("url_only"); setTelegramObservation(null); setPublicationClaim(null);
       setLinkDraft(source);
       setLinkOnly(true);
       setFiles([]);
@@ -492,6 +493,7 @@ export function MemoryImportScreen() {
       else { setFiles([]); setExtractedText(result.text || ""); setKeepOriginal(false); setTitle(result.title || "Материал по ссылке"); }
       setRecognitionResults([]);
       setLinkOnly(false); setPublicationClaim(result.publicationClaim || null);
+      setTelegramObservation(result.telegramObservation || null);
       setSourceCoverage(result.file ? "file_downloaded" :
         result.textCoverage === "telegram_post_text_only" ? "telegram_post_text_only" : "web_text_unverified");
       setSourceUrl(result.source); setLinkDraft(result.source); setSourcePickerOpen(false); setProcessingOptionsOpen(false);
@@ -650,6 +652,7 @@ export function MemoryImportScreen() {
         title, body, extractedText: content,
         ...(keepOriginal && sourceRecognitions.length ? { recognitions: sourceRecognitions } : {}),
         sourceUrl: sourceUrl || undefined, sourceCoverage: sourceCoverage || undefined,
+        ...(telegramObservation && sourceCoverage === "telegram_post_text_only" && content.trim() ? {telegramObservation} : {}),
         ...(sourceUrl && !linkOnly && publicationClaim && !keepOriginal ? {publicationClaim} : {}),
         sensitivity: classification, collectionId: collectionId || undefined,
         ...(incoming ? {
@@ -698,7 +701,7 @@ export function MemoryImportScreen() {
   }
   const incomingLink=incoming?.[position]?sharedLinkPreview(incoming[position]):null;
   const sourceDescription = describeSourceProvenance({
-    sourceUrl,coverage:sourceCoverage,
+    sourceUrl,coverage:sourceCoverage,observation:telegramObservation,
     sourceRef:incoming?"android-share":"device-import",
     publicationDate:publicationClaim?.date,
     publicationEvidence:publicationClaim?.evidence,
