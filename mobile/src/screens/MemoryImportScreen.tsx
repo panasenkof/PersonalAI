@@ -550,7 +550,7 @@ export function MemoryImportScreen() {
     } catch (e) { if (alive.current) setNotice(aborter.signal.aborted ? "Разбор остановлен." : (e as Error).message); }
     finally { if (alive.current) { setBusy(false); setRecognizingIndex(-1); } if (controller.current === aborter) controller.current = null; }
   }
-  async function save() {
+  async function save(allowSeparateCopy = false) {
     if (!keepOriginal && !body.trim() && !extractedText.trim() && !linkOnly) { setNotice("Добавьте текст или распознайте материал перед сохранением без оригинала."); return; }
     if (!profile || (!file && !body.trim() && !extractedText.trim() && !(linkOnly && sourceUrl)) || busy || preparing || controller.current) return;
     const aborter = new AbortController(); controller.current = aborter;
@@ -578,22 +578,22 @@ export function MemoryImportScreen() {
         sensitivity: classification, collectionId: collectionId || undefined,
         ...(incoming ? {
           receipt: JSON.stringify(groupedIncoming ? incoming : incoming[position]),
+          ...(allowSeparateCopy ? { allowSeparateCopy: true } : {}),
           onReplay: (existing: ShareReplay) => { replay = existing; },
         } : {}),
       }, aborter.signal);
       if (replay) {
         const status: ShareReplay['recordStatus'] = (replay as ShareReplay).recordStatus;
-        if (status !== "active") {
-          setNotice(status === "trashed"
-            ? "Этот материал уже есть в корзине. Восстановите прежнюю запись или измените новую перед сохранением."
-            : "Этот материал уже в архиве. Найдите его в архиве или измените новый черновик.");
-          return;
-        }
-        Alert.alert("Уже в памяти", "Точно такой материал ранее сохранён. Повторная запись не создана.");
-        if (alive.current) {
-          if (incoming && !groupedIncoming && position + 1 < incoming.length) setPosition(p => p + 1);
-          else setLeaving(true);
-        }
+        const location = status === "trashed" ? "в корзине" :
+          status === "archived" ? "в архиве" : "в памяти";
+        setNotice("Совпадающий материал уже " + location +
+          ". Новая запись не создана. Можно сохранить отдельную копию.");
+        Alert.alert("Материал уже " + location,
+          "Совпали текст и содержимое вложений. Это может быть повторная отправка или отдельное сообщение с тем же файлом.",
+          [
+            {text:"Оставить черновик",style:"cancel"},
+            {text:"Сохранить отдельно",onPress:()=>{void save(true);}},
+          ]);
         return;
       }
       scheduleIndexTerms(profile); scheduleVectors(profile);
