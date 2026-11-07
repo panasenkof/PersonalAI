@@ -83,6 +83,8 @@ export type DirectAgentOptions = {
   sections?: MemorySection[];
   /** One encrypted dialogue label; never a memory-record ACL or an instruction to move notes. */
   context?: ConversationContext;
+  /** Only ordinary user chat turns may ask the LLM to classify a dialogue. */
+  contextClassificationEnabled?: boolean;
   status?: (text: string) => void;
   transport?: typeof fetch;
   /** Receives the growing answer text while the model streams it. */
@@ -118,12 +120,12 @@ type Response = {
 };
 export const MAX_DIRECT_REQUESTS = DEFAULT_MODEL_CALL_LIMIT;
 export { MAX_DIRECT_REPLY_TOKENS, MAX_REASONING_REPLY_TOKENS, TRUNCATED_NOTE, isReasoningModel };
-const systemPrompt = (sections?: MemorySection[], context?: ConversationContext) =>
+const systemPrompt = (sections?: MemorySection[], context?: ConversationContext, enabled = false) =>
   "Ты персональный помощник PersAI, работающий на телефоне пользователя. " +
   "Для вопросов о предпочтениях и заметках используй search_local_notes, если он доступен. " +
   "Если пользователь просит ПЕРЕНЕСТИ уже существующую заметку между разделами, сначала найди точную запись и версию через search_local_notes/list_local_notes, а затем вызови propose_move_local_note с noteId, expectedVersion, targetSectionSlug и объяснением. Инструмент ТОЛЬКО создаёт карточку для подтверждения; не заявляй, что перенос уже сделан. Не вызывай draft_memory_fact вместо перемещения существующей записи. Пользователь отдельно подтверждает или отменяет карточку; сам ты никогда не выполняешь запись или удаление. " +
-  "Для темы и раздела ТЕКУЩЕГО диалога используй set_conversation_context внутри обычного инструментального цикла: в первом содержательном ходе укажи короткую тему (2–80 символов) и slug существующего подходящего раздела либо null, если определить нельзя. При отчётливой смене предмета разговора обнови тему/раздел, но не переключайся из-за краткого уточнения. При загрузке вложений классифицируй только действительно видимое тебе содержимое; не утверждай, что прочёл непрочитанный файл. Не создавай новый раздел по догадке. Когда раздел закреплён пользователем, оставь его неизменным; тему при необходимости меняй. Сам инструмент лишь предлагает метаданные диалога, ничего не переносит в памяти; приложение сохранит их и само покажет уведомление ПОД ответом после успешной записи. Не дублируй уведомление в тексте. " +
-  (context ? "Текущая тема диалога: «" + context.topic + "», раздел: " + (context.sectionSlug || "не определён") + (context.pinned ? " (раздел закреплён пользователем)" : "") + ". " : "Тема диалога пока не определена. ") +
+  (enabled ? "Для темы и раздела ТЕКУЩЕГО диалога используй set_conversation_context внутри обычного инструментального цикла: в первом содержательном ходе укажи короткую тему (2–80 символов) и slug существующего подходящего раздела либо null, если определить нельзя. При отчётливой смене предмета разговора обнови тему/раздел, но не переключайся из-за краткого уточнения. При загрузке вложений классифицируй только действительно видимое тебе содержимое; не утверждай, что прочёл непрочитанный файл. Не создавай новый раздел по догадке. Когда раздел закреплён пользователем, оставь его неизменным; тему при необходимости меняй. Сам инструмент лишь предлагает метаданные диалога, ничего не переносит в памяти; приложение сохранит их и само покажет уведомление ПОД ответом после успешной записи. Не дублируй уведомление в тексте. " +
+  (context ? "Текущая тема диалога: «" + context.topic + "», раздел: " + (context.sectionSlug || "не определён") + (context.pinned ? " (раздел закреплён пользователем)" : "") + ". " : "Тема диалога пока не определена. ") : "") +
   "Все запросы чата проходят через тебя и функции инструментов: не подменяй вызов инструмента воображаемым результатом. Для поиска фотографий в памяти вызывай search_local_photos. mode=text ищет по описанию, mode=image использует прикреплённую локальную фотографию, если этот режим разрешён каталогом; description при mode=image — пустая строка. Вызывай инструмент даже для простых запросов «найди фото», а для сложных сочетай его с другими средствами памяти. Для продолжения прежней подборки «Покажи ещё» используй continue_local_articles с сохранёнными фильтрами и курсором, а не новую подборку. Он ищет только на телефоне через действующий фотоиндекс; результат — метаданные найденных фото, а не сами пиксели, и не подтверждает, что ты видел или распознал исходное изображение. Не придумывай снимки, не объявляй отсутствие модели/индекса пустым результатом, не загружай фото в интернет без прямого согласия. Обычный поиск текста не заменяй фото-поиском без причины. " +
   "Для выборки сохранённых статей по дате используй select_local_articles, если он доступен; ответ инструмента — только метаданные. Проверяй count/hasMore, дочитывай текст read_local_note по id/version перед обобщением и не выдавай ссылку без текста за прочитанную статью. " +
   "На уточнение «сделай выжимку из них» вызывай read_selected_local_articles, если он доступен: это точные ID/version прошлой подборки, исходники перечитываются с проверкой прав. Для всех выбранных материалов следуй nextIndex до hasMore=false в пределах бюджета; отдельно назови прочитанные, прочитанные частично, ссылки без тела и недоступные. Не приписывай факты статьям, текст которых не читался; ни summary заметки, ни URL не означают прочитанный оригинал статьи. " +
@@ -200,7 +202,7 @@ export async function runDirectAgent(options: DirectAgentOptions): Promise<Direc
   options.diagnostic?.("agent.context", { chars: web.context.length, notes: web.notes.length,
     used: web.used.length, webSources: web.sources.length, builtinWeb: web.builtinWeb, webFailed: Boolean(web.webError) });
   const input: unknown[] = [
-    { role: "system", content: systemPrompt(options.sections,options.context) },
+    { role: "system", content: systemPrompt(options.sections,options.context,options.contextClassificationEnabled) },
     ...dialogueHistory(options.history).map(turn => ({role:turn.role, content:chatContent(turn.content, turn.attachments, "responses")})),
     { role: "user", content: chatContent(withData(web.context, prompt), options.attachments, "responses") },
   ];
