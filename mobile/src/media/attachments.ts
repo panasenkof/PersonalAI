@@ -192,7 +192,7 @@ function checkedRecognitions(originals: ImportFile[], values?: FileRecognition[]
   });
 }
 /** Note + original + receipt commit together. Cancellation never leaves a partial note. */
-export async function saveMediaNote(profile: string, input: { file?: ImportFile; files?: ImportFile[]; title: string; body: string; extractedText?: string; recognitions?: FileRecognition[]; sensitivity: 'sensitive' | 'standard'; receipt?: string; onReplay?: ShareReplayCallback; collectionId?: string; sourceUrl?: string; publicationClaim?: {date:string;evidence:'html_meta';sourceAttribute:'article:published_time'|'datePublished'} }, signal?: AbortSignal): Promise<string> {
+export async function saveMediaNote(profile: string, input: { file?: ImportFile; files?: ImportFile[]; title: string; body: string; extractedText?: string; recognitions?: FileRecognition[]; sensitivity: 'sensitive' | 'standard'; receipt?: string; onReplay?: ShareReplayCallback; allowSeparateCopy?: boolean; collectionId?: string; sourceUrl?: string; publicationClaim?: {date:string;evidence:'html_meta';sourceAttribute:'article:published_time'|'datePublished'} }, signal?: AbortSignal): Promise<string> {
   return withLocalMemoryDatabase(profile, async db => {
     check(signal);
     if (input.publicationClaim) {
@@ -256,11 +256,15 @@ export async function saveMediaNote(profile: string, input: { file?: ImportFile;
     const onlyPostUrl = Boolean(postKey && input.sourceUrl &&
       input.body.trim() === input.sourceUrl.trim());
     const normalizedBody = onlyPostUrl ? postKey : input.body;
+    const inferredFileTitle = originals.length === 1 && !input.body.trim() &&
+      input.title.trim() === originals[0].name.slice(0, 160);
     const normalizedTitle = onlyPostUrl && (input.title === 'Ссылка' ||
-      input.title === input.body.trim()) ? 'telegram-link' : input.title;
+      input.title === input.body.trim()) ? 'telegram-link' :
+      inferredFileTitle ? 'incoming-file-untitled' : input.title;
     const receivedReceipt = input.receipt
       ? await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, JSON.stringify([
-          'android-share-content-v2', receivedDigests, normalizedTitle, normalizedBody,
+          'android-share-content-v2', receivedDigests, originals.map(mediaKind),
+          normalizedTitle, normalizedBody,
           input.extractedText || "", input.sensitivity, input.collectionId || "",
           postKey || input.sourceUrl || "", recognitionSignature,
         ]))
@@ -276,9 +280,15 @@ export async function saveMediaNote(profile: string, input: { file?: ImportFile;
       input.onReplay?.({ entityId: old.entity_id, recordStatus: old.record_status });
       return old.entity_id;
     }
-    const repeated = await replayIfFound();
+    // Never silently suppress intentional separate copies of the same media
+    // (e.g. a photo sent in two different chats). This flag is set only after
+    // the user's additional explicit confirmation in the import UI.
+    const repeated = input.allowSeparateCopy ? null : await replayIfFound();
     if (repeated) return repeated;
-    const receipt = receivedReceipt;
+    const receipt = input.allowSeparateCopy && input.receipt
+      ? await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256,
+          JSON.stringify([receivedReceipt, 'confirmed-separate-copy', Crypto.randomUUID()]))
+      : receivedReceipt;
     const repo = new SqliteMemoryRepository(db);
     const slug = input.receipt ? 'inbox' : 'notes';
     let col = (await repo.listCollections()).find(c => input.collectionId ? c.id === input.collectionId : c.slug === slug);
@@ -340,7 +350,7 @@ export async function saveMediaNote(profile: string, input: { file?: ImportFile;
       // A concurrent identical Share may win the unique receipt insert.
       // createEntity already rolled back its complete transaction. Never
       // leave a partially written note or report an unexplained failure.
-      if (input.receipt) {
+      if (input.receipt && !input.allowSeparateCopy) {
         const winner = await replayIfFound();
         if (winner) return winner;
       }
