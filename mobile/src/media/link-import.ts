@@ -263,7 +263,8 @@ export async function importLink(raw: string, signal?: AbortSignal): Promise<{ f
       // NOT downloaded; public HTML extraction is always partial coverage.
       const publicationClaim=html && !telegram ? htmlPublicationClaim(rawText) : undefined;
       file.delete(); return { text: content, source,
-        ...(telegram ? {title:telegram.title,partial:true} :
+        ...(telegram ? {title:telegram.title,partial:true,
+          textCoverage:"telegram_post_text_only" as const} :
           {...(page?.title ? { title: page.title } : {}),
            ...(page ? { partial: page.partial } : {})}),
         ...(publicationClaim ? {publicationClaim} : {}) };
