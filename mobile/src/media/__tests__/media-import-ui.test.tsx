@@ -841,9 +841,17 @@ test('MSG-6.B: exact Share replay shows truthful existing status and does not ru
     const ui=render(<MemoryImportScreen/>);
     await waitFor(()=>expect(ui.getByText(/Коллекция: Входящие/)).toBeTruthy());
     fireEvent.press(ui.getByLabelText('Сохранить сведения в память'));
-    await waitFor(()=>expect(alert).toHaveBeenCalledWith('Уже в памяти',expect.stringContaining('Повторная запись не создана.')));
+    await waitFor(()=>expect(alert).toHaveBeenCalledWith('Материал уже в памяти',
+      expect.stringContaining('повторная отправка'),expect.any(Array)));
     expect(require('../../direct-agent/enrich-runner').scheduleIndexTerms).not.toHaveBeenCalled();
-    expect(mockBack).toHaveBeenCalledTimes(1);
+    expect(mockBack).not.toHaveBeenCalled();
+    const choices=(alert as jest.Mock).mock.calls[0][2];
+    expect(choices.map((choice:any)=>choice.text)).toEqual(['Оставить черновик','Сохранить отдельно']);
+    await act(async()=>{choices[1].onPress();});
+    await waitFor(()=>expect(saveMediaNote).toHaveBeenCalledTimes(2));
+    expect((saveMediaNote as jest.Mock).mock.calls[1][1]).toEqual(
+      expect.objectContaining({allowSeparateCopy:true}));
+    await waitFor(()=>expect(mockBack).toHaveBeenCalledTimes(1));
   }finally{alert.mockRestore();}
 });
 
