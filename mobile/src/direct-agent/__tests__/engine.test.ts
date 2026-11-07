@@ -41,7 +41,7 @@ test("serverless requests always provide memory tools and keep web off until ena
   // gpt-4.1-mini is not a reasoning model: OpenAI rejects reasoning.encrypted_content for it.
   expect(body.include).not.toContain("reasoning.encrypted_content");
   expect(body.max_output_tokens).toBe(4000);
-  expect(body.tools.map((tool: any) => tool.name)).toEqual(["set_conversation_context", "search_local_notes", "draft_memory_fact", "update_task_state"]);
+  expect(body.tools.map((tool: any) => tool.name)).toEqual(["search_local_notes", "draft_memory_fact", "update_task_state"]);
   expect(request.mock.calls[0][1].headers.Authorization).toBe("Bearer test-key-only");
   expect(JSON.stringify(body)).not.toContain("test-key-only");
 });
@@ -533,7 +533,7 @@ test("model tool call proposes dialogue context without extra classifier or memo
   const propose=jest.fn();
   const result=await start({},transport,{
     sections:[{slug:"projects",name:"Дела и проекты"}],
-    propose,
+    contextClassificationEnabled:true,propose,
   });
   expect(result.contextCandidate).toEqual({
     topic:"Аккумулятор",sectionSlug:"projects",reason:"Вопрос про автомобиль",
@@ -548,7 +548,7 @@ test("model tool call proposes dialogue context without extra classifier or memo
 
 test("context model instructions include saved topic and pin, not previous history outside this chat",async()=>{
   const transport=jest.fn().mockResolvedValue(final());
-  await start({},transport,{sections:[{slug:"projects",name:"Проекты"}],
+  await start({},transport,{contextClassificationEnabled:true,sections:[{slug:"projects",name:"Проекты"}],
     context:{topic:"PersAI",sectionSlug:"projects",pinned:true}});
   const body=JSON.parse(transport.mock.calls[0][1].body);
   const system=body.input[0].content;
