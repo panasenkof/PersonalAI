@@ -1035,3 +1035,27 @@ test("MSG-6.C: a plain Android Share is not misattributed to Telegram/MAX",async
   expect(ui.getByText(/Отправившее приложение, автор, дата и версия публикации не подтверждены/)).toBeTruthy();
   expect(ui.queryByLabelText("Открыть ссылку на источник в браузере")).toBeNull();
 });
+
+test("MSG-6C6: optional user tags remain separate from caption and are saved only after confirmation",async()=>{
+  const screen=render(<MemoryImportScreen/>);
+  fireEvent.press(screen.getByLabelText("Выбрать файл для памяти"));
+  await waitFor(()=>expect(screen.getByLabelText("Теги заметки")).toBeTruthy());
+  fireEvent.changeText(screen.getByLabelText("Сведения из файла"),"Мой текст");
+  fireEvent.changeText(screen.getByLabelText("Теги заметки"),"#Авто, #РЕЦЕПТЫ");
+  expect(saveMediaNote).not.toHaveBeenCalled();
+  fireEvent.press(screen.getByLabelText("Сохранить сведения в память"));
+  await waitFor(()=>expect(saveMediaNote).toHaveBeenCalledWith("guest",
+    expect.objectContaining({body:"Мой текст",tags:["авто","рецепты"]}),expect.anything()));
+});
+
+test("MSG-6C6: invalid tag refuses save without overwriting original caption",async()=>{
+  const screen=render(<MemoryImportScreen/>);
+  fireEvent.press(screen.getByLabelText("Выбрать файл для памяти"));
+  await waitFor(()=>expect(screen.getByLabelText("Теги заметки")).toBeTruthy());
+  fireEvent.changeText(screen.getByLabelText("Сведения из файла"),"Мой комментарий");
+  fireEvent.changeText(screen.getByLabelText("Теги заметки"),"#bad/name");
+  fireEvent.press(screen.getByLabelText("Сохранить сведения в память"));
+  await waitFor(()=>expect(screen.getByText(/Тег: до 32/)).toBeTruthy());
+  expect(saveMediaNote).not.toHaveBeenCalled();
+  expect(screen.getByLabelText("Сведения из файла").props.value).toBe("Мой комментарий");
+});
