@@ -508,3 +508,20 @@ test("upload in chat is classified in the SAME model dialogue turn, with user at
   expect(saved.rows[1].contextChange?.sectionName).toBe("Дела и проекты");
   store.dispose();
 });
+
+test("one allowed model request keeps ordinary answer available and does not offer a two-call context tool",async()=>{
+  const {repo,records}=repository();
+  (loadModelCallLimit as jest.Mock).mockResolvedValueOnce(1);
+  const runner=jest.fn().mockImplementation(async options=>{
+    expect(options.maxRequests).toBe(1);
+    expect(options.contextClassificationEnabled).toBe(false);
+    return {text:"Ответ в одном обращении",sources:[],requests:1};
+  });
+  const store=new DirectChatStore("guest",repo,runner);await store.initialize();
+  store.setQuestion("Что делать?");
+  await store.send(settings);
+  const c=records.get(store.getSnapshot().activeId!)!;
+  expect(c.rows.at(-1)?.text).toBe("Ответ в одном обращении");
+  expect(c.context).toBeUndefined();
+  store.dispose();
+});
