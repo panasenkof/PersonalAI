@@ -498,7 +498,7 @@ const [termsOpen, setTermsOpen] = useState(false);
             disabled={busy} onPress={() => setAiField("extracted")} /> : null}
           {sourceDescription ? <SourceProvenanceCard source={sourceDescription}
             onOpenError={()=>setError("Не удалось открыть источник.")}
-            onRecheck={sourceCheckEligible && selected &&
+            onRecheck={!editing && sourceCheckEligible && selected &&
               ["active","archived"].includes(selected.record_status) ? () => {void checkSavedSourceText();} : undefined}
             recheckDisabled={busy || voiceActive || dirty}
             recheckBusy={sourceCheckBusy} recheckMessage={sourceCheckMessage}
