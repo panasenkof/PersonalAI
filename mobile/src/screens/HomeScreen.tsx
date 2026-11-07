@@ -122,6 +122,7 @@ function NebulaHomeContent() {
     return onLocalMemorySessionChange(unlocked => { if (!unlocked) setSummaryId(null); });
   }, [profile]);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyTarget, setHistoryTarget] = useState<{ conversationId: string; rowId: string } | null>(null);
   const voicePreference = useVoiceEngine();
   const showWhisperImprove = showDraftImprove(voicePreference.pending ?? voicePreference.preference);
   const [voiceReset, setVoiceReset] = useState(0);
@@ -134,6 +135,13 @@ function NebulaHomeContent() {
     [active?.rows, active?.busy, active?.streamText]);
   const turnId = [...(active?.rows || [])].reverse().find(row => row.role === "user")?.id;
   const viewport = useChatBottomFollow(active?.id, isFocused, turnId, rows.length > 0);
+  useEffect(() => {
+    if (historyOpen || !historyTarget || active?.id !== historyTarget.conversationId) return;
+    const index = rows.findIndex(row => row.id === historyTarget.rowId);
+    if (index >= 0) viewport.jumpToMessage(index);
+    // Never try to navigate to a deleted/damaged message or to another chat.
+    setHistoryTarget(null);
+  }, [historyOpen, historyTarget, active?.id, rows, viewport.jumpToMessage]);
   // Stable component identity is essential: recreating this on tokens remounts cells.
   const ChatCell = useCallback(({ onLayout, children, style, onFocusCapture }: CellRendererProps<PresentedChatRow>) =>
     <View {...{ style, onFocusCapture }} onLayout={onLayout}>{children}</View>, []);
@@ -382,6 +390,7 @@ function NebulaHomeContent() {
       onMomentumScrollBegin={viewport.beginDrag}
       onMomentumScrollEnd={event => viewport.endDrag(event.nativeEvent)}
       onContentSizeChange={viewport.onContent}
+       onScrollToIndexFailed={viewport.onScrollToIndexFailed}
       contentContainerStyle={{ padding: nebulaSpacing.md, paddingBottom: active?.rows.length ? nebulaTouch.minimum + nebulaSpacing.xxl : nebulaSpacing.md, gap: nebulaSpacing.sm, flexGrow: 1 }}
       ListEmptyComponent={ready && needsSetup ? <View style={{ flex: 1, justifyContent: "center", gap: 14, paddingVertical: 12 }}>
         <View style={{ alignItems: "center", gap: 10 }}><NebulaHomeArtwork size={136} phase={orbPhase} />
@@ -651,7 +660,11 @@ function NebulaHomeContent() {
     </BottomSheet>
     <ConversationHistorySheet visible={historyOpen} conversations={conversations} activeId={active?.id}
       onClose={() => setHistoryOpen(false)}
-      onSelect={c => { store.select(c.id); setHistoryOpen(false); }}
+      onSelect={(c, rowId) => {
+         setHistoryTarget(rowId ? { conversationId: c.id, rowId } : null);
+         store.select(c.id);
+         setHistoryOpen(false);
+       }}
       onSummary={c => {store.select(c.id);setHistoryOpen(false);chooseDialogueSummary(c.id);}}
       onDelete={c => Alert.alert("Удалить диалог?", c.title, [
         { text: "Отмена", style: "cancel" },
