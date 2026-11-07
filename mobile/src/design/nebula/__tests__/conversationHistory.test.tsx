@@ -1,7 +1,7 @@
 import React from "react";
 import { fireEvent, render } from "@testing-library/react-native";
 import type { LiveConversation } from "../../../direct-agent/chat-store";
-import { indexConversationHistory, searchConversationHistory } from "../conversationHistory";
+import { findHistoryMessageMatch, indexConversationHistory, searchConversationHistory } from "../conversationHistory";
 import { ConversationHistorySheet } from "../ConversationHistorySheet";
 
 jest.mock("@expo/vector-icons/Feather", () => () => null);
@@ -143,4 +143,43 @@ test("history: topic transitions remain searchable under both old and new sectio
   fireEvent.press(ui.getByLabelText("Фильтр: Авто"));
   expect(ui.getByText("Найдено диалогов: 1")).toBeTruthy();
   expect(ui.getByText("Тема: Лазанья")).toBeTruthy();
+});
+
+
+test("history jump resolves the actual message, not merely the last reply in a multi-topic chat", () => {
+  const c=chat("mixed","Диалог");
+  c.context={topic:"Лазанья",sectionSlug:"recipes",pinned:false};
+  c.rows=[
+    {id:"car-q",role:"user",text:"Как включить подогрев аккумулятора?"},
+    {id:"car-a",role:"assistant",text:"Настройте контроллер",contextChange:{
+      topic:"Аккумулятор",sectionSlug:"cars",previousTopic:null,previousSectionSlug:null,
+      sectionName:"Авто",previousSectionName:null,reason:"Автомобиль",at:"2026-11-07T18:01:00Z"}},
+    {id:"recipe-q",role:"user",text:"А теперь рецепт лазаньи с помидорами"},
+    {id:"recipe-a",role:"assistant",text:"Добавьте сыр",contextChange:{
+      topic:"Лазанья",sectionSlug:"recipes",previousTopic:"Аккумулятор",previousSectionSlug:"cars",
+      sectionName:"Рецепты",previousSectionName:"Авто",reason:"Новая тема",at:"2026-11-07T18:05:00Z"}},
+  ];
+  expect(findHistoryMessageMatch(c,"включить","cars")?.rowId).toBe("car-q");
+  expect(findHistoryMessageMatch(c,"контроллер","cars")?.rowId).toBe("car-a");
+  expect(findHistoryMessageMatch(c,"помидорами","recipes")?.rowId).toBe("recipe-q");
+  expect(findHistoryMessageMatch(c,"","cars")?.rowId).toBe("car-a");
+  expect(findHistoryMessageMatch(c,"","recipes")?.rowId).toBe("recipe-a");
+  expect(findHistoryMessageMatch(c,"включить","recipes")).toBeNull();
+  expect(findHistoryMessageMatch(c,"")).toBeNull();
+  expect(findHistoryMessageMatch(c,"диалог")).toBeNull(); // title-only is not a made-up row
+  expect(searchConversationHistory(indexConversationHistory([c]),"включить","cars")).toHaveLength(1);
+});
+
+test("opening a searched history result passes a precise row anchor, without altering ordinary selection", () => {
+  const c=chat("a","Семья",undefined,"Рассказ о поездке");
+  const onSelect=jest.fn();
+  const view=render(<ConversationHistorySheet visible conversations={[c]}
+    onClose={jest.fn()} onSelect={onSelect} onDelete={jest.fn()} onNewChat={jest.fn()} />);
+  fireEvent.changeText(view.getByLabelText("Поиск диалогов"),"поездке");
+  expect(view.getByText("Совпадение: Рассказ о поездке")).toBeTruthy();
+  fireEvent.press(view.getByLabelText("Открыть диалог Семья"));
+  expect(onSelect).toHaveBeenLastCalledWith(c,"message-a");
+  fireEvent.press(view.getByLabelText("Очистить поиск диалогов"));
+  fireEvent.press(view.getByLabelText("Открыть диалог Семья"));
+  expect(onSelect).toHaveBeenLastCalledWith(c);
 });
