@@ -7,9 +7,11 @@ jest.mock("../../../theme", () => ({ useTheme: () => ({
 }) }));
 jest.mock("../components", () => ({
   NebulaAction: ({label,onPress,accessibilityLabel,disabled}: any) => {
+    const React = require("react");
     const {Pressable,Text} = require("react-native");
-    return <Pressable accessibilityRole="button" accessibilityLabel={accessibilityLabel || label}
-      disabled={disabled} onPress={onPress}><Text>{label}</Text></Pressable>;
+    return React.createElement(Pressable,{accessibilityRole:"button",
+      accessibilityLabel:accessibilityLabel || label,disabled,onPress},
+      React.createElement(Text,null,label));
   },
 }));
 const source={title:"Источник · текст публичного поста",details:"Получен текст источника.",
