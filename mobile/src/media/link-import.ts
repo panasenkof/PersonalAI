@@ -2,6 +2,8 @@ import { fetch as nativeFetch } from 'expo/fetch';
 import { File, Directory, Paths, FileMode } from 'expo-file-system';
 import * as Crypto from 'expo-crypto';
 import { mediaKind, type ImportFile } from './kinds';
+import { sharedLinkPreview } from './messenger-share-links';
+import { verifiedTelegramMessageMarkup } from './telegram-post';
 
 export function publicImportUrl(raw: string): string {
   let u: URL;
@@ -191,8 +193,20 @@ export function articleReadError(html: string, result: ArticleText): string | nu
 }
 
 /** Explicit user action only; no cookies/keys; streaming bound before allocation. */
-export async function importLink(raw: string, signal?: AbortSignal): Promise<{ file?: ImportFile; text?: string; source: string; title?: string; partial?: boolean; publicationClaim?: HtmlPublicationClaim }> {
+export async function importLink(raw: string, signal?: AbortSignal): Promise<{ file?: ImportFile; text?: string; source: string; title?: string; partial?: boolean;
+  textCoverage?: "telegram_post_text_only"; publicationClaim?: HtmlPublicationClaim }> {
   const source = publicImportUrl(raw);
+  // Source identity is URL-form only; the HTML must independently identify
+  // the EXACT Telegram message. Generic page text is not post evidence.
+  const messenger=sharedLinkPreview({shareType:'url',value:source});
+  const telegramMessage=messenger?.platform==='telegram' &&
+    messenger.kind==='public_post_candidate';
+  // Standard t.me/<channel>/<post> can be a landing page. The documented
+  // public /s/ view is the ONLY fixed, same-service alternate reader URL;
+  // never follow arbitrary HTTP redirects or user-controlled hostnames.
+  const readerUrl=telegramMessage&&messenger?.messageKey
+    ? "https://t.me/s/"+messenger.messageKey
+    : source;
   const controller = new AbortController();
   const cancel = () => controller.abort(); signal?.addEventListener('abort', cancel);
   const timer = setTimeout(cancel, 60_000);
@@ -203,7 +217,7 @@ export async function importLink(raw: string, signal?: AbortSignal): Promise<{ f
     // Deliberately reject HTTP redirects: native URL following could reach a
     // private host or send a user-selected URL to an unexpected endpoint.
     // Do not add cookies, Referer spoofing or site-specific VPN workarounds.
-    const response = await nativeFetch(source, { signal: controller.signal, credentials: 'omit', redirect: 'error' });
+    const response = await nativeFetch(readerUrl, { signal: controller.signal, credentials: 'omit', redirect: 'error' });
     stage = 'получение ответа';
     if (response.status >= 300 && response.status < 400 || response.status === 0)
       throw new Error('Сайт перенаправляет запрос на другой адрес. Автоматические перенаправления для импорта отключены.');
@@ -213,6 +227,8 @@ export async function importLink(raw: string, signal?: AbortSignal): Promise<{ f
     if (looksLikeMediaFile && (mime === 'text/html' || mime === 'application/xhtml+xml' || mime === 'text/plain'))
       throw new Error('Вместо медиафайла сайт вернул страницу или текст. Возможна проверка VPN, авторизация или недействительная прямая ссылка.');
     const html = mime === 'text/html' || mime === 'application/xhtml+xml';
+    if(telegramMessage && !html)
+      throw new Error('Публичный пост Telegram не вернул проверяемый HTML. Сохраните только ссылку или передайте оригинал через «Поделиться».');
     const text = html || mime.startsWith('text/') || mime === 'application/json';
     const limit = text ? 1024 * 1024 : 80 * 1024 * 1024;
     if (Number(response.headers.get('content-length')) > limit) throw new Error('Слишком большой материал по ссылке.');
@@ -237,15 +253,27 @@ export async function importLink(raw: string, signal?: AbortSignal): Promise<{ f
     if (text) {
       stage = 'обработка содержимого';
       const rawText = await file.text();
-      const page = html ? articleText(rawText) : null;
+      const telegram=telegramMessage ? verifiedTelegramMessageMarkup(source,rawText) : null;
+      // The text renderer is the SAME canonical articleText as before, but
+      // restricted to one verified Telegram message subtree, not whole feed.
+      const page = telegram ? articleText('<article>'+telegram.textHtml+'</article>') :
+        html ? articleText(rawText) : null;
       if (page) {
         const failure = articleReadError(rawText, page);
         if (failure) throw new Error(failure);
       }
       const content = page ? page.text : rawText;
       if (!content.trim() || content.length > 60_000) throw new Error('Текст пуст или длиннее 60 000 символов. Сохраните нужный фрагмент вручную.');
-      const publicationClaim=html ? htmlPublicationClaim(rawText) : undefined;
-      file.delete(); return { text: content, source, ...(page?.title ? { title: page.title } : {}), ...(page ? { partial: page.partial } : {}), ...(publicationClaim ? {publicationClaim} : {}) };
+      // Page-level metadata must never be attributed to an individual
+      // Telegram post. No guessed source author/date. Media in the post is
+      // NOT downloaded; public HTML extraction is always partial coverage.
+      const publicationClaim=html && !telegram ? htmlPublicationClaim(rawText) : undefined;
+      file.delete(); return { text: content, source,
+        ...(telegram ? {title:telegram.title,partial:true,
+          textCoverage:"telegram_post_text_only" as const} :
+          {...(page?.title ? { title: page.title } : {}),
+           ...(page ? { partial: page.partial } : {})}),
+        ...(publicationClaim ? {publicationClaim} : {}) };
     }
     return { file: { uri: file.uri, name, mimeType: mime }, source };
   } catch (error) {
