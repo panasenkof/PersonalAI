@@ -90,10 +90,10 @@ beforeEach(()=>{
   }]);
   (readApprovedNote as jest.Mock).mockResolvedValue({
     id:move.noteId,revision:4,title:move.title,
-    content:"Соус бешамель, томаты и сыр",offset:0,totalChars:30,hasMore:false,
+    content:"Соус бешамель, томаты и сыр",offset:0,totalChars:27,hasMore:false,
     source:{recordId:move.noteId,sourceRef:"https://example.test/recipe",
       location:"unknown"},
-    evidence:{recordId:move.noteId,recordVersion:4,startChar:0,endChar:30,
+    evidence:{recordId:move.noteId,recordVersion:4,startChar:0,endChar:27,
       coverage:"complete",originalPage:null,originalTime:null},
   });
   (previewMove as jest.Mock).mockResolvedValue(move);
