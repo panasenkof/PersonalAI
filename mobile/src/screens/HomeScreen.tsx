@@ -5,12 +5,10 @@ import Feather from "@expo/vector-icons/Feather";
 import { useChatAttachments } from "../media/useChatAttachments";
 import { capturePhotoDraft83, discardCameraPhotoDraft83, stageChatImageForNote83 } from "../media/vision-chat-camera";
 import { MAX_CHAT_FILES } from "../direct-agent/chat-attachments";
-import { savedAiArticleIntent } from "../direct-agent/article-selection";
 import { planDocumentSynthesis } from "../direct-agent/document-synthesis";
 import { loadModelCallLimit } from "../direct-agent/agent-preferences";
 import { imageCapability } from "../direct-agent/attachment-capabilities";
 import type { ChatAttachment } from "../direct-agent/chat-attachments";
-import { localPhotoIntent83, localPhotoSuggestion83 } from "../media/vision-chat-search";
 import { PhotoSearchResults } from "../media/PhotoSearchResults";
 import { loadPhotoResultCount, DEFAULT_PHOTO_RESULT_COUNT } from "../media/photo-result-preferences";
 import { PhotoContextActions } from "../media/PhotoContextActions";
@@ -173,11 +171,6 @@ function NebulaHomeContent() {
   const canSend = Boolean(ready && !pickingAttachment && !cameraBusy && !active?.deleting && settings && (settings.apiKey || anonymousLocalAllowed(settings)));
   const draftImageSupport = settings ? imageCapability(settings,active?.attachments || []) : "no-images";
   const question = active?.question || "";
-  const localArticles = savedAiArticleIntent(question,new Date(),Boolean(active?.attachments?.length));
-  // The generic visual object-finder must not swallow the article selection.
-  const localPhotoSearch = localArticles ? null : localPhotoIntent83(question,active?.attachments || []);
-  const suggestedPhotoSearch = localPhotoSuggestion83(question, active?.attachments || []);
-  const canSearchLocal = Boolean(ready && !cameraBusy && !pickingAttachment && !active?.deleting && (localPhotoSearch || localArticles));
   const busy = active?.busy || false;
   const statusSignals = { voicePhase, busy, streamText: active?.streamText, progress: active?.progress, error, ready };
   const orbPhase = resolveNebulaHomePhase(statusSignals);
@@ -233,8 +226,9 @@ function NebulaHomeContent() {
   function searchSelectedPhoto() {
     if(!selectedPhoto || busy || cameraBusy || !active?.id)return;
     Keyboard.dismiss();setComposerFocused(false);
-    // The submitted image leaves the composer on search start; other drafts remain.
-    void store.searchPhotosLocally(selectedPhoto,active.id);
+    // One assistant turn; raw photo is passed only to the canonical local tool.
+    if(!settings || !canSend){setNotice("Подключите модель для поиска фотографий через помощника.");return;}
+    void store.searchPhotosWithAgent(settings,selectedPhoto,active.id);
   }
   function findSelectedOnline() {
     if(!selectedPhoto || !active?.id || busy || cameraBusy)return;
@@ -279,14 +273,12 @@ function NebulaHomeContent() {
     if (busy) { store.stop(); return; }
     // Never send a partial draft while a selected file is being decoded/ASR.
     if (pickingAttachment) return;
-    if (!settings && !localPhotoSearch && !localArticles) return;
+    if (!settings || !canSend) {setNotice("Подключите модель для работы с чатом.");return;}
     // Only a deliberate Send closes Gboard (not a pause in typing).
     Keyboard?.dismiss?.();
     setComposerFocused(false);
     setVoiceReset(n => n + 1);
-    if(localPhotoSearch)void store.searchPhotosLocally();
-    else if(localArticles)void store.searchSavedArticlesLocally();
-    else if(settings) {
+    {
       let plan;
       try {plan=planDocumentSynthesis(active?.attachments||[],settings.model);}
       catch(e){setNotice((e as Error).message);return;}
@@ -435,7 +427,8 @@ function NebulaHomeContent() {
         </View> : null}
         {active?.retryPhoto?.rowId === item.id && active?.retryPhoto ?
           <NebulaAction icon="refresh-cw" label="Повторить поиск по фото" size="compact"
-            disabled={busy} onPress={() => void store.searchPhotosLocally(active.retryPhoto!.image,active.id)} /> : null}
+            disabled={busy || !canSend} onPress={() => settings &&
+              void store.searchPhotosWithAgent(settings,active.retryPhoto!.image,active.id)} /> : null}
         {item.photoAction ? <NebulaAction
           icon={item.photoAction === "import" ? "plus-circle" : "settings"}
           label={item.photoAction === "model" ? "Выбрать модель" : item.photoAction === "import" ? "Добавить фото в память" : "Подготовить фото"}
@@ -457,7 +450,8 @@ function NebulaHomeContent() {
           <View style={{ alignSelf: "flex-start" }}>
             <NebulaAction icon="chevron-down" label="Показать ещё" size="compact"
               accessibilityLabel="Показать следующую страницу сохранённых материалов"
-              disabled={busy} onPress={() => void store.loadMoreSavedArticlesLocally(item.id)} />
+              disabled={busy || !canSend} onPress={() => settings &&
+                void store.continueArticlesWithAgent(settings,item.id)} />
           </View> : null}
         {item.sources?.length ? <View style={{ gap: 2 }}><Text style={{ color: t.muted, fontSize: 12 }}>Источники</Text>{item.sources.map(url => {
           const part = sourceParts(url);
@@ -553,9 +547,6 @@ function NebulaHomeContent() {
             {id:"preview",label:"Посмотреть",run:()=>setPreviewPhotoId(selectedPhoto.id)},
           ]} /> : null}
       </> : null}
-      {suggestedPhotoSearch && ready && !busy && !cameraBusy && !pickingAttachment && !dictating ?
-        <NebulaAction icon="search" label="Поискать в моих фото"
-          onPress={() => { Keyboard.dismiss(); void store.searchPhotosLocally(undefined, active?.id, true); }} /> : null}
       <PromptInput value={question} onChange={value => store.setQuestion(value)} onClear={() => { normalization.reset(); setVoiceReset(n => n + 1); }} editable={ready} onFocusChange={setComposerFocused} />
       <View testID="composer-actions" style={{ zIndex: 1, flexDirection: "row", alignItems: "center", gap: 4 }}>
         <IconAction compact explainOnTap={false} icon="paperclip" label="Файл" accessibilityLabel="Прикрепить файл к сообщению" hint="JPEG/PNG/WebP, текст, PDF с текстовым слоем и аудио MP3/M4A/WAV/OGG/FLAC/AAC до 20 МБ через скачанный Whisper. Аудио распознаётся только на телефоне; в чат попадёт текст без оригинала. До 3 файлов, PDF до 6 МБ, совокупный текст до 240 000 символов (защита памяти телефона, не предел ИИ). Большие документы анализируются по частям после подтверждения расходов. Файлы не сохраняются как заметки." hintAbove hintAlign="start" disabled={!ready || busy || pickingAttachment || dictating} onPress={() => void pickAttachment()} />
@@ -572,9 +563,9 @@ function NebulaHomeContent() {
           disabled={!ready || dictating || (!normalization.busy && (!question.trim() || (!normalization.alternate && !canSend)))}
           onPress={() => void normalization.toggle(settings)} /> : null}
         <View style={{ flex: 1, minWidth: 0 }} />
-        <IconAction compact explainOnTap={false} icon={busy ? "square" : "arrow-up"} label={busy ? "Стоп" : localPhotoSearch || localArticles ? "Найти" : "Отправить"} accessibilityLabel={busy ? "Остановить запрос" : localPhotoSearch ? "Найти фотографии в памяти" : localArticles ? "Подобрать сохранённые статьи в памяти" : "Отправить запрос"}
-          hint={busy ? "Остановить ответ ИИ в этом диалоге." : localPhotoSearch ? "Найти фотографии на телефоне." : localArticles ? "Найти сохранённые ссылки по дате без вызова ИИ." : "Отправить написанное сообщение выбранной модели."} hintAbove emphasized={!busy}
-          disabled={!busy && (pickingAttachment || !(canSend || canSearchLocal) || (!question.trim() && !active?.attachments?.length))} onPress={sendOrStop} />
+        <IconAction compact explainOnTap={false} icon={busy ? "square" : "arrow-up"} label={busy ? "Стоп" : "Отправить"} accessibilityLabel={busy ? "Остановить запрос" : "Отправить запрос агенту"}
+          hint={busy ? "Остановить ответ ИИ в этом диалоге." : "Сообщение обрабатывает выбранная LLM, которая при необходимости вызывает локальные инструменты памяти, фото или сохранённых статей."} hintAbove emphasized={!busy}
+          disabled={!busy && (pickingAttachment || !canSend || (!question.trim() && !active?.attachments?.length))} onPress={sendOrStop} />
       </View>
     </View>
     <Modal visible={Boolean(previewPhoto)} transparent animationType="fade" onRequestClose={()=>setPreviewPhotoId(null)}>
