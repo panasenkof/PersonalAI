@@ -26,7 +26,7 @@ export function SourceProvenanceCard({
       </Text>
       <View style={{alignItems:"flex-start"}}>
         <NebulaAction icon="external-link" label="Открыть источник"
-          size="compact" accessibilityLabel="Открыть проверенную HTTPS-ссылку в браузере"
+          size="compact" accessibilityLabel="Открыть ссылку на источник в браузере"
           onPress={()=>{void Linking.openURL(source.url!).catch(onOpenError);}} />
       </View>
     </> : null}
