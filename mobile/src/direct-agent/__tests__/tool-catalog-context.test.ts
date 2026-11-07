@@ -7,7 +7,7 @@ const harness=(context?:DirectAgentOptions["context"])=>{
   const opts:DirectAgentOptions={
     settings:{provider:"openai",model:"test-model",baseUrl:"https://api.openai.com/v1",
       apiKey:"key",webSearchKey:"",allowWeb:false},
-    prompt:"Подскажи рецепт",history:[],sections,context,
+    prompt:"Подскажи рецепт",history:[],sections,context,contextClassificationEnabled:true,
     lookup:jest.fn().mockResolvedValue([]),propose,
   };
   return {catalog:createToolCatalog(opts,[],[],[]),propose};
