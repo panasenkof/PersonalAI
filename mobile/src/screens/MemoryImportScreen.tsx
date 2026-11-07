@@ -5,7 +5,7 @@ import { localMemoryRepository } from "../local-memory/repository";
 import { ensureSections } from "../local-memory/sections";
 import type { CollectionRecord } from "../local-memory/types";
 import { loadMediaPreferences, type FileAsrMode } from "../media/preferences";
-import { onLocalMemorySessionChange } from "../local-memory/storage";
+import { onLocalMemorySessionChange, localMemorySessionUnlocked } from "../local-memory/storage";
 import * as ImagePicker from "expo-image-picker";
 import { importLink, linkImportErrorMessage, publicImportUrl, type HtmlPublicationClaim } from "../media/link-import";
 import { sharedLinkPreview } from "../media/messenger-share-links";
@@ -300,6 +300,7 @@ export function MemoryImportScreen() {
   };
   const canExtract = files.some(canExtractFile);
   const canClassifyWithModel = classification === "standard" &&
+    (!collectionId || collections.find(c=>c.id===collectionId)?.sensitivity === "standard") &&
     classificationExcerpt(body, extractedText).substantive && collections.some(c => c.sensitivity === "standard" && c.slug !== "inbox");
   const field = { color: t.text, backgroundColor: t.panel, borderWidth: 1, borderColor: t.line, borderRadius: 16, padding: 14, minHeight: 50 };
   const button = { backgroundColor: t.accent, padding: 14, borderRadius: 17, minHeight: 50, justifyContent: "center" as const, alignItems: "center" as const };
@@ -309,7 +310,8 @@ export function MemoryImportScreen() {
    * The user still has to press the canonical Save button afterwards. */
   function askModelForCollection() {
     if (!profile || !alive.current || busy || preparing || controller.current) return;
-    if (classification !== "standard") {
+    if (!localMemorySessionUnlocked()) { setNotice("Разблокируйте память перед отправкой текста модели."); return; }
+    if (classification !== "standard" || (collectionId && collections.find(c=>c.id===collectionId)?.sensitivity !== "standard")) {
       setNotice("Личные материалы нельзя передавать модели для определения раздела.");
       return;
     }
@@ -333,17 +335,19 @@ export function MemoryImportScreen() {
   }
 
   async function classifyWithModel(connection: DirectConnection) {
-    if (!profile || busy || preparing || controller.current || classification !== "standard") return;
+    if (!profile || busy || preparing || controller.current || classification !== "standard" ||
+        (collectionId && collections.find(c=>c.id===collectionId)?.sensitivity !== "standard") ||
+        !localMemorySessionUnlocked()) return;
     const aborter=new AbortController(); controller.current=aborter;
     setBusy(true);setNotice("ИИ определяет раздел по разрешённому тексту…");
     try {
       const limit=await loadModelCallLimit(profile);
-      if (aborter.signal.aborted || !alive.current) return;
+      if (aborter.signal.aborted || !alive.current || !localMemorySessionUnlocked()) return;
       const proposal=await classifyImportCollectionWithAgent({
         title,body,extractedText,collections,settings:connection,
         explicitConsent:true,sensitivity:classification,modelCallLimit:limit,signal:aborter.signal,
       });
-      if (aborter.signal.aborted || !alive.current) return;
+      if (aborter.signal.aborted || !alive.current || !localMemorySessionUnlocked()) return;
       if (!proposal) {
         setModelCollectionHint(null);
         setNotice("ИИ не смог уверенно подобрать существующий раздел. Ничего не изменено; можно сохранить во «Входящие».");
