@@ -71,7 +71,7 @@ describe("Native Home integration remains isolated and accessible", () => {
     for(const label of ['В интернете','В моей памяти','Сохранить заметку','Посмотреть']){
       expect(home).toContain('label:"'+label+'"');
     }
-    expect(home).toContain("store.searchPhotosLocally(selectedPhoto,active.id)");
+    expect(home).toContain("store.searchPhotosWithAgent(settings,selectedPhoto,active.id)");
     expect(home).toContain("store.send(settings,id)");
     expect(home).toContain('navigation.navigate("MemoryImport",{source:"photo",initialPhotoUri:staged})');
     expect(home).not.toContain("cameraPurposeOpen");
