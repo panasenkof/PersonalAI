@@ -228,7 +228,7 @@ export async function importLink(raw: string, signal?: AbortSignal): Promise<{ f
       throw new Error('Вместо медиафайла сайт вернул страницу или текст. Возможна проверка VPN, авторизация или недействительная прямая ссылка.');
     const html = mime === 'text/html' || mime === 'application/xhtml+xml';
     if(telegramMessage && !html)
-      throw new Error('Telegram не вернул HTML нужного публичного сообщения. Сохраните только ссылку или передайте оригинал через «Поделиться».');
+      throw new Error('Публичный пост Telegram не вернул проверяемый HTML. Сохраните только ссылку или передайте оригинал через «Поделиться».');
     const text = html || mime.startsWith('text/') || mime === 'application/json';
     const limit = text ? 1024 * 1024 : 80 * 1024 * 1024;
     if (Number(response.headers.get('content-length')) > limit) throw new Error('Слишком большой материал по ссылке.');
