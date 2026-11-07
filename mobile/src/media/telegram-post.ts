@@ -41,7 +41,7 @@ export function verifiedTelegramMessageMarkup(source:string,html:string):Verifie
   const key=sharedLinkPreview({shareType:"url",value:source});
   if(key?.platform!=="telegram"||key.kind!=="public_post_candidate"||
      !key.messageKey||typeof html!=="string"||html.length>1_048_576)
-    throw new Error("invalid_telegram_public_post_request");
+    throw new Error("Это не публичная ссылка на конкретное сообщение Telegram.");
   const safe=cleanMarkup(html);
   const all=/<div\b[^>]*>/gi;
   let selected:string|null=null,seen=0;
@@ -54,7 +54,7 @@ export function verifiedTelegramMessageMarkup(source:string,html:string):Verifie
     selected=innerDiv(safe,all.lastIndex);
   }
   if(seen!==1||selected===null)
-    throw new Error("telegram_post_not_verified");
+    throw new Error("На странице Telegram не найдено именно это сообщение. Сохраните ссылку без текста или откройте пост и выберите «Поделиться».");
   const tags=/<div\b[^>]*>/gi;
   let textHtml:string|null=null,fields=0;
   for(let tag;(tag=tags.exec(selected))!==null;){
@@ -64,7 +64,7 @@ export function verifiedTelegramMessageMarkup(source:string,html:string):Verifie
     textHtml=innerDiv(selected,tags.lastIndex);
   }
   if(fields!==1||!textHtml||!textHtml.replace(/<[^>]*>/g,"").trim())
-    throw new Error("telegram_post_text_unavailable");
+    throw new Error("У этого сообщения Telegram нет доступного текста. Медиа по ссылке не импортировано; сохраните саму ссылку или передайте оригинал через «Поделиться».");
   const mediaMayBeMissing=/\btgme_widget_message_(?:photo|video|audio|document|sticker|poll|gif|voice)\b/i.test(selected);
   return {messageKey:key.messageKey,textHtml,title:"Telegram · "+key.messageKey,
     mediaMayBeMissing};
