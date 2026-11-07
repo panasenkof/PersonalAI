@@ -6,7 +6,7 @@ import { extractMedia } from '../extract';
 import { importLink } from '../link-import';
 import { analyzeFilesTogether } from '../joint-recognition';
 import { ensureSections } from '../../local-memory/sections';
-import { Alert } from 'react-native';
+import { Alert, Linking } from 'react-native';
 import { classifyImportCollectionWithAgent } from '../import-llm-classifier';
 import * as DocumentPicker from 'expo-document-picker';
 jest.mock('../../components/BottomSheet', () => ({ BottomSheet: ({ visible, children }: any) => visible ? children : null }));
@@ -982,4 +982,51 @@ test('MSG-6.C2: AppLock prevents even the opt-in classifier network call',async(
     expect(alert).not.toHaveBeenCalled();
     expect(ui.getByText(/Разблокируйте память/)).toBeTruthy();
   }finally{alert.mockRestore();}
+});
+
+test("MSG-6.C: source card displays verified-link bounds; external link opens ONLY by explicit tap",async()=>{
+  mockParams={incoming:[{shareType:"url",value:"https://t.me/public_news/123"}]};
+  const opener=jest.spyOn(Linking,"openURL").mockResolvedValue(undefined as any);
+  try{
+    const ui=render(<MemoryImportScreen/>);
+    await waitFor(()=>expect(ui.getByTestId("source-provenance-card")).toBeTruthy());
+    expect(ui.getByText(/Формат публичного поста/)).toBeTruthy();
+    expect(ui.queryByText(/Дата по метаданным/)).toBeNull();
+    expect(opener).not.toHaveBeenCalled();
+    fireEvent.press(ui.getByLabelText("Открыть проверенную HTTPS-ссылку в браузере"));
+    expect(opener).toHaveBeenCalledTimes(1);
+    expect(opener).toHaveBeenCalledWith("https://t.me/public_news/123");
+    expect(saveMediaNote).not.toHaveBeenCalled();
+    fireEvent.press(ui.getByLabelText("Сохранить сведения в память"));
+    await waitFor(()=>expect(saveMediaNote).toHaveBeenCalledWith("guest",
+      expect.objectContaining({sourceUrl:"https://t.me/public_news/123",
+        sourceCoverage:"url_only"}),expect.anything()));
+  }finally{opener.mockRestore();}
+});
+
+test("MSG-6.C: explicit Telegram HTML extraction records text-only coverage, never author/date",async()=>{
+  (importLink as jest.Mock).mockResolvedValueOnce({
+    source:"https://t.me/public_news/123",title:"Telegram · public_news/123",
+    text:"Точное сообщение публичного канала",partial:true,
+    textCoverage:"telegram_post_text_only",
+  });
+  mockParams={incoming:[{shareType:"url",value:"https://t.me/public_news/123"}]};
+  const ui=render(<MemoryImportScreen/>);
+  await waitFor(()=>expect(ui.getByLabelText("Загрузить содержимое публичной ссылки после согласия")).toBeTruthy());
+  fireEvent.press(ui.getByLabelText("Загрузить содержимое публичной ссылки после согласия"));
+  await waitFor(()=>expect(ui.getByText(/Прочитан текст именно этого публичного поста Telegram/)).toBeTruthy());
+  expect(ui.getByTestId("source-provenance-card")).toBeTruthy();
+  expect(ui.queryByText(/Дата по метаданным/)).toBeNull();
+  fireEvent.press(ui.getByLabelText("Сохранить сведения в память"));
+  await waitFor(()=>expect(saveMediaNote).toHaveBeenCalledWith("guest",
+    expect.objectContaining({sourceCoverage:"telegram_post_text_only",sourceUrl:"https://t.me/public_news/123"}),
+    expect.anything()));
+});
+
+test("MSG-6.C: a plain Android Share is not misattributed to Telegram/MAX",async()=>{
+  mockParams={incoming:[{shareType:"text",value:"Это моя записка от коллеги"}]};
+  const ui=render(<MemoryImportScreen/>);
+  await waitFor(()=>expect(ui.getByTestId("source-provenance-card")).toBeTruthy());
+  expect(ui.getByText(/Отправившее приложение, автор, дата и версия публикации не подтверждены/)).toBeTruthy();
+  expect(ui.queryByLabelText("Открыть проверенную HTTPS-ссылку в браузере")).toBeNull();
 });
