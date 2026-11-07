@@ -9,6 +9,7 @@ jest.mock("../../local-memory/storage",()=>({
   localMemorySessionUnlocked:jest.fn(()=>true),
 }));
 jest.mock("../move-proposal",()=>({
+  ...jest.requireActual("../move-proposal"),
   previewMove:jest.fn(),confirmMove:jest.fn(),undoMove:jest.fn(),
 }));
 jest.mock("expo-crypto",()=>({randomUUID:()=>"id-"+Math.random().toString(36).slice(2)}));
