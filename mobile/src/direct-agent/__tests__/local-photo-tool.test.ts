@@ -26,7 +26,7 @@ function harness(searchPhotos?:DirectAgentOptions["searchPhotos"],
   };
   return createToolCatalog(options,[],[],[]);
 }
-const query=(description="красный велосипед у дерева")=>({description});
+const query=(description="красный велосипед у дерева")=>({mode:"text",description});
 const toolResponse=(name:string,args:unknown,callId="photo-1")=>({
   ok:true,status:200,json:async()=>({status:"completed",output:[
     {type:"function_call",name,call_id:callId,arguments:JSON.stringify(args)},
@@ -59,10 +59,10 @@ test("9T1-R2: actual local photo handles survive tool → LLM → chat photo car
   const catalog=harness(search);
   const spec=catalog.definitions.find(t=>t.name==="search_local_photos");
   expect(spec?.parameters).toMatchObject({
-    type:"object",required:["description"],additionalProperties:false,
+    type:"object",required:["mode","description"],additionalProperties:false,
   });
   const response=await catalog.run("search_local_photos",query());
-  expect(search).toHaveBeenCalledWith("красный велосипед у дерева");
+  expect(search).toHaveBeenCalledWith({mode:"text",description:"красный велосипед у дерева"});
   expect(response).toMatchObject({
     outcome:"found",scope:"standard_active_local_photos",
     status:"found",count:3,imageBytesIncluded:false,
@@ -109,11 +109,11 @@ test("9T1-R2: rejects web destinations, arbitrary IDs, forged originals and dupl
   const search=jest.fn().mockResolvedValue({text:"Нашёл",memory:found});
   const catalog=harness(search);
   for(const bad of [{},{description:"x"},{description:" "},
-    {description:"а".repeat(161)},{description:22},
-    {description:"красный велосипед",id:"private-note"},
-    {description:"найди фото в интернете"},
-    {description:"https://example.org/a"},
-    {description:"коробка online"},
+    {mode:"text",description:"а".repeat(161)},{mode:"text",description:22},
+    {mode:"text",description:"красный велосипед",id:"private-note"},
+    {mode:"text",description:"найди фото в интернете"},
+    {mode:"text",description:"https://example.org/a"},
+    {mode:"text",description:"коробка online"},
   ]){
     expect(await catalog.run("search_local_photos",bad))
       .toMatchObject({error:"invalid_local_photo_search_args"});
@@ -245,4 +245,24 @@ test("9T1-R2 regression: ordinary memory references retain the previous eight-no
   expect(refs).toHaveLength(found.length+8);
   expect(refs.slice(0,found.length)).toEqual(found);
   expect(refs.filter(r=>!("photo" in r))).toHaveLength(8);
+});
+
+test("9T-R2: one local-photo tool serves selected image and text; image never goes to LLM",async()=>{
+  const search=jest.fn().mockResolvedValue({text:"Нашёл",memory:found});
+  const catalog=harness(search,{photoQueryAvailable:true});
+  const descriptor=catalog.definitions.find(t=>t.name==="search_local_photos");
+  expect(descriptor?.parameters).toMatchObject({
+    properties:{mode:{enum:["text","image"]}},
+    required:["mode","description"],
+  });
+  expect(await catalog.run("search_local_photos",{mode:"image",description:""}))
+    .toMatchObject({outcome:"found",count:3,imageBytesIncluded:false});
+  expect(search).toHaveBeenCalledWith({mode:"image",description:""});
+  expect(await catalog.run("search_local_photos",{mode:"image",description:"guess"}))
+    .toEqual({error:"invalid_local_photo_search_args"});
+  const unavailable=harness(search);
+  expect(await unavailable.run("search_local_photos",{mode:"image",description:""}))
+    .toEqual({error:"invalid_local_photo_search_args"});
+  expect(unavailable.definitions.find(t=>t.name==="search_local_photos")?.parameters)
+    .toMatchObject({properties:{mode:{enum:["text"]}}});
 });

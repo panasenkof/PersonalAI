@@ -77,7 +77,13 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
         savedFrom:intent.savedFrom,savedBefore:intent.savedBefore,
         startLocal:intent.startLocal,endLocal:intent.endLocal,
         ...(page.nextCursor ? {nextCursor:page.nextCursor} : {}),
-        selected:[...(persistedArticle && articleFilterKey===filterKey ? persistedArticle.selected||[] : []),
+        selected:[...(persistedArticle && articleFilterKey===filterKey ? persistedArticle.selected||[] :
+          options.articleContinuation && !persistedArticle &&
+          JSON.stringify([options.articleContinuation.topic||"ai",
+            options.articleContinuation.dateMode||"saved",
+            options.articleContinuation.savedFrom,
+            options.articleContinuation.savedBefore])===filterKey
+            ? options.articleContinuation.selected||[] : []),
           ...page.records.map(n=>({id:n.id,version:n.version}))]
           .filter((n,i,all)=>all.findIndex(m=>m.id===n.id)===i).slice(-24),
       };
@@ -159,21 +165,28 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
       }, verify: r => Array.isArray(r.notes) ? r.notes.length ? "found" : "empty" : "failed" },
     ...(options.searchPhotos && !options.skipLocalMemory ? [{
       definition: {name: "search_local_photos",
-        description: "9T1: найти фотографии по короткому ТЕКСТОВОМУ описанию в уже существующем локальном фотоиндексе. Только стандартная доступная память телефона, не интернет. Результат: реальные ID заметки и ID фото-вложения для показа карточек; содержимое/векторы изображений НЕ передаются модели. До двух поисков на ход; неполная индексация или отсутствие модели — не отсутствие фото.",
+        description: "Единый локальный поиск фотографий в памяти телефона. mode=text: description — описание из 3–160 символов. mode=image: используй выбранное в интерфейсе фото (только когда mode=image доступен в schema), description — пустая строка. LLM не получает пиксели или эмбеддинги. Результат — реальные фото-вложения и состояние модели/индекса; максимум 2 поиска за ход.",
         parameters: {type: "object", properties: {
-          description: {type: "string", minLength: 3, maxLength: 160},
-        }, required: ["description"], additionalProperties: false},
+          mode: {type: "string",enum:options.photoQueryAvailable?["text","image"]:["text"]},
+          description: {type: "string", maxLength: 160},
+        }, required: ["mode","description"], additionalProperties: false},
       }, effect: "read" as const,
       execute: async (args: Record<string, unknown>) => {
-        if(Object.keys(args).length!==1 || typeof args.description!=="string" ||
-          args.description.trim().length<3 || args.description.trim().length>160 ||
-          (args.description.includes("://") ||
-          /(?:в интернете|из интернета|в сети|online|по ссылке)/iu.test(args.description)))
+        if(Object.keys(args).length!==2 || typeof args.description!=="string" ||
+          (args.mode!=="text" && args.mode!=="image") ||
+          (args.mode==="image" && (!options.photoQueryAvailable || args.description!=="")) ||
+          (args.mode==="text" && (args.description.trim().length<3 ||
+            args.description.trim().length>160 ||
+            args.description.includes("://") ||
+            /(?:в интернете|из интернета|в сети|online|по ссылке)/iu.test(args.description))))
           return {error: "invalid_local_photo_search_args"};
         if(photoLookups>=2)return {error:"local_photo_turn_budget_exhausted"};
         photoLookups++;
         options.status?.("Ищу фотографии в памяти");
-        const found=await options.searchPhotos!(args.description.trim());
+        const found=await options.searchPhotos!({
+          mode:args.mode as "text"|"image",
+          description:args.mode==="image"?"":args.description.trim(),
+        });
         if(options.signal?.aborted)throw new Error("aborted");
         if(!found || typeof found.text!=="string" || !Array.isArray(found.memory) ||
             found.memory.length>20 ||

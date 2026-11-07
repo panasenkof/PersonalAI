@@ -37,10 +37,10 @@ describe("Nebula Home native B+C screen contracts", () => {
     expect(home).toContain("normalization.toggle(settings)");
     expect(home).toContain("void store.send(settings)");
     expect(home).toContain('accessibilityLabel="Прикрепить файл к сообщению"');
-    // One photo, no automatic model request, then explicit local/web/note actions.
+    // A captured photo remains local until a deliberate action. The memory action calls LLM → on-device photo tool.
     expect(home).toContain("onPress={() => void captureToDraft()}");
     expect(home).toContain("capturePhotoDraft83(controller.signal)");
-    expect(home).toContain("store.searchPhotosLocally(selectedPhoto,active.id)");
+    expect(home).toContain("store.searchPhotosWithAgent(settings,selectedPhoto,active.id)");
     expect(home).toContain("store.send(settings,id)");
     expect(home).toContain('navigation.navigate("MemoryImport",{source:"photo",initialPhotoUri:staged})');
     // Found media still opens the corresponding memory entry, including after results UI extraction.
