@@ -779,3 +779,31 @@ test('MSG-6.B: legacy receipt fingerprints still identify old notes after upgrad
   expect(replays).toHaveLength(1);
   expect(sqlite.prepare('SELECT count(*) AS n FROM memory_entities').get().n).toBe(1);
 });
+
+test('MSG-6.B: auto-derived incoming filename may change while bytes still match',async()=>{
+  const src=input.file.uri;
+  const next='file:///provider-temporary-rename.jpeg';
+  mockFiles.set(next,new Uint8Array(mockFiles.get(src)!));
+  const saved=await saveMediaNote('guest',{...input,title:'original-filename.png',
+    file:{...input.file,name:'original-filename.png'},receipt:'file-scope-a'});
+  const replays:any[]=[];
+  const repeated=await saveMediaNote('guest',{...input,title:'provider-temporary-rename.jpeg',
+    file:{...input.file,uri:next,name:'provider-temporary-rename.jpeg'},
+    receipt:'file-scope-b',onReplay:r=>replays.push(r)});
+  expect(repeated).toBe(saved);
+  expect(replays).toHaveLength(1);
+  expect(sqlite.prepare("SELECT count(*) AS n FROM memory_entities").get().n).toBe(1);
+});
+
+test('MSG-6.B: explicit user confirmation permits a separate identical note without overwriting the first',async()=>{
+  const share={...input,receipt:'incoming-original'};
+  const first=await saveMediaNote('guest',share);
+  const replayId=await saveMediaNote('guest',{...share,receipt:'incoming-another-uri'});
+  expect(replayId).toBe(first);
+  const second=await saveMediaNote('guest',{...share,receipt:'incoming-another-uri',
+    allowSeparateCopy:true});
+  expect(second).not.toBe(first);
+  expect(sqlite.prepare("SELECT count(*) AS n FROM memory_entities").get().n).toBe(2);
+  expect(sqlite.prepare("SELECT count(*) AS n FROM memory_attachments").get().n).toBe(2);
+  expect(sqlite.prepare("SELECT count(*) AS n FROM memory_received_shares").get().n).toBe(2);
+});
