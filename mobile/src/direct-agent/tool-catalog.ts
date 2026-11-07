@@ -774,7 +774,7 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
     options.diagnostic?.("tool.outcome_verified", { name: canonical, effect: spec?.effect || "unknown", outcome });
     return { ...result, ...(outcome !== "failed" ? { outcome } : {}) };
   }
-  function finish(): Pick<DirectResult, "taskState" | "proposalIds" | "articlePage" | "articleReadReport" | "photoAction" | "moveProposal"> {
+  function finish(): Pick<DirectResult, "taskState" | "proposalIds" | "articlePage" | "articleReadReport" | "photoAction" | "moveProposal" | "contextCandidate"> {
     state = { ...state, turnStatus: "answered" }; emit();
     const selected = !mixedArticleFilters && usedSelectedArticleTool ? selectedArticleHandles() : undefined;
     const checked = selected && articleCoverage.summary(selected);
