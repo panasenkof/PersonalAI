@@ -193,7 +193,8 @@ export function articleReadError(html: string, result: ArticleText): string | nu
 }
 
 /** Explicit user action only; no cookies/keys; streaming bound before allocation. */
-export async function importLink(raw: string, signal?: AbortSignal): Promise<{ file?: ImportFile; text?: string; source: string; title?: string; partial?: boolean; publicationClaim?: HtmlPublicationClaim }> {
+export async function importLink(raw: string, signal?: AbortSignal): Promise<{ file?: ImportFile; text?: string; source: string; title?: string; partial?: boolean;
+  textCoverage?: "telegram_post_text_only"; publicationClaim?: HtmlPublicationClaim }> {
   const source = publicImportUrl(raw);
   // Source identity is URL-form only; the HTML must independently identify
   // the EXACT Telegram message. Generic page text is not post evidence.
