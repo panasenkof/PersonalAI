@@ -7,7 +7,11 @@ import {fetch as nativeFetch} from "expo/fetch";
 let mockBytes=Buffer.alloc(0);
 const mockDelete=jest.fn();
 jest.mock("expo/fetch",()=>({fetch:jest.fn()}));
-jest.mock("expo-crypto",()=>({randomUUID:()=> "synthetic-telegram-file"}));
+jest.mock("expo-crypto",()=>({
+  randomUUID:()=> "synthetic-telegram-file",
+  CryptoDigestAlgorithm:{SHA256:"sha256"},
+  digestStringAsync:async (_a:string,text:string)=>require("node:crypto").createHash("sha256").update(text).digest("hex"),
+}));
 jest.mock("expo-file-system",()=>({
   Paths:{cache:"file:///cache"},
   FileMode:{WriteOnly:"write"},
@@ -63,6 +67,11 @@ test("MSG-1: importLink still uses native HTTPS/no-redirect and returns only sco
   expect(result.text).toContain("Вторая строка");
   expect(result.text).not.toMatch(/Другая публикация|Не имеет отношения/);
   expect(result.publicationClaim).toBeUndefined();
+  expect(result.telegramObservation).toMatchObject({
+    messageKey:"public_news/42",evidence:"telegram_html_data_post_v1",
+    textLength:result.text?.length,
+    textSha256:require("node:crypto").createHash("sha256").update(result.text).digest("hex"),
+  });
 });
 
 test("MSG-1: ordinary t.me/<channel>/<id> uses the fixed /s/ reader without redirecting or changing provenance",async()=>{
@@ -73,6 +82,7 @@ test("MSG-1: ordinary t.me/<channel>/<id> uses the fixed /s/ reader without redi
     expect.objectContaining({redirect:"error",credentials:"omit"}));
   expect(result.text).toContain("Нужный пост");
   expect(result.text).not.toContain("Другая публикация");
+  expect(result.telegramObservation?.messageKey).toBe("public_news/42");
 });
 test("MSG-1: username.t.me alias still reads same t.me public preview, not user-supplied second host",async()=>{
   serve('<html><body>'+current+'</body></html>');
