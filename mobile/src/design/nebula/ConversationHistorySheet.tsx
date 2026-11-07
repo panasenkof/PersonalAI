@@ -1,6 +1,6 @@
 import Feather from "@expo/vector-icons/Feather";
 import React, { useEffect, useMemo, useState } from "react";
-import { Pressable, Text, TextInput, View } from "react-native";
+import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import type { LiveConversation } from "../../direct-agent/chat-store";
 import { BottomSheet } from "../../components/BottomSheet";
 import { useTheme } from "../../theme";
@@ -25,16 +25,26 @@ export function ConversationHistorySheet({
 }) {
   const t = useTheme();
   const [query, setQuery] = useState("");
+  const [sectionFilter, setSectionFilter] = useState<string | null>(null);
   const [limit, setLimit] = useState(PAGE_SIZE);
   useEffect(() => {
-    if (!visible) { setQuery(""); setLimit(PAGE_SIZE); }
+    if (!visible) { setQuery(""); setSectionFilter(null); setLimit(PAGE_SIZE); }
   }, [visible]);
   // Build once for a given snapshot, rather than concatenate each message
   // for each character typed. Nothing is indexed outside this visible panel.
   const index = useMemo(() => visible ? indexConversationHistory(conversations) : [], [visible, conversations]);
-  const results = useMemo(() => searchConversationHistory(index, query), [index, query]);
+  const sectionOptions = useMemo(() => {
+    const names = new Map<string,string>();
+    for(const row of index) for(const change of row.conversation.rows.flatMap(r=>r.contextChange?[r.contextChange]:[])) {
+      if(change.sectionSlug && change.sectionName)names.set(change.sectionSlug,change.sectionName);
+    }
+    for(const row of index) if(row.conversation.context?.sectionSlug && !names.has(row.conversation.context.sectionSlug))
+      names.set(row.conversation.context.sectionSlug,row.conversation.context.sectionSlug);
+    return [...names].sort((a,b)=>a[1].localeCompare(b[1],"ru"));
+  },[index]);
+  const results = useMemo(() => searchConversationHistory(index, query, sectionFilter || undefined), [index, query, sectionFilter]);
   const shown = results.slice(0, limit);
-  const searching = Boolean(query.trim());
+  const searching = Boolean(query.trim() || sectionFilter);
   const changeQuery = (value: string) => { setQuery(value); setLimit(PAGE_SIZE); };
 
   return <BottomSheet visible={visible} title="Мои диалоги" onClose={onClose}>
@@ -49,6 +59,16 @@ export function ConversationHistorySheet({
         <Feather name="x" size={20} color={t.muted} />
       </Pressable> : null}
     </View>
+    {sectionOptions.length ? <ScrollView horizontal showsHorizontalScrollIndicator={false} accessibilityLabel="Фильтр диалогов по разделу"
+      contentContainerStyle={{gap:6,paddingVertical:4,alignItems:"center"}}>
+      {[[null,"Все"],...sectionOptions] .map(([slug,name])=><Pressable key={slug || "all"} accessibilityRole="button"
+        accessibilityLabel={"Фильтр: "+name} accessibilityState={{selected:sectionFilter===slug}}
+        onPress={()=>{setSectionFilter(slug);setLimit(PAGE_SIZE);}}
+        style={{minHeight:36,paddingHorizontal:12,justifyContent:"center",borderRadius:18,borderWidth:1,
+          borderColor:sectionFilter===slug?t.accent:t.line,backgroundColor:sectionFilter===slug?t.soft:t.panel}}>
+        <Text style={{color:sectionFilter===slug?t.accent:t.text,fontSize:13}}>{name}</Text>
+      </Pressable>)}
+    </ScrollView> : null}
     <Text testID="chat-history-count" accessibilityLiveRegion="polite" style={{ color: t.muted, fontSize: 13 }}>
       {searching ? `Найдено диалогов: ${results.length}` : `Диалогов: ${results.length}`}
     </Text>
@@ -73,6 +93,7 @@ export function ConversationHistorySheet({
             borderColor: selected ? t.accent : t.line, borderRadius: 16,
             backgroundColor: pressed ? t.soft : t.panel, padding: nebulaSpacing.sm, gap: 4 })}>
           <Text numberOfLines={2} style={{ color: t.text, fontSize: 15, fontWeight: "700" }}>{c.title}</Text>
+          {c.context ? <Text numberOfLines={1} style={{color:t.secondary,fontSize:12}}>Тема: {c.context.topic}</Text> : null}
           <Text numberOfLines={2} style={{ color: t.muted, fontSize: 13, lineHeight: 18 }}>{preview}</Text>
           <Text style={{ color: c.busy ? t.accent : t.muted, fontSize: 12 }}>{c.busy ? "Готовлю ответ…" : dateText}</Text>
         </Pressable>
