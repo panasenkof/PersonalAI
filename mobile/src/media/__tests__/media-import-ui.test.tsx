@@ -7,6 +7,7 @@ import { importLink } from '../link-import';
 import { analyzeFilesTogether } from '../joint-recognition';
 import { ensureSections } from '../../local-memory/sections';
 import { Alert } from 'react-native';
+import { classifyImportCollectionWithAgent } from '../import-llm-classifier';
 import * as DocumentPicker from 'expo-document-picker';
 jest.mock('../../components/BottomSheet', () => ({ BottomSheet: ({ visible, children }: any) => visible ? children : null }));
 jest.mock('../../components/NoteAiEditor', () => ({
@@ -24,8 +25,14 @@ jest.mock('../link-import', () => ({
   publicImportUrl: jest.requireActual('../link-import').publicImportUrl,
   linkImportErrorMessage: (error: Error) => error.message,
 }));
+let mockUnlocked=true;
 const mockSessionListeners=new Set<(unlocked:boolean)=>void>();
-jest.mock("../../local-memory/storage", () => ({ onLocalMemorySessionChange: (fn:any) => {mockSessionListeners.add(fn);return ()=>mockSessionListeners.delete(fn);} }));
+jest.mock("../../local-memory/storage", () => ({ onLocalMemorySessionChange: (fn:any) => {mockSessionListeners.add(fn);return ()=>mockSessionListeners.delete(fn);},localMemorySessionUnlocked:()=>mockUnlocked }));
+jest.mock('../../direct-agent/agent-preferences',()=>({loadModelCallLimit:jest.fn(async()=>4)}));
+jest.mock('../import-llm-classifier',()=>({
+  classifyImportCollectionWithAgent:jest.fn(async()=>null),
+  classificationExcerpt:(body:string,text:string)=>({substantive:(body+' '+text).replace(/\\bhttps?:\\/\\/\\S+/g,'').trim().length>=8}),
+}));
 jest.mock('../../local-memory/repository', () => ({ localMemoryRepository: async () => ({}) }));
 jest.mock('../../local-memory/sections', () => ({ ensureSections: jest.fn(async () => [{ id: 'notes', name: 'Заметки', slug: 'notes', sensitivity: 'standard' }]) }));
 jest.mock('@react-navigation/native', () => ({ useNavigation: () => ({ goBack: mockBack, dispatch: mockDispatch }), useRoute: () => ({ params: mockParams }), usePreventRemove: jest.fn() }));
@@ -45,7 +52,7 @@ jest.mock('../joint-recognition', () => ({ analyzeFilesTogether: jest.fn() }));
 jest.mock('expo-document-picker', () => ({ getDocumentAsync: jest.fn(async () => ({ canceled: false, assets: [{ uri: 'file:///cache/photo.png', name: 'photo.png', mimeType: 'image/png' }] })) }));
 jest.mock('expo-image-picker', () => ({ launchImageLibraryAsync: jest.fn(), requestCameraPermissionsAsync: jest.fn(), launchCameraAsync: jest.fn() }));
 jest.mock('expo-file-system/legacy', () => ({ copyAsync: jest.fn(async () => {}), cacheDirectory: 'file:///cache/', deleteAsync: jest.fn(async () => {}) }));
-beforeEach(() => { jest.clearAllMocks(); mockParams = undefined; mockSessionListeners.clear();
+beforeEach(() => { jest.clearAllMocks(); mockParams = undefined; mockUnlocked=true; mockSessionListeners.clear();
   (ensureSections as jest.Mock).mockResolvedValue([{ id: 'notes', name: 'Заметки', slug: 'notes', sensitivity: 'standard' }]);
 });
 test('picker lets user save original without transcript, provider or network; user text stays separate', async () => {
@@ -872,58 +879,107 @@ test.each([
   expect(require('../../direct-agent/enrich-runner').scheduleIndexTerms).not.toHaveBeenCalled();
 });
 
-test('MSG-6.C1: exact hashtag suggests but never auto-selects a collection or saves before tap',async()=>{
+
+test('MSG-6.C2: LLM chooses an existing collection only after per-import approval; user still saves',async()=>{
   (ensureSections as jest.Mock).mockResolvedValue([
     {id:'notes',name:'Заметки',slug:'notes',sensitivity:'standard'},
     {id:'recipes',name:'Рецепты',slug:'recipes',sensitivity:'standard'},
     {id:'inbox',name:'Получено',slug:'inbox',sensitivity:'sensitive'},
   ]);
+  (classifyImportCollectionWithAgent as jest.Mock).mockResolvedValueOnce({
+    collectionId:'recipes',sectionSlug:'recipes',sectionName:'Рецепты',
+    topic:'Лазанья',reason:'Подпись о рецепте',excerptTruncated:false,
+  });
   mockParams={incoming:[{shareType:'text',value:'Лазанья на ужин #рецепты'}]};
-  const ui=render(<MemoryImportScreen/>);
-  await waitFor(()=>expect(ui.getByLabelText('Выбрать предложенный раздел «Рецепты»')).toBeTruthy());
-  expect(ui.getByText(/Коллекция: Получено/)).toBeTruthy();
-  expect(saveMediaNote).not.toHaveBeenCalled();
-  expect(extractMedia).not.toHaveBeenCalled();
-  expect(importLink).not.toHaveBeenCalled();
-
-  fireEvent.press(ui.getByLabelText('Выбрать предложенный раздел «Рецепты»'));
-  expect(ui.getByText(/Коллекция: Рецепты/)).toBeTruthy();
-  expect(ui.queryByLabelText('Выбрать предложенный раздел «Рецепты»')).toBeNull();
-  expect(saveMediaNote).not.toHaveBeenCalled();
-  fireEvent.press(ui.getByLabelText('Сохранить сведения в память'));
-  await waitFor(()=>expect(saveMediaNote).toHaveBeenCalledWith('guest',expect.objectContaining({
-    body:'Лазанья на ужин #рецепты',collectionId:'recipes',
-  }),expect.anything()));
+  const alert=jest.spyOn(Alert,'alert').mockImplementation(()=>{});
+  try {
+    const ui=render(<MemoryImportScreen/>);
+    await waitFor(()=>expect(ui.getByLabelText('Определить раздел с ИИ')).toBeTruthy());
+    expect(ui.getByText(/Коллекция: Получено/)).toBeTruthy();
+    expect(classifyImportCollectionWithAgent).not.toHaveBeenCalled();
+    expect(saveMediaNote).not.toHaveBeenCalled();
+    fireEvent.press(ui.getByLabelText('Определить раздел с ИИ'));
+    expect(alert).toHaveBeenCalledWith('Разрешить ИИ выбрать раздел?',
+      expect.stringContaining('до 2 платных обращений'),expect.any(Array));
+    const choices=(alert as jest.Mock).mock.calls[0][2];
+    expect(choices.map((x:any)=>x.text)).toEqual(['Отмена','Разрешить один подбор']);
+    expect(classifyImportCollectionWithAgent).not.toHaveBeenCalled();
+    await act(async()=>{choices[1].onPress();});
+    await waitFor(()=>expect(classifyImportCollectionWithAgent).toHaveBeenCalledWith(expect.objectContaining({
+      body:'Лазанья на ужин #рецепты',sensitivity:'standard',explicitConsent:true,modelCallLimit:4,
+      title:'Лазанья на ужин #рецепты',
+    })));
+    expect(ui.getByText(/Коллекция: Рецепты/)).toBeTruthy();
+    expect(ui.getByLabelText('Предложенный ИИ раздел')).toBeTruthy();
+    expect(saveMediaNote).not.toHaveBeenCalled();
+    fireEvent.press(ui.getByLabelText('Сохранить сведения в память'));
+    await waitFor(()=>expect(saveMediaNote).toHaveBeenCalledWith('guest',
+      expect.objectContaining({body:'Лазанья на ужин #рецепты',collectionId:'recipes'}),
+      expect.anything()));
+  }finally{alert.mockRestore();}
 });
 
-test('MSG-6.C1: ambiguous or private-only tags do not suggest or silently change Inbox', async()=>{
-  (ensureSections as jest.Mock).mockResolvedValue([
-    {id:'notes',name:'Заметки',slug:'notes',sensitivity:'standard'},
-    {id:'recipes',name:'Рецепты',slug:'recipes',sensitivity:'standard'},
-    {id:'cars',name:'Авто',slug:'cars',sensitivity:'standard'},
-    {id:'docs',name:'Документы',slug:'documents',sensitivity:'sensitive'},
-  ]);
-  mockParams={incoming:[{shareType:'text',value:'Фото #авто #рецепты и #документы'}]};
+test('MSG-6.C2: no automatic provider request for hashtags or link-only material',async()=>{
+  mockParams={incoming:[{shareType:'text',value:'Моя публикация #рецепты'}]};
   const ui=render(<MemoryImportScreen/>);
   await waitFor(()=>expect(ui.getByText(/Коллекция: Входящие/)).toBeTruthy());
-  expect(ui.queryByText(/Возможный раздел/)).toBeNull();
+  expect(ui.queryByLabelText('Выбрать предложенный раздел «Рецепты»')).toBeNull();
+  expect(classifyImportCollectionWithAgent).not.toHaveBeenCalled();
   fireEvent.press(ui.getByLabelText('Сохранить сведения в память'));
-  await waitFor(()=>expect(saveMediaNote).toHaveBeenCalledWith('guest',expect.objectContaining({
-    collectionId:undefined,body:'Фото #авто #рецепты и #документы',
-  }),expect.anything()));
+  await waitFor(()=>expect(saveMediaNote).toHaveBeenCalledWith('guest',
+    expect.objectContaining({collectionId:undefined}),expect.anything()));
+  expect(classifyImportCollectionWithAgent).not.toHaveBeenCalled();
 });
 
-test('MSG-6.C1: user selecting Inbox manually suppresses suggestion without altering caption',async()=>{
+test('MSG-6.C2: private record or selected protected section forbids LLM classification',async()=>{
   (ensureSections as jest.Mock).mockResolvedValue([
     {id:'notes',name:'Заметки',slug:'notes',sensitivity:'standard'},
-    {id:'recipes',name:'Рецепты',slug:'recipes',sensitivity:'standard'},
+    {id:'family',name:'Семья',slug:'family',sensitivity:'sensitive'},
+    {id:'inbox',name:'Входящие',slug:'inbox',sensitivity:'sensitive'},
   ]);
-  mockParams={incoming:[{shareType:'text',value:'#рецепты Торт'}]};
+  mockParams={incoming:[{shareType:'text',value:'Это заметка о поездке с семьёй'}]};
   const ui=render(<MemoryImportScreen/>);
-  await waitFor(()=>expect(ui.getByLabelText('Выбрать предложенный раздел «Рецепты»')).toBeTruthy());
+  await waitFor(()=>expect(ui.getByLabelText('Определить раздел с ИИ')).toBeTruthy());
+  fireEvent.press(ui.getByLabelText('Личные — только на телефоне'));
+  expect(ui.getByLabelText('Определить раздел с ИИ').props.accessibilityState.disabled).toBe(true);
+  expect(classifyImportCollectionWithAgent).not.toHaveBeenCalled();
+  fireEvent.press(ui.getByLabelText('Обычные — доступны агенту и разбору у провайдера'));
   fireEvent.press(ui.getByLabelText('Выбрать коллекцию'));
-  fireEvent.press(ui.getByLabelText('Коллекция: Входящие'));
-  expect(ui.queryByLabelText('Выбрать предложенный раздел «Рецепты»')).toBeNull();
-  expect(ui.getByLabelText('Сведения из файла').props.value).toBe('#рецепты Торт');
-  expect(saveMediaNote).not.toHaveBeenCalled();
+  fireEvent.press(ui.getByLabelText('Коллекция: Семья'));
+  expect(ui.getByLabelText('Определить раздел с ИИ').props.accessibilityState.disabled).toBe(true);
+  expect(classifyImportCollectionWithAgent).not.toHaveBeenCalled();
+});
+
+test('MSG-6.C2: failed/ambiguous model request leaves draft and Inbox unchanged',async()=>{
+  (classifyImportCollectionWithAgent as jest.Mock).mockResolvedValueOnce(null)
+    .mockRejectedValueOnce(new Error('нет ответа модели'));
+  mockParams={incoming:[{shareType:'text',value:'Проверка условий поездки'}]};
+  const alert=jest.spyOn(Alert,'alert').mockImplementation(()=>{});
+  try {
+    const ui=render(<MemoryImportScreen/>);
+    await waitFor(()=>expect(ui.getByLabelText('Определить раздел с ИИ')).toBeTruthy());
+    fireEvent.press(ui.getByLabelText('Определить раздел с ИИ'));
+    await act(async()=>{(alert as jest.Mock).mock.calls[0][2][1].onPress();});
+    expect(ui.getByText(/Коллекция: Входящие/)).toBeTruthy();
+    expect(ui.getByText(/не смог уверенно подобрать/)).toBeTruthy();
+    fireEvent.press(ui.getByLabelText('Определить раздел с ИИ'));
+    await act(async()=>{(alert as jest.Mock).mock.calls[1][2][1].onPress();});
+    expect(ui.getByText(/нет ответа модели/)).toBeTruthy();
+    expect(saveMediaNote).not.toHaveBeenCalled();
+    expect(ui.getByLabelText('Сведения из файла').props.value).toBe('Проверка условий поездки');
+  }finally{alert.mockRestore();}
+});
+
+test('MSG-6.C2: AppLock prevents even the opt-in classifier network call',async()=>{
+  mockParams={incoming:[{shareType:'text',value:'Рецепт домашней лазаньи'}]};
+  const alert=jest.spyOn(Alert,'alert').mockImplementation(()=>{});
+  try{
+    const ui=render(<MemoryImportScreen/>);
+    await waitFor(()=>expect(ui.getByLabelText('Определить раздел с ИИ')).toBeTruthy());
+    mockUnlocked=false;
+    fireEvent.press(ui.getByLabelText('Определить раздел с ИИ'));
+    expect(classifyImportCollectionWithAgent).not.toHaveBeenCalled();
+    expect(alert).not.toHaveBeenCalled();
+    expect(ui.getByText(/Разблокируйте память/)).toBeTruthy();
+  }finally{alert.mockRestore();}
 });
