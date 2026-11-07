@@ -413,3 +413,77 @@ test("H-SAVE1b: stale approval or explicit Stop never adds a misleading summary"
   expect(store.getSnapshot().conversations[0].busy).toBe(false);
   store.dispose();
 });
+
+test("context: one model turn commits the topic, section, and source answer together in SQLCipher",async()=>{
+  const {repo,records}=repository();
+  const runner=jest.fn().mockResolvedValue({
+    text:"Возьмите аккумулятор",sources:[],requests:2,
+    contextCandidate:{topic:"Выбор аккумулятора",sectionSlug:"projects",reason:"Обсуждение автомобиля"},
+  });
+  const store=new DirectChatStore("guest",repo,runner);await store.initialize();
+  store.setQuestion("Подскажи аккумулятор");await store.send(settings);
+  const c=store.getSnapshot().conversations[0],saved=records.get(c.id)!;
+  expect(runner.mock.calls[0][0].context).toBeUndefined();
+  expect(c.context).toEqual({topic:"Выбор аккумулятора",sectionSlug:"projects",pinned:false});
+  expect(c.title).toBe("Выбор аккумулятора");
+  expect(c.rows.at(-1)).toMatchObject({role:"assistant",text:"Возьмите аккумулятор",
+    contextChange:{previousTopic:null,topic:"Выбор аккумулятора",sectionName:"Дела и проекты"}});
+  expect(saved.context).toEqual(c.context);
+  expect(saved.rows.at(-1)).toEqual(c.rows.at(-1));
+  store.dispose();
+});
+
+test("context: a later switch preserves old snapshots, explicit UI pin blocks remote reclassification",async()=>{
+  const {repo,records}=repository();const runner=jest.fn()
+    .mockResolvedValueOnce({text:"Про авто",sources:[],requests:2,
+      contextCandidate:{topic:"Авто",sectionSlug:"projects",reason:"Дела"}})
+    .mockResolvedValueOnce({text:"Про рецепт",sources:[],requests:2,
+      contextCandidate:{topic:"Лазанья",sectionSlug:"notes",reason:"Смена темы"}})
+    .mockResolvedValueOnce({text:"Уточнение",sources:[],requests:2,
+      contextCandidate:{topic:"Суп",sectionSlug:"projects",reason:"Новая тема"}});
+  const store=new DirectChatStore("guest",repo,runner);await store.initialize();
+  store.setQuestion("Авто");await store.send(settings);
+  store.setQuestion("Теперь рецепт");await store.send(settings);
+  const c=store.getSnapshot().conversations[0];
+  const history=c.rows.filter(r=>r.contextChange);
+  expect(history.map(row=>row.contextChange?.sectionSlug)).toEqual(["projects","notes"]);
+  expect(history[0].contextChange?.topic).toBe("Авто");
+  expect(history[1].contextChange?.previousSectionSlug).toBe("projects");
+  store.setContextPinned(true);
+  expect(store.getSnapshot().conversations[0].context?.pinned).toBe(true);
+  store.setQuestion("Новая тема");await store.send(settings);
+  const after=records.get(c.id)!;
+  expect(runner.mock.calls[2][0].context.pinned).toBe(true);
+  expect(after.context).toEqual({topic:"Лазанья",sectionSlug:"notes",pinned:true});
+  expect(after.rows.filter(r=>r.contextChange)).toHaveLength(2);
+  store.setContextPinned(false);
+  expect(store.getSnapshot().conversations[0].context?.pinned).toBe(false);
+  store.dispose();
+});
+
+test("context: an interrupted/failed model answer never saves a proposed new topic",async()=>{
+  const {repo,records}=repository();
+  const runner=jest.fn()
+    .mockResolvedValueOnce({text:"Готово",sources:[],requests:2,
+      contextCandidate:{topic:"Работа",sectionSlug:"projects",reason:"Проект"}})
+    .mockRejectedValueOnce(new Error("network failure"));
+  const store=new DirectChatStore("guest",repo,runner);await store.initialize();
+  store.setQuestion("Проект");await store.send(settings);
+  store.setQuestion("А теперь отпуск");await store.send(settings);
+  const saved=records.get(store.getSnapshot().activeId!)!;
+  expect(saved.context).toMatchObject({topic:"Работа",sectionSlug:"projects"});
+  expect(saved.rows.filter(r=>r.contextChange)).toHaveLength(1);
+  store.dispose();
+});
+
+test("context: an invalid/unknown section cannot be committed despite model claim",async()=>{
+  const {repo,records}=repository();
+  const runner=jest.fn().mockResolvedValue({text:"Рецепт",sources:[],requests:2,
+    contextCandidate:{topic:"Рецепты",sectionSlug:"made-up",reason:"Источник"}});
+  const store=new DirectChatStore("guest",repo,runner);await store.initialize();
+  store.setQuestion("Готовим");await store.send(settings);
+  const saved=records.get(store.getSnapshot().activeId!)!;
+  expect(saved.context).toBeUndefined();
+  expect(saved.rows.at(-1)?.contextChange).toBeUndefined();
+  store.dispose();
+});
