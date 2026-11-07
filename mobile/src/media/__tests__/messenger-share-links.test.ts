@@ -34,7 +34,7 @@ test.each([
   "https://127.0.0.1/private",
   "https://[::1]/private",
   "https://user:pass@t.me/public_ch/123",
-  "https://t.me:443/public_ch/123",
+  "https://t.me:444/public_ch/123",
   "http://t.me/public_ch/123",
 ])("MSG-0: untrusted Share text %s must not be auto-assigned Telegram provenance",value=>{
   const result=sharedLinkPreview({shareType:"text",value});
