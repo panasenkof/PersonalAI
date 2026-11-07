@@ -487,3 +487,24 @@ test("context: an invalid/unknown section cannot be committed despite model clai
   expect(saved.rows.at(-1)?.contextChange).toBeUndefined();
   store.dispose();
 });
+
+test("upload in chat is classified in the SAME model dialogue turn, with user attachment retained",async()=>{
+  const {repo,records}=repository();
+  const runner=jest.fn().mockResolvedValue({
+    text:"В файле конспект проекта",sources:[],requests:2,
+    contextCandidate:{topic:"Конспект PersAI",sectionSlug:"projects",reason:"Прочитанное содержимое файла"},
+  });
+  const store=new DirectChatStore("guest",repo,runner);await store.initialize();
+  const id=store.getSnapshot().activeId!;
+  store.setAttachments(id,[{id:"file1",name:"notes.txt",kind:"text",mime:"text/plain",
+    data:"План проекта PersAI",size:34}]);
+  await store.send(settings);
+  const saved=records.get(id)!;
+  expect(runner.mock.calls[0][0].contextClassificationEnabled).toBe(true);
+  expect(runner.mock.calls[0][0].attachments).toEqual([
+    expect.objectContaining({id:"file1",name:"notes.txt"})]);
+  expect(saved.context).toMatchObject({topic:"Конспект PersAI",sectionSlug:"projects"});
+  expect(saved.rows[0].attachments).toEqual([expect.objectContaining({id:"file1"})]);
+  expect(saved.rows[1].contextChange?.sectionName).toBe("Дела и проекты");
+  store.dispose();
+});
