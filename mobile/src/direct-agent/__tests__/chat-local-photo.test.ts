@@ -143,7 +143,10 @@ test("failed camera search cannot silently fall back to a direct search",async()
   expect(runner).toHaveBeenCalledTimes(1);
   expect(search).not.toHaveBeenCalled();
   expect(store.getSnapshot().conversations[0].rows.at(-1)?.role).toBe("info");
+  expect(store.getSnapshot().conversations[0].retryPhoto?.image).toEqual(image);
   expect(store.getSnapshot().conversations[0].busy).toBe(false);
+  await store.searchPhotosWithAgent(settings,image,id);
+  expect(runner).toHaveBeenCalledTimes(2);
   store.dispose();
 });
 
