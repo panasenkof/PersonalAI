@@ -697,6 +697,13 @@ export function MemoryImportScreen() {
     finally { if (controller.current === aborter) controller.current = null; if (alive.current) setBusy(false); }
   }
   const incomingLink=incoming?.[position]?sharedLinkPreview(incoming[position]):null;
+  const sourceDescription = describeSourceProvenance({
+    sourceUrl,coverage:sourceCoverage,
+    sourceRef:incoming?"android-share":"device-import",
+    publicationDate:publicationClaim?.date,
+    publicationEvidence:publicationClaim?.evidence,
+    publicationAttribute:publicationClaim?.sourceAttribute,
+  });
   const hasMaterial = Boolean(file || extractedText || linkOnly || (incoming && !preparing));
   const saveDisabled = busy || preparing || (!body.trim() && !extractedText.trim() && !(file && keepOriginal) && !(linkOnly && sourceUrl));
   return <View style={{ flex: 1, backgroundColor: t.bg, paddingBottom: keyboardOpen ? 0 : insets.bottom }}>
@@ -730,25 +737,15 @@ export function MemoryImportScreen() {
         </> : null}
         {hasMaterial ? <Pressable accessibilityRole="button" disabled={busy || preparing} style={button} onPress={cancelPicker}><Text style={{color:t.userText}}>Оставить текущее</Text></Pressable> : null}
       </View> : null}
-      {sourceUrl ? <View style={{gap:7}}>
-        {describeSourceProvenance({sourceUrl,coverage:sourceCoverage,
-          publicationDate:publicationClaim?.date,
-          publicationEvidence:publicationClaim?.evidence,
-          publicationAttribute:publicationClaim?.sourceAttribute,
-          sourceRef:incoming?"android-share":"device-import"}) ? <SourceProvenanceCard
-            source={describeSourceProvenance({sourceUrl,coverage:sourceCoverage,
-              publicationDate:publicationClaim?.date,
-              publicationEvidence:publicationClaim?.evidence,
-              publicationAttribute:publicationClaim?.sourceAttribute})!}
-            onOpenError={()=>setNotice("Не удалось открыть источник в браузере.")}/> : null}
+      {sourceDescription ? <View style={{gap:7}}>
+        <SourceProvenanceCard source={sourceDescription}
+          onOpenError={()=>setNotice("Не удалось открыть источник в браузере.")}/>
         {incoming && incomingLink?.url===sourceUrl && incomingLink.canFetch && linkOnly ?
           <NebulaAction icon="download" label="Загрузить публичное содержимое"
             size="compact" disabled={busy || preparing}
             accessibilityLabel="Загрузить содержимое публичной ссылки после согласия"
             onPress={()=>void readLink()}/> : null}
-      </View> : incoming && hasMaterial ? <SourceProvenanceCard
-        source={describeSourceProvenance({sourceRef:"android-share"})!}
-        onOpenError={()=>setNotice("Не удалось открыть источник.")}/> : null}
+      </View> : null}
       {!file && extractedText ? <Text style={{ color: t.muted, fontSize: 12 }}>Выбранный источник: текст по ссылке</Text> : null}
       {preparing ? <ActivityIndicator accessibilityLabel="Подготовка входящего файла" /> : null}
 
