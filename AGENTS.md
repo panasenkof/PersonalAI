@@ -1,5 +1,11 @@
 # Instructions for agents working in PersAI
 
+## Mandatory chat routing invariant (owner decision 07 November 2026)
+
+**Every submitted chat message and conversational shortcut MUST pass through the selected LLM's existing tool-calling agent loop.** Do not implement local regex-first answer paths in the chat for photos, saved articles, "show more", or future app commands. The model decides whether and which capability to call; the app still owns tool registration, ACL, local storage, cancellation, revision guards and external-action confirmation. No duplicate search/index/runtime. Existing local retrieval functions are allowed as implementations **behind tools**, not as a second chat dispatcher. Non-conversational UI/navigation, editing an explicitly opened note, device background indexing and on-device voice capture remain direct app operations.
+
+**Privacy gate:** an attached camera/gallery photo meant for local memory retrieval is retained only as an ephemeral local tool input; do not automatically serialize pixels, vectors or originals into the LLM provider request or persistent conversation. Show a model-required state if no LLM is configured; do not silently fall back to the old route. Internet image lookup requires its separate explicit authorization. Preserve historical article filters and cursor when continuing via `continue_local_articles`. Unit/scripted agent tests are not real live-LLM semantic evaluation or a physical phone PASS.
+
 ## Mandatory six-step delivery cycle for EVERY stage and package (owner decision 06 November 2026)
 
 1. **Inventory before building:** inspect current `main`, status register, actual code and tests. Never create a second storage, search, or execution mechanism.
