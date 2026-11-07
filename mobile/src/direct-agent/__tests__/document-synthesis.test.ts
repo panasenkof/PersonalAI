@@ -30,14 +30,14 @@ test("H-DOC1b2: all parts are analyzed via same provider with explicit final syn
     return {text:args.prompt.includes("ПРОВЕРЕННЫЕ МЕТКИ")?"Отдельные выводы и общий итог":"Краткий пересказ части",sources:[],requests:1};
   });
   const statuses:string[]=[];
-  const answer=await runDocumentSynthesis({...options(files),status:s=>statuses.push(s)},plan,runner);
+  const answer=await runDocumentSynthesis({...options(files),contextClassificationEnabled:true,status:s=>statuses.push(s)},plan,runner);
   expect(runner).toHaveBeenCalledTimes(5);
   expect(answer.requests).toBe(5);
   expect(answer.text).toContain("общий итог");
   expect(answer.notice).toContain("4 частей 2 файлов");
   expect(statuses).toHaveLength(5);
   expect(calls.every(c=>c.settings.model===settings.model&&c.settings.allowWeb===false)).toBe(true);
-  expect(calls.every(c=>c.attachments?.length===0 && c.skipLocalMemory===true && c.maxRequests===1)).toBe(true);
+  expect(calls.every(c=>c.attachments?.length===0 && c.skipLocalMemory===true && c.maxRequests===1 && c.contextClassificationEnabled===false)).toBe(true);
   expect(calls[4].prompt).toContain("first.txt");
   expect(calls[4].prompt).toContain("second.txt");
   expect(calls[4].prompt).toContain("Сделай вывод по обоим файлам");
