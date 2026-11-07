@@ -563,7 +563,7 @@ function NebulaHomeContent() {
           disabled={!ready || dictating || (!normalization.busy && (!question.trim() || (!normalization.alternate && !canSend)))}
           onPress={() => void normalization.toggle(settings)} /> : null}
         <View style={{ flex: 1, minWidth: 0 }} />
-        <IconAction compact explainOnTap={false} icon={busy ? "square" : "arrow-up"} label={busy ? "Стоп" : "Отправить"} accessibilityLabel={busy ? "Остановить запрос" : "Отправить запрос агенту"}
+        <IconAction compact explainOnTap={false} icon={busy ? "square" : "arrow-up"} label={busy ? "Стоп" : "Отправить"} accessibilityLabel={busy ? "Остановить запрос" : "Отправить запрос"}
           hint={busy ? "Остановить ответ ИИ в этом диалоге." : "Сообщение обрабатывает выбранная LLM, которая при необходимости вызывает локальные инструменты памяти, фото или сохранённых статей."} hintAbove emphasized={!busy}
           disabled={!busy && (pickingAttachment || !canSend || (!question.trim() && !active?.attachments?.length))} onPress={sendOrStop} />
       </View>
