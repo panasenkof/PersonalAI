@@ -1,4 +1,5 @@
 import { checkedChatAttachments, type ChatAttachment } from "./chat-attachments";
+import { parseConversationContext, parseContextChange, type ConversationContext, type ContextChange } from "./conversation-context";
 import { withLocalMemoryDatabase } from "../local-memory/storage";
 import type { NoteProposal } from "./memory";
 import { parseTaskState } from "./task-state";
@@ -35,12 +36,13 @@ export type ChatArticleReadReport = {
 export type ChatRow = { id: string; role: "user" | "assistant" | "info"; text: string; error?: boolean; photoAction?: "model" | "import" | "prepare"; sources?: string[]; memory?: ChatMemoryRef[]; attachments?: ChatAttachment[]; dialogueSummary?: DialogueSummaryOrigin; articlePage?: ChatArticlePage; articleReadReport?: ChatArticleReadReport;
   /** Only one of these can exist on an assistant row; authorizations always
    * re-check CURRENT SQLCipher record and collection ACL on the user's click. */
-  moveProposal?: ChatMoveProposal; moveReceipt?: ChatMoveReceipt };
+  moveProposal?: ChatMoveProposal; moveReceipt?: ChatMoveReceipt; contextChange?: ContextChange };
 const VIA = new Set(["search", "rewrite", "assistant"]);
 export type ChatDraft = NoteProposal & { id: string };
 export type SavedConversation = {
   id: string; title: string; createdAt: string; updatedAt: string;
   attachments?: ChatAttachment[]; rows: ChatRow[]; drafts: ChatDraft[]; question: string; interrupted?: boolean; taskState?: TaskState;
+  context?: ConversationContext;
 };
 export interface ConversationRepository {
   load(): Promise<SavedConversation[]>;
@@ -166,7 +168,8 @@ export function parseConversation(json: string): SavedConversation | null {
     const moveReceipt=r.role==="assistant"&&!moveProposal&&validMoveReceipt(r.moveReceipt)
       ? {...r.moveReceipt} as ChatMoveReceipt : undefined;
     return [{ id: r.id, role: r.role, text: r.text, ...(r.error === true && r.role === "info" ? { error: true } : {}), ...(["model","import","prepare"].includes(r.photoAction) ? {photoAction:r.photoAction} : {}), ...(r.attachments?.length ? {attachments:checkedChatAttachments(r.attachments)} : {}), ...(sources?.length ? { sources } : {}), ...(memory?.length ? { memory } : {}), ...(articlePage ? {articlePage} : {}), ...(articleReadReport ? {articleReadReport} : {}), ...(dialogueSummary ? {dialogueSummary} : {}),
-      ...(moveProposal?{moveProposal}:{}),...(moveReceipt?{moveReceipt}:{}) }];
+      ...(moveProposal?{moveProposal}:{}),...(moveReceipt?{moveReceipt}:{}),
+      ...(r.role === "assistant" && parseContextChange(r.contextChange) ? {contextChange:parseContextChange(r.contextChange)} : {}) }];
   });
   const drafts: ChatDraft[] = (Array.isArray(value.drafts) ? value.drafts : []).filter((d: any) =>
     d && typeof d.id === "string" && typeof d.title === "string" && typeof d.body === "string")
@@ -179,6 +182,7 @@ export function parseConversation(json: string): SavedConversation | null {
     id: value.id, title: typeof value.title === "string" && value.title ? value.title : "Диалог",
     createdAt: value.createdAt, updatedAt: value.updatedAt, rows, drafts, ...(value.attachments?.length ? {attachments:checkedChatAttachments(value.attachments)} : {}),
     question: typeof value.question === "string" ? value.question : "",
+    ...(parseConversationContext(value.context) ? {context:parseConversationContext(value.context)} : {}),
     ...(parseTaskState(value.taskState) ? { taskState: parseTaskState(value.taskState) } : {}),
     ...(value.interrupted === true ? { interrupted: true } : {}),
   };
