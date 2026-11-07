@@ -794,3 +794,39 @@ test('MSG-2.A: failed second album copy rolls back the whole staged preview', as
   expect(saveMediaNote).not.toHaveBeenCalled();
   expect(JSON.stringify(ui.toJSON())).not.toContain('content://provider/private');
 });
+
+test('MSG-6.A: Android Share defaults to Inbox without creating it before confirmation', async () => {
+  mockParams={incoming:[{shareType:'text',value:'Письмо из Telegram'}]};
+  const ui=render(<MemoryImportScreen/>);
+  await waitFor(()=>expect(ui.getByText(/Коллекция: Входящие · Изменить/)).toBeTruthy());
+  expect(ui.queryByText(/Коллекция: Заметки · Изменить/)).toBeNull();
+  expect(saveMediaNote).not.toHaveBeenCalled();
+  fireEvent.press(ui.getByLabelText('Выбрать коллекцию'));
+  expect(ui.getByLabelText('Коллекция: Входящие')).toBeTruthy();
+  fireEvent.press(ui.getByLabelText('Коллекция: Входящие'));
+  fireEvent.press(ui.getByLabelText('Сохранить сведения в память'));
+  await waitFor(()=>expect(saveMediaNote).toHaveBeenCalledWith('guest',expect.objectContaining({
+    body:'Письмо из Telegram',collectionId:undefined,receipt:JSON.stringify(mockParams.incoming),
+  }),expect.anything()));
+});
+
+test('MSG-6.A: existing renamed Inbox remains one default choice and user can explicitly select Notes',async()=>{
+  (ensureSections as jest.Mock).mockResolvedValue([
+    {id:'notes',name:'Заметки',slug:'notes',sensitivity:'standard'},
+    {id:'inbox-db',name:'Полученное',slug:'inbox',sensitivity:'sensitive'},
+  ]);
+  mockParams={incoming:[
+    {shareType:'image',value:'content://telegram/a.jpg',mimeType:'image/jpeg'},
+    {shareType:'image',value:'content://telegram/b.jpg',mimeType:'image/jpeg'},
+  ]};
+  const ui=render(<MemoryImportScreen/>);
+  await waitFor(()=>expect(ui.getByText(/Коллекция: Полученное · Изменить/)).toBeTruthy());
+  expect(ui.getByText('Новая заметка · альбом')).toBeTruthy();
+  fireEvent.press(ui.getByLabelText('Выбрать коллекцию'));
+  expect(ui.getAllByLabelText('Коллекция: Полученное')).toHaveLength(1);
+  fireEvent.press(ui.getByLabelText('Коллекция: Заметки'));
+  fireEvent.press(ui.getByLabelText('Сохранить сведения в память'));
+  await waitFor(()=>expect(saveMediaNote).toHaveBeenCalledWith('guest',expect.objectContaining({
+    collectionId:'notes',files:expect.arrayContaining([expect.objectContaining({name:'a.jpg'})]),
+  }),expect.anything()));
+});
