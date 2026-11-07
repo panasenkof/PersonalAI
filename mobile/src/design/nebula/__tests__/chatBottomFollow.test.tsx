@@ -85,6 +85,41 @@ describe("single-owner chat viewport", () => {
     rerender({ id: "a", focused: true, turn: "u1" }); unmount(); flush();
     expect(scrollToOffset).not.toHaveBeenCalled();
   });
+  it("jumps to the exact indexed history row and keeps the reading position", () => {
+    const { result, scrollToOffset }=setup();
+    const scrollToIndex=jest.fn();
+    result.current.list.current={scrollToOffset,scrollToIndex} as any;
+    act(()=>result.current.jumpToMessage(18));
+    flush();
+    expect(scrollToIndex).toHaveBeenCalledWith({index:18,animated:false,viewPosition:0.2});
+    scrollToOffset.mockClear();
+    act(()=>result.current.onContent(390,1900));
+    flush();
+    expect(scrollToOffset).not.toHaveBeenCalled(); // no last-message auto-follow
+    act(()=>result.current.jumpToLatest());
+    flush();
+    expect(scrollToOffset).toHaveBeenCalledWith({offset:1300,animated:false});
+  });
+  it("recovers an unmeasured virtualized target with bounded retries", () => {
+    const { result, scrollToOffset }=setup();
+    const scrollToIndex=jest.fn();
+    result.current.list.current={scrollToOffset,scrollToIndex} as any;
+    act(()=>result.current.jumpToMessage(40));
+    flush();
+    for(let i=0;i<3;i++){
+      act(()=>result.current.onScrollToIndexFailed({
+        index:40,averageItemLength:80,highestMeasuredFrameIndex:8+i,
+      }));
+      flush();
+    }
+    expect(scrollToOffset).toHaveBeenCalledWith({offset:3040,animated:false});
+    expect(scrollToIndex).toHaveBeenCalledTimes(4);
+    act(()=>result.current.onScrollToIndexFailed({
+      index:40,averageItemLength:80,highestMeasuredFrameIndex:11,
+    }));
+    flush();
+    expect(scrollToIndex).toHaveBeenCalledTimes(4); // no infinite jump loop
+  });
   it("resumes following only on a deliberate return to the bottom", () => {
     const { result, scrollToOffset } = setup();
     act(() => { result.current.beginDrag(); result.current.endDrag(metrics(1000)); result.current.onContent(390, 1800); }); flush();

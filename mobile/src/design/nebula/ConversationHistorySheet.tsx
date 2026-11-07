@@ -5,7 +5,7 @@ import type { LiveConversation } from "../../direct-agent/chat-store";
 import { BottomSheet } from "../../components/BottomSheet";
 import { useTheme } from "../../theme";
 import { nebulaSpacing, nebulaTouch } from "./tokens";
-import { indexConversationHistory, searchConversationHistory } from "./conversationHistory";
+import { findHistoryMessageMatch, indexConversationHistory, searchConversationHistory } from "./conversationHistory";
 import { NebulaAction } from "./components";
 
 const PAGE_SIZE = 30;
@@ -18,7 +18,7 @@ export function ConversationHistorySheet({
   conversations: readonly LiveConversation[];
   activeId?: string | null;
   onClose: () => void;
-  onSelect: (conversation: LiveConversation) => void;
+  onSelect: (conversation: LiveConversation, rowId?: string) => void;
   onDelete: (conversation: LiveConversation) => void;
   onNewChat: () => void;
   onSummary?: (conversation: LiveConversation) => void;
@@ -83,18 +83,22 @@ export function ConversationHistorySheet({
     {shown.map(({ conversation: c, preview }) => {
       const selected = c.id === activeId;
       const cannotDelete = c.busy || Boolean(c.savingDraft) || Boolean(c.deleting);
+      const target = searching ? findHistoryMessageMatch(c, query, sectionFilter || undefined) : null;
       const date = Date.parse(c.updatedAt);
       const dateText = Number.isFinite(date) ? new Date(date).toLocaleDateString() : "";
       return <View key={c.id} style={{ flexDirection: "row", alignItems: "center", gap: nebulaSpacing.xs }}>
         <Pressable testID={`chat-history-item-${c.id}`} accessibilityRole="button"
           accessibilityLabel={"Открыть диалог " + c.title}
-          accessibilityState={{ selected }} onPress={() => onSelect(c)}
+          accessibilityHint={target ? "Перейти к найденному сообщению" : undefined}
+          accessibilityState={{ selected }} onPress={() => target ? onSelect(c, target.rowId) : onSelect(c)}
           style={({ pressed }) => ({ flex: 1, minWidth: 0, minHeight: 72, borderWidth: 1,
             borderColor: selected ? t.accent : t.line, borderRadius: 16,
             backgroundColor: pressed ? t.soft : t.panel, padding: nebulaSpacing.sm, gap: 4 })}>
           <Text numberOfLines={2} style={{ color: t.text, fontSize: 15, fontWeight: "700" }}>{c.title}</Text>
           {c.context ? <Text numberOfLines={1} style={{color:t.secondary,fontSize:12}}>Тема: {c.context.topic}</Text> : null}
-          <Text numberOfLines={2} style={{ color: t.muted, fontSize: 13, lineHeight: 18 }}>{preview}</Text>
+          <Text numberOfLines={2} style={{ color: t.muted, fontSize: 13, lineHeight: 18 }}>
+            {target ? "Совпадение: " + (target.excerpt || "Смена темы") : preview}
+          </Text>
           <Text style={{ color: c.busy ? t.accent : t.muted, fontSize: 12 }}>{c.busy ? "Готовлю ответ…" : dateText}</Text>
         </Pressable>
         {onSummary ? <Pressable testID={"chat-history-summary-"+c.id} accessibilityRole="button"

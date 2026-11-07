@@ -5,6 +5,7 @@ import { isNebulaChatNearBottom } from "./homeArtLayout";
 
 type Mode = "latest" | "reading";
 type Metrics = { contentOffset: { y: number }; contentSize: { height: number }; layoutMeasurement: { height: number } };
+type FailedIndex = { index: number; averageItemLength: number; highestMeasuredFrameIndex: number };
 /** One owner for every scroll command. IME events never switch the reading mode.
  * Owner decision 05.11.2026: a submitted turn follows the answer to its end, so a
  * streamed answer is never left hidden below the fold. The reader keeps control
@@ -14,6 +15,7 @@ export function useChatBottomFollow(conversationId: string | undefined, focused:
   const list = useRef<FlatList<PresentedChatRow>>(null);
   const state = useRef({ mode: "latest" as Mode, content: 0, viewport: 0, offset: 0,
     gesture: false, enabled: focused, turnId });
+  const historyTarget = useRef<{ index: number; retries: number; requested: boolean } | null>(null);
   const contentPresent = useRef(hasRows);
   contentPresent.current = hasRows;
   const frame = useRef<number | null>(null);
@@ -28,7 +30,14 @@ export function useChatBottomFollow(conversationId: string | undefined, focused:
       frame.current = null;
       const s = state.current;
       if (!s.enabled || s.gesture || s.viewport <= 0 || !contentPresent.current) return;
-      if (s.mode === "latest") {
+      const target = historyTarget.current;
+      if (target && !target.requested) {
+        // FlatList can mount long histories lazily. A failed index is retried
+        // through the same viewport owner, never with a competing auto-follow.
+        if (!list.current) return;
+        target.requested = true;
+        list.current.scrollToIndex({ index: target.index, animated: false, viewPosition: 0.2 });
+      } else if (s.mode === "latest") {
         const bottom = Math.max(0, s.content - s.viewport);
         if (Math.abs(bottom - s.offset) > 1) {
           list.current?.scrollToOffset({ offset: bottom, animated: false });
@@ -40,6 +49,7 @@ export function useChatBottomFollow(conversationId: string | undefined, focused:
   }, []);
   useLayoutEffect(() => {
     cancel();
+    historyTarget.current = null;
     Object.assign(state.current, { mode: "latest", content: 0, viewport: 0, offset: 0, gesture: false, turnId });
     setShowJumpToLatest(false);
   }, [conversationId, cancel]);
@@ -61,13 +71,13 @@ export function useChatBottomFollow(conversationId: string | undefined, focused:
   const onViewport = useCallback((height: number) => { state.current.viewport = height; schedule(); }, [schedule]);
   const onContent = useCallback((_width: number, height: number) => { state.current.content = height; schedule(); }, [schedule]);
   const beginDrag = useCallback(() => {
-    cancel(); state.current.gesture = true; state.current.mode = "reading";
+    cancel(); historyTarget.current = null; state.current.gesture = true; state.current.mode = "reading";
   }, [cancel]);
   const onScroll = useCallback((metrics: Metrics) => {
     const s = state.current;
     s.offset = metrics.contentOffset.y;
     // Native offsets update geometry, but only fingers express reading intent.
-    if (s.gesture) setShowJumpToLatest(!isNebulaChatNearBottom(metrics.contentSize.height, s.offset, metrics.layoutMeasurement.height));
+    if (s.gesture || historyTarget.current) setShowJumpToLatest(!isNebulaChatNearBottom(metrics.contentSize.height, s.offset, metrics.layoutMeasurement.height));
   }, []);
   const endDrag = useCallback((metrics: Metrics) => {
     onScroll(metrics);
@@ -75,8 +85,36 @@ export function useChatBottomFollow(conversationId: string | undefined, focused:
     s.gesture = false;
     s.mode = isNebulaChatNearBottom(metrics.contentSize.height, metrics.contentOffset.y, metrics.layoutMeasurement.height) ? "latest" : "reading";
   }, [onScroll]);
+  const jumpToMessage = useCallback((index: number) => {
+    if (!Number.isSafeInteger(index) || index < 0) return;
+    cancel();
+    state.current.mode = "reading";
+    state.current.gesture = false;
+    historyTarget.current = { index, retries: 0, requested: false };
+    schedule();
+  }, [cancel, schedule]);
+  const onScrollToIndexFailed = useCallback((info: FailedIndex) => {
+    const target = historyTarget.current;
+    if (!target || target.index !== info.index || !state.current.enabled) return;
+    if (target.retries >= 3 || !Number.isFinite(info.averageItemLength) ||
+        info.averageItemLength <= 0) {
+      historyTarget.current = null; // Refuse an unbounded retry loop.
+      return;
+    }
+    target.retries++;
+    target.requested = false;
+    // Move toward the unmeasured row, then retry after the next layout frame.
+    // No guessed row ID, persistent scroll offset or SQLCipher write.
+    list.current?.scrollToOffset({
+      offset: Math.max(0, info.averageItemLength * Math.max(0, info.index - 2)),
+      animated: false,
+    });
+    schedule();
+  }, [schedule]);
   const jumpToLatest = useCallback(() => {
+    historyTarget.current = null;
     state.current.mode = "latest"; state.current.gesture = false; schedule();
   }, [schedule]);
-  return { list, showJumpToLatest, onViewport, onContent, beginDrag, onScroll, endDrag, jumpToLatest };
+  return { list, showJumpToLatest, onViewport, onContent, beginDrag, onScroll,
+    endDrag, jumpToMessage, onScrollToIndexFailed, jumpToLatest };
 }
