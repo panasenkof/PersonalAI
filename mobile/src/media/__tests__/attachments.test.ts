@@ -1,6 +1,7 @@
 import { SqliteMemoryRepository } from '../../local-memory/repository';
 import { appendNoteAttachments, writeOriginal, materializeAttachment, saveMediaNote, savedOriginalRevision, applyRecognitionCandidate, MAX_ORIGINAL_BYTES, MAX_ORIGINALS_PER_NOTE } from '../attachments';
 import { SCHEMA_SQL } from '../../local-memory/storage';
+import { reindexAll } from '../../local-memory/search-index';
 const { DatabaseSync } = require('node:sqlite');
 const crypto = require('node:crypto');
 let mockUnlocked = true;
@@ -890,6 +891,11 @@ test("MSG-6C6: explicit tags persist in one canonical SQLCipher note and its FTS
   expect(saved?.payload.body).toBe("Текст автора без хэштегов");
   expect(saved?.payload.tags).toEqual(["авто","рецепты"]);
   const repo=new SqliteMemoryRepository(mockDb);
+  expect((await repo.searchNotes("авто")).map(x=>x.id)).toContain(id);
+  // Backup restores the canonical payload_json and invokes this same rebuild.
+  // Prove tags can be retrieved even with the derived FTS fully cleared.
+  sqlite.exec("DELETE FROM memory_search_fts");
+  await reindexAll(mockDb);
   expect((await repo.searchNotes("авто")).map(x=>x.id)).toContain(id);
   // Tag changes share the same revision/CAS/search path as manual note edits.
   await repo.reviseEntity(id, saved!.record_version, {...saved!.payload,tags:["дом"]},"Редактирование тегов");
