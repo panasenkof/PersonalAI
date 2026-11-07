@@ -65,6 +65,23 @@ test("MSG-1: importLink still uses native HTTPS/no-redirect and returns only sco
   expect(result.publicationClaim).toBeUndefined();
 });
 
+test("MSG-1: ordinary t.me/<channel>/<id> uses the fixed /s/ reader without redirecting or changing provenance",async()=>{
+  serve('<html><body>'+current+unrelated+'</body></html>');
+  const result=await importLink("https://t.me/public_news/42?single");
+  expect(result.source).toBe("https://t.me/public_news/42?single");
+  expect(nativeFetch).toHaveBeenCalledWith("https://t.me/s/public_news/42",
+    expect.objectContaining({redirect:"error",credentials:"omit"}));
+  expect(result.text).toContain("Нужный пост");
+  expect(result.text).not.toContain("Другая публикация");
+});
+test("MSG-1: username.t.me alias still reads same t.me public preview, not user-supplied second host",async()=>{
+  serve('<html><body>'+current+'</body></html>');
+  const result=await importLink("https://public_news.t.me/42");
+  expect(nativeFetch).toHaveBeenCalledWith("https://t.me/s/public_news/42",
+    expect.objectContaining({redirect:"error"}));
+  expect(result.source).toBe("https://public_news.t.me/42");
+});
+
 test("MSG-1: target missing from channel feed is NOT successful article import",async()=>{
   serve("<html><body><main><h1>Канал</h1></main>"+unrelated+"</body></html>");
   await expect(importLink("https://t.me/s/public_news/42"))
