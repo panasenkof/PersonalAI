@@ -4,6 +4,7 @@
  * shows a stale version. Backups carry the records; the index is rebuilt. */
 import type * as SQLite from "expo-sqlite";
 import { foldText } from "./query";
+import { noteTagsFromPayload } from "./note-tags";
 import { CURRENT_MODEL_TERMS } from "./enrichment-policy";
 import { markEntityVectorsDirty } from "./vector-jobs";
 
@@ -73,12 +74,16 @@ export function memoryText(payload: Record<string, unknown>): string {
  * metadata into human/agent search. Source file labels are user-owned data. */
 export function searchableStructuredText(payload: Record<string, unknown>): string {
   const allowed = ["city", "date", "location", "source_file", "source_files"] as const;
-  return allowed.flatMap(key => {
+  const structured = allowed.flatMap(key => {
     const value = payload[key];
     const parts = typeof value === "string" ? [value] :
       Array.isArray(value) ? value.filter((s): s is string => typeof s === "string") : [];
     return parts.filter(s => s.trim()).slice(0, 20).map(s => s.slice(0, 240));
-  }).join("\n");
+  });
+  // Same canonical FTS/chunks as every other memory field, scoped by current
+  // entity ACL/status in repository.matches. No tag-specific second index.
+  const tags = noteTagsFromPayload(payload.tags);
+  return [...structured, ...(tags.length ? ["Теги: " + tags.join(" ")] : [])].join("\n");
 }
 
 /** Rebuilds the chunks and search rows of one record. Vectors of chunks whose

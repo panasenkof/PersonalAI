@@ -56,6 +56,7 @@ import { NoteEditorSection } from "../design/nebula/NoteEditorSection";
 import { NoteReadPreview } from "../design/nebula/NoteReadPreview";
 import { SourceProvenanceCard } from "../design/nebula/SourceProvenanceCard";
 import { describeSourceProvenance } from "../media/source-provenance";
+import { parseNoteTagsInput, noteTagsDraft, noteTagsFromPayload } from "../local-memory/note-tags";
 import { canRecheckTelegramText, recheckTelegramText, telegramRecheckMessage } from "../media/telegram-recheck";
 import { linkImportErrorMessage } from "../media/link-import";
 import { NebulaAction } from "../design/nebula/components";
@@ -98,6 +99,7 @@ export function MemoryNoteScreen() {
   const [collections, setCollections] = useState<CollectionRecord[]>([]);
   const [collectionId, setCollectionId] = useState(route.params?.collectionId);
   const [title, setTitle] = useState(""); const [body, setBody] = useState("");
+  const [tagDraft, setTagDraft] = useState("");
   const [extractedText, setExtractedText] = useState("");
   // Temporary candidate only: no new persisted version/table or duplicate original.
   const [candidate, setCandidate] = useState<{
@@ -123,7 +125,7 @@ const [termsOpen, setTermsOpen] = useState(false);
   const [history, setHistory] = useState<RevisionRecord[]>([]); const [events, setEvents] = useState<ObservationRecord[]>([]);
   const [relations, setRelations] = useState<RelationRecord[]>([]); const [related, setRelated] = useState<EntityRecord[]>([]);
   const [eventText, setEventText] = useState(""); const [linkOpen, setLinkOpen] = useState(false); const [linkSearch, setLinkSearch] = useState("");
-  const baseline = useRef({ title: "", body: "", collectionId: route.params?.collectionId, kind: "note" as MemoryKind, names: "", terms: "" });
+  const baseline = useRef({ title: "", body: "", collectionId: route.params?.collectionId, kind: "note" as MemoryKind, names: "", terms: "", tags: "" });
   const kindTouched = useRef(false);
   useEffect(() => {
     const show = Keyboard.addListener("keyboardDidShow", () => setKeyboardOpen(true));
@@ -132,7 +134,7 @@ const [termsOpen, setTermsOpen] = useState(false);
   }, []);
   const dirty = allowAgent || extractedText !== String(selected?.payload.extracted_text || "") || title !== baseline.current.title || body !== baseline.current.body || collectionId !== baseline.current.collectionId ||
     kind !== baseline.current.kind || splitNames(names).join(",") !== splitNames(baseline.current.names).join(",") ||
-    terms.trim() !== baseline.current.terms.trim();
+    terms.trim() !== baseline.current.terms.trim() || tagDraft !== baseline.current.tags;
   usePreventRemove(!leaving && (busy || dirty || voiceActive || attachmentDraft), ({ data }) => {
     if (busy || voiceActive) { setError("Дождитесь завершения сохранения или диктовки."); return; }
     setConfirmKind("leave");
@@ -165,11 +167,12 @@ const [termsOpen, setTermsOpen] = useState(false);
       const initialNames = note ? (await db.aliases(note.id)).join(", ") : "";
       const indexTerms = note ? await db.indexTerms(note.id) : [];
       const initialTerms = (indexTerms.find(x => x.source === "user")?.terms || []).join(", ");
+      const initialTags = noteTagsDraft(note?.payload.tags);
       if (!stillCurrent()) return;
-      baseline.current = { title: initialTitle, body: initialBody, collectionId: initialCollection, kind: initialKind, names: initialNames, terms: initialTerms };
+      baseline.current = { title: initialTitle, body: initialBody, collectionId: initialCollection, kind: initialKind, names: initialNames, terms: initialTerms, tags: initialTags };
       setTerms(initialTerms); setModelTerms(indexTerms.filter(x => x.source.startsWith("model:")).flatMap(x => x.terms));
       kindTouched.current = false;
-      setTitle(initialTitle); setBody(initialBody); setCollectionId(initialCollection); setKind(initialKind); namesForSave.current = initialNames; setNames(initialNames);
+      setTitle(initialTitle); setBody(initialBody); setTagDraft(initialTags); setCollectionId(initialCollection); setKind(initialKind); namesForSave.current = initialNames; setNames(initialNames);
     })().catch(e => { if (stillCurrent()) setError(memoryErrorMessage(e)); }).finally(() => { if (stillCurrent()) setLoading(false); });
     return () => { loadSequence.current++; sourceCheckController.current?.abort(); sourceCheckSequence.current++; alive.current = false; repository.current = null; };
   }, [profile, chatStore, route.params?.entityId, route.params?.collectionId,
@@ -214,8 +217,9 @@ const [termsOpen, setTermsOpen] = useState(false);
       (activeProfile.current !== profile || sourceAtOpen.current?.profile !== profile ||
        !fromChat || sourceAtOpen.current?.body !== fromChat.body))
       throw new Error("Исходный ответ или профиль изменился. Откройте ответ из диалога заново.");
+    const tags = parseNoteTagsInput(tagDraft);
     const finalTitle = title.trim() || body.trim().split("\n")[0].slice(0, 80);
-    const payload = { ...selected?.payload, type: "note", title: finalTitle,
+    const payload = { ...selected?.payload, type: "note", title: finalTitle, tags,
       // H-SAVE1a preserves Markdown and its trailing newlines exactly;
       // ordinary hand-written notes retain the established trim behavior.
       body: fromChat ? body : body.trim(), extracted_text: extractedText.trim(),
@@ -225,7 +229,7 @@ const [termsOpen, setTermsOpen] = useState(false);
     const cardFields = { kind, aliases: splitNames(namesForSave.current), userTerms: splitNames(terms) };
     if (selected) {
       const textChanged = allowAgent || extractedText !== String(selected.payload.extracted_text || "") || title !== base.title || body !== base.body || collectionId !== base.collectionId;
-      const metadataChanged = kind !== base.kind || cardFields.aliases.join(",") !== splitNames(base.names).join(",") || terms.trim() !== base.terms.trim();
+      const metadataChanged = kind !== base.kind || cardFields.aliases.join(",") !== splitNames(base.names).join(",") || terms.trim() !== base.terms.trim() || tagDraft !== base.tags;
       if (textChanged || metadataChanged) {
         // One durable entity revision, aliases and user-owned terms. Failure rolls back all.
         await db.reviseEntity(selected.id, selected.record_version, payload,
@@ -483,6 +487,10 @@ const [termsOpen, setTermsOpen] = useState(false);
             <MemoryCover profile={profile} entityId={selected.id} height={210} label={readingTitle} />
           </Pressable> : null}
           <Text accessibilityRole="header" selectable style={{ color: t.text, fontSize: 23, lineHeight: 31, fontWeight: "700" }}>{readingTitle || "Без названия"}</Text>
+          {selected && noteTagsFromPayload(selected.payload.tags).length ?
+            <Text accessibilityLabel="Теги заметки" style={{color:t.secondary,fontSize:12}}>
+              {noteTagsDraft(selected.payload.tags)}
+            </Text> : null}
           {body && body.trim() !== readingTitle ? <NoteReadPreview
             testID="note-read-body" text={body} fullTitle="Полный текст заметки"
             actionLabel="Читать полностью" maxLines={6} /> : null}
@@ -559,6 +567,10 @@ const [termsOpen, setTermsOpen] = useState(false);
             style={{ minHeight: nebulaTouch.minimum, paddingHorizontal: nebulaSpacing.sm, justifyContent: "center", borderRadius: nebulaRadii.chip, borderWidth: 1, borderColor: chosen ? t.accent : t.line, backgroundColor: chosen ? t.soft : t.panel }}>
             <Text style={{ color: chosen ? t.secondary : t.text, fontSize: 13 }}>{KIND_NAMES[k]}</Text></Pressable>; })}
         </View>
+        <TextInput accessibilityLabel="Теги заметки" value={tagDraft} onChangeText={setTagDraft}
+          editable={!busy} maxLength={440} placeholder="Необязательно: #авто #рецепты"
+          placeholderTextColor={t.muted} style={field}/>
+        <Text style={{color:t.muted,fontSize:12}}>До 12 тегов, через пробел или запятую. Доступность в поиске соответствует правам на заметку.</Text>
         <TextInput accessibilityLabel="Другие имена и прозвища" value={names} onChangeText={next => { namesForSave.current = next; setNames(next); }} editable={!busy} maxLength={600}
           placeholder={kind === "person" ? "Другие имена через запятую: Маша, Мария Петровна" : "Другие названия через запятую (по желанию)"} placeholderTextColor={t.muted} style={field} />
         <Text style={{ color: t.muted, fontSize: 12 }}>Необязательно. По этим именам запись тоже находится в поиске.</Text>

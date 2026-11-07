@@ -30,6 +30,7 @@ import { useProfile } from "../profile/ProfileContext";
 import { loadDirectConnections, anonymousLocalAllowed, defaultDirectPreferences } from "../direct-agent/settings";
 import type { DirectConnection } from "../direct-agent/settings";
 import { MAX_ORIGINALS_PER_NOTE, MAX_TOTAL_ORIGINAL_BYTES, saveMediaNote, type ShareReplay } from "../media/attachments";
+import { parseNoteTagsInput } from "../local-memory/note-tags";
 import { NoteAiEditor } from "../components/NoteAiEditor";
 import { replaceFileText, combinedRecognitionText, recognizeFilesSequentially, type FileRecognition } from "../media/batch-recognition";
 import { analyzeFilesTogether } from "../media/joint-recognition";
@@ -129,6 +130,8 @@ export function MemoryImportScreen() {
   const [classification, setClassification] = useState<"sensitive" | "standard">("standard");
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
+  const [tagDraft, setTagDraft] = useState("");
+  const [tagEditorOpen, setTagEditorOpen] = useState(false);
   const [extractedText, setExtractedText] = useState("");
   // An LLM suggestion is evidence about the PREVIOUS visible text. Any later
   // local OCR/edit/title change invalidates it without moving the draft.
@@ -173,7 +176,7 @@ export function MemoryImportScreen() {
       cancelled = true; cleanup(); setFiles([]); setPreparing(false);
       setNotice("Подготовка прервана блокировкой. Повторите приём после разблокировки.");
     });
-    setPreparing(true); setTitle(""); setFiles([]); setRecognitionResults([]); setRecognizingIndex(-1); setBody(""); setExtractedText(""); setNotice(""); setSourceUrl(""); setSourceCoverage(null); setTelegramObservation(null); setPublicationClaim(null); setLinkDraft(""); setLinkOnly(false); setSourcePickerOpen(false); setProcessingOptionsOpen(false); setKeepOriginal(true);
+    setPreparing(true); setTitle(""); setFiles([]); setRecognitionResults([]); setRecognizingIndex(-1); setBody(""); setTagDraft(""); setTagEditorOpen(false); setExtractedText(""); setNotice(""); setSourceUrl(""); setSourceCoverage(null); setTelegramObservation(null); setPublicationClaim(null); setLinkDraft(""); setLinkOnly(false); setSourcePickerOpen(false); setProcessingOptionsOpen(false); setKeepOriginal(true);
     void (async () => {
       if (incoming!.length > 30) throw new Error("Отправляйте не более 30 материалов за один раз.");
       if (groupedIncoming) {
@@ -631,6 +634,10 @@ export function MemoryImportScreen() {
   async function save(allowSeparateCopy = false) {
     if (!keepOriginal && !body.trim() && !extractedText.trim() && !linkOnly) { setNotice("Добавьте текст или распознайте материал перед сохранением без оригинала."); return; }
     if (!profile || (!file && !body.trim() && !extractedText.trim() && !(linkOnly && sourceUrl)) || busy || preparing || controller.current) return;
+    // Only explicit labels, no hidden regex classification or network.
+    let tags: string[];
+    try { tags = parseNoteTagsInput(tagDraft); }
+    catch (error) { setNotice((error as Error).message); return; }
     const aborter = new AbortController(); controller.current = aborter;
     setBusy(true); setNotice("");
     try {
@@ -649,7 +656,7 @@ export function MemoryImportScreen() {
       let replay: ShareReplay | null = null;
       const savedId = await saveMediaNote(profile, {
         ...(keepOriginal && files.length > 1 ? { files } : { file: keepOriginal ? file || undefined : undefined }),
-        title, body, extractedText: content,
+        title, body, tags, extractedText: content,
         ...(keepOriginal && sourceRecognitions.length ? { recognitions: sourceRecognitions } : {}),
         sourceUrl: sourceUrl || undefined, sourceCoverage: sourceCoverage || undefined,
         ...(telegramObservation && sourceCoverage === "telegram_post_text_only" && content.trim() ? {telegramObservation} : {}),
@@ -773,6 +780,15 @@ export function MemoryImportScreen() {
       {hasMaterial ? <>
         <TextInput accessibilityLabel="Сведения из файла" editable={!busy} multiline value={body} onChangeText={value=>{setBody(value);setModelCollectionHint(null);}} maxLength={60_000} style={[field, { minHeight: 96, textAlignVertical: "top" }]} placeholder={linkOnly ? "Моя заметка — что важно сохранить? (необязательно)" : "Добавьте подпись — необязательно"} placeholderTextColor={t.muted} />
         {body.trim() ? <NebulaAction icon="zap" label="Улучшить подпись с ИИ" size="compact" disabled={busy} onPress={() => setAiField("body")} /> : null}
+        {tagEditorOpen || tagDraft ? <>
+          <TextInput accessibilityLabel="Теги заметки" editable={!busy} value={tagDraft}
+            onChangeText={setTagDraft} maxLength={440} style={field}
+            placeholder="Теги (необязательно): #авто #рецепты" placeholderTextColor={t.muted} />
+          <Text style={{color:t.muted,fontSize:12}}>
+            До 12 тегов через пробел или запятую. Войдут в поиск по памяти; раздел определяется отдельно.
+          </Text>
+        </> : <NebulaAction icon="tag" label="Добавить теги" size="compact"
+          disabled={busy} onPress={()=>setTagEditorOpen(true)} />}
         <Pressable accessibilityRole="button" accessibilityLabel="Выбрать коллекцию" disabled={busy} onPress={() => { Keyboard.dismiss(); setSectionOpen(true); }} style={{ ...button, backgroundColor: t.panel, alignItems: "flex-start" }}><Text style={{ color: t.text }}>Коллекция: {collections.find(c => c.id === collectionId)?.name || (incoming ? inboxCollection?.name || "Входящие" : "Заметки")} · Изменить</Text></Pressable>
         <View style={{ gap: 4 }}>
           <NebulaAction icon="cpu" label="Определить раздел с ИИ" size="compact"

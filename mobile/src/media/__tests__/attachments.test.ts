@@ -1,6 +1,7 @@
 import { SqliteMemoryRepository } from '../../local-memory/repository';
 import { appendNoteAttachments, writeOriginal, materializeAttachment, saveMediaNote, savedOriginalRevision, applyRecognitionCandidate, MAX_ORIGINAL_BYTES, MAX_ORIGINALS_PER_NOTE } from '../attachments';
 import { SCHEMA_SQL } from '../../local-memory/storage';
+import { reindexAll } from '../../local-memory/search-index';
 const { DatabaseSync } = require('node:sqlite');
 const crypto = require('node:crypto');
 let mockUnlocked = true;
@@ -881,4 +882,37 @@ test("MSG-6.C: fabricated/local-only/mismatched observations do not write a note
     await expect(saveMediaNote("guest",sample as any)).rejects.toThrow("invalid_source_observation");
   }
   expect(sqlite.prepare("SELECT count(*) n FROM memory_entities").get().n).toBe(0);
+});
+
+test("MSG-6C6: explicit tags persist in one canonical SQLCipher note and its FTS, with no text rewrite",async()=>{
+  const request={...input,body:"Текст автора без хэштегов",tags:["#Авто","Рецепты"]};
+  const id=await saveMediaNote("guest",request);
+  const saved=await new SqliteMemoryRepository(mockDb).entity(id);
+  expect(saved?.payload.body).toBe("Текст автора без хэштегов");
+  expect(saved?.payload.tags).toEqual(["авто","рецепты"]);
+  const repo=new SqliteMemoryRepository(mockDb);
+  expect((await repo.searchNotes("авто")).map(x=>x.id)).toContain(id);
+  // Backup restores the canonical payload_json and invokes this same rebuild.
+  // Prove tags can be retrieved even with the derived FTS fully cleared.
+  sqlite.exec("DELETE FROM memory_search_fts");
+  await reindexAll(mockDb);
+  expect((await repo.searchNotes("авто")).map(x=>x.id)).toContain(id);
+  // Tag changes share the same revision/CAS/search path as manual note edits.
+  await repo.reviseEntity(id, saved!.record_version, {...saved!.payload,tags:["дом"]},"Редактирование тегов");
+  expect((await repo.searchNotes("дом")).map(x=>x.id)).toContain(id);
+  expect((await repo.searchNotes("авто")).map(x=>x.id)).not.toContain(id);
+  expect((await repo.entity(id))?.payload.body).toBe(request.body);
+});
+
+test("MSG-6C6: replay fingerprint includes explicit tags, and forged tags fail closed",async()=>{
+  const request={...input,receipt:"android-share-c6",tags:["авто"]};
+  const first=await saveMediaNote("guest",request);
+  expect(await saveMediaNote("guest",{...request,tags:["#АВТО"]})).toBe(first);
+  const second=await saveMediaNote("guest",{...request,tags:["рецепты"]});
+  expect(second).not.toBe(first);
+  const third=await saveMediaNote("guest",{...request,tags:[]});
+  expect(third).not.toBe(first);
+  expect(sqlite.prepare("SELECT count(*) AS n FROM memory_entities").get().n).toBe(3);
+  await expect(saveMediaNote("guest",{...request,tags:["invalid/name"]})).rejects.toThrow("Неверные теги");
+  expect(sqlite.prepare("SELECT count(*) AS n FROM memory_entities").get().n).toBe(3);
 });
