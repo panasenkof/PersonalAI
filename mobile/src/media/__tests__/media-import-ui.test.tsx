@@ -993,7 +993,7 @@ test("MSG-6.C: source card displays verified-link bounds; external link opens ON
     expect(ui.getByText(/Формат публичного поста/)).toBeTruthy();
     expect(ui.queryByText(/Дата по метаданным/)).toBeNull();
     expect(opener).not.toHaveBeenCalled();
-    fireEvent.press(ui.getByLabelText("Открыть проверенную HTTPS-ссылку в браузере"));
+    fireEvent.press(ui.getByLabelText("Открыть ссылку на источник в браузере"));
     expect(opener).toHaveBeenCalledTimes(1);
     expect(opener).toHaveBeenCalledWith("https://t.me/public_news/123");
     expect(saveMediaNote).not.toHaveBeenCalled();
@@ -1028,5 +1028,5 @@ test("MSG-6.C: a plain Android Share is not misattributed to Telegram/MAX",async
   const ui=render(<MemoryImportScreen/>);
   await waitFor(()=>expect(ui.getByTestId("source-provenance-card")).toBeTruthy());
   expect(ui.getByText(/Отправившее приложение, автор, дата и версия публикации не подтверждены/)).toBeTruthy();
-  expect(ui.queryByLabelText("Открыть проверенную HTTPS-ссылку в браузере")).toBeNull();
+  expect(ui.queryByLabelText("Открыть ссылку на источник в браузере")).toBeNull();
 });
