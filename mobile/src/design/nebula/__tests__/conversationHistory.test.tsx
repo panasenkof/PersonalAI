@@ -118,3 +118,29 @@ describe("Conversation history presentation", () => {
   });
 
 });
+
+test("history: topic transitions remain searchable under both old and new sections",()=>{
+  const c=chat("mixed","Диалог");
+  c.context={topic:"Лазанья",sectionSlug:"recipes",pinned:false};
+  c.rows=[
+    {id:"q1",role:"user",text:"Поставить аккумулятор"},
+    {id:"a1",role:"assistant",text:"Проверьте ёмкость",contextChange:{
+      topic:"Аккумулятор",sectionSlug:"cars",previousTopic:null,previousSectionSlug:null,
+      sectionName:"Авто",previousSectionName:null,reason:"Обсуждение автомобиля",at:"2026-11-07T18:01:00Z"}},
+    {id:"q2",role:"user",text:"Как приготовить лазанью?"},
+    {id:"a2",role:"assistant",text:"Используйте соус",contextChange:{
+      topic:"Лазанья",sectionSlug:"recipes",previousTopic:"Аккумулятор",previousSectionSlug:"cars",
+      sectionName:"Рецепты",previousSectionName:"Авто",reason:"Новая тема",at:"2026-11-07T18:05:00Z"}},
+  ];
+  const index=indexConversationHistory([c]);
+  expect(searchConversationHistory(index,"аккумулятор","cars")).toHaveLength(1);
+  expect(searchConversationHistory(index,"лазанья","recipes")).toHaveLength(1);
+  expect(searchConversationHistory(index,"","cars")).toHaveLength(1);
+  expect(searchConversationHistory(index,"","work")).toHaveLength(0);
+  const ui=render(<ConversationHistorySheet visible conversations={[c]} activeId="mixed"
+    onClose={jest.fn()} onSelect={jest.fn()} onDelete={jest.fn()} onNewChat={jest.fn()} />);
+  expect(ui.getByLabelText("Фильтр: Авто")).toBeTruthy();
+  fireEvent.press(ui.getByLabelText("Фильтр: Авто"));
+  expect(ui.getByText("Найдено диалогов: 1")).toBeTruthy();
+  expect(ui.getByText("Тема: Лазанья")).toBeTruthy();
+});
