@@ -25,7 +25,7 @@ import { ActivityIndicator, Alert, Image, Keyboard, KeyboardAvoidingView, Platfo
 import { useProfile } from "../profile/ProfileContext";
 import { loadDirectConnections, anonymousLocalAllowed, defaultDirectPreferences } from "../direct-agent/settings";
 import type { DirectConnection } from "../direct-agent/settings";
-import { MAX_ORIGINALS_PER_NOTE, MAX_TOTAL_ORIGINAL_BYTES, saveMediaNote } from "../media/attachments";
+import { MAX_ORIGINALS_PER_NOTE, MAX_TOTAL_ORIGINAL_BYTES, saveMediaNote, type ShareReplay } from "../media/attachments";
 import { NoteAiEditor } from "../components/NoteAiEditor";
 import { replaceFileText, combinedRecognitionText, recognizeFilesSequentially, type FileRecognition } from "../media/batch-recognition";
 import { analyzeFilesTogether } from "../media/joint-recognition";
@@ -568,6 +568,7 @@ export function MemoryImportScreen() {
         : keepOriginal && files.length === 1 && file && mediaKind(file) === "text" && content.trim()
           ? [{ index: 0, name: file.name, status: "success", text: content }]
           : [];
+      let replay: ShareReplay | null = null;
       const savedId = await saveMediaNote(profile, {
         ...(keepOriginal && files.length > 1 ? { files } : { file: keepOriginal ? file || undefined : undefined }),
         title, body, extractedText: content,
@@ -575,8 +576,26 @@ export function MemoryImportScreen() {
         sourceUrl: sourceUrl || undefined,
         ...(sourceUrl && !linkOnly && publicationClaim && !keepOriginal ? {publicationClaim} : {}),
         sensitivity: classification, collectionId: collectionId || undefined,
-        ...(incoming ? { receipt: JSON.stringify(groupedIncoming ? incoming : incoming[position]) } : {}),
+        ...(incoming ? {
+          receipt: JSON.stringify(groupedIncoming ? incoming : incoming[position]),
+          onReplay: (existing: ShareReplay) => { replay = existing; },
+        } : {}),
       }, aborter.signal);
+      if (replay) {
+        const status: ShareReplay['recordStatus'] = (replay as ShareReplay).recordStatus;
+        if (status !== "active") {
+          setNotice(status === "trashed"
+            ? "Этот материал уже есть в корзине. Восстановите прежнюю запись или измените новую перед сохранением."
+            : "Этот материал уже в архиве. Найдите его в архиве или измените новый черновик.");
+          return;
+        }
+        Alert.alert("Уже в памяти", "Точно такой материал ранее сохранён. Повторная запись не создана.");
+        if (alive.current) {
+          if (incoming && !groupedIncoming && position + 1 < incoming.length) setPosition(p => p + 1);
+          else setLeaving(true);
+        }
+        return;
+      }
       scheduleIndexTerms(profile); scheduleVectors(profile);
       // Derived visual vectors are written only after the note commits.
       // A failed model must never imply the original note was not saved.
