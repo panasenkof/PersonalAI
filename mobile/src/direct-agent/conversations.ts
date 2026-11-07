@@ -5,6 +5,7 @@ import { parseTaskState } from "./task-state";
 import type { TaskState } from "./task-state";
 import type { ArticleCoverageStatus } from "./article-read-coverage";
 import { restoredProposal } from "./fact-tool";
+import { validMoveProposal, validMoveReceipt, type ChatMoveProposal, type ChatMoveReceipt } from "./move-proposal";
 
 /** `memory`: records the answer used, with how each was found («Из памяти»). */
 export type ChatMemoryRef = { id: string; title: string; section?: string; via: "search" | "rewrite" | "assistant"; photo?: boolean; photoAttachmentId?: string };
@@ -31,7 +32,10 @@ export type ChatArticleReadReport = {
      * Older answer reports may lack ranges and therefore cannot make inline links. */
     ranges?:Array<{startChar:number;endChar:number}>}>;
 };
-export type ChatRow = { id: string; role: "user" | "assistant" | "info"; text: string; error?: boolean; photoAction?: "model" | "import" | "prepare"; sources?: string[]; memory?: ChatMemoryRef[]; attachments?: ChatAttachment[]; dialogueSummary?: DialogueSummaryOrigin; articlePage?: ChatArticlePage; articleReadReport?: ChatArticleReadReport };
+export type ChatRow = { id: string; role: "user" | "assistant" | "info"; text: string; error?: boolean; photoAction?: "model" | "import" | "prepare"; sources?: string[]; memory?: ChatMemoryRef[]; attachments?: ChatAttachment[]; dialogueSummary?: DialogueSummaryOrigin; articlePage?: ChatArticlePage; articleReadReport?: ChatArticleReadReport;
+  /** Only one of these can exist on an assistant row; authorizations always
+   * re-check CURRENT SQLCipher record and collection ACL on the user's click. */
+  moveProposal?: ChatMoveProposal; moveReceipt?: ChatMoveReceipt };
 const VIA = new Set(["search", "rewrite", "assistant"]);
 export type ChatDraft = NoteProposal & { id: string };
 export type SavedConversation = {
@@ -157,7 +161,12 @@ export function parseConversation(json: string): SavedConversation | null {
         firstRowId:d.firstRowId,lastRowId:d.lastRowId,
         model:d.model,provider:d.provider,createdAt:d.createdAt,
       } : undefined;
-    return [{ id: r.id, role: r.role, text: r.text, ...(r.error === true && r.role === "info" ? { error: true } : {}), ...(["model","import","prepare"].includes(r.photoAction) ? {photoAction:r.photoAction} : {}), ...(r.attachments?.length ? {attachments:checkedChatAttachments(r.attachments)} : {}), ...(sources?.length ? { sources } : {}), ...(memory?.length ? { memory } : {}), ...(articlePage ? {articlePage} : {}), ...(articleReadReport ? {articleReadReport} : {}), ...(dialogueSummary ? {dialogueSummary} : {}) }];
+    const moveProposal=r.role==="assistant"&&validMoveProposal(r.moveProposal)
+      ? {...r.moveProposal} as ChatMoveProposal : undefined;
+    const moveReceipt=r.role==="assistant"&&!moveProposal&&validMoveReceipt(r.moveReceipt)
+      ? {...r.moveReceipt} as ChatMoveReceipt : undefined;
+    return [{ id: r.id, role: r.role, text: r.text, ...(r.error === true && r.role === "info" ? { error: true } : {}), ...(["model","import","prepare"].includes(r.photoAction) ? {photoAction:r.photoAction} : {}), ...(r.attachments?.length ? {attachments:checkedChatAttachments(r.attachments)} : {}), ...(sources?.length ? { sources } : {}), ...(memory?.length ? { memory } : {}), ...(articlePage ? {articlePage} : {}), ...(articleReadReport ? {articleReadReport} : {}), ...(dialogueSummary ? {dialogueSummary} : {}),
+      ...(moveProposal?{moveProposal}:{}),...(moveReceipt?{moveReceipt}:{}) }];
   });
   const drafts: ChatDraft[] = (Array.isArray(value.drafts) ? value.drafts : []).filter((d: any) =>
     d && typeof d.id === "string" && typeof d.title === "string" && typeof d.body === "string")
