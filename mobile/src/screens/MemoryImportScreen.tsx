@@ -142,7 +142,15 @@ export function MemoryImportScreen() {
     };
   }, [profile]);
   useEffect(() => { if (profile) void localMemoryRepository(profile).then(ensureSections).then(cols => {
-    if (alive.current) { setCollections(cols); setCollectionId(cols.find(c => c.id === route.params?.collectionId)?.id || cols.find(c => c.slug === "notes")?.id || ""); }
+    if (alive.current) {
+      setCollections(cols);
+      // Android Share defaults to the canonical "inbox" destination. An empty
+      // collectionId means the existing saveMediaNote writer resolves/creates
+      // that collection at confirmation, not during draft preview.
+      const requested = cols.find(c => c.id === route.params?.collectionId);
+      setCollectionId(incoming && (!requested || requested.slug === "inbox") ? "" :
+        requested?.id || cols.find(c => c.slug === "notes")?.id || "");
+    }
   }).catch(() => { if (alive.current) setNotice("Не удалось загрузить разделы."); }); }, [profile]);
   useEffect(() => {
     const payload = incoming?.[position]; if (!payload) return;
@@ -265,7 +273,10 @@ export function MemoryImportScreen() {
   }, [profile]);
   useEffect(() => { setSkipApproval(null); setAudioApproval(null); setComparison(null); setAiField(null); }, [position, prepareAttempt]);
   // Both target record AND collection must permit provider egress.
-  const collectionAllowsProvider = collections.find(c => c.id === collectionId)?.sensitivity === "standard";
+  const inboxCollection = collections.find(c => c.slug === "inbox");
+  const collectionAllowsProvider = (collectionId
+    ? collections.find(c => c.id === collectionId)?.sensitivity
+    : incoming ? inboxCollection?.sensitivity : undefined) === "standard";
   const providerApproved = classification === "standard" && collectionAllowsProvider;
   const selected = connections.find(c => c.id === connectionId);
   const kind = file ? mediaKind(file) : null;
@@ -590,7 +601,7 @@ export function MemoryImportScreen() {
   return <View style={{ flex: 1, backgroundColor: t.bg, paddingBottom: keyboardOpen ? 0 : insets.bottom }}>
   <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"} keyboardVerticalOffset={Platform.OS === "ios" ? header : 0}>
     <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentContainerStyle={{ padding: 18, gap: 15, paddingBottom: 24 }}>
-      <Text accessibilityRole="header" style={{ color: t.text, fontSize: 25, fontWeight: "800" }}>{incoming ? `Новая заметка · ${position + 1}/${incoming.length}` : file || extractedText ? "Проверьте и сохраните" : sourceChoice === "link" ? "Добавить ссылку" : sourceChoice === "file" ? "Файл" : sourceChoice === "camera" ? "Камера" : sourceChoice === "gallery" ? "Галерея" : "Выберите материал"}</Text>
+      <Text accessibilityRole="header" style={{ color: t.text, fontSize: 25, fontWeight: "800" }}>{incoming ? (groupedIncoming ? "Новая заметка · альбом" : `Новая заметка · ${position + 1}/${incoming.length}`) : file || extractedText ? "Проверьте и сохраните" : sourceChoice === "link" ? "Добавить ссылку" : sourceChoice === "file" ? "Файл" : sourceChoice === "camera" ? "Камера" : sourceChoice === "gallery" ? "Галерея" : "Выберите материал"}</Text>
       {!hasMaterial && !sourceChoice ? <Text style={{ color: t.muted, lineHeight: 21 }}>Фото, документы и ссылки сохраняются в заметку. Распознавание — по вашему выбору.</Text> : null}
 
       {incoming ? <Text style={{ color: t.muted }}>Получено через «Поделиться». Сохранение — только после подтверждения.</Text> : null}
@@ -660,7 +671,7 @@ export function MemoryImportScreen() {
       {hasMaterial ? <>
         <TextInput accessibilityLabel="Сведения из файла" editable={!busy} multiline value={body} onChangeText={setBody} maxLength={60_000} style={[field, { minHeight: 96, textAlignVertical: "top" }]} placeholder={linkOnly ? "Моя заметка — что важно сохранить? (необязательно)" : "Добавьте подпись — необязательно"} placeholderTextColor={t.muted} />
         {body.trim() ? <NebulaAction icon="zap" label="Улучшить подпись с ИИ" size="compact" disabled={busy} onPress={() => setAiField("body")} /> : null}
-        <Pressable accessibilityRole="button" accessibilityLabel="Выбрать коллекцию" disabled={busy} onPress={() => { Keyboard.dismiss(); setSectionOpen(true); }} style={{ ...button, backgroundColor: t.panel, alignItems: "flex-start" }}><Text style={{ color: t.text }}>Коллекция: {collections.find(c => c.id === collectionId)?.name || "Заметки"} · Изменить</Text></Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel="Выбрать коллекцию" disabled={busy} onPress={() => { Keyboard.dismiss(); setSectionOpen(true); }} style={{ ...button, backgroundColor: t.panel, alignItems: "flex-start" }}><Text style={{ color: t.text }}>Коллекция: {collections.find(c => c.id === collectionId)?.name || (incoming ? inboxCollection?.name || "Входящие" : "Заметки")} · Изменить</Text></Pressable>
         <View testID="import-access-options" style={{ gap: 8 }}>
           <Text accessibilityRole="header" style={{ color: t.text, fontWeight: "700" }}>Доступ к записи</Text>
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
@@ -853,7 +864,23 @@ export function MemoryImportScreen() {
     <Text style={{color:t.secondary}}>После замены</Text><Text selectable style={{color:t.text}}>{comparison?.updated}</Text>
   </BottomSheet>
   <BottomSheet visible={sectionOpen} title="Коллекция для записи" onClose={() => setSectionOpen(false)}>
-        {collections.map(c => <Pressable key={c.id} disabled={busy} accessibilityRole="button" accessibilityLabel={"Коллекция: " + c.name} onPress={() => { setCollectionId(c.id); setSectionOpen(false); }} style={choiceStyle(c.id === collectionId, busy)}><Text style={{ color: c.id === collectionId ? t.secondary : t.text }}>{c.id === collectionId ? "● " : "○ "}{c.name}</Text></Pressable>)}
+        {incoming ? <Pressable disabled={busy} accessibilityRole="button"
+          accessibilityLabel={"Коллекция: " + (inboxCollection?.name || "Входящие")}
+          onPress={() => { setCollectionId(""); setSectionOpen(false); }}
+          style={choiceStyle(!collectionId, busy)}>
+          <Text style={{ color: !collectionId ? t.secondary : t.text }}>
+            {!collectionId ? "● " : "○ "}{inboxCollection?.name || "Входящие"} · по умолчанию
+          </Text>
+        </Pressable> : null}
+        {collections.filter(c => !(incoming && c.slug === "inbox")).map(c =>
+          <Pressable key={c.id} disabled={busy} accessibilityRole="button"
+            accessibilityLabel={"Коллекция: " + c.name}
+            onPress={() => { setCollectionId(c.id); setSectionOpen(false); }}
+            style={choiceStyle(c.id === collectionId, busy)}>
+            <Text style={{ color: c.id === collectionId ? t.secondary : t.text }}>
+              {c.id === collectionId ? "● " : "○ "}{c.name}
+            </Text>
+          </Pressable>)}
   </BottomSheet>
   </View>;
 }
