@@ -65,7 +65,7 @@ export function verifiedTelegramMessageMarkup(source:string,html:string):Verifie
   }
   if(fields!==1||!textHtml||!textHtml.replace(/<[^>]*>/g,"").trim())
     throw new Error("У этого сообщения Telegram нет доступного текста. Медиа по ссылке не импортировано; сохраните саму ссылку или передайте оригинал через «Поделиться».");
-  const mediaMayBeMissing=/\btgme_widget_message_(?:photo|video|audio|document|sticker|poll|gif|voice)\b/i.test(selected);
+  const mediaMayBeMissing=/\btgme_widget_message_(?:photo|video|audio|document|sticker|poll|gif|voice)(?:_|\b)/i.test(selected);
   return {messageKey:key.messageKey,textHtml,title:"Telegram · "+key.messageKey,
     mediaMayBeMissing};
 }
