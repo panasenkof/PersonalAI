@@ -8,6 +8,7 @@ import { loadMediaPreferences, type FileAsrMode } from "../media/preferences";
 import { onLocalMemorySessionChange } from "../local-memory/storage";
 import * as ImagePicker from "expo-image-picker";
 import { importLink, linkImportErrorMessage, publicImportUrl, type HtmlPublicationClaim } from "../media/link-import";
+import { sharedLinkPreview } from "../media/messenger-share-links";
 import { pdfCoverageMessage } from "../media/pdf-pages";
 import { useRussianOcrStatus } from "../media/russian-ocr";
 import { RussianOcrControls } from "../media/RussianOcrControls";
@@ -152,7 +153,29 @@ export function MemoryImportScreen() {
       if (incoming!.length > 30) throw new Error("Отправляйте не более 30 файлов за один раз.");
       const text = payload.shareType === "text" || payload.shareType === "url";
       if (!payload.value || (text && payload.value.length > 60_000)) throw new Error("Пустой или слишком длинный материал.");
-      if (text) { if (!cancelled) { if (payload.shareType === "url") { setSourceUrl(payload.value); setLinkDraft(payload.value); setLinkOnly(true); } setTitle(payload.shareType === "url" ? "Ссылка" : payload.value.split("\n")[0].slice(0, 160)); setBody(payload.value); } return; }
+      if (text) {
+        // MSG-0/1: inspect ONLY the actual Share payload. Never fetch, infer
+        // author/date, read another URL from a multi-link message or save.
+        // A link stays URL-only until the user explicitly asks to load it.
+        const link=sharedLinkPreview(payload);
+        if(!cancelled){
+          if(link){
+            // Reuse the existing canonical HTTPS/SSRF gate even for Share text.
+            const checked=publicImportUrl(link.url);
+            if(link.kind!=="restricted"){
+              setSourceUrl(checked);setLinkDraft(checked);setLinkOnly(true);
+              setKeepOriginal(false);
+            }else{
+              setNotice("Ссылка-приглашение или закрытая ссылка не является публичным постом. Откройте сообщение и выберите «Поделиться». Содержимое не загружено.");
+            }
+          }else if(payload.shareType==="url"){
+            setNotice("Адрес не прошёл проверку публичной HTTPS-ссылки. Сохраните только текст или отправьте другую ссылку.");
+          }
+          setTitle(payload.shareType==="url"?"Ссылка":payload.value.split("\n")[0].slice(0,160));
+          setBody(payload.value);
+        }
+        return;
+      }
       const source = new File(payload.value);
       const dir = new Directory(Paths.cache, "persai-incoming"); dir.create({ intermediates: true, idempotent: true });
       const target = new File(dir, Crypto.randomUUID()); staged = target;
@@ -506,6 +529,7 @@ export function MemoryImportScreen() {
     } catch (e) { if (alive.current) setNotice("Не удалось сохранить: " + memoryErrorMessage(e)); }
     finally { if (controller.current === aborter) controller.current = null; if (alive.current) setBusy(false); }
   }
+  const incomingLink=incoming?.[position]?sharedLinkPreview(incoming[position]):null;
   const hasMaterial = Boolean(file || extractedText || linkOnly || (incoming && !preparing));
   const saveDisabled = busy || preparing || (!body.trim() && !extractedText.trim() && !(file && keepOriginal) && !(linkOnly && sourceUrl));
   return <View style={{ flex: 1, backgroundColor: t.bg, paddingBottom: keyboardOpen ? 0 : insets.bottom }}>
@@ -543,6 +567,19 @@ export function MemoryImportScreen() {
         <Text style={{ color: t.text, fontWeight: "700" }}>{linkOnly ? "Ссылка · без текста страницы" : "Источник · загружен"}</Text>
         <Text numberOfLines={2} selectable style={{ color: t.secondary, fontSize: 14 }}>{sourceUrl}</Text>
         {linkOnly ? <Text style={{ color: t.muted, fontSize: 13 }}>Содержание сайта не получено. Поиск сможет учитывать название и вашу заметку, но не текст статьи.</Text> : null}
+        {incoming && incomingLink && incomingLink.url===sourceUrl ? <>
+          <Text style={{color:t.muted,fontSize:13}}>
+            {incomingLink.platform==="telegram"?"Telegram":incomingLink.platform==="max"?"MAX":"Веб-ссылка"}
+            {" · "}{incomingLink.kind==="public_post_candidate"
+              ?"Формат публичного поста. Доступность и автор не проверены."
+              :"Сохранится только ссылка. Это не подтверждённый текст публикации."}
+          </Text>
+          {incomingLink.canFetch && linkOnly ?
+            <NebulaAction icon="download" label="Загрузить публичное содержимое"
+              size="compact" disabled={busy || preparing}
+              accessibilityLabel="Загрузить содержимое публичной ссылки после согласия"
+              onPress={()=>void readLink()} /> : null}
+        </> : null}
       </View> : null}
       {!file && extractedText ? <Text style={{ color: t.muted, fontSize: 12 }}>Выбранный источник: текст по ссылке</Text> : null}
       {preparing ? <ActivityIndicator accessibilityLabel="Подготовка входящего файла" /> : null}
