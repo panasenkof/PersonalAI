@@ -163,8 +163,7 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
       totalChars:verified.totalChars,hasMore:verified.hasMore,title:verified.title});
     return verified;
   };
-  const specs: ToolSpec[] = [
-    { definition:{name:"set_conversation_context",
+  const contextTool:ToolSpec = { definition:{name:"set_conversation_context",
       description:"Определить или исправить ТЕМУ и РАЗДЕЛ текущего диалога — не переносит, не сохраняет и не читает записи памяти. Вызывай при первой содержательной теме и при явном изменении темы/раздела, включая запрос пользователя исправить классификацию. Не вызывай из-за короткого уточнения. Раздел — только существующий slug; если не уверен, null. При закреплённом разделе менять можно только тему. Приложение покажет изменение в конце ответа ПОСЛЕ успешного сохранения истории, не повторяй статус в тексте.",
       parameters:{type:"object",properties:{
         topic:{type:"string",minLength:2,maxLength:80,description:"Короткое содержательное название темы на языке пользователя."},
@@ -179,8 +178,9 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
       contextCandidate=checked.candidate;
       return {status:"pending_conversation_commit",saved:false,sectionSlug:contextCandidate.sectionSlug,topic:contextCandidate.topic,
         memoryRecordChanged:false};
-    },verify:r=>r.status==="pending_conversation_commit"&&r.saved===false?"pending_confirmation":"failed" },
-
+    },verify:r=>r.status==="pending_conversation_commit"&&r.saved===false?"pending_confirmation":"failed" };
+  const specs: ToolSpec[] = [
+    ...(options.contextClassificationEnabled ? [contextTool] : []),
     { definition: { name: "search_local_notes", description: "Найти заметки на телефоне по 1–3 ключевым словам. Найденный фрагмент не является полным чтением записи.", parameters: queryParameters }, effect: "read",
       execute: async args => {
         const query = text(args.query, 120).trim();
