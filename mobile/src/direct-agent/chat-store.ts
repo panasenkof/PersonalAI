@@ -358,7 +358,7 @@ export class DirectChatStore {
           const active = this.snapshot.conversations.find(c => c.id === id);
           if (active && !aborter.signal.aborted) this.update(id, { taskState: mergeTaskReceipts(next, active.taskState) }, true);
         }, rewrite: true, signal: aborter.signal, onText, sections, context:current.context,
-        contextClassificationEnabled: !Boolean(internetPhotoId),
+        contextClassificationEnabled: !Boolean(internetPhotoId) && maxRequests >= 2,
         diagnostic: trace,
         lookup: query => searchApprovedNotes(this.profile, query),
         previewMove: async request => {
