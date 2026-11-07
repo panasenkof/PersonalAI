@@ -43,8 +43,10 @@ export async function classifyImportCollectionWithAgent(
   request: ImportClassificationRequest,
   runner: (options: DirectAgentOptions) => Promise<DirectResult> = runDirectAgent,
 ): Promise<ImportClassification | null> {
-  if (!request.explicitConsent || request.sensitivity !== "standard")
-    throw new Error("Нельзя отправлять личные материалы модели без отдельного разрешения.");
+  if (!request.explicitConsent)
+    throw new Error("Для передачи текста модели требуется отдельное разрешение.");
+  if (request.sensitivity !== "standard")
+    throw new Error("Личные материалы нельзя передавать модели для определения раздела.");
   if (!Number.isSafeInteger(request.modelCallLimit) || request.modelCallLimit < 2)
     throw new Error("Для определения раздела требуется до 2 обращений к модели. Проверьте лимит в настройках.");
   if (request.signal?.aborted) throw new Error("Определение раздела отменено.");
