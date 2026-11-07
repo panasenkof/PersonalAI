@@ -721,3 +721,76 @@ test("selection of an import connection is visibly highlighted but remains a dra
   expect(saveMediaNote).not.toHaveBeenCalled();
   expect(extractMedia).not.toHaveBeenCalled();
 });
+
+
+test('MSG-2.A: Android Share photo album and caption remain ONE unsaved memory draft', async () => {
+  const incoming = [
+    {shareType:'text',value:'Задание на завтра: страницы 24–25'},
+    {shareType:'image',value:'content://telegram/photo_a.jpg',mimeType:'image/jpeg'},
+    {shareType:'image',value:'content://telegram/photo_b.png',mimeType:'image/png'},
+  ];
+  mockParams={incoming};
+  const ui=render(<MemoryImportScreen/>);
+  await waitFor(()=>expect(ui.getByLabelText('Сведения из файла').props.value)
+    .toBe('Задание на завтра: страницы 24–25'));
+  expect(ui.getByText(/Файлов в одной заметке: 2/)).toBeTruthy();
+  expect(ui.queryByLabelText('Пропустить материал')).toBeNull();
+  expect(saveMediaNote).not.toHaveBeenCalled();
+  expect(importLink).not.toHaveBeenCalled();
+  fireEvent.press(ui.getByLabelText('Сохранить сведения в память'));
+  await waitFor(()=>expect(saveMediaNote).toHaveBeenCalledTimes(1));
+  expect(saveMediaNote).toHaveBeenCalledWith('guest',expect.objectContaining({
+    body:'Задание на завтра: страницы 24–25',sourceUrl:undefined,
+    receipt:JSON.stringify(incoming),
+    files:[
+      expect.objectContaining({name:'photo_a.jpg',mimeType:'image/jpeg'}),
+      expect.objectContaining({name:'photo_b.png',mimeType:'image/png'}),
+    ],
+  }),expect.anything());
+  await waitFor(()=>expect(mockBack).toHaveBeenCalledTimes(1));
+});
+
+test('MSG-2.A: mixed Share caption and one file become one note; never treats caption URL as verified provenance', async () => {
+  const incoming=[
+    {shareType:'url',value:'https://t.me/public_news/123'},
+    {shareType:'file',value:'content://telegram/lesson.pdf',mimeType:'application/pdf'},
+  ];
+  mockParams={incoming};
+  const ui=render(<MemoryImportScreen/>);
+  await waitFor(()=>expect(ui.getByLabelText('Сведения из файла').props.value)
+    .toBe(incoming[0].value));
+  expect(ui.queryByText('Ссылка · без текста страницы')).toBeNull();
+  expect(importLink).not.toHaveBeenCalled();
+  fireEvent.press(ui.getByLabelText('Сохранить сведения в память'));
+  await waitFor(()=>expect(saveMediaNote).toHaveBeenCalledTimes(1));
+  expect(saveMediaNote).toHaveBeenCalledWith('guest',expect.objectContaining({
+    body:incoming[0].value,sourceUrl:undefined,
+    file:expect.objectContaining({name:'lesson.pdf'}),
+    receipt:JSON.stringify(incoming),
+  }),expect.anything());
+});
+
+test('MSG-2.A: album above 10 originals fails closed without incomplete note', async () => {
+  mockParams={incoming:Array.from({length:11},(_,i)=>({
+    shareType:'image',value:'content://telegram/photo_'+i+'.jpg',mimeType:'image/jpeg',
+  }))};
+  const ui=render(<MemoryImportScreen/>);
+  await waitFor(()=>expect(ui.getByText(/Не более 10 файлов/)).toBeTruthy());
+  expect(saveMediaNote).not.toHaveBeenCalled();
+  expect(ui.getByLabelText('Сохранить сведения в память').props.accessibilityState.disabled).toBe(true);
+  expect(mockIncomingDelete).toHaveBeenCalled();
+});
+
+test('MSG-2.A: failed second album copy rolls back the whole staged preview', async () => {
+  const fs=require('expo-file-system/legacy');
+  fs.copyAsync.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('content://provider/private'));
+  mockParams={incoming:[
+    {shareType:'image',value:'content://telegram/one.jpg',mimeType:'image/jpeg'},
+    {shareType:'image',value:'content://telegram/two.jpg',mimeType:'image/jpeg'},
+  ]};
+  const ui=render(<MemoryImportScreen/>);
+  await waitFor(()=>expect(mockIncomingDelete.mock.calls.length).toBeGreaterThanOrEqual(2));
+  expect(ui.getByLabelText('Сохранить сведения в память').props.accessibilityState.disabled).toBe(true);
+  expect(saveMediaNote).not.toHaveBeenCalled();
+  expect(JSON.stringify(ui.toJSON())).not.toContain('content://provider/private');
+});
