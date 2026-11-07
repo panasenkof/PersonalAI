@@ -321,11 +321,14 @@ export class DirectChatStore {
       modelStarted = true;
       const articleSelection=[...current.rows].reverse().find(row=>
         row.role==="assistant" && row.articlePage?.selected?.length)?.articlePage;
+      // Do not reuse an obsolete cursor if a newer article page has already
+      // exhausted the selection. An explicit button can pin its own row.
+      const latestArticleRow=[...current.rows].reverse().find(row=>
+        row.role==="assistant" && row.articlePage);
       const articleContinuation=(intent?.articleRowId
         ? current.rows.find(row=>row.id===intent.articleRowId &&
           row.role==="assistant" && row.articlePage?.nextCursor)
-        : [...current.rows].reverse().find(row=>
-          row.role==="assistant" && row.articlePage?.nextCursor))?.articlePage;
+        : latestArticleRow?.articlePage?.nextCursor ? latestArticleRow : undefined)?.articlePage;
       const agentOptions: Parameters<typeof runDirectAgent>[0] = { settings, maxRequests, prompt, attachments, skipLocalMemory:Boolean(internetPhotoId), history:privatePhoto ? history.map(turn=>({...turn,attachments:undefined})) : history, previousSources, taskState, pendingNotes: internetPhotoId ? [] : current.drafts,
         photoQueryAvailable:Boolean(privatePhoto),
         ...(!internetPhotoId && articleContinuation ? {articleContinuation} : {}),
@@ -448,13 +451,15 @@ export class DirectChatStore {
         // stops precisely when the needed fragment has arrived.
         const aborted = aborter.signal.aborted;
         const partial = aborted ? latest.trim() : "";
+        const errorRowId=Crypto.randomUUID();
         this.update(id, {
+          retryPhoto:privatePhoto?{rowId:errorRowId,image:privatePhoto}:undefined,
           taskState: { ...(c.taskState || taskState), turnStatus: "interrupted" },
           ...(!internetPhotoId && !intent?.preserveDraft && !modelStarted && !aborted
             ? { question: c.question || prompt, attachments:draftFiles } : {}),
           rows: [...c.rows,
             ...(partial ? [{ id: Crypto.randomUUID(), role: "assistant" as const, text: partial }] : []),
-            { id: Crypto.randomUUID(), role: "info", ...(aborted ? {} : { error: true as const }),
+            { id: errorRowId, role: "info", ...(aborted ? {} : { error: true as const }),
               text: aborted ? (partial ? "Ответ остановлен" : "Запрос остановлен") : !modelStarted ? beforeModelError : String((e as Error).message) }],
         });
       }
