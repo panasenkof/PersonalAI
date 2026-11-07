@@ -31,7 +31,7 @@ jest.mock("../../local-memory/storage", () => ({ onLocalMemorySessionChange: (fn
 jest.mock('../../direct-agent/agent-preferences',()=>({loadModelCallLimit:jest.fn(async()=>4)}));
 jest.mock('../import-llm-classifier',()=>({
   classifyImportCollectionWithAgent:jest.fn(async()=>null),
-  classificationExcerpt:(body:string,text:string)=>({substantive:(body+' '+text).replace(/\\bhttps?:\\/\\/\\S+/g,'').trim().length>=8}),
+  classificationExcerpt:(body:string,text:string)=>({substantive:(body+' '+text).trim().length>=8}),
 }));
 jest.mock('../../local-memory/repository', () => ({ localMemoryRepository: async () => ({}) }));
 jest.mock('../../local-memory/sections', () => ({ ensureSections: jest.fn(async () => [{ id: 'notes', name: 'Заметки', slug: 'notes', sensitivity: 'standard' }]) }));
