@@ -4,8 +4,30 @@ import { publicImportUrl } from "./link-import";
 /** Source evidence in the canonical note payload; not an upstream revision ID. */
 export type SourceCoverage =
   "url_only" | "telegram_post_text_only" | "web_text_unverified" | "file_downloaded";
+/** An observed local text snapshot after exact data-post HTML matching.
+ * Not a remote revision/edit timestamp, identity of an author or authenticity signature. */
+export type TelegramTextObservation = {
+  messageKey: string;
+  textSha256: string;
+  textLength: number;
+  evidence: "telegram_html_data_post_v1";
+};
+export function validTelegramTextObservation(sourceUrl: unknown, coverage: unknown, value: unknown):
+  value is TelegramTextObservation {
+  if (typeof sourceUrl !== "string" || coverage !== "telegram_post_text_only" ||
+      !value || typeof value !== "object" || Array.isArray(value)) return false;
+  const v=value as Record<string,unknown>;
+  const source=sharedLinkPreview({shareType:"url",value:sourceUrl});
+  return source?.platform === "telegram" && source.kind === "public_post_candidate" &&
+    typeof v.messageKey === "string" && source.messageKey?.toLowerCase() === v.messageKey.toLowerCase() &&
+    v.evidence === "telegram_html_data_post_v1" &&
+    typeof v.textSha256 === "string" && /^[a-f0-9]{64}$/.test(v.textSha256) &&
+    Number.isSafeInteger(v.textLength) && Number(v.textLength)>0 && Number(v.textLength)<=60_000 &&
+    Object.keys(v).length === 4;
+}
 export type SourceProvenanceInput = {
   sourceUrl?: unknown; coverage?: unknown; sourceRef?: unknown;
+  observation?: unknown;
   publicationDate?: unknown; publicationEvidence?: unknown;
   publicationAttribute?: unknown;
 };
@@ -48,8 +70,14 @@ export function describeSourceProvenance(input: SourceProvenanceInput): SourcePr
   const coverage = validSourceCoverage(input.coverage) ? input.coverage : undefined;
   const verifiedPostText = coverage === "telegram_post_text_only" &&
     preview?.platform === "telegram" && preview.kind === "public_post_candidate";
+  const observation = verifiedPostText &&
+    validTelegramTextObservation(url,coverage,input.observation)
+      ? input.observation : null;
   const details = verifiedPostText ?
-    "Прочитан текст именно этого публичного поста Telegram. Фото, видео, другие вложения, автор, дата и версия не подтверждены." :
+    "Прочитан текст именно этого публичного поста Telegram. Фото, видео, другие вложения, автор, дата и версия не подтверждены." +
+    (observation ? " ID сообщения по data-post: " + observation.messageKey +
+      ". Отпечаток полученного текста SHA-256: " + observation.textSha256.slice(0,12) +
+      "… (локальный снимок, не версия Telegram)." : "") :
     coverage === "file_downloaded" ?
       "Файл скачан по этому адресу. Автор, дата и версия материала не подтверждены." :
     coverage === "web_text_unverified" ?
