@@ -49,7 +49,7 @@ test("MSG-6.C2: existing context tool is the ONLY registered action; no files, w
 test("MSG-6.C2: without separate consent or with sensitive source NO model network request",async()=>{
   const runner=jest.fn().mockResolvedValue(candidate());
   await expect(classifyImportCollectionWithAgent({...request(),explicitConsent:false},runner))
-    .rejects.toThrow("разрешения");
+    .rejects.toThrow("разрешени");
   await expect(classifyImportCollectionWithAgent({...request(),sensitivity:"sensitive"},runner))
     .rejects.toThrow("Личные");
   await expect(classifyImportCollectionWithAgent({...request(),modelCallLimit:1},runner))
