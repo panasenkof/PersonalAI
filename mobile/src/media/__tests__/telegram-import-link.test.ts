@@ -97,7 +97,7 @@ test("MSG-1: fake login/JS channel page cannot become a saved post",async()=>{
 test("MSG-1: non-HTML response is not treated as post bytes or stored file",async()=>{
   serve("not a post","application/json");
   await expect(importLink("https://t.me/public_news/42"))
-    .rejects.toThrow("Telegram не вернул HTML");
+    .rejects.toThrow("Публичный пост Telegram не вернул проверяемый HTML");
   expect(mockDelete).not.toHaveBeenCalled();
 });
 test("MSG-1: exact message may be media only; no fallthrough to next text",async()=>{
