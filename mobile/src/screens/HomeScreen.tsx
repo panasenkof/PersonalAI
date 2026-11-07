@@ -467,7 +467,7 @@ function NebulaHomeContent() {
             <Text style={{color:t.muted}}>«{item.moveReceipt.title}»:
               «{item.moveReceipt.fromName}» → «{item.moveReceipt.toName}»</Text>
             {!item.moveReceipt.undone ?
-              <NebulaAction icon="undo-2" label={active?.movingRowId===item.id?"Отмена…":"Отменить перенос"}
+              <NebulaAction icon="rotate-ccw" label={active?.movingRowId===item.id?"Отмена…":"Отменить перенос"}
                 size="compact" disabled={busy || Boolean(active?.movingRowId)}
                 onPress={()=>void store.undoConfirmedMove(item.id)} /> : null}
           </View> : null}
