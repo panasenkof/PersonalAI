@@ -168,19 +168,21 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByLabel('Сообщение ассистенту', { exact: true }).waitFor();
       const prompt = page.getByLabel('Сообщение ассистенту', { exact: true });
       assert.equal(await page.getByLabel('Очистить сообщение', { exact: true }).count(), 0);
-      // A plain photo description suggests an explicit *local* search, not an
-      // automatic request. Its action must look like a real Nebula button.
+      // A photo description is a normal LLM message. No extra hidden
+      // local-search shortcut or paid request occurs until the user taps Send.
       await prompt.fill('фото красного велосипеда');
-      const suggestPhoto = page.getByLabel('Поискать в моих фото', {exact:true});
-      await suggestPhoto.waitFor();
-      const photoActionBox = await suggestPhoto.boundingBox();
-      const photoActionBorder = await suggestPhoto.evaluate(el => parseFloat(getComputedStyle(el).borderTopWidth));
-      assert(photoActionBox && photoActionBox.height >= 48 && photoActionBorder >= 1 &&
-        photoActionBox.x >= 0 && photoActionBox.x + photoActionBox.width <= width,
-        'Suggested local photo search must be a visible, reachable action');
-      assert.equal(replyNumber,0,'Typing a photo description never silently sends a network request');
+      assert.equal(await page.getByLabel('Поискать в моих фото', {exact:true}).count(),0,
+        'There must be no duplicate direct local photo-search button');
+      const agentSend=page.getByLabel('Отправить запрос', {exact:true});
+      const sendPhotoBox=await agentSend.boundingBox();
+      assert(sendPhotoBox && sendPhotoBox.height >= 44 &&
+        sendPhotoBox.x >= 0 && sendPhotoBox.x + sendPhotoBox.width <= width,
+        'Photo intent uses the same accessible chat Send button');
+      assert.equal(await agentSend.isDisabled(),false,
+        'Configured LLM should accept a photo-search description');
+      assert.equal(replyNumber,0,'Typing a photo description never silently sends a paid model request');
       if (process.env.SCREENSHOT_DIR) await page.screenshot({animations:'disabled',
-        path:path.join(process.env.SCREENSHOT_DIR,`chat-photo-suggestion-${width}.png`)});
+        path:path.join(process.env.SCREENSHOT_DIR,`chat-photo-agent-route-${width}.png`)});
       await prompt.fill('');
 
       const showShare = async payloads => {
