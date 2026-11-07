@@ -25,6 +25,7 @@ test("MSG-6.C1: existing collection name in caption is sufficient when unambiguo
 
 test("MSG-6.C1: untrusted hashtags cannot pick a private collection or auto-create a section", () => {
   expect(suggestIncomingCollection("#Документы номер паспорта", collections)).toBeNull();
+  expect(suggestIncomingCollection("#Документы #рецепты", collections)).toBeNull();
   expect(suggestIncomingCollection("#периметр описание", collections)).toBeNull();
   expect(suggestIncomingCollection("#Входящие получение", collections)).toBeNull();
 });
@@ -37,6 +38,7 @@ test("MSG-6.C1: two matching tags or two matching section names are ambiguous", 
 
 test("MSG-6.C1: URL fragments are not treated as a user hashtag", () => {
   expect(suggestIncomingCollection("https://example.org/page#рецепты", collections)).toBeNull();
+  expect(suggestIncomingCollection("tg://resolve?domain=recipes#авто", collections)).toBeNull();
   expect(suggestIncomingCollection("https://example.org/#авто комментарий #работа", collections))
     .toMatchObject({ collectionId: "work", evidence: "hashtag" });
 });
