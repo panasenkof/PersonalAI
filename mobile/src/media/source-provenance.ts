@@ -59,7 +59,7 @@ export function describeSourceProvenance(input: SourceProvenanceInput): SourcePr
         ? "Формат публичного поста. Доступность и автор не проверены. Сохранится только ссылка."
         : preview?.platform === "max"
           ? "Сохранится только ссылка. Это не подтверждённый текст публикации."
-          : "Сохранится только ссылка. Содержание сайта не получено.") :
+          : "Сохранится только ссылка — это не текст статьи. Содержание сайта не получено.") :
     "Сохранён URL источника. Доказательств чтения его содержимого в этой записи нет.";
   // HTML page-level dates are never used for a particular Telegram message.
   const publication = preview?.platform !== "telegram" &&
