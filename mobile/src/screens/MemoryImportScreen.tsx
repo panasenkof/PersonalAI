@@ -355,9 +355,11 @@ export function MemoryImportScreen() {
       else { setFiles([]); setExtractedText(result.text || ""); setKeepOriginal(false); setTitle(result.title || "Материал по ссылке"); }
       setRecognitionResults([]);
       setLinkOnly(false); setPublicationClaim(result.publicationClaim || null); setSourceUrl(result.source); setLinkDraft(result.source); setSourcePickerOpen(false); setProcessingOptionsOpen(false);
-      if (result.text) setNotice((result.partial
-        ? "Получен фрагмент страницы: разметка обрывается. Проверьте текст перед сохранением."
-        : "Текст страницы извлечён. Проверьте заголовки и полноту: сайт мог предоставить только часть статьи.") +
+      if (result.text) setNotice((result.textCoverage === "telegram_post_text_only"
+        ? "Текст именно этого сообщения Telegram найден в публичном HTML. Фото, видео, вложения, автор и дата не подтверждены и не загружены. Сохранится только доступный текст и ссылка."
+        : result.partial
+          ? "Получен фрагмент страницы: разметка обрывается. Проверьте текст перед сохранением."
+          : "Текст страницы извлечён. Проверьте заголовки и полноту: сайт мог предоставить только часть статьи.") +
           (result.publicationClaim ? " Дата публикации по метаданным сайта: " + result.publicationClaim.date + " (не проверена независимо)." : ""));
     } catch (e) { if (alive.current) setNotice(linkImportErrorMessage(e)); }
     finally { if (controller.current === aborter) controller.current = null; if (alive.current) setBusy(false); }
