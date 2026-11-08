@@ -144,12 +144,53 @@ jobs:
         run: |
           node node_modules/react-native-executorch/scripts/download-libs.js
           test -s node_modules/react-native-executorch/third-party/android/libs/executorch.jar
-      - name: Install isolated Gradle 8.13 for Kotlin 2.4 vision producer
+      - name: Install checksum-verified Gradle 8.13 for Kotlin 2.4 vision producer
         if: ${{ inputs.vision_expo_gate }}
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: "8.13"
-          cache-disabled: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Preserve the already configured trusted Gradle cache. Provision the
+          # pinned distribution independently of setup-gradle's single CDN URL.
+          # Official release SHA: https://gradle.org/release-checksums/
+          sha="20f1b1176237254a6fc204d8434196fa11a4cfb387567519c61556e8710aed78"
+          zip="$RUNNER_TEMP/gradle-8.13-bin.zip"
+          installed=0
+          for url in \
+            "https://downloads.gradle.org/distributions/gradle-8.13-bin.zip" \
+            "https://services.gradle.org/distributions/gradle-8.13-bin.zip" \
+            "https://github.com/gradle/gradle-distributions/releases/download/v8.13.0/gradle-8.13-bin.zip"; do
+            rm -f "$zip"
+            if curl --fail --location --retry 2 --retry-all-errors --retry-delay 2 \
+              --connect-timeout 20 --max-time 180 --output "$zip" "$url" &&
+              printf '%s  %s\n' "$sha" "$zip" | sha256sum --check --status; then
+              installed=1
+              break
+            fi
+            echo "::warning::Gradle 8.13 unavailable or digest mismatch at $url; trying next official host"
+          done
+          if [ "$installed" -eq 1 ]; then
+            unzip -q "$zip" -d "$RUNNER_TEMP"
+            test -x "$RUNNER_TEMP/gradle-8.13/bin/gradle"
+            "$RUNNER_TEMP/gradle-8.13/bin/gradle" --version | grep 'Gradle 8.13'
+            echo "$RUNNER_TEMP/gradle-8.13/bin" >> "$GITHUB_PATH"
+          else
+            # Last resort: reuse Gradle 9.3.1 from trusted main's restored
+            # wrapper cache. Kotlin Gradle Plugin 2.4.21 supports Gradle 9.3.1,
+            # and AGP 8.13 requires >=8.13. Do not fetch an unknown version.
+            # The following :probe:assembleDebug AND signed Expo APK/ABI AND
+            # Android smoke gates remain mandatory; compatibility is proved by
+            # those builds, never inferred from a version number alone.
+            cached="$(find "$HOME/.gradle/wrapper/dists/gradle-9.3.1-bin" \
+              -type f -path '*/gradle-9.3.1/bin/gradle' -print -quit 2>/dev/null || true)"
+            if [ -z "$cached" ] || [ ! -x "$cached" ]; then
+              echo "::error::No verified Gradle 8.13 or trusted cached Gradle 9.3.1; cannot run native CI"
+              exit 1
+            fi
+            "$cached" --version | grep 'Gradle 9.3.1'
+            echo "::warning::Official Gradle 8.13 hosts unavailable; using trusted cached Gradle 9.3.1 for full Kotlin/Android gates"
+            echo "$(dirname "$cached")" >> "$GITHUB_PATH"
+          fi
+          rm -f "$zip"
       - name: Stage offline vision AAR and Java ABI for Expo compatibility gate
         if: ${{ inputs.vision_expo_gate }}
         env:
@@ -259,11 +300,39 @@ jobs:
             echo "::error::Insufficient disk for Android emulator + PDF Gradle test (5 GiB required)"
             exit 1
           fi
-      - name: Install pinned Maestro CLI
+      - name: Install checksum-verified pinned Maestro CLI
+        shell: bash
         run: |
-          curl --fail --location --retry 3 -o "$RUNNER_TEMP/maestro.zip" "https://github.com/mobile-dev-inc/maestro/releases/download/cli-${MAESTRO_VERSION}/maestro.zip"
-          unzip -q "$RUNNER_TEMP/maestro.zip" -d "$RUNNER_TEMP/maestro-cli"
+          set -euo pipefail
+          test "$MAESTRO_VERSION" = "2.0.10" || {
+            echo "::error::Update the pinned Maestro SHA when upgrading the CLI"; exit 1;
+          }
+          # GitHub release asset digest, not a checksum from a third-party host.
+          # https://github.com/mobile-dev-inc/Maestro/releases/tag/cli-2.0.10
+          sha="dbdcfbe2b673e1a6f40c65664f1ed5becad0b0a40e35d0e203dff511d05032f6"
+          zip="$RUNNER_TEMP/maestro.zip"
+          installed=0
+          for url in \
+            "https://github.com/mobile-dev-inc/Maestro/releases/download/cli-${MAESTRO_VERSION}/maestro.zip" \
+            "https://api.github.com/repos/mobile-dev-inc/Maestro/releases/assets/315856532"; do
+            rm -f "$zip"
+            if curl --fail --location --retry 3 --retry-all-errors --retry-delay 2 \
+              --connect-timeout 20 --max-time 240 --header 'Accept: application/octet-stream' \
+              --output "$zip" "$url" &&
+              printf '%s  %s\n' "$sha" "$zip" | sha256sum --check --status; then
+              installed=1
+              break
+            fi
+            echo "::warning::Maestro release unavailable or digest mismatch at $url; trying next official endpoint"
+          done
+          if [ "$installed" -ne 1 ]; then
+            echo "::error::Maestro CLI 2.0.10 unavailable or checksum invalid"
+            exit 1
+          fi
+          unzip -q "$zip" -d "$RUNNER_TEMP/maestro-cli"
+          test -x "$RUNNER_TEMP/maestro-cli/maestro/bin/maestro"
           echo "$RUNNER_TEMP/maestro-cli/maestro/bin" >> "$GITHUB_PATH"
+          rm -f "$zip"
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
