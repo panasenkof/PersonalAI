@@ -2035,3 +2035,22 @@ test("MSG-6.C8: an incomplete new Share journal is not misclassified as legacy",
   await expect(repo.undoNotes(token)).rejects.toThrow("merge_undo_source_changed");
   expect((await repo.entity(b.id))?.record_status).toBe("superseded");
 });
+
+test("MSG-6.C8: user-owned aliases, manual search terms and protected sources cannot be silently superseded",async()=>{
+  const db=new FakeSqlite(),repo=new SqliteMemoryRepository(db as never);
+  const col=await repo.createCollection({name:"Users",slug:"alias-guard-msg6c8"});
+  const a=await repo.createEntity({collection_id:col.id,domain:"notes",payload:{body:"A"}});
+  const b=await repo.createEntity({collection_id:col.id,domain:"notes",payload:{body:"B"}});
+  await db.runAsync("INSERT INTO memory_aliases(entity_id,alias,normalized) VALUES (?,?,?)",
+    [b.id,"Завещание","завещание"]);
+  await expect(repo.changeNotes("merge",[a,b])).rejects.toThrow("merge_source_has_links_review_required");
+  await db.runAsync("DELETE FROM memory_aliases WHERE entity_id=?",[b.id]);
+  await db.runAsync("INSERT INTO memory_index_terms(entity_id,terms,source,created_at) VALUES (?,?,?,?)",
+    [b.id,"страховка","user","now"]);
+  await expect(repo.changeNotes("merge",[a,b])).rejects.toThrow("merge_source_has_links_review_required");
+  await db.runAsync("DELETE FROM memory_index_terms WHERE entity_id=?",[b.id]);
+  await db.runAsync("INSERT INTO memory_cleanup_preferences(entity_id,guard,version,updated_at) VALUES (?,?,?,?)",
+    [b.id,"pinned",1,"now"]);
+  await expect(repo.changeNotes("merge",[a,b])).rejects.toThrow("merge_source_has_links_review_required");
+  expect((await repo.entity(b.id))?.record_status).toBe("active");
+});
