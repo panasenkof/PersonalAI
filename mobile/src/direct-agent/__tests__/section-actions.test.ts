@@ -17,13 +17,13 @@ class SqliteAdapter {
   constructor(){this.db.exec(SCHEMA_SQL);this.db.exec("PRAGMA foreign_keys=ON");}
   async execAsync(sql:string){this.db.exec(sql);}
   async getFirstAsync<T>(sql:string,params:unknown[]=[]):Promise<T|null>{
-    return (this.db.prepare(sql).get(...params) as T)??null;
+    return (this.db.prepare(sql).get(...(params as any[])) as T)??null;
   }
   async getAllAsync<T>(sql:string,params:unknown[]=[]):Promise<T[]>{
-    return this.db.prepare(sql).all(...params) as T[];
+    return this.db.prepare(sql).all(...(params as any[])) as T[];
   }
   async runAsync(sql:string,params:unknown[]=[]){
-    const result=this.db.prepare(sql).run(...params);
+    const result=this.db.prepare(sql).run(...(params as any[]));
     return {changes:Number(result.changes)};
   }
 }
