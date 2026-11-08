@@ -7,6 +7,7 @@ import type { TaskState } from "./task-state";
 import type { ArticleCoverageStatus } from "./article-read-coverage";
 import { restoredProposal } from "./fact-tool";
 import { validMoveProposal, validMoveReceipt, type ChatMoveProposal, type ChatMoveReceipt } from "./move-proposal";
+import { validSectionProposal, validSectionReceipt, type ChatSectionProposal, type ChatSectionReceipt } from "./section-actions";
 
 /** `memory`: records the answer used, with how each was found («Из памяти»). */
 export type ChatMemoryRef = { id: string; title: string; section?: string; via: "search" | "rewrite" | "assistant"; photo?: boolean; photoAttachmentId?: string };
@@ -36,7 +37,8 @@ export type ChatArticleReadReport = {
 export type ChatRow = { id: string; role: "user" | "assistant" | "info"; text: string; error?: boolean; photoAction?: "model" | "import" | "prepare"; sources?: string[]; memory?: ChatMemoryRef[]; attachments?: ChatAttachment[]; dialogueSummary?: DialogueSummaryOrigin; articlePage?: ChatArticlePage; articleReadReport?: ChatArticleReadReport;
   /** Only one of these can exist on an assistant row; authorizations always
    * re-check CURRENT SQLCipher record and collection ACL on the user's click. */
-  moveProposal?: ChatMoveProposal; moveReceipt?: ChatMoveReceipt; contextChange?: ContextChange };
+  moveProposal?: ChatMoveProposal; moveReceipt?: ChatMoveReceipt;
+  sectionProposal?: ChatSectionProposal; sectionReceipt?: ChatSectionReceipt; contextChange?: ContextChange };
 const VIA = new Set(["search", "rewrite", "assistant"]);
 export type ChatDraft = NoteProposal & { id: string };
 export type SavedConversation = {
@@ -163,12 +165,17 @@ export function parseConversation(json: string): SavedConversation | null {
         firstRowId:d.firstRowId,lastRowId:d.lastRowId,
         model:d.model,provider:d.provider,createdAt:d.createdAt,
       } : undefined;
+    const sectionProposal=r.role==="assistant"&&validSectionProposal(r.sectionProposal)
+      ? {...r.sectionProposal} as ChatSectionProposal : undefined;
+    const sectionReceipt=r.role==="assistant"&&!sectionProposal&&validSectionReceipt(r.sectionReceipt)
+      ? {...r.sectionReceipt} as ChatSectionReceipt : undefined;
     const moveProposal=r.role==="assistant"&&validMoveProposal(r.moveProposal)
       ? {...r.moveProposal} as ChatMoveProposal : undefined;
     const moveReceipt=r.role==="assistant"&&!moveProposal&&validMoveReceipt(r.moveReceipt)
       ? {...r.moveReceipt} as ChatMoveReceipt : undefined;
     return [{ id: r.id, role: r.role, text: r.text, ...(r.error === true && r.role === "info" ? { error: true } : {}), ...(["model","import","prepare"].includes(r.photoAction) ? {photoAction:r.photoAction} : {}), ...(r.attachments?.length ? {attachments:checkedChatAttachments(r.attachments)} : {}), ...(sources?.length ? { sources } : {}), ...(memory?.length ? { memory } : {}), ...(articlePage ? {articlePage} : {}), ...(articleReadReport ? {articleReadReport} : {}), ...(dialogueSummary ? {dialogueSummary} : {}),
       ...(moveProposal?{moveProposal}:{}),...(moveReceipt?{moveReceipt}:{}),
+      ...(sectionProposal?{sectionProposal}:{}),...(sectionReceipt?{sectionReceipt}:{}),
       ...(r.role === "assistant" && parseContextChange(r.contextChange) ? {contextChange:parseContextChange(r.contextChange)} : {}) }];
   });
   const drafts: ChatDraft[] = (Array.isArray(value.drafts) ? value.drafts : []).filter((d: any) =>
