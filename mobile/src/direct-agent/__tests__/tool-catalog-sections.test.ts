@@ -74,3 +74,34 @@ test("invalid, injected or incomplete section arguments never reach the preview 
   ])expect(await catalog.run("propose_delete_memory_section",bad)).toHaveProperty("error");
   expect(preview).not.toHaveBeenCalled();
 });
+
+
+test("section proposals and receipts survive encrypted conversation JSON reload",()=>{
+  const {parseConversation}=require("../conversations") as typeof import("../conversations");
+  const proposal:ChatSectionProposal={kind:"delete",id:"id-old",slug:"section-old",
+    name:"Устаревшее",parentId:null,parentName:null,createdAt:"2026-11-08T12:00:00.000Z",
+    reason:"Пользователь просит убрать",recordCount:0,childCount:0};
+  const base={id:"conversation",title:"Разделы",createdAt:"2026-11-08T12:00:00.000Z",
+    updatedAt:"2026-11-08T12:00:00.000Z",question:"",drafts:[]};
+  const rows=[
+    {id:"proposed",role:"assistant",text:"Нужно подтвердить",sectionProposal:proposal},
+    {id:"done",role:"assistant",text:"Удалено",sectionReceipt:{
+      kind:"delete",id:"id-old",slug:"section-old",name:"Устаревшее",parentName:null,verified:true}},
+    {id:"tampered",role:"assistant",text:"Пример",sectionProposal:{...proposal,recordCount:1}},
+  ];
+  const loaded=parseConversation(JSON.stringify({...base,rows}));
+  expect(loaded?.rows[0].sectionProposal).toEqual(proposal);
+  expect(loaded?.rows[1].sectionReceipt).toMatchObject({kind:"delete",verified:true});
+  expect(loaded?.rows[2].sectionProposal).toBeUndefined();
+});
+
+test("model receives a safe reason when requested section is nonempty",async()=>{
+  const preview=jest.fn(async()=>{
+    throw new Error("section_not_empty");
+  });
+  const {catalog}=options({previewSectionAction:preview});
+  expect(await catalog.run("propose_delete_memory_section",{
+    sectionSlug:"section-old",reason:"Пользователь просит удалить",
+  })).toEqual({error:"section_not_empty"});
+  expect(catalog.finish().sectionProposal).toBeUndefined();
+});
