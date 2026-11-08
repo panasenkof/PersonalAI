@@ -13,6 +13,7 @@ import { savedArticleToolIntent, savedAiArticlePageIntent } from "./article-sele
 import type { SavedArticleIntent } from "./article-selection";
 import type { ChatArticlePage, ChatMemoryRef } from "./conversations";
 import { validMoveProposal, type ChatMoveProposal } from "./move-proposal";
+import { validSectionProposal, type ChatSectionProposal } from "./section-actions";
 import { createArticleReadCoverage } from "./article-read-coverage";
 import { validateContextCandidate, type ContextCandidate } from "./conversation-context";
 
@@ -40,6 +41,7 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
   }
   notes.forEach(admitMoveHandle);
   let movePreview:ChatMoveProposal|undefined;
+  let sectionPreview:ChatSectionProposal|undefined;
   let contextCandidate:ContextCandidate|undefined;
   // Derived from this turn's ACL/version-checked reads; NEVER persisted as source truth.
   const articleCoverage = createArticleReadCoverage();
@@ -635,6 +637,60 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
       verify:(r:Record<string,unknown>)=>r.status==="awaiting_user_confirmation" &&
         r.saved===false && r.requiresUserTap===true ? "pending_confirmation" as const : "failed" as const,
     }] : []),
+    // SAME canonical chat ToolSpec registry as memory search, note drafts and moves.
+    // The model never executes a section write: it only stages a card for a user tap.
+    ...(options.previewSectionAction && !options.skipLocalMemory ? [{
+      definition:{name:"propose_create_memory_section",
+        description:"Предложить создание нового раздела или подраздела памяти. parentSlug = slug существующего обычного родителя либо null для корня. Называй только последний уровень, не путь. После вызова появится карточка подтверждения; не утверждай, что раздел создан.",
+        parameters:{type:"object",properties:{
+          name:{type:"string",minLength:1,maxLength:80},
+          parentSlug:{type:["string","null"],description:"Точный slug родительского раздела либо null. Доступные: "+(options.sections||[]).map(s=>s.slug+"="+(s.path||s.name)).join("; ")},
+          reason:{type:"string",minLength:5,maxLength:240},
+        },required:["name","parentSlug","reason"],additionalProperties:false}},
+      effect:"proposal" as const,
+      execute:async(args:Record<string,unknown>)=>{
+        if(sectionPreview)return {error:"section_action_already_proposed_this_turn"};
+        const request={kind:"create",...args};
+        if(Object.keys(args).sort().join(",")!=="name,parentSlug,reason" ||
+           typeof args.name!=="string"||!args.name.trim()||args.name.length>80 ||
+           /[\/\r\n]/.test(args.name) ||
+           !(args.parentSlug===null || (typeof args.parentSlug==="string" && /^[a-z][a-z0-9_-]{0,63}$/.test(args.parentSlug))) ||
+           typeof args.reason!=="string"||args.reason.trim().length<5||args.reason.length>240)
+          return {error:"invalid_section_action_args"};
+        const proposed=await options.previewSectionAction!(request as Parameters<NonNullable<DirectAgentOptions["previewSectionAction"]>>[0]);
+        if(!validSectionProposal(proposed)||proposed.kind!=="create"||proposed.name!==args.name.trim())
+          return {error:"invalid_section_preview"};
+        sectionPreview=proposed;
+        return {status:"awaiting_user_confirmation",saved:false,requiresUserTap:true,
+          action:"create",name:proposed.name,parent:proposed.parentName};
+      },
+      verify:(v:Record<string,unknown>)=>v.status==="awaiting_user_confirmation"&&v.saved===false&&
+        v.requiresUserTap===true?"pending_confirmation" as const:"failed" as const,
+    },{
+      definition:{name:"propose_delete_memory_section",
+        description:"Предложить удаление существующего ПУСТОГО пользовательского обычного раздела. Только точный sectionSlug; удаление заблокировано для системных, защищённых разделов, разделов с записями (включая архив/корзину) или вложенными разделами. Не вызывай для очистки содержимого. Никогда не удаляй без отдельного подтверждения пользователя.",
+        parameters:{type:"object",properties:{
+          sectionSlug:{type:"string",minLength:1,maxLength:64,description:"Точный slug раздела; доступные: "+(options.sections||[]).map(s=>s.slug+"="+(s.path||s.name)).join("; ")},
+          reason:{type:"string",minLength:5,maxLength:240},
+        },required:["sectionSlug","reason"],additionalProperties:false}},
+      effect:"proposal" as const,
+      execute:async(args:Record<string,unknown>)=>{
+        if(sectionPreview)return {error:"section_action_already_proposed_this_turn"};
+        if(Object.keys(args).sort().join(",")!=="reason,sectionSlug" ||
+           typeof args.sectionSlug!=="string"||!/^[a-z][a-z0-9_-]{0,63}$/.test(args.sectionSlug) ||
+           typeof args.reason!=="string"||args.reason.trim().length<5||args.reason.length>240)
+          return {error:"invalid_section_action_args"};
+        const proposed=await options.previewSectionAction!({kind:"delete",sectionSlug:args.sectionSlug,reason:args.reason});
+        if(!validSectionProposal(proposed)||proposed.kind!=="delete"||proposed.slug!==args.sectionSlug)
+          return {error:"invalid_section_preview"};
+        sectionPreview=proposed;
+        return {status:"awaiting_user_confirmation",saved:false,requiresUserTap:true,
+          action:"delete",name:proposed.name,parent:proposed.parentName,
+          recordCount:0,childCount:0};
+      },
+      verify:(v:Record<string,unknown>)=>v.status==="awaiting_user_confirmation"&&v.saved===false&&
+        v.requiresUserTap===true?"pending_confirmation" as const:"failed" as const,
+    }] : []),
     { definition: { name: FACT_TOOL_NAME, description: FACT_TOOL_DESCRIPTION, parameters: factToolParameters(options.sections) }, effect: "proposal",
       execute: async args => {
         const proposal = factProposal(args, options.sections);
@@ -778,7 +834,7 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
     options.diagnostic?.("tool.outcome_verified", { name: canonical, effect: spec?.effect || "unknown", outcome });
     return { ...result, ...(outcome !== "failed" ? { outcome } : {}) };
   }
-  function finish(): Pick<DirectResult, "taskState" | "proposalIds" | "articlePage" | "articleReadReport" | "photoAction" | "moveProposal" | "contextCandidate"> {
+  function finish(): Pick<DirectResult, "taskState" | "proposalIds" | "articlePage" | "articleReadReport" | "photoAction" | "moveProposal" | "sectionProposal" | "contextCandidate"> {
     state = { ...state, turnStatus: "answered" }; emit();
     const selected = !mixedArticleFilters && usedSelectedArticleTool ? selectedArticleHandles() : undefined;
     const checked = selected && articleCoverage.summary(selected);
@@ -807,6 +863,7 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
       ...(articleReadReport ? {articleReadReport} : {}),
       ...(!photoMatches.length && photoRecovery ? {photoAction:photoRecovery} : {}),
       ...(movePreview ? {moveProposal:movePreview} : {}),
+      ...(sectionPreview ? {sectionProposal:sectionPreview} : {}),
       ...(contextCandidate ? {contextCandidate} : {}) };
   }
   const observeSources = (urls: string[]) => { if (urls.length) observe({ tool: "web_search", outcome: "found", subject: options.prompt.slice(0, 120), excerpt: urls.join("\n").slice(0, 600) }); };
