@@ -4,7 +4,8 @@ import type { CollectionRecord, EntityRecord } from "./types";
 export function enrichable(entity: EntityRecord, collection: CollectionRecord | undefined): boolean {
   return Boolean(collection) && collection!.sensitivity === "standard" && collection!.slug !== "documents" &&
     entity.record_status === "active" && entity.domain === "notes" &&
-    (entity.sensitivity === "standard" || entity.sensitivity === "inherit");
+    (entity.sensitivity === "standard" || entity.sensitivity === "inherit") &&
+    entity.payload.index_enrichment_opt_out !== true;
 }
 
 /** Aliases t/e/c refer to terms, entity, collection. NULL legacy versions are pending. */
