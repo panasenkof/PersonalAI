@@ -56,7 +56,9 @@ test("MSG-1: importLink still uses native HTTPS/no-redirect and returns only sco
   const reader=serve(fakeHtml);
   const result=await importLink("https://t.me/s/public_news/42");
   expect(nativeFetch).toHaveBeenCalledWith("https://t.me/s/public_news/42",
-    expect.objectContaining({redirect:"error",credentials:"omit",cache:"no-store"}));
+    expect.objectContaining({redirect:"error",credentials:"omit",headers:{
+      "Cache-Control":"no-cache, no-store",Pragma:"no-cache",
+    }}));
   expect(reader.read).toHaveBeenCalledTimes(2);
   expect(reader.cancel).toHaveBeenCalled();
   expect(mockDelete).toHaveBeenCalledTimes(1);
