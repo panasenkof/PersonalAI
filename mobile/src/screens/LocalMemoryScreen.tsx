@@ -28,6 +28,7 @@ import { mergeText, noteUndoLabel, type NoteAction } from "../local-memory/note-
 import { scheduleVectors } from "../media/vector-runner";
 import type { MemoryReviewBatchPreview, MemoryReviewAction, MemoryReviewGuard, MemoryHygieneSuggestions, MemoryHygieneSuggestedGroup } from "../local-memory/hygiene";
 import { localMemorySessionUnlocked, onLocalMemorySessionChange } from "../local-memory/storage";
+import { MemoryTagFacet } from "../design/nebula/MemoryTagFacet";
 
 export function LocalMemoryScreen() {
   const t = useTheme(); const navigation = useNavigation<NativeStackNavigationProp<RootStackParams>>();
@@ -86,10 +87,11 @@ export function LocalMemoryScreen() {
   const hygieneGeneration = useRef(0);
   const [undo, setUndo] = useState("");
   const [search, setSearch] = useState(""); const [term, setTerm] = useState("");
+  const [tagFilter, setTagFilter] = useState<string | undefined>();
   // Async deletion checks the CURRENT UI scope, never a stale closure captured
   // when the user first tapped the confirmation button.
-  const trashScope = useRef({ status, search, term, selecting, collectionId });
-  trashScope.current = { status, search, term, selecting, collectionId };
+  const trashScope = useRef({ status, search, term, selecting, collectionId, tagFilter });
+  trashScope.current = { status, search, term, selecting, collectionId, tagFilter };
   const [notes, setNotes] = useState<EntityRecord[]>([]); const [more, setMore] = useState(false);
   const selectedNotes = contextNote ? [contextNote] : selectedIds.map(id => notes.find(n => n.id === id)).filter((note): note is EntityRecord => Boolean(note));
   const reviewNotes = suggestedReviewNotes ?? selectedNotes;
@@ -98,7 +100,7 @@ export function LocalMemoryScreen() {
   const [error, setError] = useState(""); const [retry, setRetry] = useState(0);
   const [sectionOpen, setSectionOpen] = useState(false); const [sectionName, setSectionName] = useState("");
   const repository = useRef<SqliteMemoryRepository | null>(null); const generation = useRef(0);
-  const scope = memoryScrollScope(profile, collectionId, status, term);
+  const scope = memoryScrollScope(profile, collectionId, status, term, tagFilter);
   const scopeRef = useRef(scope);
   scopeRef.current = scope;
   loadedCount.current = notes.length;
@@ -150,12 +152,12 @@ export function LocalMemoryScreen() {
   useEffect(() => {
     // Invalidate a reviewed destructive action immediately when the user
     // starts searching/selecting, not 250 ms later when term is debounced.
-    if (search || selecting) {
+    if (search || selecting || tagFilter) {
       trashEpoch.current++;
       setTrashPreview(null); setTrashConfirm(false);
     }
-  }, [search, selecting]);
-  useEffect(() => { listAnchors.current.clear(); pendingAnchor.current = null; purgeHasCompleted.current = false; setBusy(false); setCollectionId(undefined); setSearch(""); setStatus("active"); setCollections([]); setNotes([]); setCollectionCards([]); setSelectedIds([]); setSelecting(false); setCounts({}); setVisibleIds(new Set()); }, [profile]);
+  }, [search, selecting, tagFilter]);
+  useEffect(() => { listAnchors.current.clear(); pendingAnchor.current = null; purgeHasCompleted.current = false; setBusy(false); setCollectionId(undefined); setSearch(""); setStatus("active"); setTagFilter(undefined); setCollections([]); setNotes([]); setCollectionCards([]); setSelectedIds([]); setSelecting(false); setCounts({}); setVisibleIds(new Set()); }, [profile]);
   useEffect(() => {
     // A first visit still defaults to a two-column library where space permits.
     // An asynchronous preference read may not override an immediate user tap.
@@ -198,7 +200,7 @@ export function LocalMemoryScreen() {
       while (page.length < target) {
         if (request !== generation.current) return;
         const size = Math.min(100, target - page.length);
-        const batch = await db.searchNotes(term, size, page.length, { collectionId, status });
+        const batch = await db.searchNotes(term, size, page.length, { collectionId, status, ...(tagFilter ? {tag:tagFilter} : {}) });
         page.push(...batch);
         if (batch.length < size) break;
       }
@@ -215,12 +217,12 @@ export function LocalMemoryScreen() {
     }).catch(e => { if (request === generation.current) { repository.current = null; setError(memoryErrorMessage(e)); } })
       .finally(() => { if (request === generation.current) setLoading(false); });
     return () => { generation.current++; repository.current = null; };
-  }, [profile, term, collectionId, status, retry]));
+  }, [profile, term, collectionId, status, tagFilter, retry]));
   useEffect(() => onLocalMemorySessionChange(unlocked => {
     if (!unlocked) {
       // Discard private navigation identities on lock, in addition to the
       // current global purge snapshot.
-      listAnchors.current.clear(); pendingAnchor.current = null;
+      listAnchors.current.clear(); pendingAnchor.current = null; setTagFilter(undefined);
       if (restoreTimer.current) clearTimeout(restoreTimer.current);
       restoreTimer.current = null;
       trashEpoch.current++;
@@ -379,8 +381,8 @@ export function LocalMemoryScreen() {
       if (profile) scheduleVectors(profile);
     } catch (e) { setError(memoryErrorMessage(e)); } finally { setBusy(false); }
   }
-  useEffect(() => { trashEpoch.current++; setTrashPreview(null); setTrashConfirm(false); setTrashMessage(""); setTrashProgress(0); setSelectedIds([]); setSelecting(false); setActionsOpen(false); setConfirmation(null); setNotes([]); setContextNote(null); setMoveOpen(false); setMergeOpen(false); setMergeExpanded(false); setMergeItemsExpanded(false); hygieneGeneration.current++; setHygieneReviewOpen(false); setHygieneSuggestionsOpen(false); setHygieneSuggestions(null); setSuggestedReviewNotes(null); setHygieneExcluded([]); setHygienePreview(null); setHygieneConfirm(false); setHygienePolicyItem(null); setHygieneAction("archive"); }, [profile, collectionId, term, status]);
-  function openAll() { setStatus("active"); setCollectionId(undefined); setSearch(""); setTerm(""); setSelectedIds([]); setSelecting(false); }
+  useEffect(() => { trashEpoch.current++; setTrashPreview(null); setTrashConfirm(false); setTrashMessage(""); setTrashProgress(0); setSelectedIds([]); setSelecting(false); setActionsOpen(false); setConfirmation(null); setNotes([]); setContextNote(null); setMoveOpen(false); setMergeOpen(false); setMergeExpanded(false); setMergeItemsExpanded(false); hygieneGeneration.current++; setHygieneReviewOpen(false); setHygieneSuggestionsOpen(false); setHygieneSuggestions(null); setSuggestedReviewNotes(null); setHygieneExcluded([]); setHygienePreview(null); setHygieneConfirm(false); setHygienePolicyItem(null); setHygieneAction("archive"); }, [profile, collectionId, term, status, tagFilter]);
+  function openAll() { setStatus("active"); setCollectionId(undefined); setSearch(""); setTerm(""); setTagFilter(undefined); setSelectedIds([]); setSelecting(false); }
   function openStatus(value: typeof status) { openAll(); setStatus(value); }
   const cancelSelection = useCallback(() => {
     setSelectedIds([]); setSelecting(false); setActionsOpen(false); setConfirmation(null); setContextNote(null);
@@ -398,6 +400,10 @@ export function LocalMemoryScreen() {
         if (!busy) setSearch("");
         return true;
       }
+      if (tagFilter) {
+        if (!busy) setTagFilter(undefined);
+        return true;
+      }
       if (status !== "active" || collectionId) {
         if (!busy) openAll();
         return true;
@@ -406,7 +412,7 @@ export function LocalMemoryScreen() {
     });
     return () => sub.remove();
   }, [selecting, busy, actionsOpen, moveOpen, mergeOpen, hygieneReviewOpen,
-    hygieneSuggestionsOpen, addOpen, menuOpen, collectionMenu, sectionOpen, trashPreview, search, status, collectionId, cancelSelection]));
+    hygieneSuggestionsOpen, addOpen, menuOpen, collectionMenu, sectionOpen, trashPreview, search, tagFilter, status, collectionId, cancelSelection]));
   function toggleSelection(id: string) {
     if (busy || loading) return;
     if (!selectedIds.includes(id) && selectedIds.length >= 100) { setError("За один раз можно выбрать до 100 записей."); return; }
@@ -424,7 +430,7 @@ export function LocalMemoryScreen() {
   }
   async function inspectWholeTrash() {
     if (!repository.current || busy || trashRunning.current || loading ||
-        status !== "trashed" || selecting || search || term || collectionId || !localMemorySessionUnlocked()) return;
+        status !== "trashed" || selecting || search || term || collectionId || tagFilter || !localMemorySessionUnlocked()) return;
     const epoch = ++trashEpoch.current, request = generation.current;
     const currentProfile = profile, db = repository.current;
     setBusy(true); setError(""); setTrashMessage(""); setTrashConfirm(false); setTrashPreview(null);
@@ -449,14 +455,14 @@ export function LocalMemoryScreen() {
   async function emptyWholeTrash() {
     const snapshot = trashPreview, db = repository.current;
     if (!snapshot?.items.length || !db || !trashConfirm || busy || trashRunning.current ||
-        status !== "trashed" || selecting || search || term || collectionId || !localMemorySessionUnlocked()) return;
+        status !== "trashed" || selecting || search || term || collectionId || tagFilter || !localMemorySessionUnlocked()) return;
     trashRunning.current = true;
     const epoch = trashEpoch.current, request = generation.current, currentProfile = profile;
     const allowed = () => {
       const scope = trashScope.current;
       return epoch === trashEpoch.current && request === generation.current &&
         viewProfile.current === currentProfile && scope.status === "trashed" &&
-        !scope.search && !scope.term && !scope.selecting && !scope.collectionId &&
+        !scope.search && !scope.term && !scope.selecting && !scope.collectionId && !scope.tagFilter &&
         localMemorySessionUnlocked();
     };
     setBusy(true); setError(""); setTrashProgress(0);
@@ -498,7 +504,7 @@ export function LocalMemoryScreen() {
     if (!repository.current || busy) return;
     const request = generation.current; setBusy(true);
     try {
-      const page = await repository.current.searchNotes(term, 50, notes.length, { collectionId, status });
+      const page = await repository.current.searchNotes(term, 50, notes.length, { collectionId, status, ...(tagFilter ? {tag:tagFilter} : {}) });
       if (request === generation.current) { setNotes(prev => [...prev, ...page]); setMore(page.length === 50); }
     } catch (e) { if (request === generation.current) setError(memoryErrorMessage(e)); }
     finally { setBusy(false); }
@@ -564,6 +570,10 @@ export function LocalMemoryScreen() {
             <Feather name="x" size={20} color={t.muted} />
           </Pressable> : null}
         </View>
+        <MemoryTagFacet key={profile+":"+(collectionId??"all")+":"+status}
+          repository={repository.current} profile={profile} collectionId={collectionId}
+          status={status} tag={tagFilter} disabled={selecting || busy || loading}
+          onTagChange={setTagFilter} onError={setError} />
         {status === "active" && !term && !collectionId && !selecting ? <View testID="memory-quick-sections"
           style={{ flexDirection: "row", flexWrap: "wrap", gap: nebulaSpacing.xl }}>
           <NebulaAction testID="memory-open-archive" icon="archive" label="Архив" size="compact"
@@ -598,7 +608,7 @@ export function LocalMemoryScreen() {
           <Text testID={status === "trashed" ? "trash-total-counter" : undefined}
             style={{ flex: 1, minWidth: 80,
               color: t.text, fontSize: 18, fontWeight: "700" }}>
-            {term ? "Результаты поиска" : status === "archived" ? "Записи в архиве" :
+            {term || tagFilter ? "Результаты фильтра" : status === "archived" ? "Записи в архиве" :
               status === "trashed" ? trashPurgeCountLabel(trashCount) : collectionId ? "Записи раздела" : "Недавнее"}
           </Text>
           {status === "active" && width >= 350 && fontScale < 1.4 ?
@@ -606,7 +616,7 @@ export function LocalMemoryScreen() {
               accessibilityLabel={grid ? "Показать списком" : "Показать плитками"}
               disabled={selecting} onPress={switchMemoryView} /> : null}
         </View>
-        {status === "trashed" && !term && !search && !selecting && !collectionId &&
+        {status === "trashed" && !term && !search && !selecting && !collectionId && !tagFilter &&
           trashCount > 0 && !loading ? <View style={{ alignItems: "flex-start", paddingVertical: 4 }}>
           <NebulaAction testID="memory-empty-trash" icon="trash-2" label="Очистить"
             variant="danger" size="compact" accessibilityLabel="Очистить всю корзину"
@@ -643,9 +653,9 @@ export function LocalMemoryScreen() {
     {loading ? <ActivityIndicator accessibilityLabel="Загрузка записей" /> : null}
 </View>} data={notes} keyExtractor={item => item.id} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag"
       contentContainerStyle={{ paddingHorizontal: nebulaSpacing.md, paddingBottom: nebulaSpacing.xl, gap: nebulaSpacing.sm, flexGrow: 1 }}
-      ListEmptyComponent={!loading && !error ? <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24, gap: 12 }}><Feather name={term ? "search" : "book-open"} size={40} color={t.secondary} />
-        <Text style={{ color: t.text, fontSize: 20, fontWeight: "700", textAlign: "center" }}>{term ? "Ничего не найдено" : status === "archived" ? "Архив пуст" : status === "trashed" ? "Корзина пуста" : "Начните с важного"}</Text>
-        <Text style={{ color: t.muted, textAlign: "center", lineHeight: 21 }}>{term ? "Попробуйте другое слово или откройте все разделы." : status === "trashed" ? "Здесь будут удалённые заметки, пока вы их не восстановите." : status === "archived" ? "Здесь хранятся записи, которые вы отправили в архив. Их можно вернуть в обычную память." : "Создайте запись или добавьте сведения из файла."}</Text>
+      ListEmptyComponent={!loading && !error ? <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24, gap: 12 }}><Feather name={term || tagFilter ? "search" : "book-open"} size={40} color={t.secondary} />
+        <Text style={{ color: t.text, fontSize: 20, fontWeight: "700", textAlign: "center" }}>{term || tagFilter ? "Ничего не найдено" : status === "archived" ? "Архив пуст" : status === "trashed" ? "Корзина пуста" : "Начните с важного"}</Text>
+        <Text style={{ color: t.muted, textAlign: "center", lineHeight: 21 }}>{term || tagFilter ? "Проверьте тег или снимите фильтр." : status === "trashed" ? "Здесь будут удалённые заметки, пока вы их не восстановите." : status === "archived" ? "Здесь хранятся записи, которые вы отправили в архив. Их можно вернуть в обычную память." : "Создайте запись или добавьте сведения из файла."}</Text>
         {!term && status !== "active" ? <NebulaAction icon="arrow-left" label="Вернуться в память" onPress={openAll} /> : null}
       </View> : null}
       renderItem={({ item }) => <View style={{ flex: 1, maxWidth: columns === 2 ? "50%" : "100%" }}><MemoryNoteCard note={item} grid={columns === 2}
