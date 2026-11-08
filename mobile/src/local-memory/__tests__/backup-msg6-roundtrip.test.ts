@@ -208,7 +208,11 @@ test("MSG-6/BKP: real v18 SQL restore preserves Share, merged source, tags, bina
   expect((await repo.searchNotes("",50,0,{tag:"космос"})).map(row=>row.id)).toContain(saved.primaryId);
   expect((await repo.searchNotes("OriginalTelegramDocument")).map(row=>row.id))
     .toContain(saved.primaryId);
-  expect((await repo.searchNotes("Подтверждённый")).map(row=>row.id)).toContain(saved.primaryId);
+  // Extracted PDF segments have their own existing FTS projection, not the
+  // note title/body FTS. The restore INSERT trigger must rebuild that index.
+  const extractedHits=main.prepare(
+    "SELECT segment_id FROM memory_extraction_fts WHERE body MATCH 'Подтверждённый'").all();
+  expect(extractedHits).toEqual([{segment_id:"pdf-seg-msg6"}]);
   await repo.undoNotes(saved.undoToken);
   const restoredSource=await repo.entity(saved.sourceId);
   expect(restoredSource?.record_status).toBe("active");
