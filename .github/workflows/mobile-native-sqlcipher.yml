@@ -144,6 +144,56 @@ jobs:
         run: |
           node node_modules/react-native-executorch/scripts/download-libs.js
           test -s node_modules/react-native-executorch/third-party/android/libs/executorch.jar
+      - name: Stage checksum-verified upstream Audio API native binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          pkg="node_modules/react-native-audio-api"
+          node -e "if(require('./node_modules/react-native-audio-api/package.json').version!=='0.13.6')process.exit(1)"
+          # The exact assets normally downloaded by the upstream Gradle task
+          # are pinned to immutable GitHub release digests, not a PR-supplied URL.
+          # Once present, upstream's own artifacts_present() verifies them and
+          # skips a fragile network request during CMake builds.
+          fetch_audio_asset() {
+            local name="$1" digest="$2" id="$3" dest="$4"
+            local zip="$RUNNER_TEMP/rnaudio-$name"
+            local downloaded=0
+            for url in \
+              "https://github.com/software-mansion-labs/rn-audio-libs/releases/download/v3.1.0/$name" \
+              "https://api.github.com/repos/software-mansion-labs/rn-audio-libs/releases/assets/$id"; do
+              rm -f "$zip"
+              if curl --fail --location --retry 3 --retry-all-errors --retry-delay 2 \
+                --connect-timeout 20 --max-time 150 --header 'Accept: application/octet-stream' \
+                --output "$zip" "$url" &&
+                printf '%s  %s\n' "$digest" "$zip" | sha256sum --check --status &&
+                unzip -tq "$zip" >/dev/null; then
+                downloaded=1
+                break
+              fi
+              echo "::warning::Audio API $name unavailable or checksum-invalid from $url"
+            done
+            if [ "$downloaded" -ne 1 ]; then
+              echo "::error::Cannot verify pinned upstream Audio API $name (v3.1.0)"
+              exit 1
+            fi
+            mkdir -p "$dest"
+            unzip -qo "$zip" -d "$dest"
+            rm -f "$zip"
+          }
+          fetch_audio_asset android.zip \
+            "5f6d01fc82cb736f00485f40d78735414494096a3a14be616c17666babbc046a" 407376170 \
+            "$pkg/common/cpp/audioapi/external"
+          fetch_audio_asset jniLibs.zip \
+            "10d29ce385ffaee74c1bcdedef0794a7fa53a035390f5c0766e33c75ba21beee" 407376243 \
+            "$pkg/android/src/main"
+          for abi in armeabi-v7a arm64-v8a x86_64 x86; do
+            for lib in libopusfile.a libopus.a libogg.a libvorbis.a libvorbisenc.a libvorbisfile.a; do
+              test -s "$pkg/common/cpp/audioapi/external/android/$abi/$lib"
+            done
+            for lib in libavcodec.so libavformat.so libavutil.so libswresample.so; do
+              test -s "$pkg/android/src/main/jniLibs/$abi/$lib"
+            done
+          done
       - name: Install checksum-verified Gradle 8.13 for Kotlin 2.4 vision producer
         if: ${{ inputs.vision_expo_gate }}
         shell: bash
