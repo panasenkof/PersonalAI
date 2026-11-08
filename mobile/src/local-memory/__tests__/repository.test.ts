@@ -2091,3 +2091,45 @@ test("a child cannot downgrade sensitivity by creating or moving under a protect
   await expect(repo.moveCollection(child.id,publicParent.id)).rejects.toBeInstanceOf(MemoryAccessError);
   expect((await repo.listCollections()).find(c=>c.id===child.id)?.parent_id).toBe(privateParent.id);
 });
+
+
+test("agent section-delete canonical writer refuses descendants, all note statuses and built-ins", async()=>{
+  const db=new FakeSqlite();
+  await db.execAsync("PRAGMA foreign_keys=ON");
+  const repo=new SqliteMemoryRepository(db as never);
+  const builtin=await repo.createCollection({name:"Заметки",slug:"notes",sensitivity:"standard"});
+  const root=await repo.createCollection({name:"ИИ",slug:"section-ai",sensitivity:"standard"});
+  const child=await repo.createCollection({name:"Обучение",slug:"section-training",parentId:root.id});
+  await expect(repo.deleteEmptyCollection(root.id,root.created_at,null))
+    .rejects.toBeInstanceOf(MemoryConflictError);
+  await expect(repo.deleteEmptyCollection(builtin.id,builtin.created_at,null))
+    .rejects.toBeInstanceOf(MemoryAccessError);
+  const note=await repo.createEntity({collection_id:child.id,domain:"notes",
+    title:"Не удалять",payload:{body:"Нельзя потерять"}});
+  await repo.setEntityStatus(note.id,note.record_version,"archived");
+  await expect(repo.deleteEmptyCollection(child.id,child.created_at,root.id))
+    .rejects.toBeInstanceOf(MemoryConflictError);
+  expect((await repo.entity(note.id))?.title).toBe("Не удалять");
+  await db.runAsync("DELETE FROM memory_entities WHERE id=?",[note.id]);
+  await expect(repo.deleteEmptyCollection(child.id,child.created_at,null))
+    .rejects.toBeInstanceOf(MemoryConflictError);
+  await repo.deleteEmptyCollection(child.id,child.created_at,root.id);
+  expect((await repo.listCollections()).some(c=>c.id===child.id)).toBe(false);
+  await repo.deleteEmptyCollection(root.id,root.created_at,null);
+  expect((await repo.listCollections()).some(c=>c.id===root.id)).toBe(false);
+});
+
+test("new sections reject duplicate sibling labels but permit equal names in separate parents",async()=>{
+  const db=new FakeSqlite();
+  const repo=new SqliteMemoryRepository(db as never);
+  const a=await repo.createCollection({name:"ИИ",slug:"section-ai",sensitivity:"standard"});
+  const b=await repo.createCollection({name:"Работа",slug:"section-work",sensitivity:"standard"});
+  await repo.createCollection({name:"Обучение",slug:"section-learning",parentId:a.id});
+  await expect(repo.createCollection({name:"обучение",slug:"section-duplicate",parentId:a.id}))
+    .rejects.toBeInstanceOf(MemoryConflictError);
+  await expect(repo.createCollection({name:"ии",slug:"section-duplicate-root"}))
+    .rejects.toBeInstanceOf(MemoryConflictError);
+  const other=await repo.createCollection({name:"Обучение",slug:"section-work-learning",
+    parentId:b.id});
+  expect(other.parent_id).toBe(b.id);
+});
