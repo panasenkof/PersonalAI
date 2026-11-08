@@ -55,3 +55,59 @@ export async function ensureSections(db: Pick<MemoryRepository, "listCollections
 /** One line per section for the model's instructions. */
 export const sectionGuide = (): string =>
   SECTIONS.filter(s => s.sensitivity === "standard").map(s => `${s.slug} — ${s.name}: ${s.hint}`).join("; ");
+
+/** Paths disambiguate equal leaf names; iteration supports arbitrary nesting depth. */
+export function collectionPath(collection: Pick<CollectionRecord,"id"|"name"|"parent_id">, collections: CollectionRecord[]): string {
+  const byId = new Map(collections.map(c => [c.id, c]));
+  const seen = new Set<string>();
+  const names: string[] = [];
+  let current: typeof collection | undefined = collection;
+  while (current && !seen.has(current.id)) {
+    seen.add(current.id); names.push(current.name);
+    current = current.parent_id ? byId.get(current.parent_id) : undefined;
+  }
+  return names.reverse().join(" / ");
+}
+
+/** Display every collection exactly once, with parents preceding children. */
+export function collectionTree(collections: CollectionRecord[]): Array<{collection: CollectionRecord; depth: number; path: string}> {
+  const ids = new Set(collections.map(c => c.id));
+  const children = new Map<string | null, CollectionRecord[]>();
+  for (const c of orderCollections(collections)) {
+    const parent = c.parent_id && ids.has(c.parent_id) ? c.parent_id : null;
+    children.set(parent, [...(children.get(parent) || []), c]);
+  }
+  const result: Array<{collection: CollectionRecord; depth: number; path: string}> = [];
+  const visited = new Set<string>();
+  const stack = [...(children.get(null) || [])].reverse().map(collection => ({collection,depth:0,path:collection.name}));
+  while (stack.length) {
+    const item = stack.pop()!;
+    if (visited.has(item.collection.id)) continue;
+    visited.add(item.collection.id); result.push(item);
+    const next = children.get(item.collection.id) || [];
+    for (let i=next.length-1;i>=0;i--) stack.push({collection:next[i],depth:item.depth+1,path:item.path+" / "+next[i].name});
+  }
+  return result;
+}
+
+/** Reject malformed backup graphs (dangling parent/self/cycle) before a restore. */
+export function validCollectionParents(rows: Array<{id:string;parent_id:string|null;sensitivity?:string}>): boolean {
+  const parents = new Map(rows.map(row => [row.id,row.parent_id]));
+  const sensitivity = new Map(rows.map(row => [row.id,row.sensitivity]));
+  for (const row of rows) {
+    if (row.parent_id && row.sensitivity && sensitivity.get(row.parent_id) &&
+        row.sensitivity !== sensitivity.get(row.parent_id)) return false;
+  }
+  if (parents.size !== rows.length) return false;
+  const valid = new Set<string>();
+  for (const row of rows) {
+    let id: string | null = row.id;
+    const route = new Set<string>();
+    while (id !== null && !valid.has(id)) {
+      if (!parents.has(id) || route.has(id)) return false;
+      route.add(id); id = parents.get(id) ?? null;
+    }
+    for (const key of route) valid.add(key);
+  }
+  return true;
+}

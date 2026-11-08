@@ -159,7 +159,9 @@ test("creates offline note, edits with CAS, stores immutable history and updates
   expect(fake.updates).toBe(1);
   // Never open a second connection: SQLCipher keys are connection-local.
   expect(fake.transactionStatements).toEqual([
-    "BEGIN IMMEDIATE", "COMMIT", "BEGIN IMMEDIATE", "COMMIT",
+    "BEGIN IMMEDIATE", "COMMIT", // canonical collection creation
+    "BEGIN IMMEDIATE", "COMMIT", // entity creation
+    "BEGIN IMMEDIATE", "COMMIT", // entity revision
   ]);
   expect(await repo.searchNotes("old oil")).toHaveLength(0);
   expect((await repo.searchNotes("new filter"))[0].id).toBe(initial.id);
@@ -196,7 +198,10 @@ test("offline creation uses the already-unlocked SQLCipher connection", async ()
   const repo = new SqliteMemoryRepository(fake as never);
   const col = await repo.createCollection({ name: "Notes", slug: "notes" });
   await repo.createEntity({ collection_id: col.id, domain: "notes", payload: { title: "A" } });
-  expect(fake.transactionStatements).toEqual(["BEGIN IMMEDIATE", "COMMIT"]);
+  expect(fake.transactionStatements).toEqual([
+    "BEGIN IMMEDIATE", "COMMIT", // collection
+    "BEGIN IMMEDIATE", "COMMIT", // entity
+  ]);
 });
 
 test("section filters, moves, archive and restore preserve payload and immutable revisions", async () => {
@@ -2053,4 +2058,78 @@ test("MSG-6.C8: user-owned aliases, manual search terms and protected sources ca
     [b.id,"pinned",1,"now"]);
   await expect(repo.changeNotes("merge",[a,b])).rejects.toThrow("merge_source_has_links_review_required");
   expect((await repo.entity(b.id))?.record_status).toBe("active");
+});
+
+
+test("v19 collections support unlimited nesting, safe reparenting, and stable note IDs", async () => {
+  const fake = new FakeSqlite();
+  await fake.execAsync("PRAGMA foreign_keys=ON");
+  const repo = new SqliteMemoryRepository(fake as never);
+  const root = await repo.createCollection({name:"ИИ",slug:"ai",sensitivity:"standard"});
+  const training = await repo.createCollection({name:"Обучение",slug:"training",parentId:root.id});
+  const skills = await repo.createCollection({name:"Скиллы",slug:"skills",parentId:training.id});
+  const note = await repo.createEntity({collection_id:skills.id,domain:"notes",title:"Курс",payload:{body:"Материал"}});
+  expect((await repo.listCollections()).find(c=>c.id===skills.id)?.parent_id).toBe(training.id);
+  await expect(repo.moveCollection(root.id,skills.id)).rejects.toBeInstanceOf(MemoryConflictError);
+  await expect(repo.moveCollection(root.id,root.id)).rejects.toBeInstanceOf(MemoryConflictError);
+  await expect(repo.moveCollection(training.id,"missing")).rejects.toBeInstanceOf(MemoryAccessError);
+  expect((await repo.listCollections()).find(c=>c.id===root.id)?.parent_id).toBeNull();
+  await repo.moveCollection(skills.id,root.id);
+  expect((await repo.listCollections()).find(c=>c.id===skills.id)?.parent_id).toBe(root.id);
+  expect(await repo.entity(note.id)).toMatchObject({id:note.id,collection_id:skills.id,record_version:1});
+});
+
+test("a child cannot downgrade sensitivity by creating or moving under a protected parent", async () => {
+  const fake = new FakeSqlite();
+  const repo = new SqliteMemoryRepository(fake as never);
+  const privateParent = await repo.createCollection({name:"Личное",slug:"private",sensitivity:"sensitive"});
+  const publicParent = await repo.createCollection({name:"Обычное",slug:"public",sensitivity:"standard"});
+  await expect(repo.createCollection({name:"Открытый",slug:"bad",sensitivity:"standard",parentId:privateParent.id}))
+    .rejects.toBeInstanceOf(MemoryAccessError);
+  const child = await repo.createCollection({name:"Личное 2",slug:"private-child",parentId:privateParent.id});
+  expect(child.sensitivity).toBe("sensitive");
+  await expect(repo.moveCollection(child.id,publicParent.id)).rejects.toBeInstanceOf(MemoryAccessError);
+  expect((await repo.listCollections()).find(c=>c.id===child.id)?.parent_id).toBe(privateParent.id);
+});
+
+
+test("agent section-delete canonical writer refuses descendants, all note statuses and built-ins", async()=>{
+  const db=new FakeSqlite();
+  await db.execAsync("PRAGMA foreign_keys=ON");
+  const repo=new SqliteMemoryRepository(db as never);
+  const builtin=await repo.createCollection({name:"Заметки",slug:"notes",sensitivity:"standard"});
+  const root=await repo.createCollection({name:"ИИ",slug:"section-ai",sensitivity:"standard"});
+  const child=await repo.createCollection({name:"Обучение",slug:"section-training",parentId:root.id});
+  await expect(repo.deleteEmptyCollection(root.id,root.created_at,null))
+    .rejects.toBeInstanceOf(MemoryConflictError);
+  await expect(repo.deleteEmptyCollection(builtin.id,builtin.created_at,null))
+    .rejects.toBeInstanceOf(MemoryAccessError);
+  const note=await repo.createEntity({collection_id:child.id,domain:"notes",
+    title:"Не удалять",payload:{body:"Нельзя потерять"}});
+  await repo.setEntityStatus(note.id,note.record_version,"archived");
+  await expect(repo.deleteEmptyCollection(child.id,child.created_at,root.id))
+    .rejects.toBeInstanceOf(MemoryConflictError);
+  expect((await repo.entity(note.id))?.title).toBe("Не удалять");
+  await db.runAsync("DELETE FROM memory_entities WHERE id=?",[note.id]);
+  await expect(repo.deleteEmptyCollection(child.id,child.created_at,null))
+    .rejects.toBeInstanceOf(MemoryConflictError);
+  await repo.deleteEmptyCollection(child.id,child.created_at,root.id);
+  expect((await repo.listCollections()).some(c=>c.id===child.id)).toBe(false);
+  await repo.deleteEmptyCollection(root.id,root.created_at,null);
+  expect((await repo.listCollections()).some(c=>c.id===root.id)).toBe(false);
+});
+
+test("new sections reject duplicate sibling labels but permit equal names in separate parents",async()=>{
+  const db=new FakeSqlite();
+  const repo=new SqliteMemoryRepository(db as never);
+  const a=await repo.createCollection({name:"ИИ",slug:"section-ai",sensitivity:"standard"});
+  const b=await repo.createCollection({name:"Работа",slug:"section-work",sensitivity:"standard"});
+  await repo.createCollection({name:"Обучение",slug:"section-learning",parentId:a.id});
+  await expect(repo.createCollection({name:"обучение",slug:"section-duplicate",parentId:a.id}))
+    .rejects.toBeInstanceOf(MemoryConflictError);
+  await expect(repo.createCollection({name:"ии",slug:"section-duplicate-root"}))
+    .rejects.toBeInstanceOf(MemoryConflictError);
+  const other=await repo.createCollection({name:"Обучение",slug:"section-work-learning",
+    parentId:b.id});
+  expect(other.parent_id).toBe(b.id);
 });

@@ -490,7 +490,7 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
         await page.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, `section-${width}.png`) });
       }
       await page.getByLabel('Создать раздел', { exact: true }).click();
-      await page.getByText('Рецепты', { exact: true }).waitFor();
+      await page.getByRole('heading', { name: 'Рецепты', exact: true }).waitFor();
       await page.setViewportSize({ width, height: 900 }); await page.evaluate(() => window.__insets(24));
       await page.getByLabel('Добавить в память', { exact: true }).click();
       await page.getByLabel('Текст или голос', { exact: true }).click();

@@ -24,6 +24,7 @@ import { waitForApplicationSession, onLocalMemorySessionChange } from "../local-
 import { localPhotoIntent83, searchLocalPhotosFromChat83 } from "../media/vision-chat-search";
 import { selectSavedAiArticles } from "./article-selection";
 import { previewMove, confirmMove, undoMove } from "./move-proposal";
+import { previewSectionAction, confirmSectionAction } from "./section-actions";
 import { applyContextCandidate } from "./conversation-context";
 
 /** `streamText` is the answer as it arrives; it is never persisted. */
@@ -361,6 +362,15 @@ export class DirectChatStore {
         contextClassificationEnabled: !Boolean(internetPhotoId) && maxRequests >= 2,
         diagnostic: trace,
         lookup: query => searchApprovedNotes(this.profile, query),
+        previewSectionAction: async request => {
+          if(aborter.signal.aborted || this.disposed || !localMemorySessionUnlocked())
+            throw new Error("application_locked");
+          const preview=await previewSectionAction(this.profile,request);
+          if(aborter.signal.aborted || this.disposed || !localMemorySessionUnlocked() ||
+             !this.snapshot.conversations.some(c=>c.id===id && !c.deleting))
+            throw new Error("application_locked");
+          return preview;
+        },
         previewMove: async request => {
           if(aborter.signal.aborted || this.disposed || !localMemorySessionUnlocked())
             throw new Error("application_locked");
@@ -457,6 +467,7 @@ export class DirectChatStore {
           ...(result.memory?.length ? { memory: result.memory } : {}),
           ...(result.photoAction ? {photoAction:result.photoAction} : {}),
           ...(result.moveProposal ? {moveProposal:result.moveProposal} : {}),
+          ...(result.sectionProposal ? {sectionProposal:result.sectionProposal} : {}),
           ...(result.articlePage ? {articlePage:result.articlePage} : {}),
           ...(result.articleReadReport ? {articleReadReport:result.articleReadReport} : {}),
           ...(applied?.change ? {contextChange:applied.change} : {}) }],
@@ -600,6 +611,49 @@ export class DirectChatStore {
       ...(c.taskState ? { taskState: recordEvidence(c.taskState, { tool: "draft_memory_fact", outcome: "dismissed", subject: draft.id, excerpt: draft.title }) } : {}),
     }, true);
   }
+  /** Same persisted confirmation lifecycle as a note move; no LLM writer.
+   * A stale/deleted/moved/non-empty folder fails atomically in SQLCipher. */
+  async confirmSectionProposal(rowId:string):Promise<void> {
+    const c=this.snapshot.conversations.find(x=>x.id===this.snapshot.activeId);
+    const row=c?.rows.find(x=>x.id===rowId&&x.role==="assistant"&&x.sectionProposal);
+    if(!c||!row?.sectionProposal||c.busy||c.movingRowId||c.deleting||this.disposed)return;
+    const proposal=row.sectionProposal;
+    this.update(c.id,{movingRowId:rowId});
+    try {
+      const receipt=await confirmSectionAction(this.profile,proposal);
+      const latest=this.snapshot.conversations.find(x=>x.id===c.id);
+      if(!latest||this.disposed)return;
+      const rows=latest.rows.map(r=>{
+        if(r.id!==rowId||!r.sectionProposal)return r;
+        const {sectionProposal:_discard,...rest}=r;
+        return {...rest,sectionReceipt:receipt};
+      });
+      const patch=this.update(c.id,{rows:[...rows,{id:Crypto.randomUUID(),role:"info" as const,
+        text:receipt.kind==="create"
+          ?receipt.verified?"Раздел «"+receipt.name+"» создан.":"Создание записано, но проверка результата не удалась."
+          :receipt.verified?"Пустой раздел «"+receipt.name+"» удалён.":"Удаление записано, но проверка результата не удалась.",
+      }],
+        ...(receipt.kind==="delete" && latest.context?.sectionSlug===receipt.slug
+          ? {context:{...latest.context,sectionSlug:null,pinned:false}} : {}),
+      });
+      if(patch)await this.persist(patch);
+      await this.refreshSections();
+      this.afterSave?.();
+    }catch(error){
+      this.publish({error:memoryErrorMessage(error)+
+        " Действие не подтверждено. Проверьте разделы; при изменении содержимого предложите операцию заново."});
+    }finally{this.update(c.id,{movingRowId:undefined});}
+  }
+  cancelSectionProposal(rowId:string):void {
+    const c=this.snapshot.conversations.find(x=>x.id===this.snapshot.activeId);
+    if(!c||c.busy||c.movingRowId||c.deleting||this.disposed)return;
+    if(!c.rows.some(r=>r.id===rowId&&r.role==="assistant"&&r.sectionProposal))return;
+    this.update(c.id,{rows:[...c.rows.map(r=>{
+      if(r.id!==rowId)return r;
+      const {sectionProposal:_discard,...rest}=r;return rest;
+    }),{id:Crypto.randomUUID(),role:"info" as const,text:"Изменение раздела отменено. Память не изменена."}]},true);
+  }
+
   /** A button, never an LLM tool. Source and target are CAS/ACL-checked by
    * the canonical SQLCipher note-actions transaction. */
   async confirmMoveProposal(rowId:string):Promise<void>{

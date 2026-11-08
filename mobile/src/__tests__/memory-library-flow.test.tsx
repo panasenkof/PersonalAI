@@ -36,7 +36,7 @@ jest.mock("../local-memory/storage", () => ({
   localMemorySessionUnlocked: () => true,
   onLocalMemorySessionChange: () => () => {},
 }));
-jest.mock("../local-memory/sections", () => ({ ensureSections: async () => sections, orderCollections: (v: any) => v }));
+jest.mock("../local-memory/sections", () => ({ ...jest.requireActual("../local-memory/sections"), ensureSections: async () => sections, orderCollections: (v: any) => v }));
 jest.mock("../profile/ProfileContext", () => ({ useProfile: () => "p" }));
 jest.mock("../media/vector-runner", () => ({ scheduleVectors: jest.fn() }));
 jest.mock("../media/MemoryCover", () => ({ MemoryCover: () => null, purgeLegacyCoverCache: jest.fn() }));
@@ -243,7 +243,7 @@ test("review entry only appears in an explicitly selected standard collection, n
   fireEvent.press(ui.getByLabelText("Открыть предложения по изменению памяти"));
   expect(mockNavigate).toHaveBeenCalledWith("MemoryTemporalReview",{collectionId:"a"});
   fireEvent.press(ui.getByLabelText("Ко всем записям"));
-  fireEvent.press(ui.getByLabelText("Раздел Люди"));
+  fireEvent.press(await waitFor(() => ui.getByLabelText("Раздел Люди")));
   await waitFor(()=>expect(ui.queryByLabelText("Открыть предложения по изменению памяти")).toBeNull());
 });
 

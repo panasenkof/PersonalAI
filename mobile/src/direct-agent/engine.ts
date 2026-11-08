@@ -18,6 +18,7 @@ import type { SavedArticleIntent, SavedArticleShortlist } from "./article-select
 import type { MemorySection } from "./fact-tool";
 import type { ChatArticlePage, ChatArticleReadReport, ChatMemoryRef } from "./conversations";
 import type { ChatMoveProposal, MoveRequest } from "./move-proposal";
+import type { SectionActionRequest, ChatSectionProposal } from "./section-actions";
 import type { ContextCandidate, ConversationContext } from "./conversation-context";
 import { ARTICLE_CITATION_GUIDE, ARTICLE_SYNTHESIS_GUIDE } from "./article-citations";
 
@@ -27,7 +28,7 @@ export type AgentTurn = { role: "user" | "assistant"; content: string; attachmen
 export type DirectResult = { text: string; sources: string[]; requests: number; notice?: string;
   memory?: Array<UsedNote | ChatMemoryRef>; photoAction?: "model" | "import" | "prepare";
   taskState?: TaskState; proposalIds?: string[]; articlePage?: ChatArticlePage; articleReadReport?: ChatArticleReadReport;
-  moveProposal?: ChatMoveProposal; contextCandidate?: ContextCandidate; importTags?: string[] };
+  moveProposal?: ChatMoveProposal; sectionProposal?: ChatSectionProposal; contextCandidate?: ContextCandidate; importTags?: string[] };
 
 export type DirectAgentOptions = {
   settings: DirectAgentSettings;
@@ -52,6 +53,8 @@ export type DirectAgentOptions = {
   lookup: (query: string) => Promise<MemorySnippet[]>;
   /** Safe 9T2 read-only proposal; this callback NEVER writes a note. */
   previewMove?: (request:MoveRequest) => Promise<ChatMoveProposal>;
+  /** Same central tool catalog; preview ONLY, never a write on model calls. */
+  previewSectionAction?: (request:SectionActionRequest) => Promise<ChatSectionProposal>;
   /** 9T1: optional host-only bridge to the existing ACL-scoped text-to-photo
    * search. No image bytes, vectors or duplicate search index reach the LLM. */
   /** The model sees only that a selected local photo exists, never its bytes. */
@@ -127,6 +130,7 @@ export { MAX_DIRECT_REPLY_TOKENS, MAX_REASONING_REPLY_TOKENS, TRUNCATED_NOTE, is
 const systemPrompt = (sections?: MemorySection[], context?: ConversationContext, enabled = false) =>
   "Ты персональный помощник PersAI, работающий на телефоне пользователя. " +
   "Для вопросов о предпочтениях и заметках используй search_local_notes, если он доступен. " +
+  "Для СОЗДАНИЯ пользовательского раздела или подраздела вызови propose_create_memory_section (name — имя нового уровня, parentSlug — точный slug родителя или null для корня), если инструмент доступен. Для УДАЛЕНИЯ пустого пользовательского раздела вызови propose_delete_memory_section с существующим sectionSlug. Сначала уточни неоднозначный путь; нельзя удалять раздел с записями, архивом, корзиной или подразделами. Оба инструмента предлагают действие, но НЕ выполняют его. Пользователь отдельно подтверждает карточку, не заявляй об успешном изменении заранее. " +
   "Если пользователь просит ПЕРЕНЕСТИ уже существующую заметку между разделами, сначала найди точную запись и версию через search_local_notes/list_local_notes, а затем вызови propose_move_local_note с noteId, expectedVersion, targetSectionSlug и объяснением. Инструмент ТОЛЬКО создаёт карточку для подтверждения; не заявляй, что перенос уже сделан. Не вызывай draft_memory_fact вместо перемещения существующей записи. Пользователь отдельно подтверждает или отменяет карточку; сам ты никогда не выполняешь запись или удаление. " +
   (enabled ? "Для темы и раздела ТЕКУЩЕГО диалога используй set_conversation_context внутри обычного инструментального цикла: в первом содержательном ходе укажи короткую тему (2–80 символов) и slug существующего подходящего раздела либо null, если определить нельзя. При отчётливой смене предмета разговора обнови тему/раздел, но не переключайся из-за краткого уточнения. При загрузке вложений классифицируй только действительно видимое тебе содержимое; не утверждай, что прочёл непрочитанный файл. Не создавай новый раздел по догадке. Когда раздел закреплён пользователем, оставь его неизменным; тему при необходимости меняй. Сам инструмент лишь предлагает метаданные диалога, ничего не переносит в памяти; приложение сохранит их и само покажет уведомление ПОД ответом после успешной записи. Не дублируй уведомление в тексте. " +
   (context ? "Текущая тема диалога: «" + context.topic + "», раздел: " + (context.sectionSlug || "не определён") + (context.pinned ? " (раздел закреплён пользователем)" : "") + ". " : "Тема диалога пока не определена. ") : "") +

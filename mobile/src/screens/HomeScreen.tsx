@@ -457,6 +457,51 @@ function NebulaHomeContent() {
           icon={item.photoAction === "import" ? "plus-circle" : "settings"}
           label={item.photoAction === "model" ? "Выбрать модель" : item.photoAction === "import" ? "Добавить фото в память" : "Подготовить фото"}
           onPress={() => item.photoAction === "import" ? navigation.navigate("MemoryImport", {source:"photo"}) : navigation.navigate("PhotoSearchSettings")} /> : null}
+        {item.role==="assistant" && !item.streaming && item.sectionProposal ?
+          <View style={{borderWidth:1,borderColor:t.line,borderRadius:16,
+            padding:12,backgroundColor:t.panel,gap:8}}>
+            <Text style={{color:t.text,fontWeight:"700"}}>
+              {item.sectionProposal.kind==="create" ? "Создать раздел?" : "Удалить пустой раздел?"}
+            </Text>
+            <Text style={{color:t.text}}>
+              {item.sectionProposal.parentName
+                ? item.sectionProposal.parentName+" / "+item.sectionProposal.name
+                : item.sectionProposal.name}
+            </Text>
+            <Text style={{color:t.muted,fontSize:12}}>Причина: {item.sectionProposal.reason}</Text>
+            {item.sectionProposal.kind==="delete" ?
+              <Text style={{color:t.muted,fontSize:12}}>
+                Только пользовательский пустой раздел. Ни одна запись (включая архив и корзину)
+                и ни один вложенный раздел не будут удалены. Состояние перепроверяется при подтверждении.
+              </Text> :
+              <Text style={{color:t.muted,fontSize:12}}>
+                Создаётся только новый раздел в существующей памяти. Записи не изменятся.
+              </Text>}
+            <View style={{flexDirection:"row",flexWrap:"wrap",gap:8}}>
+              <NebulaAction icon={item.sectionProposal.kind==="delete" ? "trash-2" : "check"}
+                variant={item.sectionProposal.kind==="delete" ? "danger" : "primary"}
+                label={active?.movingRowId===item.id ? "Проверяю…" :
+                  item.sectionProposal.kind==="create" ? "Создать раздел" : "Удалить пустой раздел"}
+                disabled={busy||Boolean(active?.movingRowId)}
+                onPress={()=>void store.confirmSectionProposal(item.id)} />
+              <NebulaAction icon="x" label="Отмена" size="compact"
+                disabled={busy||Boolean(active?.movingRowId)}
+                onPress={()=>store.cancelSectionProposal(item.id)} />
+            </View>
+          </View> : null}
+        {item.role==="assistant" && !item.streaming && item.sectionReceipt ?
+          <View style={{borderWidth:1,borderColor:t.line,borderRadius:16,
+            padding:12,backgroundColor:t.panel,gap:4}}>
+            <Text style={{color:t.text,fontWeight:"700"}}>
+              {item.sectionReceipt.kind==="create" ? "Создание раздела" : "Удаление раздела"}
+              {item.sectionReceipt.verified ? " выполнено" : " — результат не проверен"}
+            </Text>
+            <Text style={{color:t.muted}}>
+              {item.sectionReceipt.parentName
+                ? item.sectionReceipt.parentName+" / "+item.sectionReceipt.name
+                : item.sectionReceipt.name}
+            </Text>
+          </View> : null}
         {item.role==="assistant" && !item.streaming && item.moveProposal ?
           <View style={{ borderWidth:1,borderColor:t.line,borderRadius:16,padding:12,
             backgroundColor:t.panel,gap:8 }}>

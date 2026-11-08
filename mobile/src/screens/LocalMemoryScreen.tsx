@@ -13,7 +13,7 @@ import { purgeConfirmedTrash, trashPurgeCountLabel, type TrashPurgeSnapshot } fr
 import type { SqliteMemoryRepository } from "../local-memory/repository";
 import type { CollectionRecord, EntityRecord } from "../local-memory/types";
 import { memoryErrorMessage } from "../local-memory/errors";
-import { ensureSections, orderCollections } from "../local-memory/sections";
+import { collectionPath, collectionTree, ensureSections, orderCollections } from "../local-memory/sections";
 import type { RootStackParams } from "../navigation";
 import { useTheme } from "../theme";
 import { nebulaSpacing, nebulaRadii, nebulaTouch } from "../design/nebula/tokens";
@@ -55,6 +55,7 @@ export function LocalMemoryScreen() {
   const purgeHasCompleted = useRef(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [collectionMenu, setCollectionMenu] = useState(false);
+  const [reparentId, setReparentId] = useState<string | null>(null);
   const [collectionCards, setCollectionCards] = useState<CollectionRecord[]>([]);
   const [visibleIds, setVisibleIds] = useState<Set<string>>(new Set());
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 10 }).current;
@@ -207,12 +208,8 @@ export function LocalMemoryScreen() {
       if (request !== generation.current) return;
       setTrashCount(deletedTotal);
       setCounts(totals); repository.current = db; void db.lastNoteOperation().then(value => { if (request === generation.current) setUndo(purgeHasCompleted.current ? "" : value); }).catch(() => {}); setCollections(sections); setNotes(page); setMore(page.length === target);
-      const recentIds = [...new Set(page.map(n => n.collection_id))];
-      const shownSections = [...sections].sort((a, b) => {
-        const rank = (id: string) => recentIds.includes(id) ? recentIds.indexOf(id) : recentIds.length;
-        return rank(a.id) - rank(b.id);
-      }).slice(0, 6);
-      if (!term && !collectionId && status === "active") setCollectionCards(shownSections);
+      const shownSections = sections.filter(c => (c.parent_id ?? null) === (collectionId ?? null));
+      if (!term && status === "active") setCollectionCards(shownSections);
 
     }).catch(e => { if (request === generation.current) { repository.current = null; setError(memoryErrorMessage(e)); } })
       .finally(() => { if (request === generation.current) setLoading(false); });
@@ -384,6 +381,37 @@ export function LocalMemoryScreen() {
   useEffect(() => { trashEpoch.current++; setTrashPreview(null); setTrashConfirm(false); setTrashMessage(""); setTrashProgress(0); setSelectedIds([]); setSelecting(false); setActionsOpen(false); setConfirmation(null); setNotes([]); setContextNote(null); setMoveOpen(false); setMergeOpen(false); setMergeExpanded(false); setMergeItemsExpanded(false); hygieneGeneration.current++; setHygieneReviewOpen(false); setHygieneSuggestionsOpen(false); setHygieneSuggestions(null); setSuggestedReviewNotes(null); setHygieneExcluded([]); setHygienePreview(null); setHygieneConfirm(false); setHygienePolicyItem(null); setHygieneAction("archive"); }, [profile, collectionId, term, status, tagFilter]);
   function openAll() { setStatus("active"); setCollectionId(undefined); setSearch(""); setTerm(""); setTagFilter(undefined); setSelectedIds([]); setSelecting(false); }
   function openStatus(value: typeof status) { openAll(); setStatus(value); }
+  const isInSubtree = (id: string, ancestorId: string): boolean => {
+    const byId = new Map(collections.map(c=>[c.id,c]));
+    let cursor: string | null = id;
+    const visited = new Set<string>();
+    while (cursor && !visited.has(cursor)) {
+      if (cursor===ancestorId) return true;
+      visited.add(cursor);
+      cursor = byId.get(cursor)?.parent_id ?? null;
+    }
+    return false;
+  };
+  async function reparentSection(parentId: string | null) {
+    if (!reparentId || !repository.current || busy) return;
+    const request = generation.current;
+    setBusy(true); setError("");
+    try {
+      await repository.current.moveCollection(reparentId, parentId);
+      if (request === generation.current) {
+        setCollections(prev=>prev.map(c=>c.id===reparentId?{...c,parent_id:parentId}:c));
+        setReparentId(null);
+        setRetry(value=>value+1);
+      }
+    } catch(e) {if(request===generation.current)setError(memoryErrorMessage(e));}
+    finally{setBusy(false);}
+  }
+  function openParent() {
+    if (status !== "active") { openAll(); return; }
+    const parentId = collections.find(c => c.id === collectionId)?.parent_id;
+    setCollectionId(parentId ?? undefined);
+    setSearch(""); setTerm(""); setTagFilter(undefined);
+  }
   const cancelSelection = useCallback(() => {
     setSelectedIds([]); setSelecting(false); setActionsOpen(false); setConfirmation(null); setContextNote(null);
   }, []);
@@ -391,7 +419,7 @@ export function LocalMemoryScreen() {
     const sub = BackHandler.addEventListener("hardwareBackPress", () => {
       // A sheet or native keyboard handles its own Back; never change the area underneath.
       if (actionsOpen || moveOpen || mergeOpen || hygieneReviewOpen || hygieneSuggestionsOpen ||
-          addOpen || menuOpen || collectionMenu || sectionOpen || trashPreview !== null) return false;
+          addOpen || menuOpen || collectionMenu || reparentId || sectionOpen || trashPreview !== null) return false;
       if (selecting) {
         if (!busy) cancelSelection();
         return true;
@@ -405,14 +433,14 @@ export function LocalMemoryScreen() {
         return true;
       }
       if (status !== "active" || collectionId) {
-        if (!busy) openAll();
+        if (!busy) openParent();
         return true;
       }
       return false;
     });
     return () => sub.remove();
   }, [selecting, busy, actionsOpen, moveOpen, mergeOpen, hygieneReviewOpen,
-    hygieneSuggestionsOpen, addOpen, menuOpen, collectionMenu, sectionOpen, trashPreview, search, tagFilter, status, collectionId, cancelSelection]));
+    hygieneSuggestionsOpen, addOpen, menuOpen, collectionMenu, reparentId, sectionOpen, trashPreview, search, tagFilter, status, collectionId, cancelSelection]));
   function toggleSelection(id: string) {
     if (busy || loading) return;
     if (!selectedIds.includes(id) && selectedIds.length >= 100) { setError("За один раз можно выбрать до 100 записей."); return; }
@@ -513,7 +541,11 @@ export function LocalMemoryScreen() {
     if (!repository.current || busy || !sectionName.trim()) return;
     const request = generation.current; setBusy(true); setError("");
     try {
-      const created = await repository.current.createCollection({ name: sectionName.trim(), slug: "section-" + Crypto.randomUUID(), sensitivity: "standard" });
+      const parent = collections.find(c => c.id === collectionId);
+      const created = await repository.current.createCollection({
+        name: sectionName.trim(), slug: "section-" + Crypto.randomUUID(),
+        sensitivity: parent?.sensitivity ?? "standard", parentId: collectionId ?? null,
+      });
       if (request === generation.current) { setCollections(prev => orderCollections([...prev, created])); setCollectionId(created.id); setSectionName(""); setSectionOpen(false); }
     } catch (e) { if (request === generation.current) setError(memoryErrorMessage(e)); }
     finally { setBusy(false); }
@@ -526,7 +558,7 @@ export function LocalMemoryScreen() {
       <Text accessibilityLiveRegion="polite" style={{ flex: 1, color: t.text }}>Выбрано: {selectedIds.length}</Text>
       <NebulaAction icon="more-horizontal" label="Действия" accessibilityLabel="Действия с выбранными записями" variant="primary" onPress={() => setActionsOpen(true)} disabled={busy || !selectedIds.length} />
     </View> : <View testID="memory-normal-toolbar" style={{ paddingHorizontal: 16, minHeight: 56, flexDirection: "row", alignItems: "center", gap: nebulaSpacing.xs }}>
-          {status !== "active" || collectionId ? <Pressable accessibilityRole="button" accessibilityLabel="Ко всем записям" disabled={busy} onPress={openAll}
+          {status !== "active" || collectionId ? <Pressable accessibilityRole="button" accessibilityLabel={status !== "active" || !collections.find(c => c.id === collectionId)?.parent_id ? "Ко всем записям" : "На уровень выше"} disabled={busy} onPress={openParent}
             style={{ ...button, paddingHorizontal: nebulaSpacing.sm, minWidth: nebulaTouch.minimum }}>
             <Feather name="arrow-left" size={22} color={t.secondary} />
           </Pressable> : null}
@@ -538,6 +570,15 @@ export function LocalMemoryScreen() {
             style={{ ...button, paddingHorizontal: 12, backgroundColor: t.accent }}><Feather name="plus" size={24} color={t.userText} /></Pressable> : null}
           {status === "active" ? <Pressable accessibilityRole="button" accessibilityLabel="Меню памяти" disabled={busy} onPress={() => setMenuOpen(true)} style={{ ...button, paddingHorizontal: 12 }}><Feather name="more-vertical" size={24} color={t.text} /></Pressable> : null}
         </View>}
+    {status==="active" && collectionId && collections.some(c=>c.id===collectionId) ?
+      <View style={{paddingHorizontal:16,paddingBottom:4,flexDirection:"row",alignItems:"center",gap:8}}>
+        <Text numberOfLines={2} style={{color:t.muted,flex:1,fontSize:12}}>
+          {collectionPath(collections.find(c=>c.id===collectionId)!,collections)}
+        </Text>
+        <NebulaAction icon="folder-plus" size="compact" label="Подраздел"
+          accessibilityLabel="Создать подраздел здесь" disabled={busy}
+          onPress={()=>setSectionOpen(true)} />
+      </View>:null}
     <FlatList
       testID="memory-note-list" ref={listRef} key={columns} numColumns={columns}
       onViewableItemsChanged={onViewableItemsChanged} viewabilityConfig={viewabilityConfig}
@@ -581,13 +622,13 @@ export function LocalMemoryScreen() {
           <NebulaAction testID="memory-open-trash" icon="trash-2" label="Корзина" size="compact"
             accessibilityLabel="Открыть корзину" disabled={busy || loading} onPress={() => openStatus("trashed")} />
         </View> : null}
-        {!term && status === "active" && !collectionId ? <>
+        {!term && status === "active" ? <>
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-            <Text style={{ color: t.text, fontSize: 18, fontWeight: "700" }}>Коллекции</Text>
+            <Text style={{ color: t.text, fontSize: 18, fontWeight: "700" }}>{collectionId ? "Подразделы" : "Разделы памяти"}</Text>
             <NebulaAction icon="grid" label="Разделы" size="compact" accessibilityLabel="Все разделы" disabled={selecting} onPress={() => setCollectionMenu(true)} />
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: nebulaSpacing.sm }}>
-            {collectionCards.map(c => <Pressable key={c.id} accessibilityRole="button" accessibilityLabel={"Раздел " + c.name}
+            {collectionCards.map(c => <Pressable key={c.id} accessibilityRole="button" accessibilityLabel={"Раздел " + collectionPath(c, collections)}
               disabled={selecting} accessibilityState={{ disabled: selecting }} onPress={() => setCollectionId(c.id)}
               style={{ width: Math.min(width - 48, 176 * Math.min(fontScale, 1.3)),
                 minHeight: nebulaTouch.minimum + nebulaSpacing.md, padding: nebulaSpacing.sm,
@@ -930,16 +971,50 @@ export function LocalMemoryScreen() {
         <Text style={{ color: t.muted, fontSize: 13 }}>Только ручная проверка · без автоматического удаления</Text>
       </Pressable>
     </BottomSheet>
-    <BottomSheet visible={collectionMenu} title="Коллекции" onClose={() => setCollectionMenu(false)}>
-      {[{ id: undefined, name: "Все записи" }, ...collections].map(c => <Pressable key={c.id || "all"} accessibilityRole="button" accessibilityLabel={"Раздел " + c.name} style={actionButton}
-        onPress={() => { openAll(); setCollectionId(c.id); setCollectionMenu(false); }}><Text style={{ color: t.text }}>{c.name}</Text></Pressable>)}
-      <NebulaAction icon="plus" label="Создать коллекцию" accessibilityLabel="Новый раздел памяти"
+    <BottomSheet visible={collectionMenu} title="Разделы памяти" onClose={() => setCollectionMenu(false)}>
+      <Pressable accessibilityRole="button" accessibilityLabel="Раздел Все записи" style={actionButton}
+        onPress={() => { openAll(); setCollectionMenu(false); }}>
+        <Text style={{color:t.text}}>Все записи</Text>
+      </Pressable>
+      {collectionTree(collections).map(({collection:c,path,depth}) => <View key={c.id} style={{flexDirection:"row",alignItems:"center"}}>
+        <Pressable accessibilityRole="button" accessibilityLabel={"Раздел " + path}
+          style={{...actionButton,flex:1,paddingLeft:Math.min(depth,4)*12+12}}
+          onPress={() => { openAll(); setCollectionId(c.id); setCollectionMenu(false); }}>
+          <Text style={{color:t.text}}>{depth ? "↳ " : ""}{c.name}</Text>
+          {depth > 0 ? <Text numberOfLines={1} style={{color:t.muted,fontSize:12}}>{path}</Text> : null}
+        </Pressable>
+        <NebulaAction icon="move" size="compact" label="Переместить"
+          accessibilityLabel={"Переместить раздел " + path}
+          disabled={busy} onPress={()=>{setCollectionMenu(false);setReparentId(c.id);}} />
+      </View>)}
+      <NebulaAction icon="plus" label={collectionId ? "Создать подраздел" : "Создать раздел"}
+        accessibilityLabel="Новый раздел памяти"
         onPress={() => { setCollectionMenu(false); setSectionOpen(true); }} />
+      {collectionId ? <NebulaAction icon="home" label="Создать в корне"
+        onPress={() => { setCollectionId(undefined); setCollectionMenu(false); setSectionOpen(true); }} /> : null}
+    </BottomSheet>
+    <BottomSheet visible={Boolean(reparentId)} title="Переместить раздел" onClose={()=>setReparentId(null)}>
+      {reparentId && collections.find(c=>c.id===reparentId) ? <>
+        <Text style={{color:t.muted}}>Раздел: {collectionPath(collections.find(c=>c.id===reparentId)!,collections)}</Text>
+        <Text style={{color:t.muted,fontSize:13}}>
+          Меняется только расположение раздела. Заметки, ссылки и вложения сохраняются.
+        </Text>
+        <Pressable accessibilityRole="button" disabled={busy} style={actionButton}
+          onPress={()=>void reparentSection(null)}><Text style={{color:t.text}}>В корень памяти</Text></Pressable>
+        {collectionTree(collections).filter(({collection:c})=>
+          c.sensitivity===collections.find(x=>x.id===reparentId)?.sensitivity &&
+          !isInSubtree(c.id,reparentId)).map(({collection:c,path})=>
+          <Pressable key={c.id} accessibilityRole="button" disabled={busy} style={actionButton}
+            onPress={()=>void reparentSection(c.id)}>
+            <Text style={{color:t.text}}>Внутрь: {path}</Text>
+          </Pressable>)}
+      </>:null}
+      {error ? <Text accessibilityRole="alert" style={{color:t.err}}>{error}</Text>:null}
     </BottomSheet>
     <BottomSheet visible={moveOpen} title="Перенести выбранные записи" onClose={() => { setMoveOpen(false); setContextNote(null); }}>
       {error ? <Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text> : null}
       <Text style={{ color: t.muted }}>{selectedNotes.map(memoryDisplayTitle).join(", ")}</Text>
-      {collections.map(c => <Pressable key={c.id} disabled={busy} style={actionButton} onPress={() => void act("move", c.id)}><Text style={{ color: t.secondary }}>{c.name}</Text></Pressable>)}
+      {collectionTree(collections).map(({collection:c,path}) => <Pressable key={c.id} disabled={busy} style={actionButton} onPress={() => void act("move", c.id)}><Text style={{ color: t.secondary }}>{path}</Text></Pressable>)}
     </BottomSheet>
     <BottomSheet visible={mergeOpen} title="Предпросмотр объединения" onClose={() => { if (busy) return; setMergeOpen(false); setMergeExpanded(false); setMergeItemsExpanded(false); }}>
       <Text style={{ color: t.text, fontWeight: "700" }}>Выбрано записей: {selectedNotes.length} · основная определяется порядком выбора</Text>
@@ -983,8 +1058,8 @@ export function LocalMemoryScreen() {
       <NebulaAction icon="x" label="Отмена" disabled={busy}
         onPress={() => { setMergeOpen(false); setMergeExpanded(false); setMergeItemsExpanded(false); }} />
     </BottomSheet>
-    <BottomSheet visible={sectionOpen} title="Новый раздел" onClose={() => setSectionOpen(false)}>
-      <Text style={{ color: t.muted }}>Например: «Рецепты», «Идеи» или «Планы».</Text>
+    <BottomSheet visible={sectionOpen} title={collectionId ? "Новый подраздел" : "Новый раздел"} onClose={() => setSectionOpen(false)}>
+      <Text style={{ color: t.muted }}>{collectionId ? "Внутри: " + collectionPath(collections.find(c=>c.id===collectionId)!,collections) : "В корне памяти"}</Text>
       <TextInput accessibilityLabel="Название раздела памяти" value={sectionName} onChangeText={setSectionName} maxLength={80} placeholder="Название" placeholderTextColor={t.muted} style={{ minHeight: 50, padding: 12, borderWidth: 1, borderColor: t.line, borderRadius: 16, color: t.text }} />
       <Pressable accessibilityRole="button" accessibilityLabel="Создать раздел" disabled={busy || !sectionName.trim()} onPress={() => void addSection()} style={{ ...button, backgroundColor: t.accent }}><Text style={{ color: "#fff", fontWeight: "700" }}>{busy ? "Создаю…" : "Создать раздел"}</Text></Pressable>
       {error ? <Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text> : null}

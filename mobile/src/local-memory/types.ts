@@ -17,7 +17,7 @@ export type RecordStatus = "active" | "archived" | "superseded" | "trashed";
 
 export type CollectionRecord = {
   id: string; name: string; slug: string; description: string | null;
-  sensitivity: MemorySensitivity; created_at: string;
+  sensitivity: MemorySensitivity; created_at: string; parent_id?: string | null;
 };
 export type EntityRecord = {
   id: string; collection_id: string; domain: string; schema_version: string;
@@ -78,7 +78,10 @@ export type NewObservation = {
 };
 export interface MemoryRepository {
   listCollections(): Promise<CollectionRecord[]>;
-  createCollection(item: { name: string; slug: string; sensitivity?: MemorySensitivity }): Promise<CollectionRecord>;
+  createCollection(item: { name: string; slug: string; sensitivity?: MemorySensitivity; parentId?: string | null }): Promise<CollectionRecord>;
+  moveCollection(id: string, parentId: string | null): Promise<void>;
+  /** Only an empty, custom ordinary section; revalidate in one SQLCipher write. */
+  deleteEmptyCollection(id: string, expectedCreatedAt: string, expectedParentId: string | null): Promise<void>;
   entity(id: string): Promise<EntityRecord | null>;
   /** Exactly one source-verified, user-only profile-person binding (not an inferred relation). */
   profileSelfIdentity(): Promise<ProfileSelfIdentity>;
