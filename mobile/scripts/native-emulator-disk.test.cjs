@@ -17,6 +17,14 @@ test('CI cleans unused host toolchains before native build and preserves Android
   const gradle = yaml.indexOf('- name: Install checksum-verified Gradle 8.13');
   const stage = yaml.indexOf('- name: Stage offline vision AAR');
   assert(gradle >= 0 && gradle < stage && stage < native);
+  const audio = yaml.indexOf('- name: Stage checksum-verified upstream Audio API native binaries');
+  assert(audio > host && audio < gradle);
+  assert.match(yaml.slice(audio, gradle), /react-native-audio-api/);
+  assert.match(yaml.slice(audio, gradle), /sha256sum --check --status/);
+  assert.match(yaml.slice(audio, gradle), /unzip -tq/);
+  assert.match(yaml.slice(audio, gradle), /libopusfile\.a/);
+  assert.match(yaml.slice(audio, gradle), /libavcodec\.so/);
+  assert.match(yaml.slice(audio, gradle), /Cannot verify pinned upstream Audio API/);
   assert.match(yaml.slice(gradle, stage), /sha256sum --check --status/);
   assert.match(yaml.slice(gradle, stage), /downloads\.gradle\.org\/distributions/);
   assert.match(yaml.slice(gradle, stage), /gradle-distributions\/releases/);
