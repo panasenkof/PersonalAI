@@ -20,6 +20,7 @@ import type { TemporalHistoryQuery, TemporalAtDateQuery } from "./temporal-store
 import type { TemporalInboxQuery } from "./temporal-review-inbox";
 import type { TemporalDecisionRequest, TemporalDecisionExpected } from "./temporal-decisions";
 import { defaultKind, indexEntity, isMemoryKind, normalizeAlias } from "./search-index";
+import { parseNoteTagsInput } from "./note-tags";
 import type { MemoryKind } from "./search-index";
 import { ftsPhrase, requiredSearchEvidence, searchSteps } from "./query";
 import { MIN_SIMILARITY, VECTOR_DIM, cosine, embeddingHash, embeddingText, fromBlob, fuseRanks, isCurrentVectorSpace, toBlob } from "./vectors";
@@ -835,25 +836,57 @@ export class SqliteMemoryRepository implements MemoryRepository {
     return rows.map(r => String(r.id));
   }
 
+  /** Read-only facet inventory from the SAME encrypted notes table.
+   * No tag table/index, LLM classification or payload mutation. Paginated and
+   * restricted to the current collection + status (same scope as searchNotes).
+   * The caller can also type an exact tag not yet present on the first page.
+   */
+  async listNoteTags(filters: { collectionId?: string; status?: "active" | "archived" | "trashed" } = {}, limit = 50, offset = 0): Promise<string[]> {
+    const status = filters.status ?? "active";
+    if (!["active", "archived", "trashed"].includes(status)) throw new Error("invalid_record_status");
+    const n = Math.min(100, Math.max(1, Math.trunc(limit)));
+    const start = Math.max(0, Math.trunc(offset));
+    const rows = await this.db.getAllAsync<{tag: string}>(
+      `SELECT DISTINCT j.value AS tag FROM memory_entities e
+       JOIN json_each(e.payload_json,'$.tags') j
+       WHERE e.domain='notes' AND e.record_status=?
+         AND json_type(e.payload_json,'$.tags')='array'
+         AND json_array_length(e.payload_json,'$.tags') BETWEEN 1 AND 12
+         AND j.type='text' ${filters.collectionId ? "AND e.collection_id=?" : ""}
+       ORDER BY tag LIMIT ? OFFSET ?`,
+      [status, ...(filters.collectionId ? [filters.collectionId] : []), n, start],
+    );
+    return rows.map(row => row.tag).filter(tag => {
+      try { return parseNoteTagsInput(tag).length === 1 && parseNoteTagsInput(tag)[0] === tag; }
+      catch { return false; }
+    });
+  }
+
   /** `prefix` matches words that start with the query (a word stem without its
    * ending), so «машин» finds «машина», «машину» and «машиной». Results with a
    * query are ranked by relevance (bm25 over title, text, index words and
    * names), then by date. */
-  async searchNotes(query: string, limit = 50, offset = 0, filters: { collectionId?: string; status?: "active" | "archived" | "trashed"; prefix?: boolean } = {}): Promise<EntityRecord[]> {
+  async searchNotes(query: string, limit = 50, offset = 0, filters: { collectionId?: string; status?: "active" | "archived" | "trashed"; prefix?: boolean; tag?: string } = {}): Promise<EntityRecord[]> {
     const count = Math.min(100, Math.max(1, Math.trunc(limit)));
     const start = Math.max(0, Math.trunc(offset));
     const term = query.trim();
     const status = filters.status || "active";
     if (status !== "active" && status !== "archived" && status !== "trashed") throw new Error("invalid_record_status");
+    // Reject multiple/malformed tags; never treat a full-text hit as proof of
+    // membership. Exact tag equality is checked against canonical payload.
+    const selectedTags = filters.tag === undefined ? [] : parseNoteTagsInput(filters.tag);
+    if (filters.tag !== undefined && selectedTags.length !== 1)
+      throw new Error("invalid_note_tag_filter");
     const rows = await this.matches(term, filters.prefix ?? false, {
-      status, collectionIds: filters.collectionId ? [filters.collectionId] : undefined, limit: count, offset: start,
+      status, collectionIds: filters.collectionId ? [filters.collectionId] : undefined,
+      tag: selectedTags[0], limit: count, offset: start,
     });
     return rows.map(r => entityFrom(r));
   }
 
   /** One FTS search grouped by record: the best chunk of each record. */
   private async matches(term: string, prefix: boolean | { prefix: boolean; column?: "terms" }, options: {
-    status: "active" | "archived" | "trashed"; collectionIds?: string[]; sensitivities?: string[]; limit: number; offset: number;
+    status: "active" | "archived" | "trashed"; collectionIds?: string[]; sensitivities?: string[]; tag?: string; limit: number; offset: number;
   }): Promise<Row[]> {
     const filters = ["e.domain='notes'", "e.record_status=?"];
     const params: SQLite.SQLiteBindValue[] = [options.status];
@@ -863,6 +896,12 @@ export class SqliteMemoryRepository implements MemoryRepository {
     }
     if (options.sensitivities) {
       filters.push(`e.sensitivity IN (${options.sensitivities.map(() => "?").join(",")})`); params.push(...options.sensitivities);
+    }
+    if (options.tag) {
+      filters.push("json_type(e.payload_json,'$.tags')='array'");
+      filters.push("json_array_length(e.payload_json,'$.tags') BETWEEN 1 AND 12");
+      filters.push("EXISTS (SELECT 1 FROM json_each(e.payload_json,'$.tags') j WHERE j.type='text' AND j.value=?)");
+      params.push(options.tag);
     }
     if (!term) return this.db.getAllAsync<Row>(
       `SELECT e.*, NULL AS match_chunk FROM memory_entities e WHERE ${filters.join(" AND ")}

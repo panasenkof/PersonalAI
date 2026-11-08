@@ -137,7 +137,8 @@ export interface MemoryRepository {
   pendingVectorChunks(model: string, limit?: number): Promise<Array<{ chunkId: string; text: string; hash: string }>>;
   saveVectors(model: string, items: Array<{ chunkId: string; vector: Float32Array; hash: string }>): Promise<number>;
   vectorStatus(model: string): Promise<{ done: number; total: number }>;
-  searchNotes(query: string, limit?: number, offset?: number, filters?: { collectionId?: string; status?: "active" | "archived"; prefix?: boolean }): Promise<EntityRecord[]>;
+  listNoteTags(filters?: { collectionId?: string; status?: "active" | "archived" | "trashed" }, limit?: number, offset?: number): Promise<string[]>;
+  searchNotes(query: string, limit?: number, offset?: number, filters?: { collectionId?: string; status?: "active" | "archived" | "trashed"; prefix?: boolean; tag?: string }): Promise<EntityRecord[]>;
 }
 export class MemoryConflictError extends Error {}
 export class MemoryAccessError extends Error {}

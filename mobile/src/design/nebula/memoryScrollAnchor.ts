@@ -9,9 +9,11 @@ export type MemoryScrollAnchor = {
 
 export function memoryScrollScope(
   profile: string, collectionId: string | undefined,
-  status: "active" | "archived" | "trashed", term: string,
+  status: "active" | "archived" | "trashed", term: string, tag?: string,
 ): string {
-  return JSON.stringify([profile, collectionId ?? null, status, term]);
+  // The exact-tag filter changes the SQL results just as a query/section
+  // does: a saved scroll anchor cannot spill into another tag's result set.
+  return JSON.stringify([profile, collectionId ?? null, status, term, tag ?? null]);
 }
 
 /** Restore the same entity if present; otherwise use the nearest surviving item.
