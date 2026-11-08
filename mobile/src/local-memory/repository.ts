@@ -261,6 +261,12 @@ export class SqliteMemoryRepository implements MemoryRepository {
       const sensitivity = item.sensitivity ?? (parent ? parent.sensitivity as CollectionRecord["sensitivity"] : "unclassified");
       // A child cannot silently weaken the protection of its parent.
       if (parent && sensitivity !== parent.sensitivity) throw new MemoryAccessError("collection_parent_sensitivity");
+      const siblings=await tx.getAllAsync<Row>(
+        parentId===null
+          ? "SELECT name FROM memory_collections WHERE parent_id IS NULL"
+          : "SELECT name FROM memory_collections WHERE parent_id=?",parentId===null?[]:[parentId]);
+      if(siblings.some(row=>String(row.name).trim().toLocaleLowerCase()===item.name.trim().toLocaleLowerCase()))
+        throw new MemoryConflictError("collection_sibling_name_exists");
       const record: CollectionRecord = {
         id: uid(), name: item.name.trim(), slug: item.slug, description: null,
         sensitivity, created_at: now(), parent_id: parentId,
