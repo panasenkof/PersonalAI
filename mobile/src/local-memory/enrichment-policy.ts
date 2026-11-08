@@ -4,7 +4,8 @@ import type { CollectionRecord, EntityRecord } from "./types";
 export function enrichable(entity: EntityRecord, collection: CollectionRecord | undefined): boolean {
   return Boolean(collection) && collection!.sensitivity === "standard" && collection!.slug !== "documents" &&
     entity.record_status === "active" && entity.domain === "notes" &&
-    (entity.sensitivity === "standard" || entity.sensitivity === "inherit");
+    (entity.sensitivity === "standard" || entity.sensitivity === "inherit") &&
+    entity.payload.index_enrichment_opt_out !== true;
 }
 
 /** Aliases t/e/c refer to terms, entity, collection. NULL legacy versions are pending. */
@@ -14,4 +15,12 @@ export type EnrichmentSnapshot = {
   entityId: string; recordVersion: number;
   collectionId: string; collectionName: string; collectionSlug: string;
   sensitivity: EntityRecord["sensitivity"];
+};
+
+// Search-only inferences: never author/date provenance, legal identity, verified
+// relationships, canonical record title/type, or source-derived timestamps.
+export const AUTO_SEARCH_VERSION = 1;
+export type SearchMetadataSuggestion = {
+  tags: string[]; topic: string; summary: string; titleHint: string;
+  places: string[]; dates: string[]; people: string[];
 };
