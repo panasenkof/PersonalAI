@@ -25,7 +25,10 @@ const BUILTIN = new Set(["about","people","projects","preferences","dates","docu
 const own = (c:CollectionRecord) => c.sensitivity==="standard" && !BUILTIN.has(c.slug);
 const label = (name:unknown):name is string =>
   typeof name==="string" && name.length<=80 && name.trim().length>0 &&
-  !/[\\/\\r\\n\\u0000-\\u001f]/u.test(name);
+  ![...name].some(ch => ch==="/" || ch==="\\" || ch.charCodeAt(0)<32);
+const pathOk = (value:unknown):value is string =>
+  typeof value==="string" && value.trim().length>0 && value.length<=16384 &&
+  ![...value].some(ch=>ch.charCodeAt(0)<32);
 const reasonOk = (r:unknown):r is string =>
   typeof r==="string" && r.trim().length>=5 && r.length<=240;
 const root = (c:CollectionRecord) => c.parent_id ?? null;
@@ -35,7 +38,8 @@ export function validSectionProposal(value:unknown):value is ChatSectionProposal
   const p=value as ChatSectionProposal;
   if (!reasonOk(p.reason) || !label(p.name) ||
       !(p.parentId===null || (typeof p.parentId==="string" && ID.test(p.parentId))) ||
-      !(p.parentName===null || label(p.parentName))) return false;
+      !(p.parentName===null || pathOk(p.parentName)) ||
+      (p.parentId===null)!==(p.parentName===null)) return false;
   if(p.kind==="create")return true;
   return p.kind==="delete" && typeof p.id==="string" && ID.test(p.id) &&
     typeof p.slug==="string" && SLUG.test(p.slug) && !BUILTIN.has(p.slug) &&
@@ -47,7 +51,7 @@ export function validSectionReceipt(value:unknown):value is ChatSectionReceipt {
   const r=value as ChatSectionReceipt;
   return (r.kind==="create"||r.kind==="delete") &&
     typeof r.id==="string"&&ID.test(r.id)&&typeof r.slug==="string"&&SLUG.test(r.slug)&&
-    label(r.name) && (r.parentName===null||label(r.parentName)) && typeof r.verified==="boolean";
+    label(r.name) && (r.parentName===null||pathOk(r.parentName)) && typeof r.verified==="boolean";
 }
 export function validateSectionRequest(value:unknown):value is SectionActionRequest {
   if(!value || typeof value!=="object" || Array.isArray(value))return false;
