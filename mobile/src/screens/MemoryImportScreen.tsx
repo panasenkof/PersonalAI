@@ -132,10 +132,16 @@ export function MemoryImportScreen() {
   const [body, setBody] = useState("");
   const [tagDraft, setTagDraft] = useState("");
   const [tagEditorOpen, setTagEditorOpen] = useState(false);
+  const generatedTags = useRef(false);
   const [extractedText, setExtractedText] = useState("");
   // An LLM suggestion is evidence about the PREVIOUS visible text. Any later
   // local OCR/edit/title change invalidates it without moving the draft.
-  useEffect(() => { setModelCollectionHint(null); }, [body, extractedText, title]);
+  useEffect(() => {
+    setModelCollectionHint(null);
+    // A proposal was based on the PREVIOUS text. Never retain stale AI tags
+    // after a caption/OCR/title edit; user-owned tags are unaffected.
+    if (generatedTags.current) { generatedTags.current = false; setTagDraft(""); }
+  }, [body, extractedText, title]);
   const [notice, setNotice] = useState("");
   const [aiField, setAiField] = useState<"body" | "extracted" | null>(null);
   const [comparison, setComparison] = useState<{ scope: string; result: FileRecognition; updated: string } | null>(null);
@@ -333,10 +339,10 @@ export function MemoryImportScreen() {
       setNotice("Сначала настройте подключение модели в настройках.");
       return;
     }
-    Alert.alert("Разрешить ИИ выбрать раздел?",
+    Alert.alert("Разрешить ИИ подобрать раздел и теги?",
       "Модели будет отправлен только видимый текст подписи/распознавания (не более 6000 символов), заголовок и названия обычных разделов. "+
       "Оригиналы фото, документов и другие файлы не отправляются. Возможно до 2 платных обращений к модели. "+
-      "Предложенный раздел можно исправить до сохранения.",
+      "Предложенные раздел и теги можно исправить до сохранения.",
       [
         {text:"Отмена",style:"cancel"},
         {text:"Разрешить один подбор",onPress:()=>{void classifyWithModel(connection);}},
@@ -364,8 +370,14 @@ export function MemoryImportScreen() {
       }
       // The model is only allowed to select an existing standard collection.
       // Manual selection still overrides it; no note is created yet.
-      setCollectionId(proposal.collectionId);      setModelCollectionHint(proposal);
-      setNotice("ИИ предложил раздел «"+proposal.sectionName+"». Проверьте перед сохранением.");
+      if (proposal.collectionId) setCollectionId(proposal.collectionId);
+      if (!tagDraft.trim() && proposal.tags.length) {
+        generatedTags.current = true; setTagDraft(proposal.tags.join(" "));
+      }
+      setModelCollectionHint(proposal);
+      setNotice(proposal.collectionId
+        ? "ИИ предложил раздел «"+proposal.sectionName+"» и теги: "+(proposal.tags.join(", ") || "не определены")+". Проверьте перед сохранением."
+        : "ИИ предложил теги: "+(proposal.tags.join(", ") || "не определены")+". Раздел не определён.");
     } catch(e) {
       if (alive.current && !aborter.signal.aborted)
         setNotice("Раздел не определён: "+((e as Error).message || "Ошибка модели")+". Можно сохранить без ИИ.");
@@ -631,10 +643,23 @@ export function MemoryImportScreen() {
     } catch (e) { if (alive.current) setNotice(aborter.signal.aborted ? "Разбор остановлен." : (e as Error).message); }
     finally { if (alive.current) { setBusy(false); setRecognizingIndex(-1); } if (controller.current === aborter) controller.current = null; }
   }
-  async function save(allowSeparateCopy = false) {
+  async function save(allowSeparateCopy = false, aiMode: "ask" | "approved" | "skip" = "ask") {
     if (!keepOriginal && !body.trim() && !extractedText.trim() && !linkOnly) { setNotice("Добавьте текст или распознайте материал перед сохранением без оригинала."); return; }
     if (!profile || (!file && !body.trim() && !extractedText.trim() && !(linkOnly && sourceUrl)) || busy || preparing || controller.current) return;
-    // Only explicit labels, no hidden regex classification or network.
+    // Never silently transmit a Share or attachment caption to a provider.
+    // Consent is one-off and covers ONLY visible text, not file originals.
+    if (aiMode === "ask" && !allowSeparateCopy && !modelCollectionHint &&
+        !tagDraft.trim() && canClassifyWithModel &&
+        selected && (selected.apiKey || anonymousLocalAllowed(selected))) {
+      Alert.alert("Автоматические теги и раздел",
+        "При сохранении ИИ предложит до 5 тегов и подходящий существующий раздел. " +
+        "Выбранной модели будет передан только видимый текст подписи/распознавания " +
+        "(не более 6000 символов) и названия обычных разделов. " +
+        "Оригиналы фото, PDF, аудио и видео не передаются. Возможно до 2 запросов к модели.",
+        [{text:"Сохранить без ИИ",onPress:()=>{void save(false,"skip");}},
+         {text:"Разрешить ИИ и сохранить",onPress:()=>{void save(false,"approved");}}]);
+      return;
+    }
     let tags: string[];
     try { tags = parseNoteTagsInput(tagDraft); }
     catch (error) { setNotice((error as Error).message); return; }
@@ -648,6 +673,32 @@ export function MemoryImportScreen() {
       // the combined text (or an extra joint analysis) are only note content.
       // When a text file is opened locally at Save without prior recognition,
       // record that successful read under its own original as well.
+      let metadata = modelCollectionHint;
+      let metadataError = "";
+      if (aiMode === "approved" && selected && localMemorySessionUnlocked() &&
+          classification === "standard" && canClassifyWithModel) {
+        try {
+          const limit = await loadModelCallLimit(profile);
+          metadata = await classifyImportCollectionWithAgent({
+            title,body,extractedText:content,collections,settings:selected,
+            explicitConsent:true,sensitivity:classification,modelCallLimit:limit,signal:aborter.signal,
+          });
+        } catch (error) {
+          metadataError = (error as Error).message || "Модель недоступна";
+        }
+        if (aborter.signal.aborted || !localMemorySessionUnlocked()) throw new Error("Разбор отменён");
+        if (metadata?.tags?.length && !tagDraft.trim()) {
+          tags=metadata.tags;
+          generatedTags.current=true;
+          setTagDraft(tags.join(" "));
+        }
+        if (metadata) setModelCollectionHint(metadata);
+      } else if (metadata?.tags?.length && !tagDraft.trim()) {
+        tags=metadata.tags;
+      }
+      // A user-chosen section wins over the model. Android Share's empty
+      // collection id can be replaced by the permitted LLM suggestion.
+      const destinationId = collectionId || metadata?.collectionId || undefined;
       const sourceRecognitions: FileRecognition[] = recognitionResults.length
         ? recognitionResults
         : keepOriginal && files.length === 1 && file && mediaKind(file) === "text" && content.trim()
@@ -661,7 +712,7 @@ export function MemoryImportScreen() {
         sourceUrl: sourceUrl || undefined, sourceCoverage: sourceCoverage || undefined,
         ...(telegramObservation && sourceCoverage === "telegram_post_text_only" && content.trim() ? {telegramObservation} : {}),
         ...(sourceUrl && !linkOnly && publicationClaim && !keepOriginal ? {publicationClaim} : {}),
-        sensitivity: classification, collectionId: collectionId || undefined,
+        sensitivity: classification, collectionId: destinationId,
         ...(incoming ? {
           receipt: JSON.stringify(groupedIncoming ? incoming : incoming[position]),
           ...(allowSeparateCopy ? { allowSeparateCopy: true } : {}),
@@ -698,8 +749,13 @@ export function MemoryImportScreen() {
           Alert.alert("Заметка сохранена", "Фото сохранено, но индексация не завершена. Повторите её в настройках.");
         }
       }
-      if (modelCollectionHint && collectionId === modelCollectionHint.collectionId && !photoIndexPending) {
-        Alert.alert("Заметка сохранена", "Раздел определён ИИ: «"+modelCollectionHint.sectionName+"». Тема: «"+modelCollectionHint.topic+"». Запись сохранена только после вашего подтверждения.");
+      if (metadataError) {
+        Alert.alert("Заметка сохранена без автотегов",
+          "ИИ не смог подобрать теги: "+metadataError+". Оригиналы и текст сохранены.");
+      } else if (metadata && !photoIndexPending) {
+        Alert.alert("Заметка сохранена",
+          (metadata.sectionName ? "Раздел предложен ИИ: «"+metadata.sectionName+"». " : "Раздел не определён. ") +
+          "Теги: "+(tags.length ? tags.map(t=>"#"+t).join(" ") : "не определены")+".");
       }
       if (!keepOriginal) for (const item of files) { await FileSystem.deleteAsync(item.uri, { idempotent: true }).catch(() => {}); }
       if (alive.current) { if (incoming && !groupedIncoming && position + 1 < incoming.length) setPosition(p => p + 1); else setLeaving(true); }
@@ -791,15 +847,15 @@ export function MemoryImportScreen() {
           disabled={busy} onPress={()=>setTagEditorOpen(true)} />}
         <Pressable accessibilityRole="button" accessibilityLabel="Выбрать коллекцию" disabled={busy} onPress={() => { Keyboard.dismiss(); setSectionOpen(true); }} style={{ ...button, backgroundColor: t.panel, alignItems: "flex-start" }}><Text style={{ color: t.text }}>Коллекция: {collections.find(c => c.id === collectionId)?.name || (incoming ? inboxCollection?.name || "Входящие" : "Заметки")} · Изменить</Text></Pressable>
         <View style={{ gap: 4 }}>
-          <NebulaAction icon="cpu" label="Определить раздел с ИИ" size="compact"
-            disabled={busy || preparing || !canClassifyWithModel}
+          <NebulaAction icon="cpu" label="Определить раздел и теги с ИИ" size="compact"
+            disabled={busy || preparing}
             onPress={askModelForCollection} />
           {modelCollectionHint ? <Text accessibilityLabel="Предложенный ИИ раздел"
             style={{ color: t.secondary, fontSize: 13 }}>
-            ИИ определил: «{modelCollectionHint.sectionName}» · тема «{modelCollectionHint.topic}». Можно изменить раздел перед сохранением.
+            ИИ предложил: «{modelCollectionHint.sectionName || "Раздел не определён"}» · теги {modelCollectionHint.tags.map(t=>"#"+t).join(" ") || "не определены"}. Можно исправить перед сохранением.
             {modelCollectionHint.excerptTruncated ? " Использован только фрагмент текста." : ""}
           </Text> : <Text style={{ color: t.muted, fontSize: 12 }}>
-            В отличие от прежней подсказки по хэштегам раздел выбирает LLM. Текст передаётся только после отдельного разрешения; личные записи и оригиналы не отправляются. Без ИИ действует текущий выбор раздела.
+            При сохранении ИИ может автоматически подобрать теги и раздел после отдельного разрешения. Для фото без подписи/распознанного текста ИИ не угадывает содержимое. Личные записи и оригиналы не отправляются.
           </Text>}
         </View>
         <View testID="import-access-options" style={{ gap: 8 }}>
