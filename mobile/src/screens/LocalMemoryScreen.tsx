@@ -962,9 +962,10 @@ export function LocalMemoryScreen() {
         label={mergeItemsExpanded ? "Свернуть список записей" : "Показать все выбранные записи · " + selectedNotes.length}
         onPress={() => setMergeItemsExpanded(value => !value)} /> : null}
       <Text style={{ color: t.muted, lineHeight: 20 }}>
-        Основная сохранит название и получит тексты и вложения остальных. Остальные записи
-        станут неактивными; исходные сведения сохранятся в истории. Противоречия не исправляются
-        автоматически. Отменить можно до последующих правок.
+        Основная сохранит название и получит тексты и вложения остальных, их теги и ссылки.
+        Отмена вернёт оригиналы и ссылки исходным записям, если они не изменились.
+        При связанных фактах или наблюдениях объединение отклоняется.
+        Противоречия не исправляются автоматически.
       </Text>
       {error ? <Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text> : null}
       <Text style={{ color: mergePreview.length > 60000 ? t.err : t.muted, fontSize: 13 }}>

@@ -1896,3 +1896,161 @@ test("C3-3: standalone alias edit rolls back old names and FTS if insertion fail
   expect((await repo.indexTerms(n.id)).find(x => x.source === "user")?.terms)
     .toEqual(["соседство"]);
 });
+
+test("MSG-6.C8: imported Share replay, original owners, provenance, tags and search survive merge then undo",async()=>{
+  const db=new FakeSqlite(), repo=new SqliteMemoryRepository(db as never);
+  const col=await repo.createCollection({name:"Импорт",slug:"incoming-msg6c8",sensitivity:"standard"});
+  const main=await repo.createEntity({collection_id:col.id,domain:"notes",title:"Главная",
+    payload:{body:"Свой текст",tags:["важное"]}});
+  const shared=await repo.createEntity({collection_id:col.id,domain:"notes",title:"Получено",
+    payload:{body:"Оригинал Share",tags:["рецепты"],source_url:"https://t.me/test/123",
+      source_text_coverage:"telegram_post_text_only"},source_ref:"android-share"});
+  await db.runAsync("INSERT INTO memory_received_shares(fingerprint,entity_id) VALUES (?,?)",
+    ["share-fingerprint-123",shared.id]);
+  await db.runAsync("INSERT INTO memory_attachments(id,entity_id,name,mime,size,created_at) VALUES (?,?,?,?,?,?)",
+    ["original-123",shared.id,"InvoiceOriginal2026.pdf","application/pdf",4,"2026-11-08T00:00:00Z"]);
+  const token=await repo.changeNotes("merge",[main,shared]);
+  const merged=(await repo.entity(main.id))!;
+  expect(merged.record_status).toBe("active");
+  expect(merged.payload.tags).toEqual(["важное","рецепты"]);
+  expect((merged.payload.merged_sources as any[])[1]).toMatchObject({
+    id:shared.id,source_ref:"android-share",collection_id:col.id,
+    attachment_ids:["original-123"],payload:{source_url:"https://t.me/test/123"}});
+  expect((await db.getFirstAsync<any>("SELECT entity_id FROM memory_received_shares WHERE fingerprint=?",
+    ["share-fingerprint-123"]))?.entity_id).toBe(main.id);
+  expect((await db.getFirstAsync<any>("SELECT entity_id FROM memory_attachments WHERE id=?",
+    ["original-123"]))?.entity_id).toBe(main.id);
+  expect((await repo.searchNotes("InvoiceOriginal2026")).map(x=>x.id)).toContain(main.id);
+  expect((await repo.searchNotes("",50,0,{tag:"рецепты"})).map(x=>x.id)).toContain(main.id);
+  await repo.undoNotes(token);
+  const restored=(await repo.entity(shared.id))!;
+  expect(restored.record_status).toBe("active");
+  expect(restored.payload.source_url).toBe("https://t.me/test/123");
+  expect((await repo.entity(main.id))?.payload.tags).toEqual(["важное"]);
+  expect((await db.getFirstAsync<any>("SELECT entity_id FROM memory_received_shares WHERE fingerprint=?",
+    ["share-fingerprint-123"]))?.entity_id).toBe(shared.id);
+  expect((await db.getFirstAsync<any>("SELECT entity_id FROM memory_attachments WHERE id=?",
+    ["original-123"]))?.entity_id).toBe(shared.id);
+  expect((await repo.searchNotes("InvoiceOriginal2026")).map(x=>x.id)).toEqual([shared.id]);
+});
+
+test("MSG-6.C8: undo cannot steal a moved original or silently restore a missing Share receipt",async()=>{
+  const db=new FakeSqlite(),repo=new SqliteMemoryRepository(db as never);
+  const c=await repo.createCollection({name:"Notes",slug:"notes-msg6c8"});
+  const first=await repo.createEntity({collection_id:c.id,domain:"notes",payload:{body:"A"}});
+  const second=await repo.createEntity({collection_id:c.id,domain:"notes",payload:{body:"B"}});
+  const other=await repo.createEntity({collection_id:c.id,domain:"notes",payload:{body:"Other"}});
+  await db.runAsync("INSERT INTO memory_attachments(id,entity_id,name,mime,size,created_at) VALUES (?,?,?,?,?,?)",
+    ["attachment-from-second",second.id,"source.jpg","image/jpeg",2,"now"]);
+  await db.runAsync("INSERT INTO memory_received_shares(fingerprint,entity_id) VALUES (?,?)",
+    ["second-receipt",second.id]);
+  const token=await repo.changeNotes("merge",[first,second]);
+  await db.runAsync("UPDATE memory_attachments SET entity_id=? WHERE id=?",
+    [other.id,"attachment-from-second"]);
+  await expect(repo.undoNotes(token)).rejects.toThrow("merge_undo_source_changed");
+  expect((await repo.entity(second.id))?.record_status).toBe("superseded");
+  expect((await db.getFirstAsync<any>("SELECT entity_id FROM memory_received_shares WHERE fingerprint='second-receipt'"))?.entity_id).toBe(first.id);
+  await db.runAsync("UPDATE memory_attachments SET entity_id=? WHERE id=?",
+    [first.id,"attachment-from-second"]);
+  await db.runAsync("DELETE FROM memory_received_shares WHERE fingerprint=?",["second-receipt"]);
+  await expect(repo.undoNotes(token)).rejects.toThrow("merge_undo_source_changed");
+  expect((await repo.entity(second.id))?.record_status).toBe("superseded");
+  expect((await db.getFirstAsync<any>("SELECT entity_id FROM memory_attachments WHERE id='attachment-from-second'"))?.entity_id).toBe(first.id);
+});
+
+test("MSG-6.C8: superseding a source with links, observations or temporal evidence is rejected before any write",async()=>{
+  const db=new FakeSqlite(),repo=new SqliteMemoryRepository(db as never);
+  const c=await repo.createCollection({name:"Notes",slug:"guard-msg6c8"});
+  const target=await repo.createEntity({collection_id:c.id,domain:"notes",payload:{body:"Main"}});
+  const linked=await repo.createEntity({collection_id:c.id,domain:"notes",payload:{body:"Person link"}});
+  await db.runAsync("INSERT INTO memory_relations(id,source_entity_id,target_entity_id,kind,created_at) VALUES (?,?,?,?,?)",
+    ["merge-rel",linked.id,target.id,"about","now"]);
+  await expect(repo.changeNotes("merge",[target,linked])).rejects.toThrow("merge_source_has_links_review_required");
+  expect((await repo.entity(linked.id))?.record_status).toBe("active");
+  await db.runAsync("DELETE FROM memory_relations WHERE id=?",["merge-rel"]);
+  await db.runAsync("INSERT INTO memory_observations(id,entity_id,kind,payload_json,occurred_at,created_at) VALUES (?,?,?,?,?,?)",
+    ["obs",linked.id,"note",JSON.stringify({body:"linked fact"}),"now","now"]);
+  await expect(repo.changeNotes("merge",[target,linked])).rejects.toThrow("merge_source_has_links_review_required");
+  await db.runAsync("DELETE FROM memory_observations WHERE id=?",["obs"]);
+  await db.runAsync("INSERT INTO memory_temporal_claims(id,entity_id,source_record_version,predicate,context,value,temporal_kind,modality,negated,cardinality,end_confirmed,knowledge_recorded_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+    ["claim",linked.id,1,"owns","family","house","state","asserted",0,"single",0,"now"]);
+  await expect(repo.changeNotes("merge",[target,linked])).rejects.toThrow("merge_source_has_links_review_required");
+  expect((await repo.entity(target.id))?.payload.body).toBe("Main");
+});
+
+test("MSG-6.C8: merging over 12 distinct tags aborts, without overwriting either note or Share ownership",async()=>{
+  const db=new FakeSqlite(),repo=new SqliteMemoryRepository(db as never);
+  const c=await repo.createCollection({name:"Notes",slug:"tags-guard-msg6c8"});
+  const first=await repo.createEntity({collection_id:c.id,domain:"notes",payload:{
+    body:"original",tags:["a","b","c","d","e","f","g"]}});
+  const second=await repo.createEntity({collection_id:c.id,domain:"notes",payload:{
+    body:"source",tags:["h","i","j","k","l","m"]}});
+  await db.runAsync("INSERT INTO memory_received_shares(fingerprint,entity_id) VALUES (?,?)",
+    ["source-replay",second.id]);
+  await expect(repo.changeNotes("merge",[first,second])).rejects.toThrow("merge_too_many_tags_review_required");
+  expect((await repo.entity(first.id))?.record_version).toBe(1);
+  expect((await repo.entity(second.id))?.record_status).toBe("active");
+  expect((await db.getFirstAsync<any>("SELECT entity_id FROM memory_received_shares WHERE fingerprint='source-replay'"))?.entity_id).toBe(second.id);
+});
+
+test("MSG-6.C8: an older merge journal without Share receipts remains safely undoable after upgrade",async()=>{
+  const db=new FakeSqlite(),repo=new SqliteMemoryRepository(db as never);
+  const col=await repo.createCollection({name:"Legacy",slug:"legacy-merge-msg6c8"});
+  const main=await repo.createEntity({collection_id:col.id,domain:"notes",payload:{body:"Main"}});
+  const oldSource=await repo.createEntity({collection_id:col.id,domain:"notes",payload:{body:"Original"}});
+  await db.runAsync("INSERT INTO memory_attachments(id,entity_id,name,mime,size,created_at) VALUES (?,?,?,?,?,?)",
+    ["legacy-photo",oldSource.id,"legacy.jpg","image/jpeg",4,"now"]);
+  const token=await repo.changeNotes("merge",[main,oldSource]);
+  // Exactly the old journal shape: attachmentIds but no shareFingerprints,
+  // and merged_sources had no immutable attachment_id field before C8.
+  for(const id of [main.id,oldSource.id]){
+    const revision=await db.getFirstAsync<any>("SELECT before_json FROM memory_revisions WHERE reason=? AND entity_id=?",
+      [token,id]);
+    const before=JSON.parse(revision.before_json);
+    delete before.shareFingerprints;
+    await db.runAsync("UPDATE memory_revisions SET before_json=? WHERE reason=? AND entity_id=?",
+      [JSON.stringify(before),token,id]);
+  }
+  const raw=await db.getFirstAsync<any>("SELECT payload_json FROM memory_entities WHERE id=?",[main.id]);
+  const payload=JSON.parse(raw.payload_json);
+  for(const origin of payload.merged_sources) delete origin.attachment_ids;
+  await db.runAsync("UPDATE memory_entities SET payload_json=? WHERE id=?",
+    [JSON.stringify(payload),main.id]);
+  await repo.undoNotes(token);
+  expect((await repo.entity(oldSource.id))?.record_status).toBe("active");
+  expect((await db.getFirstAsync<any>("SELECT entity_id FROM memory_attachments WHERE id='legacy-photo'"))?.entity_id)
+    .toBe(oldSource.id);
+});
+
+test("MSG-6.C8: an incomplete new Share journal is not misclassified as legacy",async()=>{
+  const db=new FakeSqlite(),repo=new SqliteMemoryRepository(db as never);
+  const col=await repo.createCollection({name:"Fresh",slug:"fresh-merge-msg6c8"});
+  const a=await repo.createEntity({collection_id:col.id,domain:"notes",payload:{body:"A"}});
+  const b=await repo.createEntity({collection_id:col.id,domain:"notes",payload:{body:"B"}});
+  const token=await repo.changeNotes("merge",[a,b]);
+  const r=await db.getFirstAsync<any>("SELECT before_json FROM memory_revisions WHERE reason=? AND entity_id=?",[token,b.id]);
+  const before=JSON.parse(r.before_json); delete before.shareFingerprints;
+  await db.runAsync("UPDATE memory_revisions SET before_json=? WHERE reason=? AND entity_id=?",
+    [JSON.stringify(before),token,b.id]);
+  await expect(repo.undoNotes(token)).rejects.toThrow("merge_undo_source_changed");
+  expect((await repo.entity(b.id))?.record_status).toBe("superseded");
+});
+
+test("MSG-6.C8: user-owned aliases, manual search terms and protected sources cannot be silently superseded",async()=>{
+  const db=new FakeSqlite(),repo=new SqliteMemoryRepository(db as never);
+  const col=await repo.createCollection({name:"Users",slug:"alias-guard-msg6c8"});
+  const a=await repo.createEntity({collection_id:col.id,domain:"notes",payload:{body:"A"}});
+  const b=await repo.createEntity({collection_id:col.id,domain:"notes",payload:{body:"B"}});
+  await db.runAsync("INSERT INTO memory_aliases(entity_id,alias,normalized) VALUES (?,?,?)",
+    [b.id,"Завещание","завещание"]);
+  await expect(repo.changeNotes("merge",[a,b])).rejects.toThrow("merge_source_has_links_review_required");
+  await db.runAsync("DELETE FROM memory_aliases WHERE entity_id=?",[b.id]);
+  await db.runAsync("INSERT INTO memory_index_terms(entity_id,terms,source,created_at) VALUES (?,?,?,?)",
+    [b.id,"страховка","user","now"]);
+  await expect(repo.changeNotes("merge",[a,b])).rejects.toThrow("merge_source_has_links_review_required");
+  await db.runAsync("DELETE FROM memory_index_terms WHERE entity_id=?",[b.id]);
+  await db.runAsync("INSERT INTO memory_cleanup_preferences(entity_id,guard,version,updated_at) VALUES (?,?,?,?)",
+    [b.id,"pinned",1,"now"]);
+  await expect(repo.changeNotes("merge",[a,b])).rejects.toThrow("merge_source_has_links_review_required");
+  expect((await repo.entity(b.id))?.record_status).toBe("active");
+});
