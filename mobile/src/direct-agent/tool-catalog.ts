@@ -26,6 +26,17 @@ export type ToolSpec = {
 };
 const queryParameters = { type: "object", properties: { query: { type: "string" } }, required: ["query"], additionalProperties: false };
 const text = (v: unknown, cap = 600) => typeof v === "string" ? v.slice(0, cap) : "";
+const SECTION_TOOL_ERRORS = new Set([
+  "application_locked","invalid_section_action_args","section_parent_unavailable",
+  "section_parent_changed","section_sibling_name_exists","section_delete_protected_or_missing",
+  "section_has_children","section_not_empty","collection_not_empty","collection_delete_protected",
+  "stale_collection",
+]);
+const sectionToolError = (error:unknown) => {
+  const code=error instanceof Error ? error.message : "";
+  return SECTION_TOOL_ERRORS.has(code) ? code : "section_action_unavailable";
+};
+
 
 /** All provider adapters advertise and execute the same catalog. No dynamic code loading. */
 export function createToolCatalog(options: DirectAgentOptions, sources: string[], notes: MemorySnippet[], initialUsed: UsedNote[]) {
@@ -657,7 +668,11 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
            !(args.parentSlug===null || (typeof args.parentSlug==="string" && /^[a-z][a-z0-9_-]{0,63}$/.test(args.parentSlug))) ||
            typeof args.reason!=="string"||args.reason.trim().length<5||args.reason.length>240)
           return {error:"invalid_section_action_args"};
-        const proposed=await options.previewSectionAction!(request as Parameters<NonNullable<DirectAgentOptions["previewSectionAction"]>>[0]);
+        let proposed:ChatSectionProposal;
+        try {
+          proposed=await options.previewSectionAction!(
+            request as Parameters<NonNullable<DirectAgentOptions["previewSectionAction"]>>[0]);
+        }catch(error){return {error:sectionToolError(error)};}
         if(!validSectionProposal(proposed)||proposed.kind!=="create"||proposed.name!==args.name.trim())
           return {error:"invalid_section_preview"};
         sectionPreview=proposed;
@@ -680,7 +695,11 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
            typeof args.sectionSlug!=="string"||!/^[a-z][a-z0-9_-]{0,63}$/.test(args.sectionSlug) ||
            typeof args.reason!=="string"||args.reason.trim().length<5||args.reason.length>240)
           return {error:"invalid_section_action_args"};
-        const proposed=await options.previewSectionAction!({kind:"delete",sectionSlug:args.sectionSlug,reason:args.reason});
+        let proposed:ChatSectionProposal;
+        try {
+          proposed=await options.previewSectionAction!(
+            {kind:"delete",sectionSlug:args.sectionSlug,reason:args.reason});
+        }catch(error){return {error:sectionToolError(error)};}
         if(!validSectionProposal(proposed)||proposed.kind!=="delete"||proposed.slug!==args.sectionSlug)
           return {error:"invalid_section_preview"};
         sectionPreview=proposed;

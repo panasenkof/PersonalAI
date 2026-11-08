@@ -5,6 +5,18 @@ export function memoryErrorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : "";
   const known: Record<string, string> = {
     application_locked: "Для доступа войдите в приложение.",
+    section_parent_unavailable: "Родительский раздел отсутствует или недоступен помощнику.",
+    section_parent_changed: "Родительский раздел изменился. Создайте предложение заново.",
+    section_sibling_name_exists: "В этой папке уже есть раздел с таким названием.",
+    collection_sibling_name_exists: "В этой папке уже есть раздел с таким названием.",
+    section_delete_protected_or_missing: "Этот раздел недоступен для удаления помощником.",
+    collection_delete_protected: "Нельзя удалять системный, защищённый или недоступный подраздел.",
+    section_has_children: "Сначала переместите или удалите вложенные подразделы.",
+    section_not_empty: "В разделе есть записи. Удаление не выполнено.",
+    collection_not_empty: "В разделе остались записи или подразделы. Удаление не выполнено.",
+    stale_collection: "Раздел изменился после подготовки предложения. Проверьте его ещё раз.",
+    collection_cycle: "Нельзя переместить раздел внутрь самого себя или своего потомка.",
+
     vision_model_not_installed: "Чтобы искать фотографии, сначала скачайте и выберите модель EmbeddingGemma 2 в настройках.",
     vision_invalid_query_image: "Выберите JPEG, PNG или WebP из файлов телефона. HEIC пока не поддерживается.",
     vision_query_image_size: "Фотография пуста или превышает 80 МБ. Выберите файл меньшего размера.",
