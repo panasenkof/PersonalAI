@@ -916,3 +916,37 @@ test("MSG-6C6: replay fingerprint includes explicit tags, and forged tags fail c
   await expect(saveMediaNote("guest",{...request,tags:["invalid/name"]})).rejects.toThrow("Неверные теги");
   expect(sqlite.prepare("SELECT count(*) AS n FROM memory_entities").get().n).toBe(3);
 });
+
+test("MSG-6C7: exact tag is not a body-text hit; FTS, collection, archive and paging still compose",async()=>{
+  const db=new SqliteMemoryRepository(mockDb);
+  const base={file:input.file,sensitivity:"standard" as const};
+  const first=await saveMediaNote("guest",{...base,title:"Первый",body:"Авто в тексте",tags:["#авто"]});
+  const second=await saveMediaNote("guest",{...base,title:"Второй",body:"Авто в тексте",tags:["дом"]});
+  const third=await saveMediaNote("guest",{...base,title:"Третий",body:"Документ",tags:["авто"]});
+  expect((await db.searchNotes("авто")).length).toBe(3);
+  expect((await db.searchNotes("",50,0,{tag:"#АВТО"})).map(x=>x.id).sort()).toEqual([first,third].sort());
+  expect((await db.searchNotes("авто",50,0,{tag:"авто"})).map(x=>x.id)).toEqual([first]);
+  expect(await db.searchNotes("",50,0,{tag:"ав"})).toEqual([]);
+  expect((await db.listNoteTags()).sort()).toEqual(["авто","дом"]);
+  expect(await db.listNoteTags({},1,0)).toEqual(["авто"]);
+  expect(await db.listNoteTags({},1,1)).toEqual(["дом"]);
+  await expect(db.searchNotes("",50,0,{tag:"авто дом"})).rejects.toThrow("invalid_note_tag_filter");
+  await expect(db.searchNotes("",50,0,{tag:"bad/name"})).rejects.toThrow();
+  const col=await db.createCollection({name:"Отдельное",slug:"separate-msg6c7",sensitivity:"standard"});
+  const one=await db.entity(first);
+  await db.changeNotes("move",[{id:first,record_version:one!.record_version}],col.id);
+  expect((await db.searchNotes("",50,0,{tag:"авто",collectionId:col.id})).map(x=>x.id)).toEqual([first]);
+  expect(await db.listNoteTags({collectionId:col.id})).toEqual(["авто"]);
+  expect((await db.searchNotes("",50,0,{tag:"авто",collectionId:one!.collection_id})).map(x=>x.id)).toEqual([third]);
+  const moved=await db.entity(first);
+  await db.changeNotes("archive",[{id:first,record_version:moved!.record_version}]);
+  expect((await db.searchNotes("",50,0,{tag:"авто",status:"archived"})).map(x=>x.id)).toEqual([first]);
+  expect(await db.listNoteTags({collectionId:col.id,status:"archived"})).toEqual(["авто"]);
+  expect(await db.listNoteTags({collectionId:col.id,status:"active"})).toEqual([]);
+  expect((await db.searchNotes("",50,0,{tag:"авто",status:"active"})).map(x=>x.id)).toEqual([third]);
+  expect((await db.searchNotes("",1,0,{tag:"авто",status:"active"})).map(x=>x.id)).toEqual([third]);
+  // Malformed legacy tag shape is never a valid exact tag or listed facet.
+  const bad=await db.entity(second);
+  await db.reviseEntity(second,bad!.record_version,{...bad!.payload,tags:"авто"},"Legacy tag input");
+  expect((await db.listNoteTags({status:"active"}))).toEqual(["авто"]);
+});
