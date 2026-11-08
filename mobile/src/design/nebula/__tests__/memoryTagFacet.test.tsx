@@ -1,6 +1,5 @@
 import React from "react";
 import { fireEvent, render, waitFor } from "@testing-library/react-native";
-import { Pressable, Text } from "react-native";
 import { MemoryTagFacet } from "../MemoryTagFacet";
 import type { SqliteMemoryRepository } from "../../../local-memory/repository";
 
@@ -13,11 +12,12 @@ jest.mock("../../../local-memory/storage", () => ({
 jest.mock("../../../components/BottomSheet", () => ({
   BottomSheet: ({visible,children}:any) => visible ? children : null,
 }));
-jest.mock("../components", () => ({
-  NebulaAction: ({label,accessibilityLabel,disabled,onPress}:any) =>
+jest.mock("../components", () => {
+  const { Pressable, Text } = require("react-native");
+  return { NebulaAction: ({label,accessibilityLabel,disabled,onPress}:any) =>
     <Pressable accessibilityRole="button" accessibilityLabel={accessibilityLabel||label}
-      accessibilityState={{disabled}} disabled={disabled} onPress={onPress}><Text>{label}</Text></Pressable>,
-}));
+      accessibilityState={{disabled}} disabled={disabled} onPress={onPress}><Text>{label}</Text></Pressable> };
+});
 jest.mock("../../../theme", () => ({
   useTheme: () => ({text:"#fff",muted:"#abbad8",line:"#445574"}),
 }));
