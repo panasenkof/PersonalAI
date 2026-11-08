@@ -39,3 +39,12 @@ test("loaded pages above the database 100-row request limit are retained", () =>
   expect(memoryScrollReloadCount({ ...anchor, loaded: 30, index: 79 }, home)).toBe(80);
   expect(memoryScrollReloadCount(null, home)).toBe(50);
 });
+
+test("MSG-6C7: a tag-only filter owns a distinct scroll anchor even with identical text and collection",()=>{
+  const tagged = memoryScrollScope("profile-a",undefined,"active","","авто");
+  const differentlyTagged = memoryScrollScope("profile-a",undefined,"active","","дом");
+  expect(tagged).not.toBe(home);
+  expect(tagged).not.toBe(differentlyTagged);
+  expect(memoryScrollReloadCount(anchor,tagged)).toBe(50);
+  expect(memoryScrollRowIndex(notes,anchor,tagged,2)).toBeNull();
+});
