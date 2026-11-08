@@ -206,7 +206,10 @@ test.each([false, true])("v5 enrichment migration (retry=%s) preserves data/key 
   const { SCHEMA_SQL } = require("../storage");
   const identity = await localMemoryIdentity("guest");
   const legacy = new DatabaseSync(path.join(mockDirectory, identity.databaseName));
-  legacy.exec(SCHEMA_SQL.replace("  source_record_version INTEGER, source_collection_name TEXT,\n", ""));
+  legacy.exec(SCHEMA_SQL
+    .replace("  source_record_version INTEGER, source_collection_name TEXT,\n", "")
+    .replace("created_at TEXT NOT NULL, parent_id TEXT REFERENCES memory_collections(id) ON DELETE RESTRICT",
+      "created_at TEXT NOT NULL"));
   legacy.exec(`PRAGMA user_version=5;
     INSERT INTO memory_collections VALUES ('c','Заметки','notes',NULL,'standard','now');
     INSERT INTO memory_entities(id,collection_id,domain,payload_json,created_at,updated_at) VALUES ('n','c','notes','{"body":"Исходный текст"}','now','now');
@@ -1419,7 +1422,7 @@ test("v16 to v17 adds the nullable one-slot profile identity without changing ex
   const next=await localMemoryRepository("guest");
   expect(await next.profileSelfIdentity()).toEqual({personId:self.id,bindingVersion:1});
   expect((await next.entity(self.id))?.record_version).toBe(1);
-  expect(mockConnections.at(-1).sqlite.prepare("PRAGMA user_version").get()).toMatchObject({user_version:18});
+  expect(mockConnections.at(-1).sqlite.prepare("PRAGMA user_version").get()).toMatchObject({user_version:19});
 });
 
 

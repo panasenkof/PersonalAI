@@ -36,7 +36,7 @@ jest.mock("../local-memory/storage", () => ({
   localMemorySessionUnlocked: () => true,
   onLocalMemorySessionChange: () => () => {},
 }));
-jest.mock("../local-memory/sections", () => ({ ensureSections: async () => sections, orderCollections: (v: any) => v }));
+jest.mock("../local-memory/sections", () => ({ ...jest.requireActual("../local-memory/sections"), ensureSections: async () => sections, orderCollections: (v: any) => v }));
 jest.mock("../profile/ProfileContext", () => ({ useProfile: () => "p" }));
 jest.mock("../media/vector-runner", () => ({ scheduleVectors: jest.fn() }));
 jest.mock("../media/MemoryCover", () => ({ MemoryCover: () => null, purgeLegacyCoverCache: jest.fn() }));

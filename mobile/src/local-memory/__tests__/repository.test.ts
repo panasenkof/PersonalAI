@@ -159,7 +159,9 @@ test("creates offline note, edits with CAS, stores immutable history and updates
   expect(fake.updates).toBe(1);
   // Never open a second connection: SQLCipher keys are connection-local.
   expect(fake.transactionStatements).toEqual([
-    "BEGIN IMMEDIATE", "COMMIT", "BEGIN IMMEDIATE", "COMMIT",
+    "BEGIN IMMEDIATE", "COMMIT", // canonical collection creation
+    "BEGIN IMMEDIATE", "COMMIT", // entity creation
+    "BEGIN IMMEDIATE", "COMMIT", // entity revision
   ]);
   expect(await repo.searchNotes("old oil")).toHaveLength(0);
   expect((await repo.searchNotes("new filter"))[0].id).toBe(initial.id);
@@ -196,7 +198,10 @@ test("offline creation uses the already-unlocked SQLCipher connection", async ()
   const repo = new SqliteMemoryRepository(fake as never);
   const col = await repo.createCollection({ name: "Notes", slug: "notes" });
   await repo.createEntity({ collection_id: col.id, domain: "notes", payload: { title: "A" } });
-  expect(fake.transactionStatements).toEqual(["BEGIN IMMEDIATE", "COMMIT"]);
+  expect(fake.transactionStatements).toEqual([
+    "BEGIN IMMEDIATE", "COMMIT", // collection
+    "BEGIN IMMEDIATE", "COMMIT", // entity
+  ]);
 });
 
 test("section filters, moves, archive and restore preserve payload and immutable revisions", async () => {

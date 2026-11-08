@@ -56,7 +56,7 @@ async function save(db: DB, repo: SqliteMemoryRepository, attachmentId: string, 
 test("v18 index is derived, encrypted and lives with attachment foreign keys",async()=>{
   const db=new DB();
   try{
-    expect(LOCAL_MEMORY_SCHEMA_VERSION).toBe(18);
+    expect(LOCAL_MEMORY_SCHEMA_VERSION).toBe(19);
     const schema=await db.getFirstAsync<{sql:string}>("SELECT sql FROM sqlite_master WHERE name='memory_attachment_vectors'");
     expect(schema?.sql).toContain("REFERENCES memory_attachments(id) ON DELETE CASCADE");
     expect(schema?.sql).not.toContain("path");

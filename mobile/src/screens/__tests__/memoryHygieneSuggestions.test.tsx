@@ -51,6 +51,7 @@ jest.mock("../../components/BottomSheet", () => ({
 }));
 jest.mock("../../local-memory/repository", () => ({ localMemoryRepository: async () => mockRepo }));
 jest.mock("../../local-memory/sections", () => ({
+  ...jest.requireActual("../../local-memory/sections"),
   ensureSections: async () => [{ id: "col", slug: "recipes", name: "Рецепты", sensitivity: "standard" }],
   orderCollections: (v: unknown) => v,
 }));
