@@ -15,3 +15,11 @@ export type EnrichmentSnapshot = {
   collectionId: string; collectionName: string; collectionSlug: string;
   sensitivity: EntityRecord["sensitivity"];
 };
+
+// Search-only inferences: never author/date provenance, legal identity, verified
+// relationships, canonical record title/type, or source-derived timestamps.
+export const AUTO_SEARCH_VERSION = 1;
+export type SearchMetadataSuggestion = {
+  tags: string[]; topic: string; summary: string; titleHint: string;
+  places: string[]; dates: string[]; people: string[];
+};
