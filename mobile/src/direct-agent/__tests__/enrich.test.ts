@@ -66,6 +66,8 @@ test("index words make the record findable by a synonym, and the person named is
     const title = /Название: (.*)/.exec(JSON.parse(String(init.body)).messages[1].content)![1];
     return reply(answers[title]);
   });
+  expect((await repo.entitiesByAlias("Аня","person")).map(n=>n.id)).toContain(anya.id);
+  expect((await suggestIndexTerms(settings,{title:"Что любит",body:"Обожает капучино",section:"Люди"},transport as unknown as typeof fetch)).people).toEqual(["Аня"]);
   expect(await repo.searchNotes("автомобиль")).toHaveLength(0);
   const pass = await enrichPending(repo, settings, { transport: transport as unknown as typeof fetch });
   expect(pass).toEqual({ done: 3, failed: 0 });
@@ -145,6 +147,7 @@ test("same-millisecond edits invalidate model terms but preserve user words and 
 
 test.each(["abort", "index-failure"])("%s rolls back words and links together, retaining manual data", async mode => {
   const { repo, db, car, likes } = await setup();
+  expect((await repo.entitiesByAlias("Аня","person")).map(n=>n.id)).toContain(anya.id);
   const manual = await repo.linkEntities(car.id, likes.id, "about");
   await repo.setIndexTerms(car.id, ["ручное"], "user");
   const controller = new AbortController();
