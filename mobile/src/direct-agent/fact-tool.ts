@@ -1,6 +1,6 @@
 /** The assistant's only memory-writing tool: it proposes one record, which is
  * saved only after the user confirms it. Pure: no storage imports. */
-import { SECTIONS, sectionBySlug } from "../local-memory/sections";
+import { SECTIONS, sectionBySlug, collectionPath } from "../local-memory/sections";
 import { isMemoryKind } from "../local-memory/search-index";
 import type { MemoryKind } from "../local-memory/search-index";
 import type { CollectionRecord } from "../local-memory/types";
@@ -14,7 +14,7 @@ export type NoteProposal = {
   kind?: ProposableKind; person?: string; date?: string;
 };
 /** A section the assistant may propose a record for. */
-export type MemorySection = { slug: string; name: string; hint?: string; own?: boolean };
+export type MemorySection = { slug: string; name: string; path?: string; hint?: string; own?: boolean };
 
 /** «Документ» is never proposed: documents are entered by the user only. */
 export const PROPOSABLE_KINDS = ["fact", "person", "event", "preference", "note"] as const;
@@ -34,10 +34,22 @@ export const DEFAULT_SECTIONS: MemorySection[] = SECTIONS.filter(s => s.slug !==
 /** Sections a proposal may go to: built-in and the user's own, ordinary or
  * personal, but never «Документы» and never secret or unclassified ones. */
 export function proposableSections(collections: CollectionRecord[]): MemorySection[] {
-  return collections.filter(c => c.slug !== "documents" && (c.sensitivity === "standard" || c.sensitivity === "sensitive"))
+  const byId = new Map(collections.map(c => [c.id,c]));
+  const permitted = (c: CollectionRecord) => {
+    const seen = new Set<string>();
+    let parent: CollectionRecord | undefined = c;
+    while (parent && !seen.has(parent.id)) {
+      if (parent.slug === "documents" || parent.sensitivity === "secret" ||
+          parent.sensitivity === "unclassified") return false;
+      seen.add(parent.id);
+      parent = parent.parent_id ? byId.get(parent.parent_id) : undefined;
+    }
+    return !parent;
+  };
+  return collections.filter(c => permitted(c) && (c.sensitivity === "standard" || c.sensitivity === "sensitive"))
     .map(c => {
       const builtin = sectionBySlug(c.slug);
-      return { slug: c.slug, name: c.name.slice(0, 60), ...(builtin ? { hint: builtin.hint } : { own: true, ...(c.description ? { hint: c.description.slice(0, 120) } : {}) }) };
+      return { slug: c.slug, name: c.name.slice(0, 60), path: collectionPath(c, collections), ...(builtin ? { hint: builtin.hint } : { own: true, ...(c.description ? { hint: c.description.slice(0, 120) } : {}) }) };
     });
 }
 
@@ -46,7 +58,11 @@ const normalizeName = (value: string) => value.replace(NAME, "").replace(/ё/g, 
 /** The model may answer with a slug or a name; both find the section. */
 export function findSection(value: string, sections: MemorySection[]): MemorySection | undefined {
   const key = normalizeName(value);
-  return key ? sections.find(s => s.slug === value.trim() || normalizeName(s.name) === key) : undefined;
+  if (!key) return undefined;
+  const exact = sections.find(s => s.slug === value.trim() || normalizeName(s.path || "") === key);
+  if (exact) return exact;
+  const matches = sections.filter(s => normalizeName(s.name) === key);
+  return matches.length === 1 ? matches[0] : undefined;
 }
 const isDocuments = (value: string) => ["documents", "документы", "документ"].includes(normalizeName(value));
 
@@ -59,7 +75,7 @@ export function factToolParameters(sections: MemorySection[] = DEFAULT_SECTIONS)
     properties: {
       title: { type: "string", description: "Коротко, о чём запись" },
       body: { type: "string", description: "Сам факт полным предложением" },
-      section: { type: "string", description: "Название раздела памяти. Существующие: " + sections.map(s => "«" + s.name + "»").join(", ") +
+      section: { type: "string", description: "Название раздела памяти. Существующие: " + sections.map(s => "«" + (s.path || s.name) + "»").join(", ") +
         ". Если пользователь просит раздел, которого нет, — его название; приложение предложит создать" },
       kind: { type: "string", enum: PROPOSABLE_KINDS, description: "fact — факт о пользователе; person — запись о человеке; event — событие или дата; preference — что нравится или как отвечать; note — остальное" },
       person: { type: ["string", "null"], description: "Имя человека, о котором факт, если он не о самом пользователе; иначе null" },
@@ -72,7 +88,7 @@ export const FACT_TOOL_PARAMETERS = factToolParameters();
 
 /** What the system prompt says about the sections and the tool's fields. */
 export function factGuide(sections: MemorySection[] = DEFAULT_SECTIONS): string {
-  return "Разделы памяти пользователя: " + sections.map(s => "«" + s.name + "»" + (s.own ? " (создан пользователем)" : "") + (s.hint ? " — " + s.hint : "")).join("; ") + ". " +
+  return "Разделы памяти пользователя: " + sections.map(s => "«" + (s.path || s.name) + "»" + (s.own ? " (создан пользователем)" : "") + (s.hint ? " — " + s.hint : "")).join("; ") + ". " +
     "При вызове " + FACT_TOOL_NAME + " укажи в section название раздела. Если пользователь назвал раздел — используй именно его, " +
     "в том числе созданный им самим; если такого раздела нет, укажи название, которое назвал пользователь, — приложение предложит создать раздел. " +
     "Укажи kind; если факт о другом человеке — его имя в person (например, «Аня»), дату события — в date. ";
@@ -101,6 +117,8 @@ export function factProposal(args: Record<string, unknown>, sections: MemorySect
   if (!title && !body) throw new Error("empty_note");
   const requested = text(args.section, 80);
   const found = requested && !isDocuments(requested) ? findSection(requested, sections) : undefined;
+  if (requested && !found && sections.filter(s => normalizeName(s.name) === normalizeName(requested)).length > 1)
+    throw new Error("ambiguous_section_path");
   const fresh = requested && !found && !isDocuments(requested) && !/^null$/i.test(requested) ? requested.replace(NAME, "").replace(/\s+/g, " ").trim().slice(0, 60) : "";
   return { title, body, ...(found ? { section: found.slug } : fresh ? { newSection: fresh } : {}), ...optional(args) };
 }
