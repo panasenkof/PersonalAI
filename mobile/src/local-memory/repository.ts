@@ -20,7 +20,7 @@ import type { TemporalHistoryQuery, TemporalAtDateQuery } from "./temporal-store
 import type { TemporalInboxQuery } from "./temporal-review-inbox";
 import type { TemporalDecisionRequest, TemporalDecisionExpected } from "./temporal-decisions";
 import { defaultKind, indexEntity, isMemoryKind, normalizeAlias } from "./search-index";
-import { parseNoteTagsInput } from "./note-tags";
+import { parseNoteTagsInput, noteTagsFromPayload, checkedNoteTags } from "./note-tags";
 import type { MemoryKind } from "./search-index";
 import { ftsPhrase, requiredSearchEvidence, searchSteps } from "./query";
 import { MIN_SIMILARITY, VECTOR_DIM, cosine, embeddingHash, embeddingText, fromBlob, fuseRanks, isCurrentVectorSpace, toBlob } from "./vectors";
@@ -30,7 +30,7 @@ import type {
   ObservationRecord, RelationRecord, RevisionRecord, RecordSensitivity,
 } from "./types";
 import { MemoryAccessError, MemoryConflictError } from "./types";
-import { CURRENT_MODEL_TERMS, enrichable, type EnrichmentSnapshot } from "./enrichment-policy";
+import { CURRENT_MODEL_TERMS, AUTO_SEARCH_VERSION, enrichable, type EnrichmentSnapshot, type SearchMetadataSuggestion } from "./enrichment-policy";
 
 type SQL = Pick<SQLite.SQLiteDatabase, "getFirstAsync" | "getAllAsync" | "runAsync" | "execAsync">;
 type Row = Record<string, unknown>;
@@ -630,7 +630,7 @@ export class SqliteMemoryRepository implements MemoryRepository {
   /** Compare the request snapshot and commit words + inferred links together.
    * The database lease pins the profile. Abort is checked inside the transaction,
    * including after async indexing, so a lock/disable cannot leave half an answer. */
-  async applyIndexEnrichment(snapshot: EnrichmentSnapshot, terms: string[], people: string[], signal?: AbortSignal): Promise<boolean> {
+  async applyIndexEnrichment(snapshot: EnrichmentSnapshot, terms: string[], people: string[], signal?: AbortSignal, metadata?: SearchMetadataSuggestion): Promise<boolean> {
     const checkCancelled = () => { if (signal?.aborted) throw new Error("Подбор слов остановлен"); };
     let applied = false;
     await withUnlockedTransaction(this.db, async tx => {
@@ -642,10 +642,40 @@ export class SqliteMemoryRepository implements MemoryRepository {
           entity.sensitivity !== snapshot.sensitivity || entity.collection_id !== snapshot.collectionId ||
           collection!.name !== snapshot.collectionName || collection!.slug !== snapshot.collectionSlug) return;
       const source = "model:auto", timestamp = now();
+      let storedVersion=entity.record_version;
+      if (metadata) {
+        // User-entered tags are authoritative; remove only this model's former
+        // contribution when replacing its own stale inference.
+        const previous=entity.payload.model_search as Record<string,unknown>|undefined;
+        const oldAuto=noteTagsFromPayload(previous?.tags);
+        const userTags=noteTagsFromPayload(entity.payload.tags).filter(tag=>!oldAuto.includes(tag));
+        const manuallyOverridden=previous?.tagOverride===true;
+        const inferred=checkedNoteTags(metadata.tags).slice(0,5);
+        const tags=manuallyOverridden?noteTagsFromPayload(entity.payload.tags):
+          [...new Set([...userTags,...inferred])].slice(0,12).sort();
+        const nextHints={
+          schema:AUTO_SEARCH_VERSION,origin:"model:auto",tags:manuallyOverridden?[]:inferred,
+          tagOverride:manuallyOverridden,
+          topic:metadata.topic,summary:metadata.summary,
+          titleHint:metadata.titleHint,places:metadata.places,dates:metadata.dates,
+          people:metadata.people,
+        };
+        const payload={...entity.payload,tags,model_search:nextHints};
+        const changed=await tx.runAsync(
+          "UPDATE memory_entities SET payload_json=?,updated_at=?,record_version=record_version+1 WHERE id=? AND record_version=?",
+          [validPayload(payload),timestamp,entity.id,entity.record_version]);
+        if(changed.changes!==1)throw new MemoryConflictError("stale_memory_version");
+        storedVersion++;
+        const after={...entity,payload,record_version:storedVersion,updated_at:timestamp};
+        await tx.runAsync(
+          "INSERT INTO memory_revisions(id,record_type,entity_id,observation_id,version,reason,actor_kind,before_json,after_json,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+          [uid(),"entity",entity.id,null,storedVersion,"Поисковые подсказки ИИ","model",
+            JSON.stringify(entity),JSON.stringify(after),timestamp]);
+      }
       await tx.runAsync("DELETE FROM memory_index_terms WHERE entity_id=? AND source=?", [entity.id, source]);
       await tx.runAsync(
         "INSERT INTO memory_index_terms(entity_id,terms,source,created_at,source_record_version,source_collection_name) VALUES (?,?,?,?,?,?)",
-        [entity.id, checkedTerms(terms), source, timestamp, entity.record_version, collection!.name]);
+        [entity.id, checkedTerms(terms), source, timestamp, storedVersion, collection!.name]);
       // Only replace links we can attribute to this automatic operation. Legacy
       // source_kind=NULL links may be manual and must not be guessed away.
       await tx.runAsync("DELETE FROM memory_relations WHERE source_entity_id=? AND source_kind=?", [entity.id, source]);
@@ -814,9 +844,12 @@ export class SqliteMemoryRepository implements MemoryRepository {
 
   /** How many enrichable records have current index words from `source`, and how many wait. */
   async indexTermsStatus(source: string): Promise<{ done: number; pending: number }> {
+    const freshness = source === "model:auto" ?
+      "(" + CURRENT_MODEL_TERMS + " AND COALESCE(json_extract(e.payload_json,'$.model_search.schema'),0)=" + AUTO_SEARCH_VERSION + ")" :
+      CURRENT_MODEL_TERMS;
     const row = await this.db.getFirstAsync<Row>(
-      `SELECT sum(CASE WHEN ${CURRENT_MODEL_TERMS} THEN 1 ELSE 0 END) AS done,
-              sum(CASE WHEN ${CURRENT_MODEL_TERMS} THEN 0 ELSE 1 END) AS pending
+      `SELECT sum(CASE WHEN ${freshness} THEN 1 ELSE 0 END) AS done,
+              sum(CASE WHEN ${freshness} THEN 0 ELSE 1 END) AS pending
        FROM memory_entities e JOIN memory_collections c ON c.id=e.collection_id
        LEFT JOIN memory_index_terms t ON t.entity_id=e.id AND t.source=?
        WHERE e.record_status='active' AND e.domain='notes' AND c.sensitivity='standard' AND c.slug<>'documents'
@@ -827,11 +860,14 @@ export class SqliteMemoryRepository implements MemoryRepository {
   /** Active records of ordinary sections whose index words from `source` are
    * missing or computed for another source version/section, oldest first. */
   async staleIndexTerms(source: string, limit = 20): Promise<string[]> {
+    const freshness = source === "model:auto" ?
+      "(" + CURRENT_MODEL_TERMS + " AND COALESCE(json_extract(e.payload_json,'$.model_search.schema'),0)=" + AUTO_SEARCH_VERSION + ")" :
+      CURRENT_MODEL_TERMS;
     const rows = await this.db.getAllAsync<Row>(
       `SELECT e.id FROM memory_entities e JOIN memory_collections c ON c.id=e.collection_id
        LEFT JOIN memory_index_terms t ON t.entity_id=e.id AND t.source=?
        WHERE e.record_status='active' AND e.domain='notes' AND c.sensitivity='standard' AND c.slug<>'documents'
-         AND e.sensitivity IN ('standard','inherit') AND COALESCE(${CURRENT_MODEL_TERMS},0)=0
+         AND e.sensitivity IN ('standard','inherit') AND COALESCE(${freshness},0)=0
        ORDER BY e.updated_at, e.id LIMIT ?`, [source, Math.min(200, Math.max(1, Math.trunc(limit)))]);
     return rows.map(r => String(r.id));
   }
