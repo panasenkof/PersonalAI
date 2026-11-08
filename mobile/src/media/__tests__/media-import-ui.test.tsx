@@ -53,8 +53,15 @@ jest.mock('expo-document-picker', () => ({ getDocumentAsync: jest.fn(async () =>
 jest.mock('expo-image-picker', () => ({ launchImageLibraryAsync: jest.fn(), requestCameraPermissionsAsync: jest.fn(), launchCameraAsync: jest.fn() }));
 jest.mock('expo-file-system/legacy', () => ({ copyAsync: jest.fn(async () => {}), cacheDirectory: 'file:///cache/', deleteAsync: jest.fn(async () => {}) }));
 beforeEach(() => { jest.clearAllMocks(); mockParams = undefined; mockUnlocked=true; mockSessionListeners.clear();
+  jest.spyOn(Alert,"alert").mockImplementation((title,_message,buttons:any)=> {
+    if(title==="Автоматические теги и раздел") {
+      const skip=buttons?.find((item:any)=>item.text==="Сохранить без ИИ");
+      skip?.onPress?.();
+    }
+  });
   (ensureSections as jest.Mock).mockResolvedValue([{ id: 'notes', name: 'Заметки', slug: 'notes', sensitivity: 'standard' }]);
 });
+afterEach(()=>{jest.restoreAllMocks();});
 test('picker lets user save original without transcript, provider or network; user text stays separate', async () => {
   const screen = render(<MemoryImportScreen />);
   fireEvent.press(screen.getByLabelText('Выбрать файл для памяти'));
@@ -888,7 +895,7 @@ test('MSG-6.C2: LLM chooses an existing collection only after per-import approva
   ]);
   (classifyImportCollectionWithAgent as jest.Mock).mockResolvedValueOnce({
     collectionId:'recipes',sectionSlug:'recipes',sectionName:'Рецепты',
-    topic:'Лазанья',reason:'Подпись о рецепте',excerptTruncated:false,
+    topic:'Лазанья',reason:'Подпись о рецепте',tags:['лазанья','рецепты'],excerptTruncated:false,
   });
   mockParams={incoming:[{shareType:'text',value:'Лазанья на ужин #рецепты'}]};
   const alert=jest.spyOn(Alert,'alert').mockImplementation(()=>{});
@@ -899,7 +906,7 @@ test('MSG-6.C2: LLM chooses an existing collection only after per-import approva
     expect(classifyImportCollectionWithAgent).not.toHaveBeenCalled();
     expect(saveMediaNote).not.toHaveBeenCalled();
     fireEvent.press(ui.getByLabelText('Определить раздел с ИИ'));
-    expect(alert).toHaveBeenCalledWith('Разрешить ИИ выбрать раздел?',
+    expect(alert).toHaveBeenCalledWith('Разрешить ИИ подобрать раздел и теги?',
       expect.stringContaining('до 2 платных обращений'),expect.any(Array));
     const choices=(alert as jest.Mock).mock.calls[0][2];
     expect(choices.map((x:any)=>x.text)).toEqual(['Отмена','Разрешить один подбор']);
@@ -941,12 +948,12 @@ test('MSG-6.C2: private record or selected protected section forbids LLM classif
   const ui=render(<MemoryImportScreen/>);
   await waitFor(()=>expect(ui.getByLabelText('Определить раздел с ИИ')).toBeTruthy());
   fireEvent.press(ui.getByLabelText('Личные — только на телефоне'));
-  expect(ui.getByLabelText('Определить раздел с ИИ').props.accessibilityState.disabled).toBe(true);
+  expect(ui.getByLabelText('Определить раздел с ИИ').props.accessibilityState.disabled).toBe(false);
   expect(classifyImportCollectionWithAgent).not.toHaveBeenCalled();
   fireEvent.press(ui.getByLabelText('Обычные — доступны агенту и разбору у провайдера'));
   fireEvent.press(ui.getByLabelText('Выбрать коллекцию'));
   fireEvent.press(ui.getByLabelText('Коллекция: Семья'));
-  expect(ui.getByLabelText('Определить раздел с ИИ').props.accessibilityState.disabled).toBe(true);
+  expect(ui.getByLabelText('Определить раздел с ИИ').props.accessibilityState.disabled).toBe(false);
   expect(classifyImportCollectionWithAgent).not.toHaveBeenCalled();
 });
 
