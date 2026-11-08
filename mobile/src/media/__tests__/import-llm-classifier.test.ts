@@ -20,12 +20,14 @@ const request=():ImportClassificationRequest=>({
 const candidate=(sectionSlug:string|null="recipes"):DirectResult=>({
   text:"Определено",sources:[],requests:2,
   contextCandidate:{topic:"Рецепт лазаньи",sectionSlug,reason:"В подписи рецепт"},
+  importTags:["лазанья","рецепты"],
 });
 
-test("MSG-6.C2: existing context tool is the ONLY registered action; no files, web or memory payload",async()=>{
+test("MSG-6.C2: bounded import metadata proposal uses ONLY the existing catalog, no reads or writes",async()=>{
   const runner=jest.fn(async(options:DirectAgentOptions)=>{
     expect(options.contextOnly).toBe(true);
     expect(options.contextClassificationEnabled).toBe(true);
+    expect(options.importTagsEnabled).toBe(true);
     expect(options.skipLocalMemory).toBe(true);
     expect(options.history).toEqual([]);
     expect(options.attachments).toEqual([]);
@@ -34,14 +36,16 @@ test("MSG-6.C2: existing context tool is the ONLY registered action; no files, w
     expect(options.prompt).toContain("Приготовлю лазанью");
     expect(options.sections).toEqual([{slug:"notes",name:"Заметки"},{slug:"recipes",name:"Рецепты"}]);
     const catalog=createToolCatalog(options,[],[],[]);
-    expect(catalog.definitions.map(tool=>tool.name)).toEqual(["set_conversation_context"]);
+    expect(catalog.definitions.map(tool=>tool.name)).toEqual(["propose_import_metadata"]);
+    expect(await catalog.run("set_conversation_context",{topic:"x",sectionSlug:null,reason:"y"}))
+      .toEqual({error:"tool_not_allowed"});
     expect(await catalog.run("search_local_notes",{query:"secret"})).toEqual({error:"tool_not_allowed"});
     expect(await catalog.run("draft_memory_fact",{title:"X"})).toEqual({error:"tool_not_allowed"});
     return candidate();
   });
   await expect(classifyImportCollectionWithAgent(request(),runner)).resolves.toEqual({
     collectionId:"recipes",sectionSlug:"recipes",sectionName:"Рецепты",
-    topic:"Рецепт лазаньи",reason:"В подписи рецепт",excerptTruncated:false,
+    topic:"Рецепт лазаньи",reason:"В подписи рецепт",tags:["лазанья","рецепты"],excerptTruncated:false,
   });
   expect(runner).toHaveBeenCalledTimes(1);
 });
@@ -79,10 +83,25 @@ test("MSG-6.C2: source is a bounded EXCERPT, not secretly a complete scan of PDF
 });
 
 test("MSG-6.C2: model cannot invent a new/private collection or mark upstream link as read",async()=>{
-  for(const slug of ["documents","family","unknown",null]){
+  for(const slug of ["documents","family","unknown"]){
     const runner=jest.fn().mockResolvedValue(candidate(slug));
     expect(await classifyImportCollectionWithAgent(request(),runner)).toBeNull();
   }
+  const noSection=await classifyImportCollectionWithAgent(request(),jest.fn().mockResolvedValue(candidate(null)));
+  expect(noSection).toMatchObject({sectionSlug:null,collectionId:null,tags:["лазанья","рецепты"]});
+});
+
+test("Import metadata tool rejects invented/private sections and invalid tag lists before any changes",async()=>{
+  const options:DirectAgentOptions={settings:request().settings,prompt:"Рецепт",history:[],lookup:async()=>[],
+    propose:()=>undefined,contextOnly:true,importTagsEnabled:true,contextClassificationEnabled:true,
+    sections:[{slug:"recipes",name:"Рецепты"}]};
+  const invalid=(tags:unknown,slug:string|null="recipes")=>({topic:"Рецепт лазаньи",sectionSlug:slug,reason:"Про лазанью",tags});
+  let catalog=createToolCatalog(options,[],[],[]);
+  expect(await catalog.run("propose_import_metadata",invalid(["bad/name"]))).toEqual({error:"invalid_import_tags"});
+  expect(await catalog.run("propose_import_metadata",invalid(["рецепты"],"secret"))).toEqual({error:"unknown_conversation_section"});
+  expect(await catalog.run("propose_import_metadata",invalid(["Рецепты","#Лазанья"]))).toMatchObject({status:"pending_import_save",saved:false});
+  expect(catalog.finish().importTags).toEqual(["лазанья","рецепты"]);
+  expect(await catalog.run("propose_import_metadata",invalid(["second"]))).toEqual({error:"import_metadata_already_proposed"});
 });
 
 test("MSG-6.C2: AppLock abort cancels classification before any model request",async()=>{
