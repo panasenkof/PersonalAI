@@ -697,7 +697,7 @@ export class SqliteMemoryRepository implements MemoryRepository {
         if (existing) continue;
         await tx.runAsync(
           "INSERT INTO memory_relations(id,source_entity_id,target_entity_id,kind,source_kind,source_ref,created_at) VALUES (?,?,?,?,?,?,?)",
-          [uid(), entity.id, person.id, "about", source, String(entity.record_version), timestamp]);
+          [uid(), entity.id, person.id, "about", source, String(storedVersion), timestamp]);
       }
       await indexEntity(tx, entity.id, timestamp);
       checkCancelled();
