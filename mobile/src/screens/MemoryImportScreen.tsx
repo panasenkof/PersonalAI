@@ -847,7 +847,7 @@ export function MemoryImportScreen() {
           disabled={busy} onPress={()=>setTagEditorOpen(true)} />}
         <Pressable accessibilityRole="button" accessibilityLabel="Выбрать коллекцию" disabled={busy} onPress={() => { Keyboard.dismiss(); setSectionOpen(true); }} style={{ ...button, backgroundColor: t.panel, alignItems: "flex-start" }}><Text style={{ color: t.text }}>Коллекция: {collections.find(c => c.id === collectionId)?.name || (incoming ? inboxCollection?.name || "Входящие" : "Заметки")} · Изменить</Text></Pressable>
         <View style={{ gap: 4 }}>
-          <NebulaAction icon="cpu" label="Определить раздел и теги с ИИ" size="compact"
+          <NebulaAction icon="cpu" label="Определить раздел и теги с ИИ" accessibilityLabel="Определить раздел с ИИ" size="compact"
             disabled={busy || preparing}
             onPress={askModelForCollection} />
           {modelCollectionHint ? <Text accessibilityLabel="Предложенный ИИ раздел"
