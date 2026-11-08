@@ -227,13 +227,25 @@ export async function undoNotes(db: SQL, batch: string, moveGuard?: ChatMoveGuar
     if (isMerge) {
       const primary = JSON.parse(revisions[0].after_json).batch_participants?.[0];
       if (typeof primary !== 'string') throw new MemoryConflictError('merge_undo_source_changed');
+      const beforeStates = revisions.map(r => JSON.parse(r.before_json) as Row);
+      // Older merged revisions did not snapshot Android Share receipts and
+      // did not rebind them. They already point to the original source, so
+      // restore their attachments without rewriting those legacy receipts.
+      // A partial/malformed mix of old and new journal shapes must fail closed.
+      const legacy = beforeStates.every(before => before.shareFingerprints === undefined);
+      const newFormat = beforeStates.every(before => Array.isArray(before.shareFingerprints));
+      const target = await tx.getFirstAsync<{payload_json:string}>(
+        'SELECT payload_json FROM memory_entities WHERE id=?', [primary]);
+      const origins = target ? JSON.parse(target.payload_json).merged_sources : null;
+      if ((!legacy && !newFormat) ||
+          (legacy && Array.isArray(origins) && origins.some((origin:Row) =>
+            origin && Object.prototype.hasOwnProperty.call(origin, 'attachment_ids'))))
+        throw new MemoryConflictError('merge_undo_source_changed');
       // Neither old attachments nor Share fingerprints carry an entity CAS
       // counter: check all of them inside BEGIN IMMEDIATE before the first
       // ownership update. Missing/moved records abort the ENTIRE undo.
-      for (const revision of revisions) {
-        const before = JSON.parse(revision.before_json) as Row;
-        if (!Array.isArray(before.attachmentIds) ||
-            !Array.isArray(before.shareFingerprints))
+      for (const before of beforeStates) {
+        if (!Array.isArray(before.attachmentIds))
           throw new MemoryConflictError('merge_undo_source_changed');
         for (const id of before.attachmentIds) {
           const current = await tx.getFirstAsync<{entity_id:string}>(
@@ -241,7 +253,7 @@ export async function undoNotes(db: SQL, batch: string, moveGuard?: ChatMoveGuar
           if (!current || current.entity_id !== primary)
             throw new MemoryConflictError('merge_undo_source_changed');
         }
-        for (const fingerprint of before.shareFingerprints) {
+        if (newFormat) for (const fingerprint of before.shareFingerprints) {
           const current = await tx.getFirstAsync<{entity_id:string}>(
             'SELECT entity_id FROM memory_received_shares WHERE fingerprint=?', [fingerprint]);
           if (!current || current.entity_id !== primary)
@@ -253,7 +265,7 @@ export async function undoNotes(db: SQL, batch: string, moveGuard?: ChatMoveGuar
       const before = JSON.parse(revision.before_json), current = await snapshot(tx, before.id);
       for (const id of before.attachmentIds || [])
         await tx.runAsync('UPDATE memory_attachments SET entity_id=? WHERE id=?', [before.id, id]);
-      if (isMerge) {
+      if (isMerge && Array.isArray(before.shareFingerprints)) {
         for (const fingerprint of before.shareFingerprints)
           await tx.runAsync('UPDATE memory_received_shares SET entity_id=? WHERE fingerprint=?',
             [before.id, fingerprint]);
