@@ -4,11 +4,11 @@ import { Pressable, Text } from "react-native";
 import { MemoryTagFacet } from "../MemoryTagFacet";
 import type { SqliteMemoryRepository } from "../../../local-memory/repository";
 
-let unlocked = true;
-let sessionListener: ((unlocked: boolean) => void) | null = null;
+let mockUnlocked = true;
+let mockSessionListener: ((mockUnlocked: boolean) => void) | null = null;
 jest.mock("../../../local-memory/storage", () => ({
-  localMemorySessionUnlocked: () => unlocked,
-  onLocalMemorySessionChange: (cb: (v: boolean) => void) => { sessionListener=cb; return () => {sessionListener=null;}; },
+  localMemorySessionUnlocked: () => mockUnlocked,
+  onLocalMemorySessionChange: (cb: (v: boolean) => void) => { mockSessionListener=cb; return () => {mockSessionListener=null;}; },
 }));
 jest.mock("../../../components/BottomSheet", () => ({
   BottomSheet: ({visible,children}:any) => visible ? children : null,
@@ -25,7 +25,7 @@ jest.mock("../../../theme", () => ({
 const listNoteTags=jest.fn(async (_filters:unknown,_limit:number,offset:number)=>
   offset===0?["авто","дом"]:[]);
 const repo={listNoteTags} as unknown as SqliteMemoryRepository;
-beforeEach(()=>{jest.clearAllMocks();unlocked=true;sessionListener=null;});
+beforeEach(()=>{jest.clearAllMocks();mockUnlocked=true;mockSessionListener=null;});
 test("MSG-6C7: no network or note write, choose exact stored tag only after explicit tap", async()=>{
   const onTagChange=jest.fn(),onError=jest.fn();
   const ui=render(<MemoryTagFacet repository={repo} profile="guest" status="active"
@@ -58,7 +58,7 @@ test("MSG-6C7: AppLock closes catalog without persisting tag or rendering saved 
     disabled={false} onTagChange={onTagChange} onError={onError} />);
   fireEvent.press(ui.getByLabelText("Фильтр по тегу"));
   await waitFor(()=>expect(ui.getByLabelText("Выбрать тег дом")).toBeTruthy());
-  unlocked=false; sessionListener?.(false);
+  mockUnlocked=false; mockSessionListener?.(false);
   await waitFor(()=>expect(ui.queryByLabelText("Выбрать тег дом")).toBeNull());
   expect(onTagChange).not.toHaveBeenCalled();
 });
