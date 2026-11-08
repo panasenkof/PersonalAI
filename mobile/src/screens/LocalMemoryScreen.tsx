@@ -410,6 +410,7 @@ export function LocalMemoryScreen() {
     if (status !== "active") { openAll(); return; }
     const parentId = collections.find(c => c.id === collectionId)?.parent_id;
     setCollectionId(parentId ?? undefined);
+    setSearch(""); setTerm(""); setTagFilter(undefined);
   }
   const cancelSelection = useCallback(() => {
     setSelectedIds([]); setSelecting(false); setActionsOpen(false); setConfirmation(null); setContextNote(null);
@@ -557,7 +558,7 @@ export function LocalMemoryScreen() {
       <Text accessibilityLiveRegion="polite" style={{ flex: 1, color: t.text }}>Выбрано: {selectedIds.length}</Text>
       <NebulaAction icon="more-horizontal" label="Действия" accessibilityLabel="Действия с выбранными записями" variant="primary" onPress={() => setActionsOpen(true)} disabled={busy || !selectedIds.length} />
     </View> : <View testID="memory-normal-toolbar" style={{ paddingHorizontal: 16, minHeight: 56, flexDirection: "row", alignItems: "center", gap: nebulaSpacing.xs }}>
-          {status !== "active" || collectionId ? <Pressable accessibilityRole="button" accessibilityLabel="На уровень выше" disabled={busy} onPress={openParent}
+          {status !== "active" || collectionId ? <Pressable accessibilityRole="button" accessibilityLabel={status !== "active" || !collections.find(c => c.id === collectionId)?.parent_id ? "Ко всем записям" : "На уровень выше"} disabled={busy} onPress={openParent}
             style={{ ...button, paddingHorizontal: nebulaSpacing.sm, minWidth: nebulaTouch.minimum }}>
             <Feather name="arrow-left" size={22} color={t.secondary} />
           </Pressable> : null}
