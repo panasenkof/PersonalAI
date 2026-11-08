@@ -37,13 +37,13 @@ const current='<div class="tgme_widget_message js-widget_message" data-post="pub
   '<div class="tgme_widget_message_photo_wrap"></div></div>';
 const unrelated='<div class="tgme_widget_message" data-post="public_news/43">'+
   '<div class="tgme_widget_message_text">Другая публикация, ошибочно похожая на искомую.</div></div>';
-function serve(html:string,contentType="text/html"){
+function serve(html:string,contentType="text/html",responseUrl="https://t.me/s/public_news/42",redirected=false){
   let read=0;
   const reader={read:jest.fn(async()=>read++===0
     ? {value:new Uint8Array(Buffer.from(html)),done:false}
     : {value:undefined,done:true}),cancel:jest.fn(async()=>{})};
   (nativeFetch as unknown as jest.Mock).mockResolvedValue({
-    ok:true,status:200,headers:{get:(key:string)=>key==="content-type"?contentType:null},
+    ok:true,status:200,url:responseUrl,redirected,headers:{get:(key:string)=>key==="content-type"?contentType:null},
     body:{getReader:()=>reader},
   });
   return reader;
@@ -56,7 +56,7 @@ test("MSG-1: importLink still uses native HTTPS/no-redirect and returns only sco
   const reader=serve(fakeHtml);
   const result=await importLink("https://t.me/s/public_news/42");
   expect(nativeFetch).toHaveBeenCalledWith("https://t.me/s/public_news/42",
-    expect.objectContaining({redirect:"error",credentials:"omit"}));
+    expect.objectContaining({redirect:"error",credentials:"omit",cache:"no-store"}));
   expect(reader.read).toHaveBeenCalledTimes(2);
   expect(reader.cancel).toHaveBeenCalled();
   expect(mockDelete).toHaveBeenCalledTimes(1);
@@ -121,4 +121,22 @@ test("MSG-1: no implicit redirects, including public Telegram URL aliases",async
   await expect(importLink("https://t.me/public_news/42"))
     .rejects.toThrow("перенаправляет");
   expect(nativeFetch).toHaveBeenCalledTimes(1);
+});
+
+test("MSG-6C9: URL-mismatched or redirected 200 cannot masquerade as same Telegram post",async()=>{
+  serve('<html><body>'+current+'</body></html>',"text/html","https://other.example/public_news/42");
+  await expect(importLink("https://t.me/public_news/42"))
+    .rejects.toThrow("Ответ получен с другого адреса");
+  expect(mockDelete).not.toHaveBeenCalled();
+  serve('<html><body>'+current+'</body></html>',"text/html","https://t.me/s/public_news/42",true);
+  await expect(importLink("https://t.me/public_news/42"))
+    .rejects.toThrow("перенаправлению запрещены");
+  expect(mockDelete).not.toHaveBeenCalled();
+  expect(nativeFetch).toHaveBeenCalledTimes(2);
+});
+
+test("MSG-6C9: same-origin response with same path is accepted without URL fragments",async()=>{
+  serve('<html><body>'+current+'</body></html>',"text/html","https://t.me/s/public_news/42#fragment");
+  const result=await importLink("https://t.me/public_news/42");
+  expect(result.textCoverage).toBe("telegram_post_text_only");
 });
