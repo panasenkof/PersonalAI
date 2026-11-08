@@ -1992,3 +1992,46 @@ test("MSG-6.C8: merging over 12 distinct tags aborts, without overwriting either
   expect((await repo.entity(second.id))?.record_status).toBe("active");
   expect((await db.getFirstAsync<any>("SELECT entity_id FROM memory_received_shares WHERE fingerprint='source-replay'"))?.entity_id).toBe(second.id);
 });
+
+test("MSG-6.C8: an older merge journal without Share receipts remains safely undoable after upgrade",async()=>{
+  const db=new FakeSqlite(),repo=new SqliteMemoryRepository(db as never);
+  const col=await repo.createCollection({name:"Legacy",slug:"legacy-merge-msg6c8"});
+  const main=await repo.createEntity({collection_id:col.id,domain:"notes",payload:{body:"Main"}});
+  const oldSource=await repo.createEntity({collection_id:col.id,domain:"notes",payload:{body:"Original"}});
+  await db.runAsync("INSERT INTO memory_attachments(id,entity_id,name,mime,size,created_at) VALUES (?,?,?,?,?,?)",
+    ["legacy-photo",oldSource.id,"legacy.jpg","image/jpeg",4,"now"]);
+  const token=await repo.changeNotes("merge",[main,oldSource]);
+  // Exactly the old journal shape: attachmentIds but no shareFingerprints,
+  // and merged_sources had no immutable attachment_id field before C8.
+  for(const id of [main.id,oldSource.id]){
+    const revision=await db.getFirstAsync<any>("SELECT before_json FROM memory_revisions WHERE reason=? AND entity_id=?",
+      [token,id]);
+    const before=JSON.parse(revision.before_json);
+    delete before.shareFingerprints;
+    await db.runAsync("UPDATE memory_revisions SET before_json=? WHERE reason=? AND entity_id=?",
+      [JSON.stringify(before),token,id]);
+  }
+  const raw=await db.getFirstAsync<any>("SELECT payload_json FROM memory_entities WHERE id=?",[main.id]);
+  const payload=JSON.parse(raw.payload_json);
+  for(const origin of payload.merged_sources) delete origin.attachment_ids;
+  await db.runAsync("UPDATE memory_entities SET payload_json=? WHERE id=?",
+    [JSON.stringify(payload),main.id]);
+  await repo.undoNotes(token);
+  expect((await repo.entity(oldSource.id))?.record_status).toBe("active");
+  expect((await db.getFirstAsync<any>("SELECT entity_id FROM memory_attachments WHERE id='legacy-photo'"))?.entity_id)
+    .toBe(oldSource.id);
+});
+
+test("MSG-6.C8: an incomplete new Share journal is not misclassified as legacy",async()=>{
+  const db=new FakeSqlite(),repo=new SqliteMemoryRepository(db as never);
+  const col=await repo.createCollection({name:"Fresh",slug:"fresh-merge-msg6c8"});
+  const a=await repo.createEntity({collection_id:col.id,domain:"notes",payload:{body:"A"}});
+  const b=await repo.createEntity({collection_id:col.id,domain:"notes",payload:{body:"B"}});
+  const token=await repo.changeNotes("merge",[a,b]);
+  const r=await db.getFirstAsync<any>("SELECT before_json FROM memory_revisions WHERE reason=? AND entity_id=?",[token,b.id]);
+  const before=JSON.parse(r.before_json); delete before.shareFingerprints;
+  await db.runAsync("UPDATE memory_revisions SET before_json=? WHERE reason=? AND entity_id=?",
+    [JSON.stringify(before),token,b.id]);
+  await expect(repo.undoNotes(token)).rejects.toThrow("merge_undo_source_changed");
+  expect((await repo.entity(b.id))?.record_status).toBe("superseded");
+});
