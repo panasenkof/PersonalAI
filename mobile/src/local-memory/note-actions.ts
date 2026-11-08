@@ -5,6 +5,7 @@ import { localMemorySessionUnlocked } from './storage';
 import { indexEntity, memoryText } from './search-index';
 import { MemoryConflictError } from './types';
 import { BULK_PURGE_NEEDS_REVIEW_SQL } from './bulk-purge-eligibility';
+import { noteTagsFromPayload, MAX_NOTE_TAGS } from './note-tags';
 
 type SQL = Pick<SQLiteDatabase, 'getFirstAsync' | 'getAllAsync' | 'runAsync' | 'execAsync'>;
 type Row = Record<string, any>;
@@ -17,10 +18,18 @@ export type NoteHygieneGuard = { expectedPreferences: Array<{ id:string; prefere
 export function mergeText(notes: { title: string | null; payload: Record<string, unknown> }[]): string {
   return notes.map(n => `── ${n.title || 'Без названия'} ──\n${memoryText(n.payload)}`).join('\n\n');
 }
-async function snapshot(db: SQL, id: string): Promise<Row> {
+async function snapshot(db: SQL, id: string, forMerge = false): Promise<Row> {
   const row = await db.getFirstAsync<Row>('SELECT * FROM memory_entities WHERE id=?', [id]);
   if (!row) throw new Error('Запись не найдена.');
-  return { ...row, attachmentIds: (await db.getAllAsync<{ id: string }>('SELECT id FROM memory_attachments WHERE entity_id=?', [id])).map(a => a.id) };
+  const attachmentIds = (await db.getAllAsync<{ id: string }>(
+    'SELECT id FROM memory_attachments WHERE entity_id=? ORDER BY id', [id])).map(a => a.id);
+  if (!forMerge) return { ...row, attachmentIds };
+  // The Android Share receipts are canonical user-owned references. Their
+  // original mapping joins the SAME versioned revision as moved attachments.
+  const shareFingerprints = (await db.getAllAsync<{ fingerprint: string }>(
+    'SELECT fingerprint FROM memory_received_shares WHERE entity_id=? ORDER BY fingerprint', [id]))
+    .map(r => r.fingerprint);
+  return { ...row, attachmentIds, shareFingerprints };
 }
 async function write(db: SQL, before: Row, after: Row, reason: string) {
   const timestamp = new Date().toISOString();
@@ -52,7 +61,7 @@ export async function changeNotes(db: SQL, action: NoteAction, selection: NoteSe
       throw new MemoryConflictError('application_locked');
     const rows: Row[] = [];
     for (const selected of selection) {
-      const row = await snapshot(tx, selected.id);
+      const row = await snapshot(tx, selected.id, action === 'merge');
       if (row.record_version !== selected.record_version) throw new MemoryConflictError('stale_memory_version');
       if (action === 'restore' ? row.record_status !== 'trashed' : action === 'unarchive' ? row.record_status !== 'archived' : ['merge', 'archive'].includes(action) ? row.record_status !== 'active' : !['active', 'archived'].includes(row.record_status)) throw new Error('Статус записи изменился. Обновите список.');
       rows.push(row);
@@ -96,7 +105,35 @@ export async function changeNotes(db: SQL, action: NoteAction, selection: NoteSe
     const effective = rows.map((r, i) => [r.sensitivity, levels[i]?.sensitivity]);
     const mergedSensitivity = effective.some(v => v.includes('secret') || v.includes('unclassified')) ? 'secret' : effective.some(v => v.includes('sensitive')) ? 'sensitive' : 'standard';
     const combined = action === 'merge' ? mergeText(rows.map(r => ({ title: r.title, payload: JSON.parse(r.payload_json) }))) : '';
-    if (action === 'merge' && (rows.length < 2 || combined.length > 60_000)) throw new Error('Для объединения нужны 2–100 записей общим объёмом до 60 000 символов.');
+    if (action === 'merge') {
+      if (rows.length < 2 || combined.length > 60_000)
+        throw new Error('Для объединения нужны 2–100 записей общим объёмом до 60 000 символов.');
+      if (rows.some(r => r.domain !== 'notes'))
+        throw new MemoryConflictError('merge_only_notes');
+      // A superseded source loses its active search/identity. Never silently
+      // strand personal relations, observations, temporal claims or evidence
+      // under that now-hidden identity. Remapping those requires independent
+      // user review, not automatic merge or an alternative relation writer.
+      const hasSourceDependencies = `
+        SELECT 1 AS linked FROM memory_entities e WHERE e.id=? AND (
+          EXISTS(SELECT 1 FROM memory_observations o WHERE o.entity_id=e.id)
+          OR EXISTS(SELECT 1 FROM memory_relations r WHERE r.source_entity_id=e.id OR r.target_entity_id=e.id)
+          OR EXISTS(SELECT 1 FROM memory_relation_evidence w WHERE w.evidence_entity_id=e.id)
+          OR EXISTS(SELECT 1 FROM memory_review_proposals p
+             WHERE p.source_entity_id=e.id OR p.target_entity_id=e.id OR p.evidence_entity_id=e.id)
+          OR EXISTS(SELECT 1 FROM memory_temporal_claims c WHERE c.entity_id=e.id)
+          OR EXISTS(SELECT 1 FROM memory_temporal_evidence v WHERE v.entity_id=e.id)
+          OR EXISTS(SELECT 1 FROM memory_profile_self x WHERE x.person_id=e.id)
+        ) LIMIT 1`;
+      for (const source of rows.slice(1)) {
+        if (await tx.getFirstAsync(hasSourceDependencies, [source.id]))
+          throw new MemoryConflictError('merge_source_has_links_review_required');
+      }
+      const allTags = [...new Set(rows.flatMap(r =>
+        noteTagsFromPayload(JSON.parse(r.payload_json).tags)))].sort();
+      if (allTags.length > MAX_NOTE_TAGS)
+        throw new MemoryConflictError('merge_too_many_tags_review_required');
+    }
     for (const [i, before] of rows.entries()) {
       const after: Row = { ...before, batch_participants: rows.map(r => r.id) };
       const payload = JSON.parse(before.payload_json);
@@ -112,17 +149,39 @@ export async function changeNotes(db: SQL, action: NoteAction, selection: NoteSe
       if (action === 'merge') {
         if (i === 0) {
           payload.body = combined; payload.extracted_text = '';
-          payload.merged_sources = rows.map(r => ({ id: r.id, title: r.title, source_ref: r.source_ref, payload: JSON.parse(r.payload_json), valid_from: r.valid_from, valid_until: r.valid_until }));
+          // Preserve the true source for every original, even when its
+          // attachment owner changes for the merged note. Never manufacture
+          // a new source/version/date for Telegram or OCR evidence.
+          payload.merged_sources = rows.map(r => ({
+            id: r.id, title: r.title, source_kind: r.source_kind,
+            source_ref: r.source_ref, collection_id: r.collection_id,
+            record_version: r.record_version, attachment_ids: r.attachmentIds,
+            payload: JSON.parse(r.payload_json), valid_from: r.valid_from, valid_until: r.valid_until,
+          }));
+          const tags = [...new Set(rows.flatMap(r =>
+            noteTagsFromPayload(JSON.parse(r.payload_json).tags)))].sort();
+          if (tags.length) payload.tags = tags;
+          else delete payload.tags;
           after.sensitivity = mergedSensitivity;
         } else {
           after.record_status = 'superseded'; payload.merged_into = rows[0].id;
           await tx.runAsync('UPDATE memory_attachments SET entity_id=? WHERE entity_id=?', [rows[0].id, before.id]);
+          // Replay of a previously imported Share must open the active merged
+          // note; a superseded note is not a readable destination.
+          await tx.runAsync('UPDATE memory_received_shares SET entity_id=? WHERE entity_id=?',
+            [rows[0].id, before.id]);
         }
       }
       after.payload_json = JSON.stringify(payload);
       if((hygiene || moveGuard) && !localMemorySessionUnlocked())
       throw new MemoryConflictError('application_locked');
       await write(tx, before, after, batch);
+    }
+    if (action === 'merge') {
+      // The first note was indexed before later originals were moved. Index
+      // its final attachment filenames/extractions from the committed owner
+      // using the existing indexer in this SAME transaction.
+      await indexEntity(tx, rows[0].id);
     }
   });
   return batch;
@@ -164,9 +223,41 @@ export async function undoNotes(db: SQL, batch: string, moveGuard?: ChatMoveGuar
             current.record_status!=="active" || !["standard","inherit"].includes(current.sensitivity))))
         throw new MemoryConflictError('stale_memory_version');
     }
+    const isMerge = batch.startsWith('notes:merge:');
+    if (isMerge) {
+      const primary = JSON.parse(revisions[0].after_json).batch_participants?.[0];
+      if (typeof primary !== 'string') throw new MemoryConflictError('merge_undo_source_changed');
+      // Neither old attachments nor Share fingerprints carry an entity CAS
+      // counter: check all of them inside BEGIN IMMEDIATE before the first
+      // ownership update. Missing/moved records abort the ENTIRE undo.
+      for (const revision of revisions) {
+        const before = JSON.parse(revision.before_json) as Row;
+        if (!Array.isArray(before.attachmentIds) ||
+            !Array.isArray(before.shareFingerprints))
+          throw new MemoryConflictError('merge_undo_source_changed');
+        for (const id of before.attachmentIds) {
+          const current = await tx.getFirstAsync<{entity_id:string}>(
+            'SELECT entity_id FROM memory_attachments WHERE id=?', [id]);
+          if (!current || current.entity_id !== primary)
+            throw new MemoryConflictError('merge_undo_source_changed');
+        }
+        for (const fingerprint of before.shareFingerprints) {
+          const current = await tx.getFirstAsync<{entity_id:string}>(
+            'SELECT entity_id FROM memory_received_shares WHERE fingerprint=?', [fingerprint]);
+          if (!current || current.entity_id !== primary)
+            throw new MemoryConflictError('merge_undo_source_changed');
+        }
+      }
+    }
     for (const revision of revisions) {
       const before = JSON.parse(revision.before_json), current = await snapshot(tx, before.id);
-      for (const id of before.attachmentIds || []) await tx.runAsync('UPDATE memory_attachments SET entity_id=? WHERE id=?', [before.id, id]);
+      for (const id of before.attachmentIds || [])
+        await tx.runAsync('UPDATE memory_attachments SET entity_id=? WHERE id=?', [before.id, id]);
+      if (isMerge) {
+        for (const fingerprint of before.shareFingerprints)
+          await tx.runAsync('UPDATE memory_received_shares SET entity_id=? WHERE fingerprint=?',
+            [before.id, fingerprint]);
+      }
       await write(tx, current, { ...before }, 'Отмена ' + batch);
     }
   });
