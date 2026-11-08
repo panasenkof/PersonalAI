@@ -622,7 +622,7 @@ export function LocalMemoryScreen() {
           <NebulaAction testID="memory-open-trash" icon="trash-2" label="Корзина" size="compact"
             accessibilityLabel="Открыть корзину" disabled={busy || loading} onPress={() => openStatus("trashed")} />
         </View> : null}
-        {!term && status === "active" && !selecting ? <>
+        {!term && status === "active" ? <>
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
             <Text style={{ color: t.text, fontSize: 18, fontWeight: "700" }}>{collectionId ? "Подразделы" : "Разделы памяти"}</Text>
             <NebulaAction icon="grid" label="Разделы" size="compact" accessibilityLabel="Все разделы" disabled={selecting} onPress={() => setCollectionMenu(true)} />
@@ -972,7 +972,7 @@ export function LocalMemoryScreen() {
       </Pressable>
     </BottomSheet>
     <BottomSheet visible={collectionMenu} title="Разделы памяти" onClose={() => setCollectionMenu(false)}>
-      <Pressable accessibilityRole="button" accessibilityLabel="Все записи" style={actionButton}
+      <Pressable accessibilityRole="button" accessibilityLabel="Раздел Все записи" style={actionButton}
         onPress={() => { openAll(); setCollectionMenu(false); }}>
         <Text style={{color:t.text}}>Все записи</Text>
       </Pressable>
