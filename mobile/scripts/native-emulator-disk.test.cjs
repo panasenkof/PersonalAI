@@ -20,6 +20,9 @@ test('CI cleans unused host toolchains before native build and preserves Android
   assert.match(yaml.slice(gradle, stage), /sha256sum --check --status/);
   assert.match(yaml.slice(gradle, stage), /downloads\.gradle\.org\/distributions/);
   assert.match(yaml.slice(gradle, stage), /gradle-distributions\/releases/);
+  assert.match(yaml.slice(gradle, stage), /gradle-9\.3\.1-bin/);
+  assert.match(yaml.slice(gradle, stage), /trusted cached Gradle 9\.3\.1/);
+  assert.match(yaml.slice(gradle, stage), /No verified Gradle 8\.13/);
   assert.match(yaml.slice(maestro, smoke), /sha256sum --check --status/);
   assert.match(yaml.slice(maestro, smoke), /mobile-dev-inc\/Maestro\/releases/);
   assert.match(yaml.slice(maestro, smoke), /test "\$MAESTRO_VERSION" = "2\.0\.10"/);
