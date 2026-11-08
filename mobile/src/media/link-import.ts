@@ -218,7 +218,19 @@ export async function importLink(raw: string, signal?: AbortSignal): Promise<{ f
     // Deliberately reject HTTP redirects: native URL following could reach a
     // private host or send a user-selected URL to an unexpected endpoint.
     // Do not add cookies, Referer spoofing or site-specific VPN workarounds.
-    const response = await nativeFetch(readerUrl, { signal: controller.signal, credentials: 'omit', redirect: 'error' });
+    // A recheck must not silently reuse a previously imported browser/OS HTTP
+    // cache entry. CDN caches remain outside our control: this is still an
+    // observed HTML snapshot, never a certified upstream Telegram revision.
+    const response = await nativeFetch(readerUrl, {
+      signal: controller.signal, credentials: 'omit', redirect: 'error', cache: 'no-store',
+    });
+    // Defence in depth if an Android transport ignores redirect: 'error'.
+    // Fetch Response.url is optional in test/legacy adapters; whenever the
+    // transport exposes it, require the same endpoint, not merely a 200 body.
+    const finalUrl = typeof response.url === 'string' && response.url.trim() ? response.url : null;
+    if (response.redirected === true || (finalUrl &&
+        new URL(finalUrl).href.split('#')[0] !== new URL(readerUrl).href.split('#')[0]))
+      throw new Error('Ответ получен с другого адреса. Сверка или импорт по перенаправлению запрещены.');
     stage = 'получение ответа';
     if (response.status >= 300 && response.status < 400 || response.status === 0)
       throw new Error('Сайт перенаправляет запрос на другой адрес. Автоматические перенаправления для импорта отключены.');
