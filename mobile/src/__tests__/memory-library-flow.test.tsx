@@ -243,7 +243,7 @@ test("review entry only appears in an explicitly selected standard collection, n
   fireEvent.press(ui.getByLabelText("Открыть предложения по изменению памяти"));
   expect(mockNavigate).toHaveBeenCalledWith("MemoryTemporalReview",{collectionId:"a"});
   fireEvent.press(ui.getByLabelText("Ко всем записям"));
-  fireEvent.press(ui.getByLabelText("Раздел Люди"));
+  fireEvent.press(await waitFor(() => ui.getByLabelText("Раздел Люди")));
   await waitFor(()=>expect(ui.queryByLabelText("Открыть предложения по изменению памяти")).toBeNull());
 });
 

@@ -1,6 +1,6 @@
 import type { MemoryKind } from "./search-index";
 import type { ChooseProfileSelfIdentity, ProfileSelfIdentity } from "./self-identity";
-import type { EnrichmentSnapshot } from "./enrichment-policy";
+import type { EnrichmentSnapshot, SearchMetadataSuggestion } from "./enrichment-policy";
 import type { TemporalClaimCandidate } from "./temporal-claims";
 import type { TemporalHistoryQuery, TemporalHistoryPage, TemporalStagedReview, TemporalAtDateQuery, TemporalAtDatePage } from "./temporal-store";
 import type { ConfirmRelationInput, ConfirmRelationResult, RelationReviewExpected, RelationReviewDecision, RelationReviewActionItem, StageRelationReviewInput, RelationInboxCursor, RelationInboxPage, RelationCandidateExpected, RelationCandidateReviewChoice, RelationCandidateActionResult } from "./relation-evidence";
@@ -132,7 +132,7 @@ export interface MemoryRepository {
   entitiesByAlias(name: string, kind?: MemoryKind): Promise<EntityRecord[]>;
   indexTerms(entityId: string): Promise<Array<{ source: string; terms: string[] }>>;
   setIndexTerms(entityId: string, terms: string[], source: string): Promise<string[]>;
-  applyIndexEnrichment(snapshot: EnrichmentSnapshot, terms: string[], people: string[], signal?: AbortSignal): Promise<boolean>;
+  applyIndexEnrichment(snapshot: EnrichmentSnapshot, terms: string[], people: string[], signal?: AbortSignal, metadata?: SearchMetadataSuggestion): Promise<boolean>;
   staleIndexTerms(source: string, limit?: number): Promise<string[]>;
   indexTermsStatus(source: string): Promise<{ done: number; pending: number }>;
   searchMemory(query: string, options?: { collectionIds?: string[]; sensitivities?: string[]; limit?: number; vector?: { model: string; values: Float32Array }; imageVector?: { model: string; values: Float32Array }; verifiedRelative?: { ownerPersonId: string; relationKind: DirectPersonRelation } }): Promise<MemoryHit[]>;

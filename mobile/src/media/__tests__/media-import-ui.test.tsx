@@ -53,8 +53,15 @@ jest.mock('expo-document-picker', () => ({ getDocumentAsync: jest.fn(async () =>
 jest.mock('expo-image-picker', () => ({ launchImageLibraryAsync: jest.fn(), requestCameraPermissionsAsync: jest.fn(), launchCameraAsync: jest.fn() }));
 jest.mock('expo-file-system/legacy', () => ({ copyAsync: jest.fn(async () => {}), cacheDirectory: 'file:///cache/', deleteAsync: jest.fn(async () => {}) }));
 beforeEach(() => { jest.clearAllMocks(); mockParams = undefined; mockUnlocked=true; mockSessionListeners.clear();
+  jest.spyOn(Alert,"alert").mockImplementation((title,_message,buttons:any)=> {
+    if(title==="Автоматические теги и раздел") {
+      const skip=buttons?.find((item:any)=>item.text==="Сохранить без ИИ");
+      skip?.onPress?.();
+    }
+  });
   (ensureSections as jest.Mock).mockResolvedValue([{ id: 'notes', name: 'Заметки', slug: 'notes', sensitivity: 'standard' }]);
 });
+afterEach(()=>{jest.restoreAllMocks();});
 test('picker lets user save original without transcript, provider or network; user text stays separate', async () => {
   const screen = render(<MemoryImportScreen />);
   fireEvent.press(screen.getByLabelText('Выбрать файл для памяти'));
@@ -848,11 +855,13 @@ test('MSG-6.B: exact Share replay shows truthful existing status and does not ru
     const ui=render(<MemoryImportScreen/>);
     await waitFor(()=>expect(ui.getByText(/Коллекция: Входящие/)).toBeTruthy());
     fireEvent.press(ui.getByLabelText('Сохранить сведения в память'));
+    const consent=(alert as jest.Mock).mock.calls.find((entry:any)=>entry[0]==="Автоматические теги и раздел");
+    if(consent) await act(async()=>{consent[2][0].onPress();});
     await waitFor(()=>expect(alert).toHaveBeenCalledWith('Материал уже в памяти',
       expect.stringContaining('повторная отправка'),expect.any(Array)));
     expect(require('../../direct-agent/enrich-runner').scheduleIndexTerms).not.toHaveBeenCalled();
     expect(mockBack).not.toHaveBeenCalled();
-    const choices=(alert as jest.Mock).mock.calls[0][2];
+    const choices=(alert as jest.Mock).mock.calls.find((entry:any)=>entry[0]==="Материал уже в памяти")[2];
     expect(choices.map((choice:any)=>choice.text)).toEqual(['Оставить черновик','Сохранить отдельно']);
     await act(async()=>{choices[1].onPress();});
     await waitFor(()=>expect(saveMediaNote).toHaveBeenCalledTimes(2));
@@ -870,10 +879,14 @@ test.each([
   (saveMediaNote as jest.Mock).mockImplementationOnce(async (_profile:any,options:any)=>{
     options.onReplay({entityId:'already',recordStatus:status});return 'already';
   });
+  const alert=jest.spyOn(Alert,'alert').mockImplementation(()=>{});
   const ui=render(<MemoryImportScreen/>);
   await waitFor(()=>expect(ui.getByText(/Коллекция: Входящие/)).toBeTruthy());
   fireEvent.press(ui.getByLabelText('Сохранить сведения в память'));
+  const consent=(alert as jest.Mock).mock.calls.find((entry:any)=>entry[0]==="Автоматические теги и раздел");
+  if(consent) await act(async()=>{consent[2][0].onPress();});
   await waitFor(()=>expect(ui.getByText(new RegExp(word))).toBeTruthy());
+  alert.mockRestore();
   expect(mockBack).not.toHaveBeenCalled();
   expect(ui.getByLabelText('Сведения из файла').props.value).toBe('Сохранённый материал');
   expect(require('../../direct-agent/enrich-runner').scheduleIndexTerms).not.toHaveBeenCalled();
@@ -888,7 +901,7 @@ test('MSG-6.C2: LLM chooses an existing collection only after per-import approva
   ]);
   (classifyImportCollectionWithAgent as jest.Mock).mockResolvedValueOnce({
     collectionId:'recipes',sectionSlug:'recipes',sectionName:'Рецепты',
-    topic:'Лазанья',reason:'Подпись о рецепте',excerptTruncated:false,
+    topic:'Лазанья',reason:'Подпись о рецепте',tags:['лазанья','рецепты'],excerptTruncated:false,
   });
   mockParams={incoming:[{shareType:'text',value:'Лазанья на ужин #рецепты'}]};
   const alert=jest.spyOn(Alert,'alert').mockImplementation(()=>{});
@@ -899,7 +912,7 @@ test('MSG-6.C2: LLM chooses an existing collection only after per-import approva
     expect(classifyImportCollectionWithAgent).not.toHaveBeenCalled();
     expect(saveMediaNote).not.toHaveBeenCalled();
     fireEvent.press(ui.getByLabelText('Определить раздел с ИИ'));
-    expect(alert).toHaveBeenCalledWith('Разрешить ИИ выбрать раздел?',
+    expect(alert).toHaveBeenCalledWith('Разрешить ИИ подобрать раздел и теги?',
       expect.stringContaining('до 2 платных обращений'),expect.any(Array));
     const choices=(alert as jest.Mock).mock.calls[0][2];
     expect(choices.map((x:any)=>x.text)).toEqual(['Отмена','Разрешить один подбор']);
@@ -941,12 +954,12 @@ test('MSG-6.C2: private record or selected protected section forbids LLM classif
   const ui=render(<MemoryImportScreen/>);
   await waitFor(()=>expect(ui.getByLabelText('Определить раздел с ИИ')).toBeTruthy());
   fireEvent.press(ui.getByLabelText('Личные — только на телефоне'));
-  expect(ui.getByLabelText('Определить раздел с ИИ').props.accessibilityState.disabled).toBe(true);
+  expect(ui.getByLabelText('Определить раздел с ИИ').props.accessibilityState.disabled).toBe(false);
   expect(classifyImportCollectionWithAgent).not.toHaveBeenCalled();
   fireEvent.press(ui.getByLabelText('Обычные — доступны агенту и разбору у провайдера'));
   fireEvent.press(ui.getByLabelText('Выбрать коллекцию'));
   fireEvent.press(ui.getByLabelText('Коллекция: Семья'));
-  expect(ui.getByLabelText('Определить раздел с ИИ').props.accessibilityState.disabled).toBe(true);
+  expect(ui.getByLabelText('Определить раздел с ИИ').props.accessibilityState.disabled).toBe(false);
   expect(classifyImportCollectionWithAgent).not.toHaveBeenCalled();
 });
 
@@ -1062,4 +1075,48 @@ test("MSG-6C6: invalid tag refuses save without overwriting original caption",as
   await waitFor(()=>expect(screen.getByText(/Тег: до 32/)).toBeTruthy());
   expect(saveMediaNote).not.toHaveBeenCalled();
   expect(screen.getByLabelText("Сведения из файла").props.value).toBe("Мой комментарий");
+});
+
+test("IMPORT-AUTO: Save offers one informed LLM consent, then persists tags and section atomically",async()=>{
+  (ensureSections as jest.Mock).mockResolvedValue([
+    {id:"inbox",slug:"inbox",name:"Входящие",sensitivity:"sensitive"},
+    {id:"recipes",slug:"recipes",name:"Рецепты",sensitivity:"standard"},
+  ]);
+  (classifyImportCollectionWithAgent as jest.Mock).mockResolvedValueOnce({
+    collectionId:"recipes",sectionSlug:"recipes",sectionName:"Рецепты",
+    topic:"Рецепт лазаньи",reason:"Текст про приготовление",
+    tags:["лазанья","рецепты"],excerptTruncated:false,
+  });
+  mockParams={incoming:[{shareType:"text",value:"Приготовим лазанью на ужин с томатами"}]};
+  const alert=jest.spyOn(Alert,"alert").mockImplementation(()=>{});
+  const ui=render(<MemoryImportScreen/>);
+  await waitFor(()=>expect(ui.getByText(/Коллекция: Входящие/)).toBeTruthy());
+  fireEvent.press(ui.getByLabelText("Сохранить сведения в память"));
+  expect(alert).toHaveBeenCalledWith("Автоматические теги и раздел",
+    expect.stringContaining("Оригиналы"),expect.any(Array));
+  expect(classifyImportCollectionWithAgent).not.toHaveBeenCalled();
+  expect(saveMediaNote).not.toHaveBeenCalled();
+  const approve=(alert as jest.Mock).mock.calls[0][2][1];
+  await act(async()=>{approve.onPress();});
+  await waitFor(()=>expect(saveMediaNote).toHaveBeenCalledWith("guest",expect.objectContaining({
+    tags:["лазанья","рецепты"],collectionId:"recipes",body:"Приготовим лазанью на ужин с томатами",
+  }),expect.anything()));
+  expect(classifyImportCollectionWithAgent).toHaveBeenCalledTimes(1);
+  expect(classifyImportCollectionWithAgent).toHaveBeenCalledWith(expect.objectContaining({
+    explicitConsent:true,sensitivity:"standard",body:"Приготовим лазанью на ужин с томатами",
+  }));
+  alert.mockRestore();
+});
+
+test("IMPORT-AUTO: an unrecognized photo remains savable; AI action explains missing text",async()=>{
+  const ui=render(<MemoryImportScreen/>);
+  fireEvent.press(ui.getByLabelText("Выбрать файл для памяти"));
+  await waitFor(()=>expect(ui.getByLabelText("Определить раздел с ИИ")).toBeTruthy());
+  expect(ui.getByLabelText("Определить раздел с ИИ").props.accessibilityState.disabled).toBe(false);
+  fireEvent.press(ui.getByLabelText("Определить раздел с ИИ"));
+  expect(ui.getByText(/добавьте подпись или распознайте текст/)).toBeTruthy();
+  expect(classifyImportCollectionWithAgent).not.toHaveBeenCalled();
+  fireEvent.press(ui.getByLabelText("Сохранить сведения в память"));
+  await waitFor(()=>expect(saveMediaNote).toHaveBeenCalledWith("guest",
+    expect.objectContaining({tags:[]}),expect.anything()));
 });

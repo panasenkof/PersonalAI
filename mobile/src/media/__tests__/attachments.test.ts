@@ -950,3 +950,25 @@ test("MSG-6C7: exact tag is not a body-text hit; FTS, collection, archive and pa
   await db.reviseEntity(second,bad!.record_version,{...bad!.payload,tags:"авто"},"Legacy tag input");
   expect((await db.listNoteTags({status:"active"}))).toEqual(["авто"]);
 });
+
+test("IMPORT-AUTO: generated tags and generated section do not change canonical exact replay identity",async()=>{
+  const repo=new SqliteMemoryRepository(mockDb);
+  const recipes=await repo.createCollection({name:"Рецепты",slug:"recipes",sensitivity:"standard"});
+  const base={...input,title:"Лазанья",body:"Готовим лазанью с томатами",
+    sensitivity:"standard" as const};
+  const first=await saveMediaNote("guest",{...base,
+    receipt:"source://first",collectionId:recipes.id,
+    tags:["лазанья","рецепты"],generatedTags:true,generatedSection:true});
+  const replay:any[]=[];
+  const second=await saveMediaNote("guest",{...base,
+    receipt:"source://second",tags:[],onReplay:r=>replay.push(r)});
+  expect(second).toBe(first);
+  expect(replay).toEqual([{entityId:first,recordStatus:"active"}]);
+  const stored=sqlite.prepare("SELECT payload_json FROM memory_entities WHERE id=?").get(first);
+  expect(JSON.parse(stored.payload_json).tags).toEqual(["лазанья","рецепты"]);
+  expect(sqlite.prepare("SELECT count(*) AS n FROM memory_entities").get().n).toBe(1);
+  // A user explicitly changing tags creates a distinct, intentional copy.
+  const manual=await saveMediaNote("guest",{...base,receipt:"source://third",tags:["другое"]});
+  expect(manual).not.toBe(first);
+  expect(sqlite.prepare("SELECT count(*) AS n FROM memory_entities").get().n).toBe(2);
+});

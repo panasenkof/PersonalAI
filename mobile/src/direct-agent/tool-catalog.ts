@@ -16,6 +16,7 @@ import { validMoveProposal, type ChatMoveProposal } from "./move-proposal";
 import { validSectionProposal, type ChatSectionProposal } from "./section-actions";
 import { createArticleReadCoverage } from "./article-read-coverage";
 import { validateContextCandidate, type ContextCandidate } from "./conversation-context";
+import { checkedNoteTags } from "../local-memory/note-tags";
 
 export type ToolDefinition = { name: string; description: string; parameters: object };
 export type ToolSpec = {
@@ -54,6 +55,7 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
   let movePreview:ChatMoveProposal|undefined;
   let sectionPreview:ChatSectionProposal|undefined;
   let contextCandidate:ContextCandidate|undefined;
+  let importTagsCandidate:string[]|undefined;
   // Derived from this turn's ACL/version-checked reads; NEVER persisted as source truth.
   const articleCoverage = createArticleReadCoverage();
   const readNotes = new Set<string>();
@@ -192,6 +194,30 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
       return {status:"pending_conversation_commit",saved:false,sectionSlug:contextCandidate.sectionSlug,topic:contextCandidate.topic,
         memoryRecordChanged:false};
     },verify:r=>r.status==="pending_conversation_commit"&&r.saved===false?"pending_confirmation":"failed" };
+  // The restricted import-only proposal reuses THIS agent/catalog and the
+  // canonical note-tags validator. No metadata writer or second classifier.
+  const importMetadataTool:ToolSpec = { definition:{
+    name:"propose_import_metadata",
+    description:"Предложить существующий раздел, тему и до 5 тематических тегов только по предоставленному читаемому тексту. При сомнении sectionSlug=null и tags=[]. Это предложение, не запись.",
+    parameters:{type:"object",properties:{
+      topic:{type:"string",minLength:2,maxLength:80},
+      sectionSlug:{type:["string","null"],description:"Slug только разрешённого раздела из: "+(options.sections||[]).map(s=>s.slug+"="+s.name).join("; ")+"; либо null."},
+      reason:{type:"string",minLength:2,maxLength:180},
+      tags:{type:"array",items:{type:"string",minLength:1,maxLength:32},maxItems:5,
+        description:"0–5 точных смысловых тегов на русском, без # и пробелов. Только из действительно прочитанного содержания."},
+    },required:["topic","sectionSlug","reason","tags"],additionalProperties:false},
+  },effect:"proposal",execute:async args=>{
+    if(contextCandidate || importTagsCandidate!==undefined)return {error:"import_metadata_already_proposed"};
+    if(!Array.isArray(args.tags)||args.tags.length>5)return {error:"invalid_import_tags"};
+    const {topic,sectionSlug,reason}=args;
+    const checked=validateContextCandidate({topic,sectionSlug,reason},options.sections||[],options.context);
+    if("error" in checked)return {error:checked.error};
+    let tags:string[];
+    try { tags=checkedNoteTags(args.tags); } catch { return {error:"invalid_import_tags"}; }
+    contextCandidate=checked.candidate;
+    importTagsCandidate=tags;
+    return {status:"pending_import_save",saved:false,sectionSlug:contextCandidate.sectionSlug,tags};
+  },verify:r=>r.status==="pending_import_save"&&r.saved===false?"pending_confirmation":"failed"};
   const specs: ToolSpec[] = [
     ...(options.contextClassificationEnabled ? [contextTool] : []),
     { definition: { name: "search_local_notes", description: "Найти заметки на телефоне по 1–3 ключевым словам. Найденный фрагмент не является полным чтением записи.", parameters: queryParameters }, effect: "read",
@@ -817,7 +843,8 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
   // Import classification uses THIS catalog/engine, but no memory/web/workspace tools.
   // The host must separately authorize transmission before setting contextOnly.
   const activeSpecs = options.contextOnly
-    ? specs.filter(s => s.definition.name === "set_conversation_context") : specs;
+    ? options.importTagsEnabled ? [importMetadataTool] : specs.filter(s => s.definition.name === "set_conversation_context")
+    : specs;
   const registry = new Map(activeSpecs.map(s => [s.definition.name, s]));
   emit();
   if (notes.length) observe({ tool: "search_local_notes", outcome: "found", subject: options.prompt.slice(0, 120), excerpt: JSON.stringify(notes.map(n => ({ id: n.id, title: n.title }))).slice(0, 600) });
@@ -853,7 +880,7 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
     options.diagnostic?.("tool.outcome_verified", { name: canonical, effect: spec?.effect || "unknown", outcome });
     return { ...result, ...(outcome !== "failed" ? { outcome } : {}) };
   }
-  function finish(): Pick<DirectResult, "taskState" | "proposalIds" | "articlePage" | "articleReadReport" | "photoAction" | "moveProposal" | "sectionProposal" | "contextCandidate"> {
+  function finish(): Pick<DirectResult, "taskState" | "proposalIds" | "articlePage" | "articleReadReport" | "photoAction" | "moveProposal" | "sectionProposal" | "contextCandidate" | "importTags"> {
     state = { ...state, turnStatus: "answered" }; emit();
     const selected = !mixedArticleFilters && usedSelectedArticleTool ? selectedArticleHandles() : undefined;
     const checked = selected && articleCoverage.summary(selected);
@@ -883,7 +910,8 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
       ...(!photoMatches.length && photoRecovery ? {photoAction:photoRecovery} : {}),
       ...(movePreview ? {moveProposal:movePreview} : {}),
       ...(sectionPreview ? {sectionProposal:sectionPreview} : {}),
-      ...(contextCandidate ? {contextCandidate} : {}) };
+      ...(contextCandidate ? {contextCandidate} : {}),
+      ...(importTagsCandidate !== undefined ? {importTags:importTagsCandidate} : {}) };
   }
   const observeSources = (urls: string[]) => { if (urls.length) observe({ tool: "web_search", outcome: "found", subject: options.prompt.slice(0, 120), excerpt: urls.join("\n").slice(0, 600) }); };
   return { definitions: activeSpecs.map(s => s.definition), run, finish, observeSources,
