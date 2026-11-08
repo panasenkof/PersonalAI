@@ -414,6 +414,8 @@ export class SqliteMemoryRepository implements MemoryRepository {
         [id, item.entity_id, item.kind, validPayload(record.payload), item.occurred_at, timestamp,
           record.sensitivity, null, null, record.source_kind, record.source_ref, null, 1],
       );
+      if(record.sensitivity==="inherit" || record.sensitivity==="standard")
+        await tx.runAsync("DELETE FROM memory_index_terms WHERE entity_id=? AND source='model:auto'",[item.entity_id]);
       await indexEntity(tx, item.entity_id, timestamp);
     });
     return record;
@@ -441,6 +443,8 @@ export class SqliteMemoryRepository implements MemoryRepository {
         [uid(), "observation", null, id, after.record_version, reason.trim(), "user",
           JSON.stringify(before), JSON.stringify(after), now()],
       );
+      if(before.sensitivity==="inherit" || before.sensitivity==="standard")
+        await tx.runAsync("DELETE FROM memory_index_terms WHERE entity_id=? AND source='model:auto'",[before.entity_id]);
       await indexEntity(tx, before.entity_id);
       updated = after;
     });
