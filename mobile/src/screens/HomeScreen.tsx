@@ -478,7 +478,8 @@ function NebulaHomeContent() {
                 Создаётся только новый раздел в существующей памяти. Записи не изменятся.
               </Text>}
             <View style={{flexDirection:"row",flexWrap:"wrap",gap:8}}>
-              <NebulaAction icon="check" variant="primary"
+              <NebulaAction icon={item.sectionProposal.kind==="delete" ? "trash-2" : "check"}
+                variant={item.sectionProposal.kind==="delete" ? "danger" : "primary"}
                 label={active?.movingRowId===item.id ? "Проверяю…" :
                   item.sectionProposal.kind==="create" ? "Создать раздел" : "Удалить пустой раздел"}
                 disabled={busy||Boolean(active?.movingRowId)}
