@@ -55,6 +55,7 @@ export function LocalMemoryScreen() {
   const purgeHasCompleted = useRef(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [collectionMenu, setCollectionMenu] = useState(false);
+  const [reparentId, setReparentId] = useState<string | null>(null);
   const [collectionCards, setCollectionCards] = useState<CollectionRecord[]>([]);
   const [visibleIds, setVisibleIds] = useState<Set<string>>(new Set());
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 10 }).current;
@@ -380,6 +381,31 @@ export function LocalMemoryScreen() {
   useEffect(() => { trashEpoch.current++; setTrashPreview(null); setTrashConfirm(false); setTrashMessage(""); setTrashProgress(0); setSelectedIds([]); setSelecting(false); setActionsOpen(false); setConfirmation(null); setNotes([]); setContextNote(null); setMoveOpen(false); setMergeOpen(false); setMergeExpanded(false); setMergeItemsExpanded(false); hygieneGeneration.current++; setHygieneReviewOpen(false); setHygieneSuggestionsOpen(false); setHygieneSuggestions(null); setSuggestedReviewNotes(null); setHygieneExcluded([]); setHygienePreview(null); setHygieneConfirm(false); setHygienePolicyItem(null); setHygieneAction("archive"); }, [profile, collectionId, term, status, tagFilter]);
   function openAll() { setStatus("active"); setCollectionId(undefined); setSearch(""); setTerm(""); setTagFilter(undefined); setSelectedIds([]); setSelecting(false); }
   function openStatus(value: typeof status) { openAll(); setStatus(value); }
+  const isInSubtree = (id: string, ancestorId: string): boolean => {
+    const byId = new Map(collections.map(c=>[c.id,c]));
+    let cursor: string | null = id;
+    const visited = new Set<string>();
+    while (cursor && !visited.has(cursor)) {
+      if (cursor===ancestorId) return true;
+      visited.add(cursor);
+      cursor = byId.get(cursor)?.parent_id ?? null;
+    }
+    return false;
+  };
+  async function reparentSection(parentId: string | null) {
+    if (!reparentId || !repository.current || busy) return;
+    const request = generation.current;
+    setBusy(true); setError("");
+    try {
+      await repository.current.moveCollection(reparentId, parentId);
+      if (request === generation.current) {
+        setCollections(prev=>prev.map(c=>c.id===reparentId?{...c,parent_id:parentId}:c));
+        setReparentId(null);
+        setRetry(value=>value+1);
+      }
+    } catch(e) {if(request===generation.current)setError(memoryErrorMessage(e));}
+    finally{setBusy(false);}
+  }
   function openParent() {
     if (status !== "active") { openAll(); return; }
     const parentId = collections.find(c => c.id === collectionId)?.parent_id;
@@ -392,7 +418,7 @@ export function LocalMemoryScreen() {
     const sub = BackHandler.addEventListener("hardwareBackPress", () => {
       // A sheet or native keyboard handles its own Back; never change the area underneath.
       if (actionsOpen || moveOpen || mergeOpen || hygieneReviewOpen || hygieneSuggestionsOpen ||
-          addOpen || menuOpen || collectionMenu || sectionOpen || trashPreview !== null) return false;
+          addOpen || menuOpen || collectionMenu || reparentId || sectionOpen || trashPreview !== null) return false;
       if (selecting) {
         if (!busy) cancelSelection();
         return true;
@@ -413,7 +439,7 @@ export function LocalMemoryScreen() {
     });
     return () => sub.remove();
   }, [selecting, busy, actionsOpen, moveOpen, mergeOpen, hygieneReviewOpen,
-    hygieneSuggestionsOpen, addOpen, menuOpen, collectionMenu, sectionOpen, trashPreview, search, tagFilter, status, collectionId, cancelSelection]));
+    hygieneSuggestionsOpen, addOpen, menuOpen, collectionMenu, reparentId, sectionOpen, trashPreview, search, tagFilter, status, collectionId, cancelSelection]));
   function toggleSelection(id: string) {
     if (busy || loading) return;
     if (!selectedIds.includes(id) && selectedIds.length >= 100) { setError("За один раз можно выбрать до 100 записей."); return; }
@@ -949,17 +975,40 @@ export function LocalMemoryScreen() {
         onPress={() => { openAll(); setCollectionMenu(false); }}>
         <Text style={{color:t.text}}>Все записи</Text>
       </Pressable>
-      {collectionTree(collections).map(({collection:c,path,depth}) => <Pressable key={c.id} accessibilityRole="button"
-        accessibilityLabel={"Раздел " + path} style={{...actionButton,paddingLeft:Math.min(depth,4)*12+12}}
-        onPress={() => { openAll(); setCollectionId(c.id); setCollectionMenu(false); }}>
-        <Text style={{color:t.text}}>{depth ? "↳ " : ""}{c.name}</Text>
-        {depth > 0 ? <Text numberOfLines={1} style={{color:t.muted,fontSize:12}}>{path}</Text> : null}
-      </Pressable>)}
+      {collectionTree(collections).map(({collection:c,path,depth}) => <View key={c.id} style={{flexDirection:"row",alignItems:"center"}}>
+        <Pressable accessibilityRole="button" accessibilityLabel={"Раздел " + path}
+          style={{...actionButton,flex:1,paddingLeft:Math.min(depth,4)*12+12}}
+          onPress={() => { openAll(); setCollectionId(c.id); setCollectionMenu(false); }}>
+          <Text style={{color:t.text}}>{depth ? "↳ " : ""}{c.name}</Text>
+          {depth > 0 ? <Text numberOfLines={1} style={{color:t.muted,fontSize:12}}>{path}</Text> : null}
+        </Pressable>
+        <NebulaAction icon="move" size="compact" label="Переместить"
+          accessibilityLabel={"Переместить раздел " + path}
+          disabled={busy} onPress={()=>{setCollectionMenu(false);setReparentId(c.id);}} />
+      </View>)}
       <NebulaAction icon="plus" label={collectionId ? "Создать подраздел" : "Создать раздел"}
         accessibilityLabel="Новый раздел памяти"
         onPress={() => { setCollectionMenu(false); setSectionOpen(true); }} />
       {collectionId ? <NebulaAction icon="home" label="Создать в корне"
         onPress={() => { setCollectionId(undefined); setCollectionMenu(false); setSectionOpen(true); }} /> : null}
+    </BottomSheet>
+    <BottomSheet visible={Boolean(reparentId)} title="Переместить раздел" onClose={()=>setReparentId(null)}>
+      {reparentId && collections.find(c=>c.id===reparentId) ? <>
+        <Text style={{color:t.muted}}>Раздел: {collectionPath(collections.find(c=>c.id===reparentId)!,collections)}</Text>
+        <Text style={{color:t.muted,fontSize:13}}>
+          Меняется только расположение раздела. Заметки, ссылки и вложения сохраняются.
+        </Text>
+        <Pressable accessibilityRole="button" disabled={busy} style={actionButton}
+          onPress={()=>void reparentSection(null)}><Text style={{color:t.text}}>В корень памяти</Text></Pressable>
+        {collectionTree(collections).filter(({collection:c})=>
+          c.sensitivity===collections.find(x=>x.id===reparentId)?.sensitivity &&
+          !isInSubtree(c.id,reparentId)).map(({collection:c,path})=>
+          <Pressable key={c.id} accessibilityRole="button" disabled={busy} style={actionButton}
+            onPress={()=>void reparentSection(c.id)}>
+            <Text style={{color:t.text}}>Внутрь: {path}</Text>
+          </Pressable>)}
+      </>:null}
+      {error ? <Text accessibilityRole="alert" style={{color:t.err}}>{error}</Text>:null}
     </BottomSheet>
     <BottomSheet visible={moveOpen} title="Перенести выбранные записи" onClose={() => { setMoveOpen(false); setContextNote(null); }}>
       {error ? <Text accessibilityRole="alert" style={{ color: t.err }}>{error}</Text> : null}
