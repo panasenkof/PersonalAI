@@ -15,6 +15,7 @@ import type * as SQLite from "expo-sqlite";
 import { LOCAL_MEMORY_SCHEMA_VERSION, withLocalMemoryDatabase } from "./storage";
 import { withUnlockedTransaction } from "./transaction";
 import { reindexAll } from "./search-index";
+import { validCollectionParents } from "./sections";
 
 const CODE_PATTERN = /^[a-f0-9]{64}$/;
 /** The records themselves, present in every version (v1–v3). */
@@ -34,7 +35,7 @@ const V3_TABLES = {
 const USER_SEARCH_TABLES = Object.keys(V3_TABLES) as Array<keyof typeof V3_TABLES>;
 const ENTITY_COLUMNS = "id,collection_id,domain,schema_version,title,payload_json,record_status,sensitivity," +
   "source_kind,source_ref,valid_from,valid_until,created_at,updated_at,record_version";
-export const RESTORABLE_VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18];
+export const RESTORABLE_VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19];
 const LEGACY_MAX_BACKUP_BYTES = 2 * 1024 * 1024 * 1024;
 const MANIFEST_FORMAT_VERSION = 8;
 const MANIFEST_TABLE = 'persai_backup_manifest' as const;
@@ -351,6 +352,11 @@ export async function restoreEncryptedBackup(
           throw new Error("incompatible_backup_schema");
         if(version.user_version>=17&&!available.has("memory_profile_self"))
           throw new Error("incompatible_backup_schema");
+        if (version.user_version >= 19) {
+          const parents = await db.getAllAsync<{id:string;parent_id:string|null}>(
+            "SELECT id,parent_id FROM pia_import.memory_collections");
+          if (!validCollectionParents(parents)) throw new Error("invalid_backup_collection_tree");
+        }
         // Validate the *source* before any destination writes. A forged
         // SQLCipher file with the right table names can still have corruption.
         const integrity = await db.getFirstAsync<{ integrity_check: string }>(
@@ -445,6 +451,8 @@ export async function restoreEncryptedBackup(
         // ATTACH and the SQLCipher key are scoped to this unlocked connection.
         // Expo's exclusiveTransaction opens a DIFFERENT, still-locked DB.
         await withUnlockedTransaction(db, async tx => {
+          // v19 collections reference each other; import their stable IDs in any order.
+          if (version.user_version >= 19) await tx.execAsync("PRAGMA defer_foreign_keys=ON");
           const oldChats = verifiedCounts ? await tx.getFirstAsync<{ n: number }>(
             "SELECT count(*) AS n FROM direct_conversations") : null;
           const existing = await tx.getFirstAsync<{ n: number }>(
@@ -457,7 +465,13 @@ export async function restoreEncryptedBackup(
             // Named columns: v3 added «kind», and the type check rejects unknown values.
             const sql = table === "memory_entities"
               ? `INSERT INTO memory_entities(${ENTITY_COLUMNS}${typed ? ",kind" : ""}) SELECT ${ENTITY_COLUMNS}${typed ? ",kind" : ""} FROM pia_import.memory_entities`
-              : `INSERT INTO ${table} SELECT * FROM pia_import.${table}`;
+              : table === "memory_collections"
+                ? version.user_version >= 19
+                  ? "INSERT INTO memory_collections(id,name,slug,description,sensitivity,created_at,parent_id) " +
+                    "SELECT id,name,slug,description,sensitivity,created_at,parent_id FROM pia_import.memory_collections"
+                  : "INSERT INTO memory_collections(id,name,slug,description,sensitivity,created_at) " +
+                    "SELECT id,name,slug,description,sensitivity,created_at FROM pia_import.memory_collections"
+                : `INSERT INTO ${table} SELECT * FROM pia_import.${table}`;
             // table is a constant, never user-controlled.
             await tx.execAsync(sql);
           }

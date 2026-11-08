@@ -42,7 +42,7 @@ export function onLocalMemorySessionChange(listener: (unlocked: boolean) => void
 }
 export const localMemorySessionUnlocked = () => applicationSessionUnlocked;
 const requireApplicationSession = () => { if (!applicationSessionUnlocked) throw new Error("application_locked"); };
-export const LOCAL_MEMORY_SCHEMA_VERSION = 18;
+export const LOCAL_MEMORY_SCHEMA_VERSION = 19;
 const KIND_CHECK = `CHECK(kind IN (${MEMORY_KINDS.map(k => `'${k}'`).join(",")}))`;
 
 /** All memory (including full-text indexes, revisions, and WAL) is in SQLCipher. */
@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS direct_conversations (
 CREATE TABLE IF NOT EXISTS memory_collections (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL UNIQUE,
   description TEXT, sensitivity TEXT NOT NULL DEFAULT 'unclassified',
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL, parent_id TEXT REFERENCES memory_collections(id) ON DELETE RESTRICT
 );
 CREATE TABLE IF NOT EXISTS memory_entities (
   id TEXT PRIMARY KEY, collection_id TEXT NOT NULL REFERENCES memory_collections(id) ON DELETE CASCADE,
@@ -625,6 +625,37 @@ async function initialize(profileId: string): Promise<SQLite.SQLiteDatabase> {
         // Old installed v13/v14 journal did not have review_proposal_id at CREATE time.
         await tx.execAsync("CREATE INDEX IF NOT EXISTS ix_memory_review_actions_proposal " +
           "ON memory_review_actions(review_proposal_id,expected_version,id)");
+        // v19: optional parent pointer on the CANONICAL collections table.
+        // Old rows become roots; no entity IDs, notes or content are rewritten.
+        const collectionColumns = await tx.getAllAsync<{name:string}>("PRAGMA table_info(memory_collections)");
+        if (!collectionColumns.some(column => column.name === "parent_id")) {
+          await tx.execAsync("ALTER TABLE memory_collections ADD COLUMN parent_id TEXT REFERENCES memory_collections(id) ON DELETE RESTRICT");
+        }
+        await tx.execAsync(`
+          CREATE INDEX IF NOT EXISTS ix_memory_collections_parent ON memory_collections(parent_id,id);
+          CREATE TRIGGER IF NOT EXISTS tr_memory_collection_no_cycle_insert
+            BEFORE INSERT ON memory_collections WHEN NEW.parent_id IS NOT NULL BEGIN
+            SELECT RAISE(ABORT,'collection_cycle') WHERE NEW.parent_id=NEW.id;
+            SELECT RAISE(ABORT,'collection_cycle') WHERE NEW.id IN (
+              WITH RECURSIVE ancestors(id) AS (
+                SELECT NEW.parent_id UNION
+                SELECT c.parent_id FROM memory_collections c JOIN ancestors a ON c.id=a.id
+                WHERE c.parent_id IS NOT NULL
+              ) SELECT id FROM ancestors
+            );
+          END;
+          CREATE TRIGGER IF NOT EXISTS tr_memory_collection_no_cycle_update
+            BEFORE UPDATE OF parent_id ON memory_collections WHEN NEW.parent_id IS NOT NULL BEGIN
+            SELECT RAISE(ABORT,'collection_cycle') WHERE NEW.parent_id=NEW.id;
+            SELECT RAISE(ABORT,'collection_cycle') WHERE NEW.id IN (
+              WITH RECURSIVE ancestors(id) AS (
+                SELECT NEW.parent_id UNION
+                SELECT c.parent_id FROM memory_collections c JOIN ancestors a ON c.id=a.id
+                WHERE c.parent_id IS NOT NULL
+              ) SELECT id FROM ancestors
+            );
+          END;
+        `);
         await upgradeToV6(tx);
         if (version < 3) await upgradeToV3(tx);
         if (version === 4) await upgradeToV5(tx);
