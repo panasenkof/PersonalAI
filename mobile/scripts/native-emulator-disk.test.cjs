@@ -10,9 +10,19 @@ test('CI cleans unused host toolchains before native build and preserves Android
   const native = yaml.indexOf('- name: Compile standalone release APK');
   const saved = yaml.indexOf('- name: Save standalone emulator APK');
   const reclaim = yaml.indexOf('- name: Reclaim release intermediates before Android emulator');
-  const maestro = yaml.indexOf('- name: Install pinned Maestro CLI');
+  const maestro = yaml.indexOf('- name: Install checksum-verified pinned Maestro CLI');
   const smoke = yaml.indexOf('- name: Run real Android UI smoke');
   assert(host >= 0 && host < native && native < saved && saved < reclaim && reclaim < maestro && maestro < smoke);
+  // Distribution failover cannot skip the emulator or trust unverified tools.
+  const gradle = yaml.indexOf('- name: Install checksum-verified Gradle 8.13');
+  const stage = yaml.indexOf('- name: Stage offline vision AAR');
+  assert(gradle >= 0 && gradle < stage && stage < native);
+  assert.match(yaml.slice(gradle, stage), /sha256sum --check --status/);
+  assert.match(yaml.slice(gradle, stage), /downloads\.gradle\.org\/distributions/);
+  assert.match(yaml.slice(gradle, stage), /gradle-distributions\/releases/);
+  assert.match(yaml.slice(maestro, smoke), /sha256sum --check --status/);
+  assert.match(yaml.slice(maestro, smoke), /mobile-dev-inc\/Maestro\/releases/);
+  assert.match(yaml.slice(maestro, smoke), /test "\$MAESTRO_VERSION" = "2\.0\.10"/);
   const hostStep = yaml.slice(host, native);
   assert.match(hostStep, /\/usr\/share\/dotnet/);
   assert.match(hostStep, /\/usr\/share\/swift/);
