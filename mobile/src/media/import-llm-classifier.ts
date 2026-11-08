@@ -3,7 +3,7 @@ import { anonymousLocalAllowed, type DirectAgentSettings } from "../direct-agent
 import type { CollectionRecord } from "../local-memory/types";
 
 export const MAX_CLASSIFICATION_EXCERPT_CHARS = 6000;
-/** Same engine and set_conversation_context tool as ordinary chat. No second
+/** Same engine and tool catalog as ordinary chat; import-only proposal. No second
  * classifier, index, memory write or raw-file provider upload. */
 export type ImportClassification = {
   collectionId: string | null; sectionSlug: string | null; sectionName: string | null;
