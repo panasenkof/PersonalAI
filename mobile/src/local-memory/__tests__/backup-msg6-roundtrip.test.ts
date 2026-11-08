@@ -18,9 +18,9 @@ import { SCHEMA_SQL, withLocalMemoryDatabase } from "../storage";
 import { SqliteMemoryRepository } from "../repository";
 import { restoreEncryptedBackup } from "../backup";
 
-let sequence = 0;
+let mockSequence = 0;
 jest.mock("expo-crypto", () => ({
-  randomUUID: jest.fn(() => "msg6-fixture-" + (++sequence)),
+  randomUUID: jest.fn(() => "msg6-fixture-" + (++mockSequence)),
   getRandomBytes: jest.fn(() => new Uint8Array(32)),
 }));
 jest.mock("expo-file-system/legacy", () => ({
@@ -31,11 +31,11 @@ jest.mock("expo-file-system/legacy", () => ({
 jest.mock("expo-sharing", () => ({
   isAvailableAsync: jest.fn(), shareAsync: jest.fn(),
 }));
-let activeDb: SqliteAdapter;
+let mockActiveDb: SqliteAdapter;
 jest.mock("../storage", () => ({
   ...jest.requireActual("../storage"),
   withLocalMemoryDatabase: jest.fn(async (_id: string, action: (db: unknown) => Promise<unknown>) =>
-    action(activeDb)),
+    action(mockActiveDb)),
 }));
 
 /** Only the native encryption/URI attach transport is substituted. All SQL
@@ -103,7 +103,7 @@ function writeCurrentManifest(db: DatabaseSync) {
 }
 
 beforeEach(async () => {
-  sequence=0;
+  mockSequence=0;
   directory=mkdtempSync(join(tmpdir(),"persai-msg6-restore-"));
   archivePath=join(directory,"msg6-fixture.db");
   const archive = new DatabaseSync(archivePath);
@@ -160,7 +160,7 @@ beforeEach(async () => {
   destination = new DatabaseSync(":memory:");
   destination.exec(SCHEMA_SQL);
   destination.exec("PRAGMA foreign_keys=ON");
-  activeDb=new SqliteAdapter(destination,archivePath);
+  mockActiveDb=new SqliteAdapter(destination,archivePath);
   (FS.getFreeDiskStorageAsync as jest.Mock).mockResolvedValue(8*1024*1024*1024);
   (FS.getInfoAsync as jest.Mock).mockResolvedValue({exists:true,isDirectory:false,size:4096});
   (FS.copyAsync as jest.Mock).mockResolvedValue(undefined);
@@ -204,7 +204,7 @@ test("MSG-6/BKP: real v18 SQL restore preserves Share, merged source, tags, bina
   expect(restoredPart.sha256).toBe(partSha);
   expect((get("SELECT text,page FROM memory_extraction_segments WHERE id='pdf-seg-msg6'") as
     {text:string;page:number})).toEqual({text:"Подтверждённый фрагмент PDF",page:1});
-  const repo=new SqliteMemoryRepository(activeDb as never);
+  const repo=new SqliteMemoryRepository(mockActiveDb as never);
   expect((await repo.searchNotes("",50,0,{tag:"космос"})).map(row=>row.id)).toContain(saved.primaryId);
   expect((await repo.searchNotes("OriginalTelegramDocument")).map(row=>row.id))
     .toContain(saved.primaryId);
