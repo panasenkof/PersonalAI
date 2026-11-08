@@ -1070,3 +1070,47 @@ test("MSG-6C6: invalid tag refuses save without overwriting original caption",as
   expect(saveMediaNote).not.toHaveBeenCalled();
   expect(screen.getByLabelText("Сведения из файла").props.value).toBe("Мой комментарий");
 });
+
+test("IMPORT-AUTO: Save offers one informed LLM consent, then persists tags and section atomically",async()=>{
+  (ensureSections as jest.Mock).mockResolvedValue([
+    {id:"inbox",slug:"inbox",name:"Входящие",sensitivity:"sensitive"},
+    {id:"recipes",slug:"recipes",name:"Рецепты",sensitivity:"standard"},
+  ]);
+  (classifyImportCollectionWithAgent as jest.Mock).mockResolvedValueOnce({
+    collectionId:"recipes",sectionSlug:"recipes",sectionName:"Рецепты",
+    topic:"Рецепт лазаньи",reason:"Текст про приготовление",
+    tags:["лазанья","рецепты"],excerptTruncated:false,
+  });
+  mockParams={incoming:[{shareType:"text",value:"Приготовим лазанью на ужин с томатами"}]};
+  const alert=jest.spyOn(Alert,"alert").mockImplementation(()=>{});
+  const ui=render(<MemoryImportScreen/>);
+  await waitFor(()=>expect(ui.getByText(/Коллекция: Входящие/)).toBeTruthy());
+  fireEvent.press(ui.getByLabelText("Сохранить сведения в память"));
+  expect(alert).toHaveBeenCalledWith("Автоматические теги и раздел",
+    expect.stringContaining("Оригиналы"),expect.any(Array));
+  expect(classifyImportCollectionWithAgent).not.toHaveBeenCalled();
+  expect(saveMediaNote).not.toHaveBeenCalled();
+  const approve=(alert as jest.Mock).mock.calls[0][2][1];
+  await act(async()=>{approve.onPress();});
+  await waitFor(()=>expect(saveMediaNote).toHaveBeenCalledWith("guest",expect.objectContaining({
+    tags:["лазанья","рецепты"],collectionId:"recipes",body:"Приготовим лазанью на ужин с томатами",
+  }),expect.anything()));
+  expect(classifyImportCollectionWithAgent).toHaveBeenCalledTimes(1);
+  expect(classifyImportCollectionWithAgent).toHaveBeenCalledWith(expect.objectContaining({
+    explicitConsent:true,sensitivity:"standard",body:"Приготовим лазанью на ужин с томатами",
+  }));
+  alert.mockRestore();
+});
+
+test("IMPORT-AUTO: an unrecognized photo remains savable; AI action explains missing text",async()=>{
+  const ui=render(<MemoryImportScreen/>);
+  fireEvent.press(ui.getByLabelText("Выбрать файл для памяти"));
+  await waitFor(()=>expect(ui.getByLabelText("Определить раздел с ИИ")).toBeTruthy());
+  expect(ui.getByLabelText("Определить раздел с ИИ").props.accessibilityState.disabled).toBe(false);
+  fireEvent.press(ui.getByLabelText("Определить раздел с ИИ"));
+  expect(ui.getByText(/добавьте подпись или распознайте текст/)).toBeTruthy();
+  expect(classifyImportCollectionWithAgent).not.toHaveBeenCalled();
+  fireEvent.press(ui.getByLabelText("Сохранить сведения в память"));
+  await waitFor(()=>expect(saveMediaNote).toHaveBeenCalledWith("guest",
+    expect.objectContaining({tags:[]}),expect.anything()));
+});
