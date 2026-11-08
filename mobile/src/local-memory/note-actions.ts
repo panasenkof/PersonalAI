@@ -260,6 +260,12 @@ export async function undoNotes(db: SQL, batch: string, moveGuard?: ChatMoveGuar
       }
       await write(tx, current, { ...before }, 'Отмена ' + batch);
     }
+    if (isMerge) {
+      // Undo journal ordering is by timestamp/UUID, not participant order.
+      // Rebuild the primary only AFTER all source originals returned home.
+      const primary = JSON.parse(revisions[0].after_json).batch_participants[0];
+      await indexEntity(tx, primary);
+    }
   });
 }
 
