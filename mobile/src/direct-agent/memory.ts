@@ -3,7 +3,7 @@ import { localMemoryRepository, SqliteMemoryRepository } from "../local-memory/r
 import { withLocalMemoryDatabase } from "../local-memory/storage";
 import { withUnlockedTransaction } from "../local-memory/transaction";
 import type { MemoryRepository } from "../local-memory/types";
-import { ensureSections, orderCollections } from "../local-memory/sections";
+import { collectionPath, ensureSections, orderCollections } from "../local-memory/sections";
 
 import { memoryText, normalizeAlias as normalizeName } from "../local-memory/search-index";
 import { DEFAULT_SECTIONS, MAX_NOTE_BODY_CHARS, PROPOSABLE_KINDS, findSection, proposableSections, validDate } from "./fact-tool";
@@ -78,7 +78,8 @@ export async function searchApprovedNotes(
       entity.record_status==="active"&&["standard","inherit"].includes(entity.sensitivity));
     let remaining=MAX_CONTEXT_NOTE_CHARS;
     return allowed.map(({entity,chunk},index)=>{
-      const section=collections.find(c=>c.id===entity.collection_id)?.name;
+      const sectionRecord=collections.find(c=>c.id===entity.collection_id);
+      const section=sectionRecord ? collectionPath(sectionRecord,collections) : undefined;
       const body=memoryText(entity.payload);
       const available=Math.max(0,remaining-(allowed.length-index-1)*EXCERPT_CHARS);
       const complete=body.length<=FULL_NOTE_CHARS&&body.length<=available;
@@ -179,16 +180,26 @@ export async function saveApprovedNote(
   let col = proposal.section ? all.find(c => c.slug === proposal.section) : undefined;
   const requested = proposal.newSection?.trim().slice(0, 60);
   let newSection: string | undefined;
+  let newSectionParentId: string | null = null;
   if (!col && requested) {
-    // Validate the complete approval first. A rejected identity must not
-    // leave an unused custom section behind.
-    const existing = findSection(requested, all.map(c => ({ slug: c.slug, name: c.name })));
+    // Resolve a model-suggested path before any write. Only the final leaf is
+    // created, and only when its parent already exists.
+    const existing = findSection(requested, proposableSections(all));
     if (existing) col = all.find(c => c.slug === existing.slug);
-    else newSection = requested;
+    else {
+      const components = requested.split("/").map(value => value.trim()).filter(Boolean);
+      if (components.length > 1) {
+        const parentPath = components.slice(0,-1).join(" / ").toLocaleLowerCase();
+        const parent = all.find(c => collectionPath(c,all).toLocaleLowerCase()===parentPath);
+        if (!parent) throw new Error("Родительский раздел не найден. Создайте его сначала.");
+        newSectionParentId = parent.id;
+      }
+      newSection = components[components.length-1];
+    }
   }
-  col ||= all.find(c => c.slug === "notes");
+  col ||= all.find(c => c.id === newSectionParentId) || all.find(c => c.slug === "notes");
   if (!col) throw new Error("Раздел для заметки не найден");
-  const plannedSensitivity = newSection ? "standard" : col.sensitivity;
+  const plannedSensitivity = newSection && !newSectionParentId ? "standard" : col.sensitivity;
   // A proposal may land in a personal section (e.g. documents) but never in a
   // secret or unclassified one: those are only filled by the user directly.
   if (plannedSensitivity !== "standard" && plannedSensitivity !== "sensitive") throw new Error("Раздел «" + col.name + "» ограничен по доступу");
@@ -218,7 +229,7 @@ export async function saveApprovedNote(
   if (newSection) {
     col = await db.createCollection({ name: newSection,
       slug: "section-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
-      sensitivity: "standard" });
+      sensitivity: plannedSensitivity, parentId: newSectionParentId });
   }
   const saved = await db.createEntity({
     collection_id: col.id, domain: "notes", title,
