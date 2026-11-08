@@ -293,6 +293,40 @@ export class SqliteMemoryRepository implements MemoryRepository {
     });
   }
 
+  /** Canonical destructive writer: never cascade through notes, attachments or descendants.
+   * The confirmed card's identity, timestamp and parent are checked in the same
+   * transaction, so a stale proposal cannot delete a relocated collection. */
+  async deleteEmptyCollection(id: string, expectedCreatedAt: string,
+    expectedParentId: string | null): Promise<void> {
+    if (typeof id!=="string" || !/^[A-Za-z0-9:_-]{1,128}$/.test(id) ||
+        typeof expectedCreatedAt!=="string" || expectedCreatedAt.length>80 ||
+        (expectedParentId!==null &&
+         (typeof expectedParentId!=="string" || !/^[A-Za-z0-9:_-]{1,128}$/.test(expectedParentId))))
+      throw new Error("invalid_collection_delete_request");
+    await withUnlockedTransaction(this.db, async tx => {
+      const row=await tx.getFirstAsync<Row>(
+        "SELECT id,slug,parent_id,created_at,sensitivity FROM memory_collections WHERE id=?",[id]);
+      if (!row || row.created_at!==expectedCreatedAt ||
+          TEXT(row.parent_id)!==expectedParentId)
+        throw new MemoryConflictError("stale_collection");
+      // Built-in sections are foundations, not user-created folders.
+      if (row.sensitivity!=="standard" ||
+          ["about","people","projects","preferences","dates","documents","notes","inbox"].includes(String(row.slug)))
+        throw new MemoryAccessError("collection_delete_protected");
+      const nested=await tx.getFirstAsync<{n:number}>(
+        "SELECT COUNT(*) AS n FROM memory_collections WHERE parent_id=?",[id]);
+      const records=await tx.getFirstAsync<{n:number}>(
+        "SELECT COUNT(*) AS n FROM memory_entities WHERE collection_id=?",[id]);
+      if (!nested || !records || nested.n>0 || records.n>0)
+        throw new MemoryConflictError("collection_not_empty");
+      const result=await tx.runAsync(
+        "DELETE FROM memory_collections WHERE id=? AND created_at=? AND "+
+        (expectedParentId===null ? "parent_id IS NULL" : "parent_id=?"),
+        expectedParentId===null ? [id,expectedCreatedAt] : [id,expectedCreatedAt,expectedParentId]);
+      if (Number(result.changes)!==1) throw new MemoryConflictError("stale_collection");
+    });
+  }
+
   async entity(id: string): Promise<EntityRecord | null> {
     const row = await this.db.getFirstAsync<Row>("SELECT * FROM memory_entities WHERE id = ?", [id]);
     return row ? entityFrom(row) : null;
