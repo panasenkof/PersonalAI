@@ -24,7 +24,7 @@ import { noteHistoryLabel } from "../local-memory/note-actions";
 import type { CollectionRecord, EntityRecord, ObservationRecord, RelationRecord, RevisionRecord } from "../local-memory/types";
 import { localMemorySessionUnlocked, onLocalMemorySessionChange } from "../local-memory/storage";
 import { memoryErrorMessage } from "../local-memory/errors";
-import { ensureSections } from "../local-memory/sections";
+import { collectionTree, ensureSections } from "../local-memory/sections";
 import { MEMORY_KINDS, defaultKind } from "../local-memory/search-index";
 import type { MemoryKind } from "../local-memory/search-index";
 import { KIND_NAMES } from "../direct-agent/fact-tool";
@@ -702,7 +702,7 @@ const [termsOpen, setTermsOpen] = useState(false);
       </> : <Text style={{ color: t.muted }}>Восстановите запись из корзины, чтобы редактировать её.</Text>}
     </BottomSheet>
     <BottomSheet visible={sectionOpen} title="Раздел записи" onClose={() => setSectionOpen(false)}>
-      {collections.length ? collections.map(c => <Pressable key={c.id} accessibilityRole="button" accessibilityLabel={"Поместить в раздел " + c.name} accessibilityState={{ selected: c.id === collectionId }} style={button} onPress={() => { setCollectionId(c.id); setSectionOpen(false); if (!selected && !kindTouched.current) setKind(defaultKind(c.slug)); }}><Text style={{ color: c.id === collectionId ? t.secondary : t.text }}>{c.name}</Text></Pressable>) : <Text style={{ color: t.muted }}>Первая запись будет в разделе «Заметки». Другие разделы можно создать на странице памяти.</Text>}
+      {collections.length ? collectionTree(collections).map(({collection:c,path}) => <Pressable key={c.id} accessibilityRole="button" accessibilityLabel={"Поместить в раздел " + path} accessibilityState={{ selected: c.id === collectionId }} style={button} onPress={() => { setCollectionId(c.id); setSectionOpen(false); if (!selected && !kindTouched.current) setKind(defaultKind(c.slug)); }}><Text style={{ color: c.id === collectionId ? t.secondary : t.text }}>{path}</Text></Pressable>) : <Text style={{ color: t.muted }}>Первая запись будет в разделе «Заметки». Другие разделы можно создать на странице памяти.</Text>}
     </BottomSheet>
     <BottomSheet visible={linkOpen} title="Связать записи" onClose={() => { setLinkOpen(false); void loadDetails(); }}>
       <TextInput accessibilityLabel="Найти связанную запись" value={linkSearch} onChangeText={setLinkSearch} placeholder="Поиск" placeholderTextColor={t.muted} style={field} />
