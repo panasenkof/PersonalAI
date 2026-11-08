@@ -32,6 +32,21 @@ const pathOk = (value:unknown):value is string =>
 const reasonOk = (r:unknown):r is string =>
   typeof r==="string" && r.trim().length>=5 && r.length<=240;
 const root = (c:CollectionRecord) => c.parent_id ?? null;
+// Never expose or operate on a descendant of a protected/unknown parent,
+// even if an old or corrupted profile somehow has a standard child there.
+function standardAncestors(section:CollectionRecord,collections:CollectionRecord[]):boolean {
+  const ids=new Map(collections.map(c=>[c.id,c]));
+  const visited=new Set<string>();
+  let cursor:CollectionRecord|undefined=section;
+  while(cursor){
+    if(visited.has(cursor.id) || cursor.sensitivity!=="standard" ||
+       cursor.slug==="documents" || cursor.slug==="inbox")return false;
+    visited.add(cursor.id);
+    if(cursor.parent_id && !ids.has(cursor.parent_id))return false;
+    cursor=cursor.parent_id ? ids.get(cursor.parent_id) : undefined;
+  }
+  return true;
+}
 
 export function validSectionProposal(value:unknown):value is ChatSectionProposal {
   if (!value || typeof value!=="object" || Array.isArray(value)) return false;
@@ -75,7 +90,7 @@ export async function previewSectionAction(profile:string, request:SectionAction
     if(request.kind==="create"){
       const parent=request.parentSlug===null ? undefined :
         collections.find(c=>c.slug===request.parentSlug);
-      if(request.parentSlug!==null && (!parent || parent.sensitivity!=="standard"))
+      if(request.parentSlug!==null && (!parent || !standardAncestors(parent,collections)))
         throw new Error("section_parent_unavailable");
       if(collections.some(c=>root(c)===(parent?.id??null) &&
           c.name.trim().toLocaleLowerCase()===request.name.trim().toLocaleLowerCase()))
@@ -87,7 +102,8 @@ export async function previewSectionAction(profile:string, request:SectionAction
       return proposal;
     }
     const section=collections.find(c=>c.slug===request.sectionSlug);
-    if(!section || !own(section))throw new Error("section_delete_protected_or_missing");
+    if(!section || !own(section) || !standardAncestors(section,collections))
+      throw new Error("section_delete_protected_or_missing");
     if(collections.some(c=>root(c)===section.id))
       throw new Error("section_has_children");
     // Query includes archived, superseded and trashed records; not just active notes.
@@ -118,7 +134,7 @@ export async function confirmSectionAction(profile:string, proposal:ChatSectionP
       const sections=await repository.listCollections();
       const parent=proposal.parentId===null?undefined:sections.find(c=>c.id===proposal.parentId);
       if(proposal.parentId!==null &&
-         (!parent||parent.sensitivity!=="standard"||
+         (!parent||!standardAncestors(parent,sections)||
           collectionPath(parent,sections)!==proposal.parentName))
         throw new Error("section_parent_changed");
       if(sections.some(c=>root(c)===proposal.parentId &&
