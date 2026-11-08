@@ -117,6 +117,10 @@ export async function changeNotes(db: SQL, action: NoteAction, selection: NoteSe
       const hasSourceDependencies = `
         SELECT 1 AS linked FROM memory_entities e WHERE e.id=? AND (
           EXISTS(SELECT 1 FROM memory_observations o WHERE o.entity_id=e.id)
+          OR EXISTS(SELECT 1 FROM memory_aliases a WHERE a.entity_id=e.id)
+          OR EXISTS(SELECT 1 FROM memory_index_terms t WHERE t.entity_id=e.id AND t.source='user')
+          OR EXISTS(SELECT 1 FROM memory_cleanup_preferences p
+             WHERE p.entity_id=e.id AND p.guard IN ('pinned','never_suggest'))
           OR EXISTS(SELECT 1 FROM memory_relations r WHERE r.source_entity_id=e.id OR r.target_entity_id=e.id)
           OR EXISTS(SELECT 1 FROM memory_relation_evidence w WHERE w.evidence_entity_id=e.id)
           OR EXISTS(SELECT 1 FROM memory_review_proposals p
