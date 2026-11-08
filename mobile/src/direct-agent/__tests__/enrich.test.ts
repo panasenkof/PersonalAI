@@ -39,7 +39,7 @@ async function setup() {
 
 test("the answer is read even inside a code block; anything that is not a short string is dropped", () => {
   expect(parseSuggestion('Вот:\n```json\n{"terms":["автомобиль","автомобиль"," шкода ", 5, "' + "x".repeat(50) + '"],"people":["Аня"]}\n```'))
-    .toEqual({ terms: ["автомобиль", "шкода"], people: ["Аня"] });
+    .toMatchObject({ terms: ["автомобиль", "шкода"], people: ["Аня"] });
   expect(() => parseSuggestion("не знаю")).toThrow("не списком слов: «не знаю»");
 });
 
@@ -88,7 +88,7 @@ test("«Документы» are never sent; an edit makes the record pending ag
   expect(transport.mock.calls.some(([, init]: any) => String(init.body).includes("ОСАГО"))).toBe(false);
   expect(await repo.staleIndexTerms(MODEL_TERMS_SOURCE)).toEqual([]);
   await new Promise(r => setTimeout(r, 5));
-  await repo.reviseEntity(car.id, 1, { title: "Машина", body: "Шкода Кодиак" }, "Новая машина");
+  await repo.reviseEntity(car.id, (await repo.entity(car.id))!.record_version, { title: "Машина", body: "Шкода Кодиак" }, "Новая машина");
   expect(await repo.staleIndexTerms(MODEL_TERMS_SOURCE)).toEqual([car.id]);
   const failing = jest.fn(async () => ({ ok: false, status: 401, text: async () => '{"error":{"message":"bad key"}}' }));
   const pass = await enrichPending(repo, settings, { transport: failing as unknown as typeof fetch });
@@ -131,7 +131,7 @@ test("same-millisecond edits invalidate model terms but preserve user words and 
     await repo.setIndexTerms(car.id, ["ручное"], "user");
     await repo.setAliases(car.id, ["Ласточка"]);
     await enrichEntity(repo, car.id, settings, jest.fn(async () => reply('{"terms":["старое"],"people":[]}')) as unknown as typeof fetch);
-    await repo.reviseEntity(car.id, 1, { body: "Новая машина" }, "Правка");
+    await repo.reviseEntity(car.id, (await repo.entity(car.id))!.record_version, { body: "Новая машина" }, "Правка");
     expect(await repo.searchNotes("старое")).toEqual([]);
     expect((await repo.searchNotes("ручное"))[0].id).toBe(car.id);
     expect((await repo.searchNotes("Ласточка"))[0].id).toBe(car.id);
@@ -191,7 +191,7 @@ test("re-enrichment replaces only its own links; an edited source no longer expa
   await enrichEntity(repo, car.id, settings, answer);
   expect(await repo.relationsForEntity(car.id)).toHaveLength(2);
   expect((await repo.searchMemory("Аня")).map(h => h.entity.id)).toContain(car.id);
-  await repo.reviseEntity(car.id, 1, { body: "Другая машина" }, "Правка");
+  await repo.reviseEntity(car.id, (await repo.entity(car.id))!.record_version, { body: "Другая машина" }, "Правка");
   expect(await repo.relationsForEntity(car.id)).toEqual([manual]);
   expect((await repo.searchMemory("Аня")).map(h => h.entity.id)).not.toContain(car.id);
   const empty = jest.fn(async () => reply('{"terms":[],"people":[]}')) as unknown as typeof fetch;
@@ -208,7 +208,7 @@ test("a thinking model that ran out of tokens is asked again with more room", as
     .mockResolvedValueOnce(reply('{"terms":["автомобиль"],"people":[]}'));
   const thinking = { ...settings, model: "deepseek-v4-pro" };
   expect(await suggestIndexTerms(thinking, { title: "Машина", body: "Шкода", section: "Обо мне" }, transport as unknown as typeof fetch))
-    .toEqual({ terms: ["автомобиль"], people: [] });
+    .toMatchObject({ terms: ["автомобиль"], people: [] });
   const limits = transport.mock.calls.map(([, init]: any) => JSON.parse(String(init.body)).max_tokens);
   expect(limits[1]).toBeGreaterThan(limits[0]);
 });
@@ -233,4 +233,71 @@ test("on DeepSeek's own API index words use the fast model with thinking off and
   await suggestIndexTerms(settings, { title: "Машина", body: "Шкода", section: "Обо мне" }, transport as unknown as typeof fetch);
   const other = JSON.parse(String(((transport.mock.calls[1] as unknown) as [string, RequestInit])[1].body));
   expect(other.model).toBe("some-model"); expect(other.thinking).toBeUndefined(); expect(other.response_format).toBeUndefined();
+});
+
+test("SEARCH-META: one LLM pass fills real tag facets and typed search hints, without altering verified fields",async()=>{
+  const {repo,car}=await setup();
+  const transport=jest.fn(async()=>reply(JSON.stringify({
+    terms:["автомобиль"],people:[],tags:["Шкода","авто","Шкода"],
+    topic:"Автомобили",summary:"У пользователя есть Škoda Octavia",
+    titleHint:"Мой автомобиль",places:["Ростов-на-Дону"],dates:["2026-02-30","2026-03-08"],
+  }))) as unknown as typeof fetch;
+  const before=(await repo.entity(car.id))!;
+  expect(await enrichEntity(repo,car.id,settings,transport)).toBe("enriched");
+  const after=(await repo.entity(car.id))!;
+  expect(after.record_version).toBe(before.record_version+1);
+  expect(after.title).toBe(before.title);
+  expect(after.kind).toBe(before.kind);
+  expect(after.valid_from).toBeNull();
+  expect(after.payload.tags).toEqual(["авто","шкода"]);
+  expect(after.payload.model_search).toMatchObject({
+    schema:1,origin:"model:auto",topic:"Автомобили",dates:["2026-03-08"],
+  });
+  expect((await repo.listNoteTags()).some(t=>["авто","шкода"].includes(t))).toBe(true);
+  expect((await repo.searchNotes("автомобиль"))[0].id).toBe(car.id);
+  expect(await repo.staleIndexTerms(MODEL_TERMS_SOURCE)).not.toContain(car.id);
+  expect(transport).toHaveBeenCalledTimes(1);
+});
+
+test("SEARCH-META: text edit refreshes LLM tags; preserves authored tags and explicit tag clearing",async()=>{
+  const {repo,car}=await setup();
+  const reply1=jest.fn(async()=>reply(JSON.stringify({terms:[],people:[],tags:["красное","машина"]}))) as unknown as typeof fetch;
+  await repo.reviseEntity(car.id,1,{...car.payload,tags:["своё"]},"Добавил пользовательский тег");
+  await enrichEntity(repo,car.id,settings,reply1);
+  const first=(await repo.entity(car.id))!;
+  expect(first.payload.tags).toEqual(["красное","машина","своё"]);
+  const cleared={...first.payload,tags:[],model_search:{
+    ...(first.payload.model_search as object),tags:[],tagOverride:true,
+  },body:"Новый текст про машину"};
+  await repo.reviseEntity(car.id,first.record_version,cleared,"Пользователь удалил все теги");
+  const reply2=jest.fn(async()=>reply(JSON.stringify({terms:["новый"],people:[],tags:["новыйтег"]}))) as unknown as typeof fetch;
+  await enrichEntity(repo,car.id,settings,reply2);
+  const after=(await repo.entity(car.id))!;
+  expect(after.payload.tags).toEqual([]);
+  expect((after.payload.model_search as any).tagOverride).toBe(true);
+  expect((await repo.searchNotes("новый"))[0].id).toBe(car.id);
+});
+
+test("SEARCH-META: OCR-only notes are enriched; unrecognized original photos are never sent to provider",async()=>{
+  const {repo,about}=await setup();
+  const ocr=await repo.createEntity({collection_id:about.id,domain:"notes",title:"scan.pdf",
+    payload:{body:"",extracted_text:"Счёт за аренду квартиры в марте"},sensitivity:"standard"});
+  const photo=await repo.createEntity({collection_id:about.id,domain:"notes",title:"photo.jpg",
+    payload:{body:"",source_file:"photo.jpg"},sensitivity:"standard"});
+  const transport=jest.fn(async()=>reply(JSON.stringify({terms:["аренда"],people:[],tags:["квартира"]}))) as unknown as typeof fetch;
+  expect(await enrichEntity(repo,ocr.id,settings,transport)).toBe("enriched");
+  expect(await enrichEntity(repo,photo.id,settings,transport)).toBe("enriched");
+  expect(transport).toHaveBeenCalledTimes(1);
+  expect(String((await repo.entity(photo.id))!.payload.tags)).not.toContain("квартира");
+  expect((await repo.entity(ocr.id))!.payload.tags).toContain("квартира");
+});
+
+test("SEARCH-META: explicit opt-out never sends user text and is not pending for background backfill",async()=>{
+  const {repo,about}=await setup();
+  const note=await repo.createEntity({collection_id:about.id,domain:"notes",title:"Секретный черновик",
+    payload:{body:"Содержимое не отправлять",index_enrichment_opt_out:true},sensitivity:"standard"});
+  const transport=jest.fn(async()=>reply('{"terms":["утечка"],"people":[]}')) as unknown as typeof fetch;
+  expect(await enrichEntity(repo,note.id,settings,transport)).toBe("skipped");
+  expect(await repo.staleIndexTerms(MODEL_TERMS_SOURCE)).not.toContain(note.id);
+  expect(transport).not.toHaveBeenCalled();
 });
