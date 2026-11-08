@@ -209,9 +209,9 @@ test("MSG-6/BKP: real v18 SQL restore preserves Share, merged source, tags, bina
   expect((await repo.searchNotes("OriginalTelegramDocument")).map(row=>row.id))
     .toContain(saved.primaryId);
   // Extracted PDF segments have their own existing FTS projection, not the
-  // note title/body FTS. The restore INSERT trigger must rebuild that index.
+  // note title/body FTS. The restore INSERT trigger must rebuild that index.\n  // That existing FTS index normalizes Russian ё to е before matching.
   const extractedHits=main.prepare(
-    "SELECT segment_id FROM memory_extraction_fts WHERE body MATCH 'Подтверждённый'").all();
+    "SELECT segment_id FROM memory_extraction_fts WHERE body MATCH 'Подтвержденный'").all();
   expect(extractedHits).toEqual([{segment_id:"pdf-seg-msg6"}]);
   await repo.undoNotes(saved.undoToken);
   const restoredSource=await repo.entity(saved.sourceId);
