@@ -178,7 +178,7 @@ export async function saveApprovedNote(
   const db = repository || await localMemoryRepository(profile);
   const all = await ensureSections(db);
   let col = proposal.section ? all.find(c => c.slug === proposal.section) : undefined;
-  const requested = proposal.newSection?.trim().slice(0, 60);
+  const requested = proposal.newSection?.trim().slice(0, 2048);
   let newSection: string | undefined;
   let newSectionParentId: string | null = null;
   if (!col && requested) {

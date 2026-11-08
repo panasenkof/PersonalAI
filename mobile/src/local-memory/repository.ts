@@ -251,7 +251,8 @@ export class SqliteMemoryRepository implements MemoryRepository {
   async createCollection(item: { name: string; slug: string; sensitivity?: CollectionRecord["sensitivity"]; parentId?: string | null }): Promise<CollectionRecord> {
     if (!/^[a-z][a-z0-9_-]{0,63}$/.test(item.slug)) throw new Error("invalid_collection_slug");
     if (!item.name.trim()) throw new Error("invalid_collection_name");
-    return withUnlockedTransaction(this.db, async tx => {
+    let result!: CollectionRecord;
+    await withUnlockedTransaction(this.db, async tx => {
       const found = await tx.getFirstAsync<Row>("SELECT id FROM memory_collections WHERE slug=?", [item.slug]);
       if (found) throw new MemoryConflictError("collection_exists");
       const parentId = item.parentId ?? null;
@@ -268,8 +269,9 @@ export class SqliteMemoryRepository implements MemoryRepository {
         "INSERT INTO memory_collections(id,name,slug,description,sensitivity,created_at,parent_id) VALUES (?,?,?,?,?,?,?)",
         [record.id, record.name, record.slug, null, record.sensitivity, record.created_at, parentId],
       );
-      return record;
+      result = record;
     });
+    return result;
   }
 
   async moveCollection(id: string, parentId: string | null): Promise<void> {
@@ -289,6 +291,11 @@ export class SqliteMemoryRepository implements MemoryRepository {
       if (TEXT(source.parent_id) === parentId) return;
       await tx.runAsync("UPDATE memory_collections SET parent_id=? WHERE id=?", [parentId,id]);
     });
+  }
+
+  async entity(id: string): Promise<EntityRecord | null> {
+    const row = await this.db.getFirstAsync<Row>("SELECT * FROM memory_entities WHERE id = ?", [id]);
+    return row ? entityFrom(row) : null;
   }
 
   async entities(options: { collection_id?: string; domain?: string; kind?: MemoryKind; limit?: number; offset?: number } = {}): Promise<MemoryPage<EntityRecord>> {

@@ -17,7 +17,7 @@ export type RecordStatus = "active" | "archived" | "superseded" | "trashed";
 
 export type CollectionRecord = {
   id: string; name: string; slug: string; description: string | null;
-  sensitivity: MemorySensitivity; created_at: string; parent_id: string | null;
+  sensitivity: MemorySensitivity; created_at: string; parent_id?: string | null;
 };
 export type EntityRecord = {
   id: string; collection_id: string; domain: string; schema_version: string;

@@ -115,7 +115,7 @@ export function factProposal(args: Record<string, unknown>, sections: MemorySect
   const body = typeof args.body === "string" ? args.body.trim() : "";
   if (body.length > MAX_NOTE_BODY_CHARS) throw new Error("note_body_too_long");
   if (!title && !body) throw new Error("empty_note");
-  const requested = text(args.section, 80);
+  const requested = text(args.section, 2048);
   const found = requested && !isDocuments(requested) ? findSection(requested, sections) : undefined;
   if (requested && !found && sections.filter(s => normalizeName(s.name) === normalizeName(requested)).length > 1)
     throw new Error("ambiguous_section_path");
@@ -127,6 +127,6 @@ export function factProposal(args: Record<string, unknown>, sections: MemorySect
  * made, so it is only re-validated, never looked up again. */
 export function restoredProposal(value: Record<string, unknown>): Omit<NoteProposal, "title" | "body"> {
   const section = typeof value.section === "string" && /^[a-z0-9-]{1,80}$/.test(value.section) && value.section !== "documents" ? value.section : undefined;
-  const newSection = text(value.newSection, 60);
+  const newSection = text(value.newSection, 2048);
   return { ...(section ? { section } : {}), ...(newSection ? { newSection } : {}), ...optional(value) };
 }
