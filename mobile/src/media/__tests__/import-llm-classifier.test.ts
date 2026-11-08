@@ -92,3 +92,21 @@ test("MSG-6.C2: AppLock abort cancels classification before any model request",a
     .rejects.toThrow("отменено");
   expect(runner).not.toHaveBeenCalled();
 });
+
+
+
+test("nested imported note suggests full paths, never private descendants",async()=>{
+  const more:CollectionRecord[]=[
+    {id:"ai",slug:"ai",name:"ИИ",sensitivity:"standard",description:null,created_at:"2026-11-08",parent_id:null},
+    {id:"training",slug:"training",name:"Обучение",sensitivity:"standard",description:null,created_at:"2026-11-08",parent_id:"ai"},
+    // A malformed restored graph must never leak a descendant of Documents.
+    {id:"unsafe",slug:"unsafe",name:"Секрет",sensitivity:"standard",description:null,created_at:"2026-11-08",parent_id:"documents"},
+  ];
+  const runner=jest.fn(async(options:DirectAgentOptions)=>{
+    expect(options.sections).toContainEqual({slug:"training",name:"ИИ / Обучение"});
+    expect(options.sections).not.toEqual(expect.arrayContaining([expect.objectContaining({slug:"unsafe"})]));
+    return candidate("training");
+  });
+  await expect(classifyImportCollectionWithAgent({...request(),collections:[...collections,...more]},runner))
+    .resolves.toMatchObject({sectionSlug:"training",sectionName:"ИИ / Обучение"});
+});

@@ -1,6 +1,7 @@
 import { runDirectAgent, type DirectAgentOptions, type DirectResult } from "../direct-agent/engine";
 import { anonymousLocalAllowed, type DirectAgentSettings } from "../direct-agent/settings";
 import type { CollectionRecord } from "../local-memory/types";
+import { collectionPath } from "../local-memory/sections";
 
 export const MAX_CLASSIFICATION_EXCERPT_CHARS = 6000;
 /** Same engine and set_conversation_context tool as ordinary chat. No second
@@ -20,10 +21,23 @@ export type ImportClassificationRequest = {
   signal?: AbortSignal;
 };
 
-const ordinarySections = (collections: readonly CollectionRecord[]) =>
-  collections.filter(c => c.sensitivity === "standard" && c.id &&
-    /^[a-z0-9][a-z0-9-]{0,79}$/.test(c.slug) &&
-    !["documents", "inbox"].includes(c.slug) && Boolean(c.name.trim()));
+const ordinarySections = (collections: readonly CollectionRecord[]) => {
+  const byId = new Map(collections.map(c => [c.id,c]));
+  return collections.filter(c => {
+    if (c.sensitivity !== "standard" || !c.id ||
+        !/^[a-z0-9][a-z0-9-]{0,79}$/.test(c.slug) || !c.name.trim()) return false;
+    const visited = new Set<string>();
+    let cursor: CollectionRecord | undefined = c;
+    while (cursor) {
+      if (visited.has(cursor.id) || cursor.sensitivity !== "standard" ||
+          ["documents","inbox"].includes(cursor.slug)) return false;
+      visited.add(cursor.id);
+      if (cursor.parent_id && !byId.has(cursor.parent_id)) return false;
+      cursor = cursor.parent_id ? byId.get(cursor.parent_id) : undefined;
+    }
+    return true;
+  });
+};
 
 /** The imported original, thumbnails, file URI, and URL targets NEVER enter
  * these inputs. Only already visible caption or extracted text is considered. */
@@ -57,7 +71,7 @@ export async function classifyImportCollectionWithAgent(
   const excerpt = classificationExcerpt(request.body, request.extractedText);
   if (!permitted.length || !excerpt.substantive) return null;
 
-  const sections = permitted.map(c => ({slug:c.slug,name:c.name.slice(0,60)}));
+  const sections = permitted.map(c => ({slug:c.slug,name:collectionPath(c,[...request.collections]).slice(0,2048)}));
   const result = await runner({
     settings:{...request.settings,allowWeb:false},
     prompt:"Определи тему и ОДИН существующий раздел для импортируемой заметки. "+
@@ -78,6 +92,6 @@ export async function classifyImportCollectionWithAgent(
   const candidate = result.contextCandidate;
   const chosen = permitted.find(c => candidate?.sectionSlug === c.slug);
   if (!chosen) return null;
-  return {collectionId:chosen.id,sectionSlug:chosen.slug,sectionName:chosen.name,
+  return {collectionId:chosen.id,sectionSlug:chosen.slug,sectionName:collectionPath(chosen,[...request.collections]),
     topic:candidate!.topic,reason:candidate!.reason,excerptTruncated:excerpt.truncated};
 }

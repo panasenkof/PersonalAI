@@ -68,3 +68,12 @@ test("model resolves identical subsection names only by path or stable slug", ()
   expect(()=>factProposal({title:"Тест",body:"Содержимое",section:"Обучение"},sections))
     .toThrow("ambiguous_section_path");
 });
+
+
+test("v19 imported collection parents must not downgrade sensitivity",()=>{
+  const {validCollectionParents}=require("../sections");
+  expect(validCollectionParents([
+    {id:"sensitive",parent_id:null,sensitivity:"sensitive"},
+    {id:"public",parent_id:"sensitive",sensitivity:"standard"},
+  ])).toBe(false);
+});

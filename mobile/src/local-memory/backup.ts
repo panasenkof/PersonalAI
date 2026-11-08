@@ -353,8 +353,8 @@ export async function restoreEncryptedBackup(
         if(version.user_version>=17&&!available.has("memory_profile_self"))
           throw new Error("incompatible_backup_schema");
         if (version.user_version >= 19) {
-          const parents = await db.getAllAsync<{id:string;parent_id:string|null}>(
-            "SELECT id,parent_id FROM pia_import.memory_collections");
+          const parents = await db.getAllAsync<{id:string;parent_id:string|null;sensitivity:string}>(
+            "SELECT id,parent_id,sensitivity FROM pia_import.memory_collections");
           if (!validCollectionParents(parents)) throw new Error("invalid_backup_collection_tree");
         }
         // Validate the *source* before any destination writes. A forged

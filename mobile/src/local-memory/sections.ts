@@ -91,8 +91,13 @@ export function collectionTree(collections: CollectionRecord[]): Array<{collecti
 }
 
 /** Reject malformed backup graphs (dangling parent/self/cycle) before a restore. */
-export function validCollectionParents(rows: Array<{id:string;parent_id:string|null}>): boolean {
+export function validCollectionParents(rows: Array<{id:string;parent_id:string|null;sensitivity?:string}>): boolean {
   const parents = new Map(rows.map(row => [row.id,row.parent_id]));
+  const sensitivity = new Map(rows.map(row => [row.id,row.sensitivity]));
+  for (const row of rows) {
+    if (row.parent_id && row.sensitivity && sensitivity.get(row.parent_id) &&
+        row.sensitivity !== sensitivity.get(row.parent_id)) return false;
+  }
   if (parents.size !== rows.length) return false;
   const valid = new Set<string>();
   for (const row of rows) {
