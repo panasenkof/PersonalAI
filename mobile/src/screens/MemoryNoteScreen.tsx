@@ -219,13 +219,20 @@ const [termsOpen, setTermsOpen] = useState(false);
       throw new Error("Исходный ответ или профиль изменился. Откройте ответ из диалога заново.");
     const tags = parseNoteTagsInput(tagDraft);
     const finalTitle = title.trim() || body.trim().split("\n")[0].slice(0, 80);
-    const payload = { ...selected?.payload, type: "note", title: finalTitle, tags,
+    const payload: Record<string,unknown> = { ...selected?.payload, type: "note", title: finalTitle, tags,
       // H-SAVE1a preserves Markdown and its trailing newlines exactly;
       // ordinary hand-written notes retain the established trim behavior.
       body: fromChat ? body : body.trim(), extracted_text: extractedText.trim(),
       ...(fromChat ? { chat_origin: { ...fromChat.provenance, label: fromChat.provenance.kind === "dialogue_summary" ? "Итог диалога" : "Ответ ИИ",
         savedAt: new Date().toISOString() } } : {}) };
     const base = baseline.current;
+    if (selected && tagDraft !== base.tags) {
+      // A user's tag edit (including clearing every tag) overrides automatic
+      // suggestions. Never quietly restore tags the user deliberately removed.
+      const old=selected.payload.model_search;
+      payload.model_search={...(old && typeof old==="object" && !Array.isArray(old) ? old : {}),
+        tags:[],tagOverride:true};
+    }
     const cardFields = { kind, aliases: splitNames(namesForSave.current), userTerms: splitNames(terms) };
     if (selected) {
       const textChanged = allowAgent || extractedText !== String(selected.payload.extracted_text || "") || title !== base.title || body !== base.body || collectionId !== base.collectionId;
@@ -506,7 +513,7 @@ const [termsOpen, setTermsOpen] = useState(false);
           {selected && profile && ["active", "archived"].includes(selected.record_status) ? <AppendNoteAttachments
             key={profile + selected.id} profile={profile} note={selected} disabled={working || dirty || voiceActive}
             onBusyChange={setAttachmentBusy} onDraftChange={setAttachmentDraft}
-            onSaved={updated => { setSelected(updated); setBeforeAi(null); scheduleVectors(profile); }} /> : null}
+            onSaved={updated => { setSelected(updated); setBeforeAi(null); scheduleIndexTerms(profile); scheduleVectors(profile); }} /> : null}
           {extractedText && extractedText.trim() !== body.trim() ? <NoteReadPreview
             testID="note-extracted-summary" text={extractedText}
             heading="Текст из файла" fullTitle="Полный распознанный текст"
@@ -530,7 +537,7 @@ const [termsOpen, setTermsOpen] = useState(false);
         {selected && profile && ["active", "archived"].includes(selected.record_status) ? <AppendNoteAttachments
           key={profile + selected.id} profile={profile} note={selected} disabled={working || dirty || voiceActive}
           onBusyChange={setAttachmentBusy} onDraftChange={setAttachmentDraft}
-          onSaved={updated => { setSelected(updated); setBeforeAi(null); scheduleVectors(profile); }} /> : null}
+          onSaved={updated => { setSelected(updated); setBeforeAi(null); scheduleIndexTerms(profile); scheduleVectors(profile); }} /> : null}
         <TextInput testID="note-body-input" accessibilityLabel="Текст заметки" multiline value={body} onChangeText={value => { setBeforeAi(null); setBody(value); }} editable={!busy && !voiceActive} placeholder="Что нужно запомнить?" placeholderTextColor={t.muted} style={{ ...field, minHeight: 200, textAlignVertical: "top", lineHeight: 23 }} />
         {!body && extractedText ? <NebulaAction icon="file-text" label="Вставить распознанный текст" size="compact"
           onPress={() => setBody(extractedText)} /> : null}
@@ -635,6 +642,7 @@ const [termsOpen, setTermsOpen] = useState(false);
             <NebulaAction icon="plus" label="Добавить событие" size="compact" disabled={busy || !eventText.trim()}
               onPress={() => void run(async db => {
               await db.createObservation({ entity_id: selected.id, kind: "note_event", occurred_at: new Date().toISOString(), payload: { text: eventText.trim() }, sensitivity: "inherit", source_kind: "user", source_ref: "device" });
+              if(profile) scheduleIndexTerms(profile);
               if (alive.current) { setEvents(await db.observations(selected.id)); setEventText(""); }
             })} />
             <Text style={{ color: t.text, fontWeight: "700" }}>Связанные записи ({relations.length})</Text>
