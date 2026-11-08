@@ -699,6 +699,8 @@ export function MemoryImportScreen() {
       // A user-chosen section wins over the model. Android Share's empty
       // collection id can be replaced by the permitted LLM suggestion.
       const destinationId = collectionId || metadata?.collectionId || undefined;
+      const aiSelectedSection = Boolean(metadata?.collectionId && destinationId === metadata.collectionId);
+      const aiGeneratedTags = Boolean(metadata && tags.length && (aiMode === "approved" || generatedTags.current));
       const sourceRecognitions: FileRecognition[] = recognitionResults.length
         ? recognitionResults
         : keepOriginal && files.length === 1 && file && mediaKind(file) === "text" && content.trim()
@@ -707,7 +709,8 @@ export function MemoryImportScreen() {
       let replay: ShareReplay | null = null;
       const savedId = await saveMediaNote(profile, {
         ...(keepOriginal && files.length > 1 ? { files } : { file: keepOriginal ? file || undefined : undefined }),
-        title, body, tags, extractedText: content,
+        title, body, tags, ...(aiGeneratedTags ? {generatedTags:true} : {}),
+        ...(aiSelectedSection ? {generatedSection:true} : {}), extractedText: content,
         ...(keepOriginal && sourceRecognitions.length ? { recognitions: sourceRecognitions } : {}),
         sourceUrl: sourceUrl || undefined, sourceCoverage: sourceCoverage || undefined,
         ...(telegramObservation && sourceCoverage === "telegram_post_text_only" && content.trim() ? {telegramObservation} : {}),
@@ -838,7 +841,7 @@ export function MemoryImportScreen() {
         {body.trim() ? <NebulaAction icon="zap" label="Улучшить подпись с ИИ" size="compact" disabled={busy} onPress={() => setAiField("body")} /> : null}
         {tagEditorOpen || tagDraft ? <>
           <TextInput accessibilityLabel="Теги заметки" editable={!busy} value={tagDraft}
-            onChangeText={setTagDraft} maxLength={440} style={field}
+            onChangeText={value=>{generatedTags.current=false;setTagDraft(value);}} maxLength={440} style={field}
             placeholder="Теги (необязательно): #авто #рецепты" placeholderTextColor={t.muted} />
           <Text style={{color:t.muted,fontSize:12}}>
             До 12 тегов через пробел или запятую. Войдут в поиск по памяти; раздел определяется отдельно.
