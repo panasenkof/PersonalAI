@@ -218,7 +218,21 @@ export async function importLink(raw: string, signal?: AbortSignal): Promise<{ f
     // Deliberately reject HTTP redirects: native URL following could reach a
     // private host or send a user-selected URL to an unexpected endpoint.
     // Do not add cookies, Referer spoofing or site-specific VPN workarounds.
-    const response = await nativeFetch(readerUrl, { signal: controller.signal, credentials: 'omit', redirect: 'error' });
+    // Expo's native FetchRequestInit does not expose a browser cache mode.
+    // Ask compliant HTTP caches to revalidate and not store this explicit read;
+    // CDN/intermediary staleness still cannot be ruled out or used as proof of
+    // a remote Telegram revision. No new network transport or source identity.
+    const response = await nativeFetch(readerUrl, {
+      signal: controller.signal, credentials: 'omit', redirect: 'error',
+      headers: {'Cache-Control': 'no-cache, no-store', Pragma: 'no-cache'},
+    });
+    // Defence in depth if an Android transport ignores redirect: 'error'.
+    // Fetch Response.url is optional in test/legacy adapters; whenever the
+    // transport exposes it, require the same endpoint, not merely a 200 body.
+    const finalUrl = typeof response.url === 'string' && response.url.trim() ? response.url : null;
+    if (response.redirected === true || (finalUrl &&
+        new URL(finalUrl).href.split('#')[0] !== new URL(readerUrl).href.split('#')[0]))
+      throw new Error('Ответ получен с другого адреса. Сверка или импорт по перенаправлению запрещены.');
     stage = 'получение ответа';
     if (response.status >= 300 && response.status < 400 || response.status === 0)
       throw new Error('Сайт перенаправляет запрос на другой адрес. Автоматические перенаправления для импорта отключены.');

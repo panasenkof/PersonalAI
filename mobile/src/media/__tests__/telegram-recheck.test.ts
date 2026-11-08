@@ -25,6 +25,7 @@ test("MSG-6: explicit read-only check compares exact post fingerprints, not body
   expect(await recheckTelegramText(initial, signal)).toBe("same_text");
   expect(importLink).toHaveBeenCalledWith(sourceUrl, signal);
   expect(telegramRecheckMessage("same_text")).toContain("не доказывает");
+  expect(telegramRecheckMessage("same_text")).toContain("Кэш");
 });
 
 test("MSG-6: observed text change is not claimed to be a server edit or auto-merged", async () => {
