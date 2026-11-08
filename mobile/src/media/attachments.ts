@@ -194,10 +194,14 @@ function checkedRecognitions(originals: ImportFile[], values?: FileRecognition[]
   });
 }
 /** Note + original + receipt commit together. Cancellation never leaves a partial note. */
-export async function saveMediaNote(profile: string, input: { file?: ImportFile; files?: ImportFile[]; title: string; body: string; extractedText?: string; recognitions?: FileRecognition[]; sensitivity: 'sensitive' | 'standard'; receipt?: string; onReplay?: ShareReplayCallback; allowSeparateCopy?: boolean; collectionId?: string; sourceUrl?: string; sourceCoverage?: SourceCoverage; tags?: string[]; telegramObservation?: TelegramTextObservation; publicationClaim?: {date:string;evidence:'html_meta';sourceAttribute:'article:published_time'|'datePublished'} }, signal?: AbortSignal): Promise<string> {
+export async function saveMediaNote(profile: string, input: { file?: ImportFile; files?: ImportFile[]; title: string; body: string; extractedText?: string; recognitions?: FileRecognition[]; sensitivity: 'sensitive' | 'standard'; receipt?: string; onReplay?: ShareReplayCallback; allowSeparateCopy?: boolean; collectionId?: string; sourceUrl?: string; sourceCoverage?: SourceCoverage; tags?: string[]; generatedTags?: boolean; generatedSection?: boolean; telegramObservation?: TelegramTextObservation; publicationClaim?: {date:string;evidence:'html_meta';sourceAttribute:'article:published_time'|'datePublished'} }, signal?: AbortSignal): Promise<string> {
   return withLocalMemoryDatabase(profile, async db => {
     check(signal);
     const tags = checkedNoteTags(input.tags);
+    // LLM suggestions are derived metadata, not a user-authored change of Share
+    // identity. Variable model wording must not defeat exact replay detection.
+    const receiptTags = input.generatedTags ? [] : tags;
+    const receiptCollectionId = input.generatedSection ? "" : input.collectionId || "";
     if (input.publicationClaim) {
       const claim=input.publicationClaim;
       const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(claim.date);
@@ -259,9 +263,9 @@ export async function saveMediaNote(profile: string, input: { file?: ImportFile;
     // remain idempotent. Only Android Share gets a new content-derived key.
     const legacyReceipt = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256,
       JSON.stringify([input.receipt || 'device-import', contentHash, input.title, input.body,
-        input.extractedText || "", input.sensitivity, input.collectionId || "", input.sourceUrl || "",
+        input.extractedText || "", input.sensitivity, receiptCollectionId, input.sourceUrl || "",
         ...(recognitionSignature ? [recognitionSignature] : []),
-        ...(tags.length ? [tags] : [])]));
+        ...(receiptTags.length ? [receiptTags] : [])]));
     const preview = input.receipt && input.sourceUrl ?
       sharedLinkPreview({ shareType: 'url', value: input.sourceUrl }) : null;
     const postKey = preview?.platform === 'telegram' &&
@@ -281,9 +285,9 @@ export async function saveMediaNote(profile: string, input: { file?: ImportFile;
       ? await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, JSON.stringify([
           'android-share-content-v2', receivedDigests, originals.map(mediaKind),
           normalizedTitle, normalizedBody,
-          input.extractedText || "", input.sensitivity, input.collectionId || "",
+          input.extractedText || "", input.sensitivity, receiptCollectionId,
           postKey || input.sourceUrl || "", recognitionSignature,
-          ...(tags.length ? [tags] : []),
+          ...(receiptTags.length ? [receiptTags] : []),
         ]))
       : legacyReceipt;
     async function replayIfFound(): Promise<string | null> {
