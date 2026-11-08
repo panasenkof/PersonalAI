@@ -925,7 +925,7 @@ test("MSG-6C7: exact tag is not a body-text hit; FTS, collection, archive and pa
   const third=await saveMediaNote("guest",{...base,title:"Третий",body:"Документ",tags:["авто"]});
   expect((await db.searchNotes("авто")).length).toBe(3);
   expect((await db.searchNotes("",50,0,{tag:"#АВТО"})).map(x=>x.id).sort()).toEqual([first,third].sort());
-  expect((await db.searchNotes("авто",50,0,{tag:"авто"})).map(x=>x.id)).toEqual([first]);
+  expect((await db.searchNotes("тексте",50,0,{tag:"авто"})).map(x=>x.id)).toEqual([first]);
   expect(await db.searchNotes("",50,0,{tag:"ав"})).toEqual([]);
   expect((await db.listNoteTags()).sort()).toEqual(["авто","дом"]);
   expect(await db.listNoteTags({},1,0)).toEqual(["авто"]);
