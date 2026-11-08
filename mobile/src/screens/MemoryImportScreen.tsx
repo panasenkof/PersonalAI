@@ -709,7 +709,8 @@ export function MemoryImportScreen() {
       let replay: ShareReplay | null = null;
       const savedId = await saveMediaNote(profile, {
         ...(keepOriginal && files.length > 1 ? { files } : { file: keepOriginal ? file || undefined : undefined }),
-        title, body, tags, ...(aiGeneratedTags ? {generatedTags:true} : {}),
+        title, body, tags, ...(aiMode==="skip" ? {indexEnrichmentOptOut:true} : {}),
+        ...(aiGeneratedTags ? {generatedTags:true} : {}),
         ...(aiSelectedSection ? {generatedSection:true} : {}), extractedText: content,
         ...(keepOriginal && sourceRecognitions.length ? { recognitions: sourceRecognitions } : {}),
         sourceUrl: sourceUrl || undefined, sourceCoverage: sourceCoverage || undefined,
