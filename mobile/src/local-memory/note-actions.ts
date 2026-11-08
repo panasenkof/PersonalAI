@@ -121,7 +121,7 @@ export async function changeNotes(db: SQL, action: NoteAction, selection: NoteSe
           OR EXISTS(SELECT 1 FROM memory_relation_evidence w WHERE w.evidence_entity_id=e.id)
           OR EXISTS(SELECT 1 FROM memory_review_proposals p
              WHERE p.source_entity_id=e.id OR p.target_entity_id=e.id OR p.evidence_entity_id=e.id)
-          OR EXISTS(SELECT 1 FROM memory_temporal_claims c WHERE c.entity_id=e.id)
+          OR EXISTS(SELECT 1 FROM memory_temporal_claims c WHERE c.entity_id=e.id OR c.subject_id=e.id)
           OR EXISTS(SELECT 1 FROM memory_temporal_evidence v WHERE v.entity_id=e.id)
           OR EXISTS(SELECT 1 FROM memory_profile_self x WHERE x.person_id=e.id)
         ) LIMIT 1`;
