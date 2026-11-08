@@ -319,6 +319,18 @@ export class SqliteMemoryRepository implements MemoryRepository {
       if (row.sensitivity!=="standard" ||
           ["about","people","projects","preferences","dates","documents","notes","inbox"].includes(String(row.slug)))
         throw new MemoryAccessError("collection_delete_protected");
+      const visited=new Set<string>([id]);
+      let ancestorId=TEXT(row.parent_id);
+      while(ancestorId!==null){
+        if(visited.has(ancestorId))throw new MemoryConflictError("collection_cycle");
+        visited.add(ancestorId);
+        const ancestor=await tx.getFirstAsync<Row>(
+          "SELECT id,parent_id,slug,sensitivity FROM memory_collections WHERE id=?",[ancestorId]);
+        if(!ancestor||ancestor.sensitivity!=="standard"||
+           ["documents","inbox"].includes(String(ancestor.slug)))
+          throw new MemoryAccessError("collection_delete_protected");
+        ancestorId=TEXT(ancestor.parent_id);
+      }
       const nested=await tx.getFirstAsync<{n:number}>(
         "SELECT COUNT(*) AS n FROM memory_collections WHERE parent_id=?",[id]);
       const records=await tx.getFirstAsync<{n:number}>(
