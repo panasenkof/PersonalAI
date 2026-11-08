@@ -857,7 +857,7 @@ export class SqliteMemoryRepository implements MemoryRepository {
        FROM memory_entities e JOIN memory_collections c ON c.id=e.collection_id
        LEFT JOIN memory_index_terms t ON t.entity_id=e.id AND t.source=?
        WHERE e.record_status='active' AND e.domain='notes' AND c.sensitivity='standard' AND c.slug<>'documents'
-         AND e.sensitivity IN ('standard','inherit')`, [source]);
+         AND e.sensitivity IN ('standard','inherit') AND COALESCE(json_extract(e.payload_json,'$.index_enrichment_opt_out'),0)=0`, [source]);
     return { done: Number(row?.done ?? 0), pending: Number(row?.pending ?? 0) };
   }
 
