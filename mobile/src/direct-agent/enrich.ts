@@ -83,8 +83,13 @@ export async function enrichEntity(repo: MemoryRepository, entityId: string, set
       .flatMap(o=>[o.payload.text,o.payload.body])]
     .filter((v):v is string=>typeof v==="string"&&Boolean(v.trim())).join("\n\n");
   const title = String(entity.title || "");
-  const hasEvidence = readable.trim().length >= 8 ||
-    (title.trim().length >= 8 && !/\.(?:png|jpe?g|pdf|mp4|webp|mp3|wav|txt)$/i.test(title.trim()));
+  // A link is not a fetched article; do not label its unseen content from URL
+  // tokens, a Telegram title or a generated "file" label alone.
+  const substantive=readable.replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/giu," ").trim();
+  const linkOnly=entity.payload.source_text_coverage==="url_only";
+  const hasEvidence = substantive.length >= 8 ||
+    (!linkOnly && title.trim().length >= 8 &&
+      !/\.(?:png|jpe?g|pdf|mp4|webp|mp3|wav|txt)$/i.test(title.trim()));
   const suggestion:IndexSuggestion = hasEvidence ? await suggestIndexTerms(settings, {
     title,body:readable,section:collection!.name,
   },transport,signal) : {terms:[],people:[],search:{tags:[],topic:"",summary:"",
