@@ -168,14 +168,28 @@ jobs:
             fi
             echo "::warning::Gradle 8.13 unavailable or digest mismatch at $url; trying next official host"
           done
-          if [ "$installed" -ne 1 ]; then
-            echo "::error::Gradle 8.13 distribution unavailable or invalid from every official host"
-            exit 1
+          if [ "$installed" -eq 1 ]; then
+            unzip -q "$zip" -d "$RUNNER_TEMP"
+            test -x "$RUNNER_TEMP/gradle-8.13/bin/gradle"
+            "$RUNNER_TEMP/gradle-8.13/bin/gradle" --version | grep 'Gradle 8.13'
+            echo "$RUNNER_TEMP/gradle-8.13/bin" >> "$GITHUB_PATH"
+          else
+            # Last resort: reuse Gradle 9.3.1 from trusted main's restored
+            # wrapper cache. Kotlin Gradle Plugin 2.4.21 supports Gradle 9.3.1,
+            # and AGP 8.13 requires >=8.13. Do not fetch an unknown version.
+            # The following :probe:assembleDebug AND signed Expo APK/ABI AND
+            # Android smoke gates remain mandatory; compatibility is proved by
+            # those builds, never inferred from a version number alone.
+            cached="$(find "$HOME/.gradle/wrapper/dists/gradle-9.3.1-bin" \
+              -type f -path '*/gradle-9.3.1/bin/gradle' -print -quit 2>/dev/null || true)"
+            if [ -z "$cached" ] || [ ! -x "$cached" ]; then
+              echo "::error::No verified Gradle 8.13 or trusted cached Gradle 9.3.1; cannot run native CI"
+              exit 1
+            fi
+            "$cached" --version | grep 'Gradle 9.3.1'
+            echo "::warning::Official Gradle 8.13 hosts unavailable; using trusted cached Gradle 9.3.1 for full Kotlin/Android gates"
+            echo "$(dirname "$cached")" >> "$GITHUB_PATH"
           fi
-          unzip -q "$zip" -d "$RUNNER_TEMP"
-          test -x "$RUNNER_TEMP/gradle-8.13/bin/gradle"
-          "$RUNNER_TEMP/gradle-8.13/bin/gradle" --version | grep 'Gradle 8.13'
-          echo "$RUNNER_TEMP/gradle-8.13/bin" >> "$GITHUB_PATH"
           rm -f "$zip"
       - name: Stage offline vision AAR and Java ABI for Expo compatibility gate
         if: ${{ inputs.vision_expo_gate }}
