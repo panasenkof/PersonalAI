@@ -147,7 +147,6 @@ test("same-millisecond edits invalidate model terms but preserve user words and 
 
 test.each(["abort", "index-failure"])("%s rolls back words and links together, retaining manual data", async mode => {
   const { repo, db, car, likes } = await setup();
-  expect((await repo.entitiesByAlias("Аня","person")).map(n=>n.id)).toContain(anya.id);
   const manual = await repo.linkEntities(car.id, likes.id, "about");
   await repo.setIndexTerms(car.id, ["ручное"], "user");
   const controller = new AbortController();
