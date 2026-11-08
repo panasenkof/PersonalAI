@@ -2054,3 +2054,35 @@ test("MSG-6.C8: user-owned aliases, manual search terms and protected sources ca
   await expect(repo.changeNotes("merge",[a,b])).rejects.toThrow("merge_source_has_links_review_required");
   expect((await repo.entity(b.id))?.record_status).toBe("active");
 });
+
+
+test("v19 collections support unlimited nesting, safe reparenting, and stable note IDs", async () => {
+  const fake = new FakeSqlite();
+  await fake.execAsync("PRAGMA foreign_keys=ON");
+  const repo = new SqliteMemoryRepository(fake as never);
+  const root = await repo.createCollection({name:"ИИ",slug:"ai",sensitivity:"standard"});
+  const training = await repo.createCollection({name:"Обучение",slug:"training",parentId:root.id});
+  const skills = await repo.createCollection({name:"Скиллы",slug:"skills",parentId:training.id});
+  const note = await repo.createEntity({collection_id:skills.id,domain:"notes",title:"Курс",payload:{body:"Материал"}});
+  expect((await repo.listCollections()).find(c=>c.id===skills.id)?.parent_id).toBe(training.id);
+  await expect(repo.moveCollection(root.id,skills.id)).rejects.toBeInstanceOf(MemoryConflictError);
+  await expect(repo.moveCollection(root.id,root.id)).rejects.toBeInstanceOf(MemoryConflictError);
+  await expect(repo.moveCollection(training.id,"missing")).rejects.toBeInstanceOf(MemoryAccessError);
+  expect((await repo.listCollections()).find(c=>c.id===root.id)?.parent_id).toBeNull();
+  await repo.moveCollection(skills.id,root.id);
+  expect((await repo.listCollections()).find(c=>c.id===skills.id)?.parent_id).toBe(root.id);
+  expect(await repo.entity(note.id)).toMatchObject({id:note.id,collection_id:skills.id,record_version:1});
+});
+
+test("a child cannot downgrade sensitivity by creating or moving under a protected parent", async () => {
+  const fake = new FakeSqlite();
+  const repo = new SqliteMemoryRepository(fake as never);
+  const privateParent = await repo.createCollection({name:"Личное",slug:"private",sensitivity:"sensitive"});
+  const publicParent = await repo.createCollection({name:"Обычное",slug:"public",sensitivity:"standard"});
+  await expect(repo.createCollection({name:"Открытый",slug:"bad",sensitivity:"standard",parentId:privateParent.id}))
+    .rejects.toBeInstanceOf(MemoryAccessError);
+  const child = await repo.createCollection({name:"Личное 2",slug:"private-child",parentId:privateParent.id});
+  expect(child.sensitivity).toBe("sensitive");
+  await expect(repo.moveCollection(child.id,publicParent.id)).rejects.toBeInstanceOf(MemoryAccessError);
+  expect((await repo.listCollections()).find(c=>c.id===child.id)?.parent_id).toBe(privateParent.id);
+});
