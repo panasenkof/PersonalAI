@@ -119,7 +119,7 @@ export function factProposal(args: Record<string, unknown>, sections: MemorySect
   const found = requested && !isDocuments(requested) ? findSection(requested, sections) : undefined;
   if (requested && !found && sections.filter(s => normalizeName(s.name) === normalizeName(requested)).length > 1)
     throw new Error("ambiguous_section_path");
-  const fresh = requested && !found && !isDocuments(requested) && !/^null$/i.test(requested) ? requested.replace(NAME, "").replace(/\s+/g, " ").trim().slice(0, 60) : "";
+  const fresh = requested && !found && !isDocuments(requested) && !/^null$/i.test(requested) ? requested.replace(NAME, "").replace(/\s+/g, " ").trim().slice(0, 2048) : "";
   return { title, body, ...(found ? { section: found.slug } : fresh ? { newSection: fresh } : {}), ...optional(args) };
 }
 
