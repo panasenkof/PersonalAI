@@ -855,11 +855,13 @@ test('MSG-6.B: exact Share replay shows truthful existing status and does not ru
     const ui=render(<MemoryImportScreen/>);
     await waitFor(()=>expect(ui.getByText(/Коллекция: Входящие/)).toBeTruthy());
     fireEvent.press(ui.getByLabelText('Сохранить сведения в память'));
+    const consent=(alert as jest.Mock).mock.calls.find((entry:any)=>entry[0]==="Автоматические теги и раздел");
+    if(consent) await act(async()=>{consent[2][0].onPress();});
     await waitFor(()=>expect(alert).toHaveBeenCalledWith('Материал уже в памяти',
       expect.stringContaining('повторная отправка'),expect.any(Array)));
     expect(require('../../direct-agent/enrich-runner').scheduleIndexTerms).not.toHaveBeenCalled();
     expect(mockBack).not.toHaveBeenCalled();
-    const choices=(alert as jest.Mock).mock.calls[0][2];
+    const choices=(alert as jest.Mock).mock.calls.find((entry:any)=>entry[0]==="Материал уже в памяти")[2];
     expect(choices.map((choice:any)=>choice.text)).toEqual(['Оставить черновик','Сохранить отдельно']);
     await act(async()=>{choices[1].onPress();});
     await waitFor(()=>expect(saveMediaNote).toHaveBeenCalledTimes(2));
@@ -877,10 +879,14 @@ test.each([
   (saveMediaNote as jest.Mock).mockImplementationOnce(async (_profile:any,options:any)=>{
     options.onReplay({entityId:'already',recordStatus:status});return 'already';
   });
+  const alert=jest.spyOn(Alert,'alert').mockImplementation(()=>{});
   const ui=render(<MemoryImportScreen/>);
   await waitFor(()=>expect(ui.getByText(/Коллекция: Входящие/)).toBeTruthy());
   fireEvent.press(ui.getByLabelText('Сохранить сведения в память'));
+  const consent=(alert as jest.Mock).mock.calls.find((entry:any)=>entry[0]==="Автоматические теги и раздел");
+  if(consent) await act(async()=>{consent[2][0].onPress();});
   await waitFor(()=>expect(ui.getByText(new RegExp(word))).toBeTruthy());
+  alert.mockRestore();
   expect(mockBack).not.toHaveBeenCalled();
   expect(ui.getByLabelText('Сведения из файла').props.value).toBe('Сохранённый материал');
   expect(require('../../direct-agent/enrich-runner').scheduleIndexTerms).not.toHaveBeenCalled();
