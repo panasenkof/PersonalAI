@@ -208,7 +208,7 @@ export function LocalMemoryScreen() {
       if (request !== generation.current) return;
       setTrashCount(deletedTotal);
       setCounts(totals); repository.current = db; void db.lastNoteOperation().then(value => { if (request === generation.current) setUndo(purgeHasCompleted.current ? "" : value); }).catch(() => {}); setCollections(sections); setNotes(page); setMore(page.length === target);
-      const shownSections = sections.filter(c => c.parent_id === (collectionId ?? null));
+      const shownSections = sections.filter(c => (c.parent_id ?? null) === (collectionId ?? null));
       if (!term && status === "active") setCollectionCards(shownSections);
 
     }).catch(e => { if (request === generation.current) { repository.current = null; setError(memoryErrorMessage(e)); } })
