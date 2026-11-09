@@ -36,9 +36,15 @@ export function MemoryBackupScreen() {
         <Text selectable accessibilityLabel="Код восстановления резервной копии" style={{ color: t.text, fontFamily: "monospace" }}>{code}</Text>
         <Pressable accessibilityRole="checkbox" accessibilityLabel="Код сохранён отдельно" accessibilityState={{ checked: confirmed }} onPress={() => setConfirmed(c => !c)} style={button}><Text style={{ color: t.text }}>{confirmed ? "☑" : "☐"} Я сохранил код отдельно от файла</Text></Pressable>
         <Pressable accessibilityRole="button" accessibilityLabel="Экспортировать зашифрованную копию" disabled={busy || !confirmed} onPress={() => void run(async () => {
-          await store.checkpoint();
+          try {
+            await store.checkpoint();
+          } catch {
+            throw new Error("backup_checkpoint_failed");
+          }
           await withNativeInteraction(() => shareEncryptedBackup(profile!, code));
-          setCode(""); setConfirmed(false); setNotice("Копия передана выбранному приложению.");
+          // expo-sharing cannot verify whether the target app actually saved
+          // the file; a dismissed share sheet is NOT evidence of a backup.
+          setNotice("Меню обмена закрыто. Проверьте, что файл копии действительно сохранён. Код восстановления оставьте отдельно.");
         })} style={{ ...button, backgroundColor: t.accent, opacity: busy || !confirmed ? 0.45 : 1 }}><Text style={{ color: t.userText, fontWeight: "700" }}>{busy ? "Подготовка…" : "3 · Сохранить файл копии"}</Text></Pressable>
       </> : null}
       <Text style={{ color: t.text, fontSize: 20, fontWeight: "700", marginTop: 12 }}>Восстановить</Text>
