@@ -363,6 +363,7 @@ export async function shareEncryptedBackup(profileId: string, recoveryCode: stri
 export type BackupRestoreStats = {
   collections: number; entities: number; observations: number;
   settingsRestored?: boolean;
+  settingsWarning?: boolean;
 };
 
 export async function restoreEncryptedBackup(
@@ -395,9 +396,15 @@ export async function restoreEncryptedBackup(
         await attach(db, "pia_import", path, code);
         attached = true;
         // Wrong key throws from sqlite_master lookup, before any target write.
-        const schema = await db.getAllAsync<{ name: string }>(
-          "SELECT name FROM pia_import.sqlite_master WHERE type = 'table'",
-        );
+        let schema: Array<{ name: string }>;
+        try {
+          schema = await db.getAllAsync<{ name: string }>(
+            "SELECT name FROM pia_import.sqlite_master WHERE type = 'table'");
+        } catch {
+          // SQLCipher cannot distinguish a wrong recovery code from invalid
+          // ciphertext here; never expose native SQL or the code to the UI.
+          throw new Error("backup_wrong_key_or_corrupt");
+        }
         const available = new Set(schema.map(row => row.name));
         if (!BACKUP_TABLES.every(table => available.has(table))) {
           throw new Error("incompatible_backup_schema");
@@ -785,11 +792,16 @@ export async function restoreEncryptedBackup(
       }
     });
     if (portableSettings) {
-      try { await applyPortableBackupSettings(profileId, portableSettings); }
-      catch { throw new Error("backup_settings_restore_failed"); }
-      return { ...restored, settingsRestored: true };
+      try {
+        await applyPortableBackupSettings(profileId, portableSettings);
+        return { ...restored, settingsRestored: true, settingsWarning: false };
+      } catch {
+        // The canonical SQLCipher records were committed and MUST remain
+        // accessible. Never report a full restore failure or delete them.
+        return { ...restored, settingsRestored: false, settingsWarning: true };
+      }
     }
-    return { ...restored, settingsRestored: false };
+    return { ...restored, settingsRestored: false, settingsWarning: false };
   } finally {
     // A cancelled/partial file-manager copy still needs to be cleaned up.
     await forgetTemporaryFile(path);
