@@ -4,8 +4,8 @@
  * SecureStore remains the authoritative on-device owner of connection secrets.
  * This payload exists ONLY inside the independently encrypted backup database;
  * it is never a plaintext sidecar or a second runtime settings store.
- * OS grants, biometrics, online-send consents, installed model binaries and
- * device-bound secrets are intentionally NOT portable.
+ * OS grants, biometrics, online-send consents, model BINARIES and device-bound
+ * secrets are NOT portable. Only verified model identities/checksums travel.
  */
 import {
   loadDirectConnections, saveDirectConnections, validateBaseUrl, validateModel, validateProvider,
@@ -17,6 +17,7 @@ import { getEnrichState, loadIndexTermsPreference, setIndexTermsEnabled } from "
 import { loadMediaPreferences, saveMediaPreferences, type MediaPreferences } from "../media/preferences";
 import { loadPhotoResultCount, savePhotoResultCount, validPhotoResultCount } from "../media/photo-result-preferences";
 import { getVoiceEngine, initVoiceEngine, setVoiceEngine } from "../media/voice-engine";
+import { captureInstalledModels, parseRecoveryModels, saveRecoveryModels, type RecoveryModelsManifest } from "../media/model-backup-recovery";
 
 export type PortableBackupSettings = {
   version: 1;
@@ -26,6 +27,8 @@ export type PortableBackupSettings = {
   photoResultCount: number;
   voiceEngine: "system" | "whisper";
   indexTermsEnabled: boolean;
+  /** Optional extension: archives created before model recovery omit this. */
+  localModels?: RecoveryModelsManifest;
 };
 
 const textValid = (v: unknown, max = 1024): v is string =>
@@ -54,6 +57,10 @@ export function parsePortableBackupSettings(raw: string): PortableBackupSettings
       !["device", "online"].includes(v.media.fileAsrMode) ||
       !["system", "whisper"].includes(v.voiceEngine as string) ||
       typeof v.indexTermsEnabled !== "boolean") throw new Error("backup_settings_invalid");
+  if (v.localModels !== undefined) {
+    try { parseRecoveryModels(v.localModels); }
+    catch { throw new Error("backup_settings_invalid"); }
+  }
   try {
     validateModelCallLimit(v.modelCallLimit!);
     for (const c of v.connections.connections) {
@@ -85,6 +92,7 @@ export async function capturePortableBackupSettings(profile: string): Promise<st
     version: 1, connections, modelCallLimit, media, photoResultCount,
     voiceEngine: voice.preference === "whisper" ? "whisper" : "system",
     indexTermsEnabled: getEnrichState().enabled,
+    localModels: await captureInstalledModels(),
   };
   const json = JSON.stringify(payload);
   parsePortableBackupSettings(json);
@@ -101,4 +109,7 @@ export async function applyPortableBackupSettings(profile: string, snapshot: Por
   await saveMediaPreferences(profile, snapshot.media);
   // Connections staged and published atomically by the existing SecureStore writer.
   await saveDirectConnections(profile, snapshot.connections);
+  // This is only a small, persistent post-restore download *request*. Actual
+  // model metadata and files remain owned by their existing loaders.
+  await saveRecoveryModels(profile, snapshot.localModels);
 }
