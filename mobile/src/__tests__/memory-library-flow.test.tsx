@@ -62,6 +62,7 @@ test("all-records clears collection, archive and search from either entry", asyn
  const v = render(<LocalMemoryScreen />); await waitFor(() => v.getByLabelText("Открыть заметку Первая"));
  fireEvent.press(v.getByLabelText("Раздел Заметки")); await waitFor(() => expect(v.queryByLabelText("Открыть заметку Вторая")).toBeNull());
  fireEvent.changeText(v.getByLabelText("Поиск по заметкам"), "Нет"); await waitFor(() => v.getByText("Ничего не найдено"));
+  expect(v.getByText("Попробуйте другой поисковый запрос.")).toBeTruthy();
  fireEvent.press(v.getByLabelText("Ко всем записям"));
  await waitFor(() => v.getByLabelText("Открыть архив"));
  fireEvent.press(v.getByLabelText("Открыть архив"));
