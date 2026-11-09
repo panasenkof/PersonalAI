@@ -2,7 +2,15 @@ import * as Crypto from "expo-crypto";
 import * as FS from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
 
-jest.mock("expo-crypto", () => ({ getRandomBytes: jest.fn(), randomUUID: jest.fn() }));
+jest.mock("expo-crypto", () => ({
+  getRandomBytes: jest.fn(), randomUUID: jest.fn(), digestStringAsync: jest.fn(),
+  CryptoDigestAlgorithm: { SHA256: "SHA256" },
+}));
+jest.mock("../backup-settings", () => ({
+  capturePortableBackupSettings: jest.fn(async () => '{"version":1}'),
+  parsePortableBackupSettings: jest.fn(() => ({ version:1 })),
+  applyPortableBackupSettings: jest.fn(async () => {}),
+}));
 jest.mock("expo-file-system/legacy", () => ({
   cacheDirectory: "file:///cache/", copyAsync: jest.fn(),
   deleteAsync: jest.fn(), getInfoAsync: jest.fn(), getFreeDiskStorageAsync: jest.fn(),
@@ -15,6 +23,7 @@ jest.mock("../storage", () => ({
 
 import { withLocalMemoryDatabase } from "../storage";
 import { createRecoveryCode, restoreEncryptedBackup, shareEncryptedBackup } from "../backup";
+import { capturePortableBackupSettings, parsePortableBackupSettings, applyPortableBackupSettings } from "../backup-settings";
 
 const code = Array.from({ length: 32 }, (_, i) => i.toString(16).padStart(2, "0")).join("");
 let mockRestored = false;
@@ -40,6 +49,10 @@ beforeEach(() => {
   jest.clearAllMocks();
   (Crypto.getRandomBytes as jest.Mock).mockReturnValue(Uint8Array.from({ length: 32 }, (_, i) => i));
   (Crypto.randomUUID as jest.Mock).mockReturnValue("random-id");
+  (Crypto.digestStringAsync as jest.Mock).mockResolvedValue("a".repeat(64));
+  (capturePortableBackupSettings as jest.Mock).mockResolvedValue('{"version":1}');
+  (parsePortableBackupSettings as jest.Mock).mockReturnValue({version:1});
+  (applyPortableBackupSettings as jest.Mock).mockResolvedValue(undefined);
   (Sharing.isAvailableAsync as jest.Mock).mockResolvedValue(true);
   (Sharing.shareAsync as jest.Mock).mockResolvedValue(undefined);
   (FS.deleteAsync as jest.Mock).mockResolvedValue(undefined);
@@ -129,9 +142,9 @@ test("verified export accepts more than 100k records and writes an encrypted man
       attachments: 0, attachment_parts: 0, receipts: 0, chats: 0 } : previous(sql));
   await shareEncryptedBackup("guest", code);
   expect(mockDb.execAsync).toHaveBeenCalledWith(expect.stringContaining("CREATE TABLE pia_export.persai_backup_manifest"));
-  expect(mockDb.execAsync).toHaveBeenCalledWith(expect.stringContaining("CHECK(format_version=8)"));
+  expect(mockDb.execAsync).toHaveBeenCalledWith(expect.stringContaining("CHECK(format_version=9)"));
   expect(mockDb.runAsync).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO pia_export.persai_backup_manifest"),
-    [8, 17, 100001, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    [9, 17, 100001, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, "a".repeat(64)]);
   expect(Sharing.shareAsync).toHaveBeenCalledTimes(1);
 });
 
@@ -187,6 +200,48 @@ test("BKP-02 reports the exact unreadable fallback check without leaking native 
   await expect(shareEncryptedBackup("guest", code)).rejects.toThrow("backup_preflight_pages_unavailable");
   expect(mockDb.runAsync).not.toHaveBeenCalled();
   expect(Sharing.shareAsync).not.toHaveBeenCalled();
+});
+
+test("v9 export encrypts a private settings record and records its digest in manifest", async () => {
+  await shareEncryptedBackup("guest", code);
+  expect(capturePortableBackupSettings).toHaveBeenCalledWith("guest");
+  expect(mockDb.execAsync).toHaveBeenCalledWith(expect.stringContaining(
+    "CREATE TABLE pia_export.persai_backup_settings"));
+  expect(mockDb.runAsync).toHaveBeenCalledWith(
+    expect.stringContaining("INSERT INTO pia_export.persai_backup_settings"),
+    ['{"version":1}'],
+  );
+  const insert = mockDb.runAsync.mock.calls.find(([sql]) =>
+    String(sql).includes("INSERT INTO pia_export.persai_backup_manifest"));
+  expect(insert?.[1]).toContain("a".repeat(64));
+  expect(Sharing.shareAsync).toHaveBeenCalledTimes(1);
+});
+
+test("v9 settings are checked before any memory import and published only after COMMIT", async () => {
+  const original = mockDb.getFirstAsync.getMockImplementation()!;
+  mockDb.getFirstAsync.mockImplementation(async (sql: string) => {
+    if (sql === "PRAGMA pia_import.user_version") return { user_version: 17 };
+    if (sql === "SELECT * FROM pia_import.persai_backup_manifest")
+      return {format_version:9,schema_version:17,entities:2,collections:1,observations:1,
+        attachments:0,attachment_parts:0,receipts:0,chats:0,review_actions:0,review_proposals:0,
+        temporal_claims:0,temporal_evidence:0,temporal_proposals:0,temporal_decisions:0,
+        relation_links:0,relation_evidence:0,profile_self_binding:0,settings_sha256:"a".repeat(64)};
+    if (sql === "SELECT count(*) AS n FROM pia_import.persai_backup_settings") return {n:1};
+    if (sql === "SELECT settings_json FROM pia_import.persai_backup_settings WHERE slot=1")
+      return {settings_json:'{"version":1}'};
+    return original(sql);
+  });
+  tablesOnce([...names,"persai_backup_manifest","persai_backup_settings","memory_attachments",
+    "memory_attachment_parts","memory_received_shares","memory_cleanup_preferences",
+    "memory_extractions","memory_extraction_segments","memory_temporal_claims",
+    "memory_temporal_evidence","memory_temporal_proposals","memory_temporal_decisions",
+    "memory_relation_evidence","memory_review_actions","memory_review_proposals",
+    "memory_profile_self","direct_conversations"]);
+  const result = await restoreEncryptedBackup("guest", "file:///with-settings.db", code);
+  expect(result.settingsRestored).toBe(true);
+  expect(parsePortableBackupSettings).toHaveBeenCalledWith('{"version":1}');
+  expect(mockDb.execAsync.mock.calls.map(([sql]) => sql)).toContain("COMMIT");
+  expect(applyPortableBackupSettings).toHaveBeenCalledTimes(1);
 });
 
 test("export preflight rejects low free storage without creating ciphertext", async () => {
@@ -259,7 +314,7 @@ test("restore refuses to overwrite a profile with any existing collection", asyn
 
 test("restore imports the five record tables atomically on the unlocked connection and rebuilds the search index", async () => {
   const restored = await restoreEncryptedBackup("guest", "file:///backup.db", code);
-  expect(restored).toEqual({ collections: 1, entities: 2, observations: 1 });
+  expect(restored).toEqual({ collections: 1, entities: 2, observations: 1, settingsRestored: false });
   expect(mockDb.runAsync).toHaveBeenCalledWith("ATTACH DATABASE ? AS pia_import KEY ?", [
     "/cache/pia-encrypted-random-id.db", code,
   ]);
@@ -789,7 +844,7 @@ test("v14 restore copies review proposals after their source FK parents and reta
 test("v15 backup manifest has current schema and one shared decision journal",async()=>{
   await shareEncryptedBackup("guest",code);
   const schema=mockDb.execAsync.mock.calls.map(c=>String(c[0])).join("\n");
-  expect(schema).toContain("CHECK(format_version=8)");
+  expect(schema).toContain("CHECK(format_version=9)");
   expect(schema).toContain("PRAGMA pia_export.user_version = 17");
 });
 test("v15 forged journal count fails preflight before any user memory write",async()=>{
@@ -821,7 +876,7 @@ test("v17 encrypted backup export has exactly one v8 manifest with confirmed rev
   await shareEncryptedBackup("guest",code);
   const exported=mockDb.execAsync.mock.calls.map(([sql])=>String(sql)).join("\n");
   expect(exported).toContain("PRAGMA pia_export.user_version = 17");
-  expect(exported).toContain("CHECK(format_version=8)");
+  expect(exported).toContain("CHECK(format_version=9)");
 });
 
 
