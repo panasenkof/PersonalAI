@@ -134,24 +134,80 @@ async function requireTemporarySpace(estimatedBytes: number, multiplier: number)
   }
 }
 
-/** Refuse to export a backup which exceeds the format's restore contract. */
-async function preflightExport(db: SQLite.SQLiteDatabase): Promise<void> {
-  const count = await db.getFirstAsync<{ n: number }>("SELECT count(*) AS n FROM memory_entities");
-  if (!count || !Number.isSafeInteger(count.n) || count.n < 0) {
-    throw new Error("backup_preflight_unavailable");
+/**
+ * Expo SQLite exposes the actual native SQLCipher file path. On some Android
+ * builds the page_count/page_size PRAGMAs do not produce a reliable numeric
+ * row, although the live encrypted file and all records are readable.
+ * Measure that file (plus any WAL) first; use SQL PRAGMAs only as fallback.
+ *
+ * No file content, filesystem path, recovery code or unencrypted data leaves
+ * the application. The later export manifest validates the copied row counts.
+ */
+async function nativeDatabaseFootprint(db: SQLite.SQLiteDatabase): Promise<number | null> {
+  const nativePath = db.databasePath;
+  if (typeof nativePath !== "string" || !nativePath.startsWith("/") ||
+      nativePath.includes("\0")) return null;
+  try {
+    const main = await FileSystem.getInfoAsync("file://" + nativePath);
+    if (!main.exists || main.isDirectory ||
+        typeof main.size !== "number" || !Number.isSafeInteger(main.size) || main.size <= 0) {
+      return null;
+    }
+    const wal = await FileSystem.getInfoAsync("file://" + nativePath + "-wal");
+    if (wal.exists && (wal.isDirectory || typeof wal.size !== "number" ||
+        !Number.isSafeInteger(wal.size) || wal.size < 0)) return null;
+    const bytes = main.size + (wal.exists ? wal.size : 0);
+    return Number.isSafeInteger(bytes) && bytes > 0 ? bytes : null;
+  } catch {
+    // Some providers cannot stat the native path. Do not guess a size: try
+    // SQLite's conservative page-based estimate before refusing the export.
+    return null;
   }
-  // Current exports are format-verified; the 100k cap applies to old incoming files only.
-  const pages = await db.getFirstAsync<{ page_count: number }>("PRAGMA page_count");
-  const pageSize = await db.getFirstAsync<{ page_size: number }>("PRAGMA page_size");
-  if (!pages || !pageSize || !Number.isSafeInteger(pages.page_count) ||
-      !Number.isSafeInteger(pageSize.page_size) || pages.page_count <= 0 || pageSize.page_size <= 0) {
-    throw new Error("backup_preflight_unavailable");
+}
+
+/** Admission guard, never a substitute for validating the ciphertext. */
+async function preflightExport(db: SQLite.SQLiteDatabase): Promise<void> {
+  const diskBytes = await nativeDatabaseFootprint(db);
+  if (diskBytes !== null) {
+    // Includes WAL, and reserves extra room for encrypted output and overhead.
+    // Source integrity is checked by the encrypted manifest after the export.
+    await requireTemporarySpace(diskBytes, 1.5);
+    return;
+  }
+
+  // Compatibility fallback for platforms without a usable databasePath.
+  // Expose only stable non-secret error codes, never the native SQL exception.
+  let count: { n: number } | null;
+  try {
+    count = await db.getFirstAsync<{ n: number }>("SELECT count(*) AS n FROM memory_entities");
+  } catch {
+    throw new Error("backup_preflight_records_unavailable");
+  }
+  if (!count || !Number.isSafeInteger(count.n) || count.n < 0) {
+    throw new Error("backup_preflight_records_unavailable");
+  }
+  let pages: { page_count: number } | null;
+  try {
+    pages = await db.getFirstAsync<{ page_count: number }>("PRAGMA page_count");
+  } catch {
+    throw new Error("backup_preflight_pages_unavailable");
+  }
+  if (!pages || !Number.isSafeInteger(pages.page_count) || pages.page_count <= 0) {
+    throw new Error("backup_preflight_pages_unavailable");
+  }
+  let pageSize: { page_size: number } | null;
+  try {
+    pageSize = await db.getFirstAsync<{ page_size: number }>("PRAGMA page_size");
+  } catch {
+    throw new Error("backup_preflight_page_size_unavailable");
+  }
+  if (!pageSize || !Number.isSafeInteger(pageSize.page_size) || pageSize.page_size <= 0) {
+    throw new Error("backup_preflight_page_size_unavailable");
   }
   const estimatedBytes = pages.page_count * pageSize.page_size;
   if (!Number.isSafeInteger(estimatedBytes) || estimatedBytes <= 0) {
     throw new Error("backup_preflight_unavailable");
   }
-  // Export may have encryption overhead. Its actual size is rechecked after writing.
   await requireTemporarySpace(estimatedBytes, 1.25);
 }
 
@@ -282,7 +338,9 @@ export async function shareEncryptedBackup(profileId: string, recoveryCode: stri
     // Retain safe, actionable preflight/validation codes. Never pass through
     // raw SQLite/OS exceptions: those may embed paths or SQL parameters.
     if (["backup_insufficient_space", "backup_storage_unavailable",
-         "backup_preflight_unavailable", "backup_file_missing", "invalid_backup_size"].includes(code)) throw error;
+         "backup_preflight_unavailable", "backup_preflight_records_unavailable",
+         "backup_preflight_pages_unavailable", "backup_preflight_page_size_unavailable",
+         "backup_file_missing", "invalid_backup_size"].includes(code)) throw error;
     console.warn(`[PersAI backup] export stopped: ${exportStage}`);
     throw new Error(`backup_export_${exportStage}_failed`);
   } finally {

@@ -79,6 +79,7 @@ beforeEach(() => {
     if (sql.includes("foreign_key_check")) return null;
     return {};
   });
+  delete (mockDb as typeof mockDb & { databasePath?: string }).databasePath;
   mockTables = names;
   mockDb.getAllAsync.mockImplementation(async (sql: string) => {
     if (sql.includes("pia_import.sqlite_master")) { const tables = mockTables; mockTables = names; return tables.map(name => ({ name })); }
@@ -140,6 +141,52 @@ test("manifest export admits over 2 GiB when private cache has conservative free
     sql === "PRAGMA page_count" ? { page_count: 600000 } : previous(sql));
   await shareEncryptedBackup("guest", code);
   expect(Sharing.shareAsync).toHaveBeenCalledTimes(1);
+});
+
+test("BKP-02 accepts native SQLCipher file bytes without unsupported Android page PRAGMAs", async () => {
+  (mockDb as typeof mockDb & { databasePath?: string }).databasePath =
+    "/data/user/0/app/files/SQLite/pia-personal-memory-v1.db";
+  const previous = mockDb.getFirstAsync.getMockImplementation()!;
+  mockDb.getFirstAsync.mockImplementation(async (sql: string) => {
+    if (sql === "SELECT count(*) AS n FROM memory_entities" || sql === "PRAGMA page_count" ||
+        sql === "PRAGMA page_size") throw new Error("native SQL diagnostic must never surface");
+    return previous(sql);
+  });
+  await shareEncryptedBackup("guest", code);
+  expect(FS.getInfoAsync).toHaveBeenCalledWith(
+    "file:///data/user/0/app/files/SQLite/pia-personal-memory-v1.db");
+  expect(FS.getInfoAsync).toHaveBeenCalledWith(
+    "file:///data/user/0/app/files/SQLite/pia-personal-memory-v1.db-wal");
+  expect(Sharing.shareAsync).toHaveBeenCalledTimes(1);
+  expect(mockDb.getFirstAsync).not.toHaveBeenCalledWith("PRAGMA page_count");
+});
+
+test("BKP-02 includes pending WAL bytes and rejects insufficient space before attaching", async () => {
+  (mockDb as typeof mockDb & { databasePath?: string }).databasePath = "/private/SQLite/memory.db";
+  (FS.getInfoAsync as jest.Mock).mockImplementation(async (uri: string) => ({
+    exists: true, isDirectory: false, size: uri.endsWith("-wal") ? 120_000_000 : 4096,
+  }));
+  (FS.getFreeDiskStorageAsync as jest.Mock).mockResolvedValue(140_000_000);
+  await expect(shareEncryptedBackup("guest", code)).rejects.toThrow("backup_insufficient_space");
+  expect(mockDb.runAsync).not.toHaveBeenCalled();
+  expect(Sharing.shareAsync).not.toHaveBeenCalled();
+});
+
+test("BKP-02 falls back to checked PRAGMAs when Expo native path is unavailable", async () => {
+  (mockDb as typeof mockDb & { databasePath?: string }).databasePath = "file:///not-a-native-path";
+  await shareEncryptedBackup("guest", code);
+  expect(mockDb.getFirstAsync).toHaveBeenCalledWith("PRAGMA page_count");
+  expect(mockDb.getFirstAsync).toHaveBeenCalledWith("PRAGMA page_size");
+  expect(Sharing.shareAsync).toHaveBeenCalledTimes(1);
+});
+
+test("BKP-02 reports the exact unreadable fallback check without leaking native SQL", async () => {
+  const previous = mockDb.getFirstAsync.getMockImplementation()!;
+  mockDb.getFirstAsync.mockImplementation(async (sql: string) =>
+    sql === "PRAGMA page_count" ? (() => { throw new Error("secret native path"); })() : previous(sql));
+  await expect(shareEncryptedBackup("guest", code)).rejects.toThrow("backup_preflight_pages_unavailable");
+  expect(mockDb.runAsync).not.toHaveBeenCalled();
+  expect(Sharing.shareAsync).not.toHaveBeenCalled();
 });
 
 test("export preflight rejects low free storage without creating ciphertext", async () => {
