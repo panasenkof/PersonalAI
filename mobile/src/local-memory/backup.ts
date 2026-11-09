@@ -203,16 +203,22 @@ export async function shareEncryptedBackup(profileId: string, recoveryCode: stri
   if (!await Sharing.isAvailableAsync()) throw new Error("backup_sharing_unavailable");
   const path = temporaryPath();
   let attached = false;
+  // Stable, non-secret phase codes make Android failures diagnosable without
+  // logging native SQL exceptions (which may include the recovery key).
+  let exportStage: "preflight" | "attach" | "encrypt" | "manifest" | "validate" | "handoff" = "preflight";
   try {
     await withLocalMemoryDatabase(profileId, async db => {
       try {
         await preflightExport(db);
+        exportStage = "attach";
         await attach(db, "pia_export", path, code);
         attached = true;
+        exportStage = "encrypt";
         // sqlcipher_export copies *all* memory, provenance, relations,
         // revisions, names and the encrypted index without passing plaintext to JS.
         await db.getFirstAsync("SELECT sqlcipher_export('pia_export')");
         await db.execAsync(`PRAGMA pia_export.user_version = ${LOCAL_MEMORY_SCHEMA_VERSION}`);
+        exportStage = "manifest";
         // The manifest lives INSIDE SQLCipher ciphertext. No plaintext sidecar.
         await db.execAsync("CREATE TABLE pia_export.persai_backup_manifest (" +
           "format_version INTEGER PRIMARY KEY CHECK(format_version=8), schema_version INTEGER NOT NULL," +
@@ -245,6 +251,7 @@ export async function shareEncryptedBackup(profileId: string, recoveryCode: stri
           [MANIFEST_FORMAT_VERSION, LOCAL_MEMORY_SCHEMA_VERSION, ...backupCountValues(counts),
             ...temporalCountValues(temporalCounts), ...relationCountValues(relationCounts), reviewCounts.review_actions,proposalCounts.review_proposals,selfCounts.profile_self_binding],
         );
+        exportStage = "validate";
         const cipherIntegrity = await db.getFirstAsync<{ integrity_check: string }>(
           "PRAGMA pia_export.integrity_check",
         );
@@ -265,10 +272,19 @@ export async function shareEncryptedBackup(profileId: string, recoveryCode: stri
     if (!Number.isSafeInteger(info.size)) throw new Error("invalid_backup_size");
     // The shared file is SQLCipher ciphertext; code must be stored
     // separately and never included in the name or exported file.
+    exportStage = "handoff";
     await Sharing.shareAsync(path, {
       mimeType: "application/octet-stream",
       dialogTitle: "Сохранить зашифрованную резервную копию PersAI",
     });
+  } catch (error) {
+    const code = error instanceof Error ? error.message : "";
+    // Retain safe, actionable preflight/validation codes. Never pass through
+    // raw SQLite/OS exceptions: those may embed paths or SQL parameters.
+    if (["backup_insufficient_space", "backup_storage_unavailable",
+         "backup_preflight_unavailable", "backup_file_missing", "invalid_backup_size"].includes(code)) throw error;
+    console.warn(`[PersAI backup] export stopped: ${exportStage}`);
+    throw new Error(`backup_export_${exportStage}_failed`);
   } finally {
     await forgetTemporaryFile(path);
   }
