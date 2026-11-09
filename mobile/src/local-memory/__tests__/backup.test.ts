@@ -202,6 +202,40 @@ test("BKP-02 reports the exact unreadable fallback check without leaking native 
   expect(Sharing.shareAsync).not.toHaveBeenCalled();
 });
 
+test("v9 export refuses to release an incomplete copy when secrets cannot be read", async () => {
+  (capturePortableBackupSettings as jest.Mock).mockRejectedValue(new Error("secure store unavailable"));
+  await expect(shareEncryptedBackup("guest", code)).rejects.toThrow("backup_settings_capture_failed");
+  expect(mockDb.runAsync).not.toHaveBeenCalled();
+  expect(Sharing.shareAsync).not.toHaveBeenCalled();
+});
+
+test("v9 restore rejects changed settings digest before any SQLCipher import", async () => {
+  const original = mockDb.getFirstAsync.getMockImplementation()!;
+  mockDb.getFirstAsync.mockImplementation(async (sql: string) => {
+    if (sql === "PRAGMA pia_import.user_version") return {user_version:17};
+    if (sql === "SELECT * FROM pia_import.persai_backup_manifest")
+      return {format_version:9,schema_version:17,entities:2,collections:1,observations:1,
+        attachments:0,attachment_parts:0,receipts:0,chats:0,review_actions:0,review_proposals:0,
+        temporal_claims:0,temporal_evidence:0,temporal_proposals:0,temporal_decisions:0,
+        relation_links:0,relation_evidence:0,profile_self_binding:0,settings_sha256:"b".repeat(64)};
+    if (sql === "SELECT count(*) AS n FROM pia_import.persai_backup_settings") return {n:1};
+    if (sql === "SELECT settings_json FROM pia_import.persai_backup_settings WHERE slot=1")
+      return {settings_json:'{"version":1}'};
+    return original(sql);
+  });
+  tablesOnce([...names,"persai_backup_manifest","persai_backup_settings","memory_attachments",
+    "memory_attachment_parts","memory_received_shares","memory_cleanup_preferences",
+    "memory_extractions","memory_extraction_segments","memory_temporal_claims",
+    "memory_temporal_evidence","memory_temporal_proposals","memory_temporal_decisions",
+    "memory_relation_evidence","memory_review_actions","memory_review_proposals",
+    "memory_profile_self","direct_conversations"]);
+  await expect(restoreEncryptedBackup("guest", "file:///tampered-settings.db", code))
+    .rejects.toThrow("backup_settings_integrity");
+  expect(mockDb.execAsync.mock.calls.some(([sql]) => String(sql).startsWith("INSERT INTO memory_")))
+    .toBe(false);
+  expect(applyPortableBackupSettings).not.toHaveBeenCalled();
+});
+
 test("v9 export encrypts a private settings record and records its digest in manifest", async () => {
   await shareEncryptedBackup("guest", code);
   expect(capturePortableBackupSettings).toHaveBeenCalledWith("guest");
