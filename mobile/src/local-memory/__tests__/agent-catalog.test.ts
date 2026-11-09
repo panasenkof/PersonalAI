@@ -40,7 +40,34 @@ test("exact filtered count excludes private, secret, archived and trashed data",
     count: 2, scope: "standard_active_notes", matchMode: "exact_fts_phrase",
   });
   expect((await listAllowedNotes(db as never)).records.map(v => v.id)).toEqual(["a", "b"]);
-  expect(await countAllowedNotes(db as never, { collectionId: "c-secret" })).toMatchObject({ count: 0 });
+  await expect(countAllowedNotes(db as never, { collectionId: "c-secret" })).rejects.toThrow("catalog_scope_unavailable");
+});
+
+test("nested collections count direct or subtree explicitly without leaking protected nodes", async () => {
+  const db = new Db();
+  for (const [id, parent, sensitivity] of [
+    ["child-standard", "c-standard", "standard"],
+    ["grandchild-standard", "child-standard", "standard"],
+    ["child-private", "c-standard", "secret"],
+  ] as string[][]) {
+    db.sqlite.prepare("INSERT INTO memory_collections(id,name,slug,sensitivity,created_at,parent_id) VALUES(?,?,?,?,?,?)")
+      .run(id,id,id,sensitivity,"2026-11-01",parent);
+  }
+  db.add("root", "c-standard", "active", "inherit", "Заметка корень", "2026-11-01");
+  db.add("child", "child-standard", "active", "inherit", "Заметка ребёнок", "2026-11-02");
+  db.add("grandchild", "grandchild-standard", "active", "inherit", "Заметка потомок", "2026-11-03");
+  db.add("secret", "child-private", "active", "standard", "Тайная заметка", "2026-11-03");
+
+  expect(await countAllowedNotes(db as never,{collectionId:"c-standard"}))
+    .toMatchObject({count:1,collectionScope:"direct",collectionId:"c-standard"});
+  expect(await countAllowedNotes(db as never,{collectionId:"c-standard",includeDescendants:true}))
+    .toMatchObject({count:3,collectionScope:"subtree",collectionId:"c-standard"});
+  expect(await countAllowedNotes(db as never,{collectionId:"child-standard",includeDescendants:true}))
+    .toMatchObject({count:2,collectionScope:"subtree"});
+  await expect(countAllowedNotes(db as never,{includeDescendants:true}))
+    .rejects.toThrow("invalid_catalog_scope");
+  await expect(countAllowedNotes(db as never,{collectionId:"not-found"}))
+    .rejects.toThrow("catalog_scope_unavailable");
 });
 
 test("list is keyset-paged, no bodies leave SQLCipher and count ignores cursor", async () => {
