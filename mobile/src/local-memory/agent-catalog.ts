@@ -6,6 +6,8 @@ import { ftsPhrase } from "./query";
 
 export type AllowedListOptions = {
   collectionId?: string; query?: string; limit?: number;
+  /** Explicit full subtree count, only with a selected collection. */
+  includeDescendants?: boolean;
   beforeUpdatedAt?: string; beforeId?: string;
   /** Keyset for saved-time order. Must be supplied as a pair. */
   beforeCreatedAt?: string;
@@ -32,6 +34,10 @@ const MATCH_SQL = "EXISTS (SELECT 1 FROM memory_search_fts WHERE " +
 function filters(options: AllowedListOptions, cursor: boolean): Filter {
   if (options.collectionId !== undefined &&
       (!/^[a-z0-9-]{1,128}$/i.test(options.collectionId))) throw new Error("invalid_catalog_collection");
+  if (options.includeDescendants !== undefined && typeof options.includeDescendants !== "boolean")
+    throw new Error("invalid_catalog_scope");
+  if (options.includeDescendants && !options.collectionId)
+    throw new Error("invalid_catalog_scope");
   const term = (options.query || "").trim();
   if (term.length > 200) throw new Error("invalid_catalog_query");
   const terms = options.queryTerms;
@@ -54,7 +60,17 @@ function filters(options: AllowedListOptions, cursor: boolean): Filter {
   const where = ["e.record_status='active'", "e.domain='notes'", "c.sensitivity='standard'",
     "e.sensitivity IN ('standard','inherit')"];
   const params: (string | number)[] = [];
-  if (options.collectionId) { where.push("e.collection_id=?"); params.push(options.collectionId); }
+  if (options.collectionId) {
+    if (options.includeDescendants) {
+      where.push("e.collection_id IN (WITH RECURSIVE section_ids(id) AS (" +
+        "SELECT id FROM memory_collections WHERE id=? UNION " +
+        "SELECT c.id FROM memory_collections c JOIN section_ids s ON c.parent_id=s.id" +
+        ") SELECT id FROM section_ids)");
+    } else {
+      where.push("e.collection_id=?");
+    }
+    params.push(options.collectionId);
+  }
   if (term) { where.push(MATCH_SQL); params.push(ftsPhrase(term)); }
   if (terms) {
     where.push(MATCH_SQL);
@@ -109,10 +125,22 @@ const FROM = "FROM memory_entities e JOIN memory_collections c ON c.id=e.collect
  * private or semantically related notes. User-facing metadata says so. */
 export async function countAllowedNotes(db: Db, options: Omit<AllowedListOptions, "limit" | "beforeUpdatedAt" | "beforeCreatedAt" | "beforeId"> = {}) {
   const q = filters(options, false);
+  if (options.collectionId) {
+    // A nonexistent/private scope must not be reported as zero. This was the
+    // DEF-4a ambiguity observed in the Android chat/UI comparison.
+    const section = await db.getFirstAsync<{sensitivity:string}>(
+      "SELECT sensitivity FROM memory_collections WHERE id=?", [options.collectionId]);
+    if (!section || section.sensitivity !== "standard")
+      throw new Error("catalog_scope_unavailable");
+  }
   const row = await db.getFirstAsync<{ n: number }>(
     "SELECT count(*) AS n " + FROM + " WHERE " + q.where, q.params);
   if (!row || !Number.isSafeInteger(row.n) || row.n < 0) throw new Error("invalid_catalog_count");
-  return { count: row.n, scope: "standard_active_notes", matchMode: options.queryTerms ? "one_of_fts_phrases" : options.query ? "exact_fts_phrase" : "all_allowed" };
+  return {
+    count: row.n, scope: "standard_active_notes",
+    ...(options.collectionId ? {collectionScope: options.includeDescendants ? "subtree" : "direct", collectionId: options.collectionId} : {}),
+    matchMode: options.queryTerms ? "one_of_fts_phrases" : options.query ? "exact_fts_phrase" : "all_allowed",
+  };
 }
 
 export async function listAllowedNotes(db: Db, options: AllowedListOptions = {}) {
