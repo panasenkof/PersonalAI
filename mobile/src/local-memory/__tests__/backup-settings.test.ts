@@ -8,6 +8,12 @@ import { loadPhotoResultCount, savePhotoResultCount } from "../../media/photo-re
 import { getVoiceEngine, initVoiceEngine, setVoiceEngine } from "../../media/voice-engine";
 import { getEnrichState, loadIndexTermsPreference, setIndexTermsEnabled } from "../../direct-agent/enrich-runner";
 
+// Existing settings fixture does not invoke native model hashing/downloads.
+jest.mock("../../media/model-backup-recovery", () => ({
+  captureInstalledModels: jest.fn(async () => ({version:1,models:[]})),
+  parseRecoveryModels: jest.fn((v: unknown) => v),
+  saveRecoveryModels: jest.fn(async () => {}),
+}));
 jest.mock("../../direct-agent/settings", () => ({
   loadDirectConnections: jest.fn(), saveDirectConnections: jest.fn(),
   validateProvider: jest.fn((value: string) => {
