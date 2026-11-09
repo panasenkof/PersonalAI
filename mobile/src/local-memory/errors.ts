@@ -5,6 +5,20 @@ export function memoryErrorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : "";
   const known: Record<string, string> = {
     application_locked: "Для доступа войдите в приложение.",
+    backup_checkpoint_failed: "Не удалось завершить сохранение истории диалогов перед резервным копированием (BKP-01). Экспорт не запускался; проверьте историю диалогов.",
+    backup_insufficient_space: "Недостаточно свободного места для временной зашифрованной копии. Освободите место и повторите.",
+    backup_storage_unavailable: "Не удалось проверить свободное место для резервного копирования (BKP-02).",
+    backup_preflight_unavailable: "Не удалось проверить исходную базу перед резервным копированием (BKP-02).",
+    backup_file_missing: "Зашифрованный файл копии не был создан (BKP-06).",
+    invalid_backup_size: "Размер файла копии не удалось проверить (BKP-06).",
+    backup_sharing_unavailable: "Системный обмен файлами недоступен на устройстве (BKP-07).",
+    backup_export_preflight_failed: "Не удалось подготовить резервное копирование (BKP-02).",
+    backup_export_attach_failed: "Не удалось открыть временную зашифрованную базу для экспорта (BKP-03).",
+    backup_export_encrypt_failed: "SQLCipher не смог зашифровать копию (BKP-04). Исходная память не изменена.",
+    backup_export_manifest_failed: "Не удалось записать контрольный манифест копии (BKP-05).",
+    backup_export_validate_failed: "Проверка целостности зашифрованной копии не прошла (BKP-06). Файл не отправлен.",
+    backup_export_handoff_failed: "Не удалось открыть системное сохранение копии (BKP-07). Повторите экспорт.",
+
     section_parent_unavailable: "Родительский раздел отсутствует или недоступен помощнику.",
     section_parent_changed: "Родительский раздел изменился. Создайте предложение заново.",
     section_sibling_name_exists: "В этой папке уже есть раздел с таким названием.",

@@ -62,6 +62,7 @@ test("all-records clears collection, archive and search from either entry", asyn
  const v = render(<LocalMemoryScreen />); await waitFor(() => v.getByLabelText("Открыть заметку Первая"));
  fireEvent.press(v.getByLabelText("Раздел Заметки")); await waitFor(() => expect(v.queryByLabelText("Открыть заметку Вторая")).toBeNull());
  fireEvent.changeText(v.getByLabelText("Поиск по заметкам"), "Нет"); await waitFor(() => v.getByText("Ничего не найдено"));
+  expect(v.getByText("Попробуйте другой поисковый запрос.")).toBeTruthy();
  fireEvent.press(v.getByLabelText("Ко всем записям"));
  await waitFor(() => v.getByLabelText("Открыть архив"));
  fireEvent.press(v.getByLabelText("Открыть архив"));
@@ -71,7 +72,7 @@ test("all-records clears collection, archive and search from either entry", asyn
  fireEvent.press(v.getByLabelText("Ко всем записям"));
  await waitFor(() => v.getByLabelText("Все разделы")); fireEvent.press(v.getByLabelText("Все разделы")); fireEvent.press(v.getByLabelText("Раздел Все записи"));
  await waitFor(() => v.getByLabelText("Открыть заметку Вторая")); expect(v.getByLabelText("Открыть заметку Первая")).toBeTruthy(); expect(v.queryByLabelText("Открыть заметку Архивная")).toBeNull();
-});
+}, 15000); // multi-navigation scenario includes several debounced asynchronous reloads
 test("compact collection rows are labelled, touchable and keep the canonical destination", async () => {
  const v = render(<LocalMemoryScreen />);
  await waitFor(() => v.getByLabelText("Раздел Заметки"));
