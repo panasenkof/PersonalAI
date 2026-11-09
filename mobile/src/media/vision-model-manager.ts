@@ -121,15 +121,31 @@ export function initVisionModels(): Promise<void> {
   });
   return initialized;
 }
-export async function downloadVisionModel(id: VisionModelId): Promise<void> {
+/** Expected LFS metadata may come from an encrypted recovery snapshot.
+ * Never accept an arbitrary URL: construct an immutable URL under the
+ * existing hard-coded catalog repository, and verify the full downloaded SHA.
+ */
+export async function downloadVisionModel(
+  id: VisionModelId,
+  pinned?: Pick<TrustedFileMetadata, "revision" | "sha256" | "bytes">,
+): Promise<void> {
   await initVisionModels();
   if (Platform.OS !== "android" || snapshot.busy) return;
-  if (!getVisionModel(id)) throw new Error("vision_unknown_model");
+  const option = getVisionModel(id);
+  if (!option) throw new Error("vision_unknown_model");
+  if (pinned && (!REVISION_HEX.test(pinned.revision) ||
+      !SHA256_HEX.test(pinned.sha256) ||
+      !Number.isSafeInteger(pinned.bytes) ||
+      pinned.bytes < 50 * 1024 * 1024 || pinned.bytes > 1_500_000_000))
+    throw new Error("vision_invalid_pinned_model");
   const token = ++generation;
   emit({ ...snapshot, busy: true, progress: 0, downloadingId: id, error: "", notice: "" });
   let temporary: string | null = null;
   try {
-    const metadata = await vendorManifest(id);
+    const metadata: TrustedFileMetadata = pinned
+      ? { ...pinned, url: "https://huggingface.co/" + option.repo +
+          "/resolve/" + pinned.revision + "/" + option.filename }
+      : await vendorManifest(id);
     sameGeneration(token);
     const dir = modelDir();
     if (!(await exists(dir))) await blob().fs.mkdir(dir);
@@ -154,8 +170,17 @@ export async function downloadVisionModel(id: VisionModelId): Promise<void> {
     if (sha256 !== metadata.sha256) throw new Error("vision_wrong_hash");
     sameGeneration(token);
     const finalPath = modelPath(nextItem);
-    if (!(await exists(finalPath))) await blob().fs.mv(temporary, finalPath);
-    else await removeFile(temporary);
+    if (await exists(finalPath)) {
+      // A pre-existing file with the same fingerprinted NAME is not itself
+      // integrity proof. Only reuse bytes with the expected size and hash.
+      const previousSize = Number((await blob().fs.stat(finalPath)).size);
+      const previousHash = previousSize === metadata.bytes
+        ? String(await blob().fs.hash(finalPath, "sha256")).toLowerCase() : "";
+      if (previousSize !== metadata.bytes || previousHash !== metadata.sha256) {
+        await removeFile(finalPath);
+        await blob().fs.mv(temporary, finalPath);
+      } else await removeFile(temporary);
+    } else await blob().fs.mv(temporary, finalPath);
     temporary = null;
     const previous = await readSaved();
     const old = previous.installed.find(v => v.id === id);
