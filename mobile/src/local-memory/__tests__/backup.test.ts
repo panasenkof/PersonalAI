@@ -172,8 +172,27 @@ test("disk space query failure does not imply unlimited storage", async () => {
 
 test("failed share deletes ciphertext from cache", async () => {
   (Sharing.shareAsync as jest.Mock).mockRejectedValueOnce(new Error("cancelled"));
-  await expect(shareEncryptedBackup("guest", code)).rejects.toThrow("cancelled");
+  await expect(shareEncryptedBackup("guest", code)).rejects.toThrow("backup_export_handoff_failed");
   expect(FS.deleteAsync).toHaveBeenCalledTimes(4);
+});
+
+test("native encryption errors expose only their safe stage and never open sharing", async () => {
+  const original = mockDb.getFirstAsync.getMockImplementation()!;
+  mockDb.getFirstAsync.mockImplementation(async (sql: string) => {
+    if (sql === "SELECT sqlcipher_export('pia_export')")
+      throw new Error("native SQL may contain a recovery code or file path");
+    return original(sql);
+  });
+  await expect(shareEncryptedBackup("guest", code)).rejects.toThrow("backup_export_encrypt_failed");
+  expect(Sharing.shareAsync).not.toHaveBeenCalled();
+  expect(mockDb.execAsync).toHaveBeenCalledWith("DETACH DATABASE pia_export");
+  expect(FS.deleteAsync).toHaveBeenCalledTimes(4);
+});
+
+test("preflight failure preserves its actionable space code", async () => {
+  (FS.getFreeDiskStorageAsync as jest.Mock).mockResolvedValueOnce(1024);
+  await expect(shareEncryptedBackup("guest", code)).rejects.toThrow("backup_insufficient_space");
+  expect(Sharing.shareAsync).not.toHaveBeenCalled();
 });
 
 test("wrong password/corrupted backup cannot mutate the destination", async () => {
