@@ -5,7 +5,7 @@ export function memoryErrorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : "";
   const known: Record<string, string> = {
     application_locked: "Для доступа войдите в приложение.",
-    backup_checkpoint_failed: "Не удалось завершить сохранение истории диалогов перед резервным копированием (BKP-01). Исходная память не изменена.",
+    backup_checkpoint_failed: "Не удалось завершить сохранение истории диалогов перед резервным копированием (BKP-01). Экспорт не запускался; проверьте историю диалогов.",
     backup_insufficient_space: "Недостаточно свободного места для временной зашифрованной копии. Освободите место и повторите.",
     backup_storage_unavailable: "Не удалось проверить свободное место для резервного копирования (BKP-02).",
     backup_preflight_unavailable: "Не удалось проверить исходную базу перед резервным копированием (BKP-02).",
