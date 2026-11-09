@@ -3,12 +3,10 @@ import { localMemorySessionUnlocked } from "../../local-memory/storage";
 
 jest.mock("react-native", () => ({ Platform: { OS: "android" } }));
 jest.mock("../../local-memory/storage", () => ({ localMemorySessionUnlocked: jest.fn() }));
-// Only the optional native ABI is exercised in this fixture. Importing the
-// entire Expo runtime in a mock factory can lazy-initialize JSLogger after
-// Jest has disposed the environment (late logs and unstable open handles).
+// Keep Expo's own requireNativeModule for its test runtime/fetch polyfill.
 jest.mock("expo-modules-core", () => ({
+  ...jest.requireActual("expo-modules-core"),
   requireOptionalNativeModule: jest.fn(),
-  requireNativeModule: jest.fn(() => ({})),
 }));
 
 const { requireOptionalNativeModule } = require("expo-modules-core") as {
