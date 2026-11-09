@@ -110,7 +110,9 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       // Browser speech fixture simulates a prior explicit Settings consent.
       // Consent UI/denial paths have separate Jest tests; never grant in app code.
       await page.addInitScript(() => localStorage.setItem('pia.voice.system-online-consent.v1', 'true'));
-      await page.clock.install();
+      // Hydrate React, AppLock and the REAL conversation repository fixture
+      // against a running clock. Freezing timers before AppLock authorization
+      // can starve initialization on some Chromium/Node hosts (DEF-5).
       await page.goto(`http://127.0.0.1:${server.address().port}`);
       await page.getByLabel('Сообщение ассистенту', { exact: true }).waitFor({timeout:10000}).catch(async error => { console.error(await page.locator('body').innerText()); throw error; });
       assert.equal(await page.evaluate(() => window.__qa.auth), 1);
@@ -120,6 +122,9 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
        const initialComposer = page.getByLabel('Сообщение ассистенту', { exact: true });
        await initialComposer.fill('', { timeout: 10000 });
        assert.equal(await initialComposer.isEditable(), true);
+       // Install controlled time only after the conversation store is ready:
+       // UI timeout, session expiry and async-request tests below still use it.
+       await page.clock.install();
       // Use the ACTUAL tab navigator with no system bar, gesture navigation,
       // and three-button navigation metrics, including a live metrics change.
       for (const bottom of [0, 24, 48]) {
