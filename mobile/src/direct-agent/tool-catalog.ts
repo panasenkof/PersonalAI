@@ -423,19 +423,22 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
         typeof r.hasMore === "boolean" && r.contentIncluded === false ? "read" as const : "failed" as const,
     }] : []),
     ...(options.count ? [{
-      definition: { name: "count_local_notes", description: "Точное количество активных заметок в разрешённом scope. При collectionId подсчитывает только записи непосредственно в указанном разделе (НЕ во вложенных подразделах); не сообщай число по всему дереву на основании этого счётчика. query = exact FTS phrase, не все смысловые совпадения.", parameters: {
-        type: "object", properties: { query: { type: ["string", "null"] }, collectionId: { type: ["string", "null"] } },
+      definition: { name: "count_local_notes", description: "Количество только разрешённых активных заметок. При collectionId по умолчанию считаются только непосредственные записи. Если пользователь спрашивает обо всём дереве, укажи includeDescendants=true: поиск по вложенным разделам с сохранением ACL. Не интерпретируй ноль в приватном/недоступном разделе как отсутствие записей; query — точная FTS-фраза.", parameters: {
+        type: "object", properties: { query: { type: ["string", "null"] }, collectionId: { type: ["string", "null"] },
+          includeDescendants: { type: "boolean", description: "Включить все вложенные разделы (только с collectionId)" } },
         required: ["query","collectionId"], additionalProperties: false,
       } }, effect: "read" as const,
       execute: async (args: Record<string, unknown>) => {
-        if (Object.keys(args).some(key => !["query","collectionId"].includes(key)) ||
+        if (Object.keys(args).some(key => !["query","collectionId","includeDescendants"].includes(key)) ||
             (args.query != null && typeof args.query !== "string") ||
-            (args.collectionId != null && typeof args.collectionId !== "string")) {
+            (args.collectionId != null && typeof args.collectionId !== "string") ||
+            (args.includeDescendants !== undefined && typeof args.includeDescendants !== "boolean")) {
           return { error: "invalid_catalog_arguments" };
         }
         return options.count!({
           ...(typeof args.query === "string" ? { query: args.query } : {}),
           ...(typeof args.collectionId === "string" ? { collectionId: args.collectionId } : {}),
+          ...(args.includeDescendants === true ? { includeDescendants: true } : {}),
         });
       },
       verify: (r: Record<string, unknown>) => typeof r.count === "number" &&
