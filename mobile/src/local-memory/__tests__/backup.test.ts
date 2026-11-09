@@ -299,7 +299,7 @@ test("preflight failure preserves its actionable space code", async () => {
 
 test("wrong password/corrupted backup cannot mutate the destination", async () => {
   mockDb.getAllAsync.mockImplementationOnce(async () => { throw new Error("wrong key"); });
-  await expect(restoreEncryptedBackup("guest", "file:///bad.db", code)).rejects.toThrow("wrong key");
+  await expect(restoreEncryptedBackup("guest", "file:///bad.db", code)).rejects.toThrow("backup_wrong_key_or_corrupt");
   expect(mockDb.execAsync.mock.calls.some(([sql]: string[]) => sql.startsWith("INSERT INTO"))).toBe(false);
   expect(mockDb.execAsync).toHaveBeenCalledWith("DETACH DATABASE pia_import");
   expect(FS.deleteAsync).toHaveBeenCalledTimes(4);
@@ -314,7 +314,7 @@ test("restore refuses to overwrite a profile with any existing collection", asyn
 
 test("restore imports the five record tables atomically on the unlocked connection and rebuilds the search index", async () => {
   const restored = await restoreEncryptedBackup("guest", "file:///backup.db", code);
-  expect(restored).toEqual({ collections: 1, entities: 2, observations: 1, settingsRestored: false });
+  expect(restored).toEqual({ collections: 1, entities: 2, observations: 1, settingsRestored: false, settingsWarning: false });
   expect(mockDb.runAsync).toHaveBeenCalledWith("ATTACH DATABASE ? AS pia_import KEY ?", [
     "/cache/pia-encrypted-random-id.db", code,
   ]);
@@ -886,9 +886,9 @@ test("v17 SQLCipher export carries one self-person slot and its count in the enc
     ? {profile_self_binding:1} : original(sql));
   await shareEncryptedBackup("guest",code);
   expect(mockDb.runAsync).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO pia_export.persai_backup_manifest"),
-    expect.arrayContaining([8,17]));
+    expect.arrayContaining([9,17]));
   const call=mockDb.runAsync.mock.calls.find(([sql])=>sql.startsWith("INSERT INTO pia_export.persai_backup_manifest"));
-  expect(call?.[1]?.at(-1)).toBe(1);
+  expect(call?.[1]?.at(-2)).toBe(1);
 });
 
 
