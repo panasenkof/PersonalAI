@@ -423,7 +423,7 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
         typeof r.hasMore === "boolean" && r.contentIncluded === false ? "read" as const : "failed" as const,
     }] : []),
     ...(options.count ? [{
-      definition: { name: "count_local_notes", description: "Точное количество заметок только в разрешённом scope. query = exact FTS phrase, не все смысловые совпадения.", parameters: {
+      definition: { name: "count_local_notes", description: "Точное количество активных заметок в разрешённом scope. При collectionId подсчитывает только записи непосредственно в указанном разделе (НЕ во вложенных подразделах); не сообщай число по всему дереву на основании этого счётчика. query = exact FTS phrase, не все смысловые совпадения.", parameters: {
         type: "object", properties: { query: { type: ["string", "null"] }, collectionId: { type: ["string", "null"] } },
         required: ["query","collectionId"], additionalProperties: false,
       } }, effect: "read" as const,
