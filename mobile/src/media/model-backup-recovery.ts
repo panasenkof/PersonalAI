@@ -204,7 +204,7 @@ export const recoveryModelApproxMb = (model: RecoveryModel): number =>
   model.kind === "minilm" ? 380 :
   model.kind === "russian-ocr" ? 4 : Math.ceil(model.bytes / 1_000_000);
 
-export type RecoveryProgress = { index: number; total: number; title: string };
+export type RecoveryProgress = { index: number; total: number; title: string; model: RecoveryModel };
 /** Sequential download avoids flooding a phone with several 400+ MB native
  * tasks at once. Continue after failures; never download on app start.
  */
@@ -220,7 +220,7 @@ export async function downloadMissingRecoveryModels(
   for (let i = 0; i < pending.length; i++) {
     if (isCancelled()) break;
     const model = pending[i];
-    onProgress({ index: i + 1, total: pending.length, title: recoveryModelTitle(model) });
+    onProgress({ index: i + 1, total: pending.length, title: recoveryModelTitle(model), model });
     try {
       if (model.kind === "whisper") {
         await (require("./whisper") as typeof import("./whisper")).downloadWhisper(model.id);
