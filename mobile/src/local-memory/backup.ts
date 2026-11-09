@@ -16,6 +16,7 @@ import { LOCAL_MEMORY_SCHEMA_VERSION, withLocalMemoryDatabase } from "./storage"
 import { withUnlockedTransaction } from "./transaction";
 import { reindexAll } from "./search-index";
 import { validCollectionParents } from "./sections";
+import { capturePortableBackupSettings, parsePortableBackupSettings, applyPortableBackupSettings, type PortableBackupSettings } from "./backup-settings";
 
 const CODE_PATTERN = /^[a-f0-9]{64}$/;
 /** The records themselves, present in every version (v1–v3). */
@@ -37,7 +38,8 @@ const ENTITY_COLUMNS = "id,collection_id,domain,schema_version,title,payload_jso
   "source_kind,source_ref,valid_from,valid_until,created_at,updated_at,record_version";
 export const RESTORABLE_VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19];
 const LEGACY_MAX_BACKUP_BYTES = 2 * 1024 * 1024 * 1024;
-const MANIFEST_FORMAT_VERSION = 8;
+const MANIFEST_FORMAT_VERSION = 9;
+const SETTINGS_TABLE = "persai_backup_settings" as const;
 const MANIFEST_TABLE = 'persai_backup_manifest' as const;
 const LEGACY_MAX_RESTORABLE_ENTITIES = 100000;
 const TEMP_STORAGE_RESERVE_BYTES = 64 * 1024 * 1024;
@@ -55,7 +57,7 @@ const profileSelfCountsQuery=(prefix:""|"pia_export."|"pia_import.")=>
 const validProfileSelfCounts=(v:ProfileSelfCounts)=>Number.isSafeInteger(v.profile_self_binding)&&
   v.profile_self_binding>=0&&v.profile_self_binding<=1;
 type BackupManifest = BackupCounts & Partial<TemporalCounts> & Partial<RelationCounts> & Partial<ReviewCounts> & Partial<ProposalCounts> & Partial<ProfileSelfCounts> &
-  { format_version: number; schema_version: number };
+  { format_version: number; schema_version: number; settings_sha256?: string };
 const COUNT_TABLES = {
   entities: "memory_entities", collections: "memory_collections",
   observations: "memory_observations", attachments: "memory_attachments",
@@ -257,6 +259,10 @@ async function attach(db: SQLite.SQLiteDatabase, alias: "pia_export" | "pia_impo
 export async function shareEncryptedBackup(profileId: string, recoveryCode: string): Promise<void> {
   const code = checkedRecoveryCode(recoveryCode);
   if (!await Sharing.isAvailableAsync()) throw new Error("backup_sharing_unavailable");
+  let settingsPayload: string;
+  try { settingsPayload = await capturePortableBackupSettings(profileId); }
+  catch { throw new Error("backup_settings_capture_failed"); }
+  const settingsSha256 = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, settingsPayload);
   const path = temporaryPath();
   let attached = false;
   // Stable, non-secret phase codes make Android failures diagnosable without
@@ -277,7 +283,7 @@ export async function shareEncryptedBackup(profileId: string, recoveryCode: stri
         exportStage = "manifest";
         // The manifest lives INSIDE SQLCipher ciphertext. No plaintext sidecar.
         await db.execAsync("CREATE TABLE pia_export.persai_backup_manifest (" +
-          "format_version INTEGER PRIMARY KEY CHECK(format_version=8), schema_version INTEGER NOT NULL," +
+          "format_version INTEGER PRIMARY KEY CHECK(format_version=9), schema_version INTEGER NOT NULL," +
           "entities INTEGER NOT NULL, collections INTEGER NOT NULL, observations INTEGER NOT NULL," +
           "attachments INTEGER NOT NULL, attachment_parts INTEGER NOT NULL," +
           "receipts INTEGER NOT NULL, chats INTEGER NOT NULL," +
@@ -285,7 +291,12 @@ export async function shareEncryptedBackup(profileId: string, recoveryCode: stri
           "temporal_proposals INTEGER NOT NULL, temporal_decisions INTEGER NOT NULL," +
           "relation_links INTEGER NOT NULL, relation_evidence INTEGER NOT NULL," +
           "review_actions INTEGER NOT NULL,review_proposals INTEGER NOT NULL,"+
-          "profile_self_binding INTEGER NOT NULL CHECK(profile_self_binding BETWEEN 0 AND 1))");
+          "profile_self_binding INTEGER NOT NULL CHECK(profile_self_binding BETWEEN 0 AND 1)," +
+          "settings_sha256 TEXT NOT NULL CHECK(length(settings_sha256)=64))");
+        await db.execAsync("CREATE TABLE pia_export.persai_backup_settings (" +
+          "slot INTEGER PRIMARY KEY CHECK(slot=1), settings_json TEXT NOT NULL)");
+        await db.runAsync("INSERT INTO pia_export.persai_backup_settings(slot,settings_json) VALUES(1,?)",
+          [settingsPayload]);
         const counts = await db.getFirstAsync<BackupCounts>(backupCountsQuery("pia_export."));
         if (!counts || !validBackupCounts(counts)) throw new Error("backup_manifest_unavailable");
         const temporalCounts = await db.getFirstAsync<TemporalCounts>(temporalCountsQuery("pia_export."));
@@ -302,10 +313,11 @@ export async function shareEncryptedBackup(profileId: string, recoveryCode: stri
           "INSERT INTO pia_export.persai_backup_manifest " +
             "(format_version,schema_version,entities,collections,observations,attachments,attachment_parts,receipts,chats," +
             "temporal_claims,temporal_evidence,temporal_proposals,temporal_decisions," +
-            "relation_links,relation_evidence,review_actions,review_proposals,profile_self_binding) " +
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "relation_links,relation_evidence,review_actions,review_proposals,profile_self_binding,settings_sha256) " +
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
           [MANIFEST_FORMAT_VERSION, LOCAL_MEMORY_SCHEMA_VERSION, ...backupCountValues(counts),
-            ...temporalCountValues(temporalCounts), ...relationCountValues(relationCounts), reviewCounts.review_actions,proposalCounts.review_proposals,selfCounts.profile_self_binding],
+            ...temporalCountValues(temporalCounts), ...relationCountValues(relationCounts),
+            reviewCounts.review_actions,proposalCounts.review_proposals,selfCounts.profile_self_binding,settingsSha256],
         );
         exportStage = "validate";
         const cipherIntegrity = await db.getFirstAsync<{ integrity_check: string }>(
@@ -350,6 +362,8 @@ export async function shareEncryptedBackup(profileId: string, recoveryCode: stri
 
 export type BackupRestoreStats = {
   collections: number; entities: number; observations: number;
+  settingsRestored?: boolean;
+  settingsWarning?: boolean;
 };
 
 export async function restoreEncryptedBackup(
@@ -358,6 +372,7 @@ export async function restoreEncryptedBackup(
   const code = checkedRecoveryCode(recoveryCode);
   if (!sourceUri || !/^(content|file):\/\//.test(sourceUri)) throw new Error("invalid_backup_uri");
   const path = temporaryPath();
+  let portableSettings: PortableBackupSettings | null = null;
   try {
     // Inspect content:// providers before filling private cache.
     const sourceInfo = await FileSystem.getInfoAsync(sourceUri);
@@ -375,15 +390,21 @@ export async function restoreEncryptedBackup(
     // A malicious/buggy content provider may truncate the stream during copy.
     // Never treat a partial cache file as a valid archive.
     if (info.size !== sourceInfo.size) throw new Error("backup_source_size_mismatch");
-    return await withLocalMemoryDatabase(profileId, async db => {
+    const restored = await withLocalMemoryDatabase(profileId, async db => {
       let attached = false;
       try {
         await attach(db, "pia_import", path, code);
         attached = true;
         // Wrong key throws from sqlite_master lookup, before any target write.
-        const schema = await db.getAllAsync<{ name: string }>(
-          "SELECT name FROM pia_import.sqlite_master WHERE type = 'table'",
-        );
+        let schema: Array<{ name: string }>;
+        try {
+          schema = await db.getAllAsync<{ name: string }>(
+            "SELECT name FROM pia_import.sqlite_master WHERE type = 'table'");
+        } catch {
+          // SQLCipher cannot distinguish a wrong recovery code from invalid
+          // ciphertext here; never expose native SQL or the code to the UI.
+          throw new Error("backup_wrong_key_or_corrupt");
+        }
         const available = new Set(schema.map(row => row.name));
         if (!BACKUP_TABLES.every(table => available.has(table))) {
           throw new Error("incompatible_backup_schema");
@@ -460,7 +481,8 @@ export async function restoreEncryptedBackup(
           );
           if (manifestRows?.n !== 1 || !manifest ||
               manifest.schema_version !== version.user_version || !validBackupCounts(manifest) ||
-              manifest.format_version !== (version.user_version >= 17 ? 8 : version.user_version >= 16 ? 7 : version.user_version >= 15 ? 6 : version.user_version >= 14 ? 5 : version.user_version >= 13 ? 4 : version.user_version >= 12 ? 3 : version.user_version >= 11 ? 2 : 1)) {
+              !(manifest.format_version === (version.user_version >= 17 ? 8 : version.user_version >= 16 ? 7 : version.user_version >= 15 ? 6 : version.user_version >= 14 ? 5 : version.user_version >= 13 ? 4 : version.user_version >= 12 ? 3 : version.user_version >= 11 ? 2 : 1) ||
+                (version.user_version >= 17 && manifest.format_version === 9))) {
             throw new Error("backup_manifest_invalid");
           }
           const actual = await db.getFirstAsync<BackupCounts>(backupCountsQuery("pia_import."));
@@ -469,6 +491,22 @@ export async function restoreEncryptedBackup(
             throw new Error("backup_manifest_mismatch");
           }
           verifiedCounts = actual;
+          if (manifest.format_version === 9) {
+            if (!available.has(SETTINGS_TABLE) ||
+                typeof manifest.settings_sha256 !== "string" ||
+                !/^[a-f0-9]{64}$/.test(manifest.settings_sha256))
+              throw new Error("backup_settings_invalid");
+            const row = await db.getFirstAsync<{settings_json:string}>(
+              "SELECT settings_json FROM pia_import.persai_backup_settings WHERE slot=1");
+            const rowCount = await db.getFirstAsync<{n:number}>(
+              "SELECT count(*) AS n FROM pia_import.persai_backup_settings");
+            if (rowCount?.n !== 1 || typeof row?.settings_json !== "string")
+              throw new Error("backup_settings_invalid");
+            const digest = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, row.settings_json);
+            if (digest !== manifest.settings_sha256)
+              throw new Error("backup_settings_integrity");
+            portableSettings = parsePortableBackupSettings(row.settings_json);
+          }
           if (version.user_version >= 11) {
             const actualTemporal = await db.getFirstAsync<TemporalCounts>(temporalCountsQuery("pia_import."));
             if (!actualTemporal || !validTemporalCounts(actualTemporal) ||
@@ -753,6 +791,17 @@ export async function restoreEncryptedBackup(
         if (attached) await detach(db, "pia_import");
       }
     });
+    if (portableSettings) {
+      try {
+        await applyPortableBackupSettings(profileId, portableSettings);
+        return { ...restored, settingsRestored: true, settingsWarning: false };
+      } catch {
+        // The canonical SQLCipher records were committed and MUST remain
+        // accessible. Never report a full restore failure or delete them.
+        return { ...restored, settingsRestored: false, settingsWarning: true };
+      }
+    }
+    return { ...restored, settingsRestored: false, settingsWarning: false };
   } finally {
     // A cancelled/partial file-manager copy still needs to be cleaned up.
     await forgetTemporaryFile(path);

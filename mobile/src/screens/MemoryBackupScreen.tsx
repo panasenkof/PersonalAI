@@ -29,7 +29,7 @@ export function MemoryBackupScreen() {
   return <KeyboardAvoidingView style={{ flex: 1, backgroundColor: t.bg }} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={header}>
     <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 24, gap: 16 }}>
       <Text style={{ color: t.text, fontSize: 25, fontWeight: "800" }}>Сохранить копию</Text>
-      <Text style={{ color: t.muted, lineHeight: 22 }}>Записи и диалоги сохраняются в зашифрованном файле. Сначала создайте код, сохраните его отдельно, затем выберите, куда отправить файл копии. Без кода восстановление невозможно.</Text>
+      <Text style={{ color: t.muted, lineHeight: 22 }}>Записи, фотографии и вложения, история диалогов, все подключения моделей, API-ключи и настройки сохраняются в одном зашифрованном файле. Сохраните код восстановления отдельно: любой, у кого есть файл и код, сможет получить доступ к данным и ключам. Системные разрешения и скачанные модели потребуется настроить заново.</Text>
       <Pressable accessibilityRole="button" accessibilityLabel="Создать новый код восстановления" disabled={busy} onPress={() => { setCode(createRecoveryCode()); setConfirmed(false); }} style={button}><Text style={{ color: t.secondary, fontWeight: "700" }}>{code ? "Создать другой код" : "1 · Создать код восстановления"}</Text></Pressable>
       {code ? <>
         <Text style={{ color: t.muted }}>2 · Нажмите и удерживайте код, чтобы скопировать. Сохраните его отдельно от файла.</Text>
@@ -48,7 +48,7 @@ export function MemoryBackupScreen() {
         })} style={{ ...button, backgroundColor: t.accent, opacity: busy || !confirmed ? 0.45 : 1 }}><Text style={{ color: t.userText, fontWeight: "700" }}>{busy ? "Подготовка…" : "3 · Сохранить файл копии"}</Text></Pressable>
       </> : null}
       <Text style={{ color: t.text, fontSize: 20, fontWeight: "700", marginTop: 12 }}>Восстановить</Text>
-      <Text style={{ color: t.muted, lineHeight: 22 }}>Записи можно восстановить в пустую память. Существующие диалоги сохранятся.</Text>
+      <Text style={{ color: t.muted, lineHeight: 22 }}>Восстановление возможно в пустую память. Новая копия вернёт записи, диалоги, подключения моделей, API-ключи и настройки. Копия старого формата может не содержать настроек. Действующие настройки подключения будут заменены сохранёнными в копии.</Text>
       <TextInput accessibilityLabel="Код восстановления для импорта" value={restoreCode} onChangeText={value => setRestoreCode(value.replace(/\s/g, ""))} editable={!busy} secureTextEntry autoCapitalize="none" autoCorrect={false} placeholder="Вставьте код восстановления" placeholderTextColor={t.muted} style={{ minHeight: 50, padding: 14, color: t.text, borderWidth: 1, borderColor: t.line, borderRadius: 16 }} />
       <Text accessibilityLiveRegion="polite" style={{ color: restoreCode && !codeValid ? t.err : t.muted }}>{!restoreCode ? "Удерживайте поле → Вставить. Код состоит из 64 символов: цифры и буквы a–f." : codeValid ? "Формат кода верный. Выберите файл копии." : `Проверьте код: ${normalizedCode.length}/64 символов, допустимы 0–9 и a–f.`}</Text>
       <Pressable accessibilityRole="button" accessibilityLabel="Восстановить зашифрованную копию" accessibilityState={{ disabled: restoreDisabled }} disabled={restoreDisabled} onPress={() => void run(async () => {
@@ -56,7 +56,11 @@ export function MemoryBackupScreen() {
         if (file.canceled || !file.assets.length) return;
         const stats = await restoreEncryptedBackup(profile!, file.assets[0].uri, normalizedCode);
         setRestoreCode(""); await store.initialize();
-        setNotice(`Восстановлено записей: ${stats.entities}.`);
+        setNotice(`Восстановлено записей: ${stats.entities}. ${stats.settingsRestored
+           ? "Подключения моделей, API-ключи и настройки также восстановлены."
+           : stats.settingsWarning
+             ? "Память восстановлена, но часть настроек и ключей вернуть не удалось. Проверьте подключения моделей."
+             : "Копия старого формата: параметры подключений и API-ключи в ней отсутствуют."}`);
       })} style={{ ...button, backgroundColor: t.accent, opacity: restoreDisabled ? 0.45 : 1 }}><Text style={{ color: t.userText, fontWeight: "700" }}>Выбрать файл и восстановить</Text></Pressable>
       {notice ? <Text accessibilityRole="alert" style={{ color: t.muted }}>{notice}</Text> : null}
     </ScrollView>
