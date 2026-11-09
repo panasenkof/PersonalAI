@@ -115,7 +115,11 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'persai-mobile-ui-'));
       await page.getByLabel('Сообщение ассистенту', { exact: true }).waitFor({timeout:10000}).catch(async error => { console.error(await page.locator('body').innerText()); throw error; });
       assert.equal(await page.evaluate(() => window.__qa.auth), 1);
       assert.equal(await page.getByLabel('Вкладка Ассистент', { exact: true }).count(), 0);
-      assert.equal(await page.getByLabel('Сообщение ассистенту', { exact: true }).isEditable(), true);
+      // Auto-wait for React Native Web to enable the hydrated composer; a one-shot
+       // isEditable() races the session/connection initialization on slower hosts.
+       const initialComposer = page.getByLabel('Сообщение ассистенту', { exact: true });
+       await initialComposer.fill('', { timeout: 10000 });
+       assert.equal(await initialComposer.isEditable(), true);
       // Use the ACTUAL tab navigator with no system bar, gesture navigation,
       // and three-button navigation metrics, including a live metrics change.
       for (const bottom of [0, 24, 48]) {
