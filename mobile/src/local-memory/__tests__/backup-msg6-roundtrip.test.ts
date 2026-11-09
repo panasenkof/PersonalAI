@@ -176,7 +176,7 @@ afterEach(()=>{
 
 test("MSG-6/BKP: real v18 SQL restore preserves Share, merged source, tags, binary parts and evidence; Undo works",async()=>{
   const result=await restoreEncryptedBackup("guest","file:///synthetic-archive.db",recoveryCode);
-  expect(result).toEqual({collections:1,entities:2,observations:0});
+  expect(result).toMatchObject({collections:1,entities:2,observations:0,settingsRestored:false});
   expect(withLocalMemoryDatabase).toHaveBeenCalledTimes(1);
   const main=destination!;
   const get=(query:string,...params:unknown[])=>main.prepare(query).get(...(params as any[]));
