@@ -124,7 +124,8 @@ export async function captureInstalledModels(): Promise<RecoveryModelsManifest> 
           !Number.isSafeInteger(v.bytes) || v.bytes < 50_000_000 || v.bytes > 1_500_000_000 ||
           v.filename !== v.id + "-" + v.sha256.slice(0, 24) + ".litertlm") continue;
       const path = fs().dirs.DocumentDir + "/persai-vision-models/" + v.filename;
-      if (await exists(path) && Number((await fs().stat(path)).size) === v.bytes) {
+      if (await exists(path) && Number((await fs().stat(path)).size) === v.bytes &&
+          await hash(path) === v.sha256) {
         // Original SHA came from vendor LFS and was checked by the canonical
         // vision downloader; use its pinned revision, never /resolve/main.
         models.push({ kind: "vision", id: v.id as VisionModelId, revision: v.revision,
@@ -170,7 +171,8 @@ async function installedMatches(model: RecoveryModel): Promise<boolean> {
       v.sha256 === model.sha256 && v.revision === model.revision && v.bytes === model.bytes);
     if (!current || current.filename !== model.id + "-" + model.sha256.slice(0, 24) + ".litertlm") return false;
     const path = fs().dirs.DocumentDir + "/persai-vision-models/" + current.filename;
-    return await exists(path) && Number((await fs().stat(path)).size) === model.bytes;
+    return await exists(path) && Number((await fs().stat(path)).size) === model.bytes &&
+      await hash(path) === model.sha256;
   }
   if (model.kind === "whisper") {
     const raw = await SecureStore.getItemAsync("pia.voice.whisper.v1");
@@ -239,13 +241,18 @@ export async function downloadMissingRecoveryModels(
       failed.push(recoveryModelTitle(model) + ": не удалось скачать или проверить");
     }
   }
-  if (!isCancelled() && !failed.length && (await missingRecoveryModels(profile)).length === 0) {
-    // Apply the original image model choice once its pinned bytes exist.
+  if (!isCancelled()) {
+    // Preserve the original image-model selection even if an unrelated
+    // Whisper/MiniLM request failed; never select an unverified image model.
     const active = plan.models.find(m => m.kind === "vision" && m.active);
-    if (active?.kind === "vision")
-      await (require("./vision-model-manager") as typeof import("./vision-model-manager"))
-        .chooseVisionModel(active.id);
-    await saveRecoveryModels(profile);
+    if (active?.kind === "vision" && await installedMatches(active)) {
+      try {
+        await (require("./vision-model-manager") as typeof import("./vision-model-manager"))
+          .chooseVisionModel(active.id);
+      } catch { failed.push("Не удалось вернуть выбор модели поиска фотографий"); }
+    }
+    if (!failed.length && (await missingRecoveryModels(profile)).length === 0)
+      await saveRecoveryModels(profile);
   }
   return { downloaded, failed, cancelled: isCancelled() };
 }
