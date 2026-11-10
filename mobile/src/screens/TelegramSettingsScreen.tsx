@@ -1,5 +1,5 @@
 import React, {useEffect, useRef, useState} from "react";
-import {ScrollView, Text, TextInput, View} from "react-native";
+import {ScrollView, Text, TextInput} from "react-native";
 import {useSafeAreaInsets} from "react-native-safe-area-context";
 import {useProfile} from "../profile/ProfileContext";
 import {useTheme} from "../theme";
@@ -32,12 +32,12 @@ export function TelegramSettingsScreen() {
     return () => { live.current++; };
   }, [profile]);
 
-  async function run(task: () => Promise<void>, success: string) {
+  async function run(task: (version: number) => Promise<void>, success: string) {
     if (!ready || saving.current) return;
     const version = live.current;
     saving.current = true; setBusy(true); setError(""); setNotice("");
     try {
-      await task();
+      await task(version);
       if (version === live.current) setNotice(success);
     } catch (e) {
       if (version === live.current) setError(
@@ -50,21 +50,21 @@ export function TelegramSettingsScreen() {
   }
   async function choose(value: TelegramSyncMode) {
     if (value === mode) return;
-    await run(async () => {
+    await run(async (version) => {
       await saveTelegramSyncMode(profile, value);
-      if (live.current) setMode(value);
+      if (version === live.current) setMode(value);
     }, "Режим сохранён. Синхронизация заработает после подключения аккаунта.");
   }
   async function saveApi() {
-    await run(async () => {
+    await run(async (version) => {
       await saveTelegramApiCredentials(profile, apiId, apiHash);
-      if (live.current) { setConfigured(true); setApiHash(""); }
+      if (version === live.current) { setConfigured(true); setApiHash(""); }
     }, "API-параметры сохранены. Авторизация Telegram ещё не выполнена.");
   }
   async function clearApi() {
-    await run(async () => {
+    await run(async (version) => {
       await clearTelegramApiCredentials(profile);
-      if (live.current) { setConfigured(false); setApiId(""); setApiHash(""); }
+      if (version === live.current) { setConfigured(false); setApiId(""); setApiHash(""); }
     }, "API-параметры удалены.");
   }
   const field = {minHeight: 46, borderWidth: 1, borderColor: theme.line,
