@@ -71,6 +71,10 @@ export function DeviceSettingsScreen() {
       <NebulaSettingRow icon="file-text" title="Распознавание файлов"
         summary="Фото, PDF, аудио и видео · выбор подключений" onPress={() => open("media")} />
     </NebulaSection>
+    <NebulaSection title="Интеграции">
+      <NebulaSettingRow icon="send" title="Telegram" summary="Аккаунт · резервный бот · синхронизация"
+        onPress={() => navigation.navigate("TelegramSettings")} />
+    </NebulaSection>
     <NebulaSection title="Данные">
       <NebulaSettingRow icon="archive" title="Резервные копии"
         summary="Записи и диалоги · перенос на другой телефон"

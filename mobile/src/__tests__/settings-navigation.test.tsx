@@ -71,6 +71,8 @@ test("settings overview navigates to the right owner and shows saved values with
   expect(mockNavigate).toHaveBeenLastCalledWith("SettingsDetail", { topic: "media" });
   fireEvent.press(ui.getByLabelText("Фото и поиск"));
   expect(mockNavigate).toHaveBeenLastCalledWith("SettingsDetail", { topic: "photos" });
+  fireEvent.press(ui.getByLabelText("Telegram"));
+  expect(mockNavigate).toHaveBeenLastCalledWith("TelegramSettings");
   fireEvent.press(ui.getByLabelText("Модели и подключения"));
   expect(mockNavigate).toHaveBeenLastCalledWith("ModelConnections");
   expect(loadDirectConnections).toHaveBeenCalledWith("guest");

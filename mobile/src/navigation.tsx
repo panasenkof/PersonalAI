@@ -1,4 +1,5 @@
 import { ShareDestinationScreen } from "./screens/ShareDestinationScreen";
+import { TelegramSettingsScreen } from "./screens/TelegramSettingsScreen";
 import Feather from "@expo/vector-icons/Feather";
 import type { SharePayload } from "expo-sharing";
 import { StackActions } from "@react-navigation/native";
@@ -41,6 +42,7 @@ export type RootStackParams = {
   MemoryImport: { incoming?: SharePayload[]; camera?: boolean; initialPhotoUri?:string; source?: "camera" | "gallery" | "photo" | "file" | "link"; collectionId?: string } | undefined;
   ShareDestination: { incoming: SharePayload[] };
   DiagnosticLogs: undefined;
+  TelegramSettings: undefined;
   /** Research-only native graphics screen (not a bottom tab). */
   NebulaLab: undefined;
 };
@@ -106,6 +108,7 @@ function ThemedRootNavigator() {
         <Stack.Screen name="MemoryTemporalReview" component={MemoryTemporalReviewScreen} options={{ title: "На проверке" }} />
         <Stack.Screen name="ModelConnections" component={DirectAgentSettingsScreen} options={{ title: "Модели и подключения" }} />
         <Stack.Screen name="DiagnosticLogs" component={DiagnosticLogsScreen} options={{ title: "Диагностика" }} />
+        <Stack.Screen name="TelegramSettings" component={TelegramSettingsScreen} options={{ title: "Telegram" }} />
         {/* Lazily require the experimental native shader only when the lab is opened.
             Do not create a fourth bottom tab or initialize Skia on app launch. */}
         <Stack.Screen name="NebulaLab"
