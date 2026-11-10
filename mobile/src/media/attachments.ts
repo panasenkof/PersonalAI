@@ -21,6 +21,8 @@ export const MAX_TOTAL_ORIGINAL_BYTES = 80 * 1024 * 1024;
 const PART_BYTES = 256 * 1024;
 export type Attachment = { id: string; entity_id: string; name: string; mime: string; size: number };
 export type ShareReplay = { entityId: string; recordStatus: 'active' | 'archived' | 'trashed' };
+/** Source identity is local protected data, never interpreted as a public Telegram URL. */
+export type TelegramBotMessageRef = { botId: number; chatId: string; messageId: number };
 /** This is a notification only: the canonical saveMediaNote writer remains the only note writer. */
 export type ShareReplayCallback = (replay: ShareReplay) => void;
 const previewDirectory = () => new Directory(Paths.cache, 'persai-previews');
@@ -194,10 +196,17 @@ function checkedRecognitions(originals: ImportFile[], values?: FileRecognition[]
   });
 }
 /** Note + original + receipt commit together. Cancellation never leaves a partial note. */
-export async function saveMediaNote(profile: string, input: { file?: ImportFile; files?: ImportFile[]; title: string; body: string; extractedText?: string; recognitions?: FileRecognition[]; sensitivity: 'sensitive' | 'standard'; receipt?: string; onReplay?: ShareReplayCallback; allowSeparateCopy?: boolean; collectionId?: string; sourceUrl?: string; sourceCoverage?: SourceCoverage; tags?: string[]; generatedTags?: boolean; generatedSection?: boolean; indexEnrichmentOptOut?: boolean; telegramObservation?: TelegramTextObservation; publicationClaim?: {date:string;evidence:'html_meta';sourceAttribute:'article:published_time'|'datePublished'} }, signal?: AbortSignal): Promise<string> {
+export async function saveMediaNote(profile: string, input: { file?: ImportFile; files?: ImportFile[]; title: string; body: string; extractedText?: string; recognitions?: FileRecognition[]; sensitivity: 'sensitive' | 'standard'; receipt?: string; onReplay?: ShareReplayCallback; allowSeparateCopy?: boolean; collectionId?: string; sourceUrl?: string; sourceCoverage?: SourceCoverage; tags?: string[]; generatedTags?: boolean; generatedSection?: boolean; indexEnrichmentOptOut?: boolean; telegramObservation?: TelegramTextObservation; botMessage?: TelegramBotMessageRef; publicationClaim?: {date:string;evidence:'html_meta';sourceAttribute:'article:published_time'|'datePublished'} }, signal?: AbortSignal): Promise<string> {
   return withLocalMemoryDatabase(profile, async db => {
     check(signal);
     const tags = checkedNoteTags(input.tags);
+    if (input.botMessage) {
+      const ref=input.botMessage;
+      if (!input.receipt || !Number.isSafeInteger(ref.botId) || ref.botId<=0 ||
+          !/^[1-9][0-9]{0,15}$/.test(ref.chatId) || !Number.isSafeInteger(Number(ref.chatId)) ||
+          !Number.isSafeInteger(ref.messageId) || ref.messageId<=0)
+        throw new Error("invalid_telegram_bot_provenance");
+    }
     // LLM suggestions are derived metadata, not a user-authored change of Share
     // identity. Variable model wording must not defeat exact replay detection.
     const receiptTags = input.generatedTags ? [] : tags;
@@ -319,9 +328,9 @@ export async function saveMediaNote(profile: string, input: { file?: ImportFile;
     let entity: EntityRecord;
     try {
       entity = await repo.createEntity({ collection_id: col.id, domain: 'notes', title,
-      payload: { type: 'note', title, ...(input.indexEnrichmentOptOut ? {index_enrichment_opt_out:true} : {}), ...(tags.length ? {tags} : {}),  ...(input.sourceUrl ? { source_url: input.sourceUrl } : {}), ...(input.sourceCoverage ? { source_text_coverage: input.sourceCoverage } : {}), ...(input.telegramObservation ? {source_observation:input.telegramObservation} : {}), ...(input.publicationClaim ? { source_publication_date:input.publicationClaim.date, source_publication_evidence:input.publicationClaim.evidence, source_publication_attribute:input.publicationClaim.sourceAttribute } : {}), ...(pdfCoverage?.length ? { source_pdf_coverage: pdfCoverage } : {}), body: input.body.trim(), ...(input.extractedText ? { extracted_text: input.extractedText.trim() } : {}), ...(originals.length ? { source_file: originals[0].name, source_media: mediaKind(originals[0]),
+      payload: { type: 'note', title, ...(input.indexEnrichmentOptOut ? {index_enrichment_opt_out:true} : {}), ...(tags.length ? {tags} : {}),  ...(input.sourceUrl ? { source_url: input.sourceUrl } : {}), ...(input.sourceCoverage ? { source_text_coverage: input.sourceCoverage } : {}), ...(input.telegramObservation ? {source_observation:input.telegramObservation} : {}), ...(input.botMessage ? {source_bot_message:{service:'telegram',channel:'bot',...input.botMessage}} : {}), ...(input.publicationClaim ? { source_publication_date:input.publicationClaim.date, source_publication_evidence:input.publicationClaim.evidence, source_publication_attribute:input.publicationClaim.sourceAttribute } : {}), ...(pdfCoverage?.length ? { source_pdf_coverage: pdfCoverage } : {}), body: input.body.trim(), ...(input.extractedText ? { extracted_text: input.extractedText.trim() } : {}), ...(originals.length ? { source_file: originals[0].name, source_media: mediaKind(originals[0]),
         ...(originals.length > 1 ? { source_files: originals.map(f => f.name), source_media_types: originals.map(mediaKind) } : {}) } : {}) },
-      sensitivity: input.sensitivity, source_kind: 'user', source_ref: input.receipt ? 'android-share' : 'device-import',
+      sensitivity: input.sensitivity, source_kind: 'user', source_ref: input.botMessage ? 'telegram-bot' : input.receipt ? 'android-share' : 'device-import',
     }, async (tx, entityId) => {
       const attachmentIds: string[] = [];
       for (const [index, original] of originals.entries()) attachmentIds.push(await writeOriginal(tx, entityId, original, signal, receivedDigests[index]));
