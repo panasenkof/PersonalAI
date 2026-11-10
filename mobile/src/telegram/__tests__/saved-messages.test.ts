@@ -5,7 +5,10 @@ import {requireOptionalNativeModule} from "expo-modules-core";
 import {Platform} from "react-native";
 jest.mock("../account",()=>({tdlibAvailable:jest.fn(),tdlibAccountState:jest.fn()}));
 jest.mock("../../local-memory/storage",()=>({localMemorySessionUnlocked:jest.fn()}));
-jest.mock("expo-modules-core",()=>({requireOptionalNativeModule:jest.fn()}));
+jest.mock("expo-modules-core",()=>({
+  ...jest.requireActual("expo-modules-core"),
+  requireOptionalNativeModule:jest.fn(),
+}));
 const page=(messages:unknown[],nextCursor="")=>JSON.stringify({
   selfChatId:"12345",messages,nextCursor,
 });
