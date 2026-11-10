@@ -1,4 +1,6 @@
 import * as SecureStore from "expo-secure-store";
+import * as Crypto from "expo-crypto";
+import {fromByteArray, toByteArray} from "base64-js";
 
 /** Only preferences and TDLib app credentials; this does not authorize a Telegram user. */
 export type TelegramSyncMode = "manual" | "on_open";
@@ -54,4 +56,38 @@ export async function loadTelegramApiCredentials(profile: string): Promise<Teleg
 }
 export async function clearTelegramApiCredentials(profile: string): Promise<void> {
   await SecureStore.deleteItemAsync(apiKey(profile));
+}
+
+
+/**
+ * A distinct device-bound 256-bit key for TDLib's encrypted database.
+ * NEVER exported in the portable PersAI backup or coupled to its SQLCipher key.
+ * Corruption must stop initialization rather than silently destroy a session.
+ */
+const tdlibDbKey=(p:string)=>"pia.telegram.tdlib.dbkey.v1."+checked(p);
+const pendingTdlibKeys=new Map<string,Promise<string>>();
+export function tdlibKeyIsValid(value:string):boolean {
+  try{return /^[A-Za-z0-9+/]{43}=$/.test(value) && toByteArray(value).length===32;}
+  catch{return false;}
+}
+export function loadOrCreateTdlibDbKey(profile:string):Promise<string>{
+  checked(profile);
+  const pending=pendingTdlibKeys.get(profile);
+  if(pending)return pending;
+  const next=(async()=>{
+    const existing=await SecureStore.getItemAsync(tdlibDbKey(profile));
+    if(existing!==null){
+      if(!tdlibKeyIsValid(existing))throw new Error("tdlib_device_key_corrupted");
+      return existing;
+    }
+    const created=fromByteArray(Crypto.getRandomBytes(32));
+    if(!tdlibKeyIsValid(created))throw new Error("tdlib_device_key_invalid");
+    await SecureStore.setItemAsync(tdlibDbKey(profile),created,{
+      keychainAccessible:SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+    });
+    return created;
+  })();
+  pendingTdlibKeys.set(profile,next);
+  void next.finally(()=>{if(pendingTdlibKeys.get(profile)===next)pendingTdlibKeys.delete(profile);}).catch(()=>{});
+  return next;
 }

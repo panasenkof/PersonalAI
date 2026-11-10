@@ -1,0 +1,18 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+group = 'com.persai'
+version = '1.0.0'
+android {
+  namespace 'expo.modules.persaitdlib'
+  defaultConfig {
+    versionCode 1
+    versionName '1.0.0'
+    minSdkVersion 26
+  }
+}
+dependencies {
+  // Native TDLib is deliberately NOT pulled from third-party Maven/AAR here.
+  // Only the separately verified official-source JSONJava bundle may be staged.
+}

@@ -1,9 +1,12 @@
+import * as Crypto from "expo-crypto";
 import * as SecureStore from "expo-secure-store";
 import {
   clearTelegramApiCredentials, inspectTelegramApiCredentials, loadTelegramApiCredentials,
   loadTelegramSyncMode, saveTelegramApiCredentials, saveTelegramSyncMode,
   validateTelegramApiCredentials, validateTelegramSyncMode,
+  loadOrCreateTdlibDbKey,tdlibKeyIsValid,
 } from "../settings";
+jest.mock("expo-crypto", () => ({getRandomBytes:jest.fn(() => new Uint8Array(32).fill(42))}));
 jest.mock("expo-secure-store", () => ({
   WHEN_UNLOCKED_THIS_DEVICE_ONLY: "device-only",
   getItemAsync: jest.fn(), setItemAsync: jest.fn(), deleteItemAsync: jest.fn(),
@@ -46,4 +49,22 @@ test("invalid ID/hash/profile and damaged secrets fail closed", async () => {
   mockStore.set("pia.telegram.tdlib.api.v1.guest",'{"apiId":123,"apiHash":"bad"}');
   expect(await inspectTelegramApiCredentials("guest")).toEqual({apiId:null,configured:false});
   expect(await loadTelegramApiCredentials("guest")).toBeNull();
+});
+
+
+test("TDLib database has a different 256-bit device-only key from API credentials",async()=>{
+  expect(await loadOrCreateTdlibDbKey("guest")).toBe("KioqKioqKioqKioqKioqKioqKioqKioqKioqKioqKio=");
+  expect(Crypto.getRandomBytes).toHaveBeenCalledWith(32);
+  expect(tdlibKeyIsValid("KioqKioqKioqKioqKioqKioqKioqKioqKioqKioqKio=")).toBe(true);
+  expect(SecureStore.setItemAsync).toHaveBeenCalledWith(
+    "pia.telegram.tdlib.dbkey.v1.guest",expect.any(String),{keychainAccessible:"device-only"});
+  await loadOrCreateTdlibDbKey("guest");
+  expect(Crypto.getRandomBytes).toHaveBeenCalledTimes(1);
+  expect(await loadOrCreateTdlibDbKey("another")).toBe("KioqKioqKioqKioqKioqKioqKioqKioqKioqKioqKio=");
+  expect(Crypto.getRandomBytes).toHaveBeenCalledTimes(2);
+});
+test("corrupted TDLib encryption key fails closed rather than replacing the session key",async()=>{
+  mockStore.set("pia.telegram.tdlib.dbkey.v1.guest","invalid");
+  await expect(loadOrCreateTdlibDbKey("guest")).rejects.toThrow("tdlib_device_key_corrupted");
+  expect(Crypto.getRandomBytes).not.toHaveBeenCalled();
 });
