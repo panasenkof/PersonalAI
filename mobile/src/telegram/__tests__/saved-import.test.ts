@@ -1,9 +1,11 @@
 import {importSavedTextPage} from "../saved-import";
 import {readSavedMessagesPage} from "../saved-messages";
+import {readSavedTopicPage} from "../saved-topics";
 import {saveMediaNote} from "../../media/attachments";
 import {scheduleVectors} from "../../media/vector-runner";
 import {localMemorySessionUnlocked} from "../../local-memory/storage";
 jest.mock("../saved-messages",()=>({readSavedMessagesPage:jest.fn()}));
+jest.mock("../saved-topics",()=>({readSavedTopicPage:jest.fn(),safeTopicId:(v:string)=>typeof v==="string"&&/^(0|-?[1-9][0-9]{0,15})$/.test(v)&&Number.isSafeInteger(Number(v))}));
 jest.mock("../../media/attachments",()=>({saveMediaNote:jest.fn()}));
 jest.mock("../../media/vector-runner",()=>({scheduleVectors:jest.fn()}));
 jest.mock("../../local-memory/storage",()=>({localMemorySessionUnlocked:jest.fn()}));
@@ -17,6 +19,7 @@ beforeEach(()=>{
     selfChatId:"12345",messages:[item("50","Заметка"),item("49","Другой текст")],nextCursor:"49",
   });
   (saveMediaNote as jest.Mock).mockResolvedValue("note-1");
+  (readSavedTopicPage as jest.Mock).mockResolvedValue({selfChatId:"12345",messages:[item("50","Заметка")],nextCursor:"50"});
 });
 test("imports newest self-chat text using existing canonical writer and immutable source IDs",async()=>{
   expect(await importSavedTextPage("guest")).toEqual({
@@ -92,4 +95,32 @@ test("cancelled run fails without writing source data",async()=>{
   await expect(importSavedTextPage("guest","0",controller.signal))
     .rejects.toThrow("telegram_saved_import_cancelled");
   expect(readSavedMessagesPage).not.toHaveBeenCalled();
+});
+
+test("topic and global history share the same canonical receipt; topic ID is only metadata",async()=>{
+  await importSavedTextPage("guest","0",undefined,"-1005432");
+  expect(readSavedTopicPage).toHaveBeenCalledWith("guest","-1005432","0",20);
+  expect(readSavedMessagesPage).not.toHaveBeenCalled();
+  expect((saveMediaNote as jest.Mock).mock.calls[0][1]).toMatchObject({
+    receipt:"telegram-saved:12345:50",
+    telegramSavedMessage:{chatId:"12345",messageId:"50",date:1794300000,kind:"messageText",topicId:"-1005432"},
+  });
+});
+test("cannot supply arbitrary malformed topic ID or bypass AppLock",async()=>{
+  await expect(importSavedTextPage("guest","0",undefined,"--999"))
+    .rejects.toThrow("telegram_saved_topic_request_invalid");
+  expect(readSavedTopicPage).not.toHaveBeenCalled();
+  (localMemorySessionUnlocked as jest.Mock).mockReturnValue(false);
+  await expect(importSavedTextPage("guest","0",undefined,"1"))
+    .rejects.toThrow("telegram_app_locked");
+});
+test("topic media and captions never become a false text-only note",async()=>{
+  (readSavedTopicPage as jest.Mock).mockResolvedValueOnce({selfChatId:"12345",messages:[
+    item("50","Подпись к видео","messageVideo",true),item("49","Нормальный текст"),
+  ],nextCursor:"49"});
+  expect(await importSavedTextPage("guest","0",undefined,"0"))
+    .toMatchObject({saved:1,unsupported:1});
+  expect(saveMediaNote).toHaveBeenCalledTimes(1);
+  expect((saveMediaNote as jest.Mock).mock.calls[0][1].receipt)
+    .toBe("telegram-saved:12345:49");
 });
