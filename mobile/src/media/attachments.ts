@@ -24,7 +24,7 @@ export type ShareReplay = { entityId: string; recordStatus: 'active' | 'archived
 /** Source identity is local protected data, never interpreted as a public Telegram URL. */
 export type TelegramBotMessageRef = { botId: number; chatId: string; messageId: number };
 /** A read-only TDLib self-chat identity. IDs are decimal strings (Telegram int64). */
-export type TelegramSavedMessageRef = { chatId: string; messageId: string; date: number; kind: "messageText" };
+export type TelegramSavedMessageRef = { chatId: string; messageId: string; date: number; kind: "messageText"; topicId?: string };
 /** This is a notification only: the canonical saveMediaNote writer remains the only note writer. */
 export type ShareReplayCallback = (replay: ShareReplay) => void;
 const previewDirectory = () => new Directory(Paths.cache, 'persai-previews');
@@ -216,6 +216,9 @@ export async function saveMediaNote(profile: string, input: { file?: ImportFile;
       if (input.botMessage || !input.receipt || input.receipt !==
           'telegram-saved:' + ref.chatId + ':' + ref.messageId ||
           !validId(ref.chatId) || !validId(ref.messageId) ||
+          (ref.topicId !== undefined && !(
+            /^(0|-?[1-9][0-9]{0,15})$/.test(ref.topicId) &&
+            Number.isSafeInteger(Number(ref.topicId)))) ||
           !Number.isSafeInteger(ref.date) || ref.date < 0 ||
           ref.kind !== 'messageText' || input.allowSeparateCopy ||
           input.file || input.files !== undefined || !input.body.trim())
