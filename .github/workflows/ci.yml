@@ -37,6 +37,7 @@ jobs:
           node --test mobile/scripts/verify-native-ccache.test.cjs
           node --test mobile/scripts/classify-emulator-failure.test.cjs
           node --test mobile/scripts/native-emulator-disk.test.cjs
+          python3 -m unittest discover -s .github/scripts -p 'test_notify_android_apk.py'
           node mobile/scripts/ci-scope.cjs
 
   native:
