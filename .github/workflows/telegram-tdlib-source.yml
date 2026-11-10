@@ -23,7 +23,9 @@ jobs:
         with:
           packages: platform-tools
       - name: Validate locked source-bundle contract
-        run: node --test mobile/scripts/tdlib/bundle.test.cjs
+        run: |
+          node --test mobile/scripts/tdlib/bundle.test.cjs
+          node --test mobile/scripts/tdlib/patch-upstream.test.cjs
       - name: Install official Android SDK and toolchain
         run: |
           sdkmanager "platforms;android-34" "cmake;3.22.1" "ndk;27.0.12077973"
