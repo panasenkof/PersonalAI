@@ -68,6 +68,9 @@ def send(token, chat_id, message, opener=urllib.request.urlopen, sleeper=time.sl
         except (urllib.error.URLError, TimeoutError, OSError):
             if attempt == 2:
                 raise RuntimeError("Telegram request failed") from None
+        except (ValueError, TypeError):
+            # Avoid a traceback containing the request URL and bot token.
+            raise RuntimeError("Telegram returned an invalid response") from None
         if attempt < 2:
             sleeper(2 * (attempt + 1))
 
