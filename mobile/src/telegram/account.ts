@@ -5,6 +5,7 @@ import {loadTelegramApiCredentials,loadOrCreateTdlibDbKey} from "./settings";
 
 /** Narrow allowlist. Never expose TDLib's arbitrary request/sending API to JS. */
 type NativeTdlib = {
+  addListener?(event:string,listener:(value:{state?:unknown})=>void):{remove():void};
   isAvailable(): boolean;
   authorizationState(): string;
   initialize(profile:string,id:number,hash:string,key:string):Promise<string>;
@@ -91,4 +92,15 @@ export async function closeTelegramAccount():Promise<TelegramAccountState>{
   const native=getNative();
   if(!native?.isAvailable())return "offline";
   return safeTelegramAccountState(await native.close());
+}
+
+
+/** Observe state-only native events; no phone/code/password crosses this event. */
+export function observeTelegramAccountState(onChange:(value:TelegramAccountState)=>void):()=>void{
+  const native=getNative();
+  if(!native?.addListener)return ()=>{};
+  const subscription=native.addListener("onTelegramAuthorizationState",event=>{
+    onChange(safeTelegramAccountState(event.state));
+  });
+  return ()=>subscription.remove();
 }

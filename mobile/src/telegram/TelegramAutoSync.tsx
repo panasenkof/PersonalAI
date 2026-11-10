@@ -1,7 +1,8 @@
 import React,{useEffect} from "react";
 import {useProfile} from "../profile/ProfileContext";
 import {useApplicationVisible} from "../security/visibility";
-import {localMemorySessionUnlocked} from "../local-memory/storage";
+import {localMemorySessionUnlocked,onLocalMemorySessionChange} from "../local-memory/storage";
+import {closeTelegramAccount} from "./account";
 import {loadTelegramSyncMode} from "./settings";
 import {loadTelegramBotConfig} from "./bot-settings";
 import {syncTelegramBotText} from "./bot-sync";
@@ -13,6 +14,11 @@ import {syncTelegramBotText} from "./bot-sync";
 const attempted = new Set<string>();
 export function TelegramAutoSync(){
   const profile=useProfile(),visible=useApplicationVisible();
+  // TDLib must not retain a live account network client after AppLock revokes
+  // the protected application session, even while the navigator is mounted.
+  useEffect(()=>onLocalMemorySessionChange(unlocked=>{
+    if(!unlocked)void closeTelegramAccount().catch(()=>{});
+  }),[]);
   useEffect(()=>{
     if(!visible||!localMemorySessionUnlocked()||attempted.has(profile))return;
     attempted.add(profile);
