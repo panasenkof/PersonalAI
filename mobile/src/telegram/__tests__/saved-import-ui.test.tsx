@@ -30,7 +30,7 @@ test("end of history disables repeated paging but allows explicit reset",async()
   const ui=render(<TelegramSavedImportCard profile="guest"/>);
   fireEvent.press(ui.getByText("Импортировать последние 20 сообщений"));
   await waitFor(()=>ui.getByText(/Больше сообщений в этом диапазоне нет/));
-  expect(ui.getByText("Импортировать последние 20 сообщений").parent?.props.accessibilityState?.disabled)
+  expect(ui.getByLabelText("Импортировать последние 20 сообщений").props.accessibilityState.disabled)
     .toBe(true);
 });
 test("failure is visible but does not advance pagination",async()=>{
