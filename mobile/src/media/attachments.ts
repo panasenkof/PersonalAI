@@ -292,7 +292,9 @@ export async function saveMediaNote(profile: string, input: { file?: ImportFile;
       inferredFileTitle ? 'incoming-file-untitled' : input.title;
     const receivedReceipt = input.receipt
       ? await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, JSON.stringify([
-          'android-share-content-v2', receivedDigests, originals.map(mediaKind),
+          ...(input.botMessage ? ['telegram-bot-content-v1', input.botMessage.botId,
+            input.botMessage.chatId, input.botMessage.messageId] : ['android-share-content-v2']),
+          receivedDigests, originals.map(mediaKind),
           normalizedTitle, normalizedBody,
           input.extractedText || "", input.sensitivity, receiptCollectionId,
           postKey || input.sourceUrl || "", recognitionSignature,
