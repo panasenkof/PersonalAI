@@ -76,6 +76,11 @@ test("simultaneous calls for one profile share the same cursor worker",async()=>
   const first=syncTelegramBotText("p6");
   const second=syncTelegramBotText("p6");
   expect(first).toBe(second);
+  // The worker first awaits the protected profile config before calling fetch.
+  // Releasing the deferred fetch before that microtask would leave it blocked.
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(fetchBotUpdates).toHaveBeenCalledTimes(1);
   release([]);
   expect(await first).toEqual({imported:0,skipped:0,lastUpdate:0});
   expect(fetchBotUpdates).toHaveBeenCalledTimes(1);
