@@ -29,9 +29,10 @@ test("explicit on_open sync starts once after unlock, not on rerender",async()=>
 });
 test("manual mode or unpaired bot never sync automatically",async()=>{
   (loadTelegramSyncMode as jest.Mock).mockResolvedValueOnce("manual");
-  render(<TelegramAutoSync/>);
+  const manual=render(<TelegramAutoSync/>);
   await waitFor(()=>expect(loadTelegramSyncMode).toHaveBeenCalled());
   expect(syncTelegramBotText).not.toHaveBeenCalled();
+  manual.unmount();
   resetTelegramAutoSyncForTests();
   (loadTelegramBotConfig as jest.Mock).mockResolvedValueOnce({allowedChatId:null});
   const ui=render(<TelegramAutoSync/>);
