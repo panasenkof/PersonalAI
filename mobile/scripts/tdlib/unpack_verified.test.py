@@ -56,3 +56,6 @@ class TdlibArchiveTest(unittest.TestCase):
                     archive.addfile(info, io.BytesIO(b"x") if info.isfile() else None)
             with self.assertRaisesRegex(ValueError, "unsafe_entry"):
                 unpack(str(src), str(pathlib.Path(temporary, "extract")))
+
+if __name__ == "__main__":
+    unittest.main()
