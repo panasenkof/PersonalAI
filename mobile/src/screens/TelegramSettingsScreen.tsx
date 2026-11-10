@@ -80,7 +80,9 @@ export function TelegramSettingsScreen() {
     <NebulaSection title="Режим синхронизации">
       <Text style={{color: theme.muted, ...nebulaTypography.label}}>
         Настраивается отдельно от подключения. По умолчанию — вручную.
-        Автоматический запуск только после разблокировки PersAI и входа в Telegram.
+        При запуске — только после разблокировки PersAI и авторизации Telegram.
+        Автоматически проверяется до 20 последних текстовых сообщений «Избранного»;
+        всю старую историю можно импортировать вручную. Бот работает независимо.
       </Text>
       {([["manual", "Вручную"], ["on_open", "При каждом запуске PersAI"]] as const).map(([value, label]) =>
         <NebulaAction key={value} accessibilityLabel={label}
