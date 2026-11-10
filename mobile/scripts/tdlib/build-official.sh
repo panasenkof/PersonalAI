@@ -13,6 +13,9 @@ mkdir -p "$TDLIB_BUILD_ROOT"
 git clone --no-checkout https://github.com/tdlib/td.git "$TDLIB_BUILD_ROOT/source"
 git -C "$TDLIB_BUILD_ROOT/source" checkout --detach "$TD_SHA"
 test "$(git -C "$TDLIB_BUILD_ROOT/source" rev-parse HEAD)" = "$TD_SHA"
+# Strictly reviewed changes: compile OpenSSL for just 2 needed ABIs;
+# enable NDK r27 16 KiB linker alignment for TDLib JNI on Android 15+.
+node "$repo_root/mobile/scripts/tdlib/patch-upstream.cjs" "$TDLIB_BUILD_ROOT/source/example/android"
 cd "$TDLIB_BUILD_ROOT/source/example/android"
 bash ./check-environment.sh
 # Guard against a moved release tag before upstream script downloads its tarball.
