@@ -1,0 +1,221 @@
+package expo.modules.persaitdlib
+
+import android.os.Build
+import android.util.Base64
+import expo.modules.kotlin.modules.Module
+import expo.modules.kotlin.modules.ModuleDefinition
+import org.json.JSONObject
+import java.io.File
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
+
+/**
+ * A single narrow TDLib JSONJava gateway. No arbitrary JSON requests cross
+ * the JS boundary, no contacts/chat listing, no user text in logs or events.
+ * JsonClient.java + libtdjsonjava.so are staged ONLY by the reviewed source
+ * build; this module compiles and fails closed if they are absent.
+ */
+class PersaiTelegramTdlibModule : Module() {
+  private class NativeJson {
+    private val type = Class.forName("org.drinkless.tdlib.JsonClient")
+    private val make = type.getMethod("createClientId")
+    private val send = type.getMethod("send", Int::class.javaPrimitiveType, String::class.java)
+    private val receive = type.getMethod("receive", Double::class.javaPrimitiveType)
+    fun create(): Int = make.invoke(null) as Int
+    fun send(id: Int, json: String) { send.invoke(null, id, json) }
+    fun receive(): String? = receive.invoke(null, 0.25) as? String
+  }
+
+  private val lock = Any()
+  private val sequence = AtomicLong(0)
+  private val pending = ConcurrentHashMap<Long, CompletableFuture<JSONObject>>()
+  @Volatile private var native: NativeJson? = null
+  @Volatile private var clientId = 0
+  @Volatile private var activeProfile: String? = null
+  @Volatile private var authState = "offline"
+  @Volatile private var receiving = false
+  @Volatile private var params: JSONObject? = null
+  private var worker: Thread? = null
+
+  private fun available(): Boolean = try {
+    if (native != null) true else {
+      Class.forName("org.drinkless.tdlib.JsonClient")
+      System.loadLibrary("tdjsonjava")
+      true
+    }
+  } catch (_: Throwable) { false }
+
+  private fun requireNative(): NativeJson = native ?: throw IllegalStateException("tdlib_binary_unavailable")
+  private fun requireState(vararg allowed: String) {
+    if (!allowed.contains(authState)) throw IllegalStateException("tdlib_auth_state_mismatch")
+  }
+  private fun sendNoReply(objectData: JSONObject) {
+    requireNative().send(clientId, objectData.toString())
+  }
+  private fun sendRequest(data: JSONObject): JSONObject {
+    val n = requireNative()
+    val requestId = sequence.incrementAndGet()
+    val future = CompletableFuture<JSONObject>()
+    pending[requestId] = future
+    data.put("@extra", requestId)
+    try {
+      n.send(clientId, data.toString())
+      val reply = future.get(25, TimeUnit.SECONDS)
+      if (reply.optString("@type") == "error") {
+        throw IllegalStateException("tdlib_operation_rejected")
+      }
+      return reply
+    } catch (_: java.util.concurrent.TimeoutException) {
+      throw IllegalStateException("tdlib_request_timeout")
+    } finally {
+      pending.remove(requestId)
+    }
+  }
+  private fun emitAuth(value: String) {
+    if (value != authState) {
+      authState = value
+      sendEvent("onTelegramAuthorizationState", mapOf("state" to value))
+    }
+  }
+
+  private fun process(packet: String) {
+    if (packet.length > 1_000_000) return
+    val msg = try { JSONObject(packet) } catch (_: Exception) { return }
+    if (msg.optInt("@client_id", -1) != clientId) return
+    if (msg.optString("@type") == "updateAuthorizationState") {
+      val next = msg.optJSONObject("authorization_state")?.optString("@type") ?: return
+      if (next == "authorizationStateWaitTdlibParameters") {
+        val input = params ?: return
+        // JSON bytes are Base64 strings. No plaintext key/hash is emitted.
+        sendNoReply(input)
+        params = null
+      }
+      emitAuth(next)
+      if (next == "authorizationStateClosed") receiving = false
+    }
+    val extra = msg.optLong("@extra", -1)
+    if (extra > 0) pending[extra]?.complete(msg)
+  }
+
+  private fun beginReceive() {
+    receiving = true
+    worker = Thread({
+      while (receiving) {
+        try {
+          val packet = requireNative().receive()
+          if (packet != null) process(packet)
+        } catch (_: Throwable) {
+          emitAuth("tdlib_runtime_error")
+          receiving = false
+        }
+      }
+      pending.values.forEach { it.completeExceptionally(IllegalStateException("tdlib_closed")) }
+      pending.clear()
+    }, "PersAI-TDLib-JSON-receiver").also {
+      it.isDaemon = true
+      it.start()
+    }
+  }
+
+  private fun initialize(profile: String, apiId: Int, apiHash: String, encryptionKey: String): String {
+    require(Regex("^(guest|[a-zA-Z0-9_-]{1,120})$").matches(profile)) { "tdlib_invalid_profile" }
+    require(apiId > 0 && Regex("^[a-f0-9]{32}$").matches(apiHash)) { "tdlib_invalid_app_credentials" }
+    val key = try { Base64.decode(encryptionKey, Base64.DEFAULT) } catch (_: Exception) { byteArrayOf() }
+    require(key.size == 32) { "tdlib_invalid_db_key" }
+    require(available()) { "tdlib_binary_unavailable" }
+    synchronized(lock) {
+      if (clientId != 0) {
+        if (activeProfile != profile) throw IllegalStateException("tdlib_other_profile_active")
+        return authState
+      }
+      val ctx = appContext.reactContext ?: throw IllegalStateException("tdlib_context_unavailable")
+      val root = File(ctx.filesDir, "persai-tdlib-$profile").canonicalFile
+      require(root.path.startsWith(ctx.filesDir.canonicalPath + File.separator))
+      root.mkdirs()
+      val download = File(root,"files").apply { mkdirs() }
+      val config = JSONObject().put("@type","setTdlibParameters")
+        .put("use_test_dc",false)
+        .put("database_directory",root.absolutePath)
+        .put("files_directory",download.absolutePath)
+        .put("database_encryption_key",Base64.encodeToString(key,Base64.NO_WRAP))
+        .put("use_file_database",false)
+        .put("use_chat_info_database",false)
+        .put("use_message_database",false)
+        .put("use_secret_chats",false)
+        .put("api_id",apiId)
+        .put("api_hash",apiHash)
+        .put("system_language_code","ru-RU")
+        .put("device_model",Build.MODEL.take(120).ifEmpty { "Android" })
+        .put("system_version",Build.VERSION.RELEASE.take(60))
+        .put("application_version","PersAI 0.3.0")
+      key.fill(0)
+      params = config
+      val bridge = NativeJson()
+      native = bridge
+      clientId = bridge.create()
+      activeProfile = profile
+      authState = "starting"
+      beginReceive()
+      sendNoReply(JSONObject().put("@type","getAuthorizationState"))
+      return authState
+    }
+  }
+
+  private fun auth(type: String, field: String, value: String, allowed: String): String {
+    require(value.isNotEmpty() && value.length <= 256) { "tdlib_invalid_auth_input" }
+    requireState(allowed)
+    sendRequest(JSONObject().put("@type",type).put(field,value))
+    return authState
+  }
+
+  override fun definition() = ModuleDefinition {
+    Name("PersaiTelegramTdlib")
+    Events("onTelegramAuthorizationState")
+
+    // No implicitly downloaded runtime: default builds report false.
+    Function("isAvailable") { available() }
+    Function("authorizationState") { authState }
+
+    AsyncFunction("initialize") { profile: String, id: Int, hash: String, key: String ->
+      initialize(profile,id,hash,key)
+    }
+    AsyncFunction("submitPhone") { number: String ->
+      require(Regex("^\\+[1-9][0-9]{6,14}$").matches(number)) { "tdlib_invalid_phone" }
+      requireState("authorizationStateWaitPhoneNumber")
+      sendRequest(JSONObject().put("@type","setAuthenticationPhoneNumber")
+        .put("phone_number",number).put("settings",JSONObject().put("@type","phoneNumberAuthenticationSettings")))
+      authState
+    }
+    AsyncFunction("submitCode") { code: String ->
+      require(Regex("^[0-9]{1,12}$").matches(code)) { "tdlib_invalid_code" }
+      auth("checkAuthenticationCode","code",code,"authorizationStateWaitCode")
+    }
+    AsyncFunction("submitPassword") { password: String ->
+      auth("checkAuthenticationPassword","password",password,"authorizationStateWaitPassword")
+    }
+    AsyncFunction("submitEmail") { email: String ->
+      require(email.length in 3..254 && email.contains("@") && !email.contains(" ")) { "tdlib_invalid_email" }
+      auth("setAuthenticationEmailAddress","email_address",email,"authorizationStateWaitEmailAddress")
+    }
+    AsyncFunction("submitEmailCode") { code: String ->
+      require(Regex("^[A-Za-z0-9_-]{1,16}$").matches(code)) { "tdlib_invalid_email_code" }
+      requireState("authorizationStateWaitEmailCode")
+      sendRequest(JSONObject().put("@type","checkAuthenticationEmailCode")
+        .put("code",JSONObject().put("@type","emailAddressAuthenticationCode").put("code",code)))
+      authState
+    }
+    AsyncFunction("logOut") {
+      requireState("authorizationStateReady")
+      sendRequest(JSONObject().put("@type","logOut"))
+      authState
+    }
+    AsyncFunction("close") {
+      if (clientId == 0) "offline" else {
+        sendRequest(JSONObject().put("@type","close"))
+        authState
+      }
+    }
+  }
+}
