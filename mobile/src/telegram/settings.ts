@@ -91,3 +91,14 @@ export function loadOrCreateTdlibDbKey(profile:string):Promise<string>{
   void next.finally(()=>{if(pendingTdlibKeys.get(profile)===next)pendingTdlibKeys.delete(profile);}).catch(()=>{});
   return next;
 }
+
+
+/** Automatic resumption is allowed only for a previously started local TDLib session.
+ * This checks device-only metadata, never reveals the encryption key to callers.
+ */
+export async function hasExistingTdlibDbKey(profile:string):Promise<boolean>{
+  const stored=await SecureStore.getItemAsync(tdlibDbKey(profile));
+  if(stored===null)return false;
+  if(!tdlibKeyIsValid(stored))throw new Error("tdlib_device_key_corrupted");
+  return true;
+}
