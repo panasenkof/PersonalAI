@@ -2,20 +2,23 @@ import React,{useEffect} from "react";
 import {useProfile} from "../profile/ProfileContext";
 import {useApplicationVisible} from "../security/visibility";
 import {localMemorySessionUnlocked,onLocalMemorySessionChange} from "../local-memory/storage";
-import {closeTelegramAccount} from "./account";
-import {loadTelegramSyncMode} from "./settings";
+import {
+  closeTelegramAccount,initializeTelegramAccount,observeTelegramAccountState,tdlibAvailable,
+  type TelegramAccountState,
+} from "./account";
+import {loadTelegramSyncMode,hasExistingTdlibDbKey} from "./settings";
 import {loadTelegramBotConfig} from "./bot-settings";
 import {syncTelegramBotText} from "./bot-sync";
+import {importSavedTextPage} from "./saved-import";
 
-/** Once per app JS process and profile, not once per focus/tab or render.
- * Runs only after AppLock unlock and only if user explicitly chose on_open.
- * Network errors remain retriable through Settings > Telegram; no background service.
+/** Single attempt per app process/profile after AppLock unlock. No daemon or timer.
+ * TDLib only resumes an account whose device-bound encrypted database key
+ * already exists. Telegram's authorizationStateReady, not a preference, gates
+ * access to Saved Messages.
  */
-const attempted = new Set<string>();
+const attempted=new Set<string>();
 export function TelegramAutoSync(){
   const profile=useProfile(),visible=useApplicationVisible();
-  // TDLib must not retain a live account network client after AppLock revokes
-  // the protected application session, even while the navigator is mounted.
   useEffect(()=>onLocalMemorySessionChange(unlocked=>{
     if(!unlocked)void closeTelegramAccount().catch(()=>{});
   }),[]);
@@ -23,16 +26,41 @@ export function TelegramAutoSync(){
     if(!visible||!localMemorySessionUnlocked()||attempted.has(profile))return;
     attempted.add(profile);
     const controller=new AbortController();
+    let unsubscribe:()=>void=()=>{};
+    const active=()=>!controller.signal.aborted&&localMemorySessionUnlocked();
+
+    async function resumeAccount(){
+      if(!active()||!tdlibAvailable())return;
+      // A new/never-authorized account is not silently initialized at launch.
+      if(!await hasExistingTdlibDbKey(profile)||!active())return;
+      let imported=false;
+      const onState=(state:TelegramAccountState)=>{
+        if(state!=="authorizationStateReady"||imported||!active())return;
+        imported=true;
+        // Exactly one bounded page this launch; full history remains explicit.
+        void importSavedTextPage(profile,"0",controller.signal).catch(()=>{});
+      };
+      unsubscribe=observeTelegramAccountState(onState);
+      if(!active()){unsubscribe();unsubscribe=()=>{};return;}
+      const state=await initializeTelegramAccount(profile);
+      onState(state);
+    }
+
+    async function resumeBot(){
+      if(!active())return;
+      const bot=await loadTelegramBotConfig(profile);
+      if(bot?.allowedChatId&&active())
+        await syncTelegramBotText(profile,controller.signal);
+    }
+
     void (async()=>{
       const mode=await loadTelegramSyncMode(profile);
-      if(mode!=="on_open"||controller.signal.aborted||!localMemorySessionUnlocked())return;
-      const bot=await loadTelegramBotConfig(profile);
-      if(!bot?.allowedChatId||controller.signal.aborted||!localMemorySessionUnlocked())return;
-      await syncTelegramBotText(profile,controller.signal);
-    })().catch(()=>{/* Deliberately no unhandled rejections, tokens or chat text in logs. */});
-    return()=>controller.abort();
+      if(mode!=="on_open"||!active())return;
+      // Failure of one channel never prevents the other from syncing.
+      await Promise.allSettled([resumeAccount(),resumeBot()]);
+    })().catch(()=>{/* no credentials, Telegram content or network URL in logs */});
+    return()=>{controller.abort();unsubscribe();};
   },[profile,visible]);
   return null;
 }
-/** Only for test isolation; production has one profile and one JS process. */
 export function resetTelegramAutoSyncForTests(){attempted.clear();}
