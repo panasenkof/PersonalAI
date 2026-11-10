@@ -2,6 +2,7 @@ import {localMemorySessionUnlocked} from "../local-memory/storage";
 import {saveMediaNote} from "../media/attachments";
 import {scheduleVectors} from "../media/vector-runner";
 import {readSavedMessagesPage} from "./saved-messages";
+import {readSavedTopicPage,safeTopicId} from "./saved-topics";
 
 export type SavedTextImportResult={
   saved:number; duplicates:number; unsupported:number; empty:number;
@@ -18,12 +19,15 @@ function unlocked(signal?:AbortSignal){
  * The canonical memory writer owns SQLCipher, backup, FTS, receipt and replay.
  */
 export async function importSavedTextPage(profile:string,cursor="0",
-  signal?:AbortSignal):Promise<SavedTextImportResult>{
+  signal?:AbortSignal,topicId?:string):Promise<SavedTextImportResult>{
   unlocked(signal);
+  if(topicId!==undefined&&!safeTopicId(topicId))throw new Error("telegram_saved_topic_request_invalid");
   if(running.has(profile))throw new Error("telegram_saved_import_running");
   running.add(profile);
   try{
-    const page=await readSavedMessagesPage(profile,cursor,20);
+    const page=topicId===undefined
+      ? await readSavedMessagesPage(profile,cursor,20)
+      : await readSavedTopicPage(profile,topicId,cursor,20);
     unlocked(signal);
     let saved=0,duplicates=0,unsupported=0,empty=0;
     // Preserve chronological ordering of new notes within the current page.
@@ -45,6 +49,7 @@ export async function importSavedTextPage(profile:string,cursor="0",
         receipt:"telegram-saved:"+page.selfChatId+":"+item.id,
         telegramSavedMessage:{
           chatId:page.selfChatId,messageId:item.id,date:item.date,kind:"messageText",
+          ...(topicId!==undefined?{topicId}:{}),
         },
         onReplay:()=>{replayed=true;},
       },signal);
