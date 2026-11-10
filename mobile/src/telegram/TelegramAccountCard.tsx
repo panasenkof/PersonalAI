@@ -4,6 +4,7 @@ import {NebulaAction} from "../design/nebula/components";
 import {nebulaRadii,nebulaSpacing,nebulaTypography} from "../design/nebula/tokens";
 import {useTheme} from "../theme";
 import {onLocalMemorySessionChange} from "../local-memory/storage";
+import {TelegramSavedImportCard} from "./TelegramSavedImportCard";
 import {
   tdlibAvailable,tdlibAccountState,observeTelegramAccountState,
   initializeTelegramAccount,completeTelegramAuthorization,logOutTelegramAccount,
@@ -125,6 +126,7 @@ export function TelegramAccountCard({profile,apiConfigured}:{
           onPress={()=>void run(()=>completeTelegramAuthorization(step,value),"Данные отправлены в Telegram.")}/>
       </View>:null}
       {state==="authorizationStateReady" ? <>
+        <TelegramSavedImportCard profile={profile}/>
         {!confirmLogout?<NebulaAction icon="log-out" variant="danger"
           label="Выйти из аккаунта Telegram"
           disabled={saving} onPress={()=>setConfirmLogout(true)}/>

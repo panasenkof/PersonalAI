@@ -972,3 +972,55 @@ test("IMPORT-AUTO: generated tags and generated section do not change canonical 
   expect(manual).not.toBe(first);
   expect(sqlite.prepare("SELECT count(*) AS n FROM memory_entities").get().n).toBe(2);
 });
+
+
+test("TDLib Saved Messages use one canonical source receipt despite later text edits",async()=>{
+  const original={
+    title:"Первый текст",body:"Первый текст",sensitivity:"sensitive" as const,
+    receipt:"telegram-saved:12345:42",
+    telegramSavedMessage:{chatId:"12345",messageId:"42",date:1794300000,kind:"messageText" as const},
+  };
+  const id=await saveMediaNote("guest",original);
+  let replay:any=null;
+  const result=await saveMediaNote("guest",{
+    ...original,title:"Изменённый текст",body:"Изменённый текст",
+    onReplay:(value)=>{replay=value;},
+  });
+  expect(result).toBe(id);
+  expect(replay).toMatchObject({entityId:id,recordStatus:"active"});
+  expect(sqlite.prepare("SELECT count(*) n FROM memory_entities").get().n).toBe(1);
+  expect(sqlite.prepare("SELECT count(*) n FROM memory_received_shares").get().n).toBe(1);
+  const row=sqlite.prepare("SELECT source_ref,payload_json FROM memory_entities WHERE id=?").get(id);
+  expect(row.source_ref).toBe("telegram-saved");
+  const payload=JSON.parse(row.payload_json);
+  expect(payload.body).toBe("Первый текст");
+  expect(payload.source_telegram_saved).toEqual({
+    service:"telegram",channel:"saved",chatId:"12345",messageId:"42",
+    date:1794300000,kind:"messageText",
+  });
+  const other=await saveMediaNote("guest",{
+    ...original,receipt:"telegram-saved:12345:43",
+    telegramSavedMessage:{...original.telegramSavedMessage,messageId:"43"},
+  });
+  expect(other).not.toBe(id);
+  expect(sqlite.prepare("SELECT count(*) n FROM memory_entities").get().n).toBe(2);
+});
+
+test("TDLib Saved Messages cannot forge account source or substitute caption without original",async()=>{
+  const valid={
+    title:"Проверка",body:"Текст",sensitivity:"sensitive" as const,
+    receipt:"telegram-saved:12345:42",
+    telegramSavedMessage:{chatId:"12345",messageId:"42",date:1794300000,kind:"messageText" as const},
+  };
+  await expect(saveMediaNote("guest",{...valid,receipt:"telegram-saved:999:42"}))
+    .rejects.toThrow("invalid_telegram_saved_provenance");
+  await expect(saveMediaNote("guest",{...valid,body:""}))
+    .rejects.toThrow("invalid_telegram_saved_provenance");
+  await expect(saveMediaNote("guest",{...valid,allowSeparateCopy:true}))
+    .rejects.toThrow("invalid_telegram_saved_provenance");
+  await expect(saveMediaNote("guest",{...valid,telegramSavedMessage:{
+    ...valid.telegramSavedMessage,kind:"messagePhoto" as never,
+  }})).rejects.toThrow("invalid_telegram_saved_provenance");
+  expect(sqlite.prepare("SELECT count(*) n FROM memory_entities").get().n).toBe(0);
+  expect(sqlite.prepare("SELECT count(*) n FROM memory_received_shares").get().n).toBe(0);
+});

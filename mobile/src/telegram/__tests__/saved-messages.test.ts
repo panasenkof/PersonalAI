@@ -24,19 +24,19 @@ beforeEach(()=>{
   });
 });
 test("reads ONLY scoped native projection with bounded page; does not import",async()=>{
-  const result=await readSavedMessagesPage("0",20);
+  const result=await readSavedMessagesPage("guest","0",20);
   expect(result.messages.map(x=>x.id)).toEqual(["42","41"]);
   expect(result.nextCursor).toBe("41");
   expect((requireOptionalNativeModule as jest.Mock).mock.results[0].value.getSavedMessagesPage)
-    .toHaveBeenCalledWith("0",20);
+    .toHaveBeenCalledWith("guest","0",20);
 });
 test("rejects locked, unavailable, not authorized, malformed cursor before native read",async()=>{
   (localMemorySessionUnlocked as jest.Mock).mockReturnValueOnce(false);
-  await expect(readSavedMessagesPage()).rejects.toThrow("telegram_app_locked");
+  await expect(readSavedMessagesPage("guest")).rejects.toThrow("telegram_app_locked");
   (tdlibAvailable as jest.Mock).mockReturnValueOnce(false);
-  await expect(readSavedMessagesPage()).rejects.toThrow("telegram_account_not_authorized");
-  await expect(readSavedMessagesPage("-123")).rejects.toThrow("telegram_saved_request_invalid");
-  await expect(readSavedMessagesPage("0",101)).rejects.toThrow("telegram_saved_request_invalid");
+  await expect(readSavedMessagesPage("guest")).rejects.toThrow("telegram_account_not_authorized");
+  await expect(readSavedMessagesPage("guest","-123")).rejects.toThrow("telegram_saved_request_invalid");
+  await expect(readSavedMessagesPage("guest","0",101)).rejects.toThrow("telegram_saved_request_invalid");
 });
 test("rejects unexpected raw response, another chat identity, ordering and truncation",()=>{
   expect(()=>parseSavedMessagesPage("{}", "0",20)).toThrow("telegram_saved_page_invalid");
@@ -58,11 +58,14 @@ test("anchor repeat is skipped and zero-progress cursor terminates",()=>{
   const empty=parseSavedMessagesPage(page([item("42")],"42"),"42",20);
   expect(empty).toMatchObject({messages:[],nextCursor:""});
 });
+test("rejects invalid local profile before reading from Telegram",async()=>{
+  await expect(readSavedMessagesPage("../other")).rejects.toThrow("telegram_saved_profile_invalid");
+});
 test("locks after network read discard the result",async()=>{
   (localMemorySessionUnlocked as jest.Mock)
     .mockReturnValueOnce(true)
     .mockReturnValueOnce(false);
-  await expect(readSavedMessagesPage()).rejects.toThrow("telegram_app_locked");
+  await expect(readSavedMessagesPage("guest")).rejects.toThrow("telegram_app_locked");
 });
 test("media flags are preserved; no fake plaintext for files",()=>{
   const p=parseSavedMessagesPage(page([

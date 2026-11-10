@@ -184,8 +184,10 @@ class PersaiTelegramTdlibModule : Module() {
   /** Only read the chat belonging to getMe().id; no arbitrary chat ID in the JS API.
    * The response is an intentionally small projection, never raw TDLib JSON.
    */
-  private fun savedPage(fromId: String, limit: Int): String {
+  private fun savedPage(profile: String, fromId: String, limit: Int): String {
     requireState("authorizationStateReady")
+    require(Regex("^(guest|[a-zA-Z0-9_-]{1,120})$").matches(profile) &&
+      activeProfile == profile) { "tdlib_saved_profile_mismatch" }
     require(limit in 1..20) { "tdlib_saved_page_limit" }
     require(Regex("^(0|[1-9][0-9]{0,15})$").matches(fromId)) { "tdlib_saved_cursor_invalid" }
     val cursor = fromId.toLongOrNull() ?: throw IllegalArgumentException("tdlib_saved_cursor_invalid")
@@ -231,6 +233,10 @@ class PersaiTelegramTdlibModule : Module() {
         .put("text", text)
         .put("hasMedia", kind != "messageText"))
     }
+    // A profile switch/close during the native requests invalidates the result.
+    require(activeProfile == profile && authState == "authorizationStateReady") {
+      "tdlib_saved_profile_changed"
+    }
     // Cursor only indicates next history position; it does NOT ACK imported content.
     return JSONObject().put("messages", projected)
       .put("nextCursor", if (lastId > 0) lastId.toString() else "")
@@ -274,8 +280,8 @@ class PersaiTelegramTdlibModule : Module() {
       authState
     }
     // Explicit read-only user action; does not import or delete any Telegram data.
-    AsyncFunction("getSavedMessagesPage") { fromId: String, limit: Int ->
-      savedPage(fromId, limit)
+    AsyncFunction("getSavedMessagesPage") { profile: String, fromId: String, limit: Int ->
+      savedPage(profile, fromId, limit)
     }
     AsyncFunction("logOut") {
       requireState("authorizationStateReady")

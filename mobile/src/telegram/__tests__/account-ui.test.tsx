@@ -6,6 +6,10 @@ import {
  initializeTelegramAccount,completeTelegramAuthorization,logOutTelegramAccount,
 } from "../account";
 jest.mock("@expo/vector-icons/Feather",()=>()=>null);
+jest.mock("../TelegramSavedImportCard",()=>({
+ TelegramSavedImportCard:()=>require("react").createElement(
+   require("react-native").Text,null,"Импорт Избранного: тест"),
+}));
 jest.mock("../account",()=>({
  tdlibAvailable:jest.fn(),tdlibAccountState:jest.fn(),
  observeTelegramAccountState:jest.fn(),initializeTelegramAccount:jest.fn(),
@@ -43,6 +47,7 @@ test("real native state drives one-step login; secret code uses masked entry",as
  fireEvent.press(ui.getByText("Продолжить вход"));
  await waitFor(()=>expect(completeTelegramAuthorization).toHaveBeenCalledWith("code","123456"));
  await waitFor(()=>ui.getByText(/Telegram подтвердил авторизацию/));
+ expect(ui.getByText("Импорт Избранного: тест")).toBeTruthy();
  fireEvent.press(ui.getByText("Выйти из аккаунта Telegram"));
  expect(logOutTelegramAccount).not.toHaveBeenCalled();
  fireEvent.press(ui.getByText("Подтвердить выход из Telegram"));
