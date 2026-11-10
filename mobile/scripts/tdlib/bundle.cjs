@@ -28,6 +28,24 @@ function validateFile(root,relative){
     try{if(fs.readSync(fd,h,0,64,0)!==64)invalid('elf_short');}finally{fs.closeSync(fd);}
     if(h[0]!==127||h.toString('ascii',1,4)!=='ELF'||h[4]!==2||h[5]!==1||
        h.readUInt16LE(18)!==ARCH[relative.split('/')[1]])invalid('elf_arch');
+    // Android 15+ 16 KiB page-size support: verify every ELF64 PT_LOAD.
+    const phoff=Number(h.readBigUInt64LE(32));
+    const phentsize=h.readUInt16LE(54),phnum=h.readUInt16LE(56);
+    if(!Number.isSafeInteger(phoff)||phoff<64||phnum<1||phnum>128||
+       phentsize<56||phentsize>256||phoff+phentsize*phnum>size)invalid('elf_program_headers');
+    const fd2=fs.openSync(filename,'r');
+    let loads=0;
+    try{
+      const part=Buffer.alloc(phentsize);
+      for(let i=0;i<phnum;i++){
+        if(fs.readSync(fd2,part,0,phentsize,phoff+i*phentsize)!==phentsize)invalid('elf_program_headers');
+        if(part.readUInt32LE(0)===1){
+          loads++;
+          if(part.readBigUInt64LE(48)<16384n)invalid('elf_16k_alignment');
+        }
+      }
+    }finally{fs.closeSync(fd2);}
+    if(!loads)invalid('elf_no_load_segments');
   }else{
     const java=fs.readFileSync(filename,'utf8');
     if(!java.includes('package org.drinkless.tdlib;')||
