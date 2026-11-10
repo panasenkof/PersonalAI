@@ -38,7 +38,9 @@ export function TelegramBotCard({profile}:{profile:string}){
     running.current=true;setBusy(true);setError("");setNotice("");
     try{await f(version);}
     catch(e){if(version===current.current)setError(
-      e instanceof Error && e.message.length<240 ? e.message : "Ошибка Telegram. Повторите операцию.");}
+      e instanceof Error && e.message.length<240 &&
+      /^(Telegram|Не удалось|У бота|Укажите|Некорректн|Сначала|В очереди|Есть отредактированное|Сообщение Telegram|Разблокируйте)/.test(e.message)
+      ? e.message : "Не удалось выполнить операцию Telegram. Повторите попытку.");}
     finally{running.current=false;if(version===current.current)setBusy(false);}
   }
   function connect(){void action(async(version)=>{
