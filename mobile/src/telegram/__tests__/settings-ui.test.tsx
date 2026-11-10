@@ -8,6 +8,7 @@ jest.mock("@expo/vector-icons/Feather", () => () => null);
 jest.mock("react-native-safe-area-context", () => ({
   useSafeAreaInsets: () => ({top:24,bottom:24,left:0,right:0}),
 }));
+jest.mock("../TelegramBotCard", () => ({TelegramBotCard: () => require("react").createElement(require("react-native").Text,null,"Резервный бот: тест")}));
 jest.mock("../../profile/ProfileContext", () => ({useProfile: () => "guest"}));
 jest.mock("../settings", () => ({
   loadTelegramSyncMode: jest.fn(), inspectTelegramApiCredentials: jest.fn(),
@@ -27,7 +28,7 @@ test("mode is separately selectable and does not claim live Telegram access", as
   fireEvent.press(ui.getByLabelText("При каждом запуске PersAI"));
   await waitFor(() => expect(saveTelegramSyncMode).toHaveBeenCalledWith("guest","on_open"));
   expect(ui.getByText(/Нативная библиотека и авторизация/)).toBeTruthy();
-  expect(ui.getByText(/Бот будет подключён отдельным PR/)).toBeTruthy();
+  expect(ui.getByText("Резервный бот: тест")).toBeTruthy();
 });
 test("apiHash stays masked and is saved only on explicit confirmation", async () => {
   const ui=render(<TelegramSettingsScreen/>);
