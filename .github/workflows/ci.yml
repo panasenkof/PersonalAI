@@ -11,6 +11,9 @@ concurrency:
 
 permissions:
   contents: read
+  # Reusable native workflow may read only successful main-run artifacts.
+  # Never grants write access to PR CI.
+  actions: read
 
 jobs:
   changes:
