@@ -2,10 +2,13 @@ import React from "react";
 import {fireEvent,render,waitFor} from "@testing-library/react-native";
 import {TelegramSavedImportCard} from "../TelegramSavedImportCard";
 import {importSavedTextPage} from "../saved-import";
+import {listSavedTopics} from "../saved-topics";
 jest.mock("@expo/vector-icons/Feather",()=>()=>null);
 jest.mock("../saved-import",()=>({importSavedTextPage:jest.fn()}));
+jest.mock("../saved-topics",()=>({listSavedTopics:jest.fn()}));
 beforeEach(()=>{
   jest.clearAllMocks();
+  (listSavedTopics as jest.Mock).mockResolvedValue([]);
   (importSavedTextPage as jest.Mock).mockResolvedValue({
     saved:2,duplicates:1,unsupported:3,empty:0,nextCursor:"44",selfChatId:"12345",
   });
@@ -40,4 +43,27 @@ test("failure is visible but does not advance pagination",async()=>{
   await waitFor(()=>ui.getByText(/Не удалось прочитать или сохранить/));
   expect(ui.queryByText(/connection-key-redacted/)).toBeNull();
   expect(ui.getByText("Импортировать последние 20 сообщений")).toBeTruthy();
+});
+
+test("explicit topic selection resets cursor and reuses canonical importer",async()=>{
+  (listSavedTopics as jest.Mock).mockResolvedValueOnce([
+    {id:"-1005432",kind:"savedMessagesTopicTypeChat",isPinned:false,order:"123456789"},
+  ]);
+  const ui=render(<TelegramSavedImportCard profile="guest"/>);
+  expect(listSavedTopics).not.toHaveBeenCalled();
+  fireEvent.press(ui.getByText("Обновить подборки «Избранного»"));
+  await waitFor(()=>ui.getByText("Пересланное из чата · №-1005432"));
+  fireEvent.press(ui.getByText("Пересланное из чата · №-1005432"));
+  fireEvent.press(ui.getByText("Импортировать последние 20 сообщений"));
+  await waitFor(()=>expect(importSavedTextPage)
+    .toHaveBeenCalledWith("guest","0",undefined,"-1005432"));
+  fireEvent.press(ui.getByText("Все сообщения «Избранного»"));
+  fireEvent.press(ui.getByText("Импортировать последние 20 сообщений"));
+  await waitFor(()=>expect(importSavedTextPage).toHaveBeenLastCalledWith("guest","0"));
+});
+test("empty topic list and failures are non-destructive",async()=>{
+  const ui=render(<TelegramSavedImportCard profile="guest"/>);
+  fireEvent.press(ui.getByText("Обновить подборки «Избранного»"));
+  await waitFor(()=>ui.getByText(/Список пока пуст/));
+  expect(importSavedTextPage).not.toHaveBeenCalled();
 });
