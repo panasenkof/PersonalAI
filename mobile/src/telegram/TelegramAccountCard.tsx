@@ -116,7 +116,7 @@ export function TelegramAccountCard({profile,apiConfigured}:{
         <TextInput accessibilityLabel={labelFor[step]} value={value}
           onChangeText={setValue} editable={!saving}
           keyboardType={step==="phone"?"phone-pad":step==="email"?"email-address":
-            step==="password"?"default":"number-pad"}
+            step==="password"||step==="emailCode"?"default":"number-pad"}
           secureTextEntry={secret} autoCapitalize="none" autoCorrect={false}
           maxLength={password?256:step==="email"?254:32}
           placeholder={labelFor[step]} placeholderTextColor={t.muted} style={fieldStyle}/>
