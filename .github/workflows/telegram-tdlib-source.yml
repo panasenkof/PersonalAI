@@ -1,0 +1,49 @@
+name: Build official TDLib JSONJava bundle (manual)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pinned-tdlib:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - name: Validate locked source-bundle contract
+        run: node --test mobile/scripts/tdlib/bundle.test.cjs
+      - name: Install official Android SDK and toolchain
+        run: |
+          sdkmanager "platforms;android-34" "cmake;3.22.1" "ndk;27.0.12077973"
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends gperf php-cli perl make cmake ninja-build clang wget g++ unzip
+      - name: Build pinned upstream TDLib and OpenSSL, without prebuilt AAR
+        env:
+          TDLIB_BUILD_ROOT: ${{ runner.temp }}/persai-tdlib-build
+        run: bash mobile/scripts/tdlib/build-official.sh
+      - name: Verify manifest and package artifact
+        env:
+          TDLIB_BUILD_ROOT: ${{ runner.temp }}/persai-tdlib-build
+        run: |
+          node mobile/scripts/tdlib/bundle.cjs verify "$TDLIB_BUILD_ROOT/bundle"
+          tar -czf "$RUNNER_TEMP/official-tdlib-jsonjava-android.tar.gz" -C "$TDLIB_BUILD_ROOT" bundle
+          sha256sum "$RUNNER_TEMP/official-tdlib-jsonjava-android.tar.gz"
+      - name: Upload candidate for explicit review; NOT part of APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: tdlib-jsonjava-official-source-${{ github.sha }}
+          path: ${{ runner.temp }}/official-tdlib-jsonjava-android.tar.gz
+          retention-days: 30
+          if-no-files-found: error
