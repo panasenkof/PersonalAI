@@ -3,6 +3,7 @@
 set -euo pipefail
 TD_SHA="c8828d50f5eac2fc7089ce1089d7ce9095c61b5e"
 OPENSSL_TAG="openssl-3.5.9"
+OPENSSL_TAG_OBJECT="d0ca66a1abe52545f14eca635c648932fcde5615"
 NDK="27.0.12077973"
 : "$ANDROID_SDK_ROOT"
 : "$TDLIB_BUILD_ROOT"
@@ -14,6 +15,9 @@ git -C "$TDLIB_BUILD_ROOT/source" checkout --detach "$TD_SHA"
 test "$(git -C "$TDLIB_BUILD_ROOT/source" rev-parse HEAD)" = "$TD_SHA"
 cd "$TDLIB_BUILD_ROOT/source/example/android"
 bash ./check-environment.sh
+# Guard against a moved release tag before upstream script downloads its tarball.
+tag_ref="$(git ls-remote https://github.com/openssl/openssl.git "refs/tags/$OPENSSL_TAG" | cut -f1)"
+test "$tag_ref" = "$OPENSSL_TAG_OBJECT"
 bash ./build-openssl.sh "$ANDROID_SDK_ROOT" "$NDK" "$TDLIB_BUILD_ROOT/openssl" "$OPENSSL_TAG"
 bash ./build-tdlib.sh "$ANDROID_SDK_ROOT" "$NDK" "$TDLIB_BUILD_ROOT/openssl" \
   "c++_static" "JSONJava" 26 "arm64-v8a x86_64"
