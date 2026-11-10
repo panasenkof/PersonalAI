@@ -4,7 +4,7 @@ import {
   clearTelegramApiCredentials, inspectTelegramApiCredentials, loadTelegramApiCredentials,
   loadTelegramSyncMode, saveTelegramApiCredentials, saveTelegramSyncMode,
   validateTelegramApiCredentials, validateTelegramSyncMode,
-  loadOrCreateTdlibDbKey,tdlibKeyIsValid,
+  loadOrCreateTdlibDbKey,tdlibKeyIsValid,hasExistingTdlibDbKey,
 } from "../settings";
 jest.mock("expo-crypto", () => ({getRandomBytes:jest.fn(() => new Uint8Array(32).fill(42))}));
 jest.mock("expo-secure-store", () => ({
@@ -67,4 +67,15 @@ test("corrupted TDLib encryption key fails closed rather than replacing the sess
   mockStore.set("pia.telegram.tdlib.dbkey.v1.guest","invalid");
   await expect(loadOrCreateTdlibDbKey("guest")).rejects.toThrow("tdlib_device_key_corrupted");
   expect(Crypto.getRandomBytes).not.toHaveBeenCalled();
+});
+
+test("on_open only resumes a TDLib account whose device key was previously created",async()=>{
+  expect(await hasExistingTdlibDbKey("guest")).toBe(false);
+  expect(Crypto.getRandomBytes).not.toHaveBeenCalled();
+  await loadOrCreateTdlibDbKey("guest");
+  expect(await hasExistingTdlibDbKey("guest")).toBe(true);
+  expect(await hasExistingTdlibDbKey("other")).toBe(false);
+  mockStore.set("pia.telegram.tdlib.dbkey.v1.guest","invalid");
+  await expect(hasExistingTdlibDbKey("guest")).rejects.toThrow("tdlib_device_key_corrupted");
+  await expect(hasExistingTdlibDbKey("../other")).rejects.toThrow("invalid_local_profile");
 });
