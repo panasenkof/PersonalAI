@@ -261,6 +261,7 @@ jobs:
           echo "name=$name" >> "$GITHUB_OUTPUT"
 
       - name: Publish permanent GitHub prerelease
+        id: publish
         if: steps.changes.outputs.needed == 'true'
         working-directory: mobile
         env:
@@ -296,6 +297,25 @@ jobs:
               --title "Android test ${TAG}" --notes-file "$RUNNER_TEMP/apk-notes.md" \
               --target "$TARGET_SHA" --prerelease
           fi
+          # This output is deliberately absent if main advanced and no APK was published.
+          echo "published=true" >> "$GITHUB_OUTPUT"
+
+      - name: Notify Telegram after the APK was published
+        if: ${{ steps.publish.outputs.published == 'true' }}
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          APK_TAG: ${{ steps.artifact.outputs.tag }}
+          APK_NAME: ${{ steps.artifact.outputs.name }}
+          APK_VERSION_CODE: ${{ steps.version.outputs.code }}
+        shell: bash
+        run: |
+          if [ -z "${TELEGRAM_BOT_TOKEN:-}" ] || [ -z "${TELEGRAM_CHAT_ID:-}" ]; then
+            echo "::warning::Telegram APK notification skipped. Add TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID to PersonalAI repository secrets."
+            exit 0
+          fi
+          python3 .github/scripts/notify-android-apk.py
 
       # Never cache signing material or compiled APKs, only native object files.
       - name: Save trusted arm64 C/C++ compiler cache
