@@ -96,6 +96,9 @@ class PersaiTelegramTdlibModule : Module() {
       if (next == "authorizationStateClosed") receiving = false
     }
     val extra = msg.optLong("@extra", -1)
+    if (msg.optString("@type") == "error" && extra < 0) {
+      emitAuth("tdlib_runtime_error")
+    }
     if (extra > 0) pending[extra]?.complete(msg)
   }
 
@@ -113,6 +116,12 @@ class PersaiTelegramTdlibModule : Module() {
       }
       pending.values.forEach { it.completeExceptionally(IllegalStateException("tdlib_closed")) }
       pending.clear()
+      synchronized(lock) {
+        clientId = 0
+        activeProfile = null
+        native = null
+        params = null
+      }
     }, "PersAI-TDLib-JSON-receiver").also {
       it.isDaemon = true
       it.start()
@@ -128,6 +137,7 @@ class PersaiTelegramTdlibModule : Module() {
     synchronized(lock) {
       if (clientId != 0) {
         if (activeProfile != profile) throw IllegalStateException("tdlib_other_profile_active")
+        if (!receiving) throw IllegalStateException("tdlib_restarting_after_close")
         return authState
       }
       val ctx = appContext.reactContext ?: throw IllegalStateException("tdlib_context_unavailable")
