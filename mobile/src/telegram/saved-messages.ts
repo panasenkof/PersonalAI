@@ -11,7 +11,7 @@ export type SavedMessagesPage = {
   selfChatId:string; messages:SavedMessagePreview[]; nextCursor:string;
 };
 type NativeSavedMessages = {
-  getSavedMessagesPage(cursor:string,limit:number):Promise<string>;
+  getSavedMessagesPage(profile:string,cursor:string,limit:number):Promise<string>;
 };
 const getNative=():NativeSavedMessages|null =>
   Platform.OS==="android"
@@ -59,15 +59,17 @@ export function parseSavedMessagesPage(raw:string,cursor:string,limit:number):Sa
 }
 
 /** Explicitly requested user read; no automatic save and no LLM/external upload. */
-export async function readSavedMessagesPage(cursor="0",limit=20):Promise<SavedMessagesPage>{
+export async function readSavedMessagesPage(profile:string,cursor="0",limit=20):Promise<SavedMessagesPage>{
   if(!localMemorySessionUnlocked())throw new Error("telegram_app_locked");
+  if(!/^(guest|[a-zA-Z0-9_-]{1,120})$/.test(profile))
+    throw new Error("telegram_saved_profile_invalid");
   if(!cursorId(cursor)||!Number.isSafeInteger(limit)||limit<1||limit>20)
     throw new Error("telegram_saved_request_invalid");
   if(!tdlibAvailable()||tdlibAccountState()!=="authorizationStateReady")
     throw new Error("telegram_account_not_authorized");
   const native=getNative();
   if(!native?.getSavedMessagesPage)throw new Error("telegram_saved_reader_missing");
-  const raw=await native.getSavedMessagesPage(cursor,limit);
+  const raw=await native.getSavedMessagesPage(profile,cursor,limit);
   if(!localMemorySessionUnlocked())throw new Error("telegram_app_locked");
   return parseSavedMessagesPage(raw,cursor,limit);
 }
