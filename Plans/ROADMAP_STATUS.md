@@ -1,5 +1,7 @@
 # Реестр статусов PersAI
 
+**Telegram B9 CODE_CANDIDATE / real TDLib pending (10.11):** добавлен контур ручной проверки официального TDLib source artifact (main workflow, успешный run ID, whitelist, SHA-256/ELF/16 KiB) в прежний Android SQLCipher/Expo emulator acceptance. Обычные APK не содержат TDLib и не проходят реальную авторизацию. До физического Vivo и отдельного PR pin/phone APK — C2_PENDING. [Gate](../docs/architecture/TELEGRAM_TDLIB_APK_ACCEPTANCE_GATE_2026-11-10.md).
+
 
 **Bot B1 COMPLETE_CODE / C2_PENDING (10.11):** PR [#458](https://github.com/panasenkof/PersonalAI/pull/458) слит после [required CI SUCCESS](https://github.com/panasenkof/PersonalAI/actions/runs/42796218657) на exact SHA `a164f224697614d9a94ffa71789db29dfa5e23a1`, `main@ee420c3`. SecureStore bot token, getMe, pairing private chat, getUpdates fail-closed при webhook, text-only canonical saveMediaNote + provenance/dedup/cursor; on_open после AppLock. 198 suites / 1972 tests PASS, браузер/native APK/emulator PASS_AUTOMATED; **live Telegram и Vivo NOT_RUN_PHYSICAL**. Фото/файлы/альбомы/edits НЕ ПОДДЕРЖАНЫ, при встрече в разрешённом чате ACK блокируется. TDLib primary всё ещё NOT_IMPLEMENTED.
 
