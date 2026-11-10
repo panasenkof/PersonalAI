@@ -7,7 +7,7 @@ import {
 } from "../account";
 import {localMemorySessionUnlocked} from "../../local-memory/storage";
 import {loadTelegramApiCredentials,loadOrCreateTdlibDbKey} from "../settings";
-jest.mock("expo-modules-core",()=>({requireOptionalNativeModule:jest.fn()}));
+jest.mock("expo-modules-core",()=>({...jest.requireActual("expo-modules-core"),requireOptionalNativeModule:jest.fn()}));
 jest.mock("../../local-memory/storage",()=>({localMemorySessionUnlocked:jest.fn()}));
 jest.mock("../settings",()=>({
   loadTelegramApiCredentials:jest.fn(),loadOrCreateTdlibDbKey:jest.fn(),
