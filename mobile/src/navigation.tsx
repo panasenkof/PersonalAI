@@ -10,6 +10,7 @@ import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import React, { useEffect } from "react";
 import { createNavigationContainerRef } from "@react-navigation/native";
 import { IncomingShares } from "./media/IncomingShares";
+import { TelegramAutoSync } from "./telegram/TelegramAutoSync";
 import { SettingsDetailScreen, PhotoSearchSettingsScreen, type SettingsTopic } from "./screens/SettingsDetailScreen";
 import { clearAttachmentPreviews } from "./media/attachments";
 import type { VerifiedOriginalLocator } from "./local-memory/types";
@@ -93,6 +94,7 @@ function ThemedRootNavigator() {
   return (
     <NavigationContainer ref={navigationRef} theme={dark ? DarkTheme : DefaultTheme}>
       <IncomingShares open={incoming => { if (!navigationRef.isReady()) return false; const route = navigationRef.getCurrentRoute(); if (route?.name === "ShareDestination" || (route?.name === "MemoryImport" && (route.params as RootStackParams["MemoryImport"])?.incoming)) return false; navigationRef.dispatch(StackActions.push("ShareDestination", { incoming })); return true; }} />
+      <TelegramAutoSync />
       <Stack.Navigator screenOptions={{
         headerStyle: { backgroundColor: t.panel }, headerTintColor: t.text,
       }}>
