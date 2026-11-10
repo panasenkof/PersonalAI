@@ -180,6 +180,63 @@ class PersaiTelegramTdlibModule : Module() {
     return authState
   }
 
+
+  /** Only read the chat belonging to getMe().id; no arbitrary chat ID in the JS API.
+   * The response is an intentionally small projection, never raw TDLib JSON.
+   */
+  private fun savedPage(fromId: String, limit: Int): String {
+    requireState("authorizationStateReady")
+    require(limit in 1..20) { "tdlib_saved_page_limit" }
+    require(Regex("^(0|[1-9][0-9]{0,15})$").matches(fromId)) { "tdlib_saved_cursor_invalid" }
+    val cursor = fromId.toLongOrNull() ?: throw IllegalArgumentException("tdlib_saved_cursor_invalid")
+    require(cursor in 0L..9007199254740991L) { "tdlib_saved_cursor_invalid" }
+    val self = sendRequest(JSONObject().put("@type", "getMe"))
+    require(self.optString("@type") == "user") { "tdlib_self_identity_missing" }
+    val selfId = self.optLong("id", 0)
+    require(selfId > 0 && selfId <= 9007199254740991L) { "tdlib_self_identity_invalid" }
+    val chat = sendRequest(JSONObject().put("@type", "createPrivateChat")
+      .put("user_id", selfId).put("force", false))
+    require(chat.optString("@type") == "chat") { "tdlib_saved_chat_missing" }
+    val chatId = chat.optLong("id", 0)
+    // Telegram Saved Messages is the private chat with ourselves, not a channel.
+    require(chatId == selfId) { "tdlib_saved_chat_identity_mismatch" }
+    val history = sendRequest(JSONObject().put("@type", "getChatHistory")
+      .put("chat_id", chatId).put("from_message_id", cursor)
+      .put("offset", 0).put("limit", limit).put("only_local", false))
+    require(history.optString("@type") == "messages") { "tdlib_saved_history_invalid" }
+    val messages = history.optJSONArray("messages")
+      ?: throw IllegalStateException("tdlib_saved_messages_missing")
+    require(messages.length() <= limit) { "tdlib_saved_page_overflow" }
+    val projected = org.json.JSONArray()
+    var lastId = 0L
+    for (index in 0 until messages.length()) {
+      val message = messages.optJSONObject(index)
+        ?: throw IllegalStateException("tdlib_saved_message_invalid")
+      require(message.optLong("chat_id", 0) == chatId) { "tdlib_saved_source_mismatch" }
+      val id = message.optLong("id", 0)
+      require(id > 0 && id <= 9007199254740991L &&
+        (lastId == 0L || id < lastId) && (cursor == 0L || id <= cursor)) {
+        "tdlib_saved_message_order_invalid"
+      }
+      lastId = id
+      val content = message.optJSONObject("content")
+      val kind = content?.optString("@type") ?: "unknown"
+      val description = if (kind == "messageText") content?.optJSONObject("text")?.optString("text", "")
+        else content?.optJSONObject("caption")?.optString("text", "")
+      val text = (description ?: "").take(60000)
+      projected.put(JSONObject()
+        .put("id", id.toString())
+        .put("date", message.optLong("date", 0))
+        .put("kind", kind.take(80))
+        .put("text", text)
+        .put("hasMedia", kind != "messageText"))
+    }
+    // Cursor only indicates next history position; it does NOT ACK imported content.
+    return JSONObject().put("messages", projected)
+      .put("nextCursor", if (lastId > 0) lastId.toString() else "")
+      .put("selfChatId", chatId.toString()).toString()
+  }
+
   override fun definition() = ModuleDefinition {
     Name("PersaiTelegramTdlib")
     Events("onTelegramAuthorizationState")
@@ -215,6 +272,10 @@ class PersaiTelegramTdlibModule : Module() {
       sendRequest(JSONObject().put("@type","checkAuthenticationEmailCode")
         .put("code",JSONObject().put("@type","emailAddressAuthenticationCode").put("code",code)))
       authState
+    }
+    // Explicit read-only user action; does not import or delete any Telegram data.
+    AsyncFunction("getSavedMessagesPage") { fromId: String, limit: Int ->
+      savedPage(fromId, limit)
     }
     AsyncFunction("logOut") {
       requireState("authorizationStateReady")
