@@ -4,6 +4,7 @@ import {useSafeAreaInsets} from "react-native-safe-area-context";
 import {useProfile} from "../profile/ProfileContext";
 import {useTheme} from "../theme";
 import {TelegramBotCard} from "../telegram/TelegramBotCard";
+import {TelegramAccountCard} from "../telegram/TelegramAccountCard";
 import {NebulaAction, NebulaSection} from "../design/nebula/components";
 import {nebulaRadii, nebulaSpacing, nebulaTypography} from "../design/nebula/tokens";
 import {
@@ -106,6 +107,7 @@ export function TelegramSettingsScreen() {
         disabled={disabled || !apiId || !apiHash} onPress={() => void saveApi()}/>
       {configured ? <NebulaAction icon="trash-2" variant="danger" label="Удалить API-параметры"
         disabled={disabled} onPress={() => void clearApi()}/> : null}
+      <TelegramAccountCard profile={profile} apiConfigured={configured}/>
     </NebulaSection>
     <NebulaSection title="Резервный канал — личный бот">
       <TelegramBotCard profile={profile}/>
