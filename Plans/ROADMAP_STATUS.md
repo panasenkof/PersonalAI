@@ -1,5 +1,8 @@
 # Реестр статусов PersAI
 
+
+**Bot B1 candidate (10.11):** отдельный резервный Bot API token + проверка `getMe` + явный private chat pairing + bounded `getUpdates` + text-only импорт в canonical SQLCipher/«Входящие» и cursor после durable commit + on_open после AppLock. Это только PR-кандидат до required CI; фото/файлы/изменённые сообщения не ACK, TDLib primary не реализован. Запланирована физическая проверка, NOT_RUN_PHYSICAL.
+
 **10.11.2026 · Telegram PR2.A (новый приоритет):** отдельные настройки, manual/on_open (manual по умолчанию), device-only API ID/hash; **не** авторизация, не TDLib бинарник и не реальный импорт. PR2.B: официальный TDLib Android/«Избранное»; дальше canonical импорт и резервный Bot API. Android Share PR1 пропущен по решению владельца, MSG-2.B NOT_RUN_PHYSICAL. Не заявлять Telegram READY без CI+физической проверки.
 
 
