@@ -29,6 +29,11 @@ class PersaiTelegramTdlibModule : Module() {
   }
 
   private val lock = Any()
+  /** Only TDLib-delivered topic IDs; no caller can enumerate arbitrary chats. */
+  private data class ScopedTopic(val id: Long, val kind: String, val pinned: Boolean, val order: Long)
+  private val savedTopics = LinkedHashMap<Long, ScopedTopic>()
+  private fun safeTopicId(id: Long): Boolean =
+    id != Long.MIN_VALUE && id >= -9007199254740991L && id <= 9007199254740991L
   private val sequence = AtomicLong(0)
   private val pending = ConcurrentHashMap<Long, CompletableFuture<JSONObject>>()
   @Volatile private var native: NativeJson? = null
@@ -54,7 +59,7 @@ class PersaiTelegramTdlibModule : Module() {
   private fun sendNoReply(objectData: JSONObject) {
     requireNative().send(clientId, objectData.toString())
   }
-  private fun sendRequest(data: JSONObject): JSONObject {
+  private fun sendRequest(data: JSONObject, allowNoMoreTopics: Boolean = false): JSONObject {
     val n = requireNative()
     val requestId = sequence.incrementAndGet()
     val future = CompletableFuture<JSONObject>()
@@ -64,6 +69,10 @@ class PersaiTelegramTdlibModule : Module() {
       n.send(clientId, data.toString())
       val reply = future.get(25, TimeUnit.SECONDS)
       if (reply.optString("@type") == "error") {
+        // TDLib uses 404 to mean the Saved Topics list is completely loaded.
+        // Permit that only for an explicit loadSavedMessagesTopics request.
+        if (allowNoMoreTopics && data.optString("@type") == "loadSavedMessagesTopics" &&
+          reply.optInt("code") == 404) return JSONObject().put("@type","ok")
         throw IllegalStateException("tdlib_operation_rejected")
       }
       return reply
@@ -84,6 +93,26 @@ class PersaiTelegramTdlibModule : Module() {
     if (packet.length > 1_000_000) return
     val msg = try { JSONObject(packet) } catch (_: Exception) { return }
     if (msg.optInt("@client_id", -1) != clientId) return
+
+    if (msg.optString("@type") == "updateSavedMessagesTopic") {
+      val topic = msg.optJSONObject("topic")
+      val id = topic?.optLong("id", Long.MIN_VALUE) ?: Long.MIN_VALUE
+      val kind = topic?.optJSONObject("type")?.optString("@type", "") ?: ""
+      if (safeTopicId(id) && kind in setOf("savedMessagesTopicTypeMyNotes",
+          "savedMessagesTopicTypeAuthorHidden", "savedMessagesTopicTypeChat")) {
+        val order = topic?.optLong("order", 0L) ?: 0L
+        synchronized(lock) {
+          if (order == 0L) savedTopics.remove(id) else {
+            savedTopics[id] = ScopedTopic(id,kind,topic?.optBoolean("is_pinned",false) == true,order)
+            // Bound in-memory source-ID registry; no parallel DB or index.
+            if (savedTopics.size > 256) {
+              val least = savedTopics.values.minByOrNull { it.order }
+              if (least != null) savedTopics.remove(least.id)
+            }
+          }
+        }
+      }
+    }
     if (msg.optString("@type") == "updateAuthorizationState") {
       val next = msg.optJSONObject("authorization_state")?.optString("@type") ?: return
       if (next == "authorizationStateWaitTdlibParameters") {
@@ -121,6 +150,7 @@ class PersaiTelegramTdlibModule : Module() {
         activeProfile = null
         native = null
         params = null
+        savedTopics.clear()
       }
     }, "PersAI-TDLib-JSON-receiver").also {
       it.isDaemon = true
@@ -167,6 +197,7 @@ class PersaiTelegramTdlibModule : Module() {
       clientId = bridge.create()
       activeProfile = profile
       authState = "starting"
+      savedTopics.clear()
       beginReceive()
       sendNoReply(JSONObject().put("@type","getAuthorizationState"))
       return authState
@@ -184,7 +215,7 @@ class PersaiTelegramTdlibModule : Module() {
   /** Only read the chat belonging to getMe().id; no arbitrary chat ID in the JS API.
    * The response is an intentionally small projection, never raw TDLib JSON.
    */
-  private fun savedPage(profile: String, fromId: String, limit: Int): String {
+  private fun savedPage(profile: String, fromId: String, limit: Int, topicId: Long? = null): String {
     requireState("authorizationStateReady")
     require(Regex("^(guest|[a-zA-Z0-9_-]{1,120})$").matches(profile) &&
       activeProfile == profile) { "tdlib_saved_profile_mismatch" }
@@ -202,9 +233,21 @@ class PersaiTelegramTdlibModule : Module() {
     val chatId = chat.optLong("id", 0)
     // Telegram Saved Messages is the private chat with ourselves, not a channel.
     require(chatId == selfId) { "tdlib_saved_chat_identity_mismatch" }
-    val history = sendRequest(JSONObject().put("@type", "getChatHistory")
-      .put("chat_id", chatId).put("from_message_id", cursor)
-      .put("offset", 0).put("limit", limit).put("only_local", false))
+    if (topicId != null) {
+      require(safeTopicId(topicId)) { "tdlib_saved_topic_id_invalid" }
+      synchronized(lock) {
+        require(savedTopics.containsKey(topicId)) { "tdlib_saved_topic_not_discovered" }
+      }
+    }
+    val query = if (topicId != null)
+      JSONObject().put("@type", "getSavedMessagesTopicHistory")
+        .put("saved_messages_topic_id", topicId)
+        .put("from_message_id", cursor).put("offset", 0).put("limit", limit)
+    else
+      JSONObject().put("@type", "getChatHistory")
+        .put("chat_id", chatId).put("from_message_id", cursor)
+        .put("offset", 0).put("limit", limit).put("only_local", false)
+    val history = sendRequest(query)
     require(history.optString("@type") == "messages") { "tdlib_saved_history_invalid" }
     val messages = history.optJSONArray("messages")
       ?: throw IllegalStateException("tdlib_saved_messages_missing")
@@ -240,7 +283,30 @@ class PersaiTelegramTdlibModule : Module() {
     // Cursor only indicates next history position; it does NOT ACK imported content.
     return JSONObject().put("messages", projected)
       .put("nextCursor", if (lastId > 0) lastId.toString() else "")
-      .put("selfChatId", chatId.toString()).toString()
+      .put("selfChatId", chatId.toString())
+      .apply { if (topicId != null) put("topicId", topicId.toString()) }.toString()
+  }
+
+
+  private fun savedTopicList(profile: String): String {
+    requireState("authorizationStateReady")
+    require(Regex("^(guest|[a-zA-Z0-9_-]{1,120})$").matches(profile) &&
+      activeProfile == profile) { "tdlib_saved_profile_mismatch" }
+    // API only supplies topics as updates; loadSavedMessagesTopics returns Ok,
+    // not a list. The receiver owns the sole bounded list of verified IDs.
+    sendRequest(JSONObject().put("@type","loadSavedMessagesTopics").put("limit",20),
+      allowNoMoreTopics = true)
+    requireState("authorizationStateReady")
+    require(activeProfile == profile) { "tdlib_saved_profile_changed" }
+    val projection = org.json.JSONArray()
+    synchronized(lock) {
+      savedTopics.values.sortedByDescending { it.order }.take(100).forEach { topic ->
+        projection.put(JSONObject().put("id",topic.id.toString())
+          .put("kind",topic.kind).put("isPinned",topic.pinned)
+          .put("order",topic.order.toString()))
+      }
+    }
+    return JSONObject().put("topics",projection).toString()
   }
 
   override fun definition() = ModuleDefinition {
@@ -282,6 +348,19 @@ class PersaiTelegramTdlibModule : Module() {
     // Explicit read-only user action; does not import or delete any Telegram data.
     AsyncFunction("getSavedMessagesPage") { profile: String, fromId: String, limit: Int ->
       savedPage(profile, fromId, limit)
+    }
+    // Topic IDs are only accepted after an updateSavedMessagesTopic from TDLib.
+    AsyncFunction("listSavedMessagesTopics") { profile: String ->
+      savedTopicList(profile)
+    }
+    AsyncFunction("getSavedMessagesTopicPage") {
+      profile: String, topicId: String, fromId: String, limit: Int ->
+      require(Regex("^(0|-?[1-9][0-9]{0,15})$").matches(topicId)) {
+        "tdlib_saved_topic_id_invalid"
+      }
+      val requested = topicId.toLongOrNull()
+        ?: throw IllegalArgumentException("tdlib_saved_topic_id_invalid")
+      savedPage(profile,fromId,limit,requested)
     }
     AsyncFunction("logOut") {
       requireState("authorizationStateReady")
