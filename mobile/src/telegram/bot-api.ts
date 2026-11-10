@@ -37,7 +37,7 @@ async function api(token: string, method: "getMe" | "getWebhookInfo" | "getUpdat
   if (!response.ok) throw new Error("Telegram отклонил запрос. Проверьте токен и доступность бота.");
   let raw:string;
   try {raw=await response.text();}catch{throw new Error("Не удалось прочитать ответ Telegram.");}
-  if (!raw || raw.length > 256_000) throw new Error("Слишком большой ответ Telegram.");
+  if (!raw || raw.length > 2_000_000) throw new Error("Слишком большой ответ Telegram.");
   let body:unknown;
   try {body=JSON.parse(raw);}catch{throw new Error("Telegram вернул некорректные данные.");}
   if (!body || typeof body!=="object" || !(body as {ok?:boolean}).ok ||
