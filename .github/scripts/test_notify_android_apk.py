@@ -57,6 +57,16 @@ class TelegramApkNotificationTests(unittest.TestCase):
         notify.send("123:TEST_TOKEN", "42", "ok", opener=opener, sleeper=lambda _: None)
         self.assertEqual(len(count), 2)
 
+    def test_malformed_api_response_does_not_expose_token(self):
+        with self.assertRaises(RuntimeError) as caught:
+            notify.send(
+                "123:TOP_SECRET", "42", "hi",
+                opener=lambda request, timeout: io.BytesIO(b"invalid json"),
+                sleeper=lambda _: None,
+            )
+        self.assertIn("invalid response", str(caught.exception))
+        self.assertNotIn("TOP_SECRET", str(caught.exception))
+
     def test_invalid_chat_prevents_network_send(self):
         with self.assertRaises(ValueError):
             notify.send("123:TEST_TOKEN", "@username", "hi", opener=lambda *_args, **_kwargs: self.fail("network attempted"))
