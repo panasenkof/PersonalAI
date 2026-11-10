@@ -1,0 +1,26 @@
+name: TDLib official-source Android APK acceptance (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      tdlib_source_run_id:
+        description: "Successful run ID from Build official TDLib JSONJava bundle (manual) on main"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  reviewed-native-apk:
+    if: github.ref == 'refs/heads/main'
+    # Reuse the identical Expo, SQLCipher, native release, browser/Android
+    # smoke gates. This never publishes a user-upgrade APK automatically.
+    uses: ./.github/workflows/mobile-native-sqlcipher.yml
+    with:
+      vision_expo_gate: true
+      tdlib_source_run_id: ${{ inputs.tdlib_source_run_id }}
+    permissions:
+      contents: read
+      actions: read
