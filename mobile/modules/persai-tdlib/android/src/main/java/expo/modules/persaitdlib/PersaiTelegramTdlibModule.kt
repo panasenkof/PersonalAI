@@ -59,7 +59,7 @@ class PersaiTelegramTdlibModule : Module() {
   private fun sendNoReply(objectData: JSONObject) {
     requireNative().send(clientId, objectData.toString())
   }
-  private fun sendRequest(data: JSONObject): JSONObject {
+  private fun sendRequest(data: JSONObject, allowNoMoreTopics: Boolean = false): JSONObject {
     val n = requireNative()
     val requestId = sequence.incrementAndGet()
     val future = CompletableFuture<JSONObject>()
@@ -69,6 +69,10 @@ class PersaiTelegramTdlibModule : Module() {
       n.send(clientId, data.toString())
       val reply = future.get(25, TimeUnit.SECONDS)
       if (reply.optString("@type") == "error") {
+        // TDLib uses 404 to mean the Saved Topics list is completely loaded.
+        // Permit that only for an explicit loadSavedMessagesTopics request.
+        if (allowNoMoreTopics && data.optString("@type") == "loadSavedMessagesTopics" &&
+          reply.optInt("code") == 404) return JSONObject().put("@type","ok")
         throw IllegalStateException("tdlib_operation_rejected")
       }
       return reply
@@ -290,14 +294,8 @@ class PersaiTelegramTdlibModule : Module() {
       activeProfile == profile) { "tdlib_saved_profile_mismatch" }
     // API only supplies topics as updates; loadSavedMessagesTopics returns Ok,
     // not a list. The receiver owns the sole bounded list of verified IDs.
-    try {
-      sendRequest(JSONObject().put("@type","loadSavedMessagesTopics").put("limit",20))
-    } catch (e: IllegalStateException) {
-      // An empty cache may be legitimate after a 404 (end-of-list), but all
-      // other TDLib errors are fail-closed and should not pretend success.
-      if (e.message != "tdlib_operation_rejected") throw e
-      synchronized(lock) { if (savedTopics.isEmpty()) throw e }
-    }
+    sendRequest(JSONObject().put("@type","loadSavedMessagesTopics").put("limit",20),
+      allowNoMoreTopics = true)
     requireState("authorizationStateReady")
     require(activeProfile == profile) { "tdlib_saved_profile_changed" }
     val projection = org.json.JSONArray()
