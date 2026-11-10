@@ -256,7 +256,7 @@ jobs:
       # The ordinary PR/CI APK MUST NOT download or embed TDLib. A manually
       # approved main-only run can stage a provenance-checked source artifact.
       - name: Stage reviewed official TDLib binary for manual APK acceptance
-        if: inputs.tdlib_source_run_id != ''
+        if: ${{ inputs.tdlib_source_run_id != '' }}
         env:
           GH_TOKEN: ${{ github.token }}
           TDLIB_SOURCE_RUN_ID: ${{ inputs.tdlib_source_run_id }}
