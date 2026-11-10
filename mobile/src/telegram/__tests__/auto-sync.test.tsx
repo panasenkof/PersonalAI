@@ -8,7 +8,8 @@ import {localMemorySessionUnlocked} from "../../local-memory/storage";
 jest.mock("../settings",()=>({loadTelegramSyncMode:jest.fn()}));
 jest.mock("../bot-settings",()=>({loadTelegramBotConfig:jest.fn()}));
 jest.mock("../bot-sync",()=>({syncTelegramBotText:jest.fn()}));
-jest.mock("../../local-memory/storage",()=>({localMemorySessionUnlocked:jest.fn()}));
+jest.mock("../../local-memory/storage",()=>({localMemorySessionUnlocked:jest.fn(),onLocalMemorySessionChange:jest.fn(()=>()=>{})}));
+jest.mock("../account",()=>({closeTelegramAccount:jest.fn(async()=> "offline")}));
 jest.mock("../../profile/ProfileContext",()=>({useProfile:()=> "guest"}));
 const mockVisibility={current:true};
 jest.mock("../../security/visibility",()=>({
