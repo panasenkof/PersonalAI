@@ -66,7 +66,7 @@ class PersaiTelegramTdlibModule : Module() {
     val value = error.optString("message", "").uppercase(java.util.Locale.ROOT)
     if (value.matches(Regex("FLOOD_WAIT_[0-9]{1,6}"))) {
       val seconds = value.removePrefix("FLOOD_WAIT_").toIntOrNull() ?: 0
-      return "tdlib_flood_wait_" + seconds.coerceIn(1, 86400)
+      return if (seconds in 1..86400) "tdlib_flood_wait_" + seconds else "tdlib_flood_limited"
     }
     return when {
       value == "PHONE_NUMBER_FLOOD" || value == "PHONE_CODE_FLOOD" ||
