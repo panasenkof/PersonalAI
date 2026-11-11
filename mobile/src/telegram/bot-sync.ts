@@ -1,5 +1,5 @@
 import {localMemorySessionUnlocked,onLocalMemorySessionChange} from "../local-memory/storage";
-import {saveMediaNote} from "../media/attachments";
+import {saveMediaNote,MAX_TOTAL_ORIGINAL_BYTES} from "../media/attachments";
 import {scheduleVectors} from "../media/vector-runner";
 import {fetchBotUpdates, type BotMessage} from "./bot-api";
 import {prepareBotOriginal, type PreparedBotOriginal} from "./bot-media";
@@ -45,12 +45,16 @@ async function perform(profile:string,signal?:AbortSignal):Promise<TelegramBotSy
         break; // no ACK; later updates (or user's /done) establish a boundary
       }
       const staged:PreparedBotOriginal[]=[];
+      let stagedBytes=0;
       try{
         for(const part of plan.messages){
           mustBeUnlocked(signal);
           const original=await prepareBotOriginal(config.token,part,signal,true);
           if(!original)throw new Error("В Telegram-альбоме нет оригинала. Импорт остановлен.");
           staged.push(original);
+          stagedBytes+=original.file.size||0;
+          if(stagedBytes>MAX_TOTAL_ORIGINAL_BYTES)
+            throw new Error("Альбом Telegram превышает лимит 80 МБ. Исходные сообщения не подтверждены.");
         }
         mustBeUnlocked(signal);
         const ids=plan.messages.map(part=>part.message_id);
