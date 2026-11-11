@@ -12,7 +12,7 @@ import {
   saveTelegramApiCredentials, saveTelegramSyncMode, type TelegramSyncMode,
 } from "../telegram/settings";
 
-/** Setup UI, NOT a claim of a live TDLib session. Native bridge lands separately. */
+/** Setup UI; actual authorization state is reported only by the native TDLib account card. */
 export function TelegramSettingsScreen() {
   const profile = useProfile(), theme = useTheme(), insets = useSafeAreaInsets();
   const [mode, setMode] = useState<TelegramSyncMode>("manual");
@@ -55,7 +55,7 @@ export function TelegramSettingsScreen() {
     await run(async (version) => {
       await saveTelegramSyncMode(profile, value);
       if (version === live.current) setMode(value);
-    }, "Режим сохранён. Синхронизация заработает после подключения аккаунта.");
+    }, "Режим сохранён. Активируется для подключённых каналов после разблокировки PersAI.");
   }
   async function saveApi() {
     await run(async (version) => {
@@ -91,9 +91,9 @@ export function TelegramSettingsScreen() {
     </NebulaSection>
     <NebulaSection title="Аккаунт Telegram">
       <Text style={{color: theme.muted, ...nebulaTypography.label}}>
-        Подготовка к TDLib. Нативная библиотека и авторизация будут добавлены
-        отдельным PR; эта версия не читает Telegram. API ID и API hash
-        приложения можно получить на my.telegram.org.
+        API ID и API Hash приложения получите на my.telegram.org.
+        После сохранения параметров подключите аккаунт ниже. Для личного
+        «Избранного» необходим подписанный APK с проверенной TDLib.
       </Text>
       <TextInput accessibilityLabel="Telegram API ID" keyboardType="number-pad"
         value={apiId} onChangeText={setApiId} editable={!disabled}
@@ -103,7 +103,7 @@ export function TelegramSettingsScreen() {
         editable={!disabled} placeholder="API hash"
         placeholderTextColor={theme.muted} maxLength={32} style={field}/>
       <Text style={{color: theme.muted, ...nebulaTypography.label}}>
-        {configured ? "API-параметры сохранены локально. Аккаунт не авторизован." : "API-параметры не сохранены."}
+        {configured ? "API-параметры сохранены локально. Фактическое состояние входа показано ниже." : "API-параметры не сохранены."}
       </Text>
       <NebulaAction icon="shield" label="Сохранить API-параметры"
         disabled={disabled || !apiId || !apiHash} onPress={() => void saveApi()}/>
