@@ -30,8 +30,8 @@ export function TelegramSavedImportCard({profile}:{profile:string}){
     running.current=true;setBusy(true);setError("");
     try{
       const outcome=selectedTopic
-        ? await importSavedTextPage(profile,cursor,undefined,selectedTopic.id)
-        : await importSavedTextPage(profile,cursor);
+        ? await importSavedTextPage(profile,cursor,undefined,selectedTopic.id,"supported-originals")
+        : await importSavedTextPage(profile,cursor,undefined,undefined,"supported-originals");
       if(generation.current===version){
         setResult(outcome);
         setCursor(outcome.nextCursor||cursor);
@@ -73,9 +73,10 @@ export function TelegramSavedImportCard({profile}:{profile:string}){
       Импорт «Избранного»
     </Text>
     <Text style={{color:t.muted,...nebulaTypography.label}}>
-      Сохраняются только текстовые сообщения и ссылки, по 20 за раз.
-      Фото, документы и подписи к ним пока не сохраняются. Записи попадут
-      в существующий раздел «Входящие», без отдельной базы.
+      Вручную импортируются тексты и одиночные поддерживаемые оригиналы (фото,
+      PDF, аудио и видео) с подписями — до 20 сообщений за страницу.
+      Альбомы и неизвестные форматы пока не сохраняются. Автозагрузка при запуске
+      остаётся текстовой. Записи попадают в раздел «Входящие» без отдельной базы.
     </Text>
     <Text style={{color:t.muted,...nebulaTypography.label}}>
       {selectedTopic?"Источник: "+topicLabel(selectedTopic):
@@ -102,7 +103,7 @@ export function TelegramSavedImportCard({profile}:{profile:string}){
       }} />:null}
     {result?<Text accessibilityLiveRegion="polite" style={{color:t.text,...nebulaTypography.label}}>
       Сохранено: {result.saved}; уже были: {result.duplicates};
-      медиа пропущено: {result.unsupported}; пустых: {result.empty}.
+      неподдержанных: {result.unsupported}; пустых: {result.empty}.
       {done?" Больше сообщений в этом диапазоне нет.":""}
     </Text>:null}
     {busy?<Text accessibilityLiveRegion="polite" style={{color:t.muted}}>
