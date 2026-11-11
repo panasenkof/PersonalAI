@@ -1,3 +1,4 @@
+import {telegramAccountError} from "./account-errors";
 import React,{useEffect,useRef,useState} from "react";
 import {Text,TextInput,View} from "react-native";
 import {NebulaAction} from "../design/nebula/components";
@@ -81,8 +82,8 @@ export function TelegramAccountCard({profile,apiConfigured}:{
     try{
       const next=await action();
       if(version.current===current){setState(next);setNotice(message);}
-    }catch{
-      if(version.current===current)setError("Операция Telegram не выполнена. Проверьте данные и состояние соединения.");
+    }catch(e){
+      if(version.current===current)setError(telegramAccountError(e));
     }finally{
       running.current=false;
       if(version.current===current){setSaving(false);setValue("");}

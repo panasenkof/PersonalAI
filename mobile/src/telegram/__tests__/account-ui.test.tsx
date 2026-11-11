@@ -60,3 +60,15 @@ test("connecting requires configured API credentials",()=>{
  fireEvent.press(ui.getByText("Подключить аккаунт Telegram"));
  expect(initializeTelegramAccount).not.toHaveBeenCalled();
 });
+
+test("native rate limiting is explained without repeated Telegram requests",async()=>{
+ (tdlibAvailable as jest.Mock).mockReturnValue(true);
+ (tdlibAccountState as jest.Mock).mockReturnValue("authorizationStateWaitCode");
+ (completeTelegramAuthorization as jest.Mock).mockRejectedValueOnce(new Error("tdlib_flood_wait_125"));
+ const ui=render(<TelegramAccountCard profile="guest" apiConfigured/>);
+ fireEvent.changeText(ui.getByLabelText("Код подтверждения Telegram"),"123456");
+ fireEvent.press(ui.getByText("Продолжить вход"));
+ await waitFor(()=>ui.getByText(/3 мин/));
+ expect(completeTelegramAuthorization).toHaveBeenCalledTimes(1);
+ expect(ui.queryByText(/Операция Telegram не выполнена/)).toBeNull();
+});
