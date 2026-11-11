@@ -1,4 +1,4 @@
-import {localMemorySessionUnlocked} from "../local-memory/storage";
+import {localMemorySessionUnlocked,onLocalMemorySessionChange} from "../local-memory/storage";
 import {saveMediaNote} from "../media/attachments";
 import {scheduleVectors} from "../media/vector-runner";
 import {fetchBotUpdates, type BotMessage} from "./bot-api";
@@ -81,8 +81,21 @@ async function perform(profile:string,signal?:AbortSignal):Promise<TelegramBotSy
 export function syncTelegramBotText(profile:string,signal?:AbortSignal):Promise<TelegramBotSyncResult> {
   const pending=running.get(profile);
   if(pending)return pending;
-  const next=perform(profile,signal);
+  // A lock transition cancels in-flight Bot API requests and native media
+  // downloads, not just the following SQLCipher write.
+  const controller=new AbortController();
+  const abort=()=>controller.abort();
+  signal?.addEventListener("abort",abort,{once:true});
+  const unsubscribe=onLocalMemorySessionChange(unlocked=>{
+    if(!unlocked)controller.abort();
+  });
+  if(signal?.aborted||!localMemorySessionUnlocked())controller.abort();
+  const next=perform(profile,controller.signal);
   running.set(profile,next);
-  void next.finally(() => {if(running.get(profile)===next)running.delete(profile);}).catch(() => {});
+  void next.finally(()=>{
+    unsubscribe();
+    signal?.removeEventListener("abort",abort);
+    if(running.get(profile)===next)running.delete(profile);
+  }).catch(()=>{});
   return next;
 }
