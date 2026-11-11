@@ -22,12 +22,9 @@ const PART_BYTES = 256 * 1024;
 export type Attachment = { id: string; entity_id: string; name: string; mime: string; size: number };
 export type ShareReplay = { entityId: string; recordStatus: 'active' | 'archived' | 'trashed' };
 /** Source identity is local protected data, never interpreted as a public Telegram URL. */
-export type TelegramBotMessageRef = {
-  botId:number;chatId:string;messageId:number;
-  mediaGroupId?:string;messageIds?:number[];
-};
+export type TelegramBotMessageRef = { botId: number; chatId: string; messageId: number };
 /** A read-only TDLib self-chat identity. IDs are decimal strings (Telegram int64). */
-export type TelegramSavedMessageRef = { chatId: string; messageId: string; date: number; kind: "messageText"; topicId?: string };
+export type TelegramSavedMessageRef = { chatId: string; messageId: string; date: number; kind: "messageText" | "messagePhoto" | "messageDocument" | "messageVideo" | "messageAudio" | "messageVoiceNote" | "messageAnimation" | "messageVideoNote"; topicId?: string };
 /** This is a notification only: the canonical saveMediaNote writer remains the only note writer. */
 export type ShareReplayCallback = (replay: ShareReplay) => void;
 const previewDirectory = () => new Directory(Paths.cache, 'persai-previews');
@@ -211,23 +208,14 @@ export async function saveMediaNote(profile: string, input: { file?: ImportFile;
           !/^[1-9][0-9]{0,15}$/.test(ref.chatId) || !Number.isSafeInteger(Number(ref.chatId)) ||
           !Number.isSafeInteger(ref.messageId) || ref.messageId<=0)
         throw new Error("invalid_telegram_bot_provenance");
-      if(ref.mediaGroupId!==undefined||ref.messageIds!==undefined){
-        const ids=ref.messageIds;
-        if(typeof ref.mediaGroupId!=="string"||
-          !/^[A-Za-z0-9_-]{1,128}$/.test(ref.mediaGroupId)||
-          !Array.isArray(ids)||ids.length<2||ids.length>MAX_ORIGINALS_PER_NOTE||
-          ids[0]!==ref.messageId||ids.some((id,i)=>
-            !Number.isSafeInteger(id)||id<=0||(i>0&&id<=ids[i-1]))||
-          !input.files||input.files.length!==ids.length||input.file||
-          input.receipt!==("telegram-bot:"+ref.botId+":"+ref.chatId+":"+
-            ref.messageId+":album:"+ref.mediaGroupId+":"+ids.join(",")))
-          throw new Error("invalid_telegram_bot_album_provenance");
-      }
     }
     if (input.telegramSavedMessage) {
       const ref = input.telegramSavedMessage;
       const validId = (id: string): boolean => /^[1-9][0-9]{0,15}$/.test(id) &&
         Number.isSafeInteger(Number(id));
+      const isText = ref.kind === "messageText";
+      const mediaKinds = ["messagePhoto","messageDocument","messageVideo",
+        "messageAudio","messageVoiceNote","messageAnimation","messageVideoNote"];
       if (input.botMessage || !input.receipt || input.receipt !==
           'telegram-saved:' + ref.chatId + ':' + ref.messageId ||
           !validId(ref.chatId) || !validId(ref.messageId) ||
@@ -235,8 +223,9 @@ export async function saveMediaNote(profile: string, input: { file?: ImportFile;
             /^(0|-?[1-9][0-9]{0,15})$/.test(ref.topicId) &&
             Number.isSafeInteger(Number(ref.topicId)))) ||
           !Number.isSafeInteger(ref.date) || ref.date < 0 ||
-          ref.kind !== 'messageText' || input.allowSeparateCopy ||
-          input.file || input.files !== undefined || !input.body.trim())
+          (!isText && !mediaKinds.includes(ref.kind)) ||
+          input.allowSeparateCopy || input.files !== undefined ||
+          (isText ? Boolean(input.file) || !input.body.trim() : !input.file))
         throw new Error("invalid_telegram_saved_provenance");
     }
     // LLM suggestions are derived metadata, not a user-authored change of Share
@@ -329,9 +318,7 @@ export async function saveMediaNote(profile: string, input: { file?: ImportFile;
       : input.receipt
       ? await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, JSON.stringify([
           ...(input.botMessage ? ['telegram-bot-content-v1', input.botMessage.botId,
-            input.botMessage.chatId, input.botMessage.messageId,
-            ...(input.botMessage.mediaGroupId ? ['album',input.botMessage.mediaGroupId,
-              ...(input.botMessage.messageIds||[])] : [])] : ['android-share-content-v2']),
+            input.botMessage.chatId, input.botMessage.messageId] : ['android-share-content-v2']),
           receivedDigests, originals.map(mediaKind),
           normalizedTitle, normalizedBody,
           input.extractedText || "", input.sensitivity, receiptCollectionId,

@@ -232,6 +232,21 @@ class PersaiTelegramTdlibModule : Module() {
   }
 
 
+  /** Revalidate Saved Messages' self-chat on every requested read/download.
+   * Callers never get to specify which Telegram chat we access. */
+  private fun verifiedSelfChatId(): Long {
+    val self = sendRequest(JSONObject().put("@type", "getMe"))
+    require(self.optString("@type") == "user") { "tdlib_self_identity_missing" }
+    val selfId = self.optLong("id", 0)
+    require(selfId > 0 && selfId <= 9007199254740991L) { "tdlib_self_identity_invalid" }
+    val chat = sendRequest(JSONObject().put("@type", "createPrivateChat")
+      .put("user_id", selfId).put("force", false))
+    require(chat.optString("@type") == "chat") { "tdlib_saved_chat_missing" }
+    val chatId = chat.optLong("id", 0)
+    require(chatId == selfId) { "tdlib_saved_chat_identity_mismatch" }
+    return chatId
+  }
+
   /** Only read the chat belonging to getMe().id; no arbitrary chat ID in the JS API.
    * The response is an intentionally small projection, never raw TDLib JSON.
    */
@@ -243,16 +258,7 @@ class PersaiTelegramTdlibModule : Module() {
     require(Regex("^(0|[1-9][0-9]{0,15})$").matches(fromId)) { "tdlib_saved_cursor_invalid" }
     val cursor = fromId.toLongOrNull() ?: throw IllegalArgumentException("tdlib_saved_cursor_invalid")
     require(cursor in 0L..9007199254740991L) { "tdlib_saved_cursor_invalid" }
-    val self = sendRequest(JSONObject().put("@type", "getMe"))
-    require(self.optString("@type") == "user") { "tdlib_self_identity_missing" }
-    val selfId = self.optLong("id", 0)
-    require(selfId > 0 && selfId <= 9007199254740991L) { "tdlib_self_identity_invalid" }
-    val chat = sendRequest(JSONObject().put("@type", "createPrivateChat")
-      .put("user_id", selfId).put("force", false))
-    require(chat.optString("@type") == "chat") { "tdlib_saved_chat_missing" }
-    val chatId = chat.optLong("id", 0)
-    // Telegram Saved Messages is the private chat with ourselves, not a channel.
-    require(chatId == selfId) { "tdlib_saved_chat_identity_mismatch" }
+    val chatId = verifiedSelfChatId()
     if (topicId != null) {
       require(safeTopicId(topicId)) { "tdlib_saved_topic_id_invalid" }
       synchronized(lock) {
@@ -294,7 +300,8 @@ class PersaiTelegramTdlibModule : Module() {
         .put("date", message.optLong("date", 0))
         .put("kind", kind.take(80))
         .put("text", text)
-        .put("hasMedia", kind != "messageText"))
+        .put("hasMedia", kind != "messageText")
+        .put("hasAlbum",message.optLong("media_album_id",0L)!=0L))
     }
     // A profile switch/close during the native requests invalidates the result.
     require(activeProfile == profile && authState == "authorizationStateReady") {
@@ -307,6 +314,130 @@ class PersaiTelegramTdlibModule : Module() {
       .apply { if (topicId != null) put("topicId", topicId.toString()) }.toString()
   }
 
+
+
+  /** Exact original, scoped to a previously previewed message from our OWN
+   * Saved Messages. No arbitrary file ID, Telegram chat, HTTP URL, or contact
+   * lookup crosses the JS boundary. Does not send or mutate Telegram content.
+   */
+  private fun savedOriginal(profile:String, expectedChat:String, messageId:String):String {
+    requireState("authorizationStateReady")
+    require(Regex("^(guest|[a-zA-Z0-9_-]{1,120})$").matches(profile) &&
+      activeProfile == profile) { "tdlib_saved_profile_mismatch" }
+    val id = messageId.toLongOrNull() ?: throw IllegalArgumentException("tdlib_original_id_invalid")
+    val chatExpected = expectedChat.toLongOrNull() ?: throw IllegalArgumentException("tdlib_original_chat_invalid")
+    require(Regex("^[1-9][0-9]{0,15}$").matches(messageId) && id in 1L..9007199254740991L &&
+      Regex("^[1-9][0-9]{0,15}$").matches(expectedChat) && chatExpected in 1L..9007199254740991L) {
+      "tdlib_original_identity_invalid"
+    }
+    val chatId = verifiedSelfChatId()
+    require(chatExpected == chatId) { "tdlib_original_not_self_chat" }
+    val message = sendRequest(JSONObject().put("@type","getMessage")
+      .put("chat_id",chatId).put("message_id",id))
+    require(message.optString("@type")=="message" &&
+      message.optLong("chat_id",0)==chatId && message.optLong("id",0)==id) {
+      "tdlib_original_source_mismatch"
+    }
+    // An album must become a single note with every original; a single-file
+    // importer must never misrepresent it as complete.
+    require(message.optLong("media_album_id",0)==0L) { "tdlib_original_album_requires_batch" }
+    val content=message.optJSONObject("content")
+      ?: throw IllegalStateException("tdlib_original_content_missing")
+    val kind=content.optString("@type")
+    var origin:JSONObject?=null
+    var name=""
+    var mime=""
+    when(kind){
+      "messagePhoto" -> {
+        val sizes=content.optJSONObject("photo")?.optJSONArray("sizes")
+          ?: throw IllegalStateException("tdlib_original_photo_missing")
+        var largest=-1L
+        for(i in 0 until sizes.length()){
+          val entry=sizes.optJSONObject(i) ?: continue
+          val photoFile=entry.optJSONObject("photo") ?: continue
+          val w=entry.optLong("width",0)
+          val h=entry.optLong("height",0)
+          val rank=maxOf(photoFile.optLong("size",0), w*h)
+          if(photoFile.optInt("id",0)>0 && rank>largest){origin=photoFile;largest=rank}
+        }
+        name="photo.jpg";mime="image/jpeg"
+      }
+      "messageDocument","messageVideo","messageAudio","messageVoiceNote",
+      "messageAnimation","messageVideoNote" -> {
+        val field=when(kind){
+          "messageDocument"->"document"
+          "messageVideo"->"video"
+          "messageAudio"->"audio"
+          "messageVoiceNote"->"voice_note"
+          "messageAnimation"->"animation"
+          else->"video_note"
+        }
+        val media=content.optJSONObject(field)
+          ?: throw IllegalStateException("tdlib_original_media_missing")
+        origin=media.optJSONObject(field)
+        name=when(kind){
+          "messageDocument"->media.optString("file_name","")
+          "messageAudio"->media.optString("file_name","")
+          "messageVideo"->media.optString("file_name","")
+          "messageAnimation"->media.optString("file_name","")
+          "messageVoiceNote"->"voice.ogg"
+          else->"video_note.mp4"
+        }
+        mime=media.optString("mime_type","")
+        if(mime.isEmpty()) mime=when(kind){
+          "messageVoiceNote"->"audio/ogg"
+          "messageVideo","messageAnimation","messageVideoNote"->"video/mp4"
+          else->""
+        }
+      }
+      else->throw IllegalStateException("tdlib_original_kind_unsupported")
+    }
+    val file=origin ?: throw IllegalStateException("tdlib_original_file_missing")
+    val fileId=file.optInt("id",0)
+    val remoteSize=file.optLong("size",0)
+    require(fileId>0) { "tdlib_original_file_id_invalid" }
+    require(remoteSize>=0L && remoteSize<=80L*1024L*1024L) { "tdlib_original_too_large" }
+    // Never guess an unknown original format. Files incompatible with PersAI's
+    // existing ImportFile/mediaKind remain unacknowledged in the preview.
+    require(name.isNotEmpty() && name.length<=240 &&
+      !name.contains("/") && !name.contains("\\") &&
+      !name.contains('\u0000') && name!="." && name!="..") {
+      "tdlib_original_name_invalid"
+    }
+    require(mime.length in 3..100 && Regex("^[a-zA-Z0-9.+-]+/[a-zA-Z0-9.+-]+$").matches(mime)) {
+      "tdlib_original_mime_invalid"
+    }
+    val downloaded=sendRequest(JSONObject().put("@type","downloadFile")
+      .put("file_id",fileId).put("priority",16).put("offset",0)
+      .put("limit",0).put("synchronous",true))
+    require(downloaded.optString("@type")=="file" && downloaded.optInt("id",0)==fileId) {
+      "tdlib_original_download_mismatch"
+    }
+    val localInfo=downloaded.optJSONObject("local")
+    require(localInfo?.optBoolean("is_downloading_completed",false)==true) {
+      "tdlib_original_download_incomplete"
+    }
+    val nativePath=localInfo.optString("path","")
+    val ctx=appContext.reactContext ?: throw IllegalStateException("tdlib_context_unavailable")
+    val root=File(ctx.filesDir,"persai-tdlib-$profile/files").canonicalFile
+    val local=File(nativePath).canonicalFile
+    require(local.absolutePath.startsWith(root.absolutePath+File.separator) &&
+      local.isFile && local.length() in 1L..(80L*1024L*1024L) &&
+      (remoteSize==0L || remoteSize==local.length())) {
+      "tdlib_original_local_file_invalid"
+    }
+    require(activeProfile==profile && authState=="authorizationStateReady") {
+      "tdlib_saved_profile_changed"
+    }
+    // The path is app-private; a JS user or LLM cannot choose it.
+    val description=content.optJSONObject("caption")?.optString("text","")
+    return JSONObject().put("chatId",chatId.toString()).put("messageId",id.toString())
+      .put("date",message.optLong("date",0)).put("kind",kind)
+      .put("text",(description ?: "").take(60000))
+      .put("name",name).put("mimeType",mime).put("size",local.length())
+      .put("uri","file://" + local.absolutePath)
+      .toString()
+  }
 
   private fun savedTopicList(profile: String): String {
     requireState("authorizationStateReady")
@@ -368,6 +499,11 @@ class PersaiTelegramTdlibModule : Module() {
     // Explicit read-only user action; does not import or delete any Telegram data.
     AsyncFunction("getSavedMessagesPage") { profile: String, fromId: String, limit: Int ->
       savedPage(profile, fromId, limit)
+    }
+    // Saved media is fetched by message ID only after self-chat authorization.
+    AsyncFunction("downloadSavedMessageOriginal") {
+      profile:String, selfChatId:String, messageId:String ->
+      savedOriginal(profile,selfChatId,messageId)
     }
     // Topic IDs are only accepted after an updateSavedMessagesTopic from TDLib.
     AsyncFunction("listSavedMessagesTopics") { profile: String ->
