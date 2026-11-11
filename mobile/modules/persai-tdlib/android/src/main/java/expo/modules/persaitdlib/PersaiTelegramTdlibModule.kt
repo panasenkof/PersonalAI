@@ -429,13 +429,12 @@ class PersaiTelegramTdlibModule : Module() {
       "tdlib_saved_profile_changed"
     }
     // The path is app-private; a JS user or LLM cannot choose it.
-    val description=if(kind=="messagePhoto") content.optJSONObject("caption")?.optString("text","")
-      else content.optJSONObject("caption")?.optString("text","")
+    val description=content.optJSONObject("caption")?.optString("text","")
     return JSONObject().put("chatId",chatId.toString()).put("messageId",id.toString())
       .put("date",message.optLong("date",0)).put("kind",kind)
       .put("text",(description ?: "").take(60000))
       .put("name",name).put("mimeType",mime).put("size",local.length())
-      .put("uri",local.toURI().toString())
+      .put("uri","file://" + local.absolutePath)
       .toString()
   }
 
