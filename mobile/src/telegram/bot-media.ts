@@ -14,8 +14,8 @@ const asAsset=(value:unknown):TelegramAsset|null=>{
 };
 const safeName=(value:string):string=>value
   .replace(/[\\/:*?"<>|\x00-\x1f]/g,"_").trim().slice(0,180);
-function classify(message:BotMessage):{asset:TelegramAsset;name:string;mime:string}|null{
-  if(message.media_group_id)
+function classify(message:BotMessage,allowAlbum:boolean):{asset:TelegramAsset;name:string;mime:string}|null{
+  if(message.media_group_id&&!allowAlbum)
     throw new Error("Telegram-альбом пока нельзя подтвердить без всех файлов. Импорт остановлен без потери сообщения.");
   const kinds=fileFields.filter(kind=>Boolean(message[kind]));
   if(!kinds.length)return null;
@@ -64,8 +64,8 @@ function classify(message:BotMessage):{asset:TelegramAsset;name:string;mime:stri
  * No ACK/cursor advance on download, validation or SQLCipher failure.
  */
 export async function prepareBotOriginal(token:string,message:BotMessage,
-  external?:AbortSignal):Promise<PreparedBotOriginal|null>{
-  const chosen=classify(message);
+  external?:AbortSignal,allowAlbum=false):Promise<PreparedBotOriginal|null>{
+  const chosen=classify(message,allowAlbum);
   if(!chosen)return null;
   if(external?.aborted)throw new Error("Импорт Telegram отменён.");
   const remote=await getTelegramBotFile(token,chosen.asset.file_id,external);
