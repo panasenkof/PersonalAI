@@ -10,12 +10,12 @@ on:
   workflow_dispatch:
     inputs:
       tdlib_source_run_id:
-        description: "Optional trusted official-source TDLib run ID; manual APK only"
+        description: "Optional official-source TDLib run ID, manual APK only"
         required: false
         type: string
         default: ""
       tdlib_archive_sha256:
-        description: "SHA-256 of official-tdlib-jsonjava-android.tar.gz, both inputs or neither"
+        description: "SHA-256 of official-tdlib-jsonjava-android.tar.gz; both inputs or neither"
         required: false
         type: string
         default: ""
@@ -297,91 +297,7 @@ jobs:
             test "$found_jsonjava" -eq 1 || {
               echo "::error::Approved TDLib JNI Java class stripped from signed APK"; exit 1;
             }
-          elif unzip -Z1 "$apk" | grep -Eq '^lib/[^/]+/libtdjsonjava[.]so          test -x "$apksigner"
-          "$apksigner" verify --verbose "$apk"
-          # Supports both legacy "Signer #1" and new "V2 Signer:" apksigner outputs.
-          # Keep signature verification and certificate equality fail-closed.
-          actual="$("$apksigner" verify --print-certs "$apk" | node scripts/apk-signing-certificate.cjs)"
-          expected="$(keytool -exportcert -alias "$PIA_ANDROID_KEY_ALIAS" -keystore "$PIA_ANDROID_KEYSTORE_PATH" \
-            -storepass "$PIA_ANDROID_STORE_PASSWORD" | sha256sum | cut -d ' ' -f 1)"
-          if [ "$actual" != "$expected" ]; then
-            echo "::error::APK certificate SHA-256 is ${actual}; configured release keystore certificate SHA-256 is ${expected}. Publishing blocked."
-            exit 1
-          fi
-          echo "APK signing certificate matches the configured release key."
-          mkdir -p dist
-          tag="android-test-b${GITHUB_RUN_NUMBER}-a${GITHUB_RUN_ATTEMPT}"
-          name="PersAI-${tag}.apk"
-          cp "$apk" "dist/$name"
-          (cd dist && sha256sum "$name" > "$name.sha256")
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "name=$name" >> "$GITHUB_OUTPUT"
-
-      - name: Publish permanent GitHub prerelease
-        id: publish
-        if: steps.changes.outputs.needed == 'true'
-        working-directory: mobile
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.artifact.outputs.tag }}
-          APK_NAME: ${{ steps.artifact.outputs.name }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          # The branch may advance during Gradle compilation; never publish stale binaries.
-          current_main="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')"
-          if [ "$current_main" != "$TARGET_SHA" ]; then
-            echo "Main advanced while building; skip stale APK. The next green CI will trigger a fresh build."
-            exit 0
-          fi
-          cat > "$RUNNER_TEMP/apk-notes.md" <<EOF
-          Android test APK built from verified main commit ${TARGET_SHA}.
-
-          - Standalone release APK with native SQLCipher (not Expo Go/debug).
-          - Android package: ${{ env.PIA_ANDROID_PACKAGE }}
-          - Build number: ${{ steps.version.outputs.code }}
-          - Checksum: see attached .sha256 file.
-          - Upgrade without uninstalling: keep the same signing certificate and package ID.
-          - Test build only. Validate encrypted memory backup/restore on real devices.
-
-          Setup: docs/RELEASE_APK.md · Device QA: docs/DEVICE_QA.md
-          EOF
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" "dist/$APK_NAME" "dist/$APK_NAME.sha256" --clobber
-            gh release edit "$TAG" --notes-file "$RUNNER_TEMP/apk-notes.md"
-          else
-            gh release create "$TAG" "dist/$APK_NAME" "dist/$APK_NAME.sha256" \
-              --title "Android test ${TAG}" --notes-file "$RUNNER_TEMP/apk-notes.md" \
-              --target "$TARGET_SHA" --prerelease
-          fi
-          # This output is deliberately absent if main advanced and no APK was published.
-          echo "published=true" >> "$GITHUB_OUTPUT"
-
-      - name: Notify Telegram after the APK was published
-        if: ${{ steps.publish.outputs.published == 'true' }}
-        continue-on-error: true
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          APK_TAG: ${{ steps.artifact.outputs.tag }}
-          APK_NAME: ${{ steps.artifact.outputs.name }}
-          APK_VERSION_CODE: ${{ steps.version.outputs.code }}
-        shell: bash
-        run: |
-          if [ -z "${TELEGRAM_BOT_TOKEN:-}" ] || [ -z "${TELEGRAM_CHAT_ID:-}" ]; then
-            echo "::warning::Telegram APK notification skipped. Add TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID to PersonalAI repository secrets."
-            exit 0
-          fi
-          python3 .github/scripts/notify-android-apk.py
-
-      # Never cache signing material or compiled APKs, only native object files.
-      - name: Save trusted arm64 C/C++ compiler cache
-        if: ${{ steps.changes.outputs.needed == 'true' && success() }}
-        uses: actions/cache/save@v4
-        with:
-          path: ~/.cache/ccache
-          key: ${{ runner.os }}-persai-native-ccache-arm64-v8a-v1-${{ hashFiles('mobile/package-lock.json') }}-${{ github.run_id }}
-; then
+          elif unzip -Z1 "$apk" | grep -Eq '^lib/[^/]+/libtdjsonjava[.]so$'; then
             echo "::error::Unreviewed TDLib present in ordinary APK"; exit 1;
           fi
           apksigner="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
@@ -434,6 +350,11 @@ jobs:
 
           Setup: docs/RELEASE_APK.md · Device QA: docs/DEVICE_QA.md
           EOF
+          if [ "${TDLIB_EXPLICIT_STAGE:-}" = "true" ]; then
+            echo '- Telegram TDLib: official source and SHA-256 verified; physical Vivo acceptance pending.' >> "$RUNNER_TEMP/apk-notes.md"
+          else
+            echo '- Telegram TDLib: NOT INCLUDED; personal Saved Messages import unavailable.' >> "$RUNNER_TEMP/apk-notes.md"
+          fi
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "dist/$APK_NAME" "dist/$APK_NAME.sha256" --clobber
             gh release edit "$TAG" --notes-file "$RUNNER_TEMP/apk-notes.md"
