@@ -47,7 +47,7 @@ async function perform(profile:string,signal?:AbortSignal):Promise<TelegramBotSy
         throw new Error("В очереди есть неподдержанный объект Telegram. Импорт остановлен без потери сообщения.");
       const body=textOf(message).trim();
       if(body.length>60_000)throw new Error("Сообщение Telegram длиннее 60 000 символов. Импорт остановлен.");
-      const isCommand=/^\/(?:start|help)(?:\s|$)/i.test(body);
+      const isCommand=/^\/(?:start|help)(?:\s|$)/i.test(body)&&!hasMedia(message);
       const staged=!isCommand&&hasMedia(message)
         ? await prepareBotOriginal(config.token,message,signal):null;
       try{
@@ -55,13 +55,15 @@ async function perform(profile:string,signal?:AbortSignal):Promise<TelegramBotSy
         if((body||staged)&&!isCommand){
           const title=body.split(/\r?\n/)[0].trim().slice(0,160)||
             staged?.file.name||"Сообщение Telegram";
+          let replayed=false;
           await saveMediaNote(profile,{
             title,body,sensitivity:"sensitive",
             ...(staged?{file:staged.file}:{}),
             receipt:"telegram-bot:"+config.botId+":"+config.allowedChatId+":"+message.message_id,
+            onReplay:()=>{replayed=true;},
             botMessage:{botId:config.botId,chatId:config.allowedChatId!,messageId:message.message_id},
           },signal);
-          imported++;
+          if(replayed)skipped++;else imported++;
         }else skipped++;
       }finally{staged?.remove();}
     } else {
