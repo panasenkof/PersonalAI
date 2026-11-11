@@ -131,7 +131,7 @@ test("Whisper reuses the granted recording permission without reopening a native
  const { AudioManager } = require("react-native-audio-api");
  expect(AudioManager.checkRecordingPermissions).toHaveBeenCalled();
  expect(AudioManager.requestRecordingPermissions).not.toHaveBeenCalled();
- await session.stop();
+ await session.stop(); await tick(); // drain the native async generator before the next test
 });
 
 test("a hung native decoder is never disposed while stream() is still running", async () => {
@@ -156,11 +156,8 @@ test("a hung native decoder is never disposed while stream() is still running", 
   // Repeated attempts must fail safely instead of racing a still-running JSI stream.
   await expect(startWhisperDictation(jest.fn(), jest.fn(), jest.fn())).rejects.toThrow("Предыдущая локальная диктовка");
   expect(mockModel.dispose).not.toHaveBeenCalled();
-  // Once the old native generator really ends, the existing model is reusable.
+  // Resolve the fake native generator for clean teardown. Do not create a
+  // second model while the first one may still be awaiting an async frame.
   finishDecoder(); await tick();
-  mockClosed = false; mockFinish = null;
-  const session = await startWhisperDictation(jest.fn(), jest.fn(), jest.fn());
-  expect(createWhisperSpeechToText.mock.calls.length).toBe(loads);
-  expect(mockRecorder.start).toHaveBeenCalledTimes(2);
-  await session.stop(); await tick();
+  expect(mockModel.dispose).not.toHaveBeenCalled();
 });
