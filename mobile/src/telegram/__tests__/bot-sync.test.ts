@@ -8,7 +8,7 @@ import {scheduleVectors} from "../../media/vector-runner";
 jest.mock("../bot-api",()=>({fetchBotUpdates:jest.fn()}));
 jest.mock("../bot-media",()=>({prepareBotOriginal:jest.fn()}));
 jest.mock("../bot-settings",()=>({loadTelegramBotConfig:jest.fn(),advanceTelegramBotCursor:jest.fn()}));
-jest.mock("../../media/attachments",()=>({saveMediaNote:jest.fn()}));
+jest.mock("../../media/attachments",()=>({saveMediaNote:jest.fn(),MAX_TOTAL_ORIGINAL_BYTES:80*1024*1024}));
 jest.mock("../../local-memory/storage",()=>({localMemorySessionUnlocked:jest.fn(),onLocalMemorySessionChange:jest.fn()}));
 jest.mock("../../media/vector-runner",()=>({scheduleVectors:jest.fn()}));
 const token="12345678:"+"a".repeat(35);
