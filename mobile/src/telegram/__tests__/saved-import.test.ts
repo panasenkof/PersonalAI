@@ -169,3 +169,17 @@ test("failed original download does not save caption-only note or claim successf
     .rejects.toThrow("tdlib_request_timeout");
   expect(saveMediaNote).not.toHaveBeenCalled();
 });
+
+
+test("TDLib Saved album is not split into misleading independent original notes",async()=>{
+  (readSavedMessagesPage as jest.Mock).mockResolvedValueOnce({
+    selfChatId:"12345",messages:[
+      {...item("61","Подпись 2","messagePhoto",true),hasAlbum:true},
+      {...item("60","Подпись 1","messagePhoto",true),hasAlbum:true},
+    ],nextCursor:"60",
+  });
+  expect(await importSavedTextPage("guest","0",undefined,undefined,"supported-originals"))
+    .toMatchObject({saved:0,unsupported:2});
+  expect(downloadSavedOriginal).not.toHaveBeenCalled();
+  expect(saveMediaNote).not.toHaveBeenCalled();
+});
