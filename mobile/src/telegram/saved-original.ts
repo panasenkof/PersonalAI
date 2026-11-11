@@ -27,7 +27,7 @@ export const supportsSavedOriginal=(kind:string):boolean=>supported.has(kind);
  */
 export function parseSavedOriginal(raw:string,profile:string,chatId:string,
   preview:SavedMessagePreview):SavedOriginal {
-  if(!validProfile(profile)||!id(chatId)||!id(preview.id)||!supportsSavedOriginal(preview.kind)||
+  if(!validProfile(profile)||!id(chatId)||!id(preview.id)||!supportsSavedOriginal(preview.kind)||preview.hasAlbum===true||
     typeof raw!=="string"||raw.length>5000)
     throw new Error("telegram_saved_original_invalid");
   let data:unknown;
