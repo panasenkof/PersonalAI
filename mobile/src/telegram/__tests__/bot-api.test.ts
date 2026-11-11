@@ -45,3 +45,44 @@ test("network failures sanitize potentially sensitive token URLs",async()=>{
   await expect(verifyTelegramBot(token)).rejects.toThrow("Telegram недоступен");
   try{await verifyTelegramBot("invalid");}catch(e){expect(String(e)).not.toContain(token);}
 });
+
+test("hanging getMe is bounded even when fetch ignores AbortSignal",async()=>{
+  jest.useFakeTimers();
+  try {
+    const fetchMock=jest.spyOn(globalThis,"fetch").mockImplementation(
+      ()=>new Promise<Response>(()=>{}));
+    const pending=verifyTelegramBot(token);
+    const assertion=expect(pending).rejects.toThrow("не ответил за 15 секунд");
+    await jest.advanceTimersByTimeAsync(15_000);
+    await assertion;
+    expect((fetchMock.mock.calls[0][1] as RequestInit).signal?.aborted).toBe(true);
+    expect(JSON.stringify(fetchMock.mock.calls[0][1])).not.toContain(token);
+  }finally{jest.useRealTimers();}
+});
+test("a hung response body cannot keep the bot UI busy forever",async()=>{
+  jest.useFakeTimers();
+  try {
+    jest.spyOn(globalThis,"fetch").mockResolvedValue({
+      ok:true,status:200,text:()=>new Promise<string>(()=>{}),
+    } as Response);
+    const pending=verifyTelegramBot(token);
+    const assertion=expect(pending).rejects.toThrow("не ответил за 15 секунд");
+    await jest.advanceTimersByTimeAsync(15_000);
+    await assertion;
+  }finally{jest.useRealTimers();}
+});
+test("Bot API distinguishes invalid token and rate limit without revealing credentials",async()=>{
+  const mock=jest.spyOn(globalThis,"fetch");
+  mock.mockResolvedValueOnce({ok:false,status:401} as Response)
+    .mockResolvedValueOnce({ok:false,status:429} as Response);
+  await expect(verifyTelegramBot(token)).rejects.toThrow("токен");
+  await expect(verifyTelegramBot(token)).rejects.toThrow("частоту");
+});
+test("caller cancellation stops the request promptly",async()=>{
+  const controller=new AbortController();
+  jest.spyOn(globalThis,"fetch").mockImplementation(()=>new Promise<Response>(()=>{}));
+  const pending=verifyTelegramBot(token,controller.signal);
+  const assertion=expect(pending).rejects.toThrow("отменён");
+  controller.abort();
+  await assertion;
+});
