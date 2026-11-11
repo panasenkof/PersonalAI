@@ -3,13 +3,13 @@ import {fetchBotUpdates} from "../bot-api";
 import {prepareBotOriginal} from "../bot-media";
 import {advanceTelegramBotCursor,loadTelegramBotConfig} from "../bot-settings";
 import {saveMediaNote} from "../../media/attachments";
-import {localMemorySessionUnlocked} from "../../local-memory/storage";
+import {localMemorySessionUnlocked,onLocalMemorySessionChange} from "../../local-memory/storage";
 import {scheduleVectors} from "../../media/vector-runner";
 jest.mock("../bot-api",()=>({fetchBotUpdates:jest.fn()}));
 jest.mock("../bot-media",()=>({prepareBotOriginal:jest.fn()}));
 jest.mock("../bot-settings",()=>({loadTelegramBotConfig:jest.fn(),advanceTelegramBotCursor:jest.fn()}));
 jest.mock("../../media/attachments",()=>({saveMediaNote:jest.fn()}));
-jest.mock("../../local-memory/storage",()=>({localMemorySessionUnlocked:jest.fn()}));
+jest.mock("../../local-memory/storage",()=>({localMemorySessionUnlocked:jest.fn(),onLocalMemorySessionChange:jest.fn()}));
 jest.mock("../../media/vector-runner",()=>({scheduleVectors:jest.fn()}));
 const token="12345678:"+"a".repeat(35);
 const msg=(id:number,text:string,chatId=12345)=>({
@@ -18,6 +18,7 @@ const msg=(id:number,text:string,chatId=12345)=>({
 beforeEach(()=>{
   jest.clearAllMocks();
   (localMemorySessionUnlocked as jest.Mock).mockReturnValue(true);
+  (onLocalMemorySessionChange as jest.Mock).mockImplementation(()=>()=>{});
   (loadTelegramBotConfig as jest.Mock).mockResolvedValue({
     token,botId:456,username:"MyPersAIBot",allowedChatId:"12345",cursor:0,
   });
@@ -33,13 +34,13 @@ test("only approved private chat reaches canonical writer with typed provenance"
     {update_id:3,message:msg(3,"Рецепт\nПомнить!")},
   ]);
   expect(await syncTelegramBotText("p1")).toEqual({imported:1,skipped:2,lastUpdate:3});
-  expect(fetchBotUpdates).toHaveBeenCalledWith(token,0,undefined);
+  expect(fetchBotUpdates).toHaveBeenCalledWith(token,0,expect.any(Object));
   expect(saveMediaNote).toHaveBeenCalledTimes(1);
   expect(saveMediaNote).toHaveBeenCalledWith("p1",expect.objectContaining({
     title:"Рецепт",body:"Рецепт\nПомнить!",sensitivity:"sensitive",
     receipt:"telegram-bot:456:12345:3",
     botMessage:{botId:456,chatId:"12345",messageId:3},
-  }),undefined);
+  }),expect.any(Object));
   expect(advanceTelegramBotCursor).toHaveBeenCalledTimes(3);
   expect(advanceTelegramBotCursor).toHaveBeenLastCalledWith("p1",456,"12345",3);
   expect(scheduleVectors).toHaveBeenCalledWith("p1");
@@ -101,7 +102,7 @@ test("single Telegram photo is saved with its original and caption before cursor
   }]);
   const result=await syncTelegramBotText("photo");
   expect(result.imported).toBe(1);
-  expect(prepareBotOriginal).toHaveBeenCalledWith(token,expect.objectContaining({message_id:11}),undefined);
+  expect(prepareBotOriginal).toHaveBeenCalledWith(token,expect.objectContaining({message_id:11}),expect.any(Object));
   expect(saveMediaNote).toHaveBeenCalledWith("photo",expect.objectContaining({
     file:expect.objectContaining({uri:"file:///cache/photo.jpg"}),
     body:"Подпись к фотографии",receipt:"telegram-bot:456:12345:11",
@@ -129,4 +130,23 @@ test("non-file Telegram objects do not disappear from the queue on ACK",async()=
   await expect(syncTelegramBotText("location")).rejects.toThrow("неподдержанный объект");
   expect(advanceTelegramBotCursor).not.toHaveBeenCalled();
   expect(prepareBotOriginal).not.toHaveBeenCalled();
+});
+
+test("AppLock aborts an in-flight Telegram media download without cursor ACK",async()=>{
+  let change:(unlocked:boolean)=>void=()=>{};
+  (onLocalMemorySessionChange as jest.Mock).mockImplementation(cb=>{change=cb;return ()=>{};});
+  (fetchBotUpdates as jest.Mock).mockResolvedValueOnce([{
+    update_id:14,message:{...msg(14,""),photo:[{file_id:"AgACbig12345"}]},
+  }]);
+  (prepareBotOriginal as jest.Mock).mockImplementation(
+    (_token:string,_message:unknown,signal:AbortSignal)=>new Promise((_resolve,reject)=>{
+      signal.addEventListener("abort",()=>reject(new Error("Импорт Telegram отменён.")),{once:true});
+    }));
+  const pending=syncTelegramBotText("locked");
+  // Allow the protected config, fetch and media selection to settle.
+  await new Promise(resolve=>setImmediate(resolve));
+  change(false);
+  await expect(pending).rejects.toThrow("Импорт Telegram отменён");
+  expect(saveMediaNote).not.toHaveBeenCalled();
+  expect(advanceTelegramBotCursor).not.toHaveBeenCalled();
 });
