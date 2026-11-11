@@ -59,6 +59,26 @@ class PersaiTelegramTdlibModule : Module() {
   private fun sendNoReply(objectData: JSONObject) {
     requireNative().send(clientId, objectData.toString())
   }
+  /** Map only known Telegram auth failures to stable, privacy-safe identifiers.
+   * No raw TDLib error body, telephone number, login code or password in JS.
+   */
+  private fun safeTelegramError(error: JSONObject): String {
+    val value = error.optString("message", "").uppercase(java.util.Locale.ROOT)
+    if (value.matches(Regex("FLOOD_WAIT_[0-9]{1,6}"))) {
+      val seconds = value.removePrefix("FLOOD_WAIT_").toIntOrNull() ?: 0
+      return "tdlib_flood_wait_" + seconds.coerceIn(1, 86400)
+    }
+    return when {
+      value == "PHONE_NUMBER_FLOOD" || value == "PHONE_CODE_FLOOD" ||
+        value == "FLOOD_PREMIUM_WAIT" -> "tdlib_flood_limited"
+      value == "PHONE_NUMBER_INVALID" -> "tdlib_phone_invalid"
+      value == "PHONE_CODE_INVALID" || value == "PHONE_CODE_EXPIRED" -> "tdlib_code_invalid"
+      value == "PASSWORD_HASH_INVALID" -> "tdlib_password_invalid"
+      value == "API_ID_INVALID" || value == "API_HASH_INVALID" -> "tdlib_api_invalid"
+      error.optInt("code", 0) == 429 -> "tdlib_flood_limited"
+      else -> "tdlib_operation_rejected"
+    }
+  }
   private fun sendRequest(data: JSONObject, allowNoMoreTopics: Boolean = false): JSONObject {
     val n = requireNative()
     val requestId = sequence.incrementAndGet()
@@ -73,7 +93,7 @@ class PersaiTelegramTdlibModule : Module() {
         // Permit that only for an explicit loadSavedMessagesTopics request.
         if (allowNoMoreTopics && data.optString("@type") == "loadSavedMessagesTopics" &&
           reply.optInt("code") == 404) return JSONObject().put("@type","ok")
-        throw IllegalStateException("tdlib_operation_rejected")
+        throw IllegalStateException(safeTelegramError(reply))
       }
       return reply
     } catch (_: java.util.concurrent.TimeoutException) {
