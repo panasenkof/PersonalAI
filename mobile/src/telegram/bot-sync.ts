@@ -33,7 +33,7 @@ async function perform(profile:string,signal?:AbortSignal):Promise<TelegramBotSy
   for(let index=0;index<updates.length;) {
     const item=updates[index];
     mustBeUnlocked(signal);
-    if(item.update_id<=last)continue;
+    if(item.update_id<=last){index++;continue;}
     const message=item.message;
     const edited=item.edited_message;
     const fromAllowed = (m:BotMessage|undefined) =>
