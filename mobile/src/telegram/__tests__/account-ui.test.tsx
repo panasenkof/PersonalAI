@@ -60,3 +60,27 @@ test("connecting requires configured API credentials",()=>{
  fireEvent.press(ui.getByText("Подключить аккаунт Telegram"));
  expect(initializeTelegramAccount).not.toHaveBeenCalled();
 });
+
+test("Telegram flood limit is explained and failed login is not silently retried",async()=>{
+  (tdlibAvailable as jest.Mock).mockReturnValue(true);
+  (initializeTelegramAccount as jest.Mock).mockRejectedValueOnce(
+    new Error("Native error: tdlib_rate_limited"));
+  const ui=render(<TelegramAccountCard profile="guest" apiConfigured />);
+  fireEvent.press(ui.getByText("Подключить аккаунт Telegram"));
+  await waitFor(()=>ui.getByText(/Telegram временно ограничил попытки входа/));
+  expect(initializeTelegramAccount).toHaveBeenCalledTimes(1);
+  expect(ui.getByText("Подключить аккаунт Telegram")).toBeTruthy();
+});
+test("invalid code gets specific feedback without showing the secret",async()=>{
+  (tdlibAvailable as jest.Mock).mockReturnValue(true);
+  (tdlibAccountState as jest.Mock).mockReturnValue("authorizationStateWaitCode");
+  (completeTelegramAuthorization as jest.Mock).mockRejectedValueOnce(
+    new Error("tdlib_auth_code_invalid 123456"));
+  const ui=render(<TelegramAccountCard profile="guest" apiConfigured />);
+  const input=ui.getByLabelText("Код подтверждения Telegram");
+  fireEvent.changeText(input,"123456");
+  fireEvent.press(ui.getByText("Продолжить вход"));
+  await waitFor(()=>ui.getByText(/Код Telegram неверен/));
+  expect(ui.queryByText(/tdlib_auth_code_invalid/)).toBeNull();
+  expect(completeTelegramAuthorization).toHaveBeenCalledTimes(1);
+});
