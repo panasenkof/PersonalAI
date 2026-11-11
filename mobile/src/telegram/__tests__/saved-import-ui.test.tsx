@@ -126,3 +126,24 @@ test("leaving the importer aborts the in-flight request without writing UI state
   ui.unmount();
   expect(supplied.aborted).toBe(true);
 });
+
+test("switching profiles aborts old import and enables a new profile without stale busy state",async()=>{
+  const oldSignals:AbortSignal[]=[];
+  (importSavedTextPage as jest.Mock).mockImplementation((_p:string,_c:string,signal:AbortSignal)=>
+    new Promise((_resolve,reject)=>{
+      oldSignals.push(signal);
+      signal.addEventListener("abort",()=>reject(new Error("telegram_saved_import_cancelled")),{once:true});
+    }));
+  const ui=render(<TelegramSavedImportCard profile="guest"/>);
+  fireEvent.press(ui.getByText("Импортировать последние 20 сообщений"));
+  await waitFor(()=>ui.getByText("Отменить импорт Telegram"));
+  ui.rerender(<TelegramSavedImportCard profile="second"/>);
+  await waitFor(()=>expect(oldSignals[0]?.aborted).toBe(true));
+  expect(ui.queryByText("Отменить импорт Telegram")).toBeNull();
+  const importButton=ui.getByLabelText("Импортировать последние 20 сообщений");
+  expect(importButton.props.accessibilityState.disabled).toBe(false);
+  fireEvent.press(importButton);
+  await waitFor(()=>expect(importSavedTextPage).toHaveBeenCalledWith(
+    "second","0",expect.any(Object),undefined,"supported-originals"));
+  expect(ui.getByText("Отменить импорт Telegram")).toBeTruthy();
+});
