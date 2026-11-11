@@ -38,6 +38,7 @@ export async function importSavedTextPage(profile:string,cursor="0",
     // Preserve chronological ordering of new notes within the current page.
     for(const item of [...page.messages].reverse()){
       unlocked(signal);
+      if(item.hasAlbum===true){unsupported++;continue;}
       const textOnly=!item.hasMedia&&item.kind==="messageText";
       const originalRequested=mediaPolicy==="supported-originals"&&item.hasMedia&&
         supportsSavedOriginal(item.kind);
