@@ -1,12 +1,13 @@
 import {localMemorySessionUnlocked,onLocalMemorySessionChange} from "../local-memory/storage";
-import {saveMediaNote} from "../media/attachments";
+import {saveMediaNote,MAX_TOTAL_ORIGINAL_BYTES} from "../media/attachments";
 import {scheduleVectors} from "../media/vector-runner";
 import {fetchBotUpdates, type BotMessage} from "./bot-api";
-import {prepareBotOriginal} from "./bot-media";
+import {prepareBotOriginal, type PreparedBotOriginal} from "./bot-media";
+import {planBotAlbum} from "./bot-albums";
 import {advanceTelegramBotCursor, loadTelegramBotConfig} from "./bot-settings";
 
 export type TelegramBotSyncResult = {
-  imported: number; skipped: number; lastUpdate: number;
+  imported: number; skipped: number; lastUpdate: number; pendingAlbum?: number;
 };
 const running = new Map<string,Promise<TelegramBotSyncResult>>();
 
@@ -28,13 +29,65 @@ async function perform(profile:string,signal?:AbortSignal):Promise<TelegramBotSy
   const updates=await fetchBotUpdates(config.token,config.cursor,signal);
   mustBeUnlocked(signal);
   let last=config.cursor,imported=0,skipped=0;
-  for(const item of updates) {
+  let pendingAlbum=0;
+  for(let index=0;index<updates.length;) {
+    const item=updates[index];
     mustBeUnlocked(signal);
-    if(item.update_id<=last)continue;
+    if(item.update_id<=last){index++;continue;}
     const message=item.message;
     const edited=item.edited_message;
     const fromAllowed = (m:BotMessage|undefined) =>
       m?.chat?.type==="private" && String(m.chat.id)===config.allowedChatId;
+    if(message&&fromAllowed(message)&&message.media_group_id){
+      const plan=planBotAlbum(updates,index,config.allowedChatId);
+      if(plan.state==="pending"){
+        pendingAlbum=plan.received;
+        break; // no ACK; later updates (or user's /done) establish a boundary
+      }
+      const staged:PreparedBotOriginal[]=[];
+      let stagedBytes=0;
+      try{
+        for(const part of plan.messages){
+          mustBeUnlocked(signal);
+          const original=await prepareBotOriginal(config.token,part,signal,true);
+          if(!original)throw new Error("В Telegram-альбоме нет оригинала. Импорт остановлен.");
+          staged.push(original);
+          stagedBytes+=original.file.size||0;
+          if(stagedBytes>MAX_TOTAL_ORIGINAL_BYTES)
+            throw new Error("Альбом Telegram превышает лимит 80 МБ. Исходные сообщения не подтверждены.");
+        }
+        mustBeUnlocked(signal);
+        const ids=plan.messages.map(part=>part.message_id);
+        const captions=plan.messages.map((part,partIndex)=>{
+          const caption=textOf(part).trim();
+          return caption?{position:partIndex+1,caption}:null;
+        }).filter((v):v is {position:number;caption:string}=>v!==null);
+        const body=captions.length<2?captions[0]?.caption||"":
+          captions.map(v=>"Файл "+v.position+": "+v.caption).join("\n\n");
+        if(body.length>60_000)throw new Error("Подписи альбома Telegram превышают 60 000 символов.");
+        const title=body.split(/\r?\n/)[0].slice(0,160)||
+          "Альбом Telegram ("+staged.length+" файлов)";
+        let replayed=false;
+        await saveMediaNote(profile,{
+          title,body,sensitivity:"sensitive",
+          files:staged.map(v=>v.file),
+          receipt:"telegram-bot:"+config.botId+":"+config.allowedChatId+":"+
+            ids[0]+":album:"+plan.groupId+":"+ids.join(","),
+          botMessage:{botId:config.botId,chatId:config.allowedChatId!,
+            messageId:ids[0],mediaGroupId:plan.groupId,messageIds:ids},
+          onReplay:()=>{replayed=true;},
+        },signal);
+        if(replayed)skipped++;else imported++;
+      }finally{for(const original of staged)original.remove();}
+      mustBeUnlocked(signal);
+      // One cursor commit AFTER all originals and the canonical receipt
+      // have been committed. Never ACK just the first album photo.
+      await advanceTelegramBotCursor(profile,config.botId,config.allowedChatId,plan.lastUpdateId);
+      last=plan.lastUpdateId;
+      skipped+=plan.nextIndex-index-plan.messages.length; // other chats only
+      index=plan.nextIndex;
+      continue;
+    }
     if(fromAllowed(edited)) {
       throw new Error("Есть отредактированное сообщение Telegram. Оно не подтверждено и не пропущено; требуется отдельная обработка изменений.");
     }
@@ -47,7 +100,7 @@ async function perform(profile:string,signal?:AbortSignal):Promise<TelegramBotSy
         throw new Error("В очереди есть неподдержанный объект Telegram. Импорт остановлен без потери сообщения.");
       const body=textOf(message).trim();
       if(body.length>60_000)throw new Error("Сообщение Telegram длиннее 60 000 символов. Импорт остановлен.");
-      const isCommand=/^\/(?:start|help)(?:\s|$)/i.test(body)&&!hasMedia(message);
+      const isCommand=/^\/(?:start|help|done)(?:\s|$)/i.test(body)&&!hasMedia(message);
       const staged=!isCommand&&hasMedia(message)
         ? await prepareBotOriginal(config.token,message,signal):null;
       try{
@@ -75,9 +128,11 @@ async function perform(profile:string,signal?:AbortSignal):Promise<TelegramBotSy
     // Local cursor is committed only after canonical note commit/replay succeeds.
     await advanceTelegramBotCursor(profile,config.botId,config.allowedChatId,item.update_id);
     last=item.update_id;
+    index++;
   }
   if(imported) scheduleVectors(profile);
-  return {imported,skipped,lastUpdate:last};
+  return pendingAlbum?{imported,skipped,lastUpdate:last,pendingAlbum}:
+    {imported,skipped,lastUpdate:last};
 }
 /** Serializes per-profile manual/auto starts; no parallel cursor or writes. */
 export function syncTelegramBotText(profile:string,signal?:AbortSignal):Promise<TelegramBotSyncResult> {

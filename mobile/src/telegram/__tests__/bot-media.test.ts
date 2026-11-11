@@ -73,3 +73,35 @@ test("size mismatch is rejected and temporary file is discarded",async()=>{
     .rejects.toThrow("Размер скачанного");
   expect(mockDeleted).toHaveBeenCalledTimes(1);
 });
+
+test("only the explicit batch path can stage Telegram album media",async()=>{
+  const item=msg({media_group_id:"albumA",photo:[{file_id:"AgACbig12345"}]});
+  await expect(prepareBotOriginal(token,item)).rejects.toThrow("альбом");
+  const staged=await prepareBotOriginal(token,item,undefined,true);
+  expect(staged?.file).toMatchObject({name:"photo.jpg",size:4096});
+  staged?.remove();
+  expect(mockDeleted).toHaveBeenCalledTimes(1);
+});
+
+test("native download timeout ends even when the downloader ignores AbortSignal",async()=>{
+  jest.useFakeTimers();
+  try{
+    mockDownload.mockImplementation(()=>new Promise(()=>{}));
+    const pending=prepareBotOriginal(token,msg({photo:[{file_id:"AgACbig12345"}]}));
+    const assertion=expect(pending).rejects.toThrow("за 60 секунд");
+    await jest.advanceTimersByTimeAsync(60_000);
+    await assertion;
+    expect(mockDeleted).toHaveBeenCalled();
+  }finally{jest.useRealTimers();}
+});
+test("external cancellation interrupts a hung native download without leaking Bot token",async()=>{
+  const controller=new AbortController();
+  mockDownload.mockImplementation(()=>new Promise(()=>{}));
+  const pending=prepareBotOriginal(token,msg({photo:[{file_id:"AgACbig12345"}]}),controller.signal);
+  const assertion=expect(pending).rejects.toThrow("Импорт Telegram отменён");
+  // getFile is async; ensure its microtask initialized native download.
+  await Promise.resolve();await Promise.resolve();
+  controller.abort();
+  await assertion;
+  expect(mockDeleted).toHaveBeenCalled();
+});
