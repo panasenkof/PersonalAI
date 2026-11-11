@@ -70,7 +70,8 @@ export async function prepareBotOriginal(token:string,message:BotMessage,
   if(external?.aborted)throw new Error("Импорт Telegram отменён.");
   const remote=await getTelegramBotFile(token,chosen.asset.file_id,external);
   if(external?.aborted)throw new Error("Импорт Telegram отменён.");
-  const directory=new Directory(Paths.cache,"persai-telegram-bot");
+  // Reuse the already AppLock-cleared private incoming cache, not a second staging store.
+  const directory=new Directory(Paths.cache,"persai-incoming");
   directory.create({idempotent:true,intermediates:true});
   const suffix=chosen.name.split(".").pop()?.toLowerCase()||"bin";
   const file=new File(directory,Crypto.randomUUID()+"."+suffix);
