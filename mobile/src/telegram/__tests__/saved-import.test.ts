@@ -4,13 +4,13 @@ import {readSavedTopicPage} from "../saved-topics";
 import {saveMediaNote} from "../../media/attachments";
 import {scheduleVectors} from "../../media/vector-runner";
 import {localMemorySessionUnlocked} from "../../local-memory/storage";
-import {downloadSavedOriginal,releaseSavedOriginal} from "../saved-original";
+import {downloadSavedOriginal,downloadSavedAlbumOriginal,releaseSavedOriginal} from "../saved-original";
 jest.mock("../saved-messages",()=>({readSavedMessagesPage:jest.fn()}));
-jest.mock("../saved-original",()=>({downloadSavedOriginal:jest.fn(),releaseSavedOriginal:jest.fn(),
+jest.mock("../saved-original",()=>({downloadSavedOriginal:jest.fn(),downloadSavedAlbumOriginal:jest.fn(),releaseSavedOriginal:jest.fn(),
   supportsSavedOriginal:(kind:string)=>["messagePhoto","messageDocument","messageVideo",
     "messageAudio","messageVoiceNote","messageAnimation","messageVideoNote"].includes(kind)}));
 jest.mock("../saved-topics",()=>({readSavedTopicPage:jest.fn(),safeTopicId:(v:string)=>typeof v==="string"&&/^(0|-?[1-9][0-9]{0,15})$/.test(v)&&Number.isSafeInteger(Number(v))}));
-jest.mock("../../media/attachments",()=>({saveMediaNote:jest.fn()}));
+jest.mock("../../media/attachments",()=>({saveMediaNote:jest.fn(),MAX_TOTAL_ORIGINAL_BYTES:80*1024*1024}));
 jest.mock("../../media/vector-runner",()=>({scheduleVectors:jest.fn()}));
 jest.mock("../../local-memory/storage",()=>({localMemorySessionUnlocked:jest.fn()}));
 const item=(id:string,text:string,kind="messageText",hasMedia=false)=>({
@@ -27,6 +27,10 @@ beforeEach(()=>{
   (downloadSavedOriginal as jest.Mock).mockResolvedValue({
     file:{uri:"file:///data/persai-tdlib-guest/files/photo.jpg",name:"photo.jpg",mimeType:"image/jpeg",size:40},
   });
+  (downloadSavedAlbumOriginal as jest.Mock).mockImplementation(async (_profile:string,_chat:string,preview:{id:string;kind:string;albumId:string;text:string;date:number})=>({
+    file:{uri:"file:///data/persai-tdlib-guest/files/"+preview.id+".jpg",name:preview.id+".jpg",mimeType:"image/jpeg",size:40},
+    chatId:"12345",messageId:preview.id,kind:preview.kind,albumId:preview.albumId,text:preview.text,date:preview.date,
+  }));
   (readSavedTopicPage as jest.Mock).mockResolvedValue({selfChatId:"12345",messages:[item("50","Заметка")],nextCursor:"50"});
 });
 test("imports newest self-chat text using existing canonical writer and immutable source IDs",async()=>{
@@ -210,4 +214,98 @@ test("SQLCipher failure still attempts to reclaim the specific staged original",
   await expect(importSavedTextPage("guest","0",undefined,undefined,"supported-originals"))
     .rejects.toThrow("SQLCipher transaction failed");
   expect(releaseSavedOriginal).toHaveBeenCalledTimes(1);
+});
+
+const grouped=(id:string,caption="",group="9007199254740993")=>({
+  ...item(id,caption,"messagePhoto",true),hasAlbum:true,albumId:group,
+});
+test("complete native Saved album has one canonical note with all originals, captions and stable receipt",async()=>{
+  (readSavedMessagesPage as jest.Mock).mockResolvedValueOnce({
+    selfChatId:"12345",messages:[
+      grouped("73","Второе"),grouped("72","Первое"),item("71","Старая заметка"),
+    ],nextCursor:"71",
+  });
+  const result=await importSavedTextPage("guest","0",undefined,undefined,"supported-originals");
+  expect(result).toMatchObject({saved:2,unsupported:0,nextCursor:"71"});
+  expect(downloadSavedAlbumOriginal).toHaveBeenCalledTimes(2);
+  expect(saveMediaNote).toHaveBeenCalledWith("guest",expect.objectContaining({
+    body:"Файл 1: Первое\n\nФайл 2: Второе",
+    files:[expect.objectContaining({name:"72.jpg"}),expect.objectContaining({name:"73.jpg"})],
+    receipt:"telegram-saved:12345:72:album:9007199254740993:72,73",
+    telegramSavedMessage:expect.objectContaining({
+      chatId:"12345",messageId:"72",kind:"messageAlbum",
+      mediaAlbumId:"9007199254740993",messageIds:["72","73"],
+    }),
+  }),undefined);
+  expect(releaseSavedOriginal).toHaveBeenCalledTimes(2);
+});
+test("album spanning a page edge fetches only bounded older context before one complete save",async()=>{
+  (readSavedMessagesPage as jest.Mock).mockResolvedValueOnce({
+    selfChatId:"12345",messages:[grouped("103","newest"),grouped("102","middle")],nextCursor:"102",
+  }).mockResolvedValueOnce({
+    selfChatId:"12345",messages:[grouped("101","oldest"),item("100","Boundary")],nextCursor:"100",
+  });
+  expect(await importSavedTextPage("guest","0",undefined,undefined,"supported-originals"))
+    .toMatchObject({saved:2,unsupported:0,nextCursor:"100"});
+  expect(readSavedMessagesPage).toHaveBeenNthCalledWith(2,"guest","102",20);
+  expect(downloadSavedAlbumOriginal).toHaveBeenCalledTimes(3);
+  expect((saveMediaNote as jest.Mock).mock.calls.find(c=>c[1].telegramSavedMessage?.kind==="messageAlbum")![1]
+    .telegramSavedMessage.messageIds).toEqual(["101","102","103"]);
+});
+test("tail album without boundary remains pending, no partial note or skipped paging cursor",async()=>{
+  (readSavedMessagesPage as jest.Mock).mockResolvedValueOnce({
+    selfChatId:"12345",messages:[grouped("73"),grouped("72")],nextCursor:"72",
+  }).mockResolvedValueOnce({selfChatId:"12345",messages:[],nextCursor:""});
+  const result=await importSavedTextPage("guest","0",undefined,undefined,"supported-originals");
+  expect(result).toMatchObject({saved:0,unsupported:0,pendingAlbum:2,nextCursor:"0"});
+  expect(downloadSavedAlbumOriginal).not.toHaveBeenCalled();
+  expect(saveMediaNote).not.toHaveBeenCalled();
+});
+test("failure on a later album download releases staged originals and never saves incomplete album",async()=>{
+  (readSavedMessagesPage as jest.Mock).mockResolvedValueOnce({
+    selfChatId:"12345",messages:[grouped("73"),grouped("72"),item("71","Boundary")],nextCursor:"71",
+  });
+  (downloadSavedAlbumOriginal as jest.Mock)
+    .mockResolvedValueOnce({file:{uri:"file:///72.jpg",name:"72.jpg",mimeType:"image/jpeg",size:40}})
+    .mockRejectedValueOnce(new Error("tdlib_request_timeout"));
+  await expect(importSavedTextPage("guest","0",undefined,undefined,"supported-originals"))
+    .rejects.toThrow("tdlib_request_timeout");
+  // The older boundary note may be saved first, but no album exists.
+  expect((saveMediaNote as jest.Mock).mock.calls.some(c=>c[1].telegramSavedMessage?.kind==="messageAlbum")).toBe(false);
+  expect(releaseSavedOriginal).toHaveBeenCalledTimes(1);
+});
+test("SQLCipher album failure cleans every downloaded member and does not mark album successful",async()=>{
+  (readSavedMessagesPage as jest.Mock).mockResolvedValueOnce({
+    selfChatId:"12345",messages:[grouped("73"),grouped("72"),item("71","older")],nextCursor:"71",
+  });
+  (saveMediaNote as jest.Mock).mockResolvedValueOnce("older-note")
+    .mockRejectedValueOnce(new Error("SQLCipher failed"));
+  await expect(importSavedTextPage("guest","0",undefined,undefined,"supported-originals"))
+    .rejects.toThrow("SQLCipher failed");
+  expect(releaseSavedOriginal).toHaveBeenCalledTimes(2);
+});
+test("album replay uses canonical receipt, reports duplicate without vector reindex",async()=>{
+  (readSavedMessagesPage as jest.Mock).mockResolvedValueOnce({
+    selfChatId:"12345",messages:[grouped("73"),grouped("72"),item("71","")],nextCursor:"71",
+  });
+  (saveMediaNote as jest.Mock).mockImplementation(async(_profile:string,input:{onReplay?:()=>void})=>{
+    input.onReplay?.();return "already-saved";
+  });
+  expect(await importSavedTextPage("guest","0",undefined,undefined,"supported-originals"))
+    .toMatchObject({saved:0,duplicates:1});
+  expect(scheduleVectors).not.toHaveBeenCalled();
+});
+test("album exceeding existing 80 MiB cap never enters canonical writer",async()=>{
+  (readSavedMessagesPage as jest.Mock).mockResolvedValueOnce({
+    selfChatId:"12345",messages:[
+      grouped("85"),grouped("84"),grouped("83"),grouped("82"),grouped("81"),item("80",""),
+    ],nextCursor:"80",
+  });
+  (downloadSavedAlbumOriginal as jest.Mock).mockImplementation(async()=>({
+    file:{uri:"file:///large.jpg",name:"large.jpg",mimeType:"image/jpeg",size:20*1024*1024},
+  }));
+  await expect(importSavedTextPage("guest","0",undefined,undefined,"supported-originals"))
+    .rejects.toThrow("80 МБ");
+  expect((saveMediaNote as jest.Mock).mock.calls.some(c=>c[1].telegramSavedMessage?.kind==="messageAlbum")).toBe(false);
+  expect(releaseSavedOriginal).toHaveBeenCalledTimes(5);
 });
