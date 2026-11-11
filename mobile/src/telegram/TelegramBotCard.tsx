@@ -81,7 +81,7 @@ export function TelegramBotCard({profile}:{profile:string}){
     if(signal.aborted)return;
     if(version===current.current)setNotice(
       "Импортировано: "+result.imported+"; пропущено: "+result.skipped+
-      ". Фото, видео и документы будут поддержаны отдельно.");
+      ". Одиночные поддерживаемые файлы сохраняются; альбомы требуют отдельной обработки.");
   });}
   function disconnect(){void action(async(version)=>{
     await clearTelegramBot(profile);
@@ -95,7 +95,7 @@ export function TelegramBotCard({profile}:{profile:string}){
     backgroundColor:theme.panel,color:theme.text,minHeight:48,paddingHorizontal:nebulaSpacing.md};
   return <View style={{gap:nebulaSpacing.sm}}>
     <Text style={{color:theme.muted,...nebulaTypography.label}}>
-      Резервный личный бот без сервера: только сообщения, которые вы отправите ему.
+      Резервный личный бот без сервера: только сообщения и поддерживаемые одиночные файлы, которые вы отправите ему. Альбомы пока ожидают отдельной обработки.
       Используйте отдельного бота без webhook и без другого getUpdates-клиента.
       Обновления на сервере Telegram доступны не более 24 часов.
     </Text>
