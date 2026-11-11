@@ -15,6 +15,7 @@ const id=(value:unknown):value is string=>typeof value==="string" &&
 const validProfile=(value:string)=>/^(guest|[a-zA-Z0-9_-]{1,120})$/.test(value);
 type NativeSavedOriginal={
   downloadSavedMessageOriginal(profile:string,chatId:string,messageId:string):Promise<string>;
+  releaseSavedMessageOriginal(profile:string,chatId:string,messageId:string,uri:string):Promise<string>;
 };
 const native=():NativeSavedOriginal|null=>Platform.OS==="android"
   ? requireOptionalNativeModule<NativeSavedOriginal>("PersaiTelegramTdlib"):null;
@@ -70,4 +71,24 @@ export async function downloadSavedOriginal(profile:string,chatId:string,
     tdlibAccountState()!=="authorizationStateReady")
     throw new Error("telegram_saved_original_cancelled");
   return parseSavedOriginal(raw,profile,chatId,preview);
+}
+
+/** Best-effort cleanup of a specific TDLib cache file, after canonical
+ * SQLCipher copy or failed write. Never delete arbitrary filesystem paths.
+ * The native gate independently rechecks self-chat, message and file path.
+ */
+export async function releaseSavedOriginal(profile:string,original:SavedOriginal):Promise<void>{
+  if(!validProfile(profile)||!id(original.chatId)||!id(original.messageId)||
+    !localMemorySessionUnlocked()||tdlibAccountState()!=="authorizationStateReady")
+    return;
+  const module=native();
+  if(!module?.releaseSavedMessageOriginal)return;
+  try{
+    await module.releaseSavedMessageOriginal(profile,original.chatId,
+      original.messageId,original.file.uri);
+  }catch{
+    // Do not mask a successfully stored original or a prior DB error.
+    // On failed cleanup TDLib's private encrypted-app sandbox still protects
+    // files; a later explicit cleanup/retention policy can retry.
+  }
 }
