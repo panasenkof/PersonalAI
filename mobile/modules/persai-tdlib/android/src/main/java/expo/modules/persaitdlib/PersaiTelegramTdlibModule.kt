@@ -300,7 +300,8 @@ class PersaiTelegramTdlibModule : Module() {
         .put("date", message.optLong("date", 0))
         .put("kind", kind.take(80))
         .put("text", text)
-        .put("hasMedia", kind != "messageText"))
+        .put("hasMedia", kind != "messageText")
+        .put("hasAlbum",message.optLong("media_album_id",0L)!=0L))
     }
     // A profile switch/close during the native requests invalidates the result.
     require(activeProfile == profile && authState == "authorizationStateReady") {
