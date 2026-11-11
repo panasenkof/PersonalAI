@@ -3,7 +3,7 @@ import {saveMediaNote} from "../media/attachments";
 import {scheduleVectors} from "../media/vector-runner";
 import {readSavedMessagesPage} from "./saved-messages";
 import {readSavedTopicPage,safeTopicId} from "./saved-topics";
-import {downloadSavedOriginal,supportsSavedOriginal} from "./saved-original";
+import {downloadSavedOriginal,releaseSavedOriginal,supportsSavedOriginal} from "./saved-original";
 
 export type SavedTextImportResult={
   saved:number; duplicates:number; unsupported:number; empty:number;
@@ -49,23 +49,27 @@ export async function importSavedTextPage(profile:string,cursor="0",
       // and the JS boundary checks source, date, kind and unchanged caption.
       const original=originalRequested
         ? await downloadSavedOriginal(profile,page.selfChatId,item,signal):null;
-      unlocked(signal);
-      const title=body.split(/\r?\n/)[0].trim().slice(0,160)||
-        original?.file.name||"Сообщение из Избранного";
-      let replayed=false;
-      await saveMediaNote(profile,{
-        title,body,sensitivity:"sensitive",
-        ...(original?{file:original.file}:{}),
-        receipt:"telegram-saved:"+page.selfChatId+":"+item.id,
-        telegramSavedMessage:{
-          chatId:page.selfChatId,messageId:item.id,date:item.date,
-          kind:item.kind as "messageText"|"messagePhoto"|"messageDocument"|"messageVideo"|
-            "messageAudio"|"messageVoiceNote"|"messageAnimation"|"messageVideoNote",
-          ...(topicId!==undefined?{topicId}:{}),
-        },
-        onReplay:()=>{replayed=true;},
-      },signal);
-      if(replayed)duplicates++;else saved++;
+      try{
+        unlocked(signal);
+        const title=body.split(/\r?\n/)[0].trim().slice(0,160)||
+          original?.file.name||"Сообщение из Избранного";
+        let replayed=false;
+        await saveMediaNote(profile,{
+          title,body,sensitivity:"sensitive",
+          ...(original?{file:original.file}:{}),
+          receipt:"telegram-saved:"+page.selfChatId+":"+item.id,
+          telegramSavedMessage:{
+            chatId:page.selfChatId,messageId:item.id,date:item.date,
+            kind:item.kind as "messageText"|"messagePhoto"|"messageDocument"|"messageVideo"|
+              "messageAudio"|"messageVoiceNote"|"messageAnimation"|"messageVideoNote",
+            ...(topicId!==undefined?{topicId}:{}),
+          },
+          onReplay:()=>{replayed=true;},
+        },signal);
+        if(replayed)duplicates++;else saved++;
+      }finally{
+        if(original)await releaseSavedOriginal(profile,original);
+      }
     }
     unlocked(signal);
     if(saved)scheduleVectors(profile);

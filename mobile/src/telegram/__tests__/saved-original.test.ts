@@ -68,3 +68,29 @@ test("explicit abort prevents invoking native downloader",async()=>{
     .rejects.toThrow("telegram_saved_original_cancelled");
   expect(requireOptionalNativeModule).not.toHaveBeenCalled();
 });
+
+test("releases only the verified self-chat file by scoped native operation",async()=>{
+  const release=jest.fn().mockResolvedValue("ok");
+  (requireOptionalNativeModule as jest.Mock).mockReturnValue({
+    downloadSavedMessageOriginal:jest.fn(),releaseSavedMessageOriginal:release,
+  });
+  const {releaseSavedOriginal}=require("../saved-original");
+  const originalValue=parseSavedOriginal(JSON.stringify(original),"guest","12345",preview);
+  await releaseSavedOriginal("guest",originalValue);
+  expect(release).toHaveBeenCalledWith("guest","12345","71",original.uri);
+});
+test("never asks TDLib to delete cached original while app is locked",async()=>{
+  const release=jest.fn().mockResolvedValue("ok");
+  (requireOptionalNativeModule as jest.Mock).mockReturnValue({releaseSavedMessageOriginal:release});
+  (localMemorySessionUnlocked as jest.Mock).mockReturnValue(false);
+  const {releaseSavedOriginal}=require("../saved-original");
+  await releaseSavedOriginal("guest",parseSavedOriginal(JSON.stringify(original),"guest","12345",preview));
+  expect(release).not.toHaveBeenCalled();
+});
+test("cache release failures never change a committed note result or leak a path",async()=>{
+  const release=jest.fn().mockRejectedValue(new Error("secret TDLib native path"));
+  (requireOptionalNativeModule as jest.Mock).mockReturnValue({releaseSavedMessageOriginal:release});
+  const {releaseSavedOriginal}=require("../saved-original");
+  await expect(releaseSavedOriginal("guest",
+    parseSavedOriginal(JSON.stringify(original),"guest","12345",preview))).resolves.toBeUndefined();
+});
