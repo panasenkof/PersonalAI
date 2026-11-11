@@ -1,4 +1,4 @@
-import {fetchBotUpdates,listBotPairCandidates,verifyTelegramBot} from "../bot-api";
+import {fetchBotUpdates,listBotPairCandidates,verifyTelegramBot,getTelegramBotFile} from "../bot-api";
 const token="12345678:"+"a".repeat(35);
 const apiResult=(result:unknown,ok=true)=>({ok:true,text:async()=>JSON.stringify({ok,result})}) as Response;
 afterEach(()=>jest.restoreAllMocks());
@@ -85,4 +85,20 @@ test("caller cancellation stops the request promptly",async()=>{
   const assertion=expect(pending).rejects.toThrow("отменён");
   controller.abort();
   await assertion;
+});
+
+test("getFile validates Telegram path and rejects traversal without downloading anything",async()=>{
+  const mock=jest.spyOn(globalThis,"fetch");
+  mock.mockResolvedValueOnce(apiResult({file_path:"photos/file_12.jpg",file_size:42}))
+      .mockResolvedValueOnce(apiResult({file_path:"../unsafe",file_size:42}))
+      .mockResolvedValueOnce(apiResult({file_path:"photos/file_12.jpg",file_size:21_000_000}));
+  expect(await getTelegramBotFile(token,"AgACfile123")).toEqual({path:"photos/file_12.jpg",size:42});
+  await expect(getTelegramBotFile(token,"AgACfile123")).rejects.toThrow("небезопасный путь");
+  await expect(getTelegramBotFile(token,"AgACfile123")).rejects.toThrow("лимит 20 МБ");
+  expect(mock).toHaveBeenCalledTimes(3);
+});
+test("getFile rejects unvalidated file IDs before network",async()=>{
+  const mock=jest.spyOn(globalThis,"fetch");
+  await expect(getTelegramBotFile(token,"../../etc")).rejects.toThrow("идентификатор");
+  expect(mock).not.toHaveBeenCalled();
 });
