@@ -42,7 +42,7 @@ test("downloads the largest photo original into private cache, preserving captio
   }));
   expect(getTelegramBotFile).toHaveBeenCalledWith(token,"AgACbig12345",undefined);
   expect(original?.file).toMatchObject({name:"photo.jpg",mimeType:"image/jpeg",size:4096});
-  expect(original?.file.uri).toContain("persai-telegram-bot/test-file-uuid");
+  expect(original?.file.uri).toContain("persai-incoming/test-file-uuid");
   expect(original?.file.uri).not.toContain(token);
   expect(mockDownload).toHaveBeenCalledTimes(1);
   original?.remove();
