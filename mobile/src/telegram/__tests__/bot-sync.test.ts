@@ -243,3 +243,19 @@ test("canonical album replay keeps cursor idempotent without duplicate note",asy
   expect(advanceTelegramBotCursor).toHaveBeenCalledWith("album-replay",456,"12345",22);
   expect(scheduleVectors).not.toHaveBeenCalled();
 });
+
+test("album cumulative size is bounded before SQLCipher write; staged originals are cleaned",async()=>{
+  const files=Array.from({length:5},(_,i)=>prepared("original-"+i+".jpg"));
+  for(const file of files){
+    file.file.size=20_000_000;
+    (prepareBotOriginal as jest.Mock).mockResolvedValueOnce(file);
+  }
+  (fetchBotUpdates as jest.Mock).mockResolvedValueOnce([
+    ...Array.from({length:5},(_,i)=>album(31+i)),
+    {update_id:36,message:msg(36,"/done")},
+  ]);
+  await expect(syncTelegramBotText("large-album")).rejects.toThrow("80 МБ");
+  expect(saveMediaNote).not.toHaveBeenCalled();
+  expect(advanceTelegramBotCursor).not.toHaveBeenCalled();
+  expect(files.every(x=>x.remove.mock.calls.length===1)).toBe(true);
+});
