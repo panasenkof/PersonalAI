@@ -268,3 +268,19 @@ test("standalone /done is an album boundary command and never a memory note",asy
   expect(saveMediaNote).not.toHaveBeenCalled();
   expect(advanceTelegramBotCursor).toHaveBeenCalledWith("boundary",456,"12345",41);
 });
+
+test("already acknowledged update does not trap album sync in a retry loop",async()=>{
+  (loadTelegramBotConfig as jest.Mock).mockResolvedValueOnce({
+    token,botId:456,username:"MyPersAIBot",allowedChatId:"12345",cursor:20,
+  });
+  (fetchBotUpdates as jest.Mock).mockResolvedValueOnce([
+    {update_id:20,message:msg(20,"Already acknowledged")},
+    {update_id:21,message:msg(21,"Fresh")},
+  ]);
+  expect(await syncTelegramBotText("skip-stale")).toEqual({
+    imported:1,skipped:0,lastUpdate:21,
+  });
+  expect(saveMediaNote).toHaveBeenCalledTimes(1);
+  expect(advanceTelegramBotCursor).toHaveBeenCalledTimes(1);
+  expect(advanceTelegramBotCursor).toHaveBeenCalledWith("skip-stale",456,"12345",21);
+});
