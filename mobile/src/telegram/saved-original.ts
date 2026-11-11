@@ -1,0 +1,73 @@
+import {requireOptionalNativeModule} from "expo-modules-core";
+import {Platform} from "react-native";
+import {localMemorySessionUnlocked} from "../local-memory/storage";
+import {MAX_ORIGINAL_BYTES} from "../media/attachments";
+import {mediaKind,type ImportFile} from "../media/kinds";
+import {tdlibAvailable,tdlibAccountState} from "./account";
+import type {SavedMessagePreview} from "./saved-messages";
+
+const supported=new Set([
+  "messagePhoto","messageDocument","messageVideo","messageAudio",
+  "messageVoiceNote","messageAnimation","messageVideoNote",
+]);
+const id=(value:unknown):value is string=>typeof value==="string" &&
+  /^[1-9][0-9]{0,15}$/.test(value) && Number.isSafeInteger(Number(value));
+const validProfile=(value:string)=>/^(guest|[a-zA-Z0-9_-]{1,120})$/.test(value);
+type NativeSavedOriginal={
+  downloadSavedMessageOriginal(profile:string,chatId:string,messageId:string):Promise<string>;
+};
+const native=():NativeSavedOriginal|null=>Platform.OS==="android"
+  ? requireOptionalNativeModule<NativeSavedOriginal>("PersaiTelegramTdlib"):null;
+
+export type SavedOriginal={file:ImportFile;messageId:string;chatId:string;kind:string;date:number;text:string};
+export const supportsSavedOriginal=(kind:string):boolean=>supported.has(kind);
+
+/** Treat native JSON as untrusted. The path must be inside this profile's
+ * private TDLib download directory; never accept arbitrary content URIs.
+ */
+export function parseSavedOriginal(raw:string,profile:string,chatId:string,
+  preview:SavedMessagePreview):SavedOriginal {
+  if(!validProfile(profile)||!id(chatId)||!id(preview.id)||!supportsSavedOriginal(preview.kind)||
+    typeof raw!=="string"||raw.length>5000)
+    throw new Error("telegram_saved_original_invalid");
+  let data:unknown;
+  try{data=JSON.parse(raw);}catch{throw new Error("telegram_saved_original_invalid");}
+  if(!data||typeof data!=="object")throw new Error("telegram_saved_original_invalid");
+  const value=data as Partial<SavedOriginal>&{uri?:unknown;name?:unknown;mimeType?:unknown;size?:unknown};
+  if(value.chatId!==chatId||value.messageId!==preview.id||value.kind!==preview.kind||
+    value.date!==preview.date||value.text!==preview.text||
+    typeof value.uri!=="string"||!value.uri.startsWith("file:///")||
+    !value.uri.includes("/persai-tdlib-"+profile+"/files/")||
+    /[?#\r\n\0]/.test(value.uri)||value.uri.includes("/../")||
+    value.uri.includes("/./")||typeof value.name!=="string"||
+    !value.name||value.name.length>240||value.name==="."||value.name===".."||
+    /[\\/\x00-\x1f]/.test(value.name)||
+    typeof value.mimeType!=="string"||
+    !/^[a-zA-Z0-9.+-]+\/[a-zA-Z0-9.+-]+$/.test(value.mimeType)||
+    !Number.isSafeInteger(value.size)||!(Number(value.size)>0)||
+    Number(value.size)>MAX_ORIGINAL_BYTES)
+    throw new Error("telegram_saved_original_invalid");
+  const file:ImportFile={uri:value.uri,name:value.name,mimeType:value.mimeType,size:value.size as number};
+  mediaKind(file); // Only formats supported by the canonical writer are allowed.
+  return {file,chatId,messageId:preview.id,kind:preview.kind,date:preview.date,text:preview.text};
+}
+
+/** Restricted self-chat media download. No generic TDLib file API in JS/LLM. */
+export async function downloadSavedOriginal(profile:string,chatId:string,
+  preview:SavedMessagePreview,signal?:AbortSignal):Promise<SavedOriginal> {
+  if(signal?.aborted||!localMemorySessionUnlocked())
+    throw new Error("telegram_saved_original_cancelled");
+  if(!validProfile(profile)||!id(chatId)||!id(preview.id)||!preview.hasMedia||
+    !supportsSavedOriginal(preview.kind))
+    throw new Error("telegram_saved_original_request_invalid");
+  if(!tdlibAvailable()||tdlibAccountState()!=="authorizationStateReady")
+    throw new Error("telegram_account_not_authorized");
+  const module=native();
+  if(!module?.downloadSavedMessageOriginal)
+    throw new Error("telegram_saved_original_reader_missing");
+  const raw=await module.downloadSavedMessageOriginal(profile,chatId,preview.id);
+  if(signal?.aborted||!localMemorySessionUnlocked()||
+    tdlibAccountState()!=="authorizationStateReady")
+    throw new Error("telegram_saved_original_cancelled");
+  return parseSavedOriginal(raw,profile,chatId,preview);
+}
