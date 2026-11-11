@@ -5,6 +5,7 @@ import {nebulaRadii,nebulaSpacing,nebulaTypography} from "../design/nebula/token
 import {useTheme} from "../theme";
 import {onLocalMemorySessionChange} from "../local-memory/storage";
 import {TelegramSavedImportCard} from "./TelegramSavedImportCard";
+import {telegramAccountErrorMessage} from "./account-errors";
 import {
   tdlibAvailable,tdlibAccountState,observeTelegramAccountState,
   initializeTelegramAccount,completeTelegramAuthorization,logOutTelegramAccount,
@@ -81,8 +82,8 @@ export function TelegramAccountCard({profile,apiConfigured}:{
     try{
       const next=await action();
       if(version.current===current){setState(next);setNotice(message);}
-    }catch{
-      if(version.current===current)setError("Операция Telegram не выполнена. Проверьте данные и состояние соединения.");
+    }catch(e){
+      if(version.current===current)setError(telegramAccountErrorMessage(e));
     }finally{
       running.current=false;
       if(version.current===current){setSaving(false);setValue("");}
