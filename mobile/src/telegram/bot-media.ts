@@ -76,25 +76,42 @@ export async function prepareBotOriginal(token:string,message:BotMessage,
   const suffix=chosen.name.split(".").pop()?.toLowerCase()||"bin";
   const file=new File(directory,Crypto.randomUUID()+"."+suffix);
   const controller=new AbortController();
-  const abort=()=>controller.abort();
+  let rejectInterrupted:(reason:Error)=>void=()=>{};
+  let interrupted=false;
+  let timedOut=false;
+  const interruption=new Promise<never>((_,reject)=>{rejectInterrupted=reject;});
+  const abort=()=>{
+    interrupted=true;
+    controller.abort();
+    rejectInterrupted(new Error("Импорт Telegram отменён."));
+  };
   external?.addEventListener("abort",abort,{once:true});
   let timer:ReturnType<typeof setTimeout>|undefined;
   let oversized=false;
   const remove=()=>{try{if(file.exists)file.delete();}catch{/* app-private cache cleanup */}};
   try{
     if(external?.aborted)throw new Error("Импорт Telegram отменён.");
-    timer=setTimeout(()=>controller.abort(),60_000);
+    timer=setTimeout(()=>{
+      timedOut=true;interrupted=true;
+      controller.abort();
+      rejectInterrupted(new Error("Telegram не завершил загрузку за 60 секунд."));
+    },60_000);
     const url="https://api.telegram.org/file/bot"+token+"/"+remote.path;
-    const fileResult=await File.downloadFileAsync(url,file,{
+    const download=File.downloadFileAsync(url,file,{
       signal:controller.signal,
       onProgress:p=>{
         if(p.bytesWritten>TELEGRAM_BOT_MAX_FILE_BYTES||
           (p.totalBytes>0&&p.totalBytes>TELEGRAM_BOT_MAX_FILE_BYTES)){
-          oversized=true;
+          oversized=true;interrupted=true;
           controller.abort();
+          rejectInterrupted(new Error("Файл Telegram превышает лимит 20 МБ."));
         }
       },
     });
+    // A native downloader may ignore AbortSignal: the UI still must settle,
+    // and a late native completion must never leave the private cache behind.
+    void download.then(()=>{if(interrupted)remove();},()=>{if(interrupted)remove();});
+    const fileResult=await Promise.race([download,interruption]);
     if(external?.aborted)throw new Error("Импорт Telegram отменён.");
     if(oversized)throw new Error("Файл Telegram превышает лимит 20 МБ.");
     const size=fileResult.size;
@@ -103,9 +120,11 @@ export async function prepareBotOriginal(token:string,message:BotMessage,
       throw new Error("Размер скачанного оригинала Telegram не совпал с проверенным.");
     return {file:{uri:fileResult.uri,name:chosen.name,mimeType:chosen.mime,size},remove};
   }catch(e){
+    interrupted=true;
     remove();
     if(external?.aborted)throw new Error("Импорт Telegram отменён.");
     if(oversized)throw new Error("Файл Telegram превышает лимит 20 МБ.");
+    if(timedOut)throw new Error("Telegram не завершил загрузку за 60 секунд.");
     if(e instanceof Error&&/^(Telegram|Этот формат|Импорт Telegram|Размер скачанного)/.test(e.message))
       throw e;
     // Never leak the token-bearing URL in a native download exception.
