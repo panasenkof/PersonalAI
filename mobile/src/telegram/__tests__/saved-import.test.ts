@@ -4,9 +4,9 @@ import {readSavedTopicPage} from "../saved-topics";
 import {saveMediaNote} from "../../media/attachments";
 import {scheduleVectors} from "../../media/vector-runner";
 import {localMemorySessionUnlocked} from "../../local-memory/storage";
-import {downloadSavedOriginal} from "../saved-original";
+import {downloadSavedOriginal,releaseSavedOriginal} from "../saved-original";
 jest.mock("../saved-messages",()=>({readSavedMessagesPage:jest.fn()}));
-jest.mock("../saved-original",()=>({downloadSavedOriginal:jest.fn(),
+jest.mock("../saved-original",()=>({downloadSavedOriginal:jest.fn(),releaseSavedOriginal:jest.fn(),
   supportsSavedOriginal:(kind:string)=>["messagePhoto","messageDocument","messageVideo",
     "messageAudio","messageVoiceNote","messageAnimation","messageVideoNote"].includes(kind)}));
 jest.mock("../saved-topics",()=>({readSavedTopicPage:jest.fn(),safeTopicId:(v:string)=>typeof v==="string"&&/^(0|-?[1-9][0-9]{0,15})$/.test(v)&&Number.isSafeInteger(Number(v))}));
@@ -23,6 +23,7 @@ beforeEach(()=>{
     selfChatId:"12345",messages:[item("50","Заметка"),item("49","Другой текст")],nextCursor:"49",
   });
   (saveMediaNote as jest.Mock).mockResolvedValue("note-1");
+  (releaseSavedOriginal as jest.Mock).mockResolvedValue(undefined);
   (downloadSavedOriginal as jest.Mock).mockResolvedValue({
     file:{uri:"file:///data/persai-tdlib-guest/files/photo.jpg",name:"photo.jpg",mimeType:"image/jpeg",size:40},
   });
@@ -182,4 +183,31 @@ test("TDLib Saved album is not split into misleading independent original notes"
     .toMatchObject({saved:0,unsupported:2});
   expect(downloadSavedOriginal).not.toHaveBeenCalled();
   expect(saveMediaNote).not.toHaveBeenCalled();
+});
+
+test("successful original import releases the TDLib cache only AFTER canonical SQLCipher write",async()=>{
+  (readSavedMessagesPage as jest.Mock).mockResolvedValueOnce({
+    selfChatId:"12345",messages:[item("70","Фото","messagePhoto",true)],nextCursor:"70",
+  });
+  let wrote=false;
+  (saveMediaNote as jest.Mock).mockImplementationOnce(async()=>{
+    wrote=true;
+    expect(releaseSavedOriginal).not.toHaveBeenCalled();
+    return "note-id";
+  });
+  (releaseSavedOriginal as jest.Mock).mockImplementationOnce(async()=>{expect(wrote).toBe(true);});
+  const result=await importSavedTextPage("guest","0",undefined,undefined,"supported-originals");
+  expect(result.saved).toBe(1);
+  expect(releaseSavedOriginal).toHaveBeenCalledWith("guest",expect.objectContaining({
+    file:expect.objectContaining({name:"photo.jpg"}),
+  }));
+});
+test("SQLCipher failure still attempts to reclaim the specific staged original",async()=>{
+  (readSavedMessagesPage as jest.Mock).mockResolvedValueOnce({
+    selfChatId:"12345",messages:[item("70","Фото","messagePhoto",true)],nextCursor:"70",
+  });
+  (saveMediaNote as jest.Mock).mockRejectedValueOnce(new Error("SQLCipher transaction failed"));
+  await expect(importSavedTextPage("guest","0",undefined,undefined,"supported-originals"))
+    .rejects.toThrow("SQLCipher transaction failed");
+  expect(releaseSavedOriginal).toHaveBeenCalledTimes(1);
 });

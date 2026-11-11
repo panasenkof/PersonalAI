@@ -320,7 +320,8 @@ class PersaiTelegramTdlibModule : Module() {
    * Saved Messages. No arbitrary file ID, Telegram chat, HTTP URL, or contact
    * lookup crosses the JS boundary. Does not send or mutate Telegram content.
    */
-  private fun savedOriginal(profile:String, expectedChat:String, messageId:String):String {
+  private fun savedOriginal(profile:String, expectedChat:String, messageId:String,
+    releaseUri:String?=null):String {
     requireState("authorizationStateReady")
     require(Regex("^(guest|[a-zA-Z0-9_-]{1,120})$").matches(profile) &&
       activeProfile == profile) { "tdlib_saved_profile_mismatch" }
@@ -406,6 +407,33 @@ class PersaiTelegramTdlibModule : Module() {
     }
     require(mime.length in 3..100 && Regex("^[a-zA-Z0-9.+-]+/[a-zA-Z0-9.+-]+$").matches(mime)) {
       "tdlib_original_mime_invalid"
+    }
+    if(releaseUri != null) {
+      // Release ONLY the exact TDLib-cached original previously handed to
+      // the canonical SQLCipher writer. No arbitrary pathname or file ID
+      // is accepted from JS or exposed to an LLM tool.
+      require(releaseUri.startsWith("file:///") && releaseUri.length <= 2048 &&
+        !releaseUri.contains("?") && !releaseUri.contains("#") &&
+        !releaseUri.contains('\u0000')) { "tdlib_release_uri_invalid" }
+      val ctx=appContext.reactContext ?: throw IllegalStateException("tdlib_context_unavailable")
+      val root=File(ctx.filesDir,"persai-tdlib-$profile/files").canonicalFile
+      val target=File(releaseUri.removePrefix("file://")).canonicalFile
+      require(target.absolutePath.startsWith(root.absolutePath+File.separator)) {
+        "tdlib_release_outside_cache"
+      }
+      val known=sendRequest(JSONObject().put("@type","getFile").put("file_id",fileId))
+      require(known.optString("@type")=="file" && known.optInt("id",0)==fileId) {
+        "tdlib_release_identity_mismatch"
+      }
+      val knownPath=known.optJSONObject("local")?.optString("path","") ?: ""
+      require(knownPath.isNotEmpty() &&
+        File(knownPath).canonicalFile.absolutePath==target.absolutePath &&
+        target.isFile && activeProfile==profile && authState=="authorizationStateReady") {
+        "tdlib_release_source_changed"
+      }
+      val removed=sendRequest(JSONObject().put("@type","deleteFile").put("file_id",fileId))
+      require(removed.optString("@type")=="ok") { "tdlib_release_failed" }
+      return "ok"
     }
     val downloaded=sendRequest(JSONObject().put("@type","downloadFile")
       .put("file_id",fileId).put("priority",16).put("offset",0)
@@ -504,6 +532,11 @@ class PersaiTelegramTdlibModule : Module() {
     AsyncFunction("downloadSavedMessageOriginal") {
       profile:String, selfChatId:String, messageId:String ->
       savedOriginal(profile,selfChatId,messageId)
+    }
+    // Only releases the exact self-chat download copied to SQLCipher.
+    AsyncFunction("releaseSavedMessageOriginal") {
+      profile:String, selfChatId:String, messageId:String, uri:String ->
+      savedOriginal(profile,selfChatId,messageId,uri)
     }
     // Topic IDs are only accepted after an updateSavedMessagesTopic from TDLib.
     AsyncFunction("listSavedMessagesTopics") { profile: String ->
