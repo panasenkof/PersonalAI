@@ -1,10 +1,12 @@
 import {syncTelegramBotText} from "../bot-sync";
 import {fetchBotUpdates} from "../bot-api";
+import {prepareBotOriginal} from "../bot-media";
 import {advanceTelegramBotCursor,loadTelegramBotConfig} from "../bot-settings";
 import {saveMediaNote} from "../../media/attachments";
 import {localMemorySessionUnlocked} from "../../local-memory/storage";
 import {scheduleVectors} from "../../media/vector-runner";
 jest.mock("../bot-api",()=>({fetchBotUpdates:jest.fn()}));
+jest.mock("../bot-media",()=>({prepareBotOriginal:jest.fn()}));
 jest.mock("../bot-settings",()=>({loadTelegramBotConfig:jest.fn(),advanceTelegramBotCursor:jest.fn()}));
 jest.mock("../../media/attachments",()=>({saveMediaNote:jest.fn()}));
 jest.mock("../../local-memory/storage",()=>({localMemorySessionUnlocked:jest.fn()}));
@@ -22,6 +24,7 @@ beforeEach(()=>{
   (advanceTelegramBotCursor as jest.Mock).mockResolvedValue(undefined);
   (saveMediaNote as jest.Mock).mockResolvedValue("note-id");
   (fetchBotUpdates as jest.Mock).mockResolvedValue([]);
+  (prepareBotOriginal as jest.Mock).mockResolvedValue(null);
 });
 test("only approved private chat reaches canonical writer with typed provenance",async()=>{
   (fetchBotUpdates as jest.Mock).mockResolvedValue([
@@ -52,6 +55,7 @@ test("does not ACK an update when canonical writer fails",async()=>{
   expect(advanceTelegramBotCursor).toHaveBeenCalledWith("p2",456,"12345",5);
 });
 test("unsupported media and edits block ACK instead of silently losing content",async()=>{
+  (prepareBotOriginal as jest.Mock).mockRejectedValueOnce(new Error("Импорт остановлен без потери сообщения."));
   (fetchBotUpdates as jest.Mock).mockResolvedValueOnce([{
     update_id:8,message:{...msg(8,"photo"),photo:[{file_id:"secret"}]},
   }]);
@@ -84,4 +88,45 @@ test("simultaneous calls for one profile share the same cursor worker",async()=>
   release([]);
   expect(await first).toEqual({imported:0,skipped:0,lastUpdate:0});
   expect(fetchBotUpdates).toHaveBeenCalledTimes(1);
+});
+
+test("single Telegram photo is saved with its original and caption before cursor advances",async()=>{
+  const remove=jest.fn();
+  (prepareBotOriginal as jest.Mock).mockResolvedValueOnce({
+    file:{uri:"file:///cache/photo.jpg",name:"photo.jpg",mimeType:"image/jpeg",size:45},
+    remove,
+  });
+  (fetchBotUpdates as jest.Mock).mockResolvedValueOnce([{
+    update_id:11,message:{...msg(11,"Подпись к фотографии"),photo:[{file_id:"AgACfile123"}]},
+  }]);
+  const result=await syncTelegramBotText("photo");
+  expect(result.imported).toBe(1);
+  expect(prepareBotOriginal).toHaveBeenCalledWith(token,expect.objectContaining({message_id:11}),undefined);
+  expect(saveMediaNote).toHaveBeenCalledWith("photo",expect.objectContaining({
+    file:expect.objectContaining({uri:"file:///cache/photo.jpg"}),
+    body:"Подпись к фотографии",receipt:"telegram-bot:456:12345:11",
+  }),undefined);
+  expect(remove).toHaveBeenCalledTimes(1);
+  expect(advanceTelegramBotCursor).toHaveBeenCalledWith("photo",456,"12345",11);
+});
+test("a failed original save cleans temporary file and never acknowledges the Telegram update",async()=>{
+  const remove=jest.fn();
+  (prepareBotOriginal as jest.Mock).mockResolvedValueOnce({
+    file:{uri:"file:///cache/voice.ogg",name:"voice.ogg",mimeType:"audio/ogg",size:90},remove,
+  });
+  (fetchBotUpdates as jest.Mock).mockResolvedValueOnce([{
+    update_id:12,message:{...msg(12,""),voice:{file_id:"AwACfile123"}},
+  }]);
+  (saveMediaNote as jest.Mock).mockRejectedValueOnce(new Error("SQLCipher unavailable"));
+  await expect(syncTelegramBotText("voice")).rejects.toThrow("SQLCipher unavailable");
+  expect(remove).toHaveBeenCalledTimes(1);
+  expect(advanceTelegramBotCursor).not.toHaveBeenCalled();
+});
+test("non-file Telegram objects do not disappear from the queue on ACK",async()=>{
+  (fetchBotUpdates as jest.Mock).mockResolvedValueOnce([{
+    update_id:13,message:{...msg(13,""),location:{latitude:1,longitude:2}},
+  }]);
+  await expect(syncTelegramBotText("location")).rejects.toThrow("неподдержанный объект");
+  expect(advanceTelegramBotCursor).not.toHaveBeenCalled();
+  expect(prepareBotOriginal).not.toHaveBeenCalled();
 });
