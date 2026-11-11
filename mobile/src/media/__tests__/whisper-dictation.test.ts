@@ -118,21 +118,30 @@ test("the detector runs once per 0.3 s window, while every buffer still reaches 
   await session.stop(); await tick();
 });
 
-test("a decoder that never ends after stop does not block the next dictation forever", async () => {
+test("a hung native decoder is never disposed while stream() is still running", async () => {
   const { createWhisperSpeechToText } = require("react-native-executorch");
   const aborter = new AbortController();
   await startWhisperDictation(jest.fn(), jest.fn(), jest.fn(), { signal: aborter.signal });
   const loads = createWhisperSpeechToText.mock.calls.length;
-  mockFinish = new Promise<void>(() => {}); // the native stream hangs
+  let finishDecoder!: () => void;
+  mockFinish = new Promise<void>(resolve => { finishDecoder = resolve; });
   aborter.abort(); await tick();
   const next = startWhisperDictation(jest.fn(), jest.fn(), jest.fn());
   await tick();
   expect(mockRecorder.start).toHaveBeenCalledTimes(1);
-  mockClosed = false; mockFinish = null;
   jest.advanceTimersByTime(DRAIN_TIMEOUT_MS); await tick();
-  const session = await next;
-  expect(mockModel.dispose).toHaveBeenCalled();
-  expect(createWhisperSpeechToText.mock.calls.length).toBe(loads + 1);
+  await expect(next).rejects.toThrow("Предыдущая локальная диктовка");
+  expect(mockModel.dispose).not.toHaveBeenCalled();
+  expect(createWhisperSpeechToText.mock.calls.length).toBe(loads);
+  expect(mockRecorder.start).toHaveBeenCalledTimes(1);
+  // Repeated attempts must fail safely instead of racing a still-running JSI stream.
+  await expect(startWhisperDictation(jest.fn(), jest.fn(), jest.fn())).rejects.toThrow("Предыдущая локальная диктовка");
+  expect(mockModel.dispose).not.toHaveBeenCalled();
+  // Once the old native generator really ends, the existing model is reusable.
+  finishDecoder(); await tick();
+  mockClosed = false; mockFinish = null;
+  const session = await startWhisperDictation(jest.fn(), jest.fn(), jest.fn());
+  expect(createWhisperSpeechToText.mock.calls.length).toBe(loads);
   expect(mockRecorder.start).toHaveBeenCalledTimes(2);
   await session.stop(); await tick();
 });
