@@ -1,4 +1,4 @@
-import {parseSavedOriginal,downloadSavedOriginal,supportsSavedOriginal} from "../saved-original";
+import {parseSavedOriginal,downloadSavedOriginal,downloadSavedAlbumOriginal,releaseSavedOriginal,supportsSavedOriginal} from "../saved-original";
 import {tdlibAvailable,tdlibAccountState} from "../account";
 import {localMemorySessionUnlocked} from "../../local-memory/storage";
 import {requireOptionalNativeModule} from "expo-modules-core";
@@ -93,4 +93,41 @@ test("cache release failures never change a committed note result or leak a path
   const {releaseSavedOriginal}=require("../saved-original");
   await expect(releaseSavedOriginal("guest",
     parseSavedOriginal(JSON.stringify(original),"guest","12345",preview))).resolves.toBeUndefined();
+});
+
+test("album downloader sends only a TDLib-projected ID and validates album provenance",async()=>{
+  const albumPreview={...preview,hasAlbum:true,albumId:"9223372036854775807"};
+  const albumOriginal={...original,albumId:albumPreview.albumId};
+  const nativeDownload=jest.fn().mockResolvedValue(JSON.stringify(albumOriginal));
+  (requireOptionalNativeModule as jest.Mock).mockReturnValue({
+    downloadSavedAlbumOriginal:nativeDownload,releaseSavedAlbumOriginal:jest.fn(),
+  });
+  const result=await downloadSavedAlbumOriginal("guest","12345",albumPreview);
+  expect(result.albumId).toBe(albumPreview.albumId);
+  expect(nativeDownload).toHaveBeenCalledWith("guest","12345","71","9223372036854775807");
+  const nativeRelease=jest.fn().mockResolvedValue("ok");
+  (requireOptionalNativeModule as jest.Mock).mockReturnValue({
+    releaseSavedAlbumOriginal:nativeRelease,
+  });
+  await releaseSavedOriginal("guest",result);
+  expect(nativeRelease).toHaveBeenCalledWith("guest","12345","71",
+    albumPreview.albumId,original.uri);
+});
+test("rejects different TDLib album ID and no fake album state",async()=>{
+  const albumPreview={...preview,hasAlbum:true,albumId:"987"};
+  const nativeDownload=jest.fn().mockResolvedValue(JSON.stringify({...original,albumId:"999"}));
+  (requireOptionalNativeModule as jest.Mock).mockReturnValue({
+    downloadSavedAlbumOriginal:nativeDownload,
+  });
+  await expect(downloadSavedAlbumOriginal("guest","12345",albumPreview))
+    .rejects.toThrow("telegram_saved_original_invalid");
+  expect(()=>parseSavedOriginal(JSON.stringify({...original,albumId:"987"}),
+    "guest","12345",preview)).toThrow("telegram_saved_original_invalid");
+  await expect(downloadSavedAlbumOriginal("guest","12345",{...preview,hasAlbum:true}))
+    .rejects.toThrow("telegram_saved_album_original_request_invalid");
+});
+test("album source cannot be downloaded as a standalone original",async()=>{
+  await expect(downloadSavedOriginal("guest","12345",{
+    ...preview,hasAlbum:true,albumId:"987",
+  })).rejects.toThrow("telegram_saved_original_request_invalid");
 });

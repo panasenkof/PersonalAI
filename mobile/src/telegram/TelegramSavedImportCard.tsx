@@ -35,7 +35,7 @@ export function TelegramSavedImportCard({profile}:{profile:string}){
       if(generation.current===version){
         setResult(outcome);
         setCursor(outcome.nextCursor||cursor);
-        setDone(!outcome.nextCursor || outcome.nextCursor===cursor);
+        setDone(!outcome.pendingAlbum && (!outcome.nextCursor || outcome.nextCursor===cursor));
       }
     }catch{
       if(generation.current===version)setError(
@@ -73,9 +73,10 @@ export function TelegramSavedImportCard({profile}:{profile:string}){
       Импорт «Избранного»
     </Text>
     <Text style={{color:t.muted,...nebulaTypography.label}}>
-      Вручную импортируются тексты и одиночные поддерживаемые оригиналы (фото,
-      PDF, аудио и видео) с подписями — до 20 сообщений за страницу.
-      Альбомы и неизвестные форматы пока не сохраняются. Автозагрузка при запуске
+      Вручную импортируются тексты, одиночные оригиналы и завершённые альбомы
+      (фото, PDF, аудио и видео) с подписями. Обычно до 20 сообщений за запрос;
+      на границе альбома возможна ограниченная дочитка истории.
+      Незавершённый альбом не сохраняется частично. Автозагрузка при запуске
       остаётся текстовой. Записи попадают в раздел «Входящие» без отдельной базы.
     </Text>
     <Text style={{color:t.muted,...nebulaTypography.label}}>
@@ -104,10 +105,11 @@ export function TelegramSavedImportCard({profile}:{profile:string}){
     {result?<Text accessibilityLiveRegion="polite" style={{color:t.text,...nebulaTypography.label}}>
       Сохранено: {result.saved}; уже были: {result.duplicates};
       неподдержанных: {result.unsupported}; пустых: {result.empty}.
+      {result.pendingAlbum?" Альбом из "+result.pendingAlbum+" элементов ожидает завершения. Повторите импорт позже — эти файлы не пропущены.":""}
       {done?" Больше сообщений в этом диапазоне нет.":""}
     </Text>:null}
     {busy?<Text accessibilityLiveRegion="polite" style={{color:t.muted}}>
-      Читаю «Избранное» и сохраняю тексты…
+      Читаю «Избранное» и сохраняю оригиналы…
     </Text>:null}
     {error?<Text accessibilityRole="alert" style={{color:t.err}}>{error}</Text>:null}
   </View>;
