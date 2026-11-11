@@ -175,3 +175,71 @@ test("media with a /start caption is not silently skipped as a command",async()=
     expect.objectContaining({file:expect.objectContaining({name:"photo.jpg"})}),expect.any(Object));
   expect(remove).toHaveBeenCalledTimes(1);
 });
+
+const album=(updateId:number,caption="")=>({
+  update_id:updateId,
+  message:{message_id:updateId,chat:{id:12345,type:"private"},
+    media_group_id:"albumA",photo:[{file_id:"AgACfile12345"}],caption},
+});
+const prepared=(name:string)=>({
+  file:{uri:"file:///cache/"+name,name,mimeType:"image/jpeg",size:70},remove:jest.fn(),
+});
+test("album with explicit following message commits all originals before one group cursor ACK",async()=>{
+  const a=prepared("first.jpg"),b=prepared("second.jpg");
+  (prepareBotOriginal as jest.Mock).mockResolvedValueOnce(a).mockResolvedValueOnce(b);
+  (fetchBotUpdates as jest.Mock).mockResolvedValueOnce([
+    album(21,"Первое"),album(22,"Второе"),{update_id:23,message:msg(23,"/done")},
+  ]);
+  const result=await syncTelegramBotText("album");
+  expect(result).toEqual({imported:1,skipped:1,lastUpdate:23});
+  expect(prepareBotOriginal).toHaveBeenCalledTimes(2);
+  expect(prepareBotOriginal).toHaveBeenNthCalledWith(
+    1,token,expect.objectContaining({message_id:21}),expect.any(Object),true);
+  expect(saveMediaNote).toHaveBeenCalledTimes(1);
+  expect(saveMediaNote).toHaveBeenCalledWith("album",expect.objectContaining({
+    body:"Файл 1: Первое\n\nФайл 2: Второе",
+    files:[a.file,b.file],
+    botMessage:{botId:456,chatId:"12345",messageId:21,
+      mediaGroupId:"albumA",messageIds:[21,22]},
+    receipt:"telegram-bot:456:12345:21:album:albumA:21,22",
+  }),expect.any(Object));
+  expect(advanceTelegramBotCursor).toHaveBeenNthCalledWith(1,"album",456,"12345",22);
+  expect(advanceTelegramBotCursor).toHaveBeenNthCalledWith(2,"album",456,"12345",23);
+  expect(a.remove).toHaveBeenCalledTimes(1);
+  expect(b.remove).toHaveBeenCalledTimes(1);
+});
+test("unfinished album remains pending with zero ACK or file downloads",async()=>{
+  (fetchBotUpdates as jest.Mock).mockResolvedValueOnce([album(21),album(22)]);
+  expect(await syncTelegramBotText("pending")).toEqual({
+    imported:0,skipped:0,lastUpdate:0,pendingAlbum:2,
+  });
+  expect(prepareBotOriginal).not.toHaveBeenCalled();
+  expect(saveMediaNote).not.toHaveBeenCalled();
+  expect(advanceTelegramBotCursor).not.toHaveBeenCalled();
+});
+test("partial album download failure releases previous temporary original without ACK",async()=>{
+  const a=prepared("first.jpg");
+  (prepareBotOriginal as jest.Mock).mockResolvedValueOnce(a)
+    .mockRejectedValueOnce(new Error("Не удалось скачать оригинал Telegram."));
+  (fetchBotUpdates as jest.Mock).mockResolvedValueOnce([
+    album(21),album(22),{update_id:23,message:msg(23,"/done")},
+  ]);
+  await expect(syncTelegramBotText("failed")).rejects.toThrow("скачать");
+  expect(a.remove).toHaveBeenCalledTimes(1);
+  expect(saveMediaNote).not.toHaveBeenCalled();
+  expect(advanceTelegramBotCursor).not.toHaveBeenCalled();
+});
+test("canonical album replay keeps cursor idempotent without duplicate note",async()=>{
+  const a=prepared("first.jpg"),b=prepared("second.jpg");
+  (prepareBotOriginal as jest.Mock).mockResolvedValueOnce(a).mockResolvedValueOnce(b);
+  (fetchBotUpdates as jest.Mock).mockResolvedValueOnce([
+    album(21),album(22),{update_id:23,message:msg(23,"/done")},
+  ]);
+  (saveMediaNote as jest.Mock).mockImplementationOnce(async(_profile:unknown,input:{onReplay?:()=>void})=>{
+    input.onReplay?.();return "existing-album";
+  });
+  const result=await syncTelegramBotText("album-replay");
+  expect(result.imported).toBe(0);
+  expect(advanceTelegramBotCursor).toHaveBeenCalledWith("album-replay",456,"12345",22);
+  expect(scheduleVectors).not.toHaveBeenCalled();
+});
