@@ -88,12 +88,12 @@ export async function releaseSavedOriginal(profile:string,original:SavedOriginal
     !localMemorySessionUnlocked()||tdlibAccountState()!=="authorizationStateReady")
     return;
   const module=native();
-  if(!module?.releaseSavedMessageOriginal)return;
+  if(!module)return;
   try{
     if(original.albumId && safeSavedAlbumId(original.albumId) && module.releaseSavedAlbumOriginal)
       await module.releaseSavedAlbumOriginal(profile,original.chatId,
         original.messageId,original.albumId,original.file.uri);
-    else if(!original.albumId)
+    else if(!original.albumId && module.releaseSavedMessageOriginal)
       await module.releaseSavedMessageOriginal(profile,original.chatId,
         original.messageId,original.file.uri);
   }catch{
