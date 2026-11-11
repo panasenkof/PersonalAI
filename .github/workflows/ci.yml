@@ -40,6 +40,7 @@ jobs:
           node --test mobile/scripts/tdlib/bundle.test.cjs
           node --test mobile/scripts/tdlib/patch-upstream.test.cjs
           node --test mobile/scripts/tdlib/verify-source-run.test.cjs
+          node --test mobile/scripts/tdlib/release-stage.test.cjs
           python3 mobile/scripts/tdlib/unpack_verified.test.py
           node --test mobile/scripts/verify-native-ccache.test.cjs
           node --test mobile/scripts/classify-emulator-failure.test.cjs
