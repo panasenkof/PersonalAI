@@ -118,24 +118,6 @@ test("the detector runs once per 0.3 s window, while every buffer still reaches 
   await session.stop(); await tick();
 });
 
-test("a decoder that never ends after stop does not block the next dictation forever", async () => {
-  const { createWhisperSpeechToText } = require("react-native-executorch");
-  const aborter = new AbortController();
-  await startWhisperDictation(jest.fn(), jest.fn(), jest.fn(), { signal: aborter.signal });
-  const loads = createWhisperSpeechToText.mock.calls.length;
-  mockFinish = new Promise<void>(() => {}); // the native stream hangs
-  aborter.abort(); await tick();
-  const next = startWhisperDictation(jest.fn(), jest.fn(), jest.fn());
-  await tick();
-  expect(mockRecorder.start).toHaveBeenCalledTimes(1);
-  mockClosed = false; mockFinish = null;
-  jest.advanceTimersByTime(DRAIN_TIMEOUT_MS); await tick();
-  const session = await next;
-  expect(mockModel.dispose).toHaveBeenCalled();
-  expect(createWhisperSpeechToText.mock.calls.length).toBe(loads + 1);
-  expect(mockRecorder.start).toHaveBeenCalledTimes(2);
-  await session.stop(); await tick();
-});
 
 test("a live dictation is never released by the drain timeout", async () => {
   const session = await startWhisperDictation(jest.fn(), jest.fn(), jest.fn());
@@ -149,5 +131,33 @@ test("Whisper reuses the granted recording permission without reopening a native
  const { AudioManager } = require("react-native-audio-api");
  expect(AudioManager.checkRecordingPermissions).toHaveBeenCalled();
  expect(AudioManager.requestRecordingPermissions).not.toHaveBeenCalled();
- await session.stop();
+ await session.stop(); await tick(); // drain the native async generator before the next test
+});
+
+test("a hung native decoder is never disposed while stream() is still running", async () => {
+  const { createWhisperSpeechToText } = require("react-native-executorch");
+  const aborter = new AbortController();
+  await startWhisperDictation(jest.fn(), jest.fn(), jest.fn(), { signal: aborter.signal });
+  const loads = createWhisperSpeechToText.mock.calls.length;
+  let finishDecoder!: () => void;
+  mockFinish = new Promise<void>(resolve => { finishDecoder = resolve; });
+  aborter.abort(); await tick();
+  const next = startWhisperDictation(jest.fn(), jest.fn(), jest.fn());
+  await tick();
+  expect(mockRecorder.start).toHaveBeenCalledTimes(1);
+  const nextRejection = expect(next).rejects.toThrow("Предыдущая локальная диктовка");
+  // Advance timers asynchronously: the drain's Promise.race schedules its
+  // timeout only after the previous stop signal settles in a microtask.
+  await jest.advanceTimersByTimeAsync(DRAIN_TIMEOUT_MS + 1);
+  await nextRejection;
+  expect(mockModel.dispose).not.toHaveBeenCalled();
+  expect(createWhisperSpeechToText.mock.calls.length).toBe(loads);
+  expect(mockRecorder.start).toHaveBeenCalledTimes(1);
+  // Repeated attempts must fail safely instead of racing a still-running JSI stream.
+  await expect(startWhisperDictation(jest.fn(), jest.fn(), jest.fn())).rejects.toThrow("Предыдущая локальная диктовка");
+  expect(mockModel.dispose).not.toHaveBeenCalled();
+  // Resolve the fake native generator for clean teardown. Do not create a
+  // second model while the first one may still be awaiting an async frame.
+  finishDecoder(); await tick();
+  expect(mockModel.dispose).not.toHaveBeenCalled();
 });
