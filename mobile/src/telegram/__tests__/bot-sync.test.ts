@@ -150,3 +150,28 @@ test("AppLock aborts an in-flight Telegram media download without cursor ACK",as
   expect(saveMediaNote).not.toHaveBeenCalled();
   expect(advanceTelegramBotCursor).not.toHaveBeenCalled();
 });
+
+test("replayed Telegram message does not count as newly imported",async()=>{
+  (fetchBotUpdates as jest.Mock).mockResolvedValueOnce([{update_id:15,message:msg(15,"Сохранённый текст")}]);
+  (saveMediaNote as jest.Mock).mockImplementationOnce(async(_profile:unknown,input:{onReplay?:()=>void})=>{
+    input.onReplay?.();
+    return "existing-note";
+  });
+  expect(await syncTelegramBotText("replay")).toEqual({imported:0,skipped:1,lastUpdate:15});
+  expect(scheduleVectors).not.toHaveBeenCalled();
+  expect(advanceTelegramBotCursor).toHaveBeenCalledWith("replay",456,"12345",15);
+});
+test("media with a /start caption is not silently skipped as a command",async()=>{
+  const remove=jest.fn();
+  (prepareBotOriginal as jest.Mock).mockResolvedValueOnce({
+    file:{uri:"file:///cache/photo.jpg",name:"photo.jpg",mimeType:"image/jpeg",size:90},remove,
+  });
+  (fetchBotUpdates as jest.Mock).mockResolvedValueOnce([{
+    update_id:16,message:{...msg(16,"/start"),photo:[{file_id:"AgACbig12345"}]},
+  }]);
+  const result=await syncTelegramBotText("media-command");
+  expect(result.imported).toBe(1);
+  expect(saveMediaNote).toHaveBeenCalledWith("media-command",
+    expect.objectContaining({file:expect.objectContaining({name:"photo.jpg"})}),expect.any(Object));
+  expect(remove).toHaveBeenCalledTimes(1);
+});
