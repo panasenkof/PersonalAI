@@ -27,7 +27,7 @@ export type TelegramBotMessageRef = {
   mediaGroupId?:string;messageIds?:number[];
 };
 /** A read-only TDLib self-chat identity. IDs are decimal strings (Telegram int64). */
-export type TelegramSavedMessageRef = { chatId: string; messageId: string; date: number; kind: "messageText" | "messagePhoto" | "messageDocument" | "messageVideo" | "messageAudio" | "messageVoiceNote" | "messageAnimation" | "messageVideoNote"; topicId?: string };
+export type TelegramSavedMessageRef = { chatId: string; messageId: string; date: number; kind: "messageText" | "messagePhoto" | "messageDocument" | "messageVideo" | "messageAudio" | "messageVoiceNote" | "messageAnimation" | "messageVideoNote" | "messageAlbum"; topicId?: string; mediaAlbumId?: string; messageIds?: string[] };
 /** This is a notification only: the canonical saveMediaNote writer remains the only note writer. */
 export type ShareReplayCallback = (replay: ShareReplay) => void;
 const previewDirectory = () => new Directory(Paths.cache, 'persai-previews');
@@ -228,19 +228,30 @@ export async function saveMediaNote(profile: string, input: { file?: ImportFile;
       const ref = input.telegramSavedMessage;
       const validId = (id: string): boolean => /^[1-9][0-9]{0,15}$/.test(id) &&
         Number.isSafeInteger(Number(id));
-      const isText = ref.kind === "messageText";
-      const mediaKinds = ["messagePhoto","messageDocument","messageVideo",
+      const validTopic = ref.topicId === undefined || (
+        /^(0|-?[1-9][0-9]{0,15})$/.test(ref.topicId) &&
+        Number.isSafeInteger(Number(ref.topicId)));
+      const album = ref.kind === "messageAlbum";
+      const supportedMedia = ["messagePhoto","messageDocument","messageVideo",
         "messageAudio","messageVoiceNote","messageAnimation","messageVideoNote"];
-      if (input.botMessage || !input.receipt || input.receipt !==
-          'telegram-saved:' + ref.chatId + ':' + ref.messageId ||
-          !validId(ref.chatId) || !validId(ref.messageId) ||
-          (ref.topicId !== undefined && !(
-            /^(0|-?[1-9][0-9]{0,15})$/.test(ref.topicId) &&
-            Number.isSafeInteger(Number(ref.topicId)))) ||
-          !Number.isSafeInteger(ref.date) || ref.date < 0 ||
-          (!isText && !mediaKinds.includes(ref.kind)) ||
-          input.allowSeparateCopy || input.files !== undefined ||
-          (isText ? Boolean(input.file) || !input.body.trim() : !input.file))
+      const refs = ref.messageIds;
+      const validAlbum = album && typeof ref.mediaAlbumId === "string" &&
+        /^-?[1-9][0-9]{0,18}$/.test(ref.mediaAlbumId) &&
+        Array.isArray(refs) && refs.length>=2 && refs.length<=MAX_ORIGINALS_PER_NOTE &&
+        refs[0]===ref.messageId && refs.every((id,i)=>
+          validId(id) && (i===0 || Number(id)>Number(refs[i-1]))) &&
+        !input.file && Array.isArray(input.files) && input.files.length===refs.length &&
+        input.receipt === 'telegram-saved:' + ref.chatId + ':' + ref.messageId +
+          ':album:' + ref.mediaAlbumId + ':' + refs.join(',');
+      const regular = ref.mediaAlbumId === undefined && ref.messageIds === undefined &&
+        input.receipt === 'telegram-saved:' + ref.chatId + ':' + ref.messageId &&
+        (ref.kind === "messageText" ? !input.file && input.files===undefined &&
+          Boolean(input.body.trim()) :
+          supportedMedia.includes(ref.kind) && Boolean(input.file) &&
+            input.files===undefined);
+      if(input.botMessage || !validId(ref.chatId) || !validId(ref.messageId) ||
+        !validTopic || !Number.isSafeInteger(ref.date) || ref.date<0 ||
+        input.allowSeparateCopy || !(album ? validAlbum : regular))
         throw new Error("invalid_telegram_saved_provenance");
     }
     // LLM suggestions are derived metadata, not a user-authored change of Share
@@ -328,8 +339,11 @@ export async function saveMediaNote(profile: string, input: { file?: ImportFile;
       inferredFileTitle ? 'incoming-file-untitled' : input.title;
     const receivedReceipt = input.telegramSavedMessage
       ? await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256,
-          JSON.stringify(['telegram-saved-source-v1', input.telegramSavedMessage.chatId,
-            input.telegramSavedMessage.messageId]))
+          input.telegramSavedMessage.kind === 'messageAlbum'
+            ? JSON.stringify(['telegram-saved-album-v1', input.telegramSavedMessage.chatId,
+                input.telegramSavedMessage.mediaAlbumId,input.telegramSavedMessage.messageIds])
+            : JSON.stringify(['telegram-saved-source-v1', input.telegramSavedMessage.chatId,
+                input.telegramSavedMessage.messageId]))
       : input.receipt
       ? await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, JSON.stringify([
           ...(input.botMessage ? ['telegram-bot-content-v1', input.botMessage.botId,
