@@ -1024,3 +1024,49 @@ test("TDLib Saved Messages cannot forge account source or substitute caption wit
   expect(sqlite.prepare("SELECT count(*) n FROM memory_entities").get().n).toBe(0);
   expect(sqlite.prepare("SELECT count(*) n FROM memory_received_shares").get().n).toBe(0);
 });
+
+test("Telegram Bot album uses canonical receipt and preserves every source ID and original",async()=>{
+  mockFiles.set("file:///second.jpg",new Uint8Array(512).fill(2));
+  const files=[
+    {uri:"file:///photo.png",name:"first.png",mimeType:"image/png"},
+    {uri:"file:///second.jpg",name:"second.jpg",mimeType:"image/jpeg"},
+  ];
+  const input={
+    files,title:"Два фото",body:"Подпись",sensitivity:"sensitive" as const,
+    receipt:"telegram-bot:456:12345:21:album:groupA:21,22",
+    botMessage:{botId:456,chatId:"12345",messageId:21,
+      mediaGroupId:"groupA",messageIds:[21,22]},
+  };
+  const id=await saveMediaNote("guest",input);
+  const note=sqlite.prepare("SELECT payload_json FROM memory_entities WHERE id=?").get(id);
+  expect(JSON.parse(note.payload_json).source_bot_message).toEqual({
+    service:"telegram",channel:"bot",...input.botMessage,
+  });
+  expect(sqlite.prepare("SELECT count(*) n FROM memory_attachments WHERE entity_id=?").get(id).n).toBe(2);
+  let replay=false;
+  expect(await saveMediaNote("guest",{...input,onReplay:()=>{replay=true;}})).toBe(id);
+  expect(replay).toBe(true);
+  expect(sqlite.prepare("SELECT count(*) n FROM memory_entities").get().n).toBe(1);
+});
+test("Telegram album rejects incomplete, mismatched or fabricated message provenance before writing",async()=>{
+  mockFiles.set("file:///second.jpg",new Uint8Array(512).fill(2));
+  const files=[
+    {uri:"file:///photo.png",name:"first.png",mimeType:"image/png"},
+    {uri:"file:///second.jpg",name:"second.jpg",mimeType:"image/jpeg"},
+  ];
+  const good={
+    files,title:"Альбом",body:"",sensitivity:"sensitive" as const,
+    receipt:"telegram-bot:456:12345:21:album:groupA:21,22",
+    botMessage:{botId:456,chatId:"12345",messageId:21,mediaGroupId:"groupA",messageIds:[21,22]},
+  };
+  for(const bad of [
+    {...good,files:[files[0]]},
+    {...good,botMessage:{...good.botMessage,messageIds:[21,21]}},
+    {...good,botMessage:{...good.botMessage,mediaGroupId:"../other"}},
+    {...good,receipt:"telegram-bot:456:12345:21:album:groupA:21,99"},
+  ]){
+    await expect(saveMediaNote("guest",bad)).rejects.toThrow("invalid_telegram_bot_album_provenance");
+  }
+  expect(sqlite.prepare("SELECT count(*) n FROM memory_entities").get().n).toBe(0);
+  expect(sqlite.prepare("SELECT count(*) n FROM memory_received_shares").get().n).toBe(0);
+});
