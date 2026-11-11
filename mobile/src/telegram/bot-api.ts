@@ -18,6 +18,14 @@ export type BotMessage = {
   animation?: unknown;
   video_note?: unknown;
   media_group_id?: string;
+  sticker?: unknown;
+  contact?: unknown;
+  location?: unknown;
+  venue?: unknown;
+  poll?: unknown;
+  dice?: unknown;
+  story?: unknown;
+  paid_media?: unknown;
 };
 export type BotUpdate = {update_id:number;message?:BotMessage;edited_message?:BotMessage};
 
