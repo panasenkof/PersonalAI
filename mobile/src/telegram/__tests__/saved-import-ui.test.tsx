@@ -15,7 +15,7 @@ beforeEach(()=>{
 });
 test("manual import is visible, page bounded, reports skipped media without claiming they were saved",async()=>{
   const ui=render(<TelegramSavedImportCard profile="guest"/>);
-  expect(ui.getByText(/одиночные поддерживаемые оригиналы/)).toBeTruthy();
+  expect(ui.getByText(/тексты, одиночные оригиналы и завершённые альбомы/)).toBeTruthy();
   expect(importSavedTextPage).not.toHaveBeenCalled();
   fireEvent.press(ui.getByText("Импортировать последние 20 сообщений"));
   await waitFor(()=>expect(importSavedTextPage).toHaveBeenCalledWith("guest","0",undefined,undefined,"supported-originals"));
@@ -66,4 +66,17 @@ test("empty topic list and failures are non-destructive",async()=>{
   fireEvent.press(ui.getByText("Обновить подборки «Избранного»"));
   await waitFor(()=>ui.getByText(/Список пока пуст/));
   expect(importSavedTextPage).not.toHaveBeenCalled();
+});
+
+test("an album pending at history boundary remains retryable without a false completion message",async()=>{
+  (importSavedTextPage as jest.Mock).mockResolvedValueOnce({
+    saved:0,duplicates:0,unsupported:0,empty:0,nextCursor:"0",
+    selfChatId:"12345",pendingAlbum:2,
+  });
+  const ui=render(<TelegramSavedImportCard profile="guest"/>);
+  fireEvent.press(ui.getByText("Импортировать последние 20 сообщений"));
+  await waitFor(()=>ui.getByText(/Альбом из 2 элементов ожидает завершения/));
+  expect(ui.queryByText(/Больше сообщений в этом диапазоне нет/)).toBeNull();
+  expect(ui.getByLabelText("Импортировать последние 20 сообщений").props.accessibilityState.disabled)
+    .toBe(false);
 });
