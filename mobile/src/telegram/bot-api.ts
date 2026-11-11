@@ -52,7 +52,7 @@ async function boundedTelegramRequest<T>(operation:(signal:AbortSignal)=>Promise
   }
 }
 
-async function api(token: string, method: "getMe" | "getWebhookInfo" | "getUpdates",
+async function api(token: string, method: "getMe" | "getWebhookInfo" | "getUpdates" | "getFile",
   args: Record<string,unknown> = {}, signal?:AbortSignal): Promise<unknown> {
   const secret = validateBotToken(token);
   const raw=await boundedTelegramRequest(async requestSignal=>{
@@ -137,4 +137,30 @@ export async function listBotPairCandidates(token:string,signal?:AbortSignal):Pr
 export async function fetchBotUpdates(token:string,cursor:number,signal?:AbortSignal):Promise<BotUpdate[]> {
   if(!Number.isSafeInteger(cursor)||cursor<0)throw new Error("invalid_telegram_bot_cursor");
   return updates(token,cursor?cursor+1:null,signal);
+}
+
+/** Telegram's hosted Bot API currently caps getFile downloads at 20 MB.
+ * Never treat a user-supplied caption, URL, or file path as an origin.
+ */
+export const TELEGRAM_BOT_MAX_FILE_BYTES = 20_000_000;
+export type TelegramBotFile = {path:string;size:number|null};
+export async function getTelegramBotFile(token:string,fileId:string,signal?:AbortSignal):Promise<TelegramBotFile>{
+  if(typeof fileId!=="string"||fileId.length<8||fileId.length>512||
+    !/^[A-Za-z0-9_-]+$/.test(fileId))
+    throw new Error("Некорректный идентификатор Telegram-файла.");
+  const data=await api(token,"getFile",{file_id:fileId},signal);
+  if(!data||typeof data!=="object")throw new Error("Telegram не вернул сведения о файле.");
+  const file=data as {file_path?:unknown;file_size?:unknown};
+  // Must stay beneath the official Telegram file URL, never become a
+  // caller-controlled host/path, traversal, query string or fragment.
+  if(typeof file.file_path!=="string"||file.file_path.length>400||
+    !/^[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_.-]+)*$/.test(file.file_path)||
+    file.file_path.split("/").some(part=>part==="."||part===".."||part.startsWith(".")))
+    throw new Error("Telegram вернул небезопасный путь файла.");
+  const size=file.file_size===undefined?null:file.file_size;
+  if(size!==null && (!Number.isSafeInteger(size)||Number(size)<=0))
+    throw new Error("Telegram вернул некорректный размер файла.");
+  if(size!==null && Number(size)>TELEGRAM_BOT_MAX_FILE_BYTES)
+    throw new Error("Файл превышает доступный для ботов Telegram лимит 20 МБ.");
+  return {path:file.file_path,size:size as number|null};
 }
