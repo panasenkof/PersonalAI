@@ -21,22 +21,60 @@ export type BotMessage = {
 };
 export type BotUpdate = {update_id:number;message?:BotMessage;edited_message?:BotMessage};
 
+/** The React Native fetch implementation is not guaranteed to honor AbortSignal.
+ * Race the whole request (including response.text) against a deadline. Never
+ * expose a bot token or the token-bearing URL in an error. */
+export const TELEGRAM_BOT_REQUEST_TIMEOUT_MS = 15_000;
+async function boundedTelegramRequest<T>(operation:(signal:AbortSignal)=>Promise<T>,
+  external?:AbortSignal):Promise<T> {
+  if(external?.aborted)throw new Error("Запрос Telegram отменён.");
+  const controller=new AbortController();
+  let timer:ReturnType<typeof setTimeout>|undefined;
+  let onExternal:(()=>void)|undefined;
+  const interrupted=new Promise<never>((_,reject)=>{
+    timer=setTimeout(()=>{
+      controller.abort();
+      reject(new Error("Telegram не ответил за 15 секунд. Проверьте сеть/VPN и повторите."));
+    },TELEGRAM_BOT_REQUEST_TIMEOUT_MS);
+    if(external){
+      onExternal=()=>{
+        controller.abort();
+        reject(new Error("Запрос Telegram отменён."));
+      };
+      external.addEventListener("abort",onExternal,{once:true});
+      if(external.aborted)onExternal();
+    }
+  });
+  try{return await Promise.race([operation(controller.signal),interrupted]);}
+  finally{
+    if(timer!==undefined)clearTimeout(timer);
+    if(external&&onExternal)external.removeEventListener("abort",onExternal);
+  }
+}
+
 async function api(token: string, method: "getMe" | "getWebhookInfo" | "getUpdates",
   args: Record<string,unknown> = {}, signal?:AbortSignal): Promise<unknown> {
   const secret = validateBotToken(token);
-  let response:Response;
-  try {
-    response = await fetch(HOST+secret+"/"+method,{
-      method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify(args),signal,
-    });
-  } catch {
-    throw new Error("Telegram недоступен. Проверьте интернет и повторите.");
-  }
-  // Avoid parsing unbounded/HTML responses or including URLs/tokens in errors.
-  if (!response.ok) throw new Error("Telegram отклонил запрос. Проверьте токен и доступность бота.");
-  let raw:string;
-  try {raw=await response.text();}catch{throw new Error("Не удалось прочитать ответ Telegram.");}
+  const raw=await boundedTelegramRequest(async requestSignal=>{
+    let response:Response;
+    try {
+      response=await fetch(HOST+secret+"/"+method,{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify(args),signal:requestSignal,
+      });
+    } catch {
+      if(requestSignal.aborted)throw new Error("Запрос Telegram прерван.");
+      throw new Error("Telegram недоступен. Проверьте интернет/VPN и повторите.");
+    }
+    if (!response.ok) {
+      if(response.status===429)throw new Error("Telegram ограничил частоту запросов. Повторите позже.");
+      if(response.status===401||response.status===404)
+        throw new Error("Telegram отклонил токен бота. Проверьте токен.");
+      throw new Error("Telegram отклонил запрос. Проверьте доступность сервиса.");
+    }
+    try{return await response.text();}
+    catch{throw new Error("Не удалось прочитать ответ Telegram.");}
+  },signal);
   if (!raw || raw.length > 2_000_000) throw new Error("Слишком большой ответ Telegram.");
   let body:unknown;
   try {body=JSON.parse(raw);}catch{throw new Error("Telegram вернул некорректные данные.");}

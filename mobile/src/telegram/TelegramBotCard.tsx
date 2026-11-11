@@ -20,6 +20,7 @@ export function TelegramBotCard({profile}:{profile:string}){
   const [busy,setBusy]=useState(false),[loaded,setLoaded]=useState(false);
   const [error,setError]=useState(""),[notice,setNotice]=useState("");
   const current=useRef(0),running=useRef(false);
+  const activeRequest=useRef<AbortController|null>(null);
   useEffect(()=>{
     const version=++current.current;
     setToken("");setError("");setNotice("");setLoaded(false);setCandidates([]);
@@ -29,32 +30,37 @@ export function TelegramBotCard({profile}:{profile:string}){
     }).catch(()=>{
       if(version===current.current)setError("Не удалось прочитать настройки бота.");
     }).finally(()=>{if(version===current.current)setLoaded(true);});
-    return()=>{current.current++;};
+    return()=>{current.current++;activeRequest.current?.abort();};
   },[profile]);
 
-  async function action(f:(version:number)=>Promise<void>){
+  async function action(f:(version:number,signal:AbortSignal)=>Promise<void>){
     if(!loaded||running.current)return;
     const version=current.current;
+    const request=new AbortController();
+    activeRequest.current=request;
     running.current=true;setBusy(true);setError("");setNotice("");
-    try{await f(version);}
+    try{await f(version,request.signal);}
     catch(e){if(version===current.current)setError(
       e instanceof Error && e.message.length<240 &&
-      /^(Telegram|Не удалось|У бота|Укажите|Некорректн|Сначала|В очереди|Есть отредактированное|Сообщение Telegram|Разблокируйте)/.test(e.message)
+      /^(Telegram|Запрос Telegram|Не удалось|У бота|Укажите|Некорректн|Сначала|В очереди|Есть отредактированное|Сообщение Telegram|Разблокируйте)/.test(e.message)
       ? e.message : "Не удалось выполнить операцию Telegram. Повторите попытку.");}
-    finally{running.current=false;if(version===current.current)setBusy(false);}
+    finally{running.current=false;if(activeRequest.current===request)activeRequest.current=null;
+      if(version===current.current)setBusy(false);}
   }
-  function connect(){void action(async(version)=>{
-    const id=await verifyTelegramBot(token);
+  function connect(){void action(async(version,signal)=>{
+    const id=await verifyTelegramBot(token,signal);
+    if(signal.aborted)return;
     await saveVerifiedBot(profile,token,id);
     if(version===current.current){
       setToken("");setUsername(id.username);setPaired(false);setCandidates([]);
       setNotice("Бот проверен. Отправьте /start в его личный чат и подтвердите свой чат ниже.");
     }
   });}
-  function findChats(){void action(async(version)=>{
+  function findChats(){void action(async(version,signal)=>{
     const saved=await loadTelegramBotConfig(profile);
     if(!saved)throw new Error("Сначала сохраните и проверьте токен бота.");
-    const items=await listBotPairCandidates(saved.token);
+    const items=await listBotPairCandidates(saved.token,signal);
+    if(signal.aborted)return;
     if(version===current.current){
       setCandidates(items);
       setNotice(items.length ? "Выберите именно свой личный чат." :
@@ -70,8 +76,9 @@ export function TelegramBotCard({profile}:{profile:string}){
       setNotice("Личный чат подтверждён. Теперь можно импортировать сообщения.");
     }
   });}
-  function sync(){void action(async(version)=>{
-    const result=await syncTelegramBotText(profile);
+  function sync(){void action(async(version,signal)=>{
+    const result=await syncTelegramBotText(profile,signal);
+    if(signal.aborted)return;
     if(version===current.current)setNotice(
       "Импортировано: "+result.imported+"; пропущено: "+result.skipped+
       ". Фото, видео и документы будут поддержаны отдельно.");
@@ -118,6 +125,8 @@ export function TelegramBotCard({profile}:{profile:string}){
       <NebulaAction icon="shield" label="Проверить и сохранить бота"
         disabled={disabled||!token.trim()} onPress={connect}/>
     </>}
+    {busy?<NebulaAction icon="x" label="Отменить операцию Telegram"
+      onPress={()=>activeRequest.current?.abort()}/>:null}
     {!loaded||busy?<Text accessibilityLiveRegion="polite" style={{color:theme.muted}}>
       {busy?"Обрабатываю…":"Загружаю настройки бота…"}
     </Text>:null}

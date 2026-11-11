@@ -35,7 +35,7 @@ test("bot token is masked and never saved before Telegram verifies its getMe ide
   expect(saveVerifiedBot).not.toHaveBeenCalled();
   fireEvent.changeText(field,token);
   fireEvent.press(ui.getByText("Проверить и сохранить бота"));
-  await waitFor(()=>expect(verifyTelegramBot).toHaveBeenCalledWith(token));
+  await waitFor(()=>expect(verifyTelegramBot).toHaveBeenCalledWith(token,expect.any(Object)));
   await waitFor(()=>expect(saveVerifiedBot).toHaveBeenCalledWith("guest",token,{id:456,username:"MyPersAIBot"}));
   expect(ui.queryByLabelText("Telegram Bot Token")).toBeNull();
   expect(ui.getByText(/чат не подтверждён/)).toBeTruthy();
@@ -50,7 +50,7 @@ test("pairing is explicit, uses selected chat, then manual import uses canonical
   fireEvent.press(ui.getByText("Подтвердить чат 12345"));
   await waitFor(()=>expect(pairTelegramBot).toHaveBeenCalledWith("guest",456,"12345"));
   fireEvent.press(ui.getByText("Импортировать новые сообщения бота"));
-  await waitFor(()=>expect(syncTelegramBotText).toHaveBeenCalledWith("guest"));
+  await waitFor(()=>expect(syncTelegramBotText).toHaveBeenCalledWith("guest",expect.any(Object)));
   expect(ui.getByText(/Импортировано: 2/)).toBeTruthy();
 });
 test("invalid token/Telegram network errors keep the connection unpaired",async()=>{
@@ -62,4 +62,21 @@ test("invalid token/Telegram network errors keep the connection unpaired",async(
   await waitFor(()=>ui.getByText(/Telegram недоступен/));
   expect(saveVerifiedBot).not.toHaveBeenCalled();
   expect(ui.getByLabelText("Telegram Bot Token")).toBeTruthy();
+});
+
+test("user can cancel a pending Bot API verification without saving credentials",async()=>{
+  (verifyTelegramBot as jest.Mock).mockImplementation(
+    (_token:string,signal:AbortSignal)=>new Promise((_resolve,reject)=>{
+      signal.addEventListener("abort",()=>reject(new Error("Запрос Telegram отменён.")),{once:true});
+    }));
+  const ui=render(<TelegramBotCard profile="guest"/>);
+  await waitFor(()=>ui.getByLabelText("Telegram Bot Token"));
+  fireEvent.changeText(ui.getByLabelText("Telegram Bot Token"),token);
+  fireEvent.press(ui.getByText("Проверить и сохранить бота"));
+  await waitFor(()=>ui.getByText("Отменить операцию Telegram"));
+  fireEvent.press(ui.getByText("Отменить операцию Telegram"));
+  await waitFor(()=>ui.getByText("Запрос Telegram отменён."));
+  expect(saveVerifiedBot).not.toHaveBeenCalled();
+  expect(ui.getByLabelText("Telegram Bot Token")).toBeTruthy();
+  expect(ui.getByText("Проверить и сохранить бота")).toBeTruthy();
 });
