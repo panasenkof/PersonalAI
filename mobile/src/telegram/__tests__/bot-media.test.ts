@@ -1,6 +1,5 @@
 import {prepareBotOriginal} from "../bot-media";
 import {getTelegramBotFile} from "../bot-api";
-import {File} from "expo-file-system";
 jest.mock("../bot-api",()=>({
   getTelegramBotFile:jest.fn(),TELEGRAM_BOT_MAX_FILE_BYTES:20_000_000,
 }));
@@ -45,7 +44,7 @@ test("downloads the largest photo original into private cache, preserving captio
   expect(original?.file).toMatchObject({name:"photo.jpg",mimeType:"image/jpeg",size:4096});
   expect(original?.file.uri).toContain("persai-telegram-bot/test-file-uuid");
   expect(original?.file.uri).not.toContain(token);
-  expect((File.downloadFileAsync as jest.Mock).mock.calls).toHaveLength(1);
+  expect(mockDownload).toHaveBeenCalledTimes(1);
   original?.remove();
   expect(mockDeleted).toHaveBeenCalledTimes(1);
 });
