@@ -257,46 +257,12 @@ jobs:
       # may stage an official-source artifact into the same Expo native gate.
       - name: Stage reviewed official TDLib binary for manual APK acceptance
         if: ${{ inputs.tdlib_source_run_id != '' }}
+        working-directory: mobile
         env:
           GH_TOKEN: ${{ github.token }}
           TDLIB_SOURCE_RUN_ID: ${{ inputs.tdlib_source_run_id }}
         shell: bash
-        run: |
-          set -euo pipefail
-          test "$GITHUB_REF" = "refs/heads/main" || {
-            echo "::error::TDLib acceptance may run only on trusted main"
-            exit 1
-          }
-          [[ "$TDLIB_SOURCE_RUN_ID" =~ ^[1-9][0-9]{0,14}$ ]] || {
-            echo "::error::Invalid TDLib source-build run ID"
-            exit 1
-          }
-          metadata="$RUNNER_TEMP/tdlib-source-run.json"
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$TDLIB_SOURCE_RUN_ID" > "$metadata"
-          source_sha="$(node scripts/tdlib/verify-source-run.cjs "$metadata" \
-            "$GITHUB_REPOSITORY" "$TDLIB_SOURCE_RUN_ID")"
-          if test -f ../.git/shallow; then
-            git -C .. fetch --no-tags --unshallow origin main
-          fi
-          git -C .. merge-base --is-ancestor "$source_sha" HEAD || {
-            echo "::error::TDLib build not from an ancestor of checked-out main"
-            exit 1
-          }
-          mkdir -p "$RUNNER_TEMP/tdlib-artifact"
-          gh run download "$TDLIB_SOURCE_RUN_ID" \
-            --repo "$GITHUB_REPOSITORY" \
-            --name "tdlib-jsonjava-official-source-$source_sha" \
-            --dir "$RUNNER_TEMP/tdlib-artifact"
-          archive="$RUNNER_TEMP/tdlib-artifact/official-tdlib-jsonjava-android.tar.gz"
-          test -s "$archive"
-          python3 scripts/tdlib/unpack_verified.py "$archive" "$RUNNER_TEMP/tdlib-extracted"
-          node scripts/tdlib/bundle.cjs verify "$RUNNER_TEMP/tdlib-extracted/bundle"
-          node scripts/tdlib/bundle.cjs stage "$RUNNER_TEMP/tdlib-extracted/bundle" modules/persai-tdlib
-          test -s modules/persai-tdlib/android/src/main/jniLibs/x86_64/libtdjsonjava.so
-          test -s modules/persai-tdlib/android/src/main/jniLibs/arm64-v8a/libtdjsonjava.so
-          test -s modules/persai-tdlib/android/src/main/java/org/drinkless/tdlib/JsonClient.java
-          echo "TDLIB_EXPLICIT_STAGE=true" >> "$GITHUB_ENV"
-          echo "Official-source TDLib staged for main-only Android acceptance."
+        run: bash scripts/tdlib/stage-reviewed-run.sh
       - name: Stage offline vision AAR and Java ABI for Expo compatibility gate
         if: ${{ inputs.vision_expo_gate }}
         env:
