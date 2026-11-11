@@ -73,3 +73,12 @@ test("size mismatch is rejected and temporary file is discarded",async()=>{
     .rejects.toThrow("Размер скачанного");
   expect(mockDeleted).toHaveBeenCalledTimes(1);
 });
+
+test("only the explicit batch path can stage Telegram album media",async()=>{
+  const item=msg({media_group_id:"albumA",photo:[{file_id:"AgACbig12345"}]});
+  await expect(prepareBotOriginal(token,item)).rejects.toThrow("альбом");
+  const staged=await prepareBotOriginal(token,item,undefined,true);
+  expect(staged?.file).toMatchObject({name:"photo.jpg",size:4096});
+  staged?.remove();
+  expect(mockDeleted).toHaveBeenCalledTimes(1);
+});
