@@ -42,7 +42,7 @@ export function TelegramBotCard({profile}:{profile:string}){
     try{await f(version,request.signal);}
     catch(e){if(version===current.current)setError(
       e instanceof Error && e.message.length<240 &&
-      /^(Telegram|Не удалось|У бота|Укажите|Некорректн|Сначала|В очереди|Есть отредактированное|Сообщение Telegram|Разблокируйте)/.test(e.message)
+      /^(Telegram|Запрос Telegram|Не удалось|У бота|Укажите|Некорректн|Сначала|В очереди|Есть отредактированное|Сообщение Telegram|Разблокируйте)/.test(e.message)
       ? e.message : "Не удалось выполнить операцию Telegram. Повторите попытку.");}
     finally{running.current=false;if(activeRequest.current===request)activeRequest.current=null;
       if(version===current.current)setBusy(false);}
