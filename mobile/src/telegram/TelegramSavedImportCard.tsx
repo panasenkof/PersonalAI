@@ -21,10 +21,22 @@ export function TelegramSavedImportCard({profile}:{profile:string}){
   const running=useRef(false),generation=useRef(0);
   const activeImport=useRef<AbortController|null>(null);
   useEffect(()=>{
+    // A profile switch must not inherit another profile's busy UI or worker.
+    // Its in-flight request is aborted; a late settlement must not touch the
+    // new profile's running flag or UI state.
     generation.current++;
+    activeImport.current?.abort();
+    activeImport.current=null;
+    running.current=false;
+    setBusy(false);setCancelRequested(false);
     setCursor("0");setDone(false);setResult(null);setError("");
     setTopics(null);setSelectedTopic(null);
-    return()=>{generation.current++;activeImport.current?.abort();};
+    return()=>{
+      generation.current++;
+      activeImport.current?.abort();
+      activeImport.current=null;
+      running.current=false;
+    };
   },[profile]);
   useEffect(()=>onLocalMemorySessionChange(unlocked=>{
     if(!unlocked)activeImport.current?.abort();
@@ -50,9 +62,11 @@ export function TelegramSavedImportCard({profile}:{profile:string}){
         ? "Импорт Telegram отменён. Курсор истории не изменён; сохранённые ранее записи остаются."
         : "Не удалось прочитать или сохранить сообщения Telegram. Проверьте соединение и блокировку PersAI.");
     }finally{
-      running.current=false;
-      if(activeImport.current===request)activeImport.current=null;
-      if(generation.current===version){setBusy(false);setCancelRequested(false);}
+      if(activeImport.current===request){
+        running.current=false;
+        activeImport.current=null;
+        if(generation.current===version){setBusy(false);setCancelRequested(false);}
+      }
     }
   }
   async function showTopics(){
