@@ -259,3 +259,12 @@ test("album cumulative size is bounded before SQLCipher write; staged originals 
   expect(advanceTelegramBotCursor).not.toHaveBeenCalled();
   expect(files.every(x=>x.remove.mock.calls.length===1)).toBe(true);
 });
+
+test("standalone /done is an album boundary command and never a memory note",async()=>{
+  (fetchBotUpdates as jest.Mock).mockResolvedValueOnce([
+    {update_id:41,message:msg(41,"/done")},
+  ]);
+  expect(await syncTelegramBotText("boundary")).toEqual({imported:0,skipped:1,lastUpdate:41});
+  expect(saveMediaNote).not.toHaveBeenCalled();
+  expect(advanceTelegramBotCursor).toHaveBeenCalledWith("boundary",456,"12345",41);
+});
