@@ -106,7 +106,7 @@ test("single Telegram photo is saved with its original and caption before cursor
   expect(saveMediaNote).toHaveBeenCalledWith("photo",expect.objectContaining({
     file:expect.objectContaining({uri:"file:///cache/photo.jpg"}),
     body:"Подпись к фотографии",receipt:"telegram-bot:456:12345:11",
-  }),undefined);
+  }),expect.any(Object));
   expect(remove).toHaveBeenCalledTimes(1);
   expect(advanceTelegramBotCursor).toHaveBeenCalledWith("photo",456,"12345",11);
 });
