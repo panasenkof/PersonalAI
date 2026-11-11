@@ -77,7 +77,6 @@ export async function importSavedTextPage(profile:string,cursor="0",
         const plan=planSavedAlbum(messages,i);
         if(plan.state==="pending"){
           pendingAlbum=plan.received;
-          unsupported+=plan.received;
           // The NEXT request must include these incomplete members, not skip
           // them: the previous non-album ID becomes the next page anchor.
           safeNextCursor=i>0?messages[i-1].id:cursor;
