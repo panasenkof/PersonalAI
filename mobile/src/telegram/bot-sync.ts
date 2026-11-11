@@ -100,7 +100,7 @@ async function perform(profile:string,signal?:AbortSignal):Promise<TelegramBotSy
         throw new Error("В очереди есть неподдержанный объект Telegram. Импорт остановлен без потери сообщения.");
       const body=textOf(message).trim();
       if(body.length>60_000)throw new Error("Сообщение Telegram длиннее 60 000 символов. Импорт остановлен.");
-      const isCommand=/^\/(?:start|help)(?:\s|$)/i.test(body)&&!hasMedia(message);
+      const isCommand=/^\/(?:start|help|done)(?:\s|$)/i.test(body)&&!hasMedia(message);
       const staged=!isCommand&&hasMedia(message)
         ? await prepareBotOriginal(config.token,message,signal):null;
       try{
