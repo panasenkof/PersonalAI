@@ -15,14 +15,14 @@ beforeEach(()=>{
 });
 test("manual import is visible, page bounded, reports skipped media without claiming they were saved",async()=>{
   const ui=render(<TelegramSavedImportCard profile="guest"/>);
-  expect(ui.getByText(/Фото, документы и подписи/)).toBeTruthy();
+  expect(ui.getByText(/одиночные поддерживаемые оригиналы/)).toBeTruthy();
   expect(importSavedTextPage).not.toHaveBeenCalled();
   fireEvent.press(ui.getByText("Импортировать последние 20 сообщений"));
-  await waitFor(()=>expect(importSavedTextPage).toHaveBeenCalledWith("guest","0"));
+  await waitFor(()=>expect(importSavedTextPage).toHaveBeenCalledWith("guest","0",undefined,undefined,"supported-originals"));
   expect(ui.getByText(/Сохранено: 2; уже были: 1/)).toBeTruthy();
-  expect(ui.getByText(/медиа пропущено: 3/)).toBeTruthy();
+  expect(ui.getByText(/неподдержанных: 3/)).toBeTruthy();
   fireEvent.press(ui.getByText("Продолжить историю (до 20)"));
-  await waitFor(()=>expect(importSavedTextPage).toHaveBeenCalledWith("guest","44"));
+  await waitFor(()=>expect(importSavedTextPage).toHaveBeenCalledWith("guest","44",undefined,undefined,"supported-originals"));
   fireEvent.press(ui.getByText("Начать с новых сообщений"));
   expect(ui.getByText("Импортировать последние 20 сообщений")).toBeTruthy();
 });
@@ -56,10 +56,10 @@ test("explicit topic selection resets cursor and reuses canonical importer",asyn
   fireEvent.press(ui.getByText("Пересланное из чата · №-1005432"));
   fireEvent.press(ui.getByText("Импортировать последние 20 сообщений"));
   await waitFor(()=>expect(importSavedTextPage)
-    .toHaveBeenCalledWith("guest","0",undefined,"-1005432"));
+    .toHaveBeenCalledWith("guest","0",undefined,"-1005432","supported-originals"));
   fireEvent.press(ui.getByText("Все сообщения «Избранного»"));
   fireEvent.press(ui.getByText("Импортировать последние 20 сообщений"));
-  await waitFor(()=>expect(importSavedTextPage).toHaveBeenLastCalledWith("guest","0"));
+  await waitFor(()=>expect(importSavedTextPage).toHaveBeenLastCalledWith("guest","0",undefined,undefined,"supported-originals"));
 });
 test("empty topic list and failures are non-destructive",async()=>{
   const ui=render(<TelegramSavedImportCard profile="guest"/>);
