@@ -1070,3 +1070,44 @@ test("Telegram album rejects incomplete, mismatched or fabricated message proven
   expect(sqlite.prepare("SELECT count(*) n FROM memory_entities").get().n).toBe(0);
   expect(sqlite.prepare("SELECT count(*) n FROM memory_received_shares").get().n).toBe(0);
 });
+
+test("TDLib Saved single media stores ORIGINAL and caption with immutable source identity",async()=>{
+  const input={
+    file:{uri:"file:///photo.png",name:"photo.png",mimeType:"image/png"},
+    title:"Домашнее фото",body:"Подпись",sensitivity:"sensitive" as const,
+    receipt:"telegram-saved:12345:88",
+    telegramSavedMessage:{chatId:"12345",messageId:"88",date:1794300000,
+      kind:"messagePhoto" as const},
+  };
+  const saved=await saveMediaNote("guest",input);
+  const row=sqlite.prepare("SELECT payload_json FROM memory_entities WHERE id=?").get(saved);
+  expect(JSON.parse(row.payload_json).source_telegram_saved).toMatchObject({
+    service:"telegram",channel:"saved",...input.telegramSavedMessage,
+  });
+  expect(sqlite.prepare("SELECT count(*) n FROM memory_attachments WHERE entity_id=?")
+    .get(saved).n).toBe(1);
+  let replay=false;
+  expect(await saveMediaNote("guest",{...input,onReplay:()=>{replay=true;}})).toBe(saved);
+  expect(replay).toBe(true);
+  expect(sqlite.prepare("SELECT count(*) n FROM memory_entities").get().n).toBe(1);
+});
+test("Saved media provenance requires a file and refuses caption-only fabrications",async()=>{
+  const base={
+    title:"Подпись",body:"Подпись",sensitivity:"sensitive" as const,
+    receipt:"telegram-saved:12345:88",
+    telegramSavedMessage:{chatId:"12345",messageId:"88",date:1794300000,
+      kind:"messagePhoto" as const},
+  };
+  await expect(saveMediaNote("guest",base)).rejects.toThrow("invalid_telegram_saved_provenance");
+  await expect(saveMediaNote("guest",{...base,files:[{
+    uri:"file:///photo.png",name:"photo.png",mimeType:"image/png",
+  }]})).rejects.toThrow("invalid_telegram_saved_provenance");
+  await expect(saveMediaNote("guest",{...base,receipt:"telegram-saved:12345:89",
+    file:{uri:"file:///photo.png",name:"photo.png",mimeType:"image/png"},
+  })).rejects.toThrow("invalid_telegram_saved_provenance");
+  await expect(saveMediaNote("guest",{...base,
+    telegramSavedMessage:{...base.telegramSavedMessage,kind:"messageText" as const},
+    file:{uri:"file:///photo.png",name:"photo.png",mimeType:"image/png"},
+  })).rejects.toThrow("invalid_telegram_saved_provenance");
+  expect(sqlite.prepare("SELECT count(*) n FROM memory_entities").get().n).toBe(0);
+});

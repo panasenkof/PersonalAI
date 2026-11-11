@@ -75,3 +75,15 @@ test("media flags are preserved; no fake plaintext for files",()=>{
   expect(p.messages.every(x=>x.hasMedia)).toBe(true);
   expect(p.messages[1].text).toBe("");
 });
+
+
+test("native Saved projection carries album flag without exposing raw Telegram album IDs",()=>{
+  const pageResult=parseSavedMessagesPage(page([
+    {...item("42","Подпись"),kind:"messagePhoto",hasMedia:true,hasAlbum:true},
+    {...item("41","Одиночное фото"),kind:"messagePhoto",hasMedia:true,hasAlbum:false},
+  ],"41"),"0",20);
+  expect(pageResult.messages.map(m=>m.hasAlbum)).toEqual([true,false]);
+  expect(()=>parseSavedMessagesPage(page([
+    {...item("42","Подпись"),hasAlbum:"fake"},
+  ],"42"),"0",20)).toThrow("telegram_saved_item_invalid");
+});
