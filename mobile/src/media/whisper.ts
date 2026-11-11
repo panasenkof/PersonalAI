@@ -121,23 +121,34 @@ type DictationOptions = { signal?: AbortSignal; onFinishing?: () => void; onStop
 let dictationDrain: Promise<void> = Promise.resolve();
 /** Resolves once the current dictation has been asked to stop. */
 let dictationStopping: Promise<void> = Promise.resolve();
-/** A new draft waits for an aborted decoder's final cleanup before reusing the
- * same model (otherwise the old generator can reset the new stream's state),
- * but never forever: if it has not ended in
- * DRAIN_TIMEOUT_MS the stuck model is released and the next start loads a
- * fresh one, so one native hang cannot block every later dictation. */
+/** A new dictation may reuse the Whisper model only after the previous
+ * native generator has finished. Disposing a model while stream() is still
+ * running can free JSI/native resources in use and terminate Android itself.
+ * A stuck decoder must fail the next attempt safely, not be force-disposed. */
+let unsafeNativeStream: Promise<void> | null = null;
+const nativeStreamBusyMessage =
+  "Предыдущая локальная диктовка ещё завершает работу. Повторите через несколько секунд; если проблема сохраняется, перезапустите PersAI.";
+
 async function drainPrevious(previous: Promise<void>, stopping: Promise<void>): Promise<void> {
+  if (unsafeNativeStream) throw new Error(nativeStreamBusyMessage);
   // A live dictation is not stuck: the timeout starts when it is asked to stop.
   await Promise.race([previous, stopping]);
+  // A concurrent attempt may have discovered the stalled decoder while waiting.
+  if (unsafeNativeStream) throw new Error(nativeStreamBusyMessage);
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timedOut = await Promise.race([
     previous.then(() => false),
     new Promise<boolean>(resolve => { timer = setTimeout(() => resolve(true), DRAIN_TIMEOUT_MS); }),
   ]);
   clearTimeout(timer);
-  if (timedOut && engine) {
-    const stuck = engine.model; engine = null;
-    try { stuck.streamStop(); stuck.dispose(); } catch { /* already released */ }
+  if (timedOut) {
+    // Keep the existing native stream and model alive until their actual end.
+    // In particular, do not call dispose() on an active async generator.
+    unsafeNativeStream = previous;
+    void previous.then(() => {
+      if (unsafeNativeStream === previous) unsafeNativeStream = null;
+    });
+    throw new Error(nativeStreamBusyMessage);
   }
 }
 export async function startWhisperDictation(onText: (text: string) => void, onError: (message: string) => void,
