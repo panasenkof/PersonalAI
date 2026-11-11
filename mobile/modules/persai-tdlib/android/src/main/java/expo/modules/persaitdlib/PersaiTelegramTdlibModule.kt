@@ -59,6 +59,26 @@ class PersaiTelegramTdlibModule : Module() {
   private fun sendNoReply(objectData: JSONObject) {
     requireNative().send(clientId, objectData.toString())
   }
+
+  /** Only stable error categories cross into Expo. Never propagate raw server
+   * text: it may contain phone numbers, account information or other secrets.
+   */
+  private fun safeTdlibError(reply: JSONObject): String {
+    val message = reply.optString("message","").uppercase(java.util.Locale.ROOT)
+    val code = reply.optInt("code", 0)
+    return when {
+      code == 429 || message.contains("FLOOD_WAIT") ||
+        message.contains("TOO MANY REQUESTS") -> "tdlib_rate_limited"
+      message.contains("PHONE_CODE_INVALID") -> "tdlib_auth_code_invalid"
+      message.contains("PHONE_CODE_EXPIRED") -> "tdlib_auth_code_expired"
+      message.contains("PASSWORD_HASH_INVALID") -> "tdlib_auth_password_invalid"
+      message.contains("PHONE_NUMBER_INVALID") -> "tdlib_auth_phone_invalid"
+      message.contains("PHONE_NUMBER_BANNED") -> "tdlib_auth_phone_blocked"
+      message.contains("API_ID_INVALID") || message.contains("API_HASH_INVALID") ->
+        "tdlib_invalid_app_credentials"
+      else -> "tdlib_operation_rejected"
+    }
+  }
   private fun sendRequest(data: JSONObject, allowNoMoreTopics: Boolean = false): JSONObject {
     val n = requireNative()
     val requestId = sequence.incrementAndGet()
@@ -73,7 +93,7 @@ class PersaiTelegramTdlibModule : Module() {
         // Permit that only for an explicit loadSavedMessagesTopics request.
         if (allowNoMoreTopics && data.optString("@type") == "loadSavedMessagesTopics" &&
           reply.optInt("code") == 404) return JSONObject().put("@type","ok")
-        throw IllegalStateException("tdlib_operation_rejected")
+        throw IllegalStateException(safeTdlibError(reply))
       }
       return reply
     } catch (_: java.util.concurrent.TimeoutException) {
