@@ -5,7 +5,7 @@ import {tdlibAvailable,tdlibAccountState} from "./account";
 
 /** Safe read-only projection; never arbitrary chat-read tools or raw TDLib JSON. */
 export type SavedMessagePreview = {
-  id:string; date:number; kind:string; text:string; hasMedia:boolean; hasAlbum?:boolean;
+  id:string; date:number; kind:string; text:string; hasMedia:boolean; hasAlbum?:boolean; albumId?:string;
 };
 export type SavedMessagesPage = {
   selfChatId:string; messages:SavedMessagePreview[]; nextCursor:string;
@@ -40,7 +40,9 @@ export function parseSavedMessagesPage(raw:string,cursor:string,limit:number):Sa
        typeof item.kind!=="string"||item.kind.length>80||
        typeof item.text!=="string"||item.text.length>60000||
        typeof item.hasMedia!=="boolean"||
-       (item.hasAlbum!==undefined&&typeof item.hasAlbum!=="boolean"))
+       (item.hasAlbum!==undefined&&typeof item.hasAlbum!=="boolean")||
+       (item.albumId!==undefined&&(!item.hasAlbum||typeof item.albumId!=="string"||
+          !/^-?[1-9][0-9]{0,18}$/.test(item.albumId))))
       throw new Error("telegram_saved_item_invalid");
     const id=Number(item.id);
     if(id>previous)throw new Error("telegram_saved_order_invalid");
@@ -50,7 +52,8 @@ export function parseSavedMessagesPage(raw:string,cursor:string,limit:number):Sa
     previous=id;
     messages.push({id:item.id,date:item.date,kind:item.kind,
       text:item.text,hasMedia:item.hasMedia,
-      ...(item.hasAlbum!==undefined?{hasAlbum:item.hasAlbum}:{}),});
+      ...(item.hasAlbum!==undefined?{hasAlbum:item.hasAlbum}:{}),
+      ...(item.albumId!==undefined?{albumId:item.albumId}:{}),});
   }
   // Native last raw ID may be the existing anchor; zero-progress pages are terminal,
   // never cause infinite loops or turn read-only pagination into a write cursor.
