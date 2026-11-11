@@ -5,6 +5,7 @@ import {MAX_ORIGINAL_BYTES} from "../media/attachments";
 import {mediaKind,type ImportFile} from "../media/kinds";
 import {tdlibAvailable,tdlibAccountState} from "./account";
 import type {SavedMessagePreview} from "./saved-messages";
+import {safeSavedAlbumId} from "./saved-album-plan";
 
 const supported=new Set([
   "messagePhoto","messageDocument","messageVideo","messageAudio",
@@ -16,19 +17,22 @@ const validProfile=(value:string)=>/^(guest|[a-zA-Z0-9_-]{1,120})$/.test(value);
 type NativeSavedOriginal={
   downloadSavedMessageOriginal(profile:string,chatId:string,messageId:string):Promise<string>;
   releaseSavedMessageOriginal(profile:string,chatId:string,messageId:string,uri:string):Promise<string>;
+  downloadSavedAlbumOriginal(profile:string,chatId:string,messageId:string,albumId:string):Promise<string>;
+  releaseSavedAlbumOriginal(profile:string,chatId:string,messageId:string,albumId:string,uri:string):Promise<string>;
 };
 const native=():NativeSavedOriginal|null=>Platform.OS==="android"
   ? requireOptionalNativeModule<NativeSavedOriginal>("PersaiTelegramTdlib"):null;
 
-export type SavedOriginal={file:ImportFile;messageId:string;chatId:string;kind:string;date:number;text:string};
+export type SavedOriginal={file:ImportFile;messageId:string;chatId:string;kind:string;date:number;text:string;albumId?:string};
 export const supportsSavedOriginal=(kind:string):boolean=>supported.has(kind);
 
 /** Treat native JSON as untrusted. The path must be inside this profile's
  * private TDLib download directory; never accept arbitrary content URIs.
  */
 export function parseSavedOriginal(raw:string,profile:string,chatId:string,
-  preview:SavedMessagePreview):SavedOriginal {
-  if(!validProfile(profile)||!id(chatId)||!id(preview.id)||!supportsSavedOriginal(preview.kind)||preview.hasAlbum===true||
+  preview:SavedMessagePreview,allowAlbum=false):SavedOriginal {
+  if(!validProfile(profile)||!id(chatId)||!id(preview.id)||!supportsSavedOriginal(preview.kind)||
+    (allowAlbum?preview.hasAlbum!==true||!safeSavedAlbumId(preview.albumId):preview.hasAlbum===true)||
     typeof raw!=="string"||raw.length>5000)
     throw new Error("telegram_saved_original_invalid");
   let data:unknown;
@@ -37,6 +41,7 @@ export function parseSavedOriginal(raw:string,profile:string,chatId:string,
   const value=data as Partial<SavedOriginal>&{uri?:unknown;name?:unknown;mimeType?:unknown;size?:unknown};
   if(value.chatId!==chatId||value.messageId!==preview.id||value.kind!==preview.kind||
     value.date!==preview.date||value.text!==preview.text||
+    (allowAlbum?value.albumId!==preview.albumId:value.albumId!==undefined)||
     typeof value.uri!=="string"||!value.uri.startsWith("file:///")||
     !value.uri.includes("/persai-tdlib-"+profile+"/files/")||
     /[?#\r\n\0]/.test(value.uri)||value.uri.includes("/../")||
@@ -50,7 +55,8 @@ export function parseSavedOriginal(raw:string,profile:string,chatId:string,
     throw new Error("telegram_saved_original_invalid");
   const file:ImportFile={uri:value.uri,name:value.name,mimeType:value.mimeType,size:value.size as number};
   mediaKind(file); // Only formats supported by the canonical writer are allowed.
-  return {file,chatId,messageId:preview.id,kind:preview.kind,date:preview.date,text:preview.text};
+  return {file,chatId,messageId:preview.id,kind:preview.kind,date:preview.date,
+    text:preview.text,...(allowAlbum?{albumId:preview.albumId}:{}),};
 }
 
 /** Restricted self-chat media download. No generic TDLib file API in JS/LLM. */
@@ -59,7 +65,7 @@ export async function downloadSavedOriginal(profile:string,chatId:string,
   if(signal?.aborted||!localMemorySessionUnlocked())
     throw new Error("telegram_saved_original_cancelled");
   if(!validProfile(profile)||!id(chatId)||!id(preview.id)||!preview.hasMedia||
-    !supportsSavedOriginal(preview.kind))
+    !supportsSavedOriginal(preview.kind)||preview.hasAlbum===true)
     throw new Error("telegram_saved_original_request_invalid");
   if(!tdlibAvailable()||tdlibAccountState()!=="authorizationStateReady")
     throw new Error("telegram_account_not_authorized");
@@ -84,11 +90,39 @@ export async function releaseSavedOriginal(profile:string,original:SavedOriginal
   const module=native();
   if(!module?.releaseSavedMessageOriginal)return;
   try{
-    await module.releaseSavedMessageOriginal(profile,original.chatId,
-      original.messageId,original.file.uri);
+    if(original.albumId && safeSavedAlbumId(original.albumId) && module.releaseSavedAlbumOriginal)
+      await module.releaseSavedAlbumOriginal(profile,original.chatId,
+        original.messageId,original.albumId,original.file.uri);
+    else if(!original.albumId)
+      await module.releaseSavedMessageOriginal(profile,original.chatId,
+        original.messageId,original.file.uri);
   }catch{
     // Do not mask a successfully stored original or a prior DB error.
     // On failed cleanup TDLib's private encrypted-app sandbox still protects
     // files; a later explicit cleanup/retention policy can retry.
   }
+}
+
+/** Only original members belonging to a native-projected self Saved album.
+ * Neither LLM nor callers can select arbitrary chats, file IDs or URLs.
+ */
+export async function downloadSavedAlbumOriginal(profile:string,chatId:string,
+  preview:SavedMessagePreview,signal?:AbortSignal):Promise<SavedOriginal>{
+  if(signal?.aborted||!localMemorySessionUnlocked())
+    throw new Error("telegram_saved_original_cancelled");
+  if(!validProfile(profile)||!id(chatId)||!id(preview.id)||
+    preview.hasAlbum!==true||!safeSavedAlbumId(preview.albumId)||
+    !preview.hasMedia||!supportsSavedOriginal(preview.kind))
+    throw new Error("telegram_saved_album_original_request_invalid");
+  if(!tdlibAvailable()||tdlibAccountState()!=="authorizationStateReady")
+    throw new Error("telegram_account_not_authorized");
+  const module=native();
+  if(!module?.downloadSavedAlbumOriginal)
+    throw new Error("telegram_saved_album_native_missing");
+  const raw=await module.downloadSavedAlbumOriginal(profile,chatId,preview.id,
+    preview.albumId);
+  if(signal?.aborted||!localMemorySessionUnlocked()||
+    tdlibAccountState()!=="authorizationStateReady")
+    throw new Error("telegram_saved_original_cancelled");
+  return parseSavedOriginal(raw,profile,chatId,preview,true);
 }
