@@ -295,13 +295,17 @@ class PersaiTelegramTdlibModule : Module() {
       val description = if (kind == "messageText") content?.optJSONObject("text")?.optString("text", "")
         else content?.optJSONObject("caption")?.optString("text", "")
       val text = (description ?: "").take(60000)
+      // Native signed int64 album IDs must cross JS as decimal strings:
+      // a Double/Number would corrupt groups above 2^53.
+      val albumId = message.optLong("media_album_id",0L)
       projected.put(JSONObject()
         .put("id", id.toString())
         .put("date", message.optLong("date", 0))
         .put("kind", kind.take(80))
         .put("text", text)
         .put("hasMedia", kind != "messageText")
-        .put("hasAlbum",message.optLong("media_album_id",0L)!=0L))
+        .put("hasAlbum",albumId!=0L)
+        .apply { if(albumId!=0L) put("albumId",albumId.toString()) })
     }
     // A profile switch/close during the native requests invalidates the result.
     require(activeProfile == profile && authState == "authorizationStateReady") {
