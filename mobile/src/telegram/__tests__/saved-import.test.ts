@@ -4,7 +4,11 @@ import {readSavedTopicPage} from "../saved-topics";
 import {saveMediaNote} from "../../media/attachments";
 import {scheduleVectors} from "../../media/vector-runner";
 import {localMemorySessionUnlocked} from "../../local-memory/storage";
+import {downloadSavedOriginal} from "../saved-original";
 jest.mock("../saved-messages",()=>({readSavedMessagesPage:jest.fn()}));
+jest.mock("../saved-original",()=>({downloadSavedOriginal:jest.fn(),
+  supportsSavedOriginal:(kind:string)=>["messagePhoto","messageDocument","messageVideo",
+    "messageAudio","messageVoiceNote","messageAnimation","messageVideoNote"].includes(kind)}));
 jest.mock("../saved-topics",()=>({readSavedTopicPage:jest.fn(),safeTopicId:(v:string)=>typeof v==="string"&&/^(0|-?[1-9][0-9]{0,15})$/.test(v)&&Number.isSafeInteger(Number(v))}));
 jest.mock("../../media/attachments",()=>({saveMediaNote:jest.fn()}));
 jest.mock("../../media/vector-runner",()=>({scheduleVectors:jest.fn()}));
@@ -19,6 +23,9 @@ beforeEach(()=>{
     selfChatId:"12345",messages:[item("50","Заметка"),item("49","Другой текст")],nextCursor:"49",
   });
   (saveMediaNote as jest.Mock).mockResolvedValue("note-1");
+  (downloadSavedOriginal as jest.Mock).mockResolvedValue({
+    file:{uri:"file:///data/persai-tdlib-guest/files/photo.jpg",name:"photo.jpg",mimeType:"image/jpeg",size:40},
+  });
   (readSavedTopicPage as jest.Mock).mockResolvedValue({selfChatId:"12345",messages:[item("50","Заметка")],nextCursor:"50"});
 });
 test("imports newest self-chat text using existing canonical writer and immutable source IDs",async()=>{
@@ -123,4 +130,42 @@ test("topic media and captions never become a false text-only note",async()=>{
   expect(saveMediaNote).toHaveBeenCalledTimes(1);
   expect((saveMediaNote as jest.Mock).mock.calls[0][1].receipt)
     .toBe("telegram-saved:12345:49");
+});
+
+test("explicit manual mode stores Saved photo ORIGINAL with its caption and stable source receipt",async()=>{
+  (readSavedMessagesPage as jest.Mock).mockResolvedValueOnce({
+    selfChatId:"12345",messages:[item("60","Новая фотография","messagePhoto",true)],
+    nextCursor:"60",
+  });
+  const result=await importSavedTextPage("guest","0",undefined,undefined,"supported-originals");
+  expect(result).toMatchObject({saved:1,duplicates:0,unsupported:0});
+  expect(downloadSavedOriginal).toHaveBeenCalledWith("guest","12345",
+    expect.objectContaining({id:"60",kind:"messagePhoto"}),undefined);
+  expect(saveMediaNote).toHaveBeenCalledWith("guest",expect.objectContaining({
+    body:"Новая фотография",
+    file:expect.objectContaining({name:"photo.jpg",mimeType:"image/jpeg"}),
+    receipt:"telegram-saved:12345:60",
+    telegramSavedMessage:expect.objectContaining({
+      messageId:"60",chatId:"12345",kind:"messagePhoto",
+    }),
+  }),undefined);
+});
+test("on-open text-only mode does NOT download Saved originals silently",async()=>{
+  (readSavedMessagesPage as jest.Mock).mockResolvedValueOnce({
+    selfChatId:"12345",messages:[item("60","Новая фотография","messagePhoto",true)],
+    nextCursor:"60",
+  });
+  const result=await importSavedTextPage("guest","0");
+  expect(result).toMatchObject({saved:0,unsupported:1});
+  expect(downloadSavedOriginal).not.toHaveBeenCalled();
+  expect(saveMediaNote).not.toHaveBeenCalled();
+});
+test("failed original download does not save caption-only note or claim successful import",async()=>{
+  (readSavedMessagesPage as jest.Mock).mockResolvedValueOnce({
+    selfChatId:"12345",messages:[item("60","Подпись","messagePhoto",true)],nextCursor:"60",
+  });
+  (downloadSavedOriginal as jest.Mock).mockRejectedValueOnce(new Error("tdlib_request_timeout"));
+  await expect(importSavedTextPage("guest","0",undefined,undefined,"supported-originals"))
+    .rejects.toThrow("tdlib_request_timeout");
+  expect(saveMediaNote).not.toHaveBeenCalled();
 });
