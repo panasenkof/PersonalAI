@@ -146,20 +146,10 @@ jobs:
           key: ${{ runner.os }}-persai-native-ccache-arm64-v8a-v1-${{ hashFiles('mobile/package-lock.json') }}-${{ github.run_id }}
           restore-keys: |
             ${{ runner.os }}-persai-native-ccache-arm64-v8a-v1-${{ hashFiles('mobile/package-lock.json') }}-
-      - name: Install and prepare C/C++ compiler cache
+      - name: Install and prepare optional C/C++ compiler cache
         if: steps.changes.outputs.needed == 'true'
         shell: bash
-        run: |
-          set -euo pipefail
-          if ! command -v ccache >/dev/null 2>&1; then
-            sudo apt-get update -qq
-            sudo apt-get install -y --no-install-recommends ccache
-          fi
-          launcher="$(command -v ccache)"
-          test -x "$launcher"
-          echo "PERSAI_CCACHE_BIN=$launcher" >> "$GITHUB_ENV"
-          ccache --zero-stats
-          ccache --version | head -n 1
+        run: bash mobile/scripts/setup-ci-ccache.sh
 
       - uses: android-actions/setup-android@v3
         if: steps.changes.outputs.needed == 'true'
@@ -234,14 +224,24 @@ jobs:
           PIA_ANDROID_KEY_ALIAS: ${{ secrets.PIA_ANDROID_KEY_ALIAS }}
           PIA_ANDROID_STORE_PASSWORD: ${{ secrets.PIA_ANDROID_STORE_PASSWORD }}
           PIA_ANDROID_KEY_PASSWORD: ${{ secrets.PIA_ANDROID_KEY_PASSWORD }}
-        run: ./gradlew :app:assembleRelease --init-script ../scripts/ci-native-ccache.init.gradle --build-cache --no-configuration-cache --no-daemon --stacktrace
+        run: |
+          if [ -n "${PERSAI_CCACHE_BIN:-}" ]; then
+            ./gradlew :app:assembleRelease --init-script ../scripts/ci-native-ccache.init.gradle --build-cache --no-configuration-cache --no-daemon --stacktrace
+          else
+            echo "::warning::Signed APK compiling without optional ccache due to Ubuntu mirror failure"
+            ./gradlew :app:assembleRelease --build-cache --no-configuration-cache --no-daemon --stacktrace
+          fi
 
-      - name: Verify compiler cache wiring and report C/C++ hit rate
+      - name: Verify compiler cache wiring when available
         if: steps.changes.outputs.needed == 'true'
         working-directory: mobile
         run: |
-          node scripts/verify-native-ccache.cjs
-          ccache --show-stats
+          if [ -n "${PERSAI_CCACHE_BIN:-}" ]; then
+            node scripts/verify-native-ccache.cjs
+            ccache --show-stats
+          else
+            echo "::warning::Compiler cache unavailable; signed APK compiled normally"
+          fi
 
       - name: Verify APK, embedded JS and signing certificate
         if: steps.changes.outputs.needed == 'true'
@@ -385,7 +385,7 @@ jobs:
 
       # Never cache signing material or compiled APKs, only native object files.
       - name: Save trusted arm64 C/C++ compiler cache
-        if: ${{ steps.changes.outputs.needed == 'true' && success() }}
+        if: ${{ steps.changes.outputs.needed == 'true' && success() && env.PERSAI_CCACHE_BIN != '' }}
         uses: actions/cache/save@v4
         with:
           path: ~/.cache/ccache
