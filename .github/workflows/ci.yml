@@ -90,7 +90,11 @@ jobs:
       - name: Android release configuration tests
         run: node --test scripts/prepare-android-release.test.cjs scripts/apk-signing-certificate.test.cjs scripts/android-release-policy.test.cjs scripts/verify-main-ci.test.cjs scripts/prepare-browser-ci.test.cjs scripts/telegram-shared-app-config.test.cjs
       - name: Expo dependency compatibility
-        run: npx expo install --check
+        # Preserve real Expo validation; only an npm-verified UNPUBLISHED patch in
+        # the upstream SDK matrix may retain the exact tested package-lock pin.
+        run: |
+          node --test scripts/check-expo-compatibility.test.cjs
+          node scripts/check-expo-compatibility.cjs
       - name: Browser acceptance of production screens
         env:
           SCREENSHOT_DIR: ${{ runner.temp }}/persai-ui
