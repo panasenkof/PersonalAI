@@ -36,6 +36,22 @@ module.exports = ({ config }) => {
   if (release && !androidCiRelease && !process.env.PIA_IOS_BUNDLE_ID) {
     throw new Error('Set PIA_IOS_BUNDLE_ID for an owned iOS application identifier.');
   }
+  // One app-owned Telegram API identity for all PersAI installations.
+  // Release CI injects these from GitHub Secrets only. Never commit their values.
+  // Like any credential packaged into a mobile client, the hash is extractable
+  // from the APK; Secrets prevent source/log disclosure, not reverse engineering.
+  const telegramId = (process.env.PERSAI_TELEGRAM_API_ID || '').trim();
+  const telegramHash = (process.env.PERSAI_TELEGRAM_API_HASH || '').trim();
+  const telegramProvided = telegramId !== '' || telegramHash !== '';
+  if (telegramProvided && (
+    !/^[1-9][0-9]{0,9}$/.test(telegramId) ||
+    Number(telegramId) > 2147483647 ||
+    !/^[0-9a-fA-F]{32}$/.test(telegramHash)
+  )) {
+    throw new Error('Set BOTH valid PERSAI_TELEGRAM_API_ID and PERSAI_TELEGRAM_API_HASH or neither.');
+  }
+  const bundledTelegram = telegramProvided
+    ? { apiId: Number(telegramId), apiHash: telegramHash.toLowerCase() } : undefined;
   const versionCodeRaw = process.env.PIA_ANDROID_VERSION_CODE;
   const versionCode = versionCodeRaw ? Number(versionCodeRaw) : undefined;
   if (versionCodeRaw && (!Number.isSafeInteger(versionCode) || versionCode < 1 || versionCode > 2100000000)) {
@@ -47,6 +63,6 @@ module.exports = ({ config }) => {
     ...(androidCiRelease && versionCode ? { version: `${config.version}-test.${versionCode}` } : {}),
     ios: { ...config.ios, ...(process.env.PIA_IOS_BUNDLE_ID ? { bundleIdentifier: process.env.PIA_IOS_BUNDLE_ID } : {}) },
     android: { ...config.android, package: PERSAI_ANDROID_PACKAGE, softwareKeyboardLayoutMode: 'resize', ...(versionCode ? { versionCode } : {}) },
-    extra: { ...config.extra, ...(process.env.PIA_ANDROID_BUILD_SHA ? { buildSha: process.env.PIA_ANDROID_BUILD_SHA } : {}) },
+    extra: { ...config.extra, ...(process.env.PIA_ANDROID_BUILD_SHA ? { buildSha: process.env.PIA_ANDROID_BUILD_SHA } : {}), ...(bundledTelegram ? { persaiTelegramApi: bundledTelegram } : {}) },
   };
 };
