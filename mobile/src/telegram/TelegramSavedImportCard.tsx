@@ -8,6 +8,8 @@ import {importSavedTextPage,type SavedTextImportResult} from "./saved-import";
 import {listSavedTopics,type TelegramSavedTopic} from "./saved-topics";
 import {TelegramImportTargetPicker} from "./TelegramImportTargetPicker";
 import {loadTelegramTargetForWrite} from "./import-target";
+import {importEntireSavedHistory,savedHistoryFailure} from "./full-history";
+import {loadSavedHistoryCheckpoint,type SavedHistoryCheckpoint} from "./settings";
 
 /** Explicit local import, one page at a time. Does not reimplement the note editor. */
 export function TelegramSavedImportCard({profile}:{profile:string}){
@@ -18,6 +20,11 @@ export function TelegramSavedImportCard({profile}:{profile:string}){
   const [result,setResult]=useState<SavedTextImportResult|null>(null);
   const [error,setError]=useState("");
   const [cancelRequested,setCancelRequested]=useState(false);
+  const [fullRunning,setFullRunning]=useState(false);
+  const [historyCheckpoint,setHistoryCheckpoint]=useState<SavedHistoryCheckpoint|null>(null);
+  const [historyProgress,setHistoryProgress]=useState<SavedHistoryCheckpoint|null>(null);
+  const [historyStatus,setHistoryStatus]=useState("");
+  const [historyLoaded,setHistoryLoaded]=useState(false);
   const [topics,setTopics]=useState<TelegramSavedTopic[]|null>(null);
   const [selectedTopic,setSelectedTopic]=useState<TelegramSavedTopic|null>(null);
   const running=useRef(false),generation=useRef(0);
@@ -32,6 +39,13 @@ export function TelegramSavedImportCard({profile}:{profile:string}){
     running.current=false;
     setBusy(false);setCancelRequested(false);
     setCursor("0");setDone(false);setResult(null);setError("");
+    setFullRunning(false);setHistoryCheckpoint(null);setHistoryProgress(null);
+    setHistoryStatus("");setHistoryLoaded(false);
+    void loadSavedHistoryCheckpoint(profile).then(checkpoint=>{
+      if(generation.current===version){setHistoryCheckpoint(checkpoint);setHistoryLoaded(true);}
+    }).catch(()=>{
+      if(generation.current===version){setHistoryLoaded(true);setError("Не удалось прочитать позицию импорта Telegram.");}
+    });
     setTopics(null);setSelectedTopic(null);
     return()=>{
       generation.current++;
@@ -69,6 +83,50 @@ export function TelegramSavedImportCard({profile}:{profile:string}){
         running.current=false;
         activeImport.current=null;
         if(generation.current===version){setBusy(false);setCancelRequested(false);}
+      }
+    }
+  }
+  async function importFullHistory(resume:boolean){
+    if(running.current||!historyLoaded)return;
+    const version=generation.current;
+    const request=new AbortController();
+    activeImport.current=request;
+    running.current=true;setBusy(true);setFullRunning(true);
+    setError("");setCancelRequested(false);setHistoryStatus("");
+    try{
+      const target=await loadTelegramTargetForWrite(profile,"saved");
+      if(request.signal.aborted)throw new Error("telegram_saved_import_cancelled");
+      const outcome=await importEntireSavedHistory(profile,selectedTopic?.id,target,
+        request.signal,progress=>{
+          if(generation.current===version&&!request.signal.aborted){
+            setHistoryProgress(progress);setHistoryCheckpoint(progress);
+          }
+        },resume);
+      if(generation.current===version){
+        setHistoryProgress(outcome.progress);
+        setHistoryCheckpoint(outcome.status==="completed"?null:outcome.progress);
+        setHistoryStatus(outcome.status==="completed"?"История импортирована полностью.":
+          outcome.status==="pending_album"?
+          "Незавершённый альбом ожидает следующих сообщений. Прогресс сохранён; повторите позже.":
+          "Telegram не отдал следующую страницу. Позиция сохранена; попробуйте продолжить позже.");
+      }
+    }catch(e){
+      if(generation.current===version){
+        setHistoryStatus(request.signal.aborted?
+          "Импорт остановлен. Сохранённые заметки остаются; можно продолжить с контрольной точки.":"");
+        if(!request.signal.aborted)setError(savedHistoryFailure(e));
+        // The saved checkpoint is the authority, not an uncommitted UI cursor.
+        try{
+          const checkpoint=await loadSavedHistoryCheckpoint(profile);
+          if(generation.current===version&&checkpoint)setHistoryCheckpoint(checkpoint);
+        }catch{/* AppLock may have hidden device-only settings. */}
+      }
+    }finally{
+      if(activeImport.current===request){
+        running.current=false;activeImport.current=null;
+        if(generation.current===version){
+          setBusy(false);setFullRunning(false);setCancelRequested(false);
+        }
       }
     }
   }
@@ -110,7 +168,7 @@ export function TelegramSavedImportCard({profile}:{profile:string}){
       Сообщения, пропущенные раньше как медиа, можно догрузить: начните импорт с новых
       сообщений и продолжайте историю — уже сохранённое не повторится и не скачивается заново.
     </Text>
-    <TelegramImportTargetPicker profile={profile} channel="saved"/>
+    <TelegramImportTargetPicker profile={profile} channel="saved" disabled={busy}/>
     <Text style={{color:t.muted,...nebulaTypography.label}}>
       {selectedTopic?"Источник: "+topicLabel(selectedTopic):
         "Источник: все сообщения «Избранного»."}
@@ -130,6 +188,22 @@ export function TelegramSavedImportCard({profile}:{profile:string}){
       {topics.map(topic=><NebulaAction key={topic.id} size="compact" icon="folder"
         label={(selectedTopic?.id===topic.id?"● ":"○ ")+topicLabel(topic)} disabled={busy} onPress={()=>chooseTopic(topic)}/>)}
     </View>:null}
+    <NebulaAction icon="layers" label="Импортировать всю историю"
+      disabled={busy||!historyLoaded} onPress={()=>void importFullHistory(false)}/>
+    {historyCheckpoint&&historyCheckpoint.topicId===(selectedTopic?.id||"")?
+      <NebulaAction icon="play" label="Продолжить с места остановки"
+        disabled={busy||!historyLoaded} onPress={()=>void importFullHistory(true)}/>:null}
+    {historyProgress||historyCheckpoint?
+      <Text accessibilityLiveRegion="polite" style={{color:t.text,...nebulaTypography.label}}>
+        Обработано записей (альбом — одна запись): {(historyProgress||historyCheckpoint)!.processed};
+        сохранено: {(historyProgress||historyCheckpoint)!.saved};
+        уже были: {(historyProgress||historyCheckpoint)!.duplicates};
+        пропущено: {(historyProgress||historyCheckpoint)!.unsupported};
+        страниц: {(historyProgress||historyCheckpoint)!.pages}.
+      </Text>:null}
+    {historyStatus?<Text accessibilityLiveRegion="polite" style={{color:t.muted,...nebulaTypography.label}}>
+      {historyStatus}
+    </Text>:null}
     <NebulaAction icon="download" label={cursor==="0"?
       "Импортировать последние 20 сообщений":"Продолжить историю (до 20)"}
       disabled={busy||done} onPress={()=>void importPage()}/>
@@ -146,11 +220,13 @@ export function TelegramSavedImportCard({profile}:{profile:string}){
     {busy?<View style={{gap:nebulaSpacing.xs}}>
       <Text accessibilityLiveRegion="polite" style={{color:t.muted}}>
         {cancelRequested
-          ? "Отменяю импорт после завершения текущего запроса TDLib…"
+          ? "Останавливаю после текущего запроса TDLib…"
+          : fullRunning
+          ? "Импортирую историю с сохранением позиции после каждой страницы…"
           : "Читаю «Избранное» и сохраняю оригиналы…"}
       </Text>
       {!cancelRequested?<NebulaAction icon="x" size="compact"
-        label="Отменить импорт Telegram" onPress={()=>{
+        label={fullRunning?"Остановить":"Отменить импорт Telegram"} onPress={()=>{
           activeImport.current?.abort();
           setCancelRequested(true);
         }}/>:null}
