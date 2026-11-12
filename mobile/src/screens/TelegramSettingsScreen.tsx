@@ -5,6 +5,7 @@ import {useProfile} from "../profile/ProfileContext";
 import {useTheme} from "../theme";
 import {TelegramBotCard} from "../telegram/TelegramBotCard";
 import {TelegramAccountCard} from "../telegram/TelegramAccountCard";
+import {bundledTelegramApiCredentials} from "../telegram/bundled-api";
 import {NebulaAction, NebulaSection} from "../design/nebula/components";
 import {nebulaRadii, nebulaSpacing, nebulaTypography} from "../design/nebula/tokens";
 import {
@@ -16,6 +17,7 @@ import {
 /** Profile-scoped Telegram settings. Connection status is owned by TDLib, not saved API parameters. */
 export function TelegramSettingsScreen() {
   const profile = useProfile(), theme = useTheme(), insets = useSafeAreaInsets();
+  const bundledApi = bundledTelegramApiCredentials()!==null;
   const [mode, setMode] = useState<TelegramSyncMode>("manual");
   const [lastSync,setLastSync]=useState<TelegramAutoSyncResult|null>(null);
   const [apiId, setApiId] = useState(""), [apiHash, setApiHash] = useState("");
@@ -111,11 +113,18 @@ export function TelegramSettingsScreen() {
       </Text>:null}
     </NebulaSection>
     <NebulaSection title="Аккаунт Telegram">
+      {bundledApi ? <Text style={{color:theme.muted,...nebulaTypography.label}}>
+        PersAI уже содержит общие параметры подключения Telegram.
+        Никаких API ID и API hash вводить не нужно: подключите свой аккаунт
+        по номеру телефона и коду подтверждения. При необходимости Telegram
+        запросит пароль двухэтапной защиты.
+      </Text> : <>
       <Text style={{color: theme.muted, ...nebulaTypography.label}}>
-        Чтобы подключить личный аккаунт, нужны API ID и API hash.
-        Их выдаёт Telegram на my.telegram.org → API development tools.
-        Они хранятся только на этом телефоне.
-        Подключение доступно в APK со встроенной TDLib.
+        Эта сборка ещё не содержит общих API-параметров PersAI.
+        Подключение возможно с ранее сохранёнными параметрами или в
+        режиме разработчика: API ID и API hash с my.telegram.org.
+        В пользовательской сборке с параметрами PersAI эти поля скрыты.
+        Для работы аккаунта также необходим APK со встроенной TDLib.
       </Text>
       <TextInput accessibilityLabel="Telegram API ID" keyboardType="number-pad"
         value={apiId} onChangeText={setApiId} editable={!disabled}
@@ -143,7 +152,8 @@ export function TelegramSettingsScreen() {
       {busy ? <Text accessibilityLiveRegion="polite" style={{color:theme.muted}}>Сохраняю…</Text> : null}
       {apiError ? <Text accessibilityRole="alert" style={{color:theme.err}}>{apiError}</Text> : null}
       {apiNotice ? <Text accessibilityLiveRegion="polite" style={{color:theme.ok}}>{apiNotice}</Text> : null}
-      <TelegramAccountCard profile={profile} apiConfigured={configured}/>
+      </>}
+      <TelegramAccountCard profile={profile} apiConfigured={configured||bundledApi}/>
     </NebulaSection>
     <NebulaSection title="Резервный канал — личный бот">
       <TelegramBotCard profile={profile}/>
