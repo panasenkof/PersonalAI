@@ -148,11 +148,15 @@ export function TelegramSavedImportCard({profile}:{profile:string}){
   function chooseTopic(value:TelegramSavedTopic|null){
     if(running.current)return;
     setSelectedTopic(value);setCursor("0");setDone(false);setResult(null);setError("");
+    setHistoryProgress(null);setHistoryStatus("");
   }
   const topicLabel=(topic:TelegramSavedTopic)=>
     topic.kind==="savedMessagesTopicTypeMyNotes"?"Мои заметки":
     topic.kind==="savedMessagesTopicTypeAuthorHidden"?"Автор скрыт":
     topic.title?.trim()||"Чат без названия";
+  const visibleHistory=(historyProgress?.topicId===(selectedTopic?.id||"")
+    ?historyProgress:null)||
+    (historyCheckpoint?.topicId===(selectedTopic?.id||"")?historyCheckpoint:null);
   return <View style={{gap:nebulaSpacing.sm}}>
     <Text style={{color:t.text,...nebulaTypography.body,fontWeight:"600"}}>
       Импорт «Избранного»
@@ -193,13 +197,13 @@ export function TelegramSavedImportCard({profile}:{profile:string}){
     {historyCheckpoint&&historyCheckpoint.topicId===(selectedTopic?.id||"")?
       <NebulaAction icon="play" label="Продолжить с места остановки"
         disabled={busy||!historyLoaded} onPress={()=>void importFullHistory(true)}/>:null}
-    {historyProgress||historyCheckpoint?
+    {visibleHistory?
       <Text accessibilityLiveRegion="polite" style={{color:t.text,...nebulaTypography.label}}>
-        Обработано записей (альбом — одна запись): {(historyProgress||historyCheckpoint)!.processed};
-        сохранено: {(historyProgress||historyCheckpoint)!.saved};
-        уже были: {(historyProgress||historyCheckpoint)!.duplicates};
-        пропущено: {(historyProgress||historyCheckpoint)!.unsupported};
-        страниц: {(historyProgress||historyCheckpoint)!.pages}.
+        Обработано записей (альбом — одна запись): {visibleHistory.processed};
+        сохранено: {visibleHistory.saved};
+        уже были: {visibleHistory.duplicates};
+        пропущено: {visibleHistory.unsupported};
+        страниц: {visibleHistory.pages}.
       </Text>:null}
     {historyStatus?<Text accessibilityLiveRegion="polite" style={{color:t.muted,...nebulaTypography.label}}>
       {historyStatus}
