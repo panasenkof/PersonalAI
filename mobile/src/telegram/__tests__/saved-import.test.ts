@@ -312,3 +312,15 @@ test("album exceeding existing 80 MiB cap never enters canonical writer",async()
   expect((saveMediaNote as jest.Mock).mock.calls.some(c=>c[1].telegramSavedMessage?.kind==="messageAlbum")).toBe(false);
   expect(releaseSavedOriginal).toHaveBeenCalledTimes(5);
 });
+
+test("hidden Telegram rich-text URL is saved as a discoverable source link",async()=>{
+ (readSavedMessagesPage as jest.Mock).mockResolvedValueOnce({
+   selfChatId:"12345",messages:[{id:"99",date:1794300000,kind:"messageText",
+     text:"Интересная статья",urls:["https://example.com/article"],hasMedia:false}],nextCursor:"99",
+ });
+ await importSavedTextPage("guest");
+ expect(saveMediaNote).toHaveBeenCalledWith("guest",expect.objectContaining({
+   body:"Интересная статья\n\nСсылки:\nhttps://example.com/article",
+   sourceUrl:"https://example.com/article",sourceCoverage:"url_only",
+ }),undefined);
+});

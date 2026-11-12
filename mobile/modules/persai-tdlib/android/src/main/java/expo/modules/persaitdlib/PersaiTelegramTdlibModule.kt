@@ -327,9 +327,30 @@ class PersaiTelegramTdlibModule : Module() {
       val id = message.optLong("id", 0)
       val content = message.optJSONObject("content")
       val kind = content?.optString("@type") ?: "unknown"
-      val description = if (kind == "messageText") content?.optJSONObject("text")?.optString("text", "")
-        else content?.optJSONObject("caption")?.optString("text", "")
-      val text = (description ?: "").take(60000)
+      val rich = if (kind == "messageText") content?.optJSONObject("text")
+        else content?.optJSONObject("caption")
+      val text = (rich?.optString("text","") ?: "").take(60000)
+      // TDLib counts entity offsets in UTF-16 code units, as does Kotlin String.
+      val urls = org.json.JSONArray()
+      val unique = HashSet<String>()
+      val entities = rich?.optJSONArray("entities")
+      if (entities != null) for (index in 0 until entities.length()) {
+        val entity = entities.optJSONObject(index) ?: continue
+        val type = entity.optJSONObject("type") ?: continue
+        val url = when (type.optString("@type")) {
+          "textEntityTypeTextUrl" -> type.optString("url","")
+          "textEntityTypeUrl" -> {
+            val begin = entity.optInt("offset",-1)
+            val count = entity.optInt("length",-1)
+            if (begin >= 0 && count > 0 && begin <= text.length &&
+                count <= text.length - begin) text.substring(begin,begin+count)
+            else ""
+          }
+          else -> ""
+        }
+        if (url.startsWith("https://") && url.length in 9..2000 &&
+            unique.add(url) && urls.length() < 10) urls.put(url)
+      }
       // Native signed int64 album IDs must cross JS as decimal strings:
       // a Double/Number would corrupt groups above 2^53.
       val albumId = message.optLong("media_album_id",0L)
@@ -338,6 +359,7 @@ class PersaiTelegramTdlibModule : Module() {
         .put("date", message.optLong("date", 0))
         .put("kind", kind.take(80))
         .put("text", text)
+        .put("urls", urls)
         .put("hasMedia", kind != "messageText")
         .put("hasAlbum",albumId!=0L)
         .apply { if(albumId!=0L) put("albumId",albumId.toString()) })

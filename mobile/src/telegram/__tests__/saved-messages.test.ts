@@ -87,3 +87,13 @@ test("native Saved projection carries album flag without exposing raw Telegram a
     {...item("42","Подпись"),hasAlbum:"fake"},
   ],"42"),"0",20)).toThrow("telegram_saved_item_invalid");
 });
+
+test("optional links in native Saved projection are bounded and HTTPS-only",()=>{
+  const safe={...item("42","Ссылка"),urls:["https://example.com/article"]};
+  expect(parseSavedMessagesPage(page([safe],"42"),"0",20).messages[0].urls)
+    .toEqual(["https://example.com/article"]);
+  for(const urls of [["http://example.com"],["https://a".repeat(1500)],"https://one",null]){
+    expect(()=>parseSavedMessagesPage(page([{...item("42"),urls}],"42"),"0",20))
+      .toThrow("telegram_saved_item_invalid");
+  }
+});

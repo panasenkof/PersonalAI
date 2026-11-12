@@ -8,6 +8,7 @@ import {downloadSavedOriginal,downloadSavedAlbumOriginal,releaseSavedOriginal,
 import {planSavedAlbum,safeSavedAlbumId} from "./saved-album-plan";
 import {loadSavedWatermark,saveSavedWatermark} from "./settings";
 import {requireTelegramTarget,type TelegramImportTarget} from "./import-target";
+import {telegramLinkedText} from "./links";
 
 export type SavedTextImportResult={
   saved:number; duplicates:number; unsupported:number; empty:number;
@@ -122,10 +123,15 @@ export async function importSavedTextPage(profile:string,cursor="0",
           }
           unlocked(signal);
           const ids=oldestFirst.map(v=>v.id);
-          const captions=oldestFirst.flatMap((v,i)=>v.text.trim()
-            ?[{index:i+1,text:v.text.trim()}]:[]);
-          const body=captions.length===1?captions[0].text:
+          const captions=oldestFirst.flatMap((v,i)=>{
+            const linked=telegramLinkedText(v.text,v.urls);
+            return linked.body?[{index:i+1,text:linked.body}]:[];
+          });
+          const rawBody=captions.length===1?captions[0].text:
             captions.map(x=>"Файл "+x.index+": "+x.text).join("\n\n");
+          const allUrls=[...new Set(oldestFirst.flatMap(v=>v.urls||[]))];
+          const linked=telegramLinkedText(rawBody,allUrls);
+          const body=linked.body;
           if(body.length>60_000)
             throw new Error("Подписи альбома Telegram превышают 60 000 символов.");
           const title=body.split(/\r?\n/)[0].slice(0,160)||
@@ -134,6 +140,7 @@ export async function importSavedTextPage(profile:string,cursor="0",
           const targetFields=await requireTelegramTarget(profile,target);
           await saveMediaNote(profile,{
             files:staged.map(x=>x.file),title,body,...targetFields,
+            ...(linked.sourceUrl?{sourceUrl:linked.sourceUrl,sourceCoverage:"url_only" as const}:{}),
             receipt:"telegram-saved:"+page.selfChatId+":"+ids[0]+
               ":album:"+unit.albumId+":"+ids.join(","),
             telegramSavedMessage:{
@@ -157,7 +164,8 @@ export async function importSavedTextPage(profile:string,cursor="0",
       const originalRequested=mediaPolicy==="supported-originals"&&item.hasMedia&&
         supportsSavedOriginal(item.kind);
       if(!textOnly&&!originalRequested){unsupported++;continue;}
-      const body=item.text.trim();
+      const linked=telegramLinkedText(item.text,item.urls);
+      const body=linked.body;
       if(textOnly&&!body){empty++;continue;}
       const original=originalRequested
         ?await downloadSavedOriginal(profile,page.selfChatId,item,signal):null;
@@ -169,6 +177,7 @@ export async function importSavedTextPage(profile:string,cursor="0",
         const targetFields=await requireTelegramTarget(profile,target);
         await saveMediaNote(profile,{
           title,body,...targetFields,...(original?{file:original.file}:{}),
+          ...(linked.sourceUrl?{sourceUrl:linked.sourceUrl,sourceCoverage:"url_only" as const}:{}),
           receipt:"telegram-saved:"+page.selfChatId+":"+item.id,
           telegramSavedMessage:{
             chatId:page.selfChatId,messageId:item.id,date:item.date,

@@ -6,6 +6,7 @@ import {prepareBotOriginal, type PreparedBotOriginal} from "./bot-media";
 import {planBotAlbum} from "./bot-albums";
 import {advanceTelegramBotCursor, loadTelegramBotConfig} from "./bot-settings";
 import {requireTelegramTarget,type TelegramImportTarget} from "./import-target";
+import {telegramBotLinks,telegramLinkedText} from "./links";
 
 export type TelegramBotSyncResult = {
   imported:number;skipped:number;duplicates:number;lastUpdate:number;pendingAlbum?:number;
@@ -40,6 +41,11 @@ function hasMedia(message:BotMessage):boolean {
 }
 function textOf(message:BotMessage):string {
   return typeof message.text === "string" ? message.text : typeof message.caption === "string" ? message.caption : "";
+}
+function linkedMessage(message:BotMessage){
+  const text=textOf(message);
+  const entities=typeof message.text==="string"?message.entities:message.caption_entities;
+  return telegramLinkedText(text,telegramBotLinks(text,entities));
 }
 async function perform(profile:string,signal?:AbortSignal,target?:TelegramImportTarget):Promise<TelegramBotSyncResult> {
   mustBeUnlocked(signal);
@@ -78,11 +84,17 @@ async function perform(profile:string,signal?:AbortSignal,target?:TelegramImport
         mustBeUnlocked(signal);
         const ids=plan.messages.map(part=>part.message_id);
         const captions=plan.messages.map((part,partIndex)=>{
-          const caption=textOf(part).trim();
+          const caption=linkedMessage(part).body;
           return caption?{position:partIndex+1,caption}:null;
         }).filter((v):v is {position:number;caption:string}=>v!==null);
-        const body=captions.length<2?captions[0]?.caption||"":
+        const rawBody=captions.length<2?captions[0]?.caption||"":
           captions.map(v=>"Файл "+v.position+": "+v.caption).join("\n\n");
+        const groupUrls=[...new Set(plan.messages.flatMap(part=>{
+          const text=textOf(part);
+          return telegramBotLinks(text,typeof part.text==="string"?part.entities:part.caption_entities);
+        }))];
+        const linked=telegramLinkedText(rawBody,groupUrls);
+        const body=linked.body;
         if(body.length>60_000)throw new Error("Подписи альбома Telegram превышают 60 000 символов.");
         const title=body.split(/\r?\n/)[0].slice(0,160)||
           "Альбом Telegram ("+staged.length+" файлов)";
@@ -90,6 +102,7 @@ async function perform(profile:string,signal?:AbortSignal,target?:TelegramImport
         const targetFields=await requireTelegramTarget(profile,target);
         await saveMediaNote(profile,{
           title,body,...targetFields,
+          ...(linked.sourceUrl?{sourceUrl:linked.sourceUrl,sourceCoverage:"url_only" as const}:{}),
           files:staged.map(v=>v.file),
           receipt:"telegram-bot:"+config.botId+":"+config.allowedChatId+":"+
             ids[0]+":album:"+plan.groupId+":"+ids.join(","),
@@ -115,7 +128,8 @@ async function perform(profile:string,signal?:AbortSignal,target?:TelegramImport
         throw new Error("Telegram вернул сообщение без корректного ID.");
       // Do not acknowledge a Telegram object that has no lossless writer yet.
       // Unsupported objects are handled as a deliberate blocked update above.
-      const body=textOf(message).trim();
+      const linked=linkedMessage(message);
+      const body=linked.body;
       if(body.length>60_000)throw new Error("Сообщение Telegram длиннее 60 000 символов. Импорт остановлен.");
       const isCommand=/^\/(?:start|help|done)(?:\s|$)/i.test(body)&&!hasMedia(message);
       const staged=!isCommand&&hasMedia(message)
@@ -130,6 +144,7 @@ async function perform(profile:string,signal?:AbortSignal,target?:TelegramImport
           await saveMediaNote(profile,{
             title,body,...targetFields,
             ...(staged?{file:staged.file}:{}),
+            ...(linked.sourceUrl?{sourceUrl:linked.sourceUrl,sourceCoverage:"url_only" as const}:{}),
             receipt:"telegram-bot:"+config.botId+":"+config.allowedChatId+":"+message.message_id,
             onReplay:()=>{replayed=true;},
             botMessage:{botId:config.botId,chatId:config.allowedChatId!,messageId:message.message_id},

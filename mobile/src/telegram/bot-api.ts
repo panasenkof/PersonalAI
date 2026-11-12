@@ -10,6 +10,8 @@ export type BotMessage = {
   from?: {id?: number;is_bot?: boolean;first_name?: string;username?: string};
   text?: string;
   caption?: string;
+  entities?:Array<{type:string;offset:number;length:number;url?:string}>;
+  caption_entities?:Array<{type:string;offset:number;length:number;url?:string}>;
   photo?: unknown;
   document?: unknown;
   video?: unknown;
