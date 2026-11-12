@@ -4,6 +4,17 @@
 
 Формат новой строки: `дата · что изменилось для пользователя (#PR) · CI / APK / телефон`. Статус проверок для строк ниже смотреть в архивном снимке и в [долге приёмки](PHYSICAL_ACCEPTANCE_DEBT.md).
 
+- 2026-11-12 · TG-9R: индексирование фото, предзагрузочная дедупликация, счётчики медиа и лимитов (#494) · CI PASS 43173501132; телефон NOT_RUN_PHYSICAL
+- 2026-11-12 · TG-5: ссылки из TDLib и бота, source_url для подборок статей (#492) · CI PASS 43172146424; телефон NOT_RUN_PHYSICAL
+- 2026-11-12 · TG-8: подтверждённый пропуск неподдерживаемых сообщений бота (#491) · телефон NOT_RUN_PHYSICAL
+- 2026-11-12 · TG-10: Telegram-параметры в зашифрованной резервной копии без сессии TDLib (#490) · restore drill NOT_RUN_PHYSICAL
+- 2026-11-12 · TG-6: выбор целевого раздела для «Избранного» и бота (#489) · телефон NOT_RUN_PHYSICAL
+- 2026-11-12 · TG-4: автосинхронизация с watermark, отчётами и контролем неполных страниц (#488) · телефон NOT_RUN_PHYSICAL
+- 2026-11-12 · TG-3: улучшенный экран Telegram и названия подборок (#487) · телефон NOT_RUN_PHYSICAL
+- 2026-11-12 · TG-2: дочитывание коротких страниц TDLib до заданного лимита (#486) · телефон NOT_RUN_PHYSICAL
+- 2026-11-12 · TG-1: отмена и восстановление авторизации, нормализация номера (#485) · телефон NOT_RUN_PHYSICAL
+
+
 - 2026-11-12 · Telegram Saved B15: cancel long TDLib imports on demand, AppLock and screen exit (#482)
 - 2026-11-12 · Telegram TDLib B14B: atomic Saved albums with original files and bounded page lookahead (#481)
 - 2026-11-12 · CI: keep signed APK and native checks running when optional ccache apt mirror fails (#483)
