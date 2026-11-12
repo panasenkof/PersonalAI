@@ -1,24 +1,9 @@
 import type { DirectAgentOptions, DirectResult } from "../engine";
-import { usedNotes } from "../context";
 import type { UsedNote } from "../context";
 import type { MemorySnippet } from "../memory";
-import { FACT_TOOL_NAME, FACT_TOOL_DESCRIPTION, factToolParameters, factProposal } from "../fact-tool";
-import { createWebTools } from "../web-tools";
-import { beginTask, recordEvidence, TASK_STATE_TOOL, updateTaskInterpretation,
-  WORKSPACE_MAX_ENTRIES, WORKSPACE_ENTRY_MAX_CHARS } from "../task-state";
-import type { TaskWorkspaceEntry } from "../task-state";
-import type { TaskEvidence, ToolOutcome } from "../task-state";
-import { webPreference } from "../dialogue";
-import { savedArticleToolIntent, savedAiArticlePageIntent } from "../article-selection";
-import type { SavedArticleIntent } from "../article-selection";
-import type { ChatArticlePage, ChatMemoryRef } from "../conversations";
-import { validMoveProposal, type ChatMoveProposal } from "../move-proposal";
-import { validSectionProposal, type ChatSectionProposal } from "../section-actions";
-import { createArticleReadCoverage } from "../article-read-coverage";
-import { validateContextCandidate, type ContextCandidate } from "../conversation-context";
-import { checkedNoteTags } from "../../local-memory/note-tags";
-
-import type { ToolSpec } from "./types";
+import { FACT_TOOL_NAME } from "../fact-tool";
+import type { ToolOutcome } from "../task-state";
+import type { ToolSpec, TurnState } from "./types";
 import { sourceTools } from "./source-tools";
 import { memoryTools } from "./memory-tools";
 import { photoTools } from "./photo-tools";
@@ -43,7 +28,7 @@ const sectionToolError = (error:unknown) => {
 
 /** All provider adapters advertise and execute the same catalog. No dynamic code loading. */
 export function createToolCatalog(options: DirectAgentOptions, sources: string[], notes: MemorySnippet[], initialUsed: UsedNote[]) {
-  const turn = createTurnState(options,sources,notes,initialUsed);
+  const turn: TurnState = createTurnState(options,sources,notes,initialUsed);
   const {web,used,moveHandles,admitMoveHandle,articleCoverage,readNotes,photoMatches,
     emit,observe,fingerprint,pending,proposalIds,articleClock,readArticleSelection,
     selectedArticleHandles,verifiedSelectedArticleRead} = turn;
