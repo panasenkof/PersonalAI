@@ -33,14 +33,12 @@ for (const row of ledgerRows) {
     "Roadmap entry is incomplete: " + row.id);
 }
 
-const begin = plan.indexOf("### Постоянные номера новых задач (54–91)");
-const end = plan.indexOf("### Anthropic / Claude", begin);
-assert.ok(begin >= 0 && end > begin, "Cannot locate permanent task registry in PLAN.md");
-const permanent = plan.slice(begin, end);
-const numbered = [...permanent.matchAll(/^\|\s*\*{0,2}(\d{2})\*{0,2}\s*\|/gm)]
-  .map(m => Number(m[1])).filter(id => id >= 54 && id <= 91).sort((a,b)=>a-b);
-assert.deepEqual(numbered, expected.filter(id => id >= 54),
-  "Tasks 54–91 must each stay in the permanent PLAN.md registry");
+// Since PLAN.md ред. 96 (11.11.2026) the ledger above is the single registry of
+// IDs 1–91; the former duplicate «Постоянные номера новых задач (54–91)» table
+// is preserved verbatim in the archived snapshot below, not in the work queue.
+const archive = read("Plans/history/PLAN_FULL_2026-11-11.md");
+assert.ok(archive.includes("### Постоянные номера новых задач (54–91)"),
+  "Archived PLAN.md snapshot with the former 54–91 registry must be preserved");
 
 const required = [
   "Plans/ASSISTANT_FEATURES.md",
@@ -57,4 +55,4 @@ required.forEach(file => assert.ok(fs.existsSync(path.join(root, file)), "Missin
 assert.match(ledger, /42–53/);
 assert.match(ledger, /83\.0–83\.6/);
 assert.match(ledger, /№91/);
-console.log("Roadmap OK: 91 unique IDs, 54–91 retained in PLAN.md, referenced subplans exist.");
+console.log("Roadmap OK: 91 unique IDs in Plans/ROADMAP_STATUS.md, archived registry and referenced subplans exist.");
