@@ -42,7 +42,6 @@ export function memoryErrorMessage(error: unknown): string {
     backup_preflight_pages_unavailable: "Не удалось определить число страниц базы (BKP-02B). Исходные данные не изменены.",
     backup_preflight_page_size_unavailable: "Не удалось определить размер страниц базы (BKP-02C). Исходные данные не изменены.",
     backup_file_missing: "Зашифрованный файл копии не был создан (BKP-06).",
-    invalid_backup_size: "Размер файла копии не удалось проверить (BKP-06).",
     backup_sharing_unavailable: "Системный обмен файлами недоступен на устройстве (BKP-07).",
     backup_export_preflight_failed: "Не удалось подготовить резервное копирование (BKP-02).",
     backup_export_attach_failed: "Не удалось открыть временную зашифрованную базу для экспорта (BKP-03).",
