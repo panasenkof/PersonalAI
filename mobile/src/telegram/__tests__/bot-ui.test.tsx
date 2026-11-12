@@ -7,6 +7,8 @@ import {
 } from "../bot-settings";
 import {syncTelegramBotText} from "../bot-sync";
 jest.mock("@expo/vector-icons/Feather",()=>()=>null);
+jest.mock("../TelegramImportTargetPicker",()=>({TelegramImportTargetPicker:()=>null}));
+jest.mock("../import-target",()=>({loadTelegramTargetForWrite:jest.fn(async()=>undefined)}));
 jest.mock("../bot-api",()=>({
   verifyTelegramBot:jest.fn(),listBotPairCandidates:jest.fn(),
 }));
@@ -50,7 +52,7 @@ test("pairing is explicit, uses selected chat, then manual import uses canonical
   fireEvent.press(ui.getByText("Подтвердить чат 12345"));
   await waitFor(()=>expect(pairTelegramBot).toHaveBeenCalledWith("guest",456,"12345"));
   fireEvent.press(ui.getByText("Импортировать новые сообщения бота"));
-  await waitFor(()=>expect(syncTelegramBotText).toHaveBeenCalledWith("guest",expect.any(Object)));
+  await waitFor(()=>expect(syncTelegramBotText).toHaveBeenCalledWith("guest",expect.any(Object),undefined));
   expect(ui.getByText(/Импортировано: 2/)).toBeTruthy();
 });
 test("invalid token/Telegram network errors keep the connection unpaired",async()=>{

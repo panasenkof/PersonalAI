@@ -5,6 +5,7 @@ import {fetchBotUpdates, type BotMessage} from "./bot-api";
 import {prepareBotOriginal, type PreparedBotOriginal} from "./bot-media";
 import {planBotAlbum} from "./bot-albums";
 import {advanceTelegramBotCursor, loadTelegramBotConfig} from "./bot-settings";
+import {requireTelegramTarget,type TelegramImportTarget} from "./import-target";
 
 export type TelegramBotSyncResult = {
   imported: number; skipped: number; lastUpdate: number; pendingAlbum?: number;
@@ -22,7 +23,7 @@ function hasMedia(message:BotMessage):boolean {
 function textOf(message:BotMessage):string {
   return typeof message.text === "string" ? message.text : typeof message.caption === "string" ? message.caption : "";
 }
-async function perform(profile:string,signal?:AbortSignal):Promise<TelegramBotSyncResult> {
+async function perform(profile:string,signal?:AbortSignal,target?:TelegramImportTarget):Promise<TelegramBotSyncResult> {
   mustBeUnlocked(signal);
   const config=await loadTelegramBotConfig(profile);
   if(!config || !config.allowedChatId)throw new Error("Сначала подключите личного бота и подтвердите свой чат.");
@@ -68,8 +69,9 @@ async function perform(profile:string,signal?:AbortSignal):Promise<TelegramBotSy
         const title=body.split(/\r?\n/)[0].slice(0,160)||
           "Альбом Telegram ("+staged.length+" файлов)";
         let replayed=false;
+        const targetFields=await requireTelegramTarget(profile,target);
         await saveMediaNote(profile,{
-          title,body,sensitivity:"sensitive",
+          title,body,...targetFields,
           files:staged.map(v=>v.file),
           receipt:"telegram-bot:"+config.botId+":"+config.allowedChatId+":"+
             ids[0]+":album:"+plan.groupId+":"+ids.join(","),
@@ -109,8 +111,9 @@ async function perform(profile:string,signal?:AbortSignal):Promise<TelegramBotSy
           const title=body.split(/\r?\n/)[0].trim().slice(0,160)||
             staged?.file.name||"Сообщение Telegram";
           let replayed=false;
+          const targetFields=await requireTelegramTarget(profile,target);
           await saveMediaNote(profile,{
-            title,body,sensitivity:"sensitive",
+            title,body,...targetFields,
             ...(staged?{file:staged.file}:{}),
             receipt:"telegram-bot:"+config.botId+":"+config.allowedChatId+":"+message.message_id,
             onReplay:()=>{replayed=true;},
@@ -135,7 +138,7 @@ async function perform(profile:string,signal?:AbortSignal):Promise<TelegramBotSy
     {imported,skipped,lastUpdate:last};
 }
 /** Serializes per-profile manual/auto starts; no parallel cursor or writes. */
-export function syncTelegramBotText(profile:string,signal?:AbortSignal):Promise<TelegramBotSyncResult> {
+export function syncTelegramBotText(profile:string,signal?:AbortSignal,target?:TelegramImportTarget):Promise<TelegramBotSyncResult> {
   const pending=running.get(profile);
   if(pending)return pending;
   // A lock transition cancels in-flight Bot API requests and native media
@@ -147,7 +150,7 @@ export function syncTelegramBotText(profile:string,signal?:AbortSignal):Promise<
     if(!unlocked)controller.abort();
   });
   if(signal?.aborted||!localMemorySessionUnlocked())controller.abort();
-  const next=perform(profile,controller.signal);
+  const next=perform(profile,controller.signal,target);
   running.set(profile,next);
   void next.finally(()=>{
     unsubscribe();

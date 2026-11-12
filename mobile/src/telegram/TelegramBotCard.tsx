@@ -9,6 +9,8 @@ import {
   pairTelegramBot,saveVerifiedBot,
 } from "./bot-settings";
 import {syncTelegramBotText} from "./bot-sync";
+import {TelegramImportTargetPicker} from "./TelegramImportTargetPicker";
+import {loadTelegramTargetForWrite} from "./import-target";
 
 /** Explicit pairing and text-only import; no bot token, message or chat history in UI logs. */
 export function TelegramBotCard({profile}:{profile:string}){
@@ -77,7 +79,8 @@ export function TelegramBotCard({profile}:{profile:string}){
     }
   });}
   function sync(){void action(async(version,signal)=>{
-    const result=await syncTelegramBotText(profile,signal);
+    const target=await loadTelegramTargetForWrite(profile,"bot");
+    const result=await syncTelegramBotText(profile,signal,target);
     if(signal.aborted)return;
     if(version===current.current)setNotice(
       "Импортировано: "+result.imported+"; пропущено: "+result.skipped+
@@ -103,6 +106,7 @@ export function TelegramBotCard({profile}:{profile:string}){
       Используйте отдельного бота без webhook и без другого getUpdates-клиента.
       Обновления на сервере Telegram доступны не более 24 часов.
     </Text>
+    <TelegramImportTargetPicker profile={profile} channel="bot"/>
     {username ? <>
       <Text style={{color:theme.text,...nebulaTypography.body}}>
         Бот: @{username} · {paired?"личный чат подтверждён":"чат не подтверждён"}

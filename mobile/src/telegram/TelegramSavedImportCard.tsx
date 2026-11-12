@@ -6,6 +6,8 @@ import {useTheme} from "../theme";
 import {onLocalMemorySessionChange} from "../local-memory/storage";
 import {importSavedTextPage,type SavedTextImportResult} from "./saved-import";
 import {listSavedTopics,type TelegramSavedTopic} from "./saved-topics";
+import {TelegramImportTargetPicker} from "./TelegramImportTargetPicker";
+import {loadTelegramTargetForWrite} from "./import-target";
 
 /** Explicit local import, one page at a time. Does not reimplement the note editor. */
 export function TelegramSavedImportCard({profile}:{profile:string}){
@@ -49,9 +51,10 @@ export function TelegramSavedImportCard({profile}:{profile:string}){
     activeImport.current=request;
     running.current=true;setBusy(true);setError("");setCancelRequested(false);
     try{
+      const target=await loadTelegramTargetForWrite(profile,"saved");
       const outcome=selectedTopic
-        ? await importSavedTextPage(profile,cursor,request.signal,selectedTopic.id,"supported-originals")
-        : await importSavedTextPage(profile,cursor,request.signal,undefined,"supported-originals");
+        ? await importSavedTextPage(profile,cursor,request.signal,selectedTopic.id,"supported-originals",target)
+        : await importSavedTextPage(profile,cursor,request.signal,undefined,"supported-originals",target);
       if(generation.current===version){
         setResult(outcome);
         setCursor(outcome.nextCursor||cursor);
@@ -103,6 +106,7 @@ export function TelegramSavedImportCard({profile}:{profile:string}){
       Незавершённый альбом не сохраняется частично. Автозагрузка при запуске
       остаётся текстовой. Записи попадают в раздел «Входящие» без отдельной базы.
     </Text>
+    <TelegramImportTargetPicker profile={profile} channel="saved"/>
     <Text style={{color:t.muted,...nebulaTypography.label}}>
       {selectedTopic?"Источник: "+topicLabel(selectedTopic):
         "Источник: все сообщения «Избранного»."}

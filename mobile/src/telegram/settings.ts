@@ -164,3 +164,19 @@ export async function saveLastTelegramAutoSync(profile:string,value:TelegramAuto
     keychainAccessible:SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
   });
 }
+
+
+/** Only the user's explicit per-channel import target is stored. Empty = private Inbox. */
+export type TelegramImportChannel="saved"|"bot";
+const targetKey=(profile:string,channel:TelegramImportChannel)=>
+  "pia.telegram."+channel+".target.v1."+checked(profile);
+export async function loadTelegramTargetId(profile:string,channel:TelegramImportChannel):Promise<string>{
+  const stored=await SecureStore.getItemAsync(targetKey(profile,channel));
+  return stored&&/^[a-zA-Z0-9_-]{1,128}$/.test(stored)?stored:"";
+}
+export async function saveTelegramTargetId(profile:string,channel:TelegramImportChannel,id:string):Promise<void>{
+  if(id!==""&&!/^[a-zA-Z0-9_-]{1,128}$/.test(id))throw new Error("telegram_target_unavailable");
+  await SecureStore.setItemAsync(targetKey(profile,channel),id,{
+    keychainAccessible:SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+  });
+}
