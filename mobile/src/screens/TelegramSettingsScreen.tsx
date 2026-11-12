@@ -12,7 +12,7 @@ import {
   saveTelegramApiCredentials, saveTelegramSyncMode, type TelegramSyncMode,
 } from "../telegram/settings";
 
-/** Setup UI, NOT a claim of a live TDLib session. Native bridge lands separately. */
+/** Profile-scoped Telegram settings. Connection status is owned by TDLib, not saved API parameters. */
 export function TelegramSettingsScreen() {
   const profile = useProfile(), theme = useTheme(), insets = useSafeAreaInsets();
   const [mode, setMode] = useState<TelegramSyncMode>("manual");
@@ -80,9 +80,10 @@ export function TelegramSettingsScreen() {
     <NebulaSection title="Режим синхронизации">
       <Text style={{color: theme.muted, ...nebulaTypography.label}}>
         Настраивается отдельно от подключения. По умолчанию — вручную.
-        При запуске — только после разблокировки PersAI и авторизации Telegram.
-        Автоматически проверяется до 20 последних текстовых сообщений «Избранного»;
-        всю старую историю можно импортировать вручную. Бот работает независимо.
+        При запуске — после разблокировки PersAI. Для синхронизации «Избранного»
+        нужен авторизованный аккаунт Telegram, резервный бот работает независимо.
+        Автоматически проверяются до 20 последних текстовых сообщений;
+        старую историю и оригиналы файлов можно импортировать вручную.
       </Text>
       {([["manual", "Вручную"], ["on_open", "При каждом запуске PersAI"]] as const).map(([value, label]) =>
         <NebulaAction key={value} accessibilityLabel={label}
@@ -91,9 +92,9 @@ export function TelegramSettingsScreen() {
     </NebulaSection>
     <NebulaSection title="Аккаунт Telegram">
       <Text style={{color: theme.muted, ...nebulaTypography.label}}>
-        Подготовка к TDLib. Нативная библиотека и авторизация будут добавлены
-        отдельным PR; эта версия не читает Telegram. API ID и API hash
-        приложения можно получить на my.telegram.org.
+        API ID и API hash приложения можно получить на my.telegram.org.
+        Подключение личного аккаунта доступно в APK со встроенной TDLib;
+        установленная сборка и действительное состояние входа проверяются ниже.
       </Text>
       <TextInput accessibilityLabel="Telegram API ID" keyboardType="number-pad"
         value={apiId} onChangeText={setApiId} editable={!disabled}
@@ -103,7 +104,7 @@ export function TelegramSettingsScreen() {
         editable={!disabled} placeholder="API hash"
         placeholderTextColor={theme.muted} maxLength={32} style={field}/>
       <Text style={{color: theme.muted, ...nebulaTypography.label}}>
-        {configured ? "API-параметры сохранены локально. Аккаунт не авторизован." : "API-параметры не сохранены."}
+        {configured ? "API-параметры сохранены локально. Статус подключения показан ниже." : "API-параметры не сохранены."}
       </Text>
       <NebulaAction icon="shield" label="Сохранить API-параметры"
         disabled={disabled || !apiId || !apiHash} onPress={() => void saveApi()}/>

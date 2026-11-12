@@ -3,6 +3,7 @@ import {Text,View} from "react-native";
 import {NebulaAction} from "../design/nebula/components";
 import {nebulaSpacing,nebulaTypography} from "../design/nebula/tokens";
 import {useTheme} from "../theme";
+import {onLocalMemorySessionChange} from "../local-memory/storage";
 import {importSavedTextPage,type SavedTextImportResult} from "./saved-import";
 import {listSavedTopics,type TelegramSavedTopic} from "./saved-topics";
 
@@ -14,35 +15,58 @@ export function TelegramSavedImportCard({profile}:{profile:string}){
   const [done,setDone]=useState(false);
   const [result,setResult]=useState<SavedTextImportResult|null>(null);
   const [error,setError]=useState("");
+  const [cancelRequested,setCancelRequested]=useState(false);
   const [topics,setTopics]=useState<TelegramSavedTopic[]|null>(null);
   const [selectedTopic,setSelectedTopic]=useState<TelegramSavedTopic|null>(null);
   const running=useRef(false),generation=useRef(0);
+  const activeImport=useRef<AbortController|null>(null);
   useEffect(()=>{
+    // A profile switch must not inherit another profile's busy UI or worker.
+    // Its in-flight request is aborted; a late settlement must not touch the
+    // new profile's running flag or UI state.
     generation.current++;
+    activeImport.current?.abort();
+    activeImport.current=null;
+    running.current=false;
+    setBusy(false);setCancelRequested(false);
     setCursor("0");setDone(false);setResult(null);setError("");
     setTopics(null);setSelectedTopic(null);
-    return()=>{generation.current++;};
+    return()=>{
+      generation.current++;
+      activeImport.current?.abort();
+      activeImport.current=null;
+      running.current=false;
+    };
   },[profile]);
+  useEffect(()=>onLocalMemorySessionChange(unlocked=>{
+    if(!unlocked)activeImport.current?.abort();
+  }),[]);
 
   async function importPage(){
     if(running.current)return;
     const version=generation.current;
-    running.current=true;setBusy(true);setError("");
+    const request=new AbortController();
+    activeImport.current=request;
+    running.current=true;setBusy(true);setError("");setCancelRequested(false);
     try{
       const outcome=selectedTopic
-        ? await importSavedTextPage(profile,cursor,undefined,selectedTopic.id,"supported-originals")
-        : await importSavedTextPage(profile,cursor,undefined,undefined,"supported-originals");
+        ? await importSavedTextPage(profile,cursor,request.signal,selectedTopic.id,"supported-originals")
+        : await importSavedTextPage(profile,cursor,request.signal,undefined,"supported-originals");
       if(generation.current===version){
         setResult(outcome);
         setCursor(outcome.nextCursor||cursor);
         setDone(!outcome.pendingAlbum && (!outcome.nextCursor || outcome.nextCursor===cursor));
       }
     }catch{
-      if(generation.current===version)setError(
-        "Не удалось прочитать или сохранить сообщения Telegram. Проверьте соединение и блокировку PersAI.");
+      if(generation.current===version)setError(request.signal.aborted
+        ? "Импорт Telegram отменён. Курсор истории не изменён; сохранённые ранее записи остаются."
+        : "Не удалось прочитать или сохранить сообщения Telegram. Проверьте соединение и блокировку PersAI.");
     }finally{
-      running.current=false;
-      if(generation.current===version)setBusy(false);
+      if(activeImport.current===request){
+        running.current=false;
+        activeImport.current=null;
+        if(generation.current===version){setBusy(false);setCancelRequested(false);}
+      }
     }
   }
   async function showTopics(){
@@ -108,9 +132,18 @@ export function TelegramSavedImportCard({profile}:{profile:string}){
       {result.pendingAlbum?" Альбом из "+result.pendingAlbum+" элементов ожидает завершения. Повторите импорт позже — эти файлы не пропущены.":""}
       {done?" Больше сообщений в этом диапазоне нет.":""}
     </Text>:null}
-    {busy?<Text accessibilityLiveRegion="polite" style={{color:t.muted}}>
-      Читаю «Избранное» и сохраняю оригиналы…
-    </Text>:null}
+    {busy?<View style={{gap:nebulaSpacing.xs}}>
+      <Text accessibilityLiveRegion="polite" style={{color:t.muted}}>
+        {cancelRequested
+          ? "Отменяю импорт после завершения текущего запроса TDLib…"
+          : "Читаю «Избранное» и сохраняю оригиналы…"}
+      </Text>
+      {!cancelRequested?<NebulaAction icon="x" size="compact"
+        label="Отменить импорт Telegram" onPress={()=>{
+          activeImport.current?.abort();
+          setCancelRequested(true);
+        }}/>:null}
+    </View>:null}
     {error?<Text accessibilityRole="alert" style={{color:t.err}}>{error}</Text>:null}
   </View>;
 }
