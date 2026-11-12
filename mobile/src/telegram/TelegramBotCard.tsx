@@ -8,7 +8,7 @@ import {
   clearTelegramBot,inspectTelegramBot,loadTelegramBotConfig,
   pairTelegramBot,saveVerifiedBot,
 } from "./bot-settings";
-import {syncTelegramBotText} from "./bot-sync";
+import {syncTelegramBotText,TelegramBotBlocked,skipBlockedBotUpdate} from "./bot-sync";
 import {TelegramImportTargetPicker} from "./TelegramImportTargetPicker";
 import {loadTelegramTargetForWrite} from "./import-target";
 
@@ -21,11 +21,13 @@ export function TelegramBotCard({profile}:{profile:string}){
   const [candidates,setCandidates]=useState<BotPairCandidate[]>([]);
   const [busy,setBusy]=useState(false),[loaded,setLoaded]=useState(false);
   const [error,setError]=useState(""),[notice,setNotice]=useState("");
+  const [blocked,setBlocked]=useState<TelegramBotBlocked|null>(null);
+  const [confirmSkip,setConfirmSkip]=useState(false);
   const current=useRef(0),running=useRef(false);
   const activeRequest=useRef<AbortController|null>(null);
   useEffect(()=>{
     const version=++current.current;
-    setToken("");setError("");setNotice("");setLoaded(false);setCandidates([]);
+    setToken("");setError("");setNotice("");setLoaded(false);setCandidates([]);setBlocked(null);setConfirmSkip(false);
     void inspectTelegramBot(profile).then(x=>{
       if(version!==current.current)return;
       setUsername(x.username);setPaired(x.paired);
@@ -40,9 +42,11 @@ export function TelegramBotCard({profile}:{profile:string}){
     const version=current.current;
     const request=new AbortController();
     activeRequest.current=request;
-    running.current=true;setBusy(true);setError("");setNotice("");
+    running.current=true;setBusy(true);setError("");setNotice("");setBlocked(null);setConfirmSkip(false);
     try{await f(version,request.signal);}
-    catch(e){if(version===current.current)setError(
+    catch(e){
+      if(version===current.current && e instanceof TelegramBotBlocked)setBlocked(e);
+      if(version===current.current)setError(
       e instanceof Error && e.message.length<240 &&
       /^(Telegram|Запрос Telegram|Не удалось|У бота|Укажите|Некорректн|Сначала|В очереди|Есть отредактированное|Сообщение Telegram|Разблокируйте)/.test(e.message)
       ? e.message : "Не удалось выполнить операцию Telegram. Повторите попытку.");}
@@ -83,13 +87,25 @@ export function TelegramBotCard({profile}:{profile:string}){
     const result=await syncTelegramBotText(profile,signal,target);
     if(signal.aborted)return;
     if(version===current.current)setNotice(
-      "Импортировано: "+result.imported+"; пропущено: "+result.skipped+
+      "Импортировано: "+result.imported+"; уже были: "+result.duplicates+"; пропущено: "+result.skipped+
       (result.pendingAlbum
         ? ". Альбом ("+result.pendingAlbum+" полученных файлов) ожидает завершения. "+
           "Отправьте боту отдельное текстовое сообщение или /done и повторите импорт; "+
           "исходные файлы пока не подтверждены."
         : ". Одиночные файлы и подтверждённые группы сохраняются в защищённой памяти."));
   });}
+  function skipBlocker(){
+    if(!blocked||!confirmSkip)return;
+    const selected=blocked;
+    void action(async(version,signal)=>{
+      await skipBlockedBotUpdate(profile,selected.updateId,signal);
+      const target=await loadTelegramTargetForWrite(profile,"bot");
+      const result=await syncTelegramBotText(profile,signal,target);
+      if(version===current.current)setNotice(
+        "Сообщение пропущено без сохранения. Продолжено: "+result.imported+
+        "; уже были: "+result.duplicates+"; пропущено: "+result.skipped+".");
+    });
+  }
   function disconnect(){void action(async(version)=>{
     await clearTelegramBot(profile);
     if(version===current.current){
@@ -133,6 +149,15 @@ export function TelegramBotCard({profile}:{profile:string}){
       <NebulaAction icon="shield" label="Проверить и сохранить бота"
         disabled={disabled||!token.trim()} onPress={connect}/>
     </>}
+    {blocked&&!busy?<View style={{gap:nebulaSpacing.xs}}>
+      <Text style={{color:theme.muted,...nebulaTypography.label}}>{blocked.message}</Text>
+      {confirmSkip?<Text style={{color:theme.muted,...nebulaTypography.label}}>
+        Сообщение не будет сохранено в PersAI. В Telegram оно останется.
+      </Text>:null}
+      <NebulaAction label={confirmSkip?"Подтвердить пропуск":"Пропустить это сообщение"}
+        onPress={()=>confirmSkip?skipBlocker():setConfirmSkip(true)}/>
+      {confirmSkip?<NebulaAction label="Отмена пропуска" onPress={()=>setConfirmSkip(false)}/>:null}
+    </View>:null}
     {busy?<NebulaAction icon="x" label="Отменить операцию Telegram"
       onPress={()=>activeRequest.current?.abort()}/>:null}
     {!loaded||busy?<Text accessibilityLiveRegion="polite" style={{color:theme.muted}}>

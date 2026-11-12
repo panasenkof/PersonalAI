@@ -126,7 +126,7 @@ const lastAutoSyncKey=(p:string)=>"pia.telegram.autosync.last.v1."+checked(p);
 export type SavedWatermark={selfChatId:string;maxMessageId:string};
 export type TelegramAutoSyncResult={
   at:string;saved:number;duplicates:number;unsupported:number;gap:boolean;
-  botImported:number;botSkipped:number;error:""|"telegram_app_locked"|"network"|"other";
+  botImported:number;botSkipped:number;error:""|"telegram_app_locked"|"network"|"other"|"bot_blocked";
 };
 const validTelegramMessageId=(v:unknown):v is string=>
   typeof v==="string"&&/^[1-9][0-9]{0,15}$/.test(v)&&Number.isSafeInteger(Number(v));
@@ -155,7 +155,7 @@ export async function loadLastTelegramAutoSync(profile:string):Promise<TelegramA
     if(!v||typeof v.at!=="string"||!Number.isFinite(Date.parse(v.at))||
       !validCounter(v.saved)||!validCounter(v.duplicates)||!validCounter(v.unsupported)||
       !validCounter(v.botImported)||!validCounter(v.botSkipped)||typeof v.gap!=="boolean"||
-      !["","telegram_app_locked","network","other"].includes(v.error))return null;
+      !["","telegram_app_locked","network","other","bot_blocked"].includes(v.error))return null;
     return v;
   }catch{return null;}
 }
