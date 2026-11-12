@@ -1,17 +1,8 @@
 import type { DirectAgentOptions } from "../engine";
-import type { ChatMemoryRef } from "../conversations";
-import type { ToolSpec } from "./types";
+import type { ToolSpec, TurnState } from "./types";
 
 /** ARCH-2: photo search remains local; only attachment handles reach the LLM. */
-export function photoTools(
-  options: DirectAgentOptions,
-  scope: {
-    photoMatches: ChatMemoryRef[];
-    getLookups: () => number;
-    incrementLookups: () => void;
-    setRecovery: (reason: "model"|"import"|"prepare"|undefined) => void;
-  },
-): ToolSpec[] {
+export function photoTools(options:DirectAgentOptions, turn:TurnState):ToolSpec[] {
   return [
     ...(options.searchPhotos && !options.skipLocalMemory ? [{
       definition: {name: "search_local_photos",
@@ -30,8 +21,8 @@ export function photoTools(
             args.description.includes("://") ||
             /(?:в интернете|из интернета|в сети|online|по ссылке)/iu.test(args.description))))
           return {error: "invalid_local_photo_search_args"};
-        if(scope.getLookups()>=2)return {error:"local_photo_turn_budget_exhausted"};
-        scope.incrementLookups();
+        if(turn.photoLookups>=2)return {error:"local_photo_turn_budget_exhausted"};
+        turn.photoLookups++;
         options.status?.("Ищу фотографии в памяти");
         const found=await options.searchPhotos!({
           mode:args.mode as "text"|"image",
@@ -50,12 +41,12 @@ export function photoTools(
             (found.memory.length>0 && found.photoAction!==undefined))
           return {error:"invalid_local_photo_search_result"};
         for(const item of found.memory){
-          if(!scope.photoMatches.some(prev=>prev.id===item.id &&
-            prev.photoAttachmentId===item.photoAttachmentId) && scope.photoMatches.length<20)
-            scope.photoMatches.push({id:item.id,title:item.title,via:"search",photo:true,
+          if(!turn.photoMatches.some(prev=>prev.id===item.id &&
+            prev.photoAttachmentId===item.photoAttachmentId) && turn.photoMatches.length<20)
+            turn.photoMatches.push({id:item.id,title:item.title,via:"search",photo:true,
               photoAttachmentId:item.photoAttachmentId});
         }
-        if(!scope.photoMatches.length)scope.setRecovery(found.photoAction);
+        if(!turn.photoMatches.length)(turn.photoRecovery=found.photoAction);
         const status=found.memory.length?"found":found.photoAction==="model"?"model_missing":
           found.photoAction==="import"?"no_photos":
           found.photoAction==="prepare"?"unprepared":"no_matches";
