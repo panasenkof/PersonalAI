@@ -1,7 +1,8 @@
 import {importSavedTextPage} from "../saved-import";
 import {readSavedMessagesPage} from "../saved-messages";
 import {readSavedTopicPage} from "../saved-topics";
-import {saveMediaNote} from "../../media/attachments";
+import {saveMediaNote,telegramSavedAlreadyImported,telegramSavedAlbumAlreadyImported} from "../../media/attachments";
+import {autoIndexNotePhotos83} from "../../media/auto-index-note-photos";
 import {scheduleVectors} from "../../media/vector-runner";
 import {localMemorySessionUnlocked} from "../../local-memory/storage";
 import {downloadSavedOriginal,downloadSavedAlbumOriginal,releaseSavedOriginal} from "../saved-original";
@@ -10,7 +11,10 @@ jest.mock("../saved-original",()=>({downloadSavedOriginal:jest.fn(),downloadSave
   supportsSavedOriginal:(kind:string)=>["messagePhoto","messageDocument","messageVideo",
     "messageAudio","messageVoiceNote","messageAnimation","messageVideoNote"].includes(kind)}));
 jest.mock("../saved-topics",()=>({readSavedTopicPage:jest.fn(),safeTopicId:(v:string)=>typeof v==="string"&&/^(0|-?[1-9][0-9]{0,15})$/.test(v)&&Number.isSafeInteger(Number(v))}));
-jest.mock("../../media/attachments",()=>({saveMediaNote:jest.fn(),MAX_TOTAL_ORIGINAL_BYTES:80*1024*1024}));
+jest.mock("../../media/attachments",()=>({saveMediaNote:jest.fn(),
+ telegramSavedAlreadyImported:jest.fn(),telegramSavedAlbumAlreadyImported:jest.fn(),
+ MAX_TOTAL_ORIGINAL_BYTES:80*1024*1024}));
+jest.mock("../../media/auto-index-note-photos",()=>({autoIndexNotePhotos83:jest.fn(async()=>({indexed:1,current:0,pending:0,failed:0}))}));
 jest.mock("../../media/vector-runner",()=>({scheduleVectors:jest.fn()}));
 jest.mock("../../local-memory/storage",()=>({localMemorySessionUnlocked:jest.fn()}));
 const item=(id:string,text:string,kind="messageText",hasMedia=false)=>({
@@ -23,6 +27,8 @@ beforeEach(()=>{
     selfChatId:"12345",messages:[item("50","Заметка"),item("49","Другой текст")],nextCursor:"49",
   });
   (saveMediaNote as jest.Mock).mockResolvedValue("note-1");
+  (telegramSavedAlreadyImported as jest.Mock).mockResolvedValue(false);
+  (telegramSavedAlbumAlreadyImported as jest.Mock).mockResolvedValue(false);
   (releaseSavedOriginal as jest.Mock).mockResolvedValue(undefined);
   (downloadSavedOriginal as jest.Mock).mockResolvedValue({
     file:{uri:"file:///data/persai-tdlib-guest/files/photo.jpg",name:"photo.jpg",mimeType:"image/jpeg",size:40},
@@ -35,7 +41,7 @@ beforeEach(()=>{
 });
 test("imports newest self-chat text using existing canonical writer and immutable source IDs",async()=>{
   expect(await importSavedTextPage("guest")).toEqual({
-    saved:2,duplicates:0,unsupported:0,empty:0,nextCursor:"49",selfChatId:"12345",
+    saved:2,duplicates:0,unsupported:0,empty:0,withFiles:0,tooLarge:0,nextCursor:"49",selfChatId:"12345",
     maxMessageId:"50",minMessageId:"49",
   });
   expect(readSavedMessagesPage).toHaveBeenCalledWith("guest","0",20);
@@ -307,8 +313,8 @@ test("album exceeding existing 80 MiB cap never enters canonical writer",async()
   (downloadSavedAlbumOriginal as jest.Mock).mockImplementation(async()=>({
     file:{uri:"file:///large.jpg",name:"large.jpg",mimeType:"image/jpeg",size:20*1024*1024},
   }));
-  await expect(importSavedTextPage("guest","0",undefined,undefined,"supported-originals"))
-    .rejects.toThrow("80 МБ");
+  expect(await importSavedTextPage("guest","0",undefined,undefined,"supported-originals"))
+    .toMatchObject({saved:0,unsupported:1,tooLarge:1,withFiles:0});
   expect((saveMediaNote as jest.Mock).mock.calls.some(c=>c[1].telegramSavedMessage?.kind==="messageAlbum")).toBe(false);
   expect(releaseSavedOriginal).toHaveBeenCalledTimes(5);
 });
@@ -323,4 +329,38 @@ test("hidden Telegram rich-text URL is saved as a discoverable source link",asyn
    body:"Интересная статья\n\nСсылки:\nhttps://example.com/article",
    sourceUrl:"https://example.com/article",sourceCoverage:"url_only",
  }),undefined);
+});
+
+test("preflight skips the second photo download and index",async()=>{
+ (readSavedMessagesPage as jest.Mock).mockResolvedValueOnce({selfChatId:"12345",
+  messages:[item("90","Photo","messagePhoto",true)],nextCursor:"90"});
+ (telegramSavedAlreadyImported as jest.Mock).mockResolvedValueOnce(true);
+ const outcome=await importSavedTextPage("guest","0",undefined,undefined,"supported-originals");
+ expect(outcome).toMatchObject({saved:0,duplicates:1,withFiles:0,tooLarge:0});
+ expect(downloadSavedOriginal).not.toHaveBeenCalled();
+ expect(autoIndexNotePhotos83).not.toHaveBeenCalled();
+});
+test("new photo invokes ACL-gated index once after writing",async()=>{
+ (readSavedMessagesPage as jest.Mock).mockResolvedValueOnce({selfChatId:"12345",
+  messages:[item("90","Photo","messagePhoto",true)],nextCursor:"90"});
+ const outcome=await importSavedTextPage("guest","0",undefined,undefined,"supported-originals");
+ expect(outcome).toMatchObject({saved:1,withFiles:1,tooLarge:0});
+ expect(autoIndexNotePhotos83).toHaveBeenCalledWith("guest","note-1",undefined);
+});
+test("oversized TDLib file counts as unsupported and subsequent text imports",async()=>{
+ (readSavedMessagesPage as jest.Mock).mockResolvedValueOnce({selfChatId:"12345",
+  messages:[item("90","Photo","messagePhoto",true),item("89","Text")],nextCursor:"89"});
+ (downloadSavedOriginal as jest.Mock).mockRejectedValueOnce(new Error("tdlib_original_too_large"));
+ const outcome=await importSavedTextPage("guest","0",undefined,undefined,"supported-originals");
+ expect(outcome).toMatchObject({saved:1,unsupported:1,tooLarge:1,withFiles:0});
+});
+test("already imported album does not download originals again",async()=>{
+ (readSavedMessagesPage as jest.Mock).mockResolvedValueOnce({selfChatId:"12345",
+  messages:[{...item("91","a","messagePhoto",true),hasAlbum:true,albumId:"77"},
+   {...item("90","b","messagePhoto",true),hasAlbum:true,albumId:"77"},item("89","Text")],
+  nextCursor:"89"});
+ (telegramSavedAlbumAlreadyImported as jest.Mock).mockResolvedValueOnce(true);
+ const outcome=await importSavedTextPage("guest","0",undefined,undefined,"supported-originals");
+ expect(outcome.duplicates).toBe(1);
+ expect(downloadSavedAlbumOriginal).not.toHaveBeenCalled();
 });

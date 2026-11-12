@@ -200,6 +200,46 @@ function checkedRecognitions(originals: ImportFile[], values?: FileRecognition[]
       ...(item.asrProducerId ? { asrProducerId: item.asrProducerId } : {}) };
   });
 }
+/** Source-v1 identity is independent of contents, target section and any downloaded bytes. */
+export async function telegramSavedReceiptFingerprint(ref:TelegramSavedMessageRef):Promise<string>{
+  const id=(v:unknown)=>typeof v==="string"&&/^[1-9][0-9]{0,15}$/.test(v)&&Number.isSafeInteger(Number(v));
+  if(!id(ref.chatId)||!id(ref.messageId))throw new Error("invalid_telegram_saved_provenance");
+  let parts:unknown[];
+  if(ref.kind==="messageAlbum"){
+    const ids=ref.messageIds;
+    if(!ref.mediaAlbumId||! /^-?[1-9][0-9]{0,18}$/.test(ref.mediaAlbumId)||
+      !Array.isArray(ids)||ids.length<2||ids.length>MAX_ORIGINALS_PER_NOTE||
+      ids[0]!==ref.messageId||ids.some((v,i)=>!id(v)||(i>0&&Number(v)<=Number(ids[i-1]))))
+      throw new Error("invalid_telegram_saved_provenance");
+    parts=["telegram-saved-album-v1",ref.chatId,ref.mediaAlbumId,ids];
+  }else{
+    if(ref.mediaAlbumId!==undefined||ref.messageIds!==undefined)
+      throw new Error("invalid_telegram_saved_provenance");
+    parts=["telegram-saved-source-v1",ref.chatId,ref.messageId];
+  }
+  return Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256,JSON.stringify(parts));
+}
+/** Advisory pre-download check; the writer repeats the receipt check under SQLCipher. */
+async function existingTelegramSaved(profile:string,ref:TelegramSavedMessageRef,signal?:AbortSignal){
+  check(signal);
+  const fingerprint=await telegramSavedReceiptFingerprint(ref);
+  return withLocalMemoryDatabase(profile,async db=>{
+    check(signal);
+    const row=await db.getFirstAsync<{entity_id:string}>(
+      "SELECT r.entity_id FROM memory_received_shares r JOIN memory_entities e ON e.id=r.entity_id "+
+      "WHERE r.fingerprint=? LIMIT 1",[fingerprint]);
+    check(signal);
+    return Boolean(row);
+  });
+}
+export const telegramSavedAlreadyImported=(profile:string,chatId:string,messageId:string,signal?:AbortSignal)=>
+  existingTelegramSaved(profile,{chatId,messageId,date:0,kind:"messageText"},signal);
+export const telegramSavedAlbumAlreadyImported=(profile:string,chatId:string,
+  mediaAlbumId:string,messageIds:string[],signal?:AbortSignal)=>
+  existingTelegramSaved(profile,{
+    chatId,messageId:messageIds[0]||"",date:0,kind:"messageAlbum",mediaAlbumId,messageIds,
+  },signal);
+
 /** Note + original + receipt commit together. Cancellation never leaves a partial note. */
 export async function saveMediaNote(profile: string, input: { file?: ImportFile; files?: ImportFile[]; title: string; body: string; extractedText?: string; recognitions?: FileRecognition[]; sensitivity: 'sensitive' | 'standard'; receipt?: string; onReplay?: ShareReplayCallback; allowSeparateCopy?: boolean; collectionId?: string; sourceUrl?: string; sourceCoverage?: SourceCoverage; tags?: string[]; generatedTags?: boolean; generatedSection?: boolean; indexEnrichmentOptOut?: boolean; telegramObservation?: TelegramTextObservation; botMessage?: TelegramBotMessageRef; telegramSavedMessage?: TelegramSavedMessageRef; publicationClaim?: {date:string;evidence:'html_meta';sourceAttribute:'article:published_time'|'datePublished'} }, signal?: AbortSignal): Promise<string> {
   return withLocalMemoryDatabase(profile, async db => {
@@ -338,12 +378,7 @@ export async function saveMediaNote(profile: string, input: { file?: ImportFile;
       input.title === input.body.trim()) ? 'telegram-link' :
       inferredFileTitle ? 'incoming-file-untitled' : input.title;
     const receivedReceipt = input.telegramSavedMessage
-      ? await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256,
-          input.telegramSavedMessage.kind === 'messageAlbum'
-            ? JSON.stringify(['telegram-saved-album-v1', input.telegramSavedMessage.chatId,
-                input.telegramSavedMessage.mediaAlbumId,input.telegramSavedMessage.messageIds])
-            : JSON.stringify(['telegram-saved-source-v1', input.telegramSavedMessage.chatId,
-                input.telegramSavedMessage.messageId]))
+      ? await telegramSavedReceiptFingerprint(input.telegramSavedMessage)
       : input.receipt
       ? await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, JSON.stringify([
           ...(input.botMessage ? ['telegram-bot-content-v1', input.botMessage.botId,

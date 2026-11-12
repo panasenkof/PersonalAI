@@ -104,7 +104,11 @@ export function TelegramSavedImportCard({profile}:{profile:string}){
       (фото, PDF, аудио и видео) с подписями. Обычно до 20 сообщений за запрос;
       на границе альбома возможна ограниченная дочитка истории.
       Незавершённый альбом не сохраняется частично. Автозагрузка при запуске
-      остаётся текстовой. Записи попадают в раздел «Входящие» без отдельной базы.
+      остаётся текстовой. По умолчанию используется закрытый раздел «Входящие»; его можно поменять ниже.
+    </Text>
+    <Text style={{color:t.muted,...nebulaTypography.label}}>
+      Сообщения, пропущенные раньше как медиа, можно догрузить: начните импорт с новых
+      сообщений и продолжайте историю — уже сохранённое не повторится и не скачивается заново.
     </Text>
     <TelegramImportTargetPicker profile={profile} channel="saved"/>
     <Text style={{color:t.muted,...nebulaTypography.label}}>
@@ -134,8 +138,8 @@ export function TelegramSavedImportCard({profile}:{profile:string}){
         setCursor("0");setDone(false);setResult(null);setError("");
       }} />:null}
     {result?<Text accessibilityLiveRegion="polite" style={{color:t.text,...nebulaTypography.label}}>
-      Сохранено: {result.saved}; уже были: {result.duplicates};
-      неподдержанных: {result.unsupported}; пустых: {result.empty}.
+      Сохранено: {result.saved} (с файлами: {result.withFiles}); уже были: {result.duplicates};
+      пропущено: {result.unsupported}, из них слишком больших: {result.tooLarge}; пустых: {result.empty}.
       {result.pendingAlbum?" Альбом из "+result.pendingAlbum+" элементов ожидает завершения. Повторите импорт позже — эти файлы не пропущены.":""}
       {done?" Больше сообщений в этом диапазоне нет.":""}
     </Text>:null}

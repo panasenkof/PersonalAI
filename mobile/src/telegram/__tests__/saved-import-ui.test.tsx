@@ -14,7 +14,7 @@ beforeEach(()=>{
   jest.clearAllMocks();
   (listSavedTopics as jest.Mock).mockResolvedValue([]);
   (importSavedTextPage as jest.Mock).mockResolvedValue({
-    saved:2,duplicates:1,unsupported:3,empty:0,nextCursor:"44",selfChatId:"12345",
+    saved:2,duplicates:1,unsupported:3,empty:0,withFiles:0,tooLarge:0,nextCursor:"44",selfChatId:"12345",
   });
 });
 test("manual import is visible, page bounded, reports skipped media without claiming they were saved",async()=>{
@@ -23,8 +23,8 @@ test("manual import is visible, page bounded, reports skipped media without clai
   expect(importSavedTextPage).not.toHaveBeenCalled();
   fireEvent.press(ui.getByText("Импортировать последние 20 сообщений"));
   await waitFor(()=>expect(importSavedTextPage).toHaveBeenCalledWith("guest","0",expect.any(Object),undefined,"supported-originals",undefined));
-  expect(ui.getByText(/Сохранено: 2; уже были: 1/)).toBeTruthy();
-  expect(ui.getByText(/неподдержанных: 3/)).toBeTruthy();
+  expect(ui.getByText(/Сохранено: 2 \(с файлами: 0\); уже были: 1/)).toBeTruthy();
+  expect(ui.getByText(/пропущено: 3, из них слишком больших: 0/)).toBeTruthy();
   fireEvent.press(ui.getByText("Продолжить историю (до 20)"));
   await waitFor(()=>expect(importSavedTextPage).toHaveBeenCalledWith("guest","44",expect.any(Object),undefined,"supported-originals",undefined));
   fireEvent.press(ui.getByText("Начать с новых сообщений"));
@@ -32,7 +32,7 @@ test("manual import is visible, page bounded, reports skipped media without clai
 });
 test("end of history disables repeated paging but allows explicit reset",async()=>{
   (importSavedTextPage as jest.Mock).mockResolvedValueOnce({
-    saved:0,duplicates:0,unsupported:0,empty:0,nextCursor:"",selfChatId:"12345",
+    saved:0,duplicates:0,unsupported:0,empty:0,withFiles:0,tooLarge:0,nextCursor:"",selfChatId:"12345",
   });
   const ui=render(<TelegramSavedImportCard profile="guest"/>);
   fireEvent.press(ui.getByText("Импортировать последние 20 сообщений"));
@@ -75,7 +75,7 @@ test("empty topic list and failures are non-destructive",async()=>{
 
 test("an album pending at history boundary remains retryable without a false completion message",async()=>{
   (importSavedTextPage as jest.Mock).mockResolvedValueOnce({
-    saved:0,duplicates:0,unsupported:0,empty:0,nextCursor:"0",
+    saved:0,duplicates:0,unsupported:0,empty:0,withFiles:0,tooLarge:0,nextCursor:"0",
     selfChatId:"12345",pendingAlbum:2,
   });
   const ui=render(<TelegramSavedImportCard profile="guest"/>);

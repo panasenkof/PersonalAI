@@ -1,5 +1,7 @@
 import {localMemorySessionUnlocked} from "../local-memory/storage";
-import {saveMediaNote,MAX_TOTAL_ORIGINAL_BYTES} from "../media/attachments";
+import {saveMediaNote,MAX_TOTAL_ORIGINAL_BYTES,telegramSavedAlreadyImported,
+  telegramSavedAlbumAlreadyImported} from "../media/attachments";
+import {autoIndexNotePhotos83} from "../media/auto-index-note-photos";
 import {scheduleVectors} from "../media/vector-runner";
 import {readSavedMessagesPage,type SavedMessagePreview} from "./saved-messages";
 import {readSavedTopicPage,safeTopicId} from "./saved-topics";
@@ -11,7 +13,7 @@ import {requireTelegramTarget,type TelegramImportTarget} from "./import-target";
 import {telegramLinkedText} from "./links";
 
 export type SavedTextImportResult={
-  saved:number; duplicates:number; unsupported:number; empty:number;
+  saved:number;duplicates:number;unsupported:number;empty:number;withFiles:number;tooLarge:number;
   nextCursor:string; selfChatId:string; pendingAlbum?:number;
   maxMessageId:string;minMessageId:string;
 };
@@ -21,6 +23,8 @@ function unlocked(signal?:AbortSignal){
   if(signal?.aborted)throw new Error("telegram_saved_import_cancelled");
   if(!localMemorySessionUnlocked())throw new Error("telegram_app_locked");
 }
+const isOversize=(e:unknown)=>e instanceof Error&&
+ /tdlib_original_too_large|превышает лимит 80 МБ|размер вложений вместе не должен превышать 80 МБ|размером до 80 МБ/i.test(e.message);
 type AlbumUnit={kind:"album";albumId:string;messages:SavedMessagePreview[]};
 type SingleUnit={kind:"single";item:SavedMessagePreview};
 type Unit=AlbumUnit|SingleUnit;
@@ -82,7 +86,8 @@ export async function importSavedTextPage(profile:string,cursor="0",
     const messages=mediaPolicy==="supported-originals"
       ?await withAlbumBoundary(profile,topicId,page,signal):page.messages;
     let safeNextCursor=messages.length?messages[messages.length-1].id:"";
-    let pendingAlbum=0,saved=0,duplicates=0,unsupported=0,empty=0;
+    let pendingAlbum=0,saved=0,duplicates=0,unsupported=0,empty=0,withFiles=0,tooLarge=0;
+    const newPhotos=new Set<string>();
     const units:Unit[]=[];
     for(let i=0;i<messages.length;){
       const item=messages[i];
@@ -108,6 +113,8 @@ export async function importSavedTextPage(profile:string,cursor="0",
       unlocked(signal);
       if(unit.kind==="album"){
         const oldestFirst=[...unit.messages].reverse();
+        if(await telegramSavedAlbumAlreadyImported(profile,page.selfChatId,unit.albumId,
+          oldestFirst.map(x=>x.id),signal)){duplicates++;continue;}
         const staged:SavedOriginal[]=[];
         let bytes=0;
         try{
@@ -138,7 +145,7 @@ export async function importSavedTextPage(profile:string,cursor="0",
             "Альбом Telegram ("+staged.length+" файлов)";
           let replayed=false;
           const targetFields=await requireTelegramTarget(profile,target);
-          await saveMediaNote(profile,{
+          const noteId=await saveMediaNote(profile,{
             files:staged.map(x=>x.file),title,body,...targetFields,
             ...(linked.sourceUrl?{sourceUrl:linked.sourceUrl,sourceCoverage:"url_only" as const}:{}),
             receipt:"telegram-saved:"+page.selfChatId+":"+ids[0]+
@@ -149,7 +156,13 @@ export async function importSavedTextPage(profile:string,cursor="0",
               ...(topicId!==undefined?{topicId}:{}),
             },onReplay:()=>{replayed=true;},
           },signal);
-          if(replayed)duplicates++;else saved++;
+          if(replayed)duplicates++;else{
+            saved++;withFiles++;
+            if(staged.some(x=>x.file.mimeType?.startsWith("image/")))newPhotos.add(noteId);
+          }
+        }catch(error){
+          if(!isOversize(error))throw error;
+          unsupported++;tooLarge++;
         }finally{
           // Failure of ANY original/cipher operation must never create a
           // partial album; safely release only each previously staged file.
@@ -167,15 +180,18 @@ export async function importSavedTextPage(profile:string,cursor="0",
       const linked=telegramLinkedText(item.text,item.urls);
       const body=linked.body;
       if(textOnly&&!body){empty++;continue;}
-      const original=originalRequested
-        ?await downloadSavedOriginal(profile,page.selfChatId,item,signal):null;
+      if(originalRequested&&await telegramSavedAlreadyImported(profile,page.selfChatId,item.id,signal)){
+        duplicates++;continue;
+      }
+      let original:SavedOriginal|null=null;
       try{
+        if(originalRequested)original=await downloadSavedOriginal(profile,page.selfChatId,item,signal);
         unlocked(signal);
         const title=body.split(/\r?\n/)[0].trim().slice(0,160)||
           original?.file.name||"Сообщение из Избранного";
         let replayed=false;
         const targetFields=await requireTelegramTarget(profile,target);
-        await saveMediaNote(profile,{
+        const noteId=await saveMediaNote(profile,{
           title,body,...targetFields,...(original?{file:original.file}:{}),
           ...(linked.sourceUrl?{sourceUrl:linked.sourceUrl,sourceCoverage:"url_only" as const}:{}),
           receipt:"telegram-saved:"+page.selfChatId+":"+item.id,
@@ -186,14 +202,25 @@ export async function importSavedTextPage(profile:string,cursor="0",
             ...(topicId!==undefined?{topicId}:{}),
           },onReplay:()=>{replayed=true;},
         },signal);
-        if(replayed)duplicates++;else saved++;
+        if(replayed)duplicates++;else{
+          saved++;
+          if(originalRequested){
+            withFiles++;
+            if(original?.file.mimeType?.startsWith("image/"))newPhotos.add(noteId);
+          }
+        }
+      }catch(error){
+        if(!originalRequested||!isOversize(error))throw error;
+        unsupported++;tooLarge++;
       }finally{
         if(original)await releaseSavedOriginal(profile,original);
       }
     }
     unlocked(signal);
     if(saved)scheduleVectors(profile);
-    return {saved,duplicates,unsupported,empty,nextCursor:safeNextCursor,
+    await Promise.allSettled([...newPhotos].map(id=>autoIndexNotePhotos83(profile,id,signal)));
+    unlocked(signal);
+    return {saved,duplicates,unsupported,empty,withFiles,tooLarge,nextCursor:safeNextCursor,
       maxMessageId:messages[0]?.id||"",minMessageId:messages[messages.length-1]?.id||"",
       selfChatId:page.selfChatId,...(pendingAlbum?{pendingAlbum}:{})};
   }finally{
