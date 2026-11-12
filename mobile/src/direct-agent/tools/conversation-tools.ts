@@ -1,19 +1,12 @@
 import type { DirectAgentOptions } from "../engine";
-import { validateContextCandidate, type ContextCandidate } from "../conversation-context";
+import { validateContextCandidate } from "../conversation-context";
 import { checkedNoteTags } from "../../local-memory/note-tags";
 import { TASK_STATE_TOOL, updateTaskInterpretation, WORKSPACE_MAX_ENTRIES, WORKSPACE_ENTRY_MAX_CHARS } from "../task-state";
-import type { TaskState, TaskWorkspaceEntry } from "../task-state";
-import type { ToolSpec } from "./types";
+import type { TaskWorkspaceEntry } from "../task-state";
+import type { ToolSpec, TurnState } from "./types";
 
 /** One per-turn state machine for dialogue metadata and bounded task scratchpad. */
-export function conversationTools(options:DirectAgentOptions,scope:{
-  getContextCandidate:()=>ContextCandidate|undefined;
-  setContextCandidate:(value:ContextCandidate)=>void;
-  getImportTagsCandidate:()=>string[]|undefined;
-  setImportTagsCandidate:(tags:string[])=>void;
-  state:TaskState;
-  emit:()=>void;
-}):{contextTool:ToolSpec;importMetadataTool:ToolSpec;taskTool:ToolSpec;workspace:ToolSpec[]}{
+export function conversationTools(options:DirectAgentOptions,turn:TurnState):{contextTool:ToolSpec;importMetadataTool:ToolSpec;taskTool:ToolSpec;workspace:ToolSpec[]}{
   const contextTool:ToolSpec = { definition:{name:"set_conversation_context",
       description:"Определить или исправить ТЕМУ и РАЗДЕЛ текущего диалога — не переносит, не сохраняет и не читает записи памяти. Вызывай при первой содержательной теме и при явном изменении темы/раздела, включая запрос пользователя исправить классификацию. Не вызывай из-за короткого уточнения. Раздел — только существующий slug; если не уверен, null. При закреплённом разделе менять можно только тему. Приложение покажет изменение в конце ответа ПОСЛЕ успешного сохранения истории, не повторяй статус в тексте.",
       parameters:{type:"object",properties:{
@@ -23,10 +16,10 @@ export function conversationTools(options:DirectAgentOptions,scope:{
       },required:["topic","sectionSlug","reason"],additionalProperties:false},
     },effect:"conversation",
     execute:async args=>{
-      if(scope.getContextCandidate())return {error:"conversation_context_already_proposed_this_turn"};
+      if(turn.contextCandidate)return {error:"conversation_context_already_proposed_this_turn"};
       const checked=validateContextCandidate(args,options.sections||[],options.context);
       if("error" in checked)return {error:checked.error};
-      scope.setContextCandidate(checked.candidate);
+      (turn.contextCandidate=checked.candidate);
       return {status:"pending_conversation_commit",saved:false,sectionSlug:checked.candidate.sectionSlug,topic:checked.candidate.topic,
         memoryRecordChanged:false};
     },verify:r=>r.status==="pending_conversation_commit"&&r.saved===false?"pending_confirmation":"failed" };
@@ -43,20 +36,20 @@ export function conversationTools(options:DirectAgentOptions,scope:{
         description:"0–5 точных смысловых тегов на русском, без # и пробелов. Только из действительно прочитанного содержания."},
     },required:["topic","sectionSlug","reason","tags"],additionalProperties:false},
   },effect:"proposal",execute:async args=>{
-    if(scope.getContextCandidate() || scope.getImportTagsCandidate()!==undefined)return {error:"import_metadata_already_proposed"};
+    if(turn.contextCandidate || turn.importTagsCandidate!==undefined)return {error:"import_metadata_already_proposed"};
     if(!Array.isArray(args.tags)||args.tags.length>5)return {error:"invalid_import_tags"};
     const {topic,sectionSlug,reason}=args;
     const checked=validateContextCandidate({topic,sectionSlug,reason},options.sections||[],options.context);
     if("error" in checked)return {error:checked.error};
     let tags:string[];
     try { tags=checkedNoteTags(args.tags); } catch { return {error:"invalid_import_tags"}; }
-    scope.setContextCandidate(checked.candidate);
-    scope.setImportTagsCandidate(tags);
+    (turn.contextCandidate=checked.candidate);
+    (turn.importTagsCandidate=tags);
     return {status:"pending_import_save",saved:false,sectionSlug:checked.candidate.sectionSlug,tags};
   },verify:r=>r.status==="pending_import_save"&&r.saved===false?"pending_confirmation":"failed"};
   const taskSpecs:ToolSpec[]=[
     { definition: TASK_STATE_TOOL, effect: "conversation", execute: async args => {
-        scope.state = { ...updateTaskInterpretation(scope.state, args), webPreference: scope.state.webPreference }; scope.emit();
+        turn.state = { ...updateTaskInterpretation(turn.state, args), webPreference: turn.state.webPreference }; turn.emit();
         return { status: "state_updated", personalMemorySaved: false };
       }, verify: r => r.status === "state_updated" ? "state_updated" : "failed" },
     ...(options.saveWorkspace && options.workspaceAvailable && !options.skipLocalMemory ? [
@@ -76,15 +69,15 @@ export function conversationTools(options:DirectAgentOptions,scope:{
             typeof args.content!=="string" || !args.content.trim() ||
             args.content.length>WORKSPACE_ENTRY_MAX_CHARS)
           return {error:"invalid_workspace_entry"};
-        if(scope.state.workspace && scope.state.workspace.goal!==scope.state.goal)return {error:"workspace_task_changed_clear_first"};
+        if(turn.state.workspace && turn.state.workspace.goal!==turn.state.goal)return {error:"workspace_task_changed_clear_first"};
         const entry={key:args.key,kind:args.kind,content:args.content} as TaskWorkspaceEntry;
-        const previous=scope.state.workspace?.entries||[];
+        const previous=turn.state.workspace?.entries||[];
         if(previous.length>=WORKSPACE_MAX_ENTRIES && !previous.some(e=>e.key===entry.key))
           return {error:"workspace_capacity_reached"};
         const entries=[...previous.filter(e=>e.key!==entry.key),entry];
-        const next={...scope.state,workspace:{version:1 as const,goal:scope.state.goal,entries}};
+        const next={...turn.state,workspace:{version:1 as const,goal:turn.state.goal,entries}};
         await options.saveWorkspace!(next);
-        scope.state=next;
+        turn.state=next;
         return {status:"workspace_written",scope:"current_task",
           key:entry.key,kind:entry.kind,entries:entries.length,
           personalMemorySaved:false,verifiedSource:false};
@@ -99,8 +92,8 @@ export function conversationTools(options:DirectAgentOptions,scope:{
       execute:async(args:Record<string,unknown>)=>{
         if(!options.workspaceAvailable!())return {error:"workspace_locked"};
         if(Object.keys(args).length)return {error:"invalid_workspace_args"};
-        if(scope.state.workspace && scope.state.workspace.goal!==scope.state.goal)return {error:"workspace_task_changed_clear_first"};
-        const entries=scope.state.workspace?.entries||[];
+        if(turn.state.workspace && turn.state.workspace.goal!==turn.state.goal)return {error:"workspace_task_changed_clear_first"};
+        const entries=turn.state.workspace?.entries||[];
         return {scope:"current_task",modelDraftsOnly:true,
           entries:entries.map(e=>({key:e.key,kind:e.kind,chars:e.content.length})),
           count:entries.length};
@@ -116,8 +109,8 @@ export function conversationTools(options:DirectAgentOptions,scope:{
         if(!options.workspaceAvailable!())return {error:"workspace_locked"};
         if(Object.keys(args).length!==1 || typeof args.key!=="string" ||
             !/^[a-z][a-z0-9_-]{0,31}$/.test(args.key))return {error:"invalid_workspace_args"};
-        if(scope.state.workspace && scope.state.workspace.goal!==scope.state.goal)return {error:"workspace_task_changed_clear_first"};
-        const entry=scope.state.workspace?.entries.find(e=>e.key===args.key);
+        if(turn.state.workspace && turn.state.workspace.goal!==turn.state.goal)return {error:"workspace_task_changed_clear_first"};
+        const entry=turn.state.workspace?.entries.find(e=>e.key===args.key);
         if(!entry)return {error:"workspace_key_missing"};
         return {scope:"current_task",modelDraftOnly:true,verifiedSource:false,
           entry:{...entry}};
@@ -132,10 +125,10 @@ export function conversationTools(options:DirectAgentOptions,scope:{
       execute:async(args:Record<string,unknown>)=>{
         if(!options.workspaceAvailable!())return {error:"workspace_locked"};
         if(Object.keys(args).length)return {error:"invalid_workspace_args"};
-        const discarded=scope.state.workspace?.entries.length||0;
-        const next={...scope.state,workspace:undefined};
+        const discarded=turn.state.workspace?.entries.length||0;
+        const next={...turn.state,workspace:undefined};
         await options.saveWorkspace!(next);
-        scope.state=next;
+        turn.state=next;
         return {status:"workspace_cleared",discarded,personalMemoryDeleted:false};
       },
       verify:(r:Record<string,unknown>)=>r.status==="workspace_cleared"&&
