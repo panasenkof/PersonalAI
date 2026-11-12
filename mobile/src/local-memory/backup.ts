@@ -256,6 +256,17 @@ async function attach(db: SQLite.SQLiteDatabase, alias: "pia_export" | "pia_impo
   await db.runAsync("ATTACH DATABASE ? AS " + alias + " KEY ?", [nativeSqlitePath(fileUri), code]);
 }
 
+/** SQLCipher may reject invalid credentials/ciphertext on ATTACH itself or
+ * only on the first metadata read. Never leak native SQL, paths or keys.
+ */
+async function readEncryptedBackupMetadata<T>(read: () => Promise<T>): Promise<T> {
+  try {
+    return await read();
+  } catch {
+    throw new Error("backup_wrong_key_or_corrupt");
+  }
+}
+
 export async function shareEncryptedBackup(profileId: string, recoveryCode: string): Promise<void> {
   const code = checkedRecoveryCode(recoveryCode);
   if (!await Sharing.isAvailableAsync()) throw new Error("backup_sharing_unavailable");
@@ -392,24 +403,21 @@ export async function restoreEncryptedBackup(
     if (info.size !== sourceInfo.size) throw new Error("backup_source_size_mismatch");
     const restored = await withLocalMemoryDatabase(profileId, async db => {
       let attached = false;
+      let restoreFailed = false;
       try {
-        await attach(db, "pia_import", path, code);
+        // On Android SQLCipher may reject an incorrect key during ATTACH,
+        // not just the first sqlite_master read. Both are pre-write checks.
+        await readEncryptedBackupMetadata(() => attach(db, "pia_import", path, code));
         attached = true;
-        // Wrong key throws from sqlite_master lookup, before any target write.
-        let schema: Array<{ name: string }>;
-        try {
-          schema = await db.getAllAsync<{ name: string }>(
-            "SELECT name FROM pia_import.sqlite_master WHERE type = 'table'");
-        } catch {
-          // SQLCipher cannot distinguish a wrong recovery code from invalid
-          // ciphertext here; never expose native SQL or the code to the UI.
-          throw new Error("backup_wrong_key_or_corrupt");
-        }
+        const schema = await readEncryptedBackupMetadata(() =>
+          db.getAllAsync<{ name: string }>(
+            "SELECT name FROM pia_import.sqlite_master WHERE type = 'table'"));
         const available = new Set(schema.map(row => row.name));
         if (!BACKUP_TABLES.every(table => available.has(table))) {
           throw new Error("incompatible_backup_schema");
         }
-        const version = await db.getFirstAsync<{ user_version: number }>("PRAGMA pia_import.user_version");
+        const version = await readEncryptedBackupMetadata(() =>
+          db.getFirstAsync<{ user_version: number }>("PRAGMA pia_import.user_version"));
         // v2 added chats, v3 record types, names and index words. Every older
         // backup restores into the current schema; the search index is rebuilt.
         if (!version || !RESTORABLE_VERSIONS.includes(version.user_version) || version.user_version > LOCAL_MEMORY_SCHEMA_VERSION) {
@@ -454,11 +462,13 @@ export async function restoreEncryptedBackup(
         }
         // Validate the *source* before any destination writes. A forged
         // SQLCipher file with the right table names can still have corruption.
-        const integrity = await db.getFirstAsync<{ integrity_check: string }>(
-          "PRAGMA pia_import.integrity_check",
-        );
+        const integrity = await readEncryptedBackupMetadata(() =>
+          db.getFirstAsync<{ integrity_check: string }>(
+            "PRAGMA pia_import.integrity_check",
+          ));
         if (integrity?.integrity_check !== "ok") throw new Error("invalid_backup_integrity");
-        const badReference = await db.getFirstAsync("PRAGMA pia_import.foreign_key_check");
+        const badReference = await readEncryptedBackupMetadata(() =>
+          db.getFirstAsync("PRAGMA pia_import.foreign_key_check"));
         if (badReference !== null) throw new Error("invalid_backup_references");
         const incoming = await db.getFirstAsync<{ n: number }>(
           "SELECT count(*) AS n FROM pia_import.memory_entities",
@@ -787,8 +797,19 @@ export async function restoreEncryptedBackup(
             "SELECT count(*) AS n FROM memory_observations",
           ))?.n ?? 0,
         };
+      } catch (error) {
+        restoreFailed = true;
+        throw error;
       } finally {
-        if (attached) await detach(db, "pia_import");
+        if (attached) {
+          try {
+            await detach(db, "pia_import");
+          } catch {
+            // A damaged attachment may also fail to DETACH. Do not replace
+            // the primary preflight error with an unsafe native exception.
+            if (!restoreFailed) throw new Error("backup_restore_detach_failed");
+          }
+        }
       }
     });
     if (portableSettings) {
