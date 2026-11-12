@@ -33,7 +33,7 @@ export function TelegramSavedImportCard({profile}:{profile:string}){
     // A profile switch must not inherit another profile's busy UI or worker.
     // Its in-flight request is aborted; a late settlement must not touch the
     // new profile's running flag or UI state.
-    generation.current++;
+    const version=++generation.current;
     activeImport.current?.abort();
     activeImport.current=null;
     running.current=false;
