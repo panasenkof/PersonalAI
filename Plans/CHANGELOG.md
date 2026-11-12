@@ -4,6 +4,10 @@
 
 Формат новой строки: `дата · что изменилось для пользователя (#PR) · CI / APK / телефон`. Статус проверок для строк ниже смотреть в архивном снимке и в [долге приёмки](PHYSICAL_ACCEPTANCE_DEBT.md).
 
+- 2026-11-12 · ARCH-3b: сохранён старый текст системного промпта, правила привязаны к активным инструментам (#509) · CI PASS [43226439352](https://github.com/panasenkof/PersonalAI/actions/runs/43226439352); live LLM и физический телефон NOT_RUN, семантика не менялась
+- 2026-11-12 · ARCH-3a: контракт `ToolSpec.guidance`, выдача только активного каталога и карта правил (#507) · CI PASS [43224024987](https://github.com/panasenkof/PersonalAI/actions/runs/43224024987); поведение не менялось
+- 2026-11-12 · ARCH-11: исполнимый сценарий на двух провайдерах и уточнение DIALOGUE_GUIDE (#510) · docs-only; фактическая live-приёмка NOT_RUN
+
 - 2026-11-12 · ARCH-2c: итоговое разбиение инструментов и единый per-turn TurnState (#506) · CI PASS [43213209545](https://github.com/panasenkof/PersonalAI/actions/runs/43213209545), Android physical NOT_RUN (поведение не менялось)
 - 2026-11-12 · ARCH-2b: память, источники, фото и статьи вынесены из каталога (#505) · golden-тесты сохранены, phone NOT_RUN
 - 2026-11-12 · ARCH-2a: единый каталог перемещён в tools/index (#504) · golden-тесты сохранены, phone NOT_RUN
