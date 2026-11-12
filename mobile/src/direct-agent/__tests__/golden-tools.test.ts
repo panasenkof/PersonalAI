@@ -3,6 +3,16 @@ import type { DirectAgentOptions } from "../engine";
 import type { ChatArticlePage } from "../conversations";
 import { DEFAULT_SECTIONS } from "../fact-tool";
 
+// Snapshot the complete serialized values in stable JSON, without Jest's
+// noisy object-wrapper formatting. No prompts, names, descriptions or schemas
+// are normalized: one changed character fails the golden snapshot.
+expect.addSnapshotSerializer({
+  test: (value: unknown) => Boolean(value && typeof value === "object" &&
+    (value as { __arch0Snapshot?: boolean }).__arch0Snapshot === true),
+  print: (value: unknown) => JSON.stringify(
+    (value as { actual: unknown }).actual, null, 2),
+});
+
 /** ARCH-0: the source of truth is the CURRENT shared registry, not a duplicate
  * catalog mock. Preserve name/order, all descriptions and every JSON schema.
  */
@@ -55,12 +65,7 @@ test("ARCH-0: complete registry definitions in four configurations", () => {
   expect(actual[0].definitions).toHaveLength(3);
   expect(actual[2].definitions.map(d => d.name)).toEqual(["set_conversation_context"]);
   expect(actual[3].definitions.map(d => d.name)).toEqual(["propose_import_metadata"]);
-  // One-time snapshot capture from the test runtime; afterwards replace with
-  // toMatchSnapshot() and commit the generated exact serialized artifact.
-  const serialized = JSON.stringify(actual);
-  const size = 3500;
-  for (let offset = 0, part = 0; offset < serialized.length; offset += size, part++)
-    console.log("ARCH0_TOOLS_PART_" + part + ":" + serialized.slice(offset, offset + size));
+  expect({ __arch0Snapshot: true, actual }).toMatchSnapshot();
 });
 
 test("ARCH-0: complete tool names and their order are readable without a snapshot diff", () => {
