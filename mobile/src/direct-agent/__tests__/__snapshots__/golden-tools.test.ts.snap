@@ -1,0 +1,873 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`ARCH-0: complete registry definitions in four configurations 1`] = `
+[
+  {
+    "name": "minimum",
+    "definitions": [
+      {
+        "name": "search_local_notes",
+        "description": "Найти заметки на телефоне по 1–3 ключевым словам. Найденный фрагмент не является полным чтением записи.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "draft_memory_fact",
+        "description": "Предложить пользователю одну запись в памяти — один факт, человек, событие или предпочтение; никогда не сохраняет автоматически, только после подтверждения пользователя.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string",
+              "description": "Коротко, о чём запись"
+            },
+            "body": {
+              "type": "string",
+              "description": "Сам факт полным предложением"
+            },
+            "section": {
+              "type": "string",
+              "description": "Название раздела памяти. Существующие: «Обо мне», «Люди», «Дела и проекты», «Предпочтения», «Важные даты», «Заметки». Если пользователь просит раздел, которого нет, — его название; приложение предложит создать"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "fact",
+                "person",
+                "event",
+                "preference",
+                "note"
+              ],
+              "description": "fact — факт о пользователе; person — запись о человеке; event — событие или дата; preference — что нравится или как отвечать; note — остальное"
+            },
+            "person": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Имя человека, о котором факт, если он не о самом пользователе; иначе null"
+            },
+            "date": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Дата события в виде ГГГГ-ММ-ДД, если она есть; иначе null"
+            }
+          },
+          "required": [
+            "title",
+            "body",
+            "section",
+            "kind",
+            "person",
+            "date"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "update_task_state",
+        "description": "Уточнить рабочую цель, выбранный вариант и открытые вопросы этого диалога. Не сохраняет личные факты и не подтверждает успех инструментов. Используй при смене темы/выбора, по возможности вместе с нужным инструментом в одном ходе; для простого ответа не требуется.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "goal": {
+              "type": "string",
+              "maxLength": 600
+            },
+            "selection": {
+              "type": "string",
+              "maxLength": 400
+            },
+            "openQuestions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "maxItems": 5
+            }
+          },
+          "required": [
+            "goal",
+            "selection",
+            "openQuestions"
+          ],
+          "additionalProperties": false
+        }
+      }
+    ]
+  },
+  {
+    "name": "all-available-tools",
+    "definitions": [
+      {
+        "name": "set_conversation_context",
+        "description": "Определить или исправить ТЕМУ и РАЗДЕЛ текущего диалога — не переносит, не сохраняет и не читает записи памяти. Вызывай при первой содержательной теме и при явном изменении темы/раздела, включая запрос пользователя исправить классификацию. Не вызывай из-за короткого уточнения. Раздел — только существующий slug; если не уверен, null. При закреплённом разделе менять можно только тему. Приложение покажет изменение в конце ответа ПОСЛЕ успешного сохранения истории, не повторяй статус в тексте.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "topic": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 80,
+              "description": "Короткое содержательное название темы на языке пользователя."
+            },
+            "sectionSlug": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Точный slug уже существующей коллекции: about=Обо мне; people=Люди; projects=Дела и проекты; preferences=Предпочтения; dates=Важные даты; notes=Заметки. null при отсутствии основания."
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 180,
+              "description": "Одно короткое основание по текущему пользовательскому сообщению или реально прочитанным вложениям."
+            }
+          },
+          "required": [
+            "topic",
+            "sectionSlug",
+            "reason"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "search_local_notes",
+        "description": "Найти заметки на телефоне по 1–3 ключевым словам. Найденный фрагмент не является полным чтением записи.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "search_local_photos",
+        "description": "Единый локальный поиск фотографий в памяти телефона. mode=text: description — описание из 3–160 символов. mode=image: используй выбранное в интерфейсе фото (только когда mode=image доступен в schema), description — пустая строка. LLM не получает пиксели или эмбеддинги. Результат — реальные фото-вложения и состояние модели/индекса; максимум 2 поиска за ход.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "text",
+                "image"
+              ]
+            },
+            "description": {
+              "type": "string",
+              "maxLength": 160
+            }
+          },
+          "required": [
+            "mode",
+            "description"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "read_local_note",
+        "description": "Дочитать разрешённую заметку по id/version из поиска или каталога. Полный текст НЕ ограничен начальным контекстом 24 000 символов. Читай до hasMore=false с offset=nextOffset; если бюджет вызовов кончился, явно говори о частичном охвате. Каждый вызов максимум 6000 символов; версия/ACL проверяются заново.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "version": {
+              "type": "integer"
+            },
+            "offset": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "budget": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "maximum": 6000
+            }
+          },
+          "required": [
+            "id",
+            "version",
+            "offset",
+            "budget"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "search_local_source_segments",
+        "description": "Искать точную последовательность 1–3 ключевых слов внутри распознанных вложений. При hasMore=true передать nextOffset как offset для следующей страницы ТОГО ЖЕ query. Разрешённые активные заметки и короткие превью, не весь документ; страница/таймкод только по данным обработчика.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string"
+            },
+            "limit": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "offset": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "query",
+            "limit",
+            "offset"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "list_local_sources",
+        "description": "Получить только названия источников, короткие превью и координаты извлечённых фрагментов конкретной ранее найденной заметки по id/version. Список не является полным текстом; указанная обработчиком страница/время не проверены независимо по оригиналу.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "version": {
+              "type": "integer"
+            },
+            "limit": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "version",
+            "limit"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "read_local_source_segment",
+        "description": "Читать ограниченный текст одного сегмента конкретного вложения. Использовать только идентификаторы из list_local_sources, в той же версии записи. Повторно проверяет права и исходник. Координаты имеют уровень producer_reported, а unknown не является страницей/таймкодом.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "version": {
+              "type": "integer"
+            },
+            "attachmentId": {
+              "type": "string"
+            },
+            "extractionId": {
+              "type": "string"
+            },
+            "segmentId": {
+              "type": "string"
+            },
+            "offset": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "budget": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "version",
+            "attachmentId",
+            "extractionId",
+            "segmentId",
+            "offset",
+            "budget"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "list_local_notes",
+        "description": "Постраничный список метаданных только разрешённых активных заметок. Не является полным чтением. Поиск query означает точную FTS-фразу, не семантическое совпадение.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "collectionId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "limit": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "beforeUpdatedAt": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "beforeId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "query",
+            "collectionId",
+            "limit",
+            "beforeUpdatedAt",
+            "beforeId"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "count_local_notes",
+        "description": "Количество только разрешённых активных заметок. При collectionId по умолчанию считаются только непосредственные записи. Если пользователь спрашивает обо всём дереве, укажи includeDescendants=true: поиск по вложенным разделам с сохранением ACL. Не интерпретируй ноль в приватном/недоступном разделе как отсутствие записей; query — точная FTS-фраза.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "collectionId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "includeDescendants": {
+              "type": "boolean",
+              "description": "Включить все вложенные разделы (только с collectionId)"
+            }
+          },
+          "required": [
+            "query",
+            "collectionId"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "select_local_articles",
+        "description": "Постранично выбрать СОХРАНЁННЫЕ ссылки на статьи по теме и календарной неделе из разрешённых стандартных заметок. Дата по умолчанию — сохранение; published = только дата, указанная самим сайтом, не независимо проверенная. Результат — МЕТАДАННЫЕ, не прочитанный текст. Для выжимки дочитай read_local_note по id/version. Не путай count с числом прочитанных материалов. Максимум 3 страницы за сообщение.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "topic": {
+              "type": "string"
+            },
+            "period": {
+              "type": "string",
+              "enum": [
+                "last7days",
+                "thisweek"
+              ]
+            },
+            "dateMode": {
+              "type": "string",
+              "enum": [
+                "saved",
+                "published"
+              ]
+            },
+            "beforeCreatedAt": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "beforeId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "topic",
+            "period",
+            "dateMode",
+            "beforeCreatedAt",
+            "beforeId"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "continue_local_articles",
+        "description": "Продолжить прежнюю сохранённую подборку статей: ИСХОДНАЯ тема, режим дат и зафиксированное календарное окно из зашифрованного диалога. Не пересчитывать неделю и не начинать с первой страницы. Только метаданные, полный текст дочитывать отдельно.",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "read_selected_local_articles",
+        "description": "9B: читать именно ранее показанные в этом чате сохранённые статьи (до 24 id/version) через проверяемый локальный reader. Каждый элемент вернёт свой абсолютный selectedIndex для цитат S1=0, S2=1 и так далее (номер S = selectedIndex+1), даже если запись недоступна. Модель НЕ передаёт ID. Фильтр и список остаются в SQLCipher истории; на каждом чтении ACL/версия проверяются заново. Читай следующие страницы с nextIndex, пока hasMore=false или не исчерпан бюджет. complete_note_text НЕ значит прочитанная оригинальная веб-страница; link_only не источник фактов статьи.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "startIndex": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "count": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "charsPerNote": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "startIndex",
+            "count",
+            "charsPerNote"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "read_selected_article_chunk",
+        "description": "9B: дочитать ОДНУ длинную заметку из сохранённой подборки по selectedIndex, НЕ по ID модели. offset=nextOffset предыдущего фрагмента; до 6000 символов. Версия, права, AppLock и доказательства диапазона перепроверяются. Прочтение последнего фрагмента НЕ означает, что прочитаны все предыдущие или оригинальная веб-страница. При неполном охвате сообщи это явно.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "selectedIndex": {
+              "type": "integer"
+            },
+            "offset": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "budget": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "maximum": 6000
+            }
+          },
+          "required": [
+            "selectedIndex",
+            "offset",
+            "budget"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "selected_article_read_coverage",
+        "description": "Проверить ФАКТИЧЕСКИЙ охват выбранных статей за текущий ход агента. Только диапазоны из проверенных ACL/version source-read, не черновики workspace и не результаты прошлых ходов. Вернёт полностью/частично/не прочитано, link-only, недоступно, границы и nextUnreadOffset; количество выбранных записей НЕ равно общему числу найденных. Полная сохранённая заметка НЕ является оригинальной веб-страницей.",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "propose_move_local_note",
+        "description": "9T2: ТОЛЬКО предпросмотр переноса ОДНОЙ найденной активной заметки между двумя существующими стандартными разделами. Сначала search_local_notes/list_local_notes, возьми точный ID и record version. Пользователь отдельно подтверждает карточку. Не создавать копию заметки, не выполнять запись/merge, не трогать Документы и закрытые разделы.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "noteId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "expectedVersion": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "targetSectionSlug": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 5,
+              "maxLength": 240
+            }
+          },
+          "required": [
+            "noteId",
+            "expectedVersion",
+            "targetSectionSlug",
+            "reason"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "propose_create_memory_section",
+        "description": "Предложить создание нового раздела или подраздела памяти. parentSlug = slug существующего обычного родителя либо null для корня. Называй только последний уровень, не путь. После вызова появится карточка подтверждения; не утверждай, что раздел создан.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80
+            },
+            "parentSlug": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Точный slug родительского раздела либо null. Доступные: about=Обо мне; people=Люди; projects=Дела и проекты; preferences=Предпочтения; dates=Важные даты; notes=Заметки"
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 5,
+              "maxLength": 240
+            }
+          },
+          "required": [
+            "name",
+            "parentSlug",
+            "reason"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "propose_delete_memory_section",
+        "description": "Предложить удаление существующего ПУСТОГО пользовательского обычного раздела. Только точный sectionSlug; удаление заблокировано для системных, защищённых разделов, разделов с записями (включая архив/корзину) или вложенными разделами. Не вызывай для очистки содержимого. Никогда не удаляй без отдельного подтверждения пользователя.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "sectionSlug": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "description": "Точный slug раздела; доступные: about=Обо мне; people=Люди; projects=Дела и проекты; preferences=Предпочтения; dates=Важные даты; notes=Заметки"
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 5,
+              "maxLength": 240
+            }
+          },
+          "required": [
+            "sectionSlug",
+            "reason"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "draft_memory_fact",
+        "description": "Предложить пользователю одну запись в памяти — один факт, человек, событие или предпочтение; никогда не сохраняет автоматически, только после подтверждения пользователя.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string",
+              "description": "Коротко, о чём запись"
+            },
+            "body": {
+              "type": "string",
+              "description": "Сам факт полным предложением"
+            },
+            "section": {
+              "type": "string",
+              "description": "Название раздела памяти. Существующие: «Обо мне», «Люди», «Дела и проекты», «Предпочтения», «Важные даты», «Заметки». Если пользователь просит раздел, которого нет, — его название; приложение предложит создать"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "fact",
+                "person",
+                "event",
+                "preference",
+                "note"
+              ],
+              "description": "fact — факт о пользователе; person — запись о человеке; event — событие или дата; preference — что нравится или как отвечать; note — остальное"
+            },
+            "person": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Имя человека, о котором факт, если он не о самом пользователе; иначе null"
+            },
+            "date": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Дата события в виде ГГГГ-ММ-ДД, если она есть; иначе null"
+            }
+          },
+          "required": [
+            "title",
+            "body",
+            "section",
+            "kind",
+            "person",
+            "date"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "update_task_state",
+        "description": "Уточнить рабочую цель, выбранный вариант и открытые вопросы этого диалога. Не сохраняет личные факты и не подтверждает успех инструментов. Используй при смене темы/выбора, по возможности вместе с нужным инструментом в одном ходе; для простого ответа не требуется.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "goal": {
+              "type": "string",
+              "maxLength": 600
+            },
+            "selection": {
+              "type": "string",
+              "maxLength": 400
+            },
+            "openQuestions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "maxItems": 5
+            }
+          },
+          "required": [
+            "goal",
+            "selection",
+            "openQuestions"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "workspace_put",
+        "description": "Сохранить ОДИН промежуточный черновик, задачу или сравнение в рабочей области ЭТОЙ задачи и зашифрованного диалога. Не личная память; не факт и не источник доказательства. Не копируй полный текст статей. До 16 ключей, по 1200 символов. Один и тот же key заменяется.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string",
+              "maxLength": 32,
+              "pattern": "^[a-z][a-z0-9_-]*$"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "finding",
+                "todo",
+                "question",
+                "comparison"
+              ]
+            },
+            "content": {
+              "type": "string",
+              "maxLength": 1200
+            }
+          },
+          "required": [
+            "key",
+            "kind",
+            "content"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "workspace_list",
+        "description": "Список коротких ключей рабочей области ТЕКУЩЕЙ задачи. Содержимое и оригиналы тут НЕ возвращаются; для них workspace_get/доказательный source-read.",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "workspace_get",
+        "description": "Прочитать ОДИН промежуточный черновик модели по ключу, не оригинал. Прежде чем приводить факты, перечитай исходный документ с версионированным source reader.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string",
+              "maxLength": 32
+            }
+          },
+          "required": [
+            "key"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "workspace_clear",
+        "description": "Очистить ТОЛЬКО рабочие черновики текущего диалога (например, при смене задачи). Оригинальные заметки, документы, подтверждённые действия и историю чата не трогает.",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        }
+      }
+    ]
+  },
+  {
+    "name": "context-only",
+    "definitions": [
+      {
+        "name": "set_conversation_context",
+        "description": "Определить или исправить ТЕМУ и РАЗДЕЛ текущего диалога — не переносит, не сохраняет и не читает записи памяти. Вызывай при первой содержательной теме и при явном изменении темы/раздела, включая запрос пользователя исправить классификацию. Не вызывай из-за короткого уточнения. Раздел — только существующий slug; если не уверен, null. При закреплённом разделе менять можно только тему. Приложение покажет изменение в конце ответа ПОСЛЕ успешного сохранения истории, не повторяй статус в тексте.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "topic": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 80,
+              "description": "Короткое содержательное название темы на языке пользователя."
+            },
+            "sectionSlug": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Точный slug уже существующей коллекции: . null при отсутствии основания."
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 180,
+              "description": "Одно короткое основание по текущему пользовательскому сообщению или реально прочитанным вложениям."
+            }
+          },
+          "required": [
+            "topic",
+            "sectionSlug",
+            "reason"
+          ],
+          "additionalProperties": false
+        }
+      }
+    ]
+  },
+  {
+    "name": "context-only-with-import-tags",
+    "definitions": [
+      {
+        "name": "propose_import_metadata",
+        "description": "Предложить существующий раздел, тему и до 5 тематических тегов только по предоставленному читаемому тексту. При сомнении sectionSlug=null и tags=[]. Это предложение, не запись.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "topic": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 80
+            },
+            "sectionSlug": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Slug только разрешённого раздела из: ; либо null."
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 180
+            },
+            "tags": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 32
+              },
+              "maxItems": 5,
+              "description": "0–5 точных смысловых тегов на русском, без # и пробелов. Только из действительно прочитанного содержания."
+            }
+          },
+          "required": [
+            "topic",
+            "sectionSlug",
+            "reason",
+            "tags"
+          ],
+          "additionalProperties": false
+        }
+      }
+    ]
+  }
+]
+`;
