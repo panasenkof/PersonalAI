@@ -200,6 +200,36 @@ function checkedRecognitions(originals: ImportFile[], values?: FileRecognition[]
       ...(item.asrProducerId ? { asrProducerId: item.asrProducerId } : {}) };
   });
 }
+/** Shared source receipt for both the canonical writer and pre-download lookup. */
+async function telegramSavedReceipt(ref:TelegramSavedMessageRef):Promise<string>{
+  const serialized=ref.kind==="messageAlbum"
+    ? JSON.stringify(["telegram-saved-album-v1",ref.chatId,ref.mediaAlbumId,ref.messageIds])
+    : JSON.stringify(["telegram-saved-source-v1",ref.chatId,ref.messageId]);
+  return Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256,serialized);
+}
+/** Query only source identity, never a filename or MD5. A trashed receipt also
+ * counts as imported, preserving the existing canonical replay semantics. */
+export async function telegramSavedAlreadyImported(profile:string,chatId:string,
+  messageId:string,album?:{albumId:string;messageIds:string[]}):Promise<boolean>{
+  const idValid=(id:string)=>/^[1-9][0-9]{0,15}$/.test(id)&&Number.isSafeInteger(Number(id));
+  if(!idValid(chatId)||!idValid(messageId)||
+    (album!==undefined&&(!/^-?[1-9][0-9]{0,18}$/.test(album.albumId)||
+      album.messageIds.length<2||album.messageIds.length>MAX_ORIGINALS_PER_NOTE||
+      album.messageIds[0]!==messageId||
+      album.messageIds.some((id,i)=>!idValid(id)||(i>0&&Number(id)<=Number(album.messageIds[i-1]))))))
+    throw new Error("invalid_telegram_saved_provenance");
+  if(!localMemorySessionUnlocked())throw new Error("application_locked");
+  const digest=await telegramSavedReceipt({
+    chatId,messageId,date:0,kind:album?"messageAlbum":"messageText",
+    ...(album?{mediaAlbumId:album.albumId,messageIds:album.messageIds}:{}),
+  });
+  return withLocalMemoryDatabase(profile,async db=>{
+    if(!localMemorySessionUnlocked())throw new Error("application_locked");
+    const found=await db.getFirstAsync<{entity_id:string}>(
+      "SELECT entity_id FROM memory_received_shares WHERE fingerprint=? LIMIT 1",[digest]);
+    return Boolean(found);
+  });
+}
 /** Note + original + receipt commit together. Cancellation never leaves a partial note. */
 export async function saveMediaNote(profile: string, input: { file?: ImportFile; files?: ImportFile[]; title: string; body: string; extractedText?: string; recognitions?: FileRecognition[]; sensitivity: 'sensitive' | 'standard'; receipt?: string; onReplay?: ShareReplayCallback; allowSeparateCopy?: boolean; collectionId?: string; sourceUrl?: string; sourceCoverage?: SourceCoverage; tags?: string[]; generatedTags?: boolean; generatedSection?: boolean; indexEnrichmentOptOut?: boolean; telegramObservation?: TelegramTextObservation; botMessage?: TelegramBotMessageRef; telegramSavedMessage?: TelegramSavedMessageRef; publicationClaim?: {date:string;evidence:'html_meta';sourceAttribute:'article:published_time'|'datePublished'} }, signal?: AbortSignal): Promise<string> {
   return withLocalMemoryDatabase(profile, async db => {
@@ -338,12 +368,7 @@ export async function saveMediaNote(profile: string, input: { file?: ImportFile;
       input.title === input.body.trim()) ? 'telegram-link' :
       inferredFileTitle ? 'incoming-file-untitled' : input.title;
     const receivedReceipt = input.telegramSavedMessage
-      ? await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256,
-          input.telegramSavedMessage.kind === 'messageAlbum'
-            ? JSON.stringify(['telegram-saved-album-v1', input.telegramSavedMessage.chatId,
-                input.telegramSavedMessage.mediaAlbumId,input.telegramSavedMessage.messageIds])
-            : JSON.stringify(['telegram-saved-source-v1', input.telegramSavedMessage.chatId,
-                input.telegramSavedMessage.messageId]))
+      ? await telegramSavedReceipt(input.telegramSavedMessage)
       : input.receipt
       ? await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, JSON.stringify([
           ...(input.botMessage ? ['telegram-bot-content-v1', input.botMessage.botId,
