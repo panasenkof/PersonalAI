@@ -96,3 +96,16 @@ test("ARCH-0: complete tool names and their order are readable without a snapsho
     "workspace_clear",
   ]);
 });
+
+test("ARCH-3a: active guidance exposes only advertised tools in unchanged order", () => {
+  for (const { options } of modes) {
+    const catalog = createToolCatalog(options(), [], [], []);
+    expect(catalog.guidance.map(g => g.name)).toEqual(catalog.definitions.map(g => g.name));
+    expect(catalog.guidance.every(g => !("guidance" in g) || typeof g.guidance === "string")).toBe(true);
+  }
+  const minimum = createToolCatalog(base(), [], [], []);
+  const fullCatalog = createToolCatalog(full(), [], [], []);
+  expect(minimum.guidance.length).toBeLessThan(fullCatalog.guidance.length);
+  expect(createToolCatalog({ ...base(), contextOnly: true, importTagsEnabled: true }, [], [], [])
+    .guidance.map(g => g.name)).toEqual(["propose_import_metadata"]);
+});
