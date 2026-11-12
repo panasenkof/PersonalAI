@@ -161,6 +161,33 @@ jobs:
         working-directory: mobile
         run: npm ci --no-audit --no-fund
 
+      - name: Check shared Telegram API identity (no credential values in logs)
+        if: steps.changes.outputs.needed == 'true'
+        env:
+          PERSAI_TELEGRAM_API_ID: ${{ secrets.PERSAI_TELEGRAM_API_ID }}
+          PERSAI_TELEGRAM_API_HASH: ${{ secrets.PERSAI_TELEGRAM_API_HASH }}
+          REQUIRE_SHARED_TELEGRAM_IDENTITY: ${{ github.event_name == 'workflow_dispatch' && inputs.tdlib_source_run_id != '' }}
+        shell: bash
+        run: |
+          node - <<'NODE'
+          const id=(process.env.PERSAI_TELEGRAM_API_ID||'').trim();
+          const hash=(process.env.PERSAI_TELEGRAM_API_HASH||'').trim();
+          if (!id && !hash) {
+            if (process.env.REQUIRE_SHARED_TELEGRAM_IDENTITY==='true') {
+              console.error('::error::A signed APK with TDLib requires PersAI-owned Telegram app API secrets.');
+              process.exit(1);
+            }
+            console.log('No shared Telegram identity; ordinary APK remains in legacy API mode.');
+            process.exit(0);
+          }
+          if (!/^[1-9][0-9]{0,9}$/.test(id) || Number(id)>2147483647 ||
+              !/^[0-9a-fA-F]{32}$/.test(hash)) {
+            console.error('::error::Both valid PERSAI_TELEGRAM_API_ID and PERSAI_TELEGRAM_API_HASH secrets are required.');
+            process.exit(1);
+          }
+          console.log('Shared PersAI Telegram identity will be bundled in this signed release.');
+          NODE
+
       - name: Compute strictly increasing Android build number
         if: steps.changes.outputs.needed == 'true'
         id: version
@@ -189,6 +216,9 @@ jobs:
         env:
           PIA_ANDROID_RELEASE: 'true'
           PIA_ANDROID_VERSION_CODE: ${{ steps.version.outputs.code }}
+          # Application identity is injected only in trusted main APK builds.
+          PERSAI_TELEGRAM_API_ID: ${{ secrets.PERSAI_TELEGRAM_API_ID }}
+          PERSAI_TELEGRAM_API_HASH: ${{ secrets.PERSAI_TELEGRAM_API_HASH }}
           PIA_ANDROID_BUILD_SHA: ${{ env.TARGET_SHA }}
           PIA_VISION_EXPO_GATE: 'true'
         run: |
@@ -219,6 +249,9 @@ jobs:
           # Expo rebuilds the JS bundle during Gradle; retain the same config as prebuild.
           PIA_ANDROID_RELEASE: 'true'
           PIA_ANDROID_VERSION_CODE: ${{ steps.version.outputs.code }}
+          # Application identity is injected only in trusted main APK builds.
+          PERSAI_TELEGRAM_API_ID: ${{ secrets.PERSAI_TELEGRAM_API_ID }}
+          PERSAI_TELEGRAM_API_HASH: ${{ secrets.PERSAI_TELEGRAM_API_HASH }}
           PIA_ANDROID_BUILD_SHA: ${{ env.TARGET_SHA }}
           PIA_ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/pia-release.jks
           PIA_ANDROID_KEY_ALIAS: ${{ secrets.PIA_ANDROID_KEY_ALIAS }}

@@ -3,6 +3,7 @@ import {Platform} from "react-native";
 import Constants from "expo-constants";
 import {localMemorySessionUnlocked} from "../local-memory/storage";
 import {loadTelegramApiCredentials,loadOrCreateTdlibDbKey,clearTelegramAuthorized} from "./settings";
+import {bundledTelegramApiCredentials} from "./bundled-api";
 
 /** Narrow allowlist. Never expose TDLib's arbitrary request/sending API to JS. */
 type NativeTdlib = {
@@ -62,7 +63,9 @@ export async function initializeTelegramAccount(profile:string):Promise<Telegram
   unlocked();
   const native=getNative();
   if(!native?.isAvailable())throw new Error("telegram_tdlib_binary_missing");
-  const credentials=await loadTelegramApiCredentials(profile);
+  // The official PersAI app identity takes precedence; legacy per-profile
+  // keys remain a migration/developer fallback for builds without provisioning.
+  const credentials=bundledTelegramApiCredentials()??await loadTelegramApiCredentials(profile);
   if(!credentials)throw new Error("telegram_tdlib_api_credentials_missing");
   const dbKey=await loadOrCreateTdlibDbKey(profile);
   unlocked();
