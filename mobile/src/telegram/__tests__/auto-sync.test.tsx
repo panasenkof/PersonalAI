@@ -17,6 +17,7 @@ jest.mock("../account",()=>({
  observeTelegramAccountState:jest.fn(),
 }));
 jest.mock("../saved-import",()=>({syncNewSavedText:jest.fn()}));
+jest.mock("../import-target",()=>({loadTelegramImportTarget:jest.fn(async()=>undefined)}));
 jest.mock("../../profile/ProfileContext",()=>({useProfile:()=> "guest"}));
 const mockVisibility={current:true};
 jest.mock("../../security/visibility",()=>({
@@ -70,7 +71,7 @@ test("on_open with a previously started TDLib session imports one bounded accoun
   const ui=render(<TelegramAutoSync/>);
   await waitFor(()=>expect(syncNewSavedText).toHaveBeenCalledTimes(1));
   expect(initializeTelegramAccount).toHaveBeenCalledWith("guest");
-  expect(syncNewSavedText).toHaveBeenCalledWith("guest",expect.any(Object));
+  expect(syncNewSavedText).toHaveBeenCalledWith("guest",expect.any(Object),undefined);
   expect(syncTelegramBotText).toHaveBeenCalledTimes(1);
   ui.rerender(<TelegramAutoSync/>);
   expect(syncNewSavedText).toHaveBeenCalledTimes(1);
