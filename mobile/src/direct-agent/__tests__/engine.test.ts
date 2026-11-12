@@ -557,3 +557,53 @@ test("context model instructions include saved topic and pin, not previous histo
   expect(system).toContain("закреплён пользователем");
   expect(system).toContain("set_conversation_context");
 });
+
+test("ARCH-3c2: Responses, compatible and Anthropic send the identical shared system text", async () => {
+  const openai = jest.fn().mockResolvedValue(final());
+  const compatible = jest.fn().mockResolvedValue({
+    ok: true, status: 200, json: async () => ({ choices: [{ message: { role: "assistant", content: "OK" } }] }),
+  });
+  const anthropic = jest.fn().mockResolvedValue({
+    ok: true, status: 200, json: async () => ({ content: [{ type: "text", text: "OK" }] }),
+  });
+  const diagnostics = jest.fn();
+  await start({}, openai, { diagnostic: diagnostics });
+  await start({ provider: "openai-compatible", baseUrl: "https://llm.example.org/v1" }, compatible);
+  await start({ provider: "anthropic", baseUrl: "https://api.anthropic.com/v1" }, anthropic);
+
+  const responsesPrompt = JSON.parse(openai.mock.calls[0][1].body).input[0].content;
+  const compatiblePrompt = JSON.parse(compatible.mock.calls[0][1].body).messages[0].content;
+  const anthropicPrompt = JSON.parse(anthropic.mock.calls[0][1].body).system;
+  expect(responsesPrompt).toBe(compatiblePrompt);
+  expect(responsesPrompt).toBe(anthropicPrompt);
+  expect(responsesPrompt).toContain("search_local_notes");
+  expect(responsesPrompt).not.toContain("search_local_photos");
+  expect(responsesPrompt).not.toContain("read_selected_local_articles");
+  expect(responsesPrompt).not.toContain("web_search");
+  expect(diagnostics).toHaveBeenCalledWith("agent.prompt", { chars: responsesPrompt.length });
+});
+
+test("ARCH-3c2: restricted import does not inherit unavailable tools in either protocol", async () => {
+  const response = jest.fn().mockResolvedValue(final());
+  const compatible = jest.fn().mockResolvedValue({
+    ok: true, status: 200, json: async () => ({ choices: [{ message: { role: "assistant", content: "OK" } }] }),
+  });
+  const opts = { contextOnly: true, importTagsEnabled: true, contextClassificationEnabled: true,
+    sections: [{ slug: "notes", name: "Заметки" }] };
+  await start({}, response, opts);
+  await start({ provider: "openai-compatible", baseUrl: "https://llm.example.org/v1" }, compatible, opts);
+  const requests = [
+    JSON.parse(response.mock.calls[0][1].body),
+    JSON.parse(compatible.mock.calls[0][1].body),
+  ];
+  const prompts = [requests[0].input[0].content, requests[1].messages[0].content];
+  for (const p of prompts) {
+    expect(p).toContain("propose_import_metadata");
+    expect(p).not.toContain("search_local_notes");
+    expect(p).not.toContain("search_local_photos");
+    expect(p).not.toContain("read_selected_local_articles");
+    expect(p).not.toContain("read_web_page");
+  }
+  expect(requests[0].tools.map((t: any) => t.name)).toEqual(["propose_import_metadata"]);
+  expect(requests[1].tools.map((t: any) => t.function.name)).toEqual(["propose_import_metadata"]);
+});
