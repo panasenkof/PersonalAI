@@ -2,6 +2,7 @@ import type { DirectAgentOptions, DirectResult } from "../engine";
 import type { UsedNote } from "../context";
 import type { MemorySnippet } from "../memory";
 import { FACT_TOOL_NAME } from "../fact-tool";
+import { TOOL_GUIDANCE } from "../prompt";
 import type { ToolOutcome } from "../task-state";
 import type { ToolSpec, TurnState } from "./types";
 import { sourceTools } from "./source-tools";
@@ -41,6 +42,13 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
         ? Array.isArray(r.sources) && typeof r.context === "string" ? r.sources.length ? "found" : "empty" : "failed"
         : typeof r.content === "string" && r.content.trim() && typeof r.url === "string" ? "read" : "failed" })),
   ];
+  // ARCH-3b: source the same literal instruction blocks as the golden
+  // Responses prompt. This still does NOT alter the messages sent to a model.
+  // Missing/disabled tools have no advertised guidance.
+  for (const spec of specs) {
+    const guidance = TOOL_GUIDANCE[spec.definition.name];
+    if (guidance) spec.guidance = guidance;
+  }
   // Import classification uses THIS catalog/engine, but no memory/web/workspace tools.
   // The host must separately authorize transmission before setting contextOnly.
   const activeSpecs = options.contextOnly
