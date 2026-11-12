@@ -23,6 +23,7 @@ import { sourceTools } from "./source-tools";
 import { memoryTools } from "./memory-tools";
 import { photoTools } from "./photo-tools";
 import { articleTools } from "./article-tools";
+import { proposalTools } from "./proposal-tools";
 export type { ToolDefinition, ToolSpec } from "./types";
 const queryParameters = { type: "object", properties: { query: { type: "string" } }, required: ["query"], additionalProperties: false };
 const text = (v: unknown, cap = 600) => typeof v === "string" ? v.slice(0, cap) : "";
@@ -218,6 +219,11 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
     return {status:"pending_import_save",saved:false,sectionSlug:contextCandidate.sectionSlug,tags};
   },verify:r=>r.status==="pending_import_save"&&r.saved===false?"pending_confirmation":"failed"};
   const memory = memoryTools(options, {web,used,readNotes,admitMoveHandle}, text, queryParameters);
+  const proposals = proposalTools(options, {
+    getMovePreview:()=>movePreview,setMovePreview:value=>{movePreview=value;},moveHandles,
+    getSectionPreview:()=>sectionPreview,setSectionPreview:value=>{sectionPreview=value;},
+    sectionToolError,fingerprint,pending,proposalIds,
+  });
   const specs: ToolSpec[] = [
     ...(options.contextClassificationEnabled ? [contextTool] : []),
     memory.search,
@@ -235,121 +241,11 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
       getMixedArticleFilters:()=>mixedArticleFilters,
       markUsedSelectedArticleTool:()=>{usedSelectedArticleTool=true;},
     }),
-    ...(options.previewMove && !options.skipLocalMemory ? [{
-      definition: {name:"propose_move_local_note",
-        description:"9T2: ТОЛЬКО предпросмотр переноса ОДНОЙ найденной активной заметки между двумя существующими стандартными разделами. Сначала search_local_notes/list_local_notes, возьми точный ID и record version. Пользователь отдельно подтверждает карточку. Не создавать копию заметки, не выполнять запись/merge, не трогать Документы и закрытые разделы.",
-        parameters:{type:"object",properties:{
-          noteId:{type:"string",minLength:1,maxLength:128},
-          expectedVersion:{type:"integer",minimum:1},
-          targetSectionSlug:{type:"string",minLength:1,maxLength:80},
-          reason:{type:"string",minLength:5,maxLength:240},
-        },required:["noteId","expectedVersion","targetSectionSlug","reason"],
-          additionalProperties:false},
-      },effect:"proposal" as const,
-      execute:async(args:Record<string,unknown>)=>{
-        if(movePreview)return {error:"move_preview_already_proposed_this_turn"};
-        const id=args.noteId, version=args.expectedVersion, to=args.targetSectionSlug, reason=args.reason;
-        if(Object.keys(args).length!==4 ||
-           typeof id!=="string"||!/^[A-Za-z0-9:_-]{1,128}$/.test(id) ||
-           !Number.isSafeInteger(version)||(version as number)<1 ||
-           typeof to!=="string"|| !/^[a-z0-9_-]{1,80}$/.test(to) ||
-           typeof reason!=="string"||reason.trim().length<5||reason.length>240)
-          return {error:"invalid_move_arguments"};
-        if(moveHandles.get(id)!==version)
-          return {error:"note_not_selected_for_move"};
-        if(options.signal?.aborted)throw new Error("Запрос остановлен");
-        options.status?.("Проверяю предложение переноса");
-        const proposed=await options.previewMove!({
-          noteId:id,expectedVersion:version as number,targetSectionSlug:to,reason:reason.trim(),
-        });
-        if(options.signal?.aborted)throw new Error("Запрос остановлен");
-        if(!validMoveProposal(proposed)||proposed.noteId!==id||
-           proposed.expectedVersion!==version)
-          return {error:"invalid_move_preview"};
-        movePreview=proposed;
-        return {status:"awaiting_user_confirmation",saved:false,
-          noteId:proposed.noteId,version:proposed.expectedVersion,
-          title:proposed.title,fromSection:proposed.fromName,toSection:proposed.toName,
-          attachmentsPreserved:proposed.attachmentCount,sourceLinksPreserved:proposed.hasSource,
-          reason:proposed.reason,requiresUserTap:true};
-      },
-      verify:(r:Record<string,unknown>)=>r.status==="awaiting_user_confirmation" &&
-        r.saved===false && r.requiresUserTap===true ? "pending_confirmation" as const : "failed" as const,
-    }] : []),
+    ...proposals.move,
     // SAME canonical chat ToolSpec registry as memory search, note drafts and moves.
     // The model never executes a section write: it only stages a card for a user tap.
-    ...(options.previewSectionAction && !options.skipLocalMemory ? [{
-      definition:{name:"propose_create_memory_section",
-        description:"Предложить создание нового раздела или подраздела памяти. parentSlug = slug существующего обычного родителя либо null для корня. Называй только последний уровень, не путь. После вызова появится карточка подтверждения; не утверждай, что раздел создан.",
-        parameters:{type:"object",properties:{
-          name:{type:"string",minLength:1,maxLength:80},
-          parentSlug:{type:["string","null"],description:"Точный slug родительского раздела либо null. Доступные: "+(options.sections||[]).map(s=>s.slug+"="+(s.path||s.name)).join("; ")},
-          reason:{type:"string",minLength:5,maxLength:240},
-        },required:["name","parentSlug","reason"],additionalProperties:false}},
-      effect:"proposal" as const,
-      execute:async(args:Record<string,unknown>)=>{
-        if(sectionPreview)return {error:"section_action_already_proposed_this_turn"};
-        const request={kind:"create",...args};
-        if(Object.keys(args).sort().join(",")!=="name,parentSlug,reason" ||
-           typeof args.name!=="string"||!args.name.trim()||args.name.length>80 ||
-           /[\/\r\n]/.test(args.name) ||
-           !(args.parentSlug===null || (typeof args.parentSlug==="string" && /^[a-z][a-z0-9_-]{0,63}$/.test(args.parentSlug))) ||
-           typeof args.reason!=="string"||args.reason.trim().length<5||args.reason.length>240)
-          return {error:"invalid_section_action_args"};
-        let proposed:ChatSectionProposal;
-        try {
-          proposed=await options.previewSectionAction!(
-            request as Parameters<NonNullable<DirectAgentOptions["previewSectionAction"]>>[0]);
-        }catch(error){return {error:sectionToolError(error)};}
-        if(!validSectionProposal(proposed)||proposed.kind!=="create"||proposed.name!==args.name.trim())
-          return {error:"invalid_section_preview"};
-        sectionPreview=proposed;
-        return {status:"awaiting_user_confirmation",saved:false,requiresUserTap:true,
-          action:"create",name:proposed.name,parent:proposed.parentName};
-      },
-      verify:(v:Record<string,unknown>)=>v.status==="awaiting_user_confirmation"&&v.saved===false&&
-        v.requiresUserTap===true?"pending_confirmation" as const:"failed" as const,
-    },{
-      definition:{name:"propose_delete_memory_section",
-        description:"Предложить удаление существующего ПУСТОГО пользовательского обычного раздела. Только точный sectionSlug; удаление заблокировано для системных, защищённых разделов, разделов с записями (включая архив/корзину) или вложенными разделами. Не вызывай для очистки содержимого. Никогда не удаляй без отдельного подтверждения пользователя.",
-        parameters:{type:"object",properties:{
-          sectionSlug:{type:"string",minLength:1,maxLength:64,description:"Точный slug раздела; доступные: "+(options.sections||[]).map(s=>s.slug+"="+(s.path||s.name)).join("; ")},
-          reason:{type:"string",minLength:5,maxLength:240},
-        },required:["sectionSlug","reason"],additionalProperties:false}},
-      effect:"proposal" as const,
-      execute:async(args:Record<string,unknown>)=>{
-        if(sectionPreview)return {error:"section_action_already_proposed_this_turn"};
-        if(Object.keys(args).sort().join(",")!=="reason,sectionSlug" ||
-           typeof args.sectionSlug!=="string"||!/^[a-z][a-z0-9_-]{0,63}$/.test(args.sectionSlug) ||
-           typeof args.reason!=="string"||args.reason.trim().length<5||args.reason.length>240)
-          return {error:"invalid_section_action_args"};
-        let proposed:ChatSectionProposal;
-        try {
-          proposed=await options.previewSectionAction!(
-            {kind:"delete",sectionSlug:args.sectionSlug,reason:args.reason});
-        }catch(error){return {error:sectionToolError(error)};}
-        if(!validSectionProposal(proposed)||proposed.kind!=="delete"||proposed.slug!==args.sectionSlug)
-          return {error:"invalid_section_preview"};
-        sectionPreview=proposed;
-        return {status:"awaiting_user_confirmation",saved:false,requiresUserTap:true,
-          action:"delete",name:proposed.name,parent:proposed.parentName,
-          recordCount:0,childCount:0};
-      },
-      verify:(v:Record<string,unknown>)=>v.status==="awaiting_user_confirmation"&&v.saved===false&&
-        v.requiresUserTap===true?"pending_confirmation" as const:"failed" as const,
-    }] : []),
-    { definition: { name: FACT_TOOL_NAME, description: FACT_TOOL_DESCRIPTION, parameters: factToolParameters(options.sections) }, effect: "proposal",
-      execute: async args => {
-        const proposal = factProposal(args, options.sections);
-        const key = fingerprint(proposal);
-        if (pending.has(key) && pending.get(key)) proposalIds.add(pending.get(key)!);
-        if (pending.has(key)) return { status: "awaiting_user_confirmation", saved: false, duplicate: true, ...(pending.get(key) ? { proposalId: pending.get(key) } : {}) };
-        const proposalId = options.propose(proposal);
-        pending.set(key, proposalId || undefined);
-        if (proposalId) proposalIds.add(proposalId);
-        options.diagnostic?.("memory.tool_draft", { name: FACT_TOOL_NAME });
-        return { status: "awaiting_user_confirmation", saved: false, ...(proposalId ? { proposalId } : {}) };
-      }, verify: r => r.status === "awaiting_user_confirmation" && r.saved === false ? "pending_confirmation" : "failed" },
+    ...proposals.section,
+    proposals.draft,
     { definition: TASK_STATE_TOOL, effect: "conversation", execute: async args => {
         state = { ...updateTaskInterpretation(state, args), webPreference: state.webPreference }; emit();
         return { status: "state_updated", personalMemorySaved: false };
