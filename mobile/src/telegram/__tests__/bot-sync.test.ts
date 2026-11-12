@@ -318,3 +318,15 @@ test("edited owner update is typed blocker",async()=>{
    reason:"edited",updateId:11,
  });
 });
+
+test("bot hidden HTTPS link is retained with url_only provenance",async()=>{
+ (fetchBotUpdates as jest.Mock).mockResolvedValueOnce([{
+   update_id:80,message:{...msg(80,"Читайте тут"),
+     entities:[{type:"text_link",offset:0,length:9,url:"https://example.com/lesson"}]},
+ }]);
+ await syncTelegramBotText("linked");
+ expect(saveMediaNote).toHaveBeenCalledWith("linked",expect.objectContaining({
+   body:"Читайте тут\n\nСсылки:\nhttps://example.com/lesson",
+   sourceUrl:"https://example.com/lesson",sourceCoverage:"url_only",
+ }),expect.any(Object));
+});
