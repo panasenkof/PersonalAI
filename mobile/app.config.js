@@ -50,7 +50,12 @@ module.exports = ({ config }) => {
   )) {
     throw new Error('Set BOTH valid PERSAI_TELEGRAM_API_ID and PERSAI_TELEGRAM_API_HASH or neither.');
   }
-  const bundledTelegram = telegramProvided
+  // Ordinary published APKs deliberately omit the shared identity: TDLib
+  // is not embedded in those builds. Include it only when an explicitly
+  // reviewed TDLib APK is staged, or in a developer build.
+  const includeTelegram = telegramProvided &&
+    (!androidCiRelease || process.env.TDLIB_EXPLICIT_STAGE === 'true');
+  const bundledTelegram = includeTelegram
     ? { apiId: Number(telegramId), apiHash: telegramHash.toLowerCase() } : undefined;
   const versionCodeRaw = process.env.PIA_ANDROID_VERSION_CODE;
   const versionCode = versionCodeRaw ? Number(versionCodeRaw) : undefined;
