@@ -25,6 +25,7 @@ import { photoTools } from "./photo-tools";
 import { articleTools } from "./article-tools";
 import { proposalTools } from "./proposal-tools";
 import { conversationTools } from "./conversation-tools";
+import { createTurnState } from "./turn-state";
 export type { ToolDefinition, ToolSpec } from "./types";
 const queryParameters = { type: "object", properties: { query: { type: "string" } }, required: ["query"], additionalProperties: false };
 const text = (v: unknown, cap = 600) => typeof v === "string" ? v.slice(0, cap) : "";
@@ -42,165 +43,32 @@ const sectionToolError = (error:unknown) => {
 
 /** All provider adapters advertise and execute the same catalog. No dynamic code loading. */
 export function createToolCatalog(options: DirectAgentOptions, sources: string[], notes: MemorySnippet[], initialUsed: UsedNote[]) {
-  const web = createWebTools(options, sources, notes);
-  const used = new Map(initialUsed.map(n => [n.id, n]));
-  // IDs/versions are admitted ONLY from verified current-turn memory readers.
-  // The model cannot invent a record ID and submit it directly to a move tool.
-  const moveHandles = new Map<string,number>();
-  function admitMoveHandle(n:{id:string;version?:number}) {
-    if(typeof n.id==="string" && /^[A-Za-z0-9:_-]{1,128}$/.test(n.id) &&
-       Number.isSafeInteger(n.version) && (n.version??0)>0)
-      moveHandles.set(n.id,n.version!);
-  }
-  notes.forEach(admitMoveHandle);
-  let movePreview:ChatMoveProposal|undefined;
-  let sectionPreview:ChatSectionProposal|undefined;
-  let contextCandidate:ContextCandidate|undefined;
-  let importTagsCandidate:string[]|undefined;
-  // Derived from this turn's ACL/version-checked reads; NEVER persisted as source truth.
-  const articleCoverage = createArticleReadCoverage();
-  const readNotes = new Set<string>();
-  // A model turn only keeps ACL-scoped handles returned by the existing local
-  // visual search. The bytes/vectors never go into LLM tools or TaskState.
-  const photoMatches: ChatMemoryRef[] = [];
-  let photoRecovery: "model" | "import" | "prepare" | undefined;
-  let photoLookups = 0;
-  let state = { ...beginTask(options.taskState, options.prompt), webPreference: webPreference(options) };
-  const emit = () => { options.onTaskState?.(state); };
-  const observe = (e: TaskEvidence) => { state = { ...recordEvidence(state, e), webPreference: state.webPreference }; emit(); };
-  const fingerprint = (p: { title: string; body: string; section?: string; newSection?: string; kind?: string; person?: string; date?: string }) => JSON.stringify([p.title, p.body, p.section, p.newSection, p.kind, p.person, p.date]);
-  const pending = new Map((options.pendingNotes || []).map(n => [fingerprint(n), n.id as string | undefined]));
-  const proposalIds = new Set<string>();
-  // 9T1: one request/turn uses a fixed local calendar anchor; never an extra agent runtime.
-  const articleClock = new Date();
-  let articlePages = 0;
-  const articleRequests = new Set<string>();
-  // Persist the same authorized filter+calendar window+cursor already used by
-  // the no-LLM chat picker. The LLM cannot invent the next-page state.
-  let persistedArticle: ChatArticlePage | undefined;
-  let articleFilterKey: string | undefined;
-  let mixedArticleFilters = false;
-  let usedSelectedArticleTool = false;
-  async function readArticleSelection(
-    intent: SavedArticleIntent, cursor?: {beforeCreatedAt:string;beforeId:string},
-  ): Promise<Record<string, unknown>> {
-    const key = JSON.stringify([intent.topic,intent.dateMode,intent.savedFrom,intent.savedBefore,
-      cursor?.beforeCreatedAt??null,cursor?.beforeId??null]);
-    if (articleRequests.has(key)) return { error:"article_page_already_requested" };
-    if (articlePages >= 3) return { error:"article_page_budget_exhausted",
-      hint:"Попроси пользователя «Показать ещё»: исходные тема, даты и курсор сохранятся в диалоге." };
-    articlePages++; articleRequests.add(key);
-    options.status?.("Выбираю сохранённые статьи");
-    const page = await options.selectArticles!(intent,cursor);
-    if (page.scope!=="standard_active_saved_links" || !Array.isArray(page.records) ||
-        !Number.isSafeInteger(page.count) || page.count<0 || typeof page.hasMore!=="boolean" ||
-        (page.hasMore && !page.nextCursor)) return { error:"invalid_article_reader_result" };
-    const filterKey=JSON.stringify([intent.topic,intent.dateMode,intent.savedFrom,intent.savedBefore]);
-    if (articleFilterKey !== undefined && articleFilterKey !== filterKey) mixedArticleFilters=true;
-    articleFilterKey=filterKey;
-    if (!mixedArticleFilters) {
-      persistedArticle={
-        kind:intent.topic==="ai" ? "saved_ai_links" : "saved_topic_links",
-        ...(intent.dateMode==="published" ? {dateMode:"published" as const} : {}),
-        ...(intent.topic==="ai" ? {} : {topic:intent.topic,queryTerms:intent.queryTerms}),
-        savedFrom:intent.savedFrom,savedBefore:intent.savedBefore,
-        startLocal:intent.startLocal,endLocal:intent.endLocal,
-        ...(page.nextCursor ? {nextCursor:page.nextCursor} : {}),
-        selected:[...(persistedArticle && articleFilterKey===filterKey ? persistedArticle.selected||[] :
-          options.articleContinuation && !persistedArticle &&
-          JSON.stringify([options.articleContinuation.topic||"ai",
-            options.articleContinuation.dateMode||"saved",
-            options.articleContinuation.savedFrom,
-            options.articleContinuation.savedBefore])===filterKey
-            ? options.articleContinuation.selected||[] : []),
-          ...page.records.map(n=>({id:n.id,version:n.version}))]
-          .filter((n,i,all)=>all.findIndex(m=>m.id===n.id)===i).slice(-24),
-      };
-    } else persistedArticle=undefined;
-    return {scope:page.scope,matchMode:page.matchMode,count:page.count,
-      records:page.records.slice(0,8).map(n=>({
-        id:n.id,version:n.version,title:n.title.slice(0,160),
-        section:n.section.slice(0,80),createdAt:n.createdAt,
-        ...(n.publicationDay ? {publicationDay:n.publicationDay} : {}),
-        ...(n.duplicateCount!==undefined ? {duplicateCount:n.duplicateCount} : {}),
-      })),
-      hasMore:page.hasMore,...(page.nextCursor ? {nextCursor:page.nextCursor} : {}),
-      ...(page.unknownPublicationCount!==undefined
-        ? {unknownPublicationCount:page.unknownPublicationCount} : {}),
-      selection:{topic:intent.topic,dateMode:intent.dateMode,fromLocal:intent.startLocal,
-        throughLocal:intent.endLocal,dateEvidence:intent.dateMode==="published"
-          ? "html_meta_source_claim" : "local_save_time"},
-      contentIncluded:false};
-  }
-
-  // Selection handles are already persisted by the encrypted conversation writer.
-  // Never accept a record ID supplied by the model for selection-specific tools.
-  const selectedArticleHandles = () => {
-    const selected=persistedArticle ? (persistedArticle.selected||[]) :
-      (options.articleSelection?.selected||[]);
-    if(!selected.length || selected.length>24 || selected.some(n=>!n ||
-        !/^[A-Za-z0-9:_-]{1,128}$/.test(n.id) ||
-        !Number.isSafeInteger(n.version) || n.version<1 ||
-        selected.filter(m=>m.id===n.id).length!==1)) return undefined;
-    return selected;
-  };
-  // Both batch selection and later chunks use the SAME canonical versioned reader
-  // and evidence contract. A chunk at the end is NOT proof earlier chunks were read.
-  const verifiedSelectedArticleRead = async (
-    handle:{id:string;version:number}, offset:number, budget:number,
-  ) => {
-    if(options.signal?.aborted)throw new Error("aborted");
-    const result=await options.read!(handle.id,handle.version,offset,budget);
-    if(options.signal?.aborted)throw new Error("aborted");
-    const evidence=result.evidence as Record<string,unknown>|undefined;
-    const content=result.content, total=result.totalChars;
-    const end=typeof content==="string" ? offset+content.length : -1;
-    if(result.id!==handle.id || result.revision!==handle.version ||
-        typeof result.title!=="string" || typeof content!=="string" ||
-        !Number.isSafeInteger(total) || Number(total)<0 ||
-        !Number.isSafeInteger(result.offset) || result.offset!==offset ||
-        offset>Number(total) || content.length>budget || end>Number(total) ||
-        (content.length===0 && Number(total)>0) ||
-        typeof result.hasMore!=="boolean" ||
-        result.hasMore!==(end<Number(total)) ||
-        (result.hasMore && (result.nextOffset!==end || end===offset)) ||
-        !evidence || evidence.recordId!==handle.id ||
-        evidence.recordVersion!==handle.version ||
-        evidence.startChar!==offset || evidence.endChar!==end ||
-        (evidence.coverage!=="complete"&&evidence.coverage!=="excerpt"))
-      throw new Error("invalid_article_read_evidence");
-    // Narrow unknown fields only AFTER the complete source/evidence contract passed.
-    const verified = result as typeof result & {
-      id:string;revision:number;title:string;content:string;offset:number;
-      totalChars:number;hasMore:boolean;nextOffset?:number;
-      evidence:Record<string,unknown>;
-    };
-    articleCoverage.record(handle,{offset:verified.offset,content:verified.content,
-      totalChars:verified.totalChars,hasMore:verified.hasMore,title:verified.title});
-    return verified;
-  };
+  const turn = createTurnState(options,sources,notes,initialUsed);
+  const {web,used,moveHandles,admitMoveHandle,articleCoverage,readNotes,photoMatches,
+    emit,observe,fingerprint,pending,proposalIds,articleClock,readArticleSelection,
+    selectedArticleHandles,verifiedSelectedArticleRead} = turn;
   const memory = memoryTools(options, {web,used,readNotes,admitMoveHandle}, text, queryParameters);
   const proposals = proposalTools(options, {
-    getMovePreview:()=>movePreview,setMovePreview:value=>{movePreview=value;},moveHandles,
-    getSectionPreview:()=>sectionPreview,setSectionPreview:value=>{sectionPreview=value;},
+    getMovePreview:()=>turn.movePreview,setMovePreview:value=>{turn.movePreview=value;},moveHandles,
+    getSectionPreview:()=>turn.sectionPreview,setSectionPreview:value=>{turn.sectionPreview=value;},
     sectionToolError,fingerprint,pending,proposalIds,
   });
   const conversations = conversationTools(options, {
-    getContextCandidate:()=>contextCandidate,
-    setContextCandidate:value=>{contextCandidate=value;},
-    getImportTagsCandidate:()=>importTagsCandidate,
-    setImportTagsCandidate:tags=>{importTagsCandidate=tags;},
-    get state(){return state;},
-    set state(next){state=next;},
+    getContextCandidate:()=>turn.contextCandidate,
+    setContextCandidate:value=>{turn.contextCandidate=value;},
+    getImportTagsCandidate:()=>turn.importTagsCandidate,
+    setImportTagsCandidate:tags=>{turn.importTagsCandidate=tags;},
+    get state(){return turn.state;},
+    set state(next){turn.state=next;},
     emit,
   });
   const specs: ToolSpec[] = [
     ...(options.contextClassificationEnabled ? [conversations.contextTool] : []),
     memory.search,
     ...photoTools(options, {
-      photoMatches, getLookups: () => photoLookups,
-      incrementLookups: () => { photoLookups++; },
-      setRecovery: reason => { photoRecovery = reason; },
+      photoMatches, getLookups: () => turn.photoLookups,
+      incrementLookups: () => { turn.photoLookups++; },
+      setRecovery: reason => { turn.photoRecovery = reason; },
     }),
     ...memory.read,
     ...sourceTools(options, text),
@@ -208,8 +76,8 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
     ...articleTools(options, {
       articleClock,readArticleSelection,selectedArticleHandles,verifiedSelectedArticleRead,
       articleCoverage,used,readNotes,
-      getMixedArticleFilters:()=>mixedArticleFilters,
-      markUsedSelectedArticleTool:()=>{usedSelectedArticleTool=true;},
+      getMixedArticleFilters:()=>turn.mixedArticleFilters,
+      markUsedSelectedArticleTool:()=>{turn.usedSelectedArticleTool=true;},
     }),
     ...proposals.move,
     // SAME canonical chat ToolSpec registry as memory search, note drafts and moves.
@@ -264,8 +132,8 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
     return { ...result, ...(outcome !== "failed" ? { outcome } : {}) };
   }
   function finish(): Pick<DirectResult, "taskState" | "proposalIds" | "articlePage" | "articleReadReport" | "photoAction" | "moveProposal" | "sectionProposal" | "contextCandidate" | "importTags"> {
-    state = { ...state, turnStatus: "answered" }; emit();
-    const selected = !mixedArticleFilters && usedSelectedArticleTool ? selectedArticleHandles() : undefined;
+    turn.state = { ...turn.state, turnStatus: "answered" }; emit();
+    const selected = !turn.mixedArticleFilters && turn.usedSelectedArticleTool ? selectedArticleHandles() : undefined;
     const checked = selected && articleCoverage.summary(selected);
     // This is a historic, read-only answer annotation. It is NOT promoted into
     // TaskState evidence and cannot authorize a future read or preserve source text.
@@ -286,15 +154,15 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
           }))} : {}),
       })),
     } : undefined;
-    return { taskState: state, proposalIds: [...proposalIds],
-      ...(persistedArticle ? {articlePage:persistedArticle} :
-        usedSelectedArticleTool && options.articleSelection ? {articlePage:options.articleSelection} : {}),
+    return { taskState: turn.state, proposalIds: [...proposalIds],
+      ...(turn.persistedArticle ? {articlePage:turn.persistedArticle} :
+        turn.usedSelectedArticleTool && options.articleSelection ? {articlePage:options.articleSelection} : {}),
       ...(articleReadReport ? {articleReadReport} : {}),
-      ...(!photoMatches.length && photoRecovery ? {photoAction:photoRecovery} : {}),
-      ...(movePreview ? {moveProposal:movePreview} : {}),
-      ...(sectionPreview ? {sectionProposal:sectionPreview} : {}),
-      ...(contextCandidate ? {contextCandidate} : {}),
-      ...(importTagsCandidate !== undefined ? {importTags:importTagsCandidate} : {}) };
+      ...(!photoMatches.length && turn.photoRecovery ? {photoAction:turn.photoRecovery} : {}),
+      ...(turn.movePreview ? {moveProposal:turn.movePreview} : {}),
+      ...(turn.sectionPreview ? {sectionProposal:turn.sectionPreview} : {}),
+      ...(turn.contextCandidate ? {contextCandidate:turn.contextCandidate} : {}),
+      ...(turn.importTagsCandidate !== undefined ? {importTags:turn.importTagsCandidate} : {}) };
   }
   const observeSources = (urls: string[]) => { if (urls.length) observe({ tool: "web_search", outcome: "found", subject: options.prompt.slice(0, 120), excerpt: urls.join("\n").slice(0, 600) }); };
   return { definitions: activeSpecs.map(s => s.definition), run, finish, observeSources,
