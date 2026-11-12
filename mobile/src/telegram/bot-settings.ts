@@ -28,7 +28,7 @@ export function validatePrivateChatId(value: string): string {
     throw new Error("invalid_telegram_private_chat_id");
   return value;
 }
-function checkedConfig(value: unknown): TelegramBotConfig | null {
+export function parseTelegramBotConfig(value: unknown): TelegramBotConfig | null {
   if (!value || typeof value !== "object") return null;
   try {
     const v = value as Partial<TelegramBotConfig>;
@@ -45,7 +45,7 @@ function checkedConfig(value: unknown): TelegramBotConfig | null {
 export async function loadTelegramBotConfig(profile: string): Promise<TelegramBotConfig | null> {
   const raw = await SecureStore.getItemAsync(key(profile));
   if (!raw) return null;
-  try { return checkedConfig(JSON.parse(raw)); } catch { return null; }
+  try { return parseTelegramBotConfig(JSON.parse(raw)); } catch { return null; }
 }
 export async function inspectTelegramBot(profile: string): Promise<{
   configured: boolean; username: string | null; paired: boolean; cursor: number;
@@ -59,7 +59,7 @@ export async function saveVerifiedBot(profile: string, token: string, identity: 
     token:validateBotToken(token),botId:checkedBotId(identity.id),
     username:identity.username,allowedChatId:null,cursor:0,
   };
-  if (!checkedConfig(parsed)) throw new Error("invalid_telegram_bot_identity");
+  if (!parseTelegramBotConfig(parsed)) throw new Error("invalid_telegram_bot_identity");
   await SecureStore.setItemAsync(key(profile),JSON.stringify(parsed),secretOptions);
 }
 export async function pairTelegramBot(profile: string, botId: number, chatId: string): Promise<void> {
@@ -80,4 +80,11 @@ export async function advanceTelegramBotCursor(profile: string, botId: number, c
 }
 export async function clearTelegramBot(profile:string):Promise<void> {
   await SecureStore.deleteItemAsync(key(profile));
+}
+
+/** Used only after the separately encrypted SQLCipher backup is validated. */
+export async function restoreTelegramBotConfig(profile:string,config:TelegramBotConfig):Promise<void>{
+  const validated=parseTelegramBotConfig(config);
+  if(!validated)throw new Error("backup_settings_invalid");
+  await SecureStore.setItemAsync(key(profile),JSON.stringify(validated),secretOptions);
 }

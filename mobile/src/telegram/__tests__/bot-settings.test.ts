@@ -2,6 +2,7 @@ import * as SecureStore from "expo-secure-store";
 import {
   advanceTelegramBotCursor,clearTelegramBot,inspectTelegramBot,loadTelegramBotConfig,
   pairTelegramBot,saveVerifiedBot,validateBotToken,validatePrivateChatId,
+  parseTelegramBotConfig,restoreTelegramBotConfig,
 } from "../bot-settings";
 jest.mock("expo-secure-store",()=>({
   WHEN_UNLOCKED_THIS_DEVICE_ONLY:"device-only",
@@ -44,4 +45,13 @@ test("damaged data and unsafe scope fail closed",async()=>{
   expect(await loadTelegramBotConfig("guest")).toBeNull();
   await expect(saveVerifiedBot("../bad",token,{id:1,username:"MyPersAIBot"})).rejects.toThrow("invalid_local_profile");
   await expect(saveVerifiedBot("guest",token,{id:1,username:"bad"})).rejects.toThrow("invalid_telegram_bot_identity");
+});
+
+test("portable restoration validates the same bot payload and preserves pairing/cursor",async()=>{
+ const snapshot={token,botId:456,username:"MyPersAIBot",allowedChatId:"12345",cursor:88};
+ expect(parseTelegramBotConfig(snapshot)).toEqual(snapshot);
+ await restoreTelegramBotConfig("guest",snapshot);
+ expect(await loadTelegramBotConfig("guest")).toEqual(snapshot);
+ await expect(restoreTelegramBotConfig("guest",{...snapshot,token:"bad"}))
+   .rejects.toThrow("backup_settings_invalid");
 });
