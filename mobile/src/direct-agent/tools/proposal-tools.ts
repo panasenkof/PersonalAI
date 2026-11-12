@@ -1,22 +1,12 @@
 import type { DirectAgentOptions } from "../engine";
-import type { NoteProposal } from "../fact-tool";
 import { FACT_TOOL_NAME, FACT_TOOL_DESCRIPTION, factToolParameters, factProposal } from "../fact-tool";
-import { validMoveProposal, type ChatMoveProposal } from "../move-proposal";
+import { validMoveProposal } from "../move-proposal";
 import { validSectionProposal, type ChatSectionProposal } from "../section-actions";
-import type { ToolSpec } from "./types";
+import { sectionToolError } from "./helpers";
+import type { ToolSpec, TurnState } from "./types";
 
 /** ARCH-2: all memory mutations remain proposals, never direct device writes. */
-export function proposalTools(options:DirectAgentOptions,scope:{
-  getMovePreview:()=>ChatMoveProposal|undefined;
-  setMovePreview:(value:ChatMoveProposal)=>void;
-  moveHandles:Map<string,number>;
-  getSectionPreview:()=>ChatSectionProposal|undefined;
-  setSectionPreview:(value:ChatSectionProposal)=>void;
-  sectionToolError:(error:unknown)=>string;
-  fingerprint:(proposal:NoteProposal)=>string;
-  pending:Map<string,string|undefined>;
-  proposalIds:Set<string>;
-}):{move:ToolSpec[];section:ToolSpec[];draft:ToolSpec}{
+export function proposalTools(options:DirectAgentOptions,turn:TurnState):{move:ToolSpec[];section:ToolSpec[];draft:ToolSpec}{
   const move:ToolSpec[]=[
     ...(options.previewMove && !options.skipLocalMemory ? [{
       definition: {name:"propose_move_local_note",
@@ -30,7 +20,7 @@ export function proposalTools(options:DirectAgentOptions,scope:{
           additionalProperties:false},
       },effect:"proposal" as const,
       execute:async(args:Record<string,unknown>)=>{
-        if(scope.getMovePreview())return {error:"move_preview_already_proposed_this_turn"};
+        if(turn.movePreview)return {error:"move_preview_already_proposed_this_turn"};
         const id=args.noteId, version=args.expectedVersion, to=args.targetSectionSlug, reason=args.reason;
         if(Object.keys(args).length!==4 ||
            typeof id!=="string"||!/^[A-Za-z0-9:_-]{1,128}$/.test(id) ||
@@ -38,7 +28,7 @@ export function proposalTools(options:DirectAgentOptions,scope:{
            typeof to!=="string"|| !/^[a-z0-9_-]{1,80}$/.test(to) ||
            typeof reason!=="string"||reason.trim().length<5||reason.length>240)
           return {error:"invalid_move_arguments"};
-        if(scope.moveHandles.get(id)!==version)
+        if(turn.moveHandles.get(id)!==version)
           return {error:"note_not_selected_for_move"};
         if(options.signal?.aborted)throw new Error("Запрос остановлен");
         options.status?.("Проверяю предложение переноса");
@@ -49,7 +39,7 @@ export function proposalTools(options:DirectAgentOptions,scope:{
         if(!validMoveProposal(proposed)||proposed.noteId!==id||
            proposed.expectedVersion!==version)
           return {error:"invalid_move_preview"};
-        scope.setMovePreview(proposed);
+        (turn.movePreview=proposed);
         return {status:"awaiting_user_confirmation",saved:false,
           noteId:proposed.noteId,version:proposed.expectedVersion,
           title:proposed.title,fromSection:proposed.fromName,toSection:proposed.toName,
@@ -71,7 +61,7 @@ export function proposalTools(options:DirectAgentOptions,scope:{
         },required:["name","parentSlug","reason"],additionalProperties:false}},
       effect:"proposal" as const,
       execute:async(args:Record<string,unknown>)=>{
-        if(scope.getSectionPreview())return {error:"section_action_already_proposed_this_turn"};
+        if(turn.sectionPreview)return {error:"section_action_already_proposed_this_turn"};
         const request={kind:"create",...args};
         if(Object.keys(args).sort().join(",")!=="name,parentSlug,reason" ||
            typeof args.name!=="string"||!args.name.trim()||args.name.length>80 ||
@@ -83,10 +73,10 @@ export function proposalTools(options:DirectAgentOptions,scope:{
         try {
           proposed=await options.previewSectionAction!(
             request as Parameters<NonNullable<DirectAgentOptions["previewSectionAction"]>>[0]);
-        }catch(error){return {error:scope.sectionToolError(error)};}
+        }catch(error){return {error:sectionToolError(error)};}
         if(!validSectionProposal(proposed)||proposed.kind!=="create"||proposed.name!==args.name.trim())
           return {error:"invalid_section_preview"};
-        scope.setSectionPreview(proposed);
+        (turn.sectionPreview=proposed);
         return {status:"awaiting_user_confirmation",saved:false,requiresUserTap:true,
           action:"create",name:proposed.name,parent:proposed.parentName};
       },
@@ -101,7 +91,7 @@ export function proposalTools(options:DirectAgentOptions,scope:{
         },required:["sectionSlug","reason"],additionalProperties:false}},
       effect:"proposal" as const,
       execute:async(args:Record<string,unknown>)=>{
-        if(scope.getSectionPreview())return {error:"section_action_already_proposed_this_turn"};
+        if(turn.sectionPreview)return {error:"section_action_already_proposed_this_turn"};
         if(Object.keys(args).sort().join(",")!=="reason,sectionSlug" ||
            typeof args.sectionSlug!=="string"||!/^[a-z][a-z0-9_-]{0,63}$/.test(args.sectionSlug) ||
            typeof args.reason!=="string"||args.reason.trim().length<5||args.reason.length>240)
@@ -110,10 +100,10 @@ export function proposalTools(options:DirectAgentOptions,scope:{
         try {
           proposed=await options.previewSectionAction!(
             {kind:"delete",sectionSlug:args.sectionSlug,reason:args.reason});
-        }catch(error){return {error:scope.sectionToolError(error)};}
+        }catch(error){return {error:sectionToolError(error)};}
         if(!validSectionProposal(proposed)||proposed.kind!=="delete"||proposed.slug!==args.sectionSlug)
           return {error:"invalid_section_preview"};
-        scope.setSectionPreview(proposed);
+        (turn.sectionPreview=proposed);
         return {status:"awaiting_user_confirmation",saved:false,requiresUserTap:true,
           action:"delete",name:proposed.name,parent:proposed.parentName,
           recordCount:0,childCount:0};
@@ -126,12 +116,12 @@ export function proposalTools(options:DirectAgentOptions,scope:{
     { definition: { name: FACT_TOOL_NAME, description: FACT_TOOL_DESCRIPTION, parameters: factToolParameters(options.sections) }, effect: "proposal",
       execute: async args => {
         const proposal = factProposal(args, options.sections);
-        const key = scope.fingerprint(proposal);
-        if (scope.pending.has(key) && scope.pending.get(key)) scope.proposalIds.add(scope.pending.get(key)!);
-        if (scope.pending.has(key)) return { status: "awaiting_user_confirmation", saved: false, duplicate: true, ...(scope.pending.get(key) ? { proposalId: scope.pending.get(key) } : {}) };
+        const key = turn.fingerprint(proposal);
+        if (turn.pending.has(key) && turn.pending.get(key)) turn.proposalIds.add(turn.pending.get(key)!);
+        if (turn.pending.has(key)) return { status: "awaiting_user_confirmation", saved: false, duplicate: true, ...(turn.pending.get(key) ? { proposalId: turn.pending.get(key) } : {}) };
         const proposalId = options.propose(proposal);
-        scope.pending.set(key, proposalId || undefined);
-        if (proposalId) scope.proposalIds.add(proposalId);
+        turn.pending.set(key, proposalId || undefined);
+        if (proposalId) turn.proposalIds.add(proposalId);
         options.diagnostic?.("memory.tool_draft", { name: FACT_TOOL_NAME });
         return { status: "awaiting_user_confirmation", saved: false, ...(proposalId ? { proposalId } : {}) };
       }, verify: r => r.status === "awaiting_user_confirmation" && r.saved === false ? "pending_confirmation" : "failed" },
