@@ -126,6 +126,11 @@ export function TelegramSavedImportCard({profile}:{profile:string}){
       {topics.map(topic=><NebulaAction key={topic.id} size="compact" icon="folder"
         label={(selectedTopic?.id===topic.id?"● ":"○ ")+topicLabel(topic)} disabled={busy} onPress={()=>chooseTopic(topic)}/>)}
     </View>:null}
+    <Text style={{color:t.muted,...nebulaTypography.label}}>
+      Сообщения, пропущенные раньше как медиа, можно догрузить: начните импорт
+      с новых сообщений и продолжайте историю — уже сохранённое не повторится
+      и не скачивается заново.
+    </Text>
     <NebulaAction icon="download" label={cursor==="0"?
       "Импортировать последние 20 сообщений":"Продолжить историю (до 20)"}
       disabled={busy||done} onPress={()=>void importPage()}/>
@@ -134,8 +139,8 @@ export function TelegramSavedImportCard({profile}:{profile:string}){
         setCursor("0");setDone(false);setResult(null);setError("");
       }} />:null}
     {result?<Text accessibilityLiveRegion="polite" style={{color:t.text,...nebulaTypography.label}}>
-      Сохранено: {result.saved}; уже были: {result.duplicates};
-      неподдержанных: {result.unsupported}; пустых: {result.empty}.
+      Сохранено: {result.saved} (с файлами: {result.withFiles}); уже были: {result.duplicates};
+      пропущено: {result.unsupported}, из них слишком больших: {result.tooLarge}; пустых: {result.empty}.
       {result.pendingAlbum?" Альбом из "+result.pendingAlbum+" элементов ожидает завершения. Повторите импорт позже — эти файлы не пропущены.":""}
       {done?" Больше сообщений в этом диапазоне нет.":""}
     </Text>:null}
