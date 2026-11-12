@@ -67,14 +67,14 @@ export async function initializeTelegramAccount(profile:string):Promise<Telegram
   const dbKey=await loadOrCreateTdlibDbKey(profile);
   unlocked();
   const version=Constants.expoConfig?.version ?? "0";
-  const appVersion=/^[0-9A-Za-z.\\-]{1,32}$/.test(version)?version:"0";
+  const appVersion=/^[0-9A-Za-z.-]{1,32}$/.test(version)?version:"0";
   return safeTelegramAccountState(await native.initialize(profile,credentials.apiId,credentials.apiHash,dbKey,appVersion));
 }
 /** Accept common phone formatting; the native boundary still validates E.164. */
 export function normalizeTelegramPhone(input:string):string{
-  const digits=input.replace(/[\\s()\\-.]/g,"");
-  if(/^8\\d{10}$/.test(digits))return "+7"+digits.slice(1);
-  if(/^\\d{7,15}$/.test(digits))return "+"+digits;
+  const digits=input.replace(/[\s().-]/g,"");
+  if(/^8\d{10}$/.test(digits))return "+7"+digits.slice(1);
+  if(/^\d{7,15}$/.test(digits))return "+"+digits;
   return digits;
 }
 type Step="phone"|"code"|"password"|"email"|"emailCode";
