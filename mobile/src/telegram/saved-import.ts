@@ -1,5 +1,5 @@
 import {localMemorySessionUnlocked} from "../local-memory/storage";
-import {saveMediaNote,MAX_TOTAL_ORIGINAL_BYTES} from "../media/attachments";
+import {saveMediaNote,MAX_TOTAL_ORIGINAL_BYTES,telegramSavedAlreadyImported} from "../media/attachments";
 import {scheduleVectors} from "../media/vector-runner";
 import {autoIndexNotePhotos83} from "../media/auto-index-note-photos";
 import {readSavedMessagesPage,type SavedMessagePreview} from "./saved-messages";
@@ -109,6 +109,9 @@ export async function importSavedTextPage(profile:string,cursor="0",
       unlocked(signal);
       if(unit.kind==="album"){
         const oldestFirst=[...unit.messages].reverse();
+        const albumIds=oldestFirst.map(v=>v.id);
+        if(await telegramSavedAlreadyImported(profile,page.selfChatId,albumIds[0],
+          {albumId:unit.albumId,messageIds:albumIds})) {duplicates++;continue;}
         const staged:SavedOriginal[]=[];
         let bytes=0;
         try{
@@ -162,6 +165,10 @@ export async function importSavedTextPage(profile:string,cursor="0",
       if(!textOnly&&!originalRequested){unsupported++;continue;}
       const body=item.text.trim();
       if(textOnly&&!body){empty++;continue;}
+      // Replays must be checked before downloading originals, not after.
+      if(await telegramSavedAlreadyImported(profile,page.selfChatId,item.id)){
+        duplicates++;continue;
+      }
       const original=originalRequested
         ?await downloadSavedOriginal(profile,page.selfChatId,item,signal):null;
       try{
