@@ -18,9 +18,10 @@ export function TelegramImportTargetPicker({profile,channel}:{
  useEffect(()=>{
    let live=true;
    setCurrent("");setChoosing(false);setOptions([]);setError("");
-   void loadTelegramImportTarget(profile,channel).then(target=>{
-     if(live)setCurrent(target?.collectionId||"");
-   }).catch(()=>{if(live)setError("Не удалось прочитать выбранный раздел.");});
+   void Promise.all([loadTelegramImportTarget(profile,channel),telegramTargetOptions(profile)])
+     .then(([target,all])=>{
+       if(live){setCurrent(target?.collectionId||"");setOptions(all);}
+     }).catch(()=>{if(live)setError("Не удалось прочитать выбранный раздел.");});
    return()=>{live=false;};
  },[profile,channel]);
  const name=options.find(o=>o.id===current)?.name||"Входящие (закрыто от помощника)";

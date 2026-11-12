@@ -10,7 +10,7 @@ import {
 } from "./bot-settings";
 import {syncTelegramBotText} from "./bot-sync";
 import {TelegramImportTargetPicker} from "./TelegramImportTargetPicker";
-import {loadTelegramImportTarget} from "./import-target";
+import {loadTelegramTargetForWrite} from "./import-target";
 
 /** Explicit pairing and text-only import; no bot token, message or chat history in UI logs. */
 export function TelegramBotCard({profile}:{profile:string}){

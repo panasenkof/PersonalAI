@@ -35,3 +35,12 @@ export async function chooseTelegramImportTarget(profile:string,channel:Telegram
   if(id)await requireTelegramTarget(profile,{collectionId:id});
   await saveTelegramTargetId(profile,channel,id);
 }
+
+// Used only at a write boundary: do not silently reroute a previously selected
+// standard section into Inbox when its ACL has changed.
+export async function loadTelegramTargetForWrite(profile:string,channel:TelegramImportChannel):
+ Promise<TelegramImportTarget|undefined>{
+  const id=await loadTelegramTargetId(profile,channel);
+  if(!id)return undefined;
+  return requireTelegramTarget(profile,{collectionId:id}).then(()=>({collectionId:id}));
+}

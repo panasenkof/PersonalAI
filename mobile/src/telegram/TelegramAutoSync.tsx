@@ -11,7 +11,7 @@ import {loadTelegramSyncMode,wasTelegramAuthorized,markTelegramAuthorized,
 import {loadTelegramBotConfig} from "./bot-settings";
 import {syncTelegramBotText} from "./bot-sync";
 import {syncNewSavedText} from "./saved-import";
-import {loadTelegramImportTarget} from "./import-target";
+import {loadTelegramTargetForWrite} from "./import-target";
 
 /** Single attempt per app process/profile after AppLock unlock. No daemon or timer.
  * TDLib only resumes an account whose device-bound encrypted database key

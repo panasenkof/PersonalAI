@@ -7,7 +7,7 @@ import {onLocalMemorySessionChange} from "../local-memory/storage";
 import {importSavedTextPage,type SavedTextImportResult} from "./saved-import";
 import {listSavedTopics,type TelegramSavedTopic} from "./saved-topics";
 import {TelegramImportTargetPicker} from "./TelegramImportTargetPicker";
-import {loadTelegramImportTarget} from "./import-target";
+import {loadTelegramTargetForWrite} from "./import-target";
 
 /** Explicit local import, one page at a time. Does not reimplement the note editor. */
 export function TelegramSavedImportCard({profile}:{profile:string}){
