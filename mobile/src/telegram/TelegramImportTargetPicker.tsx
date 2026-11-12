@@ -9,8 +9,8 @@ import {
 } from "./import-target";
 import type {TelegramImportChannel} from "./settings";
 
-export function TelegramImportTargetPicker({profile,channel}:{
- profile:string;channel:TelegramImportChannel;
+export function TelegramImportTargetPicker({profile,channel,disabled=false}:{
+ profile:string;channel:TelegramImportChannel;disabled?:boolean;
 }){
  const t=useTheme();
  const [current,setCurrent]=useState(""),[options,setOptions]=useState<TelegramTargetOption[]>([]);
@@ -26,6 +26,7 @@ export function TelegramImportTargetPicker({profile,channel}:{
  },[profile,channel]);
  const name=options.find(o=>o.id===current)?.name||"Входящие (закрыто от помощника)";
  async function open(){
+   if(disabled)return;
    setBusy(true);setError("");
    try{
      const next=await telegramTargetOptions(profile);
@@ -34,6 +35,7 @@ export function TelegramImportTargetPicker({profile,channel}:{
    finally{setBusy(false);}
  }
  async function choose(id:string){
+   if(disabled)return;
    setBusy(true);setError("");
    try{
      await chooseTelegramImportTarget(profile,channel,id);
@@ -48,11 +50,11 @@ export function TelegramImportTargetPicker({profile,channel}:{
    {current?<Text style={{color:t.muted,...nebulaTypography.label}}>
      Записи из этого раздела помощник может передавать выбранной модели при ответе.
    </Text>:null}
-   <NebulaAction label={choosing?"Скрыть разделы":"Изменить"} size="compact" disabled={busy}
+   <NebulaAction label={choosing?"Скрыть разделы":"Изменить"} size="compact" disabled={busy||disabled}
      onPress={()=>choosing?setChoosing(false):void open()}/>
    {choosing?<View style={{gap:nebulaSpacing.xs}}>
      <NebulaAction label={(current===""?"● ":"○ ")+"Входящие (закрыто от помощника)"}
-       size="compact" disabled={busy} onPress={()=>void choose("")}/>
+       size="compact" disabled={busy||disabled} onPress={()=>void choose("")}/>
      {options.map(o=><NebulaAction key={o.id} size="compact"
        label={(current===o.id?"● ":"○ ")+o.name}
        disabled={busy} onPress={()=>void choose(o.id)}/>)}

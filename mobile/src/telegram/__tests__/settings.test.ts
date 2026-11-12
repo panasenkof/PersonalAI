@@ -107,3 +107,29 @@ test("automatic Saved watermark is profile-scoped, guarded and device-only",asyn
   await saveLastTelegramAutoSync("guest",result);
   expect(await loadLastTelegramAutoSync("guest")).toEqual(result);
 });
+
+test("TG-7 history checkpoint is profile-scoped, device-only, validated and cancellable",async()=>{
+  const {loadSavedHistoryCheckpoint,saveSavedHistoryCheckpoint,
+    clearSavedHistoryCheckpoint,validSavedHistoryCheckpoint}=require("../settings");
+  const checkpoint={
+    version:1,cursor:"123",topicId:"-100500",targetId:"abc-12",selfChatId:"9876",
+    pages:2,processed:40,saved:30,duplicates:5,unsupported:4,empty:1,
+    withFiles:10,tooLarge:2,
+  };
+  expect(validSavedHistoryCheckpoint(checkpoint)).toBe(true);
+  expect(await loadSavedHistoryCheckpoint("guest")).toBeNull();
+  await saveSavedHistoryCheckpoint("guest",checkpoint);
+  expect(await loadSavedHistoryCheckpoint("guest")).toEqual(checkpoint);
+  expect(await loadSavedHistoryCheckpoint("another")).toBeNull();
+  expect(SecureStore.setItemAsync).toHaveBeenCalledWith(
+    "pia.telegram.saved.history-cursor.v1.guest",JSON.stringify(checkpoint),
+    {keychainAccessible:"device-only"});
+  await expect(saveSavedHistoryCheckpoint("guest",{...checkpoint,cursor:"1;DROP"}))
+    .rejects.toThrow("telegram_history_checkpoint_invalid");
+  await expect(saveSavedHistoryCheckpoint("guest",{...checkpoint,pages:-1}))
+    .rejects.toThrow("telegram_history_checkpoint_invalid");
+  mockStore.set("pia.telegram.saved.history-cursor.v1.guest",'{"version":1,"cursor":"bad"}');
+  expect(await loadSavedHistoryCheckpoint("guest")).toBeNull();
+  await clearSavedHistoryCheckpoint("guest");
+  expect(await loadSavedHistoryCheckpoint("guest")).toBeNull();
+});
