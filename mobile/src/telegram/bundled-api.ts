@@ -12,7 +12,7 @@ export function bundledTelegramApiCredentials():TelegramApiCredentials|null{
   const raw:unknown=Constants.expoConfig?.extra?.persaiTelegramApi;
   if(!raw||typeof raw!=="object"||Array.isArray(raw))return null;
   const value=raw as Record<string,unknown>;
-  if(!Number.isSafeInteger(value.apiId)||typeof value.apiHash!=="string")return null;
+  if(typeof value.apiId!=="number"||!Number.isSafeInteger(value.apiId)||typeof value.apiHash!=="string")return null;
   try{
     return validateTelegramApiCredentials(String(value.apiId),value.apiHash);
   }catch{return null;}
