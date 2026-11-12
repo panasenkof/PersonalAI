@@ -90,3 +90,20 @@ test("explicit authorization marker is device-only and cleared by logout",async(
   await clearTelegramAuthorized("guest");
   expect(await wasTelegramAuthorized("guest")).toBe(false);
 });
+
+
+// The sync watermark and last outcome never include account credentials.
+test("automatic Saved watermark is profile-scoped, guarded and device-only",async()=>{
+  const {loadSavedWatermark,saveSavedWatermark,loadLastTelegramAutoSync,saveLastTelegramAutoSync}
+    =require("../settings");
+  expect(await loadSavedWatermark("guest")).toBeNull();
+  await saveSavedWatermark("guest",{selfChatId:"12345",maxMessageId:"500"});
+  expect(await loadSavedWatermark("guest")).toEqual({selfChatId:"12345",maxMessageId:"500"});
+  expect(await loadSavedWatermark("other")).toBeNull();
+  await expect(saveSavedWatermark("guest",{selfChatId:"X",maxMessageId:"500"}))
+    .rejects.toThrow("telegram_saved_watermark_invalid");
+  const result={at:"2026-11-12T10:00:00.000Z",saved:2,duplicates:0,unsupported:1,gap:false,
+    botImported:3,botSkipped:0,error:""};
+  await saveLastTelegramAutoSync("guest",result);
+  expect(await loadLastTelegramAutoSync("guest")).toEqual(result);
+});

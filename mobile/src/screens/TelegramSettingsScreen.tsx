@@ -9,13 +9,15 @@ import {NebulaAction, NebulaSection} from "../design/nebula/components";
 import {nebulaRadii, nebulaSpacing, nebulaTypography} from "../design/nebula/tokens";
 import {
   clearTelegramApiCredentials, inspectTelegramApiCredentials, loadTelegramSyncMode,
-  saveTelegramApiCredentials, saveTelegramSyncMode, type TelegramSyncMode,
+  saveTelegramApiCredentials, saveTelegramSyncMode, loadLastTelegramAutoSync,
+  type TelegramAutoSyncResult, type TelegramSyncMode,
 } from "../telegram/settings";
 
 /** Profile-scoped Telegram settings. Connection status is owned by TDLib, not saved API parameters. */
 export function TelegramSettingsScreen() {
   const profile = useProfile(), theme = useTheme(), insets = useSafeAreaInsets();
   const [mode, setMode] = useState<TelegramSyncMode>("manual");
+  const [lastSync,setLastSync]=useState<TelegramAutoSyncResult|null>(null);
   const [apiId, setApiId] = useState(""), [apiHash, setApiHash] = useState("");
   const [configured, setConfigured] = useState(false);
   const [ready, setReady] = useState(false), [busy, setBusy] = useState(false);
@@ -26,10 +28,10 @@ export function TelegramSettingsScreen() {
   useEffect(() => {
     const version = ++live.current;
     setReady(false); setModeError("");setApiError("");setModeNotice("");setApiNotice("");setConfirmClear(false); setApiHash("");
-    void Promise.all([loadTelegramSyncMode(profile), inspectTelegramApiCredentials(profile)])
-      .then(([value, info]) => {
+    void Promise.all([loadTelegramSyncMode(profile), inspectTelegramApiCredentials(profile),loadLastTelegramAutoSync(profile)])
+      .then(([value, info, last]) => {
         if (version !== live.current) return;
-        setMode(value); setConfigured(info.configured); setApiId(info.apiId ? String(info.apiId) : "");
+        setMode(value);setLastSync(last); setConfigured(info.configured); setApiId(info.apiId ? String(info.apiId) : "");
       }).catch(() => {
         if (version === live.current) setApiError("Не удалось прочитать защищённые настройки.");
       }).finally(() => {if (version === live.current) setReady(true);});
@@ -86,8 +88,8 @@ export function TelegramSettingsScreen() {
         Настраивается отдельно от подключения. По умолчанию — вручную.
         При запуске — после разблокировки PersAI. Для синхронизации «Избранного»
         нужен авторизованный аккаунт Telegram, резервный бот работает независимо.
-        Автоматически проверяются до 20 последних текстовых сообщений;
-        старую историю и оригиналы файлов можно импортировать вручную.
+        При запуске PersAI импортируются новые текстовые сообщения «Избранного»
+        с прошлого раза, не более 100. Файлы импортируются вручную.
       </Text>
       {([["manual", "Вручную"], ["on_open", "При каждом запуске PersAI"]] as const).map(([value, label]) =>
         <NebulaAction key={value} accessibilityLabel={label}
@@ -95,6 +97,16 @@ export function TelegramSettingsScreen() {
           disabled={disabled} onPress={() => void choose(value)} />)}
       {modeError?<Text accessibilityRole="alert" style={{color:theme.err}}>{modeError}</Text>:null}
       {modeNotice?<Text accessibilityLiveRegion="polite" style={{color:theme.ok}}>{modeNotice}</Text>:null}
+      {lastSync?<Text style={{color:theme.muted,...nebulaTypography.label}}>
+        Последняя синхронизация при запуске: {new Date(lastSync.at).toLocaleString("ru-RU")}
+        {" — сохранено "+lastSync.saved+", уже были "+lastSync.duplicates+
+          ", медиа пропущено "+lastSync.unsupported+"."}
+        {lastSync.unsupported>0?" Сообщений с файлами пропущено: "+lastSync.unsupported+
+          " — импортируйте их вручную кнопкой ниже.":""}
+        {lastSync.gap?" Новых сообщений было больше 100. Более старые импортируйте вручную кнопкой ниже.":""}
+        {lastSync.error?" Не удалось: "+(lastSync.error==="telegram_app_locked"?
+          "приложение заблокировано":lastSync.error==="network"?"ошибка сети":"ошибка Telegram")+".":""}
+      </Text>:null}
     </NebulaSection>
     <NebulaSection title="Аккаунт Telegram">
       <Text style={{color: theme.muted, ...nebulaTypography.label}}>

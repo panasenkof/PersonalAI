@@ -6,12 +6,15 @@ import {readSavedTopicPage,safeTopicId} from "./saved-topics";
 import {downloadSavedOriginal,downloadSavedAlbumOriginal,releaseSavedOriginal,
   supportsSavedOriginal,type SavedOriginal} from "./saved-original";
 import {planSavedAlbum,safeSavedAlbumId} from "./saved-album-plan";
+import {loadSavedWatermark,saveSavedWatermark} from "./settings";
 
 export type SavedTextImportResult={
   saved:number; duplicates:number; unsupported:number; empty:number;
   nextCursor:string; selfChatId:string; pendingAlbum?:number;
+  maxMessageId:string;minMessageId:string;
 };
-const running=new Set<string>();
+const running=new Map<string,Promise<void>>();
+const waiting=new Set<string>();
 function unlocked(signal?:AbortSignal){
   if(signal?.aborted)throw new Error("telegram_saved_import_cancelled");
   if(!localMemorySessionUnlocked())throw new Error("telegram_app_locked");
@@ -60,8 +63,16 @@ export async function importSavedTextPage(profile:string,cursor="0",
     throw new Error("telegram_saved_topic_request_invalid");
   if(mediaPolicy!=="text-only"&&mediaPolicy!=="supported-originals")
     throw new Error("telegram_saved_import_policy_invalid");
-  if(running.has(profile))throw new Error("telegram_saved_import_running");
-  running.add(profile);
+  const previous=running.get(profile);
+  if(previous){
+    if(waiting.has(profile))throw new Error("telegram_saved_import_running");
+    waiting.add(profile);
+    try{await previous;unlocked(signal);}
+    finally{waiting.delete(profile);}
+  }
+  let release!:()=>void;
+  const gate=new Promise<void>(resolve=>{release=resolve;});
+  running.set(profile,gate);
   try{
     const page=await getPage(profile,cursor,topicId);
     unlocked(signal);
@@ -170,6 +181,42 @@ export async function importSavedTextPage(profile:string,cursor="0",
     unlocked(signal);
     if(saved)scheduleVectors(profile);
     return {saved,duplicates,unsupported,empty,nextCursor:safeNextCursor,
+      maxMessageId:messages[0]?.id||"",minMessageId:messages[messages.length-1]?.id||"",
       selfChatId:page.selfChatId,...(pendingAlbum?{pendingAlbum}:{})};
-  }finally{running.delete(profile);}
+  }finally{
+    if(running.get(profile)===gate)running.delete(profile);
+    release();
+  }
+}
+
+/** Import up to five pages (100 text messages) until the previous watermark.
+ * The watermark only advances after every attempted page was safely written. */
+export async function syncNewSavedText(profile:string,signal?:AbortSignal){
+  unlocked(signal);
+  const watermark=await loadSavedWatermark(profile);
+  let cursor="0",selfChatId="",top="",saved=0,duplicates=0,unsupported=0,empty=0;
+  let reached=false;
+  for(let pages=0;pages<5;pages++){
+    unlocked(signal);
+    const page=await importSavedTextPage(profile,cursor,signal,undefined,"text-only");
+    unlocked(signal);
+    if(pages===0){
+      top=page.maxMessageId;
+      selfChatId=page.selfChatId;
+    }else if(page.selfChatId!==selfChatId){
+      throw new Error("telegram_saved_account_changed");
+    }
+    saved+=page.saved;duplicates+=page.duplicates;unsupported+=page.unsupported;empty+=page.empty;
+    if(watermark&&page.selfChatId===watermark.selfChatId&&page.minMessageId&&
+      Number(page.minMessageId)<=Number(watermark.maxMessageId)){
+      reached=true;break;
+    }
+    if(!page.nextCursor||page.nextCursor===cursor||!page.maxMessageId){
+      reached=true;break;
+    }
+    cursor=page.nextCursor;
+  }
+  unlocked(signal);
+  if(top)await saveSavedWatermark(profile,{selfChatId,maxMessageId:top});
+  return {saved,duplicates,unsupported,empty,gap:!reached};
 }

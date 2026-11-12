@@ -118,3 +118,49 @@ export async function clearTelegramAuthorized(profile:string):Promise<void>{
 export async function wasTelegramAuthorized(profile:string):Promise<boolean>{
   return await SecureStore.getItemAsync(authorizedKey(profile))==="1";
 }
+
+
+// Telegram automatic sync cursors/results are device-local and never backed up.
+const savedWatermarkKey=(p:string)=>"pia.telegram.saved.watermark.v1."+checked(p);
+const lastAutoSyncKey=(p:string)=>"pia.telegram.autosync.last.v1."+checked(p);
+export type SavedWatermark={selfChatId:string;maxMessageId:string};
+export type TelegramAutoSyncResult={
+  at:string;saved:number;duplicates:number;unsupported:number;gap:boolean;
+  botImported:number;botSkipped:number;error:""|"telegram_app_locked"|"network"|"other";
+};
+const validTelegramMessageId=(v:unknown):v is string=>
+  typeof v==="string"&&/^[1-9][0-9]{0,15}$/.test(v)&&Number.isSafeInteger(Number(v));
+const validCounter=(v:unknown):v is number=>typeof v==="number"&&
+  Number.isSafeInteger(v)&&v>=0&&v<=1000000;
+export async function loadSavedWatermark(profile:string):Promise<SavedWatermark|null>{
+  const raw=await SecureStore.getItemAsync(savedWatermarkKey(profile));
+  if(!raw)return null;
+  try{
+    const v=JSON.parse(raw) as SavedWatermark;
+    return validTelegramMessageId(v.selfChatId)&&validTelegramMessageId(v.maxMessageId)?v:null;
+  }catch{return null;}
+}
+export async function saveSavedWatermark(profile:string,value:SavedWatermark):Promise<void>{
+  if(!validTelegramMessageId(value.selfChatId)||!validTelegramMessageId(value.maxMessageId))
+    throw new Error("telegram_saved_watermark_invalid");
+  await SecureStore.setItemAsync(savedWatermarkKey(profile),JSON.stringify(value),{
+    keychainAccessible:SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+  });
+}
+export async function loadLastTelegramAutoSync(profile:string):Promise<TelegramAutoSyncResult|null>{
+  const raw=await SecureStore.getItemAsync(lastAutoSyncKey(profile));
+  if(!raw)return null;
+  try{
+    const v=JSON.parse(raw) as TelegramAutoSyncResult;
+    if(!v||typeof v.at!=="string"||!Number.isFinite(Date.parse(v.at))||
+      !validCounter(v.saved)||!validCounter(v.duplicates)||!validCounter(v.unsupported)||
+      !validCounter(v.botImported)||!validCounter(v.botSkipped)||typeof v.gap!=="boolean"||
+      !["","telegram_app_locked","network","other"].includes(v.error))return null;
+    return v;
+  }catch{return null;}
+}
+export async function saveLastTelegramAutoSync(profile:string,value:TelegramAutoSyncResult):Promise<void>{
+  await SecureStore.setItemAsync(lastAutoSyncKey(profile),JSON.stringify(value),{
+    keychainAccessible:SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+  });
+}

@@ -36,6 +36,7 @@ beforeEach(()=>{
 test("imports newest self-chat text using existing canonical writer and immutable source IDs",async()=>{
   expect(await importSavedTextPage("guest")).toEqual({
     saved:2,duplicates:0,unsupported:0,empty:0,nextCursor:"49",selfChatId:"12345",
+    maxMessageId:"50",minMessageId:"49",
   });
   expect(readSavedMessagesPage).toHaveBeenCalledWith("guest","0",20);
   expect(saveMediaNote).toHaveBeenCalledTimes(2);
@@ -93,14 +94,16 @@ test("AppLock after network read prevents saving",async()=>{
   await expect(importSavedTextPage("guest")).rejects.toThrow("telegram_app_locked");
   expect(saveMediaNote).not.toHaveBeenCalled();
 });
-test("parallel import for same profile is rejected rather than racing DB cursor",async()=>{
+test("one waiting import follows the active read without racing DB cursor",async()=>{
   let release:(value:any)=>void=()=>{};
   (readSavedMessagesPage as jest.Mock).mockImplementationOnce(
     ()=>new Promise(resolve=>{release=resolve;}));
   const first=importSavedTextPage("guest");
-  await expect(importSavedTextPage("guest")).rejects.toThrow("telegram_saved_import_running");
+  const second=importSavedTextPage("guest");
   release({selfChatId:"12345",messages:[],nextCursor:""});
   expect(await first).toMatchObject({saved:0});
+  expect(await second).toMatchObject({saved:2});
+  expect(readSavedMessagesPage).toHaveBeenCalledTimes(2);
 });
 test("cancelled run fails without writing source data",async()=>{
   const controller=new AbortController();controller.abort();

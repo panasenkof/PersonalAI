@@ -3,11 +3,11 @@ import {render,waitFor} from "@testing-library/react-native";
 import {TelegramAutoSync,resetTelegramAutoSyncForTests} from "../TelegramAutoSync";
 import {loadTelegramSyncMode,wasTelegramAuthorized} from "../settings";
 import {tdlibAvailable,initializeTelegramAccount,observeTelegramAccountState} from "../account";
-import {importSavedTextPage} from "../saved-import";
+import {syncNewSavedText} from "../saved-import";
 import {loadTelegramBotConfig} from "../bot-settings";
 import {syncTelegramBotText} from "../bot-sync";
 import {localMemorySessionUnlocked} from "../../local-memory/storage";
-jest.mock("../settings",()=>({loadTelegramSyncMode:jest.fn(),wasTelegramAuthorized:jest.fn(),markTelegramAuthorized:jest.fn(async()=>{})}));
+jest.mock("../settings",()=>({loadTelegramSyncMode:jest.fn(),wasTelegramAuthorized:jest.fn(),markTelegramAuthorized:jest.fn(async()=>{}),saveLastTelegramAutoSync:jest.fn(async()=>{})}));
 jest.mock("../bot-settings",()=>({loadTelegramBotConfig:jest.fn()}));
 jest.mock("../bot-sync",()=>({syncTelegramBotText:jest.fn()}));
 jest.mock("../../local-memory/storage",()=>({localMemorySessionUnlocked:jest.fn(),onLocalMemorySessionChange:jest.fn(()=>()=>{})}));
@@ -16,7 +16,7 @@ jest.mock("../account",()=>({
  tdlibAvailable:jest.fn(),initializeTelegramAccount:jest.fn(),
  observeTelegramAccountState:jest.fn(),
 }));
-jest.mock("../saved-import",()=>({importSavedTextPage:jest.fn()}));
+jest.mock("../saved-import",()=>({syncNewSavedText:jest.fn()}));
 jest.mock("../../profile/ProfileContext",()=>({useProfile:()=> "guest"}));
 const mockVisibility={current:true};
 jest.mock("../../security/visibility",()=>({
@@ -32,7 +32,7 @@ beforeEach(()=>{
   (wasTelegramAuthorized as jest.Mock).mockResolvedValue(false);
   (initializeTelegramAccount as jest.Mock).mockResolvedValue("starting");
   (observeTelegramAccountState as jest.Mock).mockReturnValue(()=>{});
-  (importSavedTextPage as jest.Mock).mockResolvedValue({saved:0,duplicates:0,unsupported:0,empty:0,nextCursor:"",selfChatId:"12345"});
+  (syncNewSavedText as jest.Mock).mockResolvedValue({saved:0,duplicates:0,unsupported:0,empty:0,gap:false});
 });
 test("explicit on_open sync starts once after unlock, not on rerender",async()=>{
   const ui=render(<TelegramAutoSync/>);
@@ -68,12 +68,12 @@ test("on_open with a previously started TDLib session imports one bounded accoun
   (wasTelegramAuthorized as jest.Mock).mockResolvedValue(true);
   (initializeTelegramAccount as jest.Mock).mockResolvedValue("authorizationStateReady");
   const ui=render(<TelegramAutoSync/>);
-  await waitFor(()=>expect(importSavedTextPage).toHaveBeenCalledTimes(1));
+  await waitFor(()=>expect(syncNewSavedText).toHaveBeenCalledTimes(1));
   expect(initializeTelegramAccount).toHaveBeenCalledWith("guest");
-  expect(importSavedTextPage).toHaveBeenCalledWith("guest","0",expect.any(Object));
+  expect(syncNewSavedText).toHaveBeenCalledWith("guest",expect.any(Object));
   expect(syncTelegramBotText).toHaveBeenCalledTimes(1);
   ui.rerender(<TelegramAutoSync/>);
-  expect(importSavedTextPage).toHaveBeenCalledTimes(1);
+  expect(syncNewSavedText).toHaveBeenCalledTimes(1);
 });
 test("on_open does not silently create a TDLib session for an account never connected",async()=>{
   (tdlibAvailable as jest.Mock).mockReturnValue(true);
@@ -81,7 +81,7 @@ test("on_open does not silently create a TDLib session for an account never conn
   render(<TelegramAutoSync/>);
   await waitFor(()=>expect(wasTelegramAuthorized).toHaveBeenCalledWith("guest"));
   expect(initializeTelegramAccount).not.toHaveBeenCalled();
-  expect(importSavedTextPage).not.toHaveBeenCalled();
+  expect(syncNewSavedText).not.toHaveBeenCalled();
 });
 test("TDLib auth must reach ready state before account import (never import during code/2FA)",async()=>{
   (tdlibAvailable as jest.Mock).mockReturnValue(true);
@@ -91,11 +91,11 @@ test("TDLib auth must reach ready state before account import (never import duri
   (observeTelegramAccountState as jest.Mock).mockImplementation(fn=>{update=fn;return ()=>{};});
   render(<TelegramAutoSync/>);
   await waitFor(()=>expect(initializeTelegramAccount).toHaveBeenCalledWith("guest"));
-  expect(importSavedTextPage).not.toHaveBeenCalled();
+  expect(syncNewSavedText).not.toHaveBeenCalled();
   update("authorizationStateReady");
-  await waitFor(()=>expect(importSavedTextPage).toHaveBeenCalledTimes(1));
+  await waitFor(()=>expect(syncNewSavedText).toHaveBeenCalledTimes(1));
   update("authorizationStateReady");
-  expect(importSavedTextPage).toHaveBeenCalledTimes(1);
+  expect(syncNewSavedText).toHaveBeenCalledTimes(1);
 });
 test("manual mode starts neither account TDLib nor bot channel even if account key exists",async()=>{
   (loadTelegramSyncMode as jest.Mock).mockResolvedValue("manual");
@@ -112,5 +112,5 @@ test("bot failure does not suppress account channel, and both are gated independ
   (initializeTelegramAccount as jest.Mock).mockResolvedValue("authorizationStateReady");
   (syncTelegramBotText as jest.Mock).mockRejectedValueOnce(new Error("bot unavailable"));
   render(<TelegramAutoSync/>);
-  await waitFor(()=>expect(importSavedTextPage).toHaveBeenCalledTimes(1));
+  await waitFor(()=>expect(syncNewSavedText).toHaveBeenCalledTimes(1));
 });
