@@ -71,13 +71,13 @@ function main() {
     // npm uses E404 OR ETARGET depending on the registry/CLI generation.
     // Both mean an exact queried version has not been published. Never
     // treat timeouts, permission errors or arbitrary failures as "missing".
-    const diagnostic = (lookup.stderr || "").replace(/\\x1b\\[[0-9;]*m/g, "");
-    const isAbsent = /\\b(?:E404|ETARGET)\\b|404 Not Found|No match(?:ing)? (?:version )?found for/i.test(diagnostic);
+    const diagnostic = (lookup.stderr || "").replace(/\x1b\[[0-9;]*m/g, "");
+    const isAbsent = /\b(?:E404|ETARGET)\b|404 Not Found|No match(?:ing)? (?:version )?found for/i.test(diagnostic);
     const accepted = lookup.status !== 0 && !lookup.error && !lookup.signal && isAbsent;
     console.warn("Expo npm probe " + name + "@" + version +
       ": " + (accepted ? "not published" : "published, unreachable or unexpected response") +
       " (exit=" + lookup.status + ", code=" +
-      (diagnostic.match(/\\b(?:E404|ETARGET|E401|E403|ENOTFOUND|ETIMEDOUT)\\b/) || ["unknown"])[0] + ")");
+      (diagnostic.match(/\b(?:E404|ETARGET|E401|E403|ENOTFOUND|ETIMEDOUT)\b/) || ["unknown"])[0] + ")");
     return accepted ? "unpublished" : "published-or-unknown";
   });
   if (!accepted) {
