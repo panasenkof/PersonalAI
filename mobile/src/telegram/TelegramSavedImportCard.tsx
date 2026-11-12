@@ -89,9 +89,9 @@ export function TelegramSavedImportCard({profile}:{profile:string}){
     setSelectedTopic(value);setCursor("0");setDone(false);setResult(null);setError("");
   }
   const topicLabel=(topic:TelegramSavedTopic)=>
-    (topic.kind==="savedMessagesTopicTypeMyNotes"?"Мои сообщения":
-      topic.kind==="savedMessagesTopicTypeAuthorHidden"?"Автор скрыт":
-      "Пересланное из чата") + " · №"+topic.id;
+    topic.kind==="savedMessagesTopicTypeMyNotes"?"Мои заметки":
+    topic.kind==="savedMessagesTopicTypeAuthorHidden"?"Автор скрыт":
+    topic.title?.trim()||"Чат без названия";
   return <View style={{gap:nebulaSpacing.sm}}>
     <Text style={{color:t.text,...nebulaTypography.body,fontWeight:"600"}}>
       Импорт «Избранного»
@@ -107,17 +107,20 @@ export function TelegramSavedImportCard({profile}:{profile:string}){
       {selectedTopic?"Источник: "+topicLabel(selectedTopic):
         "Источник: все сообщения «Избранного»."}
     </Text>
-    <NebulaAction icon="layers" label="Обновить подборки «Избранного»"
+    <NebulaAction icon="layers" label={topics===null?"Показать подборки":"Загрузить ещё подборки"}
       disabled={busy} onPress={()=>void showTopics()}/>
     {topics!==null?<View style={{gap:nebulaSpacing.xs}}>
       <Text style={{color:t.muted,...nebulaTypography.label}}>
         Telegram группирует пересылки по источнику — это не разделы PersAI.
         {topics.length===0?" Список пока пуст. Если синхронизация только началась, обновите его ещё раз.":""}
       </Text>
-      <NebulaAction icon="list" size="compact" label="Все сообщения «Избранного»"
+      <NebulaAction icon="list" size="compact" label={(selectedTopic===null?"● ":"○ ")+"Все сообщения «Избранного»" }
         disabled={busy} onPress={()=>chooseTopic(null)}/>
+      <Text style={{color:t.muted,...nebulaTypography.label}}>
+        Telegram отдаёт подборки частями по 20.
+      </Text>
       {topics.map(topic=><NebulaAction key={topic.id} size="compact" icon="folder"
-        label={topicLabel(topic)} disabled={busy} onPress={()=>chooseTopic(topic)}/>)}
+        label={(selectedTopic?.id===topic.id?"● ":"○ ")+topicLabel(topic)} disabled={busy} onPress={()=>chooseTopic(topic)}/>)}
     </View>:null}
     <NebulaAction icon="download" label={cursor==="0"?
       "Импортировать последние 20 сообщений":"Продолжить историю (до 20)"}

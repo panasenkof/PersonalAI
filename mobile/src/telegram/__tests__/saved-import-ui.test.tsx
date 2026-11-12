@@ -53,19 +53,20 @@ test("explicit topic selection resets cursor and reuses canonical importer",asyn
   ]);
   const ui=render(<TelegramSavedImportCard profile="guest"/>);
   expect(listSavedTopics).not.toHaveBeenCalled();
-  fireEvent.press(ui.getByText("Обновить подборки «Избранного»"));
-  await waitFor(()=>ui.getByText("Пересланное из чата · №-1005432"));
-  fireEvent.press(ui.getByText("Пересланное из чата · №-1005432"));
+  fireEvent.press(ui.getByText("Показать подборки"));
+  await waitFor(()=>ui.getByText("○ Чат без названия"));
+  fireEvent.press(ui.getByText("○ Чат без названия"));
+  expect(ui.getByText("● Чат без названия")).toBeTruthy();
   fireEvent.press(ui.getByText("Импортировать последние 20 сообщений"));
   await waitFor(()=>expect(importSavedTextPage)
     .toHaveBeenCalledWith("guest","0",expect.any(Object),"-1005432","supported-originals"));
-  fireEvent.press(ui.getByText("Все сообщения «Избранного»"));
+  fireEvent.press(ui.getByText("○ Все сообщения «Избранного»"));
   fireEvent.press(ui.getByText("Импортировать последние 20 сообщений"));
   await waitFor(()=>expect(importSavedTextPage).toHaveBeenLastCalledWith("guest","0",expect.any(Object),undefined,"supported-originals"));
 });
 test("empty topic list and failures are non-destructive",async()=>{
   const ui=render(<TelegramSavedImportCard profile="guest"/>);
-  fireEvent.press(ui.getByText("Обновить подборки «Избранного»"));
+  fireEvent.press(ui.getByText("Показать подборки"));
   await waitFor(()=>ui.getByText(/Список пока пуст/));
   expect(importSavedTextPage).not.toHaveBeenCalled();
 });

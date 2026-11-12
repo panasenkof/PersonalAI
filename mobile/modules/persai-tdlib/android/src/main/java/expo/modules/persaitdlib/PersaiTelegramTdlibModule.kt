@@ -525,13 +525,30 @@ class PersaiTelegramTdlibModule : Module() {
       allowNoMoreTopics = true)
     requireState("authorizationStateReady")
     require(activeProfile == profile) { "tdlib_saved_profile_changed" }
+    // Snapshot under lock; make bounded getChat requests outside lock.
+    val topics = synchronized(lock) {
+      savedTopics.values.sortedByDescending { it.order }.take(100).toList()
+    }
     val projection = org.json.JSONArray()
-    synchronized(lock) {
-      savedTopics.values.sortedByDescending { it.order }.take(100).forEach { topic ->
-        projection.put(JSONObject().put("id",topic.id.toString())
-          .put("kind",topic.kind).put("isPinned",topic.pinned)
-          .put("order",topic.order.toString()))
+    for (topic in topics) {
+      val item = JSONObject().put("id",topic.id.toString())
+        .put("kind",topic.kind).put("isPinned",topic.pinned)
+        .put("order",topic.order.toString())
+      if (topic.kind == "savedMessagesTopicTypeChat") {
+        try {
+          val chat = sendRequest(JSONObject().put("@type","getChat").put("chat_id",topic.id))
+          if (chat.optString("@type") == "chat") {
+            val title = chat.optString("title","").trim().take(80)
+            if (title.isNotEmpty()) item.put("title",title)
+          }
+        } catch (_: Exception) {
+          // Topic remains usable when chat title is unavailable.
+        }
       }
+      projection.put(item)
+    }
+    require(activeProfile == profile && authState == "authorizationStateReady") {
+      "tdlib_saved_profile_changed"
     }
     return JSONObject().put("topics",projection).toString()
   }

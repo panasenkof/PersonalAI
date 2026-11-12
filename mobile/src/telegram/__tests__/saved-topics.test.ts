@@ -77,3 +77,11 @@ test("re-check after native await; no results escape after screen lock",async()=
   await expect(readSavedTopicPage("guest","-1001234"))
     .rejects.toThrow("telegram_app_locked");
 });
+
+test("optional native topic title is safe and bounded",()=>{
+ const data=JSON.stringify({topics:[{...topic("-1001234","savedMessagesTopicTypeChat"),title:"Математика"}]});
+ expect(parseSavedTopics(data)[0].title).toBe("Математика");
+ expect(parseSavedTopics(JSON.stringify({topics:[topic("0")]}))[0].title).toBeUndefined();
+ expect(()=>parseSavedTopics(JSON.stringify({topics:[{...topic("1"),title:"a".repeat(81)}]})))
+   .toThrow("telegram_saved_topic_invalid");
+});
