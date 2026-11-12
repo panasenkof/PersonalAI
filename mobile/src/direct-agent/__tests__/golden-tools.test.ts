@@ -109,3 +109,25 @@ test("ARCH-3a: active guidance exposes only advertised tools in unchanged order"
   expect(createToolCatalog({ ...base(), contextOnly: true, importTagsEnabled: true }, [], [], [])
     .guidance.map(g => g.name)).toEqual(["propose_import_metadata"]);
 });
+
+test("ARCH-3b: guidance literals are attached only to active canonical definitions", () => {
+  const rich = createToolCatalog(full(), [], [], []);
+  const byName = new Map(rich.guidance.map(item => [item.name, item.guidance]));
+  expect(byName.get("search_local_notes")).toContain("search_local_notes");
+  expect(byName.get("propose_move_local_note")).toContain("propose_move_local_note");
+  expect(byName.get("search_local_photos")).toContain("search_local_photos");
+  expect(byName.get("continue_local_articles")).toContain("continue_local_articles");
+  expect(byName.get("read_selected_article_chunk")).toContain("read_selected_article_chunk");
+  expect(byName.get("selected_article_read_coverage")).toContain("selected_article_read_coverage");
+  expect(byName.get("workspace_put")).toContain("workspace_put");
+  expect(byName.get("read_local_source_segment")).toContain("locationConfidence");
+  const minimum = createToolCatalog(base(), [], [], []);
+  expect(minimum.guidance.every(item => minimum.definitions.some(d => d.name === item.name))).toBe(true);
+  expect(minimum.guidance.map(item => item.name)).not.toContain("search_local_photos");
+  expect(minimum.guidance.map(item => item.name)).not.toContain("continue_local_articles");
+  const restricted = createToolCatalog({
+    ...base(), contextOnly: true, contextClassificationEnabled: true,
+  }, [], [], []);
+  expect(restricted.guidance.map(item => item.name)).toEqual(["set_conversation_context"]);
+  expect(restricted.guidance[0].guidance).toContain("set_conversation_context");
+});
