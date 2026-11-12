@@ -18,6 +18,12 @@ import { loadMediaPreferences, saveMediaPreferences, type MediaPreferences } fro
 import { loadPhotoResultCount, savePhotoResultCount, validPhotoResultCount } from "../media/photo-result-preferences";
 import { getVoiceEngine, initVoiceEngine, setVoiceEngine } from "../media/voice-engine";
 import { captureInstalledModels, parseRecoveryModels, saveRecoveryModels, type RecoveryModelsManifest } from "../media/model-backup-recovery";
+import {loadTelegramApiCredentials,saveTelegramApiCredentials,validateTelegramApiCredentials,
+  loadTelegramSyncMode,saveTelegramSyncMode,validateTelegramSyncMode,
+  loadTelegramTargetId,saveTelegramTargetId} from "../telegram/settings";
+import {loadTelegramBotConfig,parseTelegramBotConfig,restoreTelegramBotConfig,
+  type TelegramBotConfig} from "../telegram/bot-settings";
+import {telegramTargetOptions} from "../telegram/import-target";
 
 export type PortableBackupSettings = {
   version: 1;
@@ -29,6 +35,13 @@ export type PortableBackupSettings = {
   indexTermsEnabled: boolean;
   /** Optional extension: archives created before model recovery omit this. */
   localModels?: RecoveryModelsManifest;
+  telegram?:{
+    api?:{apiId:number;apiHash:string};
+    syncMode:"manual"|"on_open";
+    bot?:TelegramBotConfig;
+    savedTargetId?:string;
+    botTargetId?:string;
+  };
 };
 
 const textValid = (v: unknown, max = 1024): v is string =>
@@ -57,6 +70,25 @@ export function parsePortableBackupSettings(raw: string): PortableBackupSettings
       !["device", "online"].includes(v.media.fileAsrMode) ||
       !["system", "whisper"].includes(v.voiceEngine as string) ||
       typeof v.indexTermsEnabled !== "boolean") throw new Error("backup_settings_invalid");
+  if (v.telegram!==undefined) {
+    const tg=v.telegram;
+    const validTarget=(s:unknown)=>typeof s==="string"&&/^[A-Za-z0-9:_-]{1,128}$/.test(s);
+    try{
+      if(!tg||typeof tg!=="object"||!["manual","on_open"].includes(tg.syncMode))
+        throw new Error("invalid_telegram_sync_mode");
+      validateTelegramSyncMode(tg.syncMode);
+      if(tg.api!==undefined){
+        if(!tg.api||!Number.isSafeInteger(tg.api.apiId)||typeof tg.api.apiHash!=="string")
+          throw new Error("invalid_telegram_credentials");
+        validateTelegramApiCredentials(String(tg.api.apiId),tg.api.apiHash);
+      }
+      if(tg.bot!==undefined&&!parseTelegramBotConfig(tg.bot))
+        throw new Error("invalid_telegram_bot");
+      if((tg.savedTargetId!==undefined&&!validTarget(tg.savedTargetId))||
+         (tg.botTargetId!==undefined&&!validTarget(tg.botTargetId)))
+        throw new Error("invalid_telegram_target");
+    }catch{throw new Error("backup_settings_invalid");}
+  }
   if (v.localModels !== undefined) {
     try { parseRecoveryModels(v.localModels); }
     catch { throw new Error("backup_settings_invalid"); }
@@ -94,6 +126,19 @@ export async function capturePortableBackupSettings(profile: string): Promise<st
     indexTermsEnabled: getEnrichState().enabled,
     localModels: await captureInstalledModels(),
   };
+  const [api,syncMode,botConfig,savedTargetId,botTargetId]=await Promise.all([
+    loadTelegramApiCredentials(profile),loadTelegramSyncMode(profile),
+    loadTelegramBotConfig(profile),loadTelegramTargetId(profile,"saved"),
+    loadTelegramTargetId(profile,"bot"),
+  ]);
+  if(api||botConfig||savedTargetId||botTargetId||syncMode!=="manual"){
+    payload.telegram={
+      ...(api?{api}:{}),syncMode,
+      ...(botConfig?{bot:botConfig}:{}),
+      ...(savedTargetId?{savedTargetId}:{}),
+      ...(botTargetId?{botTargetId}:{}),
+    };
+  }
   const json = JSON.stringify(payload);
   parsePortableBackupSettings(json);
   return json;
@@ -112,4 +157,16 @@ export async function applyPortableBackupSettings(profile: string, snapshot: Por
   // This is only a small, persistent post-restore download *request*. Actual
   // model metadata and files remain owned by their existing loaders.
   await saveRecoveryModels(profile, snapshot.localModels);
+  if(snapshot.telegram){
+    const tg=snapshot.telegram;
+    if(tg.api)await saveTelegramApiCredentials(profile,String(tg.api.apiId),tg.api.apiHash);
+    await saveTelegramSyncMode(profile,tg.syncMode);
+    if(tg.bot)await restoreTelegramBotConfig(profile,tg.bot);
+    // A copied collection ID is advisory; apply only when current ACL permits it.
+    const eligible=new Set((await telegramTargetOptions(profile)).map(x=>x.id));
+    await saveTelegramTargetId(profile,"saved",tg.savedTargetId&&eligible.has(tg.savedTargetId)
+      ?tg.savedTargetId:"");
+    await saveTelegramTargetId(profile,"bot",tg.botTargetId&&eligible.has(tg.botTargetId)
+      ?tg.botTargetId:"");
+  }
 }

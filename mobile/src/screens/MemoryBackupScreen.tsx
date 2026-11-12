@@ -24,6 +24,7 @@ export function MemoryBackupScreen() {
   const [missingModels, setMissingModels] = useState<RecoveryModel[]>([]);
   const [modelProgress, setModelProgress] = useState<RecoveryProgress | null>(null);
   const [modelsNotice, setModelsNotice] = useState("");
+  const [restoreUri,setRestoreUri]=useState<string|null>(null);
   const cancellingModels = useRef(false);
   const activeModel = useRef<RecoveryModel | null>(null);
   const refreshRecovery = useCallback(async () => {
@@ -79,7 +80,7 @@ export function MemoryBackupScreen() {
   return <KeyboardAvoidingView style={{ flex: 1, backgroundColor: t.bg }} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={header}>
     <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 24, gap: 16 }}>
       <Text style={{ color: t.text, fontSize: 25, fontWeight: "800" }}>Сохранить копию</Text>
-      <Text style={{ color: t.muted, lineHeight: 22 }}>Записи, фотографии и вложения, история диалогов, все подключения моделей, API-ключи и настройки сохраняются в одном зашифрованном файле. Сохраните код восстановления отдельно: любой, у кого есть файл и код, сможет получить доступ к данным и ключам. Системные разрешения не переносятся. Для скачанных локальных моделей сохраняются названия, версии и контрольные суммы, но не сами большие файлы. После восстановления их можно скачать одной кнопкой.</Text>
+      <Text style={{ color: t.muted, lineHeight: 22 }}>Записи, фотографии и вложения, история диалогов, все подключения моделей, API-ключи и настройки сохраняются в одном зашифрованном файле. Сохраните код восстановления отдельно: любой, у кого есть файл и код, сможет получить доступ к данным и ключам. Системные разрешения не переносятся. Настройки Telegram сохраняются, но вход в личный аккаунт выполняется заново. Для скачанных локальных моделей сохраняются названия, версии и контрольные суммы, но не сами большие файлы. После восстановления их можно скачать одной кнопкой.</Text>
       <Pressable accessibilityRole="button" accessibilityLabel="Создать новый код восстановления" disabled={busy} onPress={() => { setCode(createRecoveryCode()); setConfirmed(false); }} style={button}><Text style={{ color: t.secondary, fontWeight: "700" }}>{code ? "Создать другой код" : "1 · Создать код восстановления"}</Text></Pressable>
       {code ? <>
         <Text style={{ color: t.muted }}>2 · Нажмите и удерживайте код, чтобы скопировать. Сохраните его отдельно от файла.</Text>
@@ -104,15 +105,31 @@ export function MemoryBackupScreen() {
       <Pressable accessibilityRole="button" accessibilityLabel="Восстановить зашифрованную копию" accessibilityState={{ disabled: restoreDisabled }} disabled={restoreDisabled} onPress={() => void run(async () => {
         const file = await withNativeInteraction(() => DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true }));
         if (file.canceled || !file.assets.length) return;
-        const stats = await restoreEncryptedBackup(profile!, file.assets[0].uri, normalizedCode);
-        setRestoreCode(""); await store.initialize();
-        await refreshRecovery();
-        setNotice(`Восстановлено записей: ${stats.entities}. ${stats.settingsRestored
-           ? "Подключения моделей, API-ключи и настройки также восстановлены."
-           : stats.settingsWarning
-             ? "Память восстановлена, но часть настроек и ключей вернуть не удалось. Проверьте подключения моделей."
-             : "Копия старого формата: параметры подключений и API-ключи в ней отсутствуют."}`);
+        setRestoreUri(file.assets[0].uri);
+        setNotice("Файл выбран. Подтвердите восстановление ниже.");
       })} style={{ ...button, backgroundColor: t.accent, opacity: restoreDisabled ? 0.45 : 1 }}><Text style={{ color: t.userText, fontWeight: "700" }}>Выбрать файл и восстановить</Text></Pressable>
+      {restoreUri?<Text style={{color:t.muted,lineHeight:22}}>
+        Если в копии есть бот Telegram, он будет подключён на этом телефоне.
+        Отключите его на старом: два телефона не должны одновременно получать сообщения одного бота.
+        Личный аккаунт Telegram потребует повторного входа. Восстановление перезапишет настройки.
+      </Text>:null}
+      {restoreUri?<Pressable accessibilityRole="button" accessibilityLabel="Подтвердить восстановление копии"
+        disabled={busy} onPress={()=>void run(async()=>{
+          const stats=await restoreEncryptedBackup(profile!,restoreUri,normalizedCode);
+          setRestoreUri(null);setRestoreCode("");
+          await store.initialize();await refreshRecovery();
+          setNotice(`Восстановлено записей: ${stats.entities}. ${stats.settingsRestored
+            ?"Параметры моделей и Telegram восстановлены; в личный Telegram войдите заново."
+            :stats.settingsWarning
+              ?"Память восстановлена, но часть настроек восстановить не удалось."
+              :"Копия старого формата: параметры подключений в ней отсутствуют."}`);
+        })} style={{...button,backgroundColor:t.accent}}>
+        <Text style={{color:t.userText,fontWeight:"700"}}>Подтвердить восстановление</Text>
+      </Pressable>:null}
+      {restoreUri?<Pressable accessibilityRole="button" accessibilityLabel="Отменить восстановление копии"
+        disabled={busy} onPress={()=>setRestoreUri(null)} style={button}>
+        <Text style={{color:t.text}}>Отмена</Text>
+      </Pressable>:null}
       {notice ? <Text accessibilityRole="alert" style={{ color: t.muted }}>{notice}</Text> : null}
       {missingModels.length ? <>
         <Text style={{ color: t.text, fontSize: 19, fontWeight: "700", marginTop: 10 }}>

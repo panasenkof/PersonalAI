@@ -7,7 +7,24 @@ import { loadMediaPreferences, saveMediaPreferences } from "../../media/preferen
 import { loadPhotoResultCount, savePhotoResultCount } from "../../media/photo-result-preferences";
 import { getVoiceEngine, initVoiceEngine, setVoiceEngine } from "../../media/voice-engine";
 import { getEnrichState, loadIndexTermsPreference, setIndexTermsEnabled } from "../../direct-agent/enrich-runner";
+import {loadTelegramApiCredentials,loadTelegramSyncMode,loadTelegramTargetId,
+  saveTelegramApiCredentials,saveTelegramSyncMode,saveTelegramTargetId} from "../../telegram/settings";
+import {loadTelegramBotConfig,restoreTelegramBotConfig} from "../../telegram/bot-settings";
 
+jest.mock("../../telegram/settings",()=>({
+  loadTelegramApiCredentials:jest.fn(),loadTelegramSyncMode:jest.fn(),loadTelegramTargetId:jest.fn(),
+  saveTelegramApiCredentials:jest.fn(),saveTelegramSyncMode:jest.fn(),saveTelegramTargetId:jest.fn(),
+  validateTelegramApiCredentials:jest.fn((id:string,hash:string)=>{
+    if(!/^[1-9][0-9]*$/.test(id)||!/^[a-f0-9]{32}$/.test(hash))throw Error("bad");
+    return {apiId:Number(id),apiHash:hash};
+  }),
+  validateTelegramSyncMode:jest.fn((v:string)=>{if(!["manual","on_open"].includes(v))throw Error("bad");return v;}),
+}));
+jest.mock("../../telegram/bot-settings",()=>({
+  loadTelegramBotConfig:jest.fn(),restoreTelegramBotConfig:jest.fn(),
+  parseTelegramBotConfig:jest.fn((v:any)=>v&&typeof v.token==="string"&&v.botId>0&&v.username&&v.cursor>=0?v:null),
+}));
+jest.mock("../../telegram/import-target",()=>({telegramTargetOptions:jest.fn(async()=>[{id:"section-1",name:"Учёба"}])}));
 // Existing settings fixture does not invoke native model hashing/downloads.
 jest.mock("../../media/model-backup-recovery", () => ({
   captureInstalledModels: jest.fn(async () => ({version:1,models:[]})),
@@ -72,9 +89,14 @@ beforeEach(() => {
   (loadModelCallLimit as jest.Mock).mockResolvedValue(9);
   (loadMediaPreferences as jest.Mock).mockResolvedValue({visionId:"deepseek",speechId:"anthropic",fileAsrMode:"device"});
   (loadPhotoResultCount as jest.Mock).mockResolvedValue(6);
+  (loadTelegramApiCredentials as jest.Mock).mockResolvedValue(null);
+  (loadTelegramSyncMode as jest.Mock).mockResolvedValue("manual");
+  (loadTelegramBotConfig as jest.Mock).mockResolvedValue(null);
+  (loadTelegramTargetId as jest.Mock).mockResolvedValue("");
   (getVoiceEngine as jest.Mock).mockReturnValue({preference:"whisper"});
   (getEnrichState as jest.Mock).mockReturnValue({enabled:false});
-  for (const fn of [initVoiceEngine,loadIndexTermsPreference,saveDirectConnections,saveModelCallLimit,
+  for (const fn of [saveTelegramApiCredentials,saveTelegramSyncMode,saveTelegramTargetId,restoreTelegramBotConfig,
+    initVoiceEngine,loadIndexTermsPreference,saveDirectConnections,saveModelCallLimit,
     saveMediaPreferences,savePhotoResultCount,setVoiceEngine,setIndexTermsEnabled])
     (fn as jest.Mock).mockResolvedValue(undefined);
 });
@@ -117,4 +139,36 @@ test("rejects unknown schema, malformed secrets, endpoint or wrong active connec
   tamper(v => { v.connections.connections[0].searchKeys = {unknown:"key"}; });
   tamper(v => { v.modelCallLimit = 999; });
   tamper(v => { v.voiceEngine = "remote"; });
+});
+
+test("encrypted snapshot includes full Telegram configuration, but not TDLib device secrets",async()=>{
+ const bot={token:"12345678:"+"a".repeat(35),botId:12345678,username:"PersAIHelper",
+   allowedChatId:"12345",cursor:42};
+ (loadTelegramApiCredentials as jest.Mock).mockResolvedValue({apiId:12345,apiHash:"a".repeat(32)});
+ (loadTelegramSyncMode as jest.Mock).mockResolvedValue("on_open");
+ (loadTelegramBotConfig as jest.Mock).mockResolvedValue(bot);
+ (loadTelegramTargetId as jest.Mock).mockImplementation(async(_p:string,channel:string)=>
+   channel==="saved"?"section-1":"unknown-section");
+ const raw=await capturePortableBackupSettings("guest");
+ expect(raw).not.toContain("dbkey");
+ expect(raw).not.toContain("device-secret");
+ const parsed=parsePortableBackupSettings(raw);
+ expect(parsed.telegram?.bot).toEqual(bot);
+ await applyPortableBackupSettings("guest",parsed);
+ expect(saveTelegramApiCredentials).toHaveBeenCalledWith("guest","12345","a".repeat(32));
+ expect(restoreTelegramBotConfig).toHaveBeenCalledWith("guest",bot);
+ expect(saveTelegramTargetId).toHaveBeenCalledWith("guest","saved","section-1");
+ expect(saveTelegramTargetId).toHaveBeenCalledWith("guest","bot","");
+});
+test("bad Telegram backup data is rejected before restoration",async()=>{
+ const data=JSON.parse(await capturePortableBackupSettings("guest"));
+ const check=(tg:any)=>{
+   expect(()=>parsePortableBackupSettings(JSON.stringify({...data,telegram:tg})))
+     .toThrow("backup_settings_invalid");
+ };
+ check({syncMode:"unknown"});
+ check({syncMode:"manual",api:{apiId:123,apiHash:"invalid"}});
+ check({syncMode:"manual",savedTargetId:"../../bad"});
+ check({syncMode:"manual",bot:{token:"bad"}});
+ expect(saveTelegramApiCredentials).not.toHaveBeenCalled();
 });
