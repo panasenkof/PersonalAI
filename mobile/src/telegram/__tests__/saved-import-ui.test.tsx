@@ -4,15 +4,27 @@ import {TelegramSavedImportCard} from "../TelegramSavedImportCard";
 import {importSavedTextPage} from "../saved-import";
 import {listSavedTopics} from "../saved-topics";
 import {onLocalMemorySessionChange} from "../../local-memory/storage";
+import {importEntireSavedHistory} from "../full-history";
+import {loadSavedHistoryCheckpoint} from "../settings";
 jest.mock("@expo/vector-icons/Feather",()=>()=>null);
 jest.mock("../TelegramImportTargetPicker",()=>({TelegramImportTargetPicker:()=>null}));
 jest.mock("../import-target",()=>({loadTelegramTargetForWrite:jest.fn(async()=>undefined)}));
 jest.mock("../saved-import",()=>({importSavedTextPage:jest.fn()}));
+jest.mock("../full-history",()=>({
+  importEntireSavedHistory:jest.fn(),savedHistoryFailure:jest.fn(()=>"Ошибка импорта истории."),
+}));
+jest.mock("../settings",()=>({loadSavedHistoryCheckpoint:jest.fn()}));
 jest.mock("../saved-topics",()=>({listSavedTopics:jest.fn()}));
 jest.mock("../../local-memory/storage",()=>({onLocalMemorySessionChange:jest.fn(()=>()=>{})}));
 beforeEach(()=>{
   jest.clearAllMocks();
   (listSavedTopics as jest.Mock).mockResolvedValue([]);
+  (loadSavedHistoryCheckpoint as jest.Mock).mockResolvedValue(null);
+  (importEntireSavedHistory as jest.Mock).mockResolvedValue({
+    status:"completed",
+    progress:{version:1,cursor:"10",topicId:"",targetId:"",selfChatId:"12345",
+      pages:2,processed:24,saved:22,duplicates:2,unsupported:0,empty:0,withFiles:3,tooLarge:0},
+  });
   (importSavedTextPage as jest.Mock).mockResolvedValue({
     saved:2,duplicates:1,unsupported:3,empty:0,withFiles:0,tooLarge:0,nextCursor:"44",selfChatId:"12345",
   });
@@ -149,4 +161,65 @@ test("switching profiles aborts old import and enables a new profile without sta
   await waitFor(()=>expect(importSavedTextPage).toHaveBeenCalledWith(
     "second","0",expect.any(Object),undefined,"supported-originals",undefined));
   expect(ui.getByText("Отменить импорт Telegram")).toBeTruthy();
+});
+
+const checkpoint=(topicId="")=>({
+  version:1,cursor:"90",topicId,targetId:"",selfChatId:"12345",
+  pages:1,processed:10,saved:9,duplicates:1,unsupported:0,empty:0,withFiles:2,tooLarge:0,
+});
+test("full-history action shows progress and completion while preserving page importer",async()=>{
+  const ui=render(<TelegramSavedImportCard profile="guest"/>);
+  await waitFor(()=>expect(ui.getByLabelText("Импортировать всю историю").props.accessibilityState.disabled)
+    .toBe(false));
+  fireEvent.press(ui.getByText("Импортировать всю историю"));
+  await waitFor(()=>expect(importEntireSavedHistory).toHaveBeenCalledWith(
+    "guest",undefined,undefined,expect.any(Object),expect.any(Function),false));
+  await waitFor(()=>ui.getByText(/История импортирована полностью/));
+  expect(ui.getByText(/Обработано записей/)).toBeTruthy();
+  expect(ui.queryByText("Продолжить с места остановки")).toBeNull();
+});
+test("checkpoint offers resume only for matching Saved selection",async()=>{
+  (loadSavedHistoryCheckpoint as jest.Mock).mockResolvedValue(checkpoint());
+  const ui=render(<TelegramSavedImportCard profile="guest"/>);
+  await waitFor(()=>ui.getByText("Продолжить с места остановки"));
+  fireEvent.press(ui.getByText("Продолжить с места остановки"));
+  await waitFor(()=>expect(importEntireSavedHistory).toHaveBeenCalledWith(
+    "guest",undefined,undefined,expect.any(Object),expect.any(Function),true));
+});
+test("full import Stop aborts active request and retains checkpoint UI",async()=>{
+  let supplied:AbortSignal|null=null;
+  (importEntireSavedHistory as jest.Mock).mockImplementation((_p:string,_topic:any,
+    _target:any,signal:AbortSignal)=>new Promise((_resolve,reject)=>{
+      supplied=signal;
+      signal.addEventListener("abort",()=>reject(new Error("telegram_saved_import_cancelled")),{once:true});
+    }));
+  const ui=render(<TelegramSavedImportCard profile="guest"/>);
+  await waitFor(()=>expect(ui.getByLabelText("Импортировать всю историю").props.accessibilityState.disabled)
+    .toBe(false));
+  fireEvent.press(ui.getByText("Импортировать всю историю"));
+  await waitFor(()=>ui.getByText("Остановить"));
+  fireEvent.press(ui.getByText("Остановить"));
+  expect(supplied?.aborted).toBe(true);
+  await waitFor(()=>ui.getByText(/Импорт остановлен/));
+});
+test("unmount cancels a running full-history job",async()=>{
+  let supplied:AbortSignal|null=null;
+  (importEntireSavedHistory as jest.Mock).mockImplementation((_p:string,_topic:any,
+    _target:any,signal:AbortSignal)=>new Promise((_resolve,reject)=>{
+      supplied=signal;
+      signal.addEventListener("abort",()=>reject(new Error("telegram_saved_import_cancelled")),{once:true});
+    }));
+  const ui=render(<TelegramSavedImportCard profile="guest"/>);
+  await waitFor(()=>expect(ui.getByLabelText("Импортировать всю историю").props.accessibilityState.disabled)
+    .toBe(false));
+  fireEvent.press(ui.getByText("Импортировать всю историю"));
+  await waitFor(()=>ui.getByText("Остановить"));
+  ui.unmount();
+  expect(supplied?.aborted).toBe(true);
+});
+test("checkpoint for another selected topic cannot be resumed from all Saved",async()=>{
+  (loadSavedHistoryCheckpoint as jest.Mock).mockResolvedValue(checkpoint("17"));
+  const ui=render(<TelegramSavedImportCard profile="guest"/>);
+  await waitFor(()=>expect(loadSavedHistoryCheckpoint).toHaveBeenCalledWith("guest"));
+  expect(ui.queryByText("Продолжить с места остановки")).toBeNull();
 });
