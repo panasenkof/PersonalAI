@@ -7,8 +7,10 @@ import {
 } from "../account";
 import {localMemorySessionUnlocked} from "../../local-memory/storage";
 import {loadTelegramApiCredentials,loadOrCreateTdlibDbKey,clearTelegramAuthorized} from "../settings";
+import {bundledTelegramApiCredentials} from "../bundled-api";
 jest.mock("expo-modules-core",()=>({...jest.requireActual("expo-modules-core"),requireOptionalNativeModule:jest.fn()}));
 jest.mock("../../local-memory/storage",()=>({localMemorySessionUnlocked:jest.fn()}));
+jest.mock("../bundled-api",()=>({bundledTelegramApiCredentials:jest.fn()}));
 jest.mock("../settings",()=>({
   loadTelegramApiCredentials:jest.fn(),loadOrCreateTdlibDbKey:jest.fn(),clearTelegramAuthorized:jest.fn(),
 }));
@@ -22,6 +24,7 @@ beforeEach(()=>{
   (Platform as any).OS="android";
   (requireOptionalNativeModule as jest.Mock).mockReturnValue(native);
   (localMemorySessionUnlocked as jest.Mock).mockReturnValue(true);
+  (bundledTelegramApiCredentials as jest.Mock).mockReturnValue(null);
   (loadTelegramApiCredentials as jest.Mock).mockResolvedValue({apiId:12345,apiHash:"a".repeat(32)});
   (loadOrCreateTdlibDbKey as jest.Mock).mockResolvedValue("k".repeat(44));
   native.isAvailable.mockReturnValue(true);
@@ -89,4 +92,15 @@ test("authorization input is trimmed except password, and cancel clears resume p
   expect(await cancelTelegramAuthorization("guest")).toBe("authorizationStateLoggingOut");
   expect(native.cancelAuthorization).toHaveBeenCalledTimes(1);
   expect(clearTelegramAuthorized).toHaveBeenCalledWith("guest");
+});
+
+test("shared PersAI app identity takes priority over legacy per-profile API, no per-user key required",async()=>{
+  (bundledTelegramApiCredentials as jest.Mock).mockReturnValue({
+    apiId:987654,apiHash:"b".repeat(32),
+  });
+  (loadTelegramApiCredentials as jest.Mock).mockResolvedValue(null);
+  expect(await initializeTelegramAccount("guest")).toBe("authorizationStateWaitPhoneNumber");
+  expect(native.initialize).toHaveBeenCalledWith(
+    "guest",987654,"b".repeat(32),"k".repeat(44),expect.any(String));
+  expect(loadTelegramApiCredentials).not.toHaveBeenCalled();
 });
