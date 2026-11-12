@@ -115,7 +115,11 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
       ...(turn.importTagsCandidate !== undefined ? {importTags:turn.importTagsCandidate} : {}) };
   }
   const observeSources = (urls: string[]) => { if (urls.length) observe({ tool: "web_search", outcome: "found", subject: options.prompt.slice(0, 120), excerpt: urls.join("\n").slice(0, 600) }); };
-  return { definitions: activeSpecs.map(s => s.definition), run, finish, observeSources,
+  return { definitions: activeSpecs.map(s => s.definition),
+    // Only ACTIVE tools can contribute guidance to a future shared system prompt.
+    // Kept in canonical catalog order, without changing model tool schemas.
+    guidance: activeSpecs.map(s => ({ name: s.definition.name, ...(s.guidance ? { guidance: s.guidance } : {}) })),
+    run, finish, observeSources,
     memory: () => {
       const read=[...readNotes].reverse().flatMap(id=>used.has(id)?[used.get(id)!]:[]);
       // Photo originals are per attachment, not per note. Do not deduplicate
