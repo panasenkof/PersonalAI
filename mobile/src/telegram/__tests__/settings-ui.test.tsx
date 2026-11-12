@@ -14,13 +14,14 @@ jest.mock("../../profile/ProfileContext", () => ({useProfile: () => "guest"}));
 jest.mock("../settings", () => ({
   loadTelegramSyncMode: jest.fn(), inspectTelegramApiCredentials: jest.fn(),
   saveTelegramSyncMode: jest.fn(), saveTelegramApiCredentials: jest.fn(),
-  clearTelegramApiCredentials: jest.fn(),
+  clearTelegramApiCredentials: jest.fn(),loadLastTelegramAutoSync:jest.fn(),
 }));
 beforeEach(() => {
   jest.clearAllMocks();
   (loadTelegramSyncMode as jest.Mock).mockResolvedValue("manual");
   (inspectTelegramApiCredentials as jest.Mock).mockResolvedValue({apiId:null,configured:false});
   (saveTelegramSyncMode as jest.Mock).mockResolvedValue(undefined);
+  (require("../settings").loadLastTelegramAutoSync as jest.Mock).mockResolvedValue(null);
   (saveTelegramApiCredentials as jest.Mock).mockResolvedValue(undefined);
 });
 test("mode is separately selectable and does not claim live Telegram access", async () => {
