@@ -5,6 +5,7 @@ import {
   loadTelegramSyncMode, saveTelegramApiCredentials, saveTelegramSyncMode,
   validateTelegramApiCredentials, validateTelegramSyncMode,
   loadOrCreateTdlibDbKey,tdlibKeyIsValid,hasExistingTdlibDbKey,
+  markTelegramAuthorized,clearTelegramAuthorized,wasTelegramAuthorized,
 } from "../settings";
 jest.mock("expo-crypto", () => ({getRandomBytes:jest.fn(() => new Uint8Array(32).fill(42))}));
 jest.mock("expo-secure-store", () => ({
@@ -78,4 +79,14 @@ test("on_open only resumes a TDLib account whose device key was previously creat
   mockStore.set("pia.telegram.tdlib.dbkey.v1.guest","invalid");
   await expect(hasExistingTdlibDbKey("guest")).rejects.toThrow("tdlib_device_key_corrupted");
   await expect(hasExistingTdlibDbKey("../other")).rejects.toThrow("invalid_local_profile");
+});
+
+test("explicit authorization marker is device-only and cleared by logout",async()=>{
+  expect(await wasTelegramAuthorized("guest")).toBe(false);
+  await markTelegramAuthorized("guest");
+  expect(await wasTelegramAuthorized("guest")).toBe(true);
+  expect(SecureStore.setItemAsync).toHaveBeenCalledWith(
+    "pia.telegram.tdlib.authorized.v1.guest","1",{keychainAccessible:"device-only"});
+  await clearTelegramAuthorized("guest");
+  expect(await wasTelegramAuthorized("guest")).toBe(false);
 });

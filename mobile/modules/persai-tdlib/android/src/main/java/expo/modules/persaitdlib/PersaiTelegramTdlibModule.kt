@@ -72,7 +72,10 @@ class PersaiTelegramTdlibModule : Module() {
       value == "PHONE_NUMBER_FLOOD" || value == "PHONE_CODE_FLOOD" ||
         value == "FLOOD_PREMIUM_WAIT" -> "tdlib_flood_limited"
       value == "PHONE_NUMBER_INVALID" -> "tdlib_phone_invalid"
-      value == "PHONE_CODE_INVALID" || value == "PHONE_CODE_EXPIRED" -> "tdlib_code_invalid"
+      value == "PHONE_NUMBER_BANNED" -> "tdlib_phone_banned"
+      value == "PHONE_CODE_INVALID" || value == "PHONE_CODE_EMPTY" -> "tdlib_code_invalid"
+      value == "PHONE_CODE_EXPIRED" -> "tdlib_code_expired"
+      value.contains("EMAIL") && value.contains("INVALID") -> "tdlib_email_invalid"
       value == "PASSWORD_HASH_INVALID" -> "tdlib_password_invalid"
       value == "API_ID_INVALID" || value == "API_HASH_INVALID" -> "tdlib_api_invalid"
       error.optInt("code", 0) == 429 -> "tdlib_flood_limited"
@@ -145,7 +148,8 @@ class PersaiTelegramTdlibModule : Module() {
       if (next == "authorizationStateClosed") receiving = false
     }
     val extra = msg.optLong("@extra", -1)
-    if (msg.optString("@type") == "error" && extra < 0) {
+    if (msg.optString("@type") == "error" && extra < 0 &&
+      authState in setOf("starting","authorizationStateWaitTdlibParameters")) {
       emitAuth("tdlib_runtime_error")
     }
     if (extra > 0) pending[extra]?.complete(msg)
@@ -178,18 +182,31 @@ class PersaiTelegramTdlibModule : Module() {
     }
   }
 
-  private fun initialize(profile: String, apiId: Int, apiHash: String, encryptionKey: String): String {
+  private fun initialize(profile: String, apiId: Int, apiHash: String, encryptionKey: String, appVersion: String): String {
     require(Regex("^(guest|[a-zA-Z0-9_-]{1,120})$").matches(profile)) { "tdlib_invalid_profile" }
     require(apiId > 0 && Regex("^[a-f0-9]{32}$").matches(apiHash)) { "tdlib_invalid_app_credentials" }
     val key = try { Base64.decode(encryptionKey, Base64.DEFAULT) } catch (_: Exception) { byteArrayOf() }
     require(key.size == 32) { "tdlib_invalid_db_key" }
     require(available()) { "tdlib_binary_unavailable" }
-    synchronized(lock) {
+    require(Regex("^[0-9A-Za-z.\\-]{1,32}$").matches(appVersion)) { "tdlib_app_version_invalid" }
+    // Wait for the receiver outside lock: its finally block clears clientId under lock.
+    val closingWorker = synchronized(lock) {
       if (clientId != 0) {
         if (activeProfile != profile) throw IllegalStateException("tdlib_other_profile_active")
-        if (!receiving) throw IllegalStateException("tdlib_restarting_after_close")
-        return authState
-      }
+        if (authState != "tdlib_runtime_error") {
+          if (!receiving) throw IllegalStateException("tdlib_restarting_after_close")
+          return authState
+        }
+        if (receiving) sendNoReply(JSONObject().put("@type","close"))
+        worker
+      } else null
+    }
+    if (closingWorker != null) {
+      closingWorker.join(5000)
+      if (clientId != 0) throw IllegalStateException("tdlib_restarting_after_close")
+    }
+    synchronized(lock) {
+      if (clientId != 0) throw IllegalStateException("tdlib_restarting_after_close")
       val ctx = appContext.reactContext ?: throw IllegalStateException("tdlib_context_unavailable")
       val root = File(ctx.filesDir, "persai-tdlib-$profile").canonicalFile
       require(root.path.startsWith(ctx.filesDir.canonicalPath + File.separator))
@@ -209,7 +226,7 @@ class PersaiTelegramTdlibModule : Module() {
         .put("system_language_code","ru-RU")
         .put("device_model",Build.MODEL.take(120).ifEmpty { "Android" })
         .put("system_version",Build.VERSION.RELEASE.take(60))
-        .put("application_version","PersAI 0.3.0")
+        .put("application_version",appVersion)
       key.fill(0)
       params = config
       val bridge = NativeJson()
@@ -509,8 +526,8 @@ class PersaiTelegramTdlibModule : Module() {
     Function("isAvailable") { available() }
     Function("authorizationState") { authState }
 
-    AsyncFunction("initialize") { profile: String, id: Int, hash: String, key: String ->
-      initialize(profile,id,hash,key)
+    AsyncFunction("initialize") { profile: String, id: Int, hash: String, key: String, appVersion: String ->
+      initialize(profile,id,hash,key,appVersion)
     }
     AsyncFunction("submitPhone") { number: String ->
       require(Regex("^\\+[1-9][0-9]{6,14}$").matches(number)) { "tdlib_invalid_phone" }
@@ -573,6 +590,14 @@ class PersaiTelegramTdlibModule : Module() {
       val requested = topicId.toLongOrNull()
         ?: throw IllegalArgumentException("tdlib_saved_topic_id_invalid")
       savedPage(profile,fromId,limit,requested)
+    }
+    AsyncFunction("cancelAuthorization") {
+      requireState("authorizationStateWaitPhoneNumber","authorizationStateWaitCode",
+        "authorizationStateWaitPassword","authorizationStateWaitEmailAddress",
+        "authorizationStateWaitEmailCode","authorizationStateWaitRegistration",
+        "authorizationStateWaitOtherDeviceConfirmation")
+      sendRequest(JSONObject().put("@type","logOut"))
+      authState
     }
     AsyncFunction("logOut") {
       requireState("authorizationStateReady")
