@@ -16,3 +16,9 @@ test("untrusted native error never reveals tokens, numbers or URLs",()=>{
   expect(output).not.toContain(secret);
   expect(output).not.toContain("api.telegram.org");
 });
+
+test("cancel and expired-code errors are actionable without exposing raw payloads",()=>{
+  expect(telegramAccountError(new Error("tdlib_code_expired"))).toContain("Отмените вход");
+  expect(telegramAccountError(new Error("tdlib_phone_banned"))).toContain("заблокирован");
+  expect(telegramAccountError(new Error("tdlib_auth_state_mismatch"))).toContain("Повторите");
+});

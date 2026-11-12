@@ -1,14 +1,16 @@
 import {requireOptionalNativeModule} from "expo-modules-core";
 import {Platform} from "react-native";
+import Constants from "expo-constants";
 import {localMemorySessionUnlocked} from "../local-memory/storage";
-import {loadTelegramApiCredentials,loadOrCreateTdlibDbKey} from "./settings";
+import {loadTelegramApiCredentials,loadOrCreateTdlibDbKey,clearTelegramAuthorized} from "./settings";
 
 /** Narrow allowlist. Never expose TDLib's arbitrary request/sending API to JS. */
 type NativeTdlib = {
   addListener?(event:string,listener:(value:{state?:unknown})=>void):{remove():void};
   isAvailable(): boolean;
   authorizationState(): string;
-  initialize(profile:string,id:number,hash:string,key:string):Promise<string>;
+  initialize(profile:string,id:number,hash:string,key:string,appVersion:string):Promise<string>;
+  cancelAuthorization():Promise<string>;
   submitPhone(value:string):Promise<string>;
   submitCode(value:string):Promise<string>;
   submitPassword(value:string):Promise<string>;
@@ -64,7 +66,16 @@ export async function initializeTelegramAccount(profile:string):Promise<Telegram
   if(!credentials)throw new Error("telegram_tdlib_api_credentials_missing");
   const dbKey=await loadOrCreateTdlibDbKey(profile);
   unlocked();
-  return safeTelegramAccountState(await native.initialize(profile,credentials.apiId,credentials.apiHash,dbKey));
+  const version=Constants.expoConfig?.version ?? "0";
+  const appVersion=/^[0-9A-Za-z.-]{1,32}$/.test(version)?version:"0";
+  return safeTelegramAccountState(await native.initialize(profile,credentials.apiId,credentials.apiHash,dbKey,appVersion));
+}
+/** Accept common phone formatting; the native boundary still validates E.164. */
+export function normalizeTelegramPhone(input:string):string{
+  const digits=input.replace(/[\s().-]/g,"");
+  if(/^8\d{10}$/.test(digits))return "+7"+digits.slice(1);
+  if(/^\d{7,15}$/.test(digits))return "+"+digits;
+  return digits;
 }
 type Step="phone"|"code"|"password"|"email"|"emailCode";
 export async function completeTelegramAuthorization(step:Step,value:string):Promise<TelegramAccountState>{
@@ -73,20 +84,31 @@ export async function completeTelegramAuthorization(step:Step,value:string):Prom
   if(!native?.isAvailable())throw new Error("telegram_tdlib_binary_missing");
   let state:string;
   switch(step){
-    case "phone":state=await native.submitPhone(value);break;
-    case "code":state=await native.submitCode(value);break;
+    case "phone":state=await native.submitPhone(normalizeTelegramPhone(value));break;
+    case "code":state=await native.submitCode(value.trim());break;
     case "password":state=await native.submitPassword(value);break;
-    case "email":state=await native.submitEmail(value);break;
-    case "emailCode":state=await native.submitEmailCode(value);break;
+    case "email":state=await native.submitEmail(value.trim());break;
+    case "emailCode":state=await native.submitEmailCode(value.trim());break;
     default:throw new Error("telegram_invalid_auth_step");
   }
   return safeTelegramAccountState(state);
 }
-export async function logOutTelegramAccount():Promise<TelegramAccountState>{
+export async function cancelTelegramAuthorization(profile:string):Promise<TelegramAccountState>{
   unlocked();
   const native=getNative();
   if(!native?.isAvailable())throw new Error("telegram_tdlib_binary_missing");
-  return safeTelegramAccountState(await native.logOut());
+  const next=await native.cancelAuthorization();
+  await clearTelegramAuthorized(profile);
+  // Native logOut may acknowledge before the asynchronous auth-state event.
+  return next==="authorizationStateReady" ? "authorizationStateLoggingOut" : safeTelegramAccountState(next);
+}
+export async function logOutTelegramAccount(profile:string):Promise<TelegramAccountState>{
+  unlocked();
+  const native=getNative();
+  if(!native?.isAvailable())throw new Error("telegram_tdlib_binary_missing");
+  const next=await native.logOut();
+  await clearTelegramAuthorized(profile);
+  return next==="authorizationStateReady" ? "authorizationStateLoggingOut" : safeTelegramAccountState(next);
 }
 export async function closeTelegramAccount():Promise<TelegramAccountState>{
   const native=getNative();

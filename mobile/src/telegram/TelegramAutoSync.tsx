@@ -6,14 +6,14 @@ import {
   closeTelegramAccount,initializeTelegramAccount,observeTelegramAccountState,tdlibAvailable,
   type TelegramAccountState,
 } from "./account";
-import {loadTelegramSyncMode,hasExistingTdlibDbKey} from "./settings";
+import {loadTelegramSyncMode,wasTelegramAuthorized,markTelegramAuthorized} from "./settings";
 import {loadTelegramBotConfig} from "./bot-settings";
 import {syncTelegramBotText} from "./bot-sync";
 import {importSavedTextPage} from "./saved-import";
 
 /** Single attempt per app process/profile after AppLock unlock. No daemon or timer.
  * TDLib only resumes an account whose device-bound encrypted database key
- * already exists. Telegram's authorizationStateReady, not a preference, gates
+ * is marked explicitly as previously authorized. Telegram's authorizationStateReady gates
  * access to Saved Messages.
  */
 const attempted=new Set<string>();
@@ -32,11 +32,12 @@ export function TelegramAutoSync(){
     async function resumeAccount(){
       if(!active()||!tdlibAvailable())return;
       // A new/never-authorized account is not silently initialized at launch.
-      if(!await hasExistingTdlibDbKey(profile)||!active())return;
+      if(!await wasTelegramAuthorized(profile)||!active())return;
       let imported=false;
       const onState=(state:TelegramAccountState)=>{
         if(state!=="authorizationStateReady"||imported||!active())return;
         imported=true;
+        void markTelegramAuthorized(profile).catch(()=>{});
         // Exactly one bounded page this launch; full history remains explicit.
         void importSavedTextPage(profile,"0",controller.signal).catch(()=>{});
       };

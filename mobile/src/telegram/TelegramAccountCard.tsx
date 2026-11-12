@@ -6,9 +6,10 @@ import {nebulaRadii,nebulaSpacing,nebulaTypography} from "../design/nebula/token
 import {useTheme} from "../theme";
 import {onLocalMemorySessionChange} from "../local-memory/storage";
 import {TelegramSavedImportCard} from "./TelegramSavedImportCard";
+import {markTelegramAuthorized,wasTelegramAuthorized} from "./settings";
 import {
   tdlibAvailable,tdlibAccountState,observeTelegramAccountState,
-  initializeTelegramAccount,completeTelegramAuthorization,logOutTelegramAccount,
+  initializeTelegramAccount,completeTelegramAuthorization,logOutTelegramAccount,cancelTelegramAuthorization,
   type TelegramAccountState,
 } from "./account";
 
@@ -60,13 +61,17 @@ export function TelegramAccountCard({profile,apiConfigured}:{
   const [state,setState]=useState<TelegramAccountState>("offline");
   const [value,setValue]=useState("");
   const [saving,setSaving]=useState(false),[confirmLogout,setConfirmLogout]=useState(false);
+  const [authorizedBefore,setAuthorizedBefore]=useState(false);
   const [error,setError]=useState(""),[notice,setNotice]=useState("");
   const running=useRef(false),version=useRef(0);
   useEffect(()=>{
     const current=++version.current;
     const supported=tdlibAvailable();
     setNativeAvailable(supported);setState(tdlibAccountState());
-    setValue("");setError("");setNotice("");
+    setValue("");setError("");setNotice("");setAuthorizedBefore(false);
+    void wasTelegramAuthorized(profile).then(value=>{
+      if(current===version.current)setAuthorizedBefore(value);
+    }).catch(()=>{});
     const unsubscribe=observeTelegramAccountState(next=>{
       if(current===version.current){setState(next);setValue("");setError("");}
     });
@@ -75,6 +80,12 @@ export function TelegramAccountCard({profile,apiConfigured}:{
     });
     return()=>{version.current++;unsubscribe();lock();};
   },[profile]);
+  useEffect(()=>{
+    if(state==="authorizationStateReady"){
+      setAuthorizedBefore(true);
+      void markTelegramAuthorized(profile).catch(()=>{});
+    }
+  },[profile,state]);
   async function run(action:()=>Promise<TelegramAccountState>,message:string){
     if(running.current)return;
     const current=version.current;
@@ -102,11 +113,14 @@ export function TelegramAccountCard({profile,apiConfigured}:{
       не пройдёт проверенная нативная сборка. Резервный бот работает отдельно.
     </Text> : <>
       <Text accessibilityLiveRegion="polite" style={{color:t.text,...nebulaTypography.label}}>
-        {explanation(state)}
+        {(state==="offline"||state==="authorizationStateClosed")&&authorizedBefore
+          ? "Сессия Telegram приостановлена после блокировки PersAI."
+          : explanation(state)}
       </Text>
       {state==="offline"||state==="authorizationStateClosed"||
        state==="tdlib_runtime_error"||state==="unsupported_state"
-        ? <NebulaAction icon="log-in" label="Подключить аккаунт Telegram"
+        ? <NebulaAction icon="log-in" label={(state==="offline"||state==="authorizationStateClosed")&&authorizedBefore
+            ? "Возобновить сессию" : "Подключить аккаунт Telegram" }
             disabled={saving||!apiConfigured}
             onPress={()=>void run(()=>initializeTelegramAccount(profile),"Запрос на авторизацию отправлен.")}/>
         : null}
@@ -122,10 +136,20 @@ export function TelegramAccountCard({profile,apiConfigured}:{
           secureTextEntry={secret} autoCapitalize="none" autoCorrect={false}
           maxLength={password?256:step==="email"?254:32}
           placeholder={labelFor[step]} placeholderTextColor={t.muted} style={fieldStyle}/>
+        {step==="phone"?<Text style={{color:t.muted,...nebulaTypography.label}}>
+          В международном формате: +79161234567
+        </Text>:null}
         <NebulaAction icon="check" label="Продолжить вход"
           disabled={saving||!value.trim()}
           onPress={()=>void run(()=>completeTelegramAuthorization(step,value),"Данные отправлены в Telegram.")}/>
       </View>:null}
+      {[
+        "authorizationStateWaitPhoneNumber","authorizationStateWaitCode",
+        "authorizationStateWaitPassword","authorizationStateWaitEmailAddress",
+        "authorizationStateWaitEmailCode","authorizationStateWaitRegistration",
+        "authorizationStateWaitOtherDeviceConfirmation",
+      ].includes(state)?<NebulaAction label="Отменить вход" disabled={saving}
+        onPress={()=>void run(()=>cancelTelegramAuthorization(profile),"Вход в Telegram отменён.")}/>:null}
       {state==="authorizationStateReady" ? <>
         <TelegramSavedImportCard profile={profile}/>
         {!confirmLogout?<NebulaAction icon="log-out" variant="danger"
@@ -137,7 +161,7 @@ export function TelegramAccountCard({profile,apiConfigured}:{
           </Text>
           <NebulaAction icon="log-out" variant="danger" label="Подтвердить выход из Telegram"
             disabled={saving} onPress={()=>void run(async()=>{
-              const next=await logOutTelegramAccount();setConfirmLogout(false);return next;
+              const next=await logOutTelegramAccount(profile);setAuthorizedBefore(false);setConfirmLogout(false);return next;
             },"Запрос на выход отправлен Telegram.")}/>
           <NebulaAction label="Отмена" disabled={saving} onPress={()=>setConfirmLogout(false)}/>
         </>}

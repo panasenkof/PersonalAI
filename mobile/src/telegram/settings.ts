@@ -102,3 +102,19 @@ export async function hasExistingTdlibDbKey(profile:string):Promise<boolean>{
   if(!tdlibKeyIsValid(stored))throw new Error("tdlib_device_key_corrupted");
   return true;
 }
+
+
+/** An explicit successful login marker; unlike a leftover database key, this is
+ * removed on logout and is never part of a portable backup. */
+const authorizedKey=(p:string)=>"pia.telegram.tdlib.authorized.v1."+checked(p);
+export async function markTelegramAuthorized(profile:string):Promise<void>{
+  await SecureStore.setItemAsync(authorizedKey(profile),"1",{
+    keychainAccessible:SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+  });
+}
+export async function clearTelegramAuthorized(profile:string):Promise<void>{
+  await SecureStore.deleteItemAsync(authorizedKey(profile));
+}
+export async function wasTelegramAuthorized(profile:string):Promise<boolean>{
+  return await SecureStore.getItemAsync(authorizedKey(profile))==="1";
+}

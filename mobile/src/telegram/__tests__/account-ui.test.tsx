@@ -3,7 +3,7 @@ import {render,fireEvent,waitFor} from "@testing-library/react-native";
 import {TelegramAccountCard} from "../TelegramAccountCard";
 import {
  tdlibAvailable,tdlibAccountState,observeTelegramAccountState,
- initializeTelegramAccount,completeTelegramAuthorization,logOutTelegramAccount,
+ initializeTelegramAccount,completeTelegramAuthorization,logOutTelegramAccount,cancelTelegramAuthorization,
 } from "../account";
 jest.mock("@expo/vector-icons/Feather",()=>()=>null);
 jest.mock("../TelegramSavedImportCard",()=>({
@@ -13,20 +13,23 @@ jest.mock("../TelegramSavedImportCard",()=>({
 jest.mock("../account",()=>({
  tdlibAvailable:jest.fn(),tdlibAccountState:jest.fn(),
  observeTelegramAccountState:jest.fn(),initializeTelegramAccount:jest.fn(),
- completeTelegramAuthorization:jest.fn(),logOutTelegramAccount:jest.fn(),
+ completeTelegramAuthorization:jest.fn(),logOutTelegramAccount:jest.fn(),cancelTelegramAuthorization:jest.fn(),
 }));
+jest.mock("../settings",()=>({wasTelegramAuthorized:jest.fn(async()=>false),markTelegramAuthorized:jest.fn(async()=>{})}));
 jest.mock("../../local-memory/storage",()=>({
  onLocalMemorySessionChange:jest.fn(()=>()=>{}),
 }));
 let onAuth:(value:string)=>void=()=>{};
 beforeEach(()=>{
  jest.clearAllMocks();
+ (require("../settings").wasTelegramAuthorized as jest.Mock).mockResolvedValue(false);
  (tdlibAvailable as jest.Mock).mockReturnValue(false);
  (tdlibAccountState as jest.Mock).mockReturnValue("offline");
  (observeTelegramAccountState as jest.Mock).mockImplementation(cb=>{onAuth=cb;return ()=>{};});
  (initializeTelegramAccount as jest.Mock).mockResolvedValue("starting");
  (completeTelegramAuthorization as jest.Mock).mockResolvedValue("authorizationStateReady");
  (logOutTelegramAccount as jest.Mock).mockResolvedValue("authorizationStateLoggingOut");
+ (cancelTelegramAuthorization as jest.Mock).mockResolvedValue("authorizationStateLoggingOut");
 });
 test("default APK without verified JNI never claims account connected",()=>{
  const ui=render(<TelegramAccountCard profile="guest" apiConfigured />);
@@ -71,4 +74,20 @@ test("native rate limiting is explained without repeated Telegram requests",asyn
  await waitFor(()=>ui.getByText(/3 мин/));
  expect(completeTelegramAuthorization).toHaveBeenCalledTimes(1);
  expect(ui.queryByText(/Операция Telegram не выполнена/)).toBeNull();
+});
+
+test("authorization can be cancelled while waiting for code",async()=>{
+ (tdlibAvailable as jest.Mock).mockReturnValue(true);
+ (tdlibAccountState as jest.Mock).mockReturnValue("authorizationStateWaitCode");
+ const ui=render(<TelegramAccountCard profile="guest" apiConfigured/>);
+ fireEvent.press(ui.getByText("Отменить вход"));
+ await waitFor(()=>expect(cancelTelegramAuthorization).toHaveBeenCalledWith("guest"));
+});
+test("previously authorized account offers session resume after AppLock",async()=>{
+ const {wasTelegramAuthorized}=require("../settings");
+ (wasTelegramAuthorized as jest.Mock).mockResolvedValue(true);
+ (tdlibAvailable as jest.Mock).mockReturnValue(true);
+ const ui=render(<TelegramAccountCard profile="guest" apiConfigured/>);
+ await waitFor(()=>ui.getByText("Возобновить сессию"));
+ expect(ui.getByText(/Сессия Telegram приостановлена/)).toBeTruthy();
 });

@@ -12,14 +12,19 @@ export function telegramAccountError(error:unknown):string {
   }
   if(/tdlib_flood_limited/.test(raw))
     return "Telegram временно ограничил попытки входа. Повторите позже, не запрашивая новые коды.";
+  if(/tdlib_phone_banned/.test(raw))return "Этот номер заблокирован в Telegram.";
+  if(/tdlib_code_expired/.test(raw))return "Срок действия кода истёк. Отмените вход и начните заново.";
+  if(/tdlib_email_invalid/.test(raw))return "Telegram не принял адрес или код из почты.";
   if(/tdlib_phone_invalid/.test(raw))
     return "Telegram не принял номер телефона. Проверьте международный формат.";
   if(/tdlib_code_invalid/.test(raw))
     return "Telegram не принял код или срок его действия истёк. Проверьте актуальный код.";
   if(/tdlib_password_invalid/.test(raw))
     return "Неверный пароль двухэтапной защиты Telegram.";
-  if(/tdlib_api_invalid/.test(raw))
+  if(/tdlib_api_invalid|tdlib_app_credentials_invalid|tdlib_invalid_app_credentials/.test(raw))
     return "Telegram отклонил API ID или API hash. Проверьте параметры приложения.";
+  if(/tdlib_auth_state_mismatch/.test(raw))return "Состояние входа изменилось. Повторите действие.";
+  if(/tdlib_restarting_after_close/.test(raw))return "TDLib ещё завершает предыдущий сеанс. Повторите подключение.";
   if(/tdlib_request_timeout/.test(raw))
     return "Telegram не ответил за 25 секунд. Проверьте соединение и VPN.";
   if(/tdlib_binary_unavailable/.test(raw))
