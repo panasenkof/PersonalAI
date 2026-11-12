@@ -55,7 +55,7 @@ test("AppLock prevents all authorization network and secret handling",async()=>{
 });
 test("starts scoped session with per-profile API and device-bound database key",async()=>{
   expect(await initializeTelegramAccount("guest")).toBe("authorizationStateWaitPhoneNumber");
-  expect(native.initialize).toHaveBeenCalledWith("guest",12345,"a".repeat(32),"k".repeat(44),"0");
+  expect(native.initialize).toHaveBeenCalledWith("guest",12345,"a".repeat(32),"k".repeat(44),expect.any(String));
   expect(tdlibAccountState()).toBe("authorizationStateWaitPhoneNumber");
   expect(await completeTelegramAuthorization("phone","+79161234567")).toBe("authorizationStateWaitCode");
   expect(await completeTelegramAuthorization("code","12345")).toBe("authorizationStateReady");

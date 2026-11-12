@@ -22,6 +22,7 @@ jest.mock("../../local-memory/storage",()=>({
 let onAuth:(value:string)=>void=()=>{};
 beforeEach(()=>{
  jest.clearAllMocks();
+ (require("../settings").wasTelegramAuthorized as jest.Mock).mockResolvedValue(false);
  (tdlibAvailable as jest.Mock).mockReturnValue(false);
  (tdlibAccountState as jest.Mock).mockReturnValue("offline");
  (observeTelegramAccountState as jest.Mock).mockImplementation(cb=>{onAuth=cb;return ()=>{};});

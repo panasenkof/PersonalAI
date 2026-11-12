@@ -99,7 +99,8 @@ export async function cancelTelegramAuthorization(profile:string):Promise<Telegr
   if(!native?.isAvailable())throw new Error("telegram_tdlib_binary_missing");
   const next=await native.cancelAuthorization();
   await clearTelegramAuthorized(profile);
-  return safeTelegramAccountState(next);
+  // Native logOut may acknowledge before the asynchronous auth-state event.
+  return next==="authorizationStateReady" ? "authorizationStateLoggingOut" : safeTelegramAccountState(next);
 }
 export async function logOutTelegramAccount(profile:string):Promise<TelegramAccountState>{
   unlocked();
@@ -107,7 +108,7 @@ export async function logOutTelegramAccount(profile:string):Promise<TelegramAcco
   if(!native?.isAvailable())throw new Error("telegram_tdlib_binary_missing");
   const next=await native.logOut();
   await clearTelegramAuthorized(profile);
-  return safeTelegramAccountState(next);
+  return next==="authorizationStateReady" ? "authorizationStateLoggingOut" : safeTelegramAccountState(next);
 }
 export async function closeTelegramAccount():Promise<TelegramAccountState>{
   const native=getNative();
