@@ -24,6 +24,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      # TEMPORARY: read-only diagnostics before lockfile regeneration.
+      # Remove this step from final PR; never give npm write credentials.
+      - name: Preview npm lockfile changes for Expo SDK 57
+        working-directory: mobile
+        continue-on-error: true
+        run: |
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          git diff -- package-lock.json
       - name: Classify changes and verify roadmap
         id: scope
         env:
@@ -90,11 +98,7 @@ jobs:
       - name: Android release configuration tests
         run: node --test scripts/prepare-android-release.test.cjs scripts/apk-signing-certificate.test.cjs scripts/android-release-policy.test.cjs scripts/verify-main-ci.test.cjs scripts/prepare-browser-ci.test.cjs scripts/telegram-shared-app-config.test.cjs
       - name: Expo dependency compatibility
-        # Preserve real Expo validation; only an npm-verified UNPUBLISHED patch in
-        # the upstream SDK matrix may retain the exact tested package-lock pin.
-        run: |
-          node --test scripts/check-expo-compatibility.test.cjs
-          node scripts/check-expo-compatibility.cjs
+        run: npx expo install --check
       - name: Browser acceptance of production screens
         env:
           SCREENSHOT_DIR: ${{ runner.temp }}/persai-ui
