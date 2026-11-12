@@ -30,8 +30,9 @@ jobs:
         working-directory: mobile
         continue-on-error: true
         run: |
+          cp package-lock.json /tmp/persai-package-lock-before.json
           npm install --package-lock-only --ignore-scripts --no-audit --no-fund
-          git diff -- package-lock.json
+          node -e 'const fs=require("fs");const a=JSON.parse(fs.readFileSync("/tmp/persai-package-lock-before.json","utf8"));const b=JSON.parse(fs.readFileSync("package-lock.json","utf8"));const keys=new Set([...Object.keys(a.packages),...Object.keys(b.packages)]);const delta={};for(const k of keys){if(JSON.stringify(a.packages[k])!==JSON.stringify(b.packages[k]))delta[k]=b.packages[k]??null;}console.log("LOCK_DELTA_JSON="+JSON.stringify(delta));'
       - name: Classify changes and verify roadmap
         id: scope
         env:
