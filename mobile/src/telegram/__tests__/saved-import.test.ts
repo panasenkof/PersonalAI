@@ -313,8 +313,8 @@ test("album exceeding existing 80 MiB cap never enters canonical writer",async()
   (downloadSavedAlbumOriginal as jest.Mock).mockImplementation(async()=>({
     file:{uri:"file:///large.jpg",name:"large.jpg",mimeType:"image/jpeg",size:20*1024*1024},
   }));
-  await expect(importSavedTextPage("guest","0",undefined,undefined,"supported-originals"))
-    .rejects.toThrow("80 МБ");
+  expect(await importSavedTextPage("guest","0",undefined,undefined,"supported-originals"))
+    .toMatchObject({saved:0,unsupported:1,tooLarge:1,withFiles:0});
   expect((saveMediaNote as jest.Mock).mock.calls.some(c=>c[1].telegramSavedMessage?.kind==="messageAlbum")).toBe(false);
   expect(releaseSavedOriginal).toHaveBeenCalledTimes(5);
 });
