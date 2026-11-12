@@ -19,30 +19,34 @@ export function TelegramSettingsScreen() {
   const [apiId, setApiId] = useState(""), [apiHash, setApiHash] = useState("");
   const [configured, setConfigured] = useState(false);
   const [ready, setReady] = useState(false), [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState(""), [error, setError] = useState("");
+  const [modeNotice,setModeNotice]=useState(""),[modeError,setModeError]=useState("");
+  const [apiNotice,setApiNotice]=useState(""),[apiError,setApiError]=useState("");
+  const [confirmClear,setConfirmClear]=useState(false);
   const live = useRef(0), saving = useRef(false);
   useEffect(() => {
     const version = ++live.current;
-    setReady(false); setError(""); setApiHash("");
+    setReady(false); setModeError("");setApiError("");setModeNotice("");setApiNotice("");setConfirmClear(false); setApiHash("");
     void Promise.all([loadTelegramSyncMode(profile), inspectTelegramApiCredentials(profile)])
       .then(([value, info]) => {
         if (version !== live.current) return;
         setMode(value); setConfigured(info.configured); setApiId(info.apiId ? String(info.apiId) : "");
       }).catch(() => {
-        if (version === live.current) setError("Не удалось прочитать защищённые настройки.");
+        if (version === live.current) setApiError("Не удалось прочитать защищённые настройки.");
       }).finally(() => {if (version === live.current) setReady(true);});
     return () => { live.current++; };
   }, [profile]);
 
-  async function run(task: (version: number) => Promise<void>, success: string) {
+  async function run(task: (version: number) => Promise<void>, success: string, section:"mode"|"api") {
     if (!ready || saving.current) return;
     const version = live.current;
-    saving.current = true; setBusy(true); setError(""); setNotice("");
+    saving.current = true; setBusy(true);
+    if(section==="mode"){setModeError("");setModeNotice("");}
+    else {setApiError("");setApiNotice("");}
     try {
       await task(version);
-      if (version === live.current) setNotice(success);
+      if (version === live.current) (section==="mode"?setModeNotice:setApiNotice)(success);
     } catch (e) {
-      if (version === live.current) setError(
+      if (version === live.current) (section==="mode"?setModeError:setApiError)(
         e instanceof Error && /^(Укажите|Telegram API hash)/.test(e.message)
           ? e.message : "Не удалось сохранить параметры Telegram.");
     } finally {
@@ -55,19 +59,19 @@ export function TelegramSettingsScreen() {
     await run(async (version) => {
       await saveTelegramSyncMode(profile, value);
       if (version === live.current) setMode(value);
-    }, "Режим сохранён. Синхронизация заработает после подключения аккаунта.");
+    }, "Режим сохранён.", "mode");
   }
   async function saveApi() {
     await run(async (version) => {
       await saveTelegramApiCredentials(profile, apiId, apiHash);
       if (version === live.current) { setConfigured(true); setApiHash(""); }
-    }, "API-параметры сохранены. Авторизация Telegram ещё не выполнена.");
+    }, "API-параметры сохранены.", "api");
   }
   async function clearApi() {
     await run(async (version) => {
       await clearTelegramApiCredentials(profile);
-      if (version === live.current) { setConfigured(false); setApiId(""); setApiHash(""); }
-    }, "API-параметры удалены.");
+      if (version === live.current) { setConfigured(false); setApiId(""); setApiHash("");setConfirmClear(false); }
+    }, "API-параметры удалены.", "api");
   }
   const field = {minHeight: 46, borderWidth: 1, borderColor: theme.line,
     borderRadius: nebulaRadii.field, color: theme.text, backgroundColor: theme.panel,
@@ -89,12 +93,15 @@ export function TelegramSettingsScreen() {
         <NebulaAction key={value} accessibilityLabel={label}
           label={(mode === value ? "● " : "○ ") + label}
           disabled={disabled} onPress={() => void choose(value)} />)}
+      {modeError?<Text accessibilityRole="alert" style={{color:theme.err}}>{modeError}</Text>:null}
+      {modeNotice?<Text accessibilityLiveRegion="polite" style={{color:theme.ok}}>{modeNotice}</Text>:null}
     </NebulaSection>
     <NebulaSection title="Аккаунт Telegram">
       <Text style={{color: theme.muted, ...nebulaTypography.label}}>
-        API ID и API hash приложения можно получить на my.telegram.org.
-        Подключение личного аккаунта доступно в APK со встроенной TDLib;
-        установленная сборка и действительное состояние входа проверяются ниже.
+        Чтобы подключить личный аккаунт, нужны API ID и API hash.
+        Их выдаёт Telegram на my.telegram.org → API development tools.
+        Они хранятся только на этом телефоне.
+        Подключение доступно в APK со встроенной TDLib.
       </Text>
       <TextInput accessibilityLabel="Telegram API ID" keyboardType="number-pad"
         value={apiId} onChangeText={setApiId} editable={!disabled}
@@ -104,21 +111,31 @@ export function TelegramSettingsScreen() {
         editable={!disabled} placeholder="API hash"
         placeholderTextColor={theme.muted} maxLength={32} style={field}/>
       <Text style={{color: theme.muted, ...nebulaTypography.label}}>
-        {configured ? "API-параметры сохранены локально. Статус подключения показан ниже." : "API-параметры не сохранены."}
+        {configured ? "API-параметры сохранены." : "API-параметры не сохранены."}
       </Text>
       <NebulaAction icon="shield" label="Сохранить API-параметры"
         disabled={disabled || !apiId || !apiHash} onPress={() => void saveApi()}/>
-      {configured ? <NebulaAction icon="trash-2" variant="danger" label="Удалить API-параметры"
-        disabled={disabled} onPress={() => void clearApi()}/> : null}
+      {configured ? (confirmClear ? <>
+        <Text style={{color:theme.muted,...nebulaTypography.label}}>
+          Без API-параметров сессия Telegram не сможет возобновиться.
+          Сам аккаунт и заметки не изменятся.
+        </Text>
+        <NebulaAction icon="trash-2" variant="danger" label="Подтвердить удаление API-параметров"
+          disabled={disabled} onPress={()=>void clearApi()}/>
+        <NebulaAction label="Отмена" disabled={disabled}
+          onPress={()=>setConfirmClear(false)}/>
+      </> : <NebulaAction icon="trash-2" variant="danger" label="Удалить API-параметры"
+        disabled={disabled} onPress={()=>setConfirmClear(true)}/>) : null}
+      {busy ? <Text accessibilityLiveRegion="polite" style={{color:theme.muted}}>Сохраняю…</Text> : null}
+      {apiError ? <Text accessibilityRole="alert" style={{color:theme.err}}>{apiError}</Text> : null}
+      {apiNotice ? <Text accessibilityLiveRegion="polite" style={{color:theme.ok}}>{apiNotice}</Text> : null}
       <TelegramAccountCard profile={profile} apiConfigured={configured}/>
     </NebulaSection>
     <NebulaSection title="Резервный канал — личный бот">
       <TelegramBotCard profile={profile}/>
     </NebulaSection>
-    {!ready || busy ? <Text accessibilityLiveRegion="polite" style={{color:theme.muted}}>
-      {busy ? "Сохраняю…" : "Загружаю настройки…"}
-    </Text> : null}
-    {error ? <Text accessibilityRole="alert" style={{color:theme.err}}>{error}</Text> : null}
-    {notice ? <Text accessibilityLiveRegion="polite" style={{color:theme.ok}}>{notice}</Text> : null}
+    {!ready?<Text accessibilityLiveRegion="polite" style={{color:theme.muted}}>
+      Загружаю настройки…
+    </Text>:null}
   </ScrollView>;
 }

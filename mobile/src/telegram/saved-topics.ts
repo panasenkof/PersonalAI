@@ -7,7 +7,7 @@ import {parseSavedMessagesPage,type SavedMessagesPage} from "./saved-messages";
 export type TelegramSavedTopic = {
   id:string;kind:"savedMessagesTopicTypeMyNotes"|
   "savedMessagesTopicTypeAuthorHidden"|"savedMessagesTopicTypeChat";
-  isPinned:boolean;order:string;
+  isPinned:boolean;order:string;title?:string;
 };
 type NativeTopics = {
   listSavedMessagesTopics(profile:string):Promise<string>;
@@ -44,8 +44,11 @@ export function parseSavedTopics(raw:string):TelegramSavedTopic[]{
         "savedMessagesTopicTypeChat"].includes(topic.kind||"")||
        typeof topic.isPinned!=="boolean"||!ordered(topic.order))
       throw new Error("telegram_saved_topic_invalid");
+    if(topic.title!==undefined && (typeof topic.title!=="string"||topic.title.length>80))
+      throw new Error("telegram_saved_topic_invalid");
     seen.add(topic.id);
-    output.push({id:topic.id,kind:topic.kind!,isPinned:topic.isPinned,order:topic.order!});
+    output.push({id:topic.id,kind:topic.kind!,isPinned:topic.isPinned,order:topic.order!,
+      ...(topic.title!==undefined?{title:topic.title}: {})});
   }
   return output;
 }

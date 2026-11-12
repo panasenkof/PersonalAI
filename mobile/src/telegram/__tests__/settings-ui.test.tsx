@@ -31,6 +31,7 @@ test("mode is separately selectable and does not claim live Telegram access", as
   expect(ui.getByText(/APK со встроенной TDLib/)).toBeTruthy();
   expect(ui.queryByText(/эта версия не читает Telegram/)).toBeNull();
   expect(ui.getByText(/резервный бот работает независимо/)).toBeTruthy();
+  expect(ui.getByText("Режим сохранён.")).toBeTruthy();
   expect(ui.getByText("Резервный бот: тест")).toBeTruthy();
   expect(ui.getByText("TDLib: тест")).toBeTruthy();
 });
@@ -51,7 +52,20 @@ test("saved API credentials do not falsely claim the account is disconnected",as
     apiId:12345,configured:true,
   });
   const ui=render(<TelegramSettingsScreen/>);
-  await waitFor(()=>ui.getByText(/API-параметры сохранены локально/));
-  expect(ui.getByText(/Статус подключения показан ниже/)).toBeTruthy();
+  await waitFor(()=>ui.getByText("API-параметры сохранены."));
+  expect(ui.getByText(/my.telegram.org/)).toBeTruthy();
   expect(ui.queryByText(/Аккаунт не авторизован/)).toBeNull();
+});
+
+test("API credential deletion requires confirmation",async()=>{
+  const {clearTelegramApiCredentials}=require("../settings");
+  (inspectTelegramApiCredentials as jest.Mock).mockResolvedValue({apiId:12345,configured:true});
+  (clearTelegramApiCredentials as jest.Mock).mockResolvedValue(undefined);
+  const ui=render(<TelegramSettingsScreen/>);
+  await waitFor(()=>ui.getByText("Удалить API-параметры"));
+  fireEvent.press(ui.getByText("Удалить API-параметры"));
+  expect(clearTelegramApiCredentials).not.toHaveBeenCalled();
+  expect(ui.getByText(/сессия Telegram не сможет возобновиться/)).toBeTruthy();
+  fireEvent.press(ui.getByText("Подтвердить удаление API-параметров"));
+  await waitFor(()=>expect(clearTelegramApiCredentials).toHaveBeenCalledWith("guest"));
 });
