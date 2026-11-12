@@ -9,7 +9,7 @@ import {
 import {loadTelegramSyncMode,wasTelegramAuthorized,markTelegramAuthorized,
   saveLastTelegramAutoSync,type TelegramAutoSyncResult} from "./settings";
 import {loadTelegramBotConfig} from "./bot-settings";
-import {syncTelegramBotText} from "./bot-sync";
+import {syncTelegramBotText,TelegramBotBlocked} from "./bot-sync";
 import {syncNewSavedText} from "./saved-import";
 import {loadTelegramTargetForWrite} from "./import-target";
 
@@ -74,7 +74,8 @@ export function TelegramAutoSync(){
       if(!active())return;
       const errors=results.filter((r):r is PromiseRejectedResult=>r.status==="rejected");
       const raw=errors.map(r=>r.reason instanceof Error?r.reason.message:"");
-      const code:TelegramAutoSyncResult["error"]=raw.some(s=>/telegram_app_locked/.test(s))
+      const code:TelegramAutoSyncResult["error"]=errors.some(r=>r.reason instanceof TelegramBotBlocked)
+        ?"bot_blocked":raw.some(s=>/telegram_app_locked/.test(s))
         ?"telegram_app_locked":raw.some(s=>/network|timeout|fetch|connection/i.test(s))
         ?"network":errors.length?"other":"";
       await saveLastTelegramAutoSync(profile,{

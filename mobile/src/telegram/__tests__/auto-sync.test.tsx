@@ -9,7 +9,11 @@ import {syncTelegramBotText} from "../bot-sync";
 import {localMemorySessionUnlocked} from "../../local-memory/storage";
 jest.mock("../settings",()=>({loadTelegramSyncMode:jest.fn(),wasTelegramAuthorized:jest.fn(),markTelegramAuthorized:jest.fn(async()=>{}),saveLastTelegramAutoSync:jest.fn(async()=>{})}));
 jest.mock("../bot-settings",()=>({loadTelegramBotConfig:jest.fn()}));
-jest.mock("../bot-sync",()=>({syncTelegramBotText:jest.fn()}));
+jest.mock("../bot-sync",()=>({syncTelegramBotText:jest.fn(),
+  TelegramBotBlocked:class TelegramBotBlocked extends Error{
+    constructor(public reason:string,public updateId:number){super("bot blocked");}
+  },
+}));
 jest.mock("../../local-memory/storage",()=>({localMemorySessionUnlocked:jest.fn(),onLocalMemorySessionChange:jest.fn(()=>()=>{})}));
 jest.mock("../account",()=>({
  closeTelegramAccount:jest.fn(async()=> "offline"),

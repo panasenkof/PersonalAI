@@ -104,8 +104,10 @@ export function TelegramSettingsScreen() {
         {lastSync.unsupported>0?" Сообщений с файлами пропущено: "+lastSync.unsupported+
           " — импортируйте их вручную кнопкой ниже.":""}
         {lastSync.gap?" Новых сообщений было больше 100. Более старые импортируйте вручную кнопкой ниже.":""}
-        {lastSync.error?" Не удалось: "+(lastSync.error==="telegram_app_locked"?
-          "приложение заблокировано":lastSync.error==="network"?"ошибка сети":"ошибка Telegram")+".":""}
+        {lastSync.error==="bot_blocked"
+          ?" Импорт бота остановлен: в очереди неподдерживаемое сообщение. Откройте карточку бота."
+          :lastSync.error?" Не удалось: "+(lastSync.error==="telegram_app_locked"?
+            "приложение заблокировано":lastSync.error==="network"?"ошибка сети":"ошибка Telegram")+".":""}
       </Text>:null}
     </NebulaSection>
     <NebulaSection title="Аккаунт Telegram">

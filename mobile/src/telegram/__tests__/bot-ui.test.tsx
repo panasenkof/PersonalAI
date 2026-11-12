@@ -5,7 +5,7 @@ import {verifyTelegramBot,listBotPairCandidates} from "../bot-api";
 import {
   inspectTelegramBot,saveVerifiedBot,loadTelegramBotConfig,pairTelegramBot,clearTelegramBot,
 } from "../bot-settings";
-import {syncTelegramBotText} from "../bot-sync";
+import {syncTelegramBotText,TelegramBotBlocked,skipBlockedBotUpdate} from "../bot-sync";
 jest.mock("@expo/vector-icons/Feather",()=>()=>null);
 jest.mock("../TelegramImportTargetPicker",()=>({TelegramImportTargetPicker:()=>null}));
 jest.mock("../import-target",()=>({loadTelegramTargetForWrite:jest.fn(async()=>undefined)}));
@@ -16,7 +16,14 @@ jest.mock("../bot-settings",()=>({
   inspectTelegramBot:jest.fn(),saveVerifiedBot:jest.fn(),
   loadTelegramBotConfig:jest.fn(),pairTelegramBot:jest.fn(),clearTelegramBot:jest.fn(),
 }));
-jest.mock("../bot-sync",()=>({syncTelegramBotText:jest.fn()}));
+jest.mock("../bot-sync",()=>({
+  syncTelegramBotText:jest.fn(),skipBlockedBotUpdate:jest.fn(),
+  TelegramBotBlocked:class TelegramBotBlocked extends Error{
+    constructor(public reason:string,public updateId:number){
+      super("В очереди бота есть сообщение, которое PersAI не умеет сохранять.");
+    }
+  },
+}));
 const token="12345678:"+"a".repeat(35);
 beforeEach(()=>{
   jest.clearAllMocks();
@@ -27,7 +34,8 @@ beforeEach(()=>{
   (listBotPairCandidates as jest.Mock).mockResolvedValue([{chatId:"12345",label:"Личный пользователь"}]);
   (pairTelegramBot as jest.Mock).mockResolvedValue(undefined);
   (clearTelegramBot as jest.Mock).mockResolvedValue(undefined);
-  (syncTelegramBotText as jest.Mock).mockResolvedValue({imported:2,skipped:1,lastUpdate:42});
+  (syncTelegramBotText as jest.Mock).mockResolvedValue({imported:2,skipped:1,duplicates:0,lastUpdate:42});
+  (skipBlockedBotUpdate as jest.Mock).mockResolvedValue(undefined);
 });
 test("bot token is masked and never saved before Telegram verifies its getMe identity",async()=>{
   const ui=render(<TelegramBotCard profile="guest"/>);
@@ -81,4 +89,23 @@ test("user can cancel a pending Bot API verification without saving credentials"
   expect(saveVerifiedBot).not.toHaveBeenCalled();
   expect(ui.getByLabelText("Telegram Bot Token")).toBeTruthy();
   expect(ui.getByText("Проверить и сохранить бота")).toBeTruthy();
+});
+
+test("blocked update is not skipped without an explicit second confirmation",async()=>{
+ (inspectTelegramBot as jest.Mock).mockResolvedValue({
+   configured:true,username:"MyPersAIBot",paired:true,cursor:0,
+ });
+ (syncTelegramBotText as jest.Mock).mockRejectedValueOnce(
+   new TelegramBotBlocked("unsupported",12));
+ const ui=render(<TelegramBotCard profile="guest"/>);
+ await waitFor(()=>ui.getByText("Импортировать новые сообщения бота"));
+ fireEvent.press(ui.getByText("Импортировать новые сообщения бота"));
+ await waitFor(()=>ui.getByText("Пропустить это сообщение"));
+ expect(skipBlockedBotUpdate).not.toHaveBeenCalled();
+ fireEvent.press(ui.getByText("Пропустить это сообщение"));
+ expect(skipBlockedBotUpdate).not.toHaveBeenCalled();
+ expect(ui.getByText(/Сообщение не будет сохранено/)).toBeTruthy();
+ fireEvent.press(ui.getByText("Подтвердить пропуск"));
+ await waitFor(()=>expect(skipBlockedBotUpdate).toHaveBeenCalledWith(
+   "guest",12,expect.any(Object)));
 });

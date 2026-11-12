@@ -8,8 +8,26 @@ import {advanceTelegramBotCursor, loadTelegramBotConfig} from "./bot-settings";
 import {requireTelegramTarget,type TelegramImportTarget} from "./import-target";
 
 export type TelegramBotSyncResult = {
-  imported: number; skipped: number; lastUpdate: number; pendingAlbum?: number;
+  imported:number;skipped:number;duplicates:number;lastUpdate:number;pendingAlbum?:number;
 };
+export class TelegramBotBlocked extends Error {
+  constructor(public readonly reason:"unsupported"|"edited",public readonly updateId:number){
+    super(reason==="edited"
+      ?"В очереди бота есть отредактированное сообщение. Изменения не переносятся в заметку."
+      :"В очереди бота есть сообщение, которое PersAI не умеет сохранять (опрос, история и т. п.).");
+    this.name="TelegramBotBlocked";
+  }
+}
+function blockedReason(message:BotMessage|undefined,edited:BotMessage|undefined,
+  chatId:string):"unsupported"|"edited"|null{
+  const fromAllowed=(m:BotMessage|undefined)=>
+    m?.chat?.type==="private"&&String(m.chat.id)===chatId;
+  if(fromAllowed(edited))return "edited";
+  if(fromAllowed(message)&&(message?.sticker||message?.contact||message?.location||
+    message?.venue||message?.poll||message?.dice||message?.story||message?.paid_media))
+    return "unsupported";
+  return null;
+}
 const running = new Map<string,Promise<TelegramBotSyncResult>>();
 
 function mustBeUnlocked(signal?:AbortSignal) {
@@ -29,7 +47,7 @@ async function perform(profile:string,signal?:AbortSignal,target?:TelegramImport
   if(!config || !config.allowedChatId)throw new Error("Сначала подключите личного бота и подтвердите свой чат.");
   const updates=await fetchBotUpdates(config.token,config.cursor,signal);
   mustBeUnlocked(signal);
-  let last=config.cursor,imported=0,skipped=0;
+  let last=config.cursor,imported=0,skipped=0,duplicates=0;
   let pendingAlbum=0;
   for(let index=0;index<updates.length;) {
     const item=updates[index];
@@ -79,7 +97,7 @@ async function perform(profile:string,signal?:AbortSignal,target?:TelegramImport
             messageId:ids[0],mediaGroupId:plan.groupId,messageIds:ids},
           onReplay:()=>{replayed=true;},
         },signal);
-        if(replayed)skipped++;else imported++;
+        if(replayed)duplicates++;else imported++;
       }finally{for(const original of staged)original.remove();}
       mustBeUnlocked(signal);
       // One cursor commit AFTER all originals and the canonical receipt
@@ -90,16 +108,13 @@ async function perform(profile:string,signal?:AbortSignal,target?:TelegramImport
       index=plan.nextIndex;
       continue;
     }
-    if(fromAllowed(edited)) {
-      throw new Error("Есть отредактированное сообщение Telegram. Оно не подтверждено и не пропущено; требуется отдельная обработка изменений.");
-    }
+    const reason=blockedReason(message,edited,config.allowedChatId);
+    if(reason)throw new TelegramBotBlocked(reason,item.update_id);
     if(message && fromAllowed(message)) {
       if(!Number.isSafeInteger(message.message_id)||message.message_id<=0)
         throw new Error("Telegram вернул сообщение без корректного ID.");
       // Do not acknowledge a Telegram object that has no lossless writer yet.
-      if(message.sticker||message.contact||message.location||message.venue||
-        message.poll||message.dice||message.story||message.paid_media)
-        throw new Error("В очереди есть неподдержанный объект Telegram. Импорт остановлен без потери сообщения.");
+      // Unsupported objects are handled as a deliberate blocked update above.
       const body=textOf(message).trim();
       if(body.length>60_000)throw new Error("Сообщение Telegram длиннее 60 000 символов. Импорт остановлен.");
       const isCommand=/^\/(?:start|help|done)(?:\s|$)/i.test(body)&&!hasMedia(message);
@@ -119,7 +134,7 @@ async function perform(profile:string,signal?:AbortSignal,target?:TelegramImport
             onReplay:()=>{replayed=true;},
             botMessage:{botId:config.botId,chatId:config.allowedChatId!,messageId:message.message_id},
           },signal);
-          if(replayed)skipped++;else imported++;
+          if(replayed)duplicates++;else imported++;
         }else skipped++;
       }finally{staged?.remove();}
     } else {
@@ -134,8 +149,8 @@ async function perform(profile:string,signal?:AbortSignal,target?:TelegramImport
     index++;
   }
   if(imported) scheduleVectors(profile);
-  return pendingAlbum?{imported,skipped,lastUpdate:last,pendingAlbum}:
-    {imported,skipped,lastUpdate:last};
+  return pendingAlbum?{imported,skipped,duplicates,lastUpdate:last,pendingAlbum}:
+    {imported,skipped,duplicates,lastUpdate:last};
 }
 /** Serializes per-profile manual/auto starts; no parallel cursor or writes. */
 export function syncTelegramBotText(profile:string,signal?:AbortSignal,target?:TelegramImportTarget):Promise<TelegramBotSyncResult> {
@@ -158,4 +173,26 @@ export function syncTelegramBotText(profile:string,signal?:AbortSignal,target?:T
     if(running.get(profile)===next)running.delete(profile);
   }).catch(()=>{});
   return next;
+}
+
+
+/** Explicit user consent only. Re-read the live queue and confirm the blocker
+ * is still the first unprocessed event from the paired private chat. */
+export async function skipBlockedBotUpdate(profile:string,updateId:number,
+  signal?:AbortSignal):Promise<void>{
+  mustBeUnlocked(signal);
+  if(!Number.isSafeInteger(updateId)||updateId<=0)throw new Error("telegram_bot_queue_changed");
+  if(running.has(profile))throw new Error("telegram_bot_import_running");
+  const config=await loadTelegramBotConfig(profile);
+  if(!config?.allowedChatId)throw new Error("telegram_bot_queue_changed");
+  const events=await fetchBotUpdates(config.token,config.cursor,signal);
+  mustBeUnlocked(signal);
+  const allowed=(m:BotMessage|undefined)=>
+    m?.chat?.type==="private"&&String(m.chat.id)===config.allowedChatId;
+  const first=events.find(x=>x.update_id>config.cursor&&
+    (allowed(x.message)||allowed(x.edited_message)));
+  if(!first||first.update_id!==updateId||
+    !blockedReason(first.message,first.edited_message,config.allowedChatId))
+    throw new Error("telegram_bot_queue_changed");
+  await advanceTelegramBotCursor(profile,config.botId,config.allowedChatId,updateId);
 }

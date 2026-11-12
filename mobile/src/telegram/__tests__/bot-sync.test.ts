@@ -1,4 +1,4 @@
-import {syncTelegramBotText} from "../bot-sync";
+import {syncTelegramBotText,TelegramBotBlocked,skipBlockedBotUpdate} from "../bot-sync";
 import {fetchBotUpdates} from "../bot-api";
 import {prepareBotOriginal} from "../bot-media";
 import {advanceTelegramBotCursor,loadTelegramBotConfig} from "../bot-settings";
@@ -33,7 +33,7 @@ test("only approved private chat reaches canonical writer with typed provenance"
     {update_id:2,message:msg(2,"/start")},
     {update_id:3,message:msg(3,"Рецепт\nПомнить!")},
   ]);
-  expect(await syncTelegramBotText("p1")).toEqual({imported:1,skipped:2,lastUpdate:3});
+  expect(await syncTelegramBotText("p1")).toEqual({imported:1,skipped:2,duplicates:0,lastUpdate:3});
   expect(fetchBotUpdates).toHaveBeenCalledWith(token,0,expect.any(Object));
   expect(saveMediaNote).toHaveBeenCalledTimes(1);
   expect(saveMediaNote).toHaveBeenCalledWith("p1",expect.objectContaining({
@@ -60,7 +60,7 @@ test("unsupported media and edits block ACK instead of silently losing content",
   (fetchBotUpdates as jest.Mock).mockResolvedValueOnce([{
     update_id:8,message:{...msg(8,"photo"),photo:[{file_id:"secret"}]},
   }]);
-  await expect(syncTelegramBotText("p3")).rejects.toThrow("Импорт остановлен");
+  await expect(syncTelegramBotText("p3")).rejects.toBeInstanceOf(TelegramBotBlocked);
   expect(saveMediaNote).not.toHaveBeenCalled();
   expect(advanceTelegramBotCursor).not.toHaveBeenCalled();
   (fetchBotUpdates as jest.Mock).mockResolvedValueOnce([{
@@ -87,7 +87,7 @@ test("simultaneous calls for one profile share the same cursor worker",async()=>
   await Promise.resolve();
   expect(fetchBotUpdates).toHaveBeenCalledTimes(1);
   release([]);
-  expect(await first).toEqual({imported:0,skipped:0,lastUpdate:0});
+  expect(await first).toEqual({imported:0,skipped:0,duplicates:0,lastUpdate:0});
   expect(fetchBotUpdates).toHaveBeenCalledTimes(1);
 });
 
@@ -157,7 +157,7 @@ test("replayed Telegram message does not count as newly imported",async()=>{
     input.onReplay?.();
     return "existing-note";
   });
-  expect(await syncTelegramBotText("replay")).toEqual({imported:0,skipped:1,lastUpdate:15});
+  expect(await syncTelegramBotText("replay")).toEqual({imported:0,skipped:0,duplicates:1,lastUpdate:15});
   expect(scheduleVectors).not.toHaveBeenCalled();
   expect(advanceTelegramBotCursor).toHaveBeenCalledWith("replay",456,"12345",15);
 });
@@ -191,7 +191,7 @@ test("album with explicit following message commits all originals before one gro
     album(21,"Первое"),album(22,"Второе"),{update_id:23,message:msg(23,"/done")},
   ]);
   const result=await syncTelegramBotText("album");
-  expect(result).toEqual({imported:1,skipped:1,lastUpdate:23});
+  expect(result).toEqual({imported:1,skipped:1,duplicates:0,lastUpdate:23});
   expect(prepareBotOriginal).toHaveBeenCalledTimes(2);
   expect(prepareBotOriginal).toHaveBeenNthCalledWith(
     1,token,expect.objectContaining({message_id:21}),expect.any(Object),true);
@@ -283,4 +283,38 @@ test("already acknowledged update does not trap album sync in a retry loop",asyn
   expect(saveMediaNote).toHaveBeenCalledTimes(1);
   expect(advanceTelegramBotCursor).toHaveBeenCalledTimes(1);
   expect(advanceTelegramBotCursor).toHaveBeenCalledWith("skip-stale",456,"12345",21);
+});
+
+test("blocked unsupported poll can be explicitly skipped after rechecking live queue",async()=>{
+ (fetchBotUpdates as jest.Mock).mockResolvedValue([
+   {update_id:40,message:{...msg(40,""),poll:{id:"p"}}},
+   {update_id:41,message:msg(41,"Следом текст")},
+ ]);
+ const outcome=syncTelegramBotText("block");
+ await expect(outcome).rejects.toBeInstanceOf(TelegramBotBlocked);
+ expect(advanceTelegramBotCursor).not.toHaveBeenCalled();
+ await skipBlockedBotUpdate("block",40);
+ expect(advanceTelegramBotCursor).toHaveBeenCalledWith("block",456,"12345",40);
+ (loadTelegramBotConfig as jest.Mock).mockResolvedValue({
+   token,botId:456,username:"MyPersAIBot",allowedChatId:"12345",cursor:40,
+ });
+ (fetchBotUpdates as jest.Mock).mockResolvedValue([{update_id:41,message:msg(41,"Следом текст")}]);
+ expect(await syncTelegramBotText("block")).toMatchObject({imported:1,duplicates:0,lastUpdate:41});
+});
+test("skip denies stale or foreign-chat blockers",async()=>{
+ (fetchBotUpdates as jest.Mock).mockResolvedValue([
+   {update_id:7,message:msg(7,"Not owner",900)},
+   {update_id:8,message:{...msg(8,""),sticker:{}}},
+   {update_id:9,message:{...msg(9,""),poll:{}}},
+ ]);
+ await expect(skipBlockedBotUpdate("p1",9)).rejects.toThrow("telegram_bot_queue_changed");
+ expect(advanceTelegramBotCursor).not.toHaveBeenCalled();
+});
+test("edited owner update is typed blocker",async()=>{
+ (fetchBotUpdates as jest.Mock).mockResolvedValue([
+   {update_id:11,edited_message:msg(11,"changed")},
+ ]);
+ await expect(syncTelegramBotText("edited")).rejects.toMatchObject({
+   reason:"edited",updateId:11,
+ });
 });
