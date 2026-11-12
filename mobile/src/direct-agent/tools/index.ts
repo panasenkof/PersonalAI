@@ -19,7 +19,7 @@ import { validateContextCandidate, type ContextCandidate } from "../conversation
 import { checkedNoteTags } from "../../local-memory/note-tags";
 
 import type { ToolSpec } from "./types";
-export type { ToolDefinition, ToolSpec } from "../types";
+export type { ToolDefinition, ToolSpec } from "./types";
 const queryParameters = { type: "object", properties: { query: { type: "string" } }, required: ["query"], additionalProperties: false };
 const text = (v: unknown, cap = 600) => typeof v === "string" ? v.slice(0, cap) : "";
 const SECTION_TOOL_ERRORS = new Set([
