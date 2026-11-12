@@ -282,31 +282,49 @@ class PersaiTelegramTdlibModule : Module() {
         require(savedTopics.containsKey(topicId)) { "tdlib_saved_topic_not_discovered" }
       }
     }
-    val query = if (topicId != null)
-      JSONObject().put("@type", "getSavedMessagesTopicHistory")
-        .put("saved_messages_topic_id", topicId)
-        .put("from_message_id", cursor).put("offset", 0).put("limit", limit)
-    else
-      JSONObject().put("@type", "getChatHistory")
-        .put("chat_id", chatId).put("from_message_id", cursor)
-        .put("offset", 0).put("limit", limit).put("only_local", false)
-    val history = sendRequest(query)
-    require(history.optString("@type") == "messages") { "tdlib_saved_history_invalid" }
-    val messages = history.optJSONArray("messages")
-      ?: throw IllegalStateException("tdlib_saved_messages_missing")
-    require(messages.length() <= limit) { "tdlib_saved_page_overflow" }
-    val projected = org.json.JSONArray()
+    // TDLib may return fewer messages than requested, even when history continues.
+    val collected = ArrayList<JSONObject>(limit)
+    var from = cursor
     var lastId = 0L
-    for (index in 0 until messages.length()) {
-      val message = messages.optJSONObject(index)
-        ?: throw IllegalStateException("tdlib_saved_message_invalid")
-      require(message.optLong("chat_id", 0) == chatId) { "tdlib_saved_source_mismatch" }
-      val id = message.optLong("id", 0)
-      require(id > 0 && id <= 9007199254740991L &&
-        (lastId == 0L || id < lastId) && (cursor == 0L || id <= cursor)) {
-        "tdlib_saved_message_order_invalid"
+    var attempts = 0
+    while (collected.size < limit && attempts < 5) {
+      attempts++
+      val requested = limit - collected.size
+      val query = if (topicId != null)
+        JSONObject().put("@type", "getSavedMessagesTopicHistory")
+          .put("saved_messages_topic_id", topicId)
+          .put("from_message_id", from).put("offset", 0).put("limit", requested)
+      else
+        JSONObject().put("@type", "getChatHistory")
+          .put("chat_id", chatId).put("from_message_id", from)
+          .put("offset", 0).put("limit", requested).put("only_local", false)
+      val history = sendRequest(query)
+      require(history.optString("@type") == "messages") { "tdlib_saved_history_invalid" }
+      val messages = history.optJSONArray("messages")
+        ?: throw IllegalStateException("tdlib_saved_messages_missing")
+      require(messages.length() <= requested) { "tdlib_saved_page_overflow" }
+      var added = 0
+      for (index in 0 until messages.length()) {
+        val message = messages.optJSONObject(index)
+          ?: throw IllegalStateException("tdlib_saved_message_invalid")
+        require(message.optLong("chat_id", 0) == chatId) { "tdlib_saved_source_mismatch" }
+        val id = message.optLong("id", 0)
+        // TDLib may repeat the from_message_id anchor.
+        if (from != 0L && id == from) continue
+        require(id > 0 && id <= 9007199254740991L &&
+          (lastId == 0L || id < lastId) && (cursor == 0L || id <= cursor)) {
+          "tdlib_saved_message_order_invalid"
+        }
+        lastId = id
+        collected.add(message)
+        added++
       }
-      lastId = id
+      if (added == 0) break
+      from = lastId
+    }
+    val projected = org.json.JSONArray()
+    for (message in collected) {
+      val id = message.optLong("id", 0)
       val content = message.optJSONObject("content")
       val kind = content?.optString("@type") ?: "unknown"
       val description = if (kind == "messageText") content?.optJSONObject("text")?.optString("text", "")
