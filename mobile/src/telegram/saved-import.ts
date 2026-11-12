@@ -1,6 +1,7 @@
 import {localMemorySessionUnlocked} from "../local-memory/storage";
 import {saveMediaNote,MAX_TOTAL_ORIGINAL_BYTES} from "../media/attachments";
 import {scheduleVectors} from "../media/vector-runner";
+import {autoIndexNotePhotos83} from "../media/auto-index-note-photos";
 import {readSavedMessagesPage,type SavedMessagePreview} from "./saved-messages";
 import {readSavedTopicPage,safeTopicId} from "./saved-topics";
 import {downloadSavedOriginal,downloadSavedAlbumOriginal,releaseSavedOriginal,
@@ -10,7 +11,7 @@ import {loadSavedWatermark,saveSavedWatermark} from "./settings";
 import {requireTelegramTarget,type TelegramImportTarget} from "./import-target";
 
 export type SavedTextImportResult={
-  saved:number; duplicates:number; unsupported:number; empty:number;
+  saved:number; duplicates:number; unsupported:number; empty:number; withFiles:number; tooLarge:number;
   nextCursor:string; selfChatId:string; pendingAlbum?:number;
   maxMessageId:string;minMessageId:string;
 };
@@ -81,7 +82,8 @@ export async function importSavedTextPage(profile:string,cursor="0",
     const messages=mediaPolicy==="supported-originals"
       ?await withAlbumBoundary(profile,topicId,page,signal):page.messages;
     let safeNextCursor=messages.length?messages[messages.length-1].id:"";
-    let pendingAlbum=0,saved=0,duplicates=0,unsupported=0,empty=0;
+    let pendingAlbum=0,saved=0,duplicates=0,unsupported=0,empty=0,withFiles=0,tooLarge=0;
+    const photosToIndex:string[]=[];
     const units:Unit[]=[];
     for(let i=0;i<messages.length;){
       const item=messages[i];
@@ -132,7 +134,7 @@ export async function importSavedTextPage(profile:string,cursor="0",
             "Альбом Telegram ("+staged.length+" файлов)";
           let replayed=false;
           const targetFields=await requireTelegramTarget(profile,target);
-          await saveMediaNote(profile,{
+          const savedId=await saveMediaNote(profile,{
             files:staged.map(x=>x.file),title,body,...targetFields,
             receipt:"telegram-saved:"+page.selfChatId+":"+ids[0]+
               ":album:"+unit.albumId+":"+ids.join(","),
@@ -142,7 +144,8 @@ export async function importSavedTextPage(profile:string,cursor="0",
               ...(topicId!==undefined?{topicId}:{}),
             },onReplay:()=>{replayed=true;},
           },signal);
-          if(replayed)duplicates++;else saved++;
+          if(replayed)duplicates++;
+          else {saved++;withFiles++;if(oldestFirst.some(v=>v.kind==="messagePhoto"))photosToIndex.push(savedId);}
         }finally{
           // Failure of ANY original/cipher operation must never create a
           // partial album; safely release only each previously staged file.
@@ -167,7 +170,7 @@ export async function importSavedTextPage(profile:string,cursor="0",
           original?.file.name||"Сообщение из Избранного";
         let replayed=false;
         const targetFields=await requireTelegramTarget(profile,target);
-        await saveMediaNote(profile,{
+        const savedId=await saveMediaNote(profile,{
           title,body,...targetFields,...(original?{file:original.file}:{}),
           receipt:"telegram-saved:"+page.selfChatId+":"+item.id,
           telegramSavedMessage:{
@@ -177,14 +180,21 @@ export async function importSavedTextPage(profile:string,cursor="0",
             ...(topicId!==undefined?{topicId}:{}),
           },onReplay:()=>{replayed=true;},
         },signal);
-        if(replayed)duplicates++;else saved++;
+        if(replayed)duplicates++;
+        else {saved++;if(original){withFiles++;if(item.kind==="messagePhoto")photosToIndex.push(savedId);}}
       }finally{
         if(original)await releaseSavedOriginal(profile,original);
       }
     }
     unlocked(signal);
     if(saved)scheduleVectors(profile);
-    return {saved,duplicates,unsupported,empty,nextCursor:safeNextCursor,
+    // The canonical note writer has already committed. Vision indexing is best-effort:
+    // no secondary receipt, failed index or missing model may undo an import.
+    for(const id of photosToIndex){
+      try{unlocked(signal);await autoIndexNotePhotos83(profile,id,signal);}
+      catch{if(signal?.aborted||!localMemorySessionUnlocked())break;}
+    }
+    return {saved,duplicates,unsupported,empty,withFiles,tooLarge,nextCursor:safeNextCursor,
       maxMessageId:messages[0]?.id||"",minMessageId:messages[messages.length-1]?.id||"",
       selfChatId:page.selfChatId,...(pendingAlbum?{pendingAlbum}:{})};
   }finally{
