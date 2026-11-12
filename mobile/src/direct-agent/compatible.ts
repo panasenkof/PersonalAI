@@ -6,7 +6,7 @@ import { anonymousLocalAllowed, validateBaseUrl, validateModel } from "./setting
 import type { WebContext } from "./web-search";
 export { fetchWebContext } from "./web-search";
 import { createToolCatalog } from "./tool-catalog";
-import { compatibleSystemPrompt as system, restrictedSystemPrompt } from "./prompt";
+import { modelSystemPrompt } from "./prompt";
 
 import { dialogueHistory } from "./dialogue";
 import { prepareDirectContext, withData } from "./context";
@@ -26,12 +26,9 @@ function apiEndpoint(settings: DirectAgentSettings): string {
   const base = validateBaseUrl(settings.baseUrl, settings.provider);
   return base + (settings.provider === "anthropic" ? "/messages" : "/chat/completions");
 }
-function conversation(options: DirectAgentOptions, search: WebContext) {
+function conversation(options: DirectAgentOptions, search: WebContext, systemMessage: string) {
   return [
-    { role: "system", content: (options.contextOnly
-      ? restrictedSystemPrompt("compatible", Boolean(options.importTagsEnabled)) +
-        (options.importTagsEnabled ? "" : system(options.sections,options.context,options.contextClassificationEnabled))
-      : system(options.sections,options.context,options.contextClassificationEnabled)) },
+    { role: "system", content: systemMessage },
     ...dialogueHistory(options.history).map(turn => ({role:turn.role, content:chatContent(turn.content, turn.attachments, options.settings.provider === "anthropic" ? "anthropic" : "chat")})),
     { role: "user", content: chatContent(withData(search.context, options.prompt.trim()), options.attachments, options.settings.provider === "anthropic" ? "anthropic" : "chat") },
   ];
@@ -50,8 +47,17 @@ export async function runCompatibleAgent(options: DirectAgentOptions): Promise<D
   options.diagnostic?.("agent.context", { chars: search.context.length, webSources: search.sources.length,
     used: search.used.length, builtinWeb: search.builtinWeb, webFailed: Boolean(search.webError) });
   const sources = search.sources;
-  const messages: Array<Record<string, unknown>> = conversation(options, search);
   const catalog = createToolCatalog(options, sources, search.notes, search.used);
+  // Identical system rules to Responses for identical active tool catalog.
+  const systemMessage = modelSystemPrompt({
+    protocol: "compatible", contextOnly: options.contextOnly,
+    importTagsEnabled: options.importTagsEnabled,
+    sections: options.sections, context: options.context,
+    contextEnabled: Boolean(options.contextClassificationEnabled),
+    tools: catalog.guidance,
+  });
+  options.diagnostic?.("agent.prompt", { chars: systemMessage.length });
+  const messages: Array<Record<string, unknown>> = conversation(options, search, systemMessage);
   const memory = catalog.memory;
   const tools = catalog.definitions;
   options.diagnostic?.("agent.tools_available", { names: tools.map(t => t.name) });
