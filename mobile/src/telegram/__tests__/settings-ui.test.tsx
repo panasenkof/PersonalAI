@@ -1,10 +1,12 @@
 import React from "react";
+import {bundledTelegramApiCredentials} from "../bundled-api";
 import {fireEvent, render, waitFor} from "@testing-library/react-native";
 import {TelegramSettingsScreen} from "../../screens/TelegramSettingsScreen";
 import {
   inspectTelegramApiCredentials, loadTelegramSyncMode, saveTelegramSyncMode, saveTelegramApiCredentials,
 } from "../settings";
 jest.mock("@expo/vector-icons/Feather", () => () => null);
+jest.mock("../bundled-api",()=>({bundledTelegramApiCredentials:jest.fn()}));
 jest.mock("react-native-safe-area-context", () => ({
   useSafeAreaInsets: () => ({top:24,bottom:24,left:0,right:0}),
 }));
@@ -19,6 +21,7 @@ jest.mock("../settings", () => ({
 beforeEach(() => {
   jest.clearAllMocks();
   (loadTelegramSyncMode as jest.Mock).mockResolvedValue("manual");
+  (bundledTelegramApiCredentials as jest.Mock).mockReturnValue(null);
   (inspectTelegramApiCredentials as jest.Mock).mockResolvedValue({apiId:null,configured:false});
   (saveTelegramSyncMode as jest.Mock).mockResolvedValue(undefined);
   (require("../settings").loadLastTelegramAutoSync as jest.Mock).mockResolvedValue(null);
@@ -69,4 +72,18 @@ test("API credential deletion requires confirmation",async()=>{
   expect(ui.getByText(/сессия Telegram не сможет возобновиться/)).toBeTruthy();
   fireEvent.press(ui.getByText("Подтвердить удаление API-параметров"));
   await waitFor(()=>expect(clearTelegramApiCredentials).toHaveBeenCalledWith("guest"));
+});
+
+test("signed PersAI with shared Telegram app identity skips per-user API form",async()=>{
+  (bundledTelegramApiCredentials as jest.Mock).mockReturnValue({
+    apiId:13579,apiHash:"a".repeat(32),
+  });
+  const ui=render(<TelegramSettingsScreen/>);
+  await waitFor(()=>ui.getByText(/PersAI уже содержит общие параметры подключения/));
+  expect(ui.queryByLabelText("Telegram API ID")).toBeNull();
+  expect(ui.queryByLabelText("Telegram API hash")).toBeNull();
+  expect(ui.queryByText("Сохранить API-параметры")).toBeNull();
+  expect(ui.queryByText("Удалить API-параметры")).toBeNull();
+  expect(ui.getByText(/по номеру телефона и коду подтверждения/)).toBeTruthy();
+  expect(saveTelegramApiCredentials).not.toHaveBeenCalled();
 });
