@@ -1,3 +1,4 @@
+import {telegramSavedAlreadyImported,telegramSavedAlbumAlreadyImported,telegramSavedReceiptFingerprint} from '../attachments';
 import { SqliteMemoryRepository } from '../../local-memory/repository';
 import { appendNoteAttachments, writeOriginal, materializeAttachment, saveMediaNote, savedOriginalRevision, applyRecognitionCandidate, MAX_ORIGINAL_BYTES, MAX_ORIGINALS_PER_NOTE } from '../attachments';
 import { SCHEMA_SQL } from '../../local-memory/storage';
@@ -1165,4 +1166,26 @@ test("TDLib Saved album rejects incomplete IDs, mismatched file counts or forged
     await expect(saveMediaNote("guest",bad)).rejects.toThrow("invalid_telegram_saved_provenance");
   }
   expect(sqlite.prepare("SELECT count(*) n FROM memory_entities").get().n).toBe(0);
+});
+
+test("Saved preflight fingerprint exactly matches writer for single and album",async()=>{
+ const single={chatId:"12345",messageId:"91",date:1794300000,kind:"messagePhoto" as const};
+ expect(await telegramSavedAlreadyImported("guest","12345","91")).toBe(false);
+ const note=await saveMediaNote("guest",{file:input.file,title:"Photo",body:"Caption",
+  sensitivity:"sensitive",receipt:"telegram-saved:12345:91",telegramSavedMessage:single});
+ expect(await telegramSavedAlreadyImported("guest","12345","91")).toBe(true);
+ expect(sqlite.prepare("SELECT fingerprint FROM memory_received_shares WHERE entity_id=?").get(note).fingerprint)
+  .toBe(await telegramSavedReceiptFingerprint(single));
+ const album={chatId:"12345",messageId:"92",date:1794300000,kind:"messageAlbum" as const,
+   mediaAlbumId:"-123",messageIds:["92","93"]};
+ mockFiles.set("file:///second.jpg",new Uint8Array([1,2,3]));
+ const files=[input.file,{uri:"file:///second.jpg",name:"second.jpg",mimeType:"image/jpeg"}];
+ expect(await telegramSavedAlbumAlreadyImported("guest","12345","-123",["92","93"])).toBe(false);
+ const albumNote=await saveMediaNote("guest",{files,title:"Album",body:"Caption",
+  sensitivity:"sensitive",receipt:"telegram-saved:12345:92:album:-123:92,93",telegramSavedMessage:album});
+ expect(await telegramSavedAlbumAlreadyImported("guest","12345","-123",["92","93"])).toBe(true);
+ expect(sqlite.prepare("SELECT fingerprint FROM memory_received_shares WHERE entity_id=?").get(albumNote).fingerprint)
+  .toBe(await telegramSavedReceiptFingerprint(album));
+ mockUnlocked=false;
+ await expect(telegramSavedAlreadyImported("guest","12345","91")).rejects.toThrow("application_locked");
 });

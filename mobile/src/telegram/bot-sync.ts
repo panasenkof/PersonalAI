@@ -1,5 +1,6 @@
 import {localMemorySessionUnlocked,onLocalMemorySessionChange} from "../local-memory/storage";
 import {saveMediaNote,MAX_TOTAL_ORIGINAL_BYTES} from "../media/attachments";
+import {autoIndexNotePhotos83} from "../media/auto-index-note-photos";
 import {scheduleVectors} from "../media/vector-runner";
 import {fetchBotUpdates, type BotMessage} from "./bot-api";
 import {prepareBotOriginal, type PreparedBotOriginal} from "./bot-media";
@@ -54,6 +55,7 @@ async function perform(profile:string,signal?:AbortSignal,target?:TelegramImport
   const updates=await fetchBotUpdates(config.token,config.cursor,signal);
   mustBeUnlocked(signal);
   let last=config.cursor,imported=0,skipped=0,duplicates=0;
+  const newPhotos=new Set<string>();
   let pendingAlbum=0;
   for(let index=0;index<updates.length;) {
     const item=updates[index];
@@ -100,7 +102,7 @@ async function perform(profile:string,signal?:AbortSignal,target?:TelegramImport
           "Альбом Telegram ("+staged.length+" файлов)";
         let replayed=false;
         const targetFields=await requireTelegramTarget(profile,target);
-        await saveMediaNote(profile,{
+        const noteId=await saveMediaNote(profile,{
           title,body,...targetFields,
           ...(linked.sourceUrl?{sourceUrl:linked.sourceUrl,sourceCoverage:"url_only" as const}:{}),
           files:staged.map(v=>v.file),
@@ -110,7 +112,10 @@ async function perform(profile:string,signal?:AbortSignal,target?:TelegramImport
             messageId:ids[0],mediaGroupId:plan.groupId,messageIds:ids},
           onReplay:()=>{replayed=true;},
         },signal);
-        if(replayed)duplicates++;else imported++;
+        if(replayed)duplicates++;else{
+          imported++;
+          if(staged.some(x=>x.file.mimeType?.startsWith("image/")))newPhotos.add(noteId);
+        }
       }finally{for(const original of staged)original.remove();}
       mustBeUnlocked(signal);
       // One cursor commit AFTER all originals and the canonical receipt
@@ -141,7 +146,7 @@ async function perform(profile:string,signal?:AbortSignal,target?:TelegramImport
             staged?.file.name||"Сообщение Telegram";
           let replayed=false;
           const targetFields=await requireTelegramTarget(profile,target);
-          await saveMediaNote(profile,{
+          const noteId=await saveMediaNote(profile,{
             title,body,...targetFields,
             ...(staged?{file:staged.file}:{}),
             ...(linked.sourceUrl?{sourceUrl:linked.sourceUrl,sourceCoverage:"url_only" as const}:{}),
@@ -149,7 +154,10 @@ async function perform(profile:string,signal?:AbortSignal,target?:TelegramImport
             onReplay:()=>{replayed=true;},
             botMessage:{botId:config.botId,chatId:config.allowedChatId!,messageId:message.message_id},
           },signal);
-          if(replayed)duplicates++;else imported++;
+          if(replayed)duplicates++;else{
+            imported++;
+            if(staged?.file.mimeType?.startsWith("image/"))newPhotos.add(noteId);
+          }
         }else skipped++;
       }finally{staged?.remove();}
     } else {
@@ -164,6 +172,8 @@ async function perform(profile:string,signal?:AbortSignal,target?:TelegramImport
     index++;
   }
   if(imported) scheduleVectors(profile);
+  await Promise.allSettled([...newPhotos].map(id=>autoIndexNotePhotos83(profile,id,signal)));
+  mustBeUnlocked(signal);
   return pendingAlbum?{imported,skipped,duplicates,lastUpdate:last,pendingAlbum}:
     {imported,skipped,duplicates,lastUpdate:last};
 }

@@ -3,6 +3,7 @@ import {fetchBotUpdates} from "../bot-api";
 import {prepareBotOriginal} from "../bot-media";
 import {advanceTelegramBotCursor,loadTelegramBotConfig} from "../bot-settings";
 import {saveMediaNote} from "../../media/attachments";
+import {autoIndexNotePhotos83} from "../../media/auto-index-note-photos";
 import {localMemorySessionUnlocked,onLocalMemorySessionChange} from "../../local-memory/storage";
 import {scheduleVectors} from "../../media/vector-runner";
 jest.mock("../bot-api",()=>({fetchBotUpdates:jest.fn()}));
@@ -11,6 +12,7 @@ jest.mock("../bot-settings",()=>({loadTelegramBotConfig:jest.fn(),advanceTelegra
 jest.mock("../../media/attachments",()=>({saveMediaNote:jest.fn(),MAX_TOTAL_ORIGINAL_BYTES:80*1024*1024}));
 jest.mock("../../local-memory/storage",()=>({localMemorySessionUnlocked:jest.fn(),onLocalMemorySessionChange:jest.fn()}));
 jest.mock("../../media/vector-runner",()=>({scheduleVectors:jest.fn()}));
+jest.mock("../../media/auto-index-note-photos",()=>({autoIndexNotePhotos83:jest.fn(async()=>({indexed:1,current:0,pending:0,failed:0}))}));
 const token="12345678:"+"a".repeat(35);
 const msg=(id:number,text:string,chatId=12345)=>({
   message_id:id,chat:{id:chatId,type:"private"},text,
@@ -329,4 +331,21 @@ test("bot hidden HTTPS link is retained with url_only provenance",async()=>{
    body:"Читайте тут\n\nСсылки:\nhttps://example.com/lesson",
    sourceUrl:"https://example.com/lesson",sourceCoverage:"url_only",
  }),expect.any(Object));
+});
+
+test("new bot photo indexes, replay skips index",async()=>{
+ const photo={file:{uri:"file:///cache/p.jpg",name:"p.jpg",mimeType:"image/jpeg",size:40},remove:jest.fn()};
+ (prepareBotOriginal as jest.Mock).mockResolvedValue(photo);
+ (fetchBotUpdates as jest.Mock).mockResolvedValueOnce([{update_id:61,
+  message:{...msg(61,"Caption"),photo:[{file_id:"AgAC1"}]}}]);
+ await syncTelegramBotText("botphoto");
+ expect(autoIndexNotePhotos83).toHaveBeenCalledWith("botphoto","note-id",expect.any(Object));
+ (autoIndexNotePhotos83 as jest.Mock).mockClear();
+ (fetchBotUpdates as jest.Mock).mockResolvedValueOnce([{update_id:61,
+  message:{...msg(61,"Caption"),photo:[{file_id:"AgAC1"}]}}]);
+ (saveMediaNote as jest.Mock).mockImplementation(async(_profile:string,input:any)=>{
+  input.onReplay({entityId:"note-id",recordStatus:"active"});return "note-id";
+ });
+ await syncTelegramBotText("botphoto");
+ expect(autoIndexNotePhotos83).not.toHaveBeenCalled();
 });
