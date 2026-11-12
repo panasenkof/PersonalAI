@@ -51,7 +51,7 @@ export function TelegramSavedImportCard({profile}:{profile:string}){
     activeImport.current=request;
     running.current=true;setBusy(true);setError("");setCancelRequested(false);
     try{
-      const target=await loadTelegramImportTarget(profile,"saved");
+      const target=await loadTelegramTargetForWrite(profile,"saved");
       const outcome=selectedTopic
         ? await importSavedTextPage(profile,cursor,request.signal,selectedTopic.id,"supported-originals",target)
         : await importSavedTextPage(profile,cursor,request.signal,undefined,"supported-originals",target);

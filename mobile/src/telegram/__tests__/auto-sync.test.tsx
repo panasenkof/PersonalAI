@@ -17,7 +17,7 @@ jest.mock("../account",()=>({
  observeTelegramAccountState:jest.fn(),
 }));
 jest.mock("../saved-import",()=>({syncNewSavedText:jest.fn()}));
-jest.mock("../import-target",()=>({loadTelegramImportTarget:jest.fn(async()=>undefined)}));
+jest.mock("../import-target",()=>({loadTelegramTargetForWrite:jest.fn(async()=>undefined)}));
 jest.mock("../../profile/ProfileContext",()=>({useProfile:()=> "guest"}));
 const mockVisibility={current:true};
 jest.mock("../../security/visibility",()=>({

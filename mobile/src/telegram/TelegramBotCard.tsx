@@ -79,7 +79,7 @@ export function TelegramBotCard({profile}:{profile:string}){
     }
   });}
   function sync(){void action(async(version,signal)=>{
-    const target=await loadTelegramImportTarget(profile,"bot");
+    const target=await loadTelegramTargetForWrite(profile,"bot");
     const result=await syncTelegramBotText(profile,signal,target);
     if(signal.aborted)return;
     if(version===current.current)setNotice(

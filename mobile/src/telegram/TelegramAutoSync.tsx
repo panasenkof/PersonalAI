@@ -43,7 +43,7 @@ export function TelegramAutoSync(){
         if(state!=="authorizationStateReady"||imported||!active())return;
         imported=true;
         void markTelegramAuthorized(profile).catch(()=>{});
-        inFlight=loadTelegramImportTarget(profile,"saved").then(target=>
+        inFlight=loadTelegramTargetForWrite(profile,"saved").then(target=>
           syncNewSavedText(profile,controller.signal,target)).then(outcome=>{
           Object.assign(accountResult,outcome);
         });
@@ -59,7 +59,7 @@ export function TelegramAutoSync(){
       if(!active())return;
       const bot=await loadTelegramBotConfig(profile);
       if(bot?.allowedChatId&&active()){
-        const target=await loadTelegramImportTarget(profile,"bot");
+        const target=await loadTelegramTargetForWrite(profile,"bot");
         const result=await syncTelegramBotText(profile,controller.signal,target);
         botResult.botImported=result.imported;
         botResult.botSkipped=result.skipped;

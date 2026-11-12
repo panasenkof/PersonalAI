@@ -6,7 +6,7 @@ import {listSavedTopics} from "../saved-topics";
 import {onLocalMemorySessionChange} from "../../local-memory/storage";
 jest.mock("@expo/vector-icons/Feather",()=>()=>null);
 jest.mock("../TelegramImportTargetPicker",()=>({TelegramImportTargetPicker:()=>null}));
-jest.mock("../import-target",()=>({loadTelegramImportTarget:jest.fn(async()=>undefined)}));
+jest.mock("../import-target",()=>({loadTelegramTargetForWrite:jest.fn(async()=>undefined)}));
 jest.mock("../saved-import",()=>({importSavedTextPage:jest.fn()}));
 jest.mock("../saved-topics",()=>({listSavedTopics:jest.fn()}));
 jest.mock("../../local-memory/storage",()=>({onLocalMemorySessionChange:jest.fn(()=>()=>{})}));

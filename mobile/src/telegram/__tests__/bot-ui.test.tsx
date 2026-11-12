@@ -8,7 +8,7 @@ import {
 import {syncTelegramBotText} from "../bot-sync";
 jest.mock("@expo/vector-icons/Feather",()=>()=>null);
 jest.mock("../TelegramImportTargetPicker",()=>({TelegramImportTargetPicker:()=>null}));
-jest.mock("../import-target",()=>({loadTelegramImportTarget:jest.fn(async()=>undefined)}));
+jest.mock("../import-target",()=>({loadTelegramTargetForWrite:jest.fn(async()=>undefined)}));
 jest.mock("../bot-api",()=>({
   verifyTelegramBot:jest.fn(),listBotPairCandidates:jest.fn(),
 }));
