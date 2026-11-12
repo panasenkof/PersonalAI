@@ -4,6 +4,16 @@ import { DEFAULT_SECTIONS } from "../fact-tool";
 import type { MemorySection } from "../fact-tool";
 import type { ConversationContext } from "../conversation-context";
 
+// Snapshot the complete serialized values in stable JSON, without Jest's
+// noisy object-wrapper formatting. No prompts, names, descriptions or schemas
+// are normalized: one changed character fails the golden snapshot.
+expect.addSnapshotSerializer({
+  test: (value: unknown) => Boolean(value && typeof value === "object" &&
+    (value as { __arch0Snapshot?: boolean }).__arch0Snapshot === true),
+  print: (value: unknown) => JSON.stringify(
+    (value as { actual: unknown }).actual, null, 2),
+});
+
 /** ARCH-0: capture the EXACT prompt bytes for both existing LLM protocols.
  * Do not normalize whitespace or strip rules: ARCH-1 must preserve all text.
  */
@@ -28,10 +38,5 @@ test("ARCH-0: exact system prompts for Responses and compatible protocols (four 
   expect(actual[2].responses).toContain("Текущая тема диалога");
   expect(actual[3].responses).toContain("раздел закреплён пользователем");
   expect(actual[3].compatible).toContain("закреплён пользователем");
-  // Bootstrap exact snapshots from the real compiled Jest environment, then
-  // commit the immutable snapshot and replace this temporary capture.
-  const serialized = JSON.stringify(actual);
-  const size = 3500;
-  for (let offset = 0, part = 0; offset < serialized.length; offset += size, part++)
-    console.log("ARCH0_PROMPTS_PART_" + part + ":" + serialized.slice(offset, offset + size));
+  expect({ __arch0Snapshot: true, actual }).toMatchSnapshot();
 });
