@@ -11,6 +11,7 @@ import {loadTelegramSyncMode,wasTelegramAuthorized,markTelegramAuthorized,
 import {loadTelegramBotConfig} from "./bot-settings";
 import {syncTelegramBotText} from "./bot-sync";
 import {syncNewSavedText} from "./saved-import";
+import {loadTelegramImportTarget} from "./import-target";
 
 /** Single attempt per app process/profile after AppLock unlock. No daemon or timer.
  * TDLib only resumes an account whose device-bound encrypted database key
@@ -42,7 +43,8 @@ export function TelegramAutoSync(){
         if(state!=="authorizationStateReady"||imported||!active())return;
         imported=true;
         void markTelegramAuthorized(profile).catch(()=>{});
-        inFlight=syncNewSavedText(profile,controller.signal).then(outcome=>{
+        inFlight=loadTelegramImportTarget(profile,"saved").then(target=>
+          syncNewSavedText(profile,controller.signal,target)).then(outcome=>{
           Object.assign(accountResult,outcome);
         });
       };
@@ -57,7 +59,8 @@ export function TelegramAutoSync(){
       if(!active())return;
       const bot=await loadTelegramBotConfig(profile);
       if(bot?.allowedChatId&&active()){
-        const result=await syncTelegramBotText(profile,controller.signal);
+        const target=await loadTelegramImportTarget(profile,"bot");
+        const result=await syncTelegramBotText(profile,controller.signal,target);
         botResult.botImported=result.imported;
         botResult.botSkipped=result.skipped;
       }

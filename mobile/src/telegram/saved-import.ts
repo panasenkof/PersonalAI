@@ -7,6 +7,7 @@ import {downloadSavedOriginal,downloadSavedAlbumOriginal,releaseSavedOriginal,
   supportsSavedOriginal,type SavedOriginal} from "./saved-original";
 import {planSavedAlbum,safeSavedAlbumId} from "./saved-album-plan";
 import {loadSavedWatermark,saveSavedWatermark} from "./settings";
+import {requireTelegramTarget,type TelegramImportTarget} from "./import-target";
 
 export type SavedTextImportResult={
   saved:number; duplicates:number; unsupported:number; empty:number;
@@ -57,7 +58,8 @@ async function withAlbumBoundary(profile:string,topicId:string|undefined,
  */
 export async function importSavedTextPage(profile:string,cursor="0",
   signal?:AbortSignal,topicId?:string,
-  mediaPolicy:"text-only"|"supported-originals"="text-only"):Promise<SavedTextImportResult>{
+  mediaPolicy:"text-only"|"supported-originals"="text-only",
+  target?:TelegramImportTarget):Promise<SavedTextImportResult>{
   unlocked(signal);
   if(topicId!==undefined&&!safeTopicId(topicId))
     throw new Error("telegram_saved_topic_request_invalid");
@@ -129,8 +131,9 @@ export async function importSavedTextPage(profile:string,cursor="0",
           const title=body.split(/\r?\n/)[0].slice(0,160)||
             "Альбом Telegram ("+staged.length+" файлов)";
           let replayed=false;
+          const targetFields=await requireTelegramTarget(profile,target);
           await saveMediaNote(profile,{
-            files:staged.map(x=>x.file),title,body,sensitivity:"sensitive",
+            files:staged.map(x=>x.file),title,body,...targetFields,
             receipt:"telegram-saved:"+page.selfChatId+":"+ids[0]+
               ":album:"+unit.albumId+":"+ids.join(","),
             telegramSavedMessage:{
@@ -163,8 +166,9 @@ export async function importSavedTextPage(profile:string,cursor="0",
         const title=body.split(/\r?\n/)[0].trim().slice(0,160)||
           original?.file.name||"Сообщение из Избранного";
         let replayed=false;
+        const targetFields=await requireTelegramTarget(profile,target);
         await saveMediaNote(profile,{
-          title,body,sensitivity:"sensitive",...(original?{file:original.file}:{}),
+          title,body,...targetFields,...(original?{file:original.file}:{}),
           receipt:"telegram-saved:"+page.selfChatId+":"+item.id,
           telegramSavedMessage:{
             chatId:page.selfChatId,messageId:item.id,date:item.date,
@@ -191,14 +195,14 @@ export async function importSavedTextPage(profile:string,cursor="0",
 
 /** Import up to five pages (100 text messages) until the previous watermark.
  * The watermark only advances after every attempted page was safely written. */
-export async function syncNewSavedText(profile:string,signal?:AbortSignal){
+export async function syncNewSavedText(profile:string,signal?:AbortSignal,target?:TelegramImportTarget){
   unlocked(signal);
   const watermark=await loadSavedWatermark(profile);
   let cursor="0",selfChatId="",top="",saved=0,duplicates=0,unsupported=0,empty=0;
   let reached=false;
   for(let pages=0;pages<5;pages++){
     unlocked(signal);
-    const page=await importSavedTextPage(profile,cursor,signal,undefined,"text-only");
+    const page=await importSavedTextPage(profile,cursor,signal,undefined,"text-only",target);
     unlocked(signal);
     if(pages===0){
       top=page.maxMessageId;

@@ -5,6 +5,8 @@ import {importSavedTextPage} from "../saved-import";
 import {listSavedTopics} from "../saved-topics";
 import {onLocalMemorySessionChange} from "../../local-memory/storage";
 jest.mock("@expo/vector-icons/Feather",()=>()=>null);
+jest.mock("../TelegramImportTargetPicker",()=>({TelegramImportTargetPicker:()=>null}));
+jest.mock("../import-target",()=>({loadTelegramImportTarget:jest.fn(async()=>undefined)}));
 jest.mock("../saved-import",()=>({importSavedTextPage:jest.fn()}));
 jest.mock("../saved-topics",()=>({listSavedTopics:jest.fn()}));
 jest.mock("../../local-memory/storage",()=>({onLocalMemorySessionChange:jest.fn(()=>()=>{})}));
@@ -20,11 +22,11 @@ test("manual import is visible, page bounded, reports skipped media without clai
   expect(ui.getByText(/тексты, одиночные оригиналы и завершённые альбомы/)).toBeTruthy();
   expect(importSavedTextPage).not.toHaveBeenCalled();
   fireEvent.press(ui.getByText("Импортировать последние 20 сообщений"));
-  await waitFor(()=>expect(importSavedTextPage).toHaveBeenCalledWith("guest","0",expect.any(Object),undefined,"supported-originals"));
+  await waitFor(()=>expect(importSavedTextPage).toHaveBeenCalledWith("guest","0",expect.any(Object),undefined,"supported-originals",undefined));
   expect(ui.getByText(/Сохранено: 2; уже были: 1/)).toBeTruthy();
   expect(ui.getByText(/неподдержанных: 3/)).toBeTruthy();
   fireEvent.press(ui.getByText("Продолжить историю (до 20)"));
-  await waitFor(()=>expect(importSavedTextPage).toHaveBeenCalledWith("guest","44",expect.any(Object),undefined,"supported-originals"));
+  await waitFor(()=>expect(importSavedTextPage).toHaveBeenCalledWith("guest","44",expect.any(Object),undefined,"supported-originals",undefined));
   fireEvent.press(ui.getByText("Начать с новых сообщений"));
   expect(ui.getByText("Импортировать последние 20 сообщений")).toBeTruthy();
 });
@@ -59,10 +61,10 @@ test("explicit topic selection resets cursor and reuses canonical importer",asyn
   expect(ui.getByText("● Чат без названия")).toBeTruthy();
   fireEvent.press(ui.getByText("Импортировать последние 20 сообщений"));
   await waitFor(()=>expect(importSavedTextPage)
-    .toHaveBeenCalledWith("guest","0",expect.any(Object),"-1005432","supported-originals"));
+    .toHaveBeenCalledWith("guest","0",expect.any(Object),"-1005432","supported-originals",undefined));
   fireEvent.press(ui.getByText("○ Все сообщения «Избранного»"));
   fireEvent.press(ui.getByText("Импортировать последние 20 сообщений"));
-  await waitFor(()=>expect(importSavedTextPage).toHaveBeenLastCalledWith("guest","0",expect.any(Object),undefined,"supported-originals"));
+  await waitFor(()=>expect(importSavedTextPage).toHaveBeenLastCalledWith("guest","0",expect.any(Object),undefined,"supported-originals",undefined));
 });
 test("empty topic list and failures are non-destructive",async()=>{
   const ui=render(<TelegramSavedImportCard profile="guest"/>);
@@ -145,6 +147,6 @@ test("switching profiles aborts old import and enables a new profile without sta
   expect(importButton.props.accessibilityState.disabled).toBe(false);
   fireEvent.press(importButton);
   await waitFor(()=>expect(importSavedTextPage).toHaveBeenCalledWith(
-    "second","0",expect.any(Object),undefined,"supported-originals"));
+    "second","0",expect.any(Object),undefined,"supported-originals",undefined));
   expect(ui.getByText("Отменить импорт Telegram")).toBeTruthy();
 });
