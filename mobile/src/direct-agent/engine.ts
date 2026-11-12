@@ -127,7 +127,7 @@ type Response = {
 };
 export const MAX_DIRECT_REQUESTS = DEFAULT_MODEL_CALL_LIMIT;
 export { MAX_DIRECT_REPLY_TOKENS, MAX_REASONING_REPLY_TOKENS, TRUNCATED_NOTE, isReasoningModel };
-const systemPrompt = (sections?: MemorySection[], context?: ConversationContext, enabled = false) =>
+export const systemPrompt = (sections?: MemorySection[], context?: ConversationContext, enabled = false) =>
   "Ты персональный помощник PersAI, работающий на телефоне пользователя. " +
   "Для вопросов о предпочтениях и заметках используй search_local_notes, если он доступен. " +
   "Для СОЗДАНИЯ пользовательского раздела или подраздела вызови propose_create_memory_section (name — имя нового уровня, parentSlug — точный slug родителя или null для корня), если инструмент доступен. Для УДАЛЕНИЯ пустого пользовательского раздела вызови propose_delete_memory_section с существующим sectionSlug. Сначала уточни неоднозначный путь; нельзя удалять раздел с записями, архивом, корзиной или подразделами. При отказе инструмента НЕ выдумывай количество записей или подразделов: если точные счётчики не возвращены инструментом, сообщи только причину отказа. Счётчик заметок для конкретного раздела не означает рекурсивный подсчёт его потомков. Оба инструмента предлагают действие, но НЕ выполняют его. Пользователь отдельно подтверждает карточку, не заявляй об успешном изменении заранее. " +
