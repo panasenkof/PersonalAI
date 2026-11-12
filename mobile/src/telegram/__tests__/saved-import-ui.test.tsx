@@ -199,7 +199,7 @@ test("full import Stop aborts active request and retains checkpoint UI",async()=
   fireEvent.press(ui.getByText("Импортировать всю историю"));
   await waitFor(()=>ui.getByText("Остановить"));
   fireEvent.press(ui.getByText("Остановить"));
-  expect(supplied?.aborted).toBe(true);
+  expect((importEntireSavedHistory as jest.Mock).mock.calls[0][3].aborted).toBe(true);
   await waitFor(()=>ui.getByText(/Импорт остановлен/));
 });
 test("unmount cancels a running full-history job",async()=>{
@@ -215,7 +215,7 @@ test("unmount cancels a running full-history job",async()=>{
   fireEvent.press(ui.getByText("Импортировать всю историю"));
   await waitFor(()=>ui.getByText("Остановить"));
   ui.unmount();
-  expect(supplied?.aborted).toBe(true);
+  expect((importEntireSavedHistory as jest.Mock).mock.calls[0][3].aborted).toBe(true);
 });
 test("checkpoint for another selected topic cannot be resumed from all Saved",async()=>{
   (loadSavedHistoryCheckpoint as jest.Mock).mockResolvedValue(checkpoint("17"));
