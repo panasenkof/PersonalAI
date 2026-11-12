@@ -1,10 +1,10 @@
 import type { DirectAgentOptions } from "../engine";
-import type { ToolSpec } from "./types";
+import type { ToolSpec, TurnState } from "./types";
+import { text } from "./helpers";
 
 /** ARCH-2: source extraction tools retain their canonical ACL/version readers. */
 export function sourceTools(
-  options: DirectAgentOptions,
-  text: (value: unknown, cap?: number) => string,
+  options: DirectAgentOptions, _turn: TurnState,
 ): ToolSpec[] {
   return [
     ...(options.searchSources ? [{
