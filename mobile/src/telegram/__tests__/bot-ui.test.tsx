@@ -19,8 +19,10 @@ jest.mock("../bot-settings",()=>({
 jest.mock("../bot-sync",()=>({
   syncTelegramBotText:jest.fn(),skipBlockedBotUpdate:jest.fn(),
   TelegramBotBlocked:class TelegramBotBlocked extends Error{
-    constructor(public reason:string,public updateId:number){
+    reason:string;updateId:number;
+    constructor(reason:string,updateId:number){
       super("В очереди бота есть сообщение, которое PersAI не умеет сохранять.");
+      this.reason=reason;this.updateId=updateId;
     }
   },
 }));

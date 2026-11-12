@@ -127,7 +127,7 @@ test("non-file Telegram objects do not disappear from the queue on ACK",async()=
   (fetchBotUpdates as jest.Mock).mockResolvedValueOnce([{
     update_id:13,message:{...msg(13,""),location:{latitude:1,longitude:2}},
   }]);
-  await expect(syncTelegramBotText("location")).rejects.toThrow("неподдержанный объект");
+  await expect(syncTelegramBotText("location")).rejects.toBeInstanceOf(TelegramBotBlocked);
   expect(advanceTelegramBotCursor).not.toHaveBeenCalled();
   expect(prepareBotOriginal).not.toHaveBeenCalled();
 });
@@ -211,7 +211,7 @@ test("album with explicit following message commits all originals before one gro
 test("unfinished album remains pending with zero ACK or file downloads",async()=>{
   (fetchBotUpdates as jest.Mock).mockResolvedValueOnce([album(21),album(22)]);
   expect(await syncTelegramBotText("pending")).toEqual({
-    imported:0,skipped:0,lastUpdate:0,pendingAlbum:2,
+    imported:0,skipped:0,duplicates:0,lastUpdate:0,pendingAlbum:2,
   });
   expect(prepareBotOriginal).not.toHaveBeenCalled();
   expect(saveMediaNote).not.toHaveBeenCalled();
@@ -264,7 +264,7 @@ test("standalone /done is an album boundary command and never a memory note",asy
   (fetchBotUpdates as jest.Mock).mockResolvedValueOnce([
     {update_id:41,message:msg(41,"/done")},
   ]);
-  expect(await syncTelegramBotText("boundary")).toEqual({imported:0,skipped:1,lastUpdate:41});
+  expect(await syncTelegramBotText("boundary")).toEqual({imported:0,skipped:1,duplicates:0,lastUpdate:41});
   expect(saveMediaNote).not.toHaveBeenCalled();
   expect(advanceTelegramBotCursor).toHaveBeenCalledWith("boundary",456,"12345",41);
 });
@@ -278,7 +278,7 @@ test("already acknowledged update does not trap album sync in a retry loop",asyn
     {update_id:21,message:msg(21,"Fresh")},
   ]);
   expect(await syncTelegramBotText("skip-stale")).toEqual({
-    imported:1,skipped:0,lastUpdate:21,
+    imported:1,skipped:0,duplicates:0,lastUpdate:21,
   });
   expect(saveMediaNote).toHaveBeenCalledTimes(1);
   expect(advanceTelegramBotCursor).toHaveBeenCalledTimes(1);

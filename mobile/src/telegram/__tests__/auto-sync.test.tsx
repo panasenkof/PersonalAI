@@ -11,7 +11,8 @@ jest.mock("../settings",()=>({loadTelegramSyncMode:jest.fn(),wasTelegramAuthoriz
 jest.mock("../bot-settings",()=>({loadTelegramBotConfig:jest.fn()}));
 jest.mock("../bot-sync",()=>({syncTelegramBotText:jest.fn(),
   TelegramBotBlocked:class TelegramBotBlocked extends Error{
-    constructor(public reason:string,public updateId:number){super("bot blocked");}
+    reason:string;updateId:number;
+    constructor(reason:string,updateId:number){super("bot blocked");this.reason=reason;this.updateId=updateId;}
   },
 }));
 jest.mock("../../local-memory/storage",()=>({localMemorySessionUnlocked:jest.fn(),onLocalMemorySessionChange:jest.fn(()=>()=>{})}));
