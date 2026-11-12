@@ -180,3 +180,49 @@ export async function saveTelegramTargetId(profile:string,channel:TelegramImport
     keychainAccessible:SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
   });
 }
+
+/**
+ * Device-only checkpoint for explicit TG-7 history import. Not included in the
+ * portable backup, and never reused for automatic text-only synchronization.
+ * One checkpoint per profile; topic and destination identify the import scope.
+ */
+export type SavedHistoryCheckpoint={
+  version:1;cursor:string;topicId:string;targetId:string;selfChatId:string;
+  pages:number;processed:number;saved:number;duplicates:number;
+  unsupported:number;empty:number;withFiles:number;tooLarge:number;
+};
+const historyKey=(p:string)=>"pia.telegram.saved.history-cursor.v1."+checked(p);
+const historyCursorValid=(value:unknown)=>value==="0"||validTelegramMessageId(value);
+const historyTopicValid=(value:unknown)=>typeof value==="string"&&
+  (value===""||/^(0|-?[1-9][0-9]{0,15})$/.test(value)&&
+    Number.isSafeInteger(Number(value)));
+const historyTargetValid=(value:unknown)=>typeof value==="string"&&
+  (value===""||/^[a-zA-Z0-9_-]{1,128}$/.test(value));
+const historyCountValid=(value:unknown)=>typeof value==="number"&&
+  Number.isSafeInteger(value)&&value>=0&&value<=1_000_000_000;
+export function validSavedHistoryCheckpoint(value:unknown):value is SavedHistoryCheckpoint{
+  if(!value||typeof value!=="object")return false;
+  const v=value as Partial<SavedHistoryCheckpoint>;
+  return v.version===1&&historyCursorValid(v.cursor)&&
+    historyTopicValid(v.topicId)&&historyTargetValid(v.targetId)&&
+    (v.selfChatId===""||validTelegramMessageId(v.selfChatId))&&
+    [v.pages,v.processed,v.saved,v.duplicates,v.unsupported,v.empty,
+      v.withFiles,v.tooLarge].every(historyCountValid);
+}
+export async function loadSavedHistoryCheckpoint(profile:string):Promise<SavedHistoryCheckpoint|null>{
+  const raw=await SecureStore.getItemAsync(historyKey(profile));
+  if(raw===null)return null;
+  try{
+    const value:unknown=JSON.parse(raw);
+    return validSavedHistoryCheckpoint(value)?value:null;
+  }catch{return null;}
+}
+export async function saveSavedHistoryCheckpoint(profile:string,value:SavedHistoryCheckpoint):Promise<void>{
+  if(!validSavedHistoryCheckpoint(value))throw new Error("telegram_history_checkpoint_invalid");
+  await SecureStore.setItemAsync(historyKey(profile),JSON.stringify(value),{
+    keychainAccessible:SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+  });
+}
+export async function clearSavedHistoryCheckpoint(profile:string):Promise<void>{
+  await SecureStore.deleteItemAsync(historyKey(profile));
+}
