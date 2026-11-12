@@ -93,19 +93,9 @@ jobs:
           key: ${{ runner.os }}-persai-native-ccache-x86_64-v1-${{ hashFiles('mobile/package-lock.json') }}-${{ github.run_id }}
           restore-keys: |
             ${{ runner.os }}-persai-native-ccache-x86_64-v1-${{ hashFiles('mobile/package-lock.json') }}-
-      - name: Install and prepare C/C++ compiler cache
+      - name: Install and prepare optional C/C++ compiler cache
         shell: bash
-        run: |
-          set -euo pipefail
-          if ! command -v ccache >/dev/null 2>&1; then
-            sudo apt-get update -qq
-            sudo apt-get install -y --no-install-recommends ccache
-          fi
-          launcher="$(command -v ccache)"
-          test -x "$launcher"
-          echo "PERSAI_CCACHE_BIN=$launcher" >> "$GITHUB_ENV"
-          ccache --zero-stats
-          ccache --version | head -n 1
+        run: bash scripts/setup-ci-ccache.sh
       # AGP may try to download r27 during :expo-sqlite configuration.
       # A transient truncated/invalid ZIP then fails the entire native build
       # before any product code compiles. Install and verify independently.
@@ -297,17 +287,26 @@ jobs:
             -dname 'CN=PersAI CI Test,O=Ephemeral QA,C=US'
           node scripts/prepare-android-release.cjs
           cd android
-          ./gradlew :app:assembleRelease --init-script ../scripts/ci-native-ccache.init.gradle --build-cache --no-configuration-cache --no-daemon --stacktrace
+          if [ -n "${PERSAI_CCACHE_BIN:-}" ]; then
+            ./gradlew :app:assembleRelease --init-script ../scripts/ci-native-ccache.init.gradle --build-cache --no-configuration-cache --no-daemon --stacktrace
+          else
+            echo "::warning::Native build without ccache due to unavailable Ubuntu mirrors"
+            ./gradlew :app:assembleRelease --build-cache --no-configuration-cache --no-daemon --stacktrace
+          fi
           test -s app/build/outputs/apk/release/app-release.apk
           unzip -Z1 app/build/outputs/apk/release/app-release.apk | grep -Fx 'assets/index.android.bundle'
           apksigner="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
           test -x "$apksigner"
           "$apksigner" verify --verbose app/build/outputs/apk/release/app-release.apk
 
-      - name: Verify compiler cache was wired into every native CMake module
+      - name: Verify compiler cache wiring when available
         run: |
-          node scripts/verify-native-ccache.cjs
-          ccache --show-stats
+          if [ -n "${PERSAI_CCACHE_BIN:-}" ]; then
+            node scripts/verify-native-ccache.cjs
+            ccache --show-stats
+          else
+            echo "::warning::No compiler cache installed; native APK was still compiled and verified"
+          fi
       - name: Validate native APK archive
         run: |
           APK=android/app/build/outputs/apk/release/app-release.apk
@@ -507,7 +506,7 @@ jobs:
           fi
       # Only main is allowed to publish compiler objects for future PR restores.
       - name: Save trusted x86_64 C/C++ compiler cache
-        if: ${{ github.ref == 'refs/heads/main' && success() }}
+        if: ${{ github.ref == 'refs/heads/main' && success() && env.PERSAI_CCACHE_BIN != '' }}
         uses: actions/cache/save@v4
         with:
           path: ~/.cache/ccache
