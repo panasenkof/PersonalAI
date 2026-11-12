@@ -1111,3 +1111,58 @@ test("Saved media provenance requires a file and refuses caption-only fabricatio
   })).rejects.toThrow("invalid_telegram_saved_provenance");
   expect(sqlite.prepare("SELECT count(*) n FROM memory_entities").get().n).toBe(0);
 });
+
+test("TDLib Saved album commits all ORIGINALS and immutable album source in one note",async()=>{
+  mockFiles.set("file:///second.jpg",new Uint8Array(512).fill(2));
+  const files=[
+    {uri:"file:///photo.png",name:"first.png",mimeType:"image/png"},
+    {uri:"file:///second.jpg",name:"second.jpg",mimeType:"image/jpeg"},
+  ];
+  const input={
+    files,title:"Альбом",body:"Первое фото",sensitivity:"sensitive" as const,
+    receipt:"telegram-saved:12345:21:album:9223372036854775807:21,22",
+    telegramSavedMessage:{
+      chatId:"12345",messageId:"21",date:1794300000,kind:"messageAlbum" as const,
+      mediaAlbumId:"9223372036854775807",messageIds:["21","22"],
+    },
+  };
+  const id=await saveMediaNote("guest",input);
+  const row=sqlite.prepare("SELECT payload_json FROM memory_entities WHERE id=?").get(id);
+  expect(JSON.parse(row.payload_json).source_telegram_saved).toEqual({
+    service:"telegram",channel:"saved",...input.telegramSavedMessage,
+  });
+  expect(sqlite.prepare("SELECT count(*) n FROM memory_attachments WHERE entity_id=?")
+    .get(id).n).toBe(2);
+  let replay=false;
+  expect(await saveMediaNote("guest",{...input,onReplay:()=>{replay=true;}})).toBe(id);
+  expect(replay).toBe(true);
+  expect(sqlite.prepare("SELECT count(*) n FROM memory_entities").get().n).toBe(1);
+});
+test("TDLib Saved album rejects incomplete IDs, mismatched file counts or forged receipts",async()=>{
+  mockFiles.set("file:///second.jpg",new Uint8Array(512).fill(2));
+  const files=[
+    {uri:"file:///photo.png",name:"first.png",mimeType:"image/png"},
+    {uri:"file:///second.jpg",name:"second.jpg",mimeType:"image/jpeg"},
+  ];
+  const good={
+    files,title:"Альбом",body:"",sensitivity:"sensitive" as const,
+    receipt:"telegram-saved:12345:21:album:albumId:21,22",
+    telegramSavedMessage:{
+      chatId:"12345",messageId:"21",date:1794300000,kind:"messageAlbum" as const,
+      mediaAlbumId:"albumId",messageIds:["21","22"],
+    },
+  };
+  const valid={...good,receipt:"telegram-saved:12345:21:album:1234:21,22",
+    telegramSavedMessage:{...good.telegramSavedMessage,mediaAlbumId:"1234"}};
+  for(const bad of [
+    {...valid,files:[files[0]]},
+    {...valid,telegramSavedMessage:{...valid.telegramSavedMessage,messageIds:["21","21"]}},
+    {...valid,telegramSavedMessage:{...valid.telegramSavedMessage,messageIds:["22","21"]}},
+    {...valid,telegramSavedMessage:{...valid.telegramSavedMessage,mediaAlbumId:"../fake"}},
+    {...valid,receipt:"telegram-saved:12345:21"},
+    {...valid,telegramSavedMessage:{...valid.telegramSavedMessage,kind:"messagePhoto" as const}},
+  ]){
+    await expect(saveMediaNote("guest",bad)).rejects.toThrow("invalid_telegram_saved_provenance");
+  }
+  expect(sqlite.prepare("SELECT count(*) n FROM memory_entities").get().n).toBe(0);
+});

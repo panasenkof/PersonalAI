@@ -325,7 +325,7 @@ class PersaiTelegramTdlibModule : Module() {
    * lookup crosses the JS boundary. Does not send or mutate Telegram content.
    */
   private fun savedOriginal(profile:String, expectedChat:String, messageId:String,
-    releaseUri:String?=null):String {
+    releaseUri:String?=null, expectedAlbumId:String?=null):String {
     requireState("authorizationStateReady")
     require(Regex("^(guest|[a-zA-Z0-9_-]{1,120})$").matches(profile) &&
       activeProfile == profile) { "tdlib_saved_profile_mismatch" }
@@ -345,7 +345,15 @@ class PersaiTelegramTdlibModule : Module() {
     }
     // An album must become a single note with every original; a single-file
     // importer must never misrepresent it as complete.
-    require(message.optLong("media_album_id",0)==0L) { "tdlib_original_album_requires_batch" }
+    val realAlbumId=message.optLong("media_album_id",0L)
+    if(expectedAlbumId==null){
+      require(realAlbumId==0L) { "tdlib_original_album_requires_batch" }
+    }else{
+      require(Regex("^-?[1-9][0-9]{0,18}$").matches(expectedAlbumId) &&
+        realAlbumId!=0L && realAlbumId.toString()==expectedAlbumId){
+        "tdlib_original_album_source_mismatch"
+      }
+    }
     val content=message.optJSONObject("content")
       ?: throw IllegalStateException("tdlib_original_content_missing")
     val kind=content.optString("@type")
@@ -468,6 +476,7 @@ class PersaiTelegramTdlibModule : Module() {
       .put("text",(description ?: "").take(60000))
       .put("name",name).put("mimeType",mime).put("size",local.length())
       .put("uri","file://" + local.absolutePath)
+      .apply { if(expectedAlbumId!=null) put("albumId",expectedAlbumId) }
       .toString()
   }
 
@@ -541,6 +550,16 @@ class PersaiTelegramTdlibModule : Module() {
     AsyncFunction("releaseSavedMessageOriginal") {
       profile:String, selfChatId:String, messageId:String, uri:String ->
       savedOriginal(profile,selfChatId,messageId,uri)
+    }
+    // Group-member operations require a source album ID from a checked
+    // self-chat projection; they share the exact single-original validation.
+    AsyncFunction("downloadSavedAlbumOriginal") {
+      profile:String, selfChatId:String, messageId:String, albumId:String ->
+      savedOriginal(profile,selfChatId,messageId,null,albumId)
+    }
+    AsyncFunction("releaseSavedAlbumOriginal") {
+      profile:String, selfChatId:String, messageId:String, albumId:String, uri:String ->
+      savedOriginal(profile,selfChatId,messageId,uri,albumId)
     }
     // Topic IDs are only accepted after an updateSavedMessagesTopic from TDLib.
     AsyncFunction("listSavedMessagesTopics") { profile: String ->

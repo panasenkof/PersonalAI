@@ -8,14 +8,14 @@ export type SavedAlbumPlan =
   | {state:"pending";albumId:string;received:number;reason:"page_tail"|"legacy_source"}
   | {state:"ready";albumId:string;messages:SavedMessagePreview[];nextIndex:number};
 const MAX_ALBUM_ORIGINALS=10;
-const validAlbumId=(value:unknown):value is string=>
+export const safeSavedAlbumId=(value:unknown):value is string=>
   typeof value==="string"&&/^-?[1-9][0-9]{0,18}$/.test(value);
 /** Compare only native-supplied decimal strings; numbers corrupt 64-bit IDs. */
 export function planSavedAlbum(page:SavedMessagePreview[],index:number):SavedAlbumPlan{
   const first=page[index];
   if(!first||first.hasAlbum!==true||!first.hasMedia)
     throw new Error("telegram_saved_album_invalid_head");
-  if(!validAlbumId(first.albumId))
+  if(!safeSavedAlbumId(first.albumId))
     return {state:"pending",albumId:"",received:1,reason:"legacy_source"};
   const albumId=first.albumId;
   const entries:SavedMessagePreview[]=[];
