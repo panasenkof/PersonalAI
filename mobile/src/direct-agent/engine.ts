@@ -5,7 +5,7 @@ import { runCompatibleAgent } from "./compatible";
 import { prepareDirectContext, withData } from "./context";
 import type { UsedNote } from "./context";
 import { createToolCatalog } from "./tool-catalog";
-import { responsesSystemPrompt as systemPrompt, restrictedSystemPrompt } from "./prompt";
+import { modelSystemPrompt } from "./prompt";
 import type { TaskState } from "./task-state";
 import { dialogueHistory } from "./dialogue";
 import { requestModel } from "./request";
@@ -184,16 +184,23 @@ export async function runDirectAgent(options: DirectAgentOptions): Promise<Direc
   const web = await prepareDirectContext(options);
   options.diagnostic?.("agent.context", { chars: web.context.length, notes: web.notes.length,
     used: web.used.length, webSources: web.sources.length, builtinWeb: web.builtinWeb, webFailed: Boolean(web.webError) });
+  const toolSources = [...web.sources];
+  const catalog = createToolCatalog(options, toolSources, web.notes, web.used);
+  // The tool catalog must be resolved BEFORE the system message. This keeps
+  // provider instructions in sync with the actual advertised tool schemas.
+  const systemMessage = modelSystemPrompt({
+    protocol: "responses", contextOnly: options.contextOnly,
+    importTagsEnabled: options.importTagsEnabled,
+    sections: options.sections, context: options.context,
+    contextEnabled: Boolean(options.contextClassificationEnabled),
+    tools: [...catalog.guidance, ...(web.builtinWeb ? [{ name: "web_search" }] : [])],
+  });
+  options.diagnostic?.("agent.prompt", { chars: systemMessage.length });
   const input: unknown[] = [
-    { role: "system", content: (options.contextOnly
-      ? restrictedSystemPrompt("responses", Boolean(options.importTagsEnabled)) +
-        (options.importTagsEnabled ? "" : systemPrompt(options.sections,options.context,options.contextClassificationEnabled))
-      : systemPrompt(options.sections,options.context,options.contextClassificationEnabled)) },
+    { role: "system", content: systemMessage },
     ...dialogueHistory(options.history).map(turn => ({role:turn.role, content:chatContent(turn.content, turn.attachments, "responses")})),
     { role: "user", content: chatContent(withData(web.context, prompt), options.attachments, "responses") },
   ];
-  const toolSources = [...web.sources];
-  const catalog = createToolCatalog(options, toolSources, web.notes, web.used);
   const tools: object[] = catalog.definitions.map(t => ({ type: "function", ...t, strict: true }));
   options.diagnostic?.("agent.tools_available", { names: [...catalog.definitions.map(t => t.name), ...(web.builtinWeb ? ["web_search"] : [])] });
   if (web.builtinWeb) tools.push({ type: "web_search", search_context_size: "low", external_web_access: true });
