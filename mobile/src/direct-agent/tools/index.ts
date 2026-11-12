@@ -11,59 +11,24 @@ import { articleTools } from "./article-tools";
 import { proposalTools } from "./proposal-tools";
 import { conversationTools } from "./conversation-tools";
 import { createTurnState } from "./turn-state";
+import { text } from "./helpers";
 export type { ToolDefinition, ToolSpec } from "./types";
-const queryParameters = { type: "object", properties: { query: { type: "string" } }, required: ["query"], additionalProperties: false };
-const text = (v: unknown, cap = 600) => typeof v === "string" ? v.slice(0, cap) : "";
-const SECTION_TOOL_ERRORS = new Set([
-  "application_locked","invalid_section_action_args","section_parent_unavailable",
-  "section_parent_changed","section_sibling_name_exists","section_delete_protected_or_missing",
-  "section_has_children","section_not_empty","collection_not_empty","collection_delete_protected",
-  "stale_collection",
-]);
-const sectionToolError = (error:unknown) => {
-  const code=error instanceof Error ? error.message : "";
-  return SECTION_TOOL_ERRORS.has(code) ? code : "section_action_unavailable";
-};
-
-
 /** All provider adapters advertise and execute the same catalog. No dynamic code loading. */
 export function createToolCatalog(options: DirectAgentOptions, sources: string[], notes: MemorySnippet[], initialUsed: UsedNote[]) {
   const turn: TurnState = createTurnState(options,sources,notes,initialUsed);
-  const {web,used,moveHandles,admitMoveHandle,articleCoverage,readNotes,photoMatches,
-    emit,observe,fingerprint,pending,proposalIds,articleClock,readArticleSelection,
-    selectedArticleHandles,verifiedSelectedArticleRead} = turn;
-  const memory = memoryTools(options, {web,used,readNotes,admitMoveHandle}, text, queryParameters);
-  const proposals = proposalTools(options, {
-    getMovePreview:()=>turn.movePreview,setMovePreview:value=>{turn.movePreview=value;},moveHandles,
-    getSectionPreview:()=>turn.sectionPreview,setSectionPreview:value=>{turn.sectionPreview=value;},
-    sectionToolError,fingerprint,pending,proposalIds,
-  });
-  const conversations = conversationTools(options, {
-    getContextCandidate:()=>turn.contextCandidate,
-    setContextCandidate:value=>{turn.contextCandidate=value;},
-    getImportTagsCandidate:()=>turn.importTagsCandidate,
-    setImportTagsCandidate:tags=>{turn.importTagsCandidate=tags;},
-    get state(){return turn.state;},
-    set state(next){turn.state=next;},
-    emit,
-  });
+  const {web,used,articleCoverage,readNotes,photoMatches,emit,observe,proposalIds,
+    selectedArticleHandles} = turn;
+  const memory = memoryTools(options,turn);
+  const proposals = proposalTools(options,turn);
+  const conversations = conversationTools(options,turn);
   const specs: ToolSpec[] = [
     ...(options.contextClassificationEnabled ? [conversations.contextTool] : []),
     memory.search,
-    ...photoTools(options, {
-      photoMatches, getLookups: () => turn.photoLookups,
-      incrementLookups: () => { turn.photoLookups++; },
-      setRecovery: reason => { turn.photoRecovery = reason; },
-    }),
+    ...photoTools(options,turn),
     ...memory.read,
-    ...sourceTools(options, text),
+    ...sourceTools(options,turn),
     ...memory.listing,
-    ...articleTools(options, {
-      articleClock,readArticleSelection,selectedArticleHandles,verifiedSelectedArticleRead,
-      articleCoverage,used,readNotes,
-      getMixedArticleFilters:()=>turn.mixedArticleFilters,
-      markUsedSelectedArticleTool:()=>{turn.usedSelectedArticleTool=true;},
-    }),
+    ...articleTools(options,turn),
     ...proposals.move,
     // SAME canonical chat ToolSpec registry as memory search, note drafts and moves.
     // The model never executes a section write: it only stages a card for a user tap.
