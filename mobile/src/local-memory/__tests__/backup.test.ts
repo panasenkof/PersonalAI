@@ -339,6 +339,46 @@ test("wrong password/corrupted backup cannot mutate the destination", async () =
   expect(FS.deleteAsync).toHaveBeenCalledTimes(4);
 });
 
+test("QA-9 DEF-6: native ATTACH failure is a safe wrong-key/corrupt error before writes", async () => {
+  mockDb.runAsync.mockRejectedValueOnce(new Error("native SQLite path and recovery key must not leak"));
+  await expect(restoreEncryptedBackup("guest", "file:///wrong-key.db", code))
+    .rejects.toThrow("backup_wrong_key_or_corrupt");
+  expect(mockDb.execAsync.mock.calls.some(([sql]) => String(sql).startsWith("INSERT INTO"))).toBe(false);
+  expect(mockDb.execAsync).not.toHaveBeenCalledWith("DETACH DATABASE pia_import");
+  expect(FS.deleteAsync).toHaveBeenCalled();
+});
+
+test("QA-9 DEF-6: failed DETACH cannot replace a wrong-key error", async () => {
+  mockDb.getAllAsync.mockRejectedValueOnce(new Error("file is not a database: secret"));
+  mockDb.execAsync.mockRejectedValueOnce(new Error("native DETACH failed: private path"));
+  await expect(restoreEncryptedBackup("guest", "file:///wrong-key-detach.db", code))
+    .rejects.toThrow("backup_wrong_key_or_corrupt");
+  expect(mockDb.execAsync).toHaveBeenCalledWith("DETACH DATABASE pia_import");
+  expect(mockDb.execAsync.mock.calls.some(([sql]) => String(sql).startsWith("INSERT INTO"))).toBe(false);
+});
+
+test("QA-9 DEF-6: corrupt SQLCipher metadata cannot return a native exception", async () => {
+  const previous = mockDb.getFirstAsync.getMockImplementation()!;
+  mockDb.getFirstAsync.mockImplementation(async (sql: string) => {
+    if (sql === "PRAGMA pia_import.integrity_check")
+      throw new Error("not a database (native message includes private path)");
+    return previous(sql);
+  });
+  await expect(restoreEncryptedBackup("guest", "file:///truncated.db", code))
+    .rejects.toThrow("backup_wrong_key_or_corrupt");
+  expect(mockDb.execAsync).toHaveBeenCalledWith("DETACH DATABASE pia_import");
+  expect(mockDb.execAsync.mock.calls.some(([sql]) => String(sql).startsWith("INSERT INTO"))).toBe(false);
+});
+
+test("QA-9 DEF-6: a cleanup failure after successful restore has a safe explicit code", async () => {
+  mockDb.execAsync.mockImplementation(async (sql: string) => {
+    if (sql === "DETACH DATABASE pia_import") throw new Error("native private URI");
+  });
+  await expect(restoreEncryptedBackup("guest", "file:///cleanup.db", code))
+    .rejects.toThrow("backup_restore_detach_failed");
+  expect(mockDb.execAsync).toHaveBeenCalledWith("COMMIT");
+});
+
 test("restore refuses to overwrite a profile with any existing collection", async () => {
   mockAlreadyContainsMemory = true;
   await expect(restoreEncryptedBackup("guest", "file:///backup.db", code))
