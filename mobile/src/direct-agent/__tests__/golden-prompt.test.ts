@@ -1,4 +1,5 @@
 import { systemPrompt } from "../engine";
+import { restrictedSystemPrompt } from "../prompt";
 import { system } from "../compatible";
 import { DEFAULT_SECTIONS } from "../fact-tool";
 import type { MemorySection } from "../fact-tool";
@@ -38,5 +39,16 @@ test("ARCH-0: exact system prompts for Responses and compatible protocols (four 
   expect(actual[2].responses).toContain("Текущая тема диалога");
   expect(actual[3].responses).toContain("раздел закреплён пользователем");
   expect(actual[3].compatible).toContain("закреплён пользователем");
+  expect({ __arch0Snapshot: true, actual }).toMatchSnapshot();
+});
+
+test("ARCH-1: exact restricted prompts in both protocols, with and without import tags", () => {
+  const actual = (["responses", "compatible"] as const).flatMap(protocol =>
+    [false, true].map(importTags => ({
+      protocol, importTags, content: restrictedSystemPrompt(protocol, importTags),
+    })));
+  expect(actual).toHaveLength(4);
+  // These snapshots pin the two different privacy-restricted import prefixes
+  // and the optional tagging suffixes. They are not a generic chat prompt.
   expect({ __arch0Snapshot: true, actual }).toMatchSnapshot();
 });
