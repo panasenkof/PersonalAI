@@ -60,7 +60,7 @@ test("unsupported media and edits block ACK instead of silently losing content",
   (fetchBotUpdates as jest.Mock).mockResolvedValueOnce([{
     update_id:8,message:{...msg(8,"photo"),photo:[{file_id:"secret"}]},
   }]);
-  await expect(syncTelegramBotText("p3")).rejects.toBeInstanceOf(TelegramBotBlocked);
+  await expect(syncTelegramBotText("p3")).rejects.toThrow("Импорт остановлен");
   expect(saveMediaNote).not.toHaveBeenCalled();
   expect(advanceTelegramBotCursor).not.toHaveBeenCalled();
   (fetchBotUpdates as jest.Mock).mockResolvedValueOnce([{
