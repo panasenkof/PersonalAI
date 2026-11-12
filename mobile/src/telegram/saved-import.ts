@@ -17,6 +17,8 @@ export type SavedTextImportResult={
 };
 const running=new Map<string,Promise<void>>();
 const waiting=new Set<string>();
+const tooLargeOriginal=(e:unknown):boolean=>e instanceof Error&&
+  /tdlib_original_too_large|превышает лимит 80 МБ/.test(e.message);
 function unlocked(signal?:AbortSignal){
   if(signal?.aborted)throw new Error("telegram_saved_import_cancelled");
   if(!localMemorySessionUnlocked())throw new Error("telegram_app_locked");
@@ -149,6 +151,9 @@ export async function importSavedTextPage(profile:string,cursor="0",
           },signal);
           if(replayed)duplicates++;
           else {saved++;withFiles++;if(oldestFirst.some(v=>v.kind==="messagePhoto"))photosToIndex.push(savedId);}
+        }catch(e){
+          if(!tooLargeOriginal(e))throw e;
+          unsupported++;tooLarge++;
         }finally{
           // Failure of ANY original/cipher operation must never create a
           // partial album; safely release only each previously staged file.
@@ -169,8 +174,11 @@ export async function importSavedTextPage(profile:string,cursor="0",
       if(await telegramSavedAlreadyImported(profile,page.selfChatId,item.id)){
         duplicates++;continue;
       }
-      const original=originalRequested
-        ?await downloadSavedOriginal(profile,page.selfChatId,item,signal):null;
+      let original:SavedOriginal|null=null;
+      if(originalRequested){
+        try{original=await downloadSavedOriginal(profile,page.selfChatId,item,signal);}
+        catch(e){if(!tooLargeOriginal(e))throw e;unsupported++;tooLarge++;continue;}
+      }
       try{
         unlocked(signal);
         const title=body.split(/\r?\n/)[0].trim().slice(0,160)||
