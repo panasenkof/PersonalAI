@@ -1,23 +1,13 @@
 import type { DirectAgentOptions } from "../engine";
 import { usedNotes } from "../context";
-import type { UsedNote } from "../context";
-import type { MemorySnippet } from "../memory";
-import type { createWebTools } from "../web-tools";
-import type { ToolSpec } from "./types";
+import type { ToolSpec, TurnState } from "./types";
+import { queryParameters, text } from "./helpers";
 
 /** ARCH-2: note search/read/list/count still use the same host ACL readers. */
 export function memoryTools(
-  options: DirectAgentOptions,
-  scope: {
-    web: ReturnType<typeof createWebTools>;
-    used: Map<string, UsedNote>;
-    readNotes: Set<string>;
-    admitMoveHandle: (note: {id:string;version?:number}) => void;
-  },
-  text: (value: unknown, cap?: number) => string,
-  queryParameters: object,
+  options: DirectAgentOptions, turn: TurnState,
 ): {search:ToolSpec;read:ToolSpec[];listing:ToolSpec[]} {
-  const {web, used, readNotes, admitMoveHandle} = scope;
+  const {web, used, readNotes, admitMoveHandle} = turn;
   const searchSpecs:ToolSpec[] = [
     { definition: { name: "search_local_notes", description: "Найти заметки на телефоне по 1–3 ключевым словам. Найденный фрагмент не является полным чтением записи.", parameters: queryParameters }, effect: "read",
       execute: async args => {
