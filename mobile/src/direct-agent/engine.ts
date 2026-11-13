@@ -1,3 +1,4 @@
+import type { DuplicateKind, DuplicateCandidateResult } from "../local-memory/duplicate-candidates";
 import { diagnosticToolResultContent } from "./tool-diagnostics";
 import { chatContent, type ChatAttachment } from "./chat-attachments";
 import type { DirectAgentSettings } from "./settings";
@@ -60,6 +61,8 @@ export type DirectAgentOptions = {
   requestInboxTriageApproval?: (limit:number)=>InboxTriageApproval;
   listInboxForTriage?: (options:{limit:number;cursor?:number})=>Promise<InboxTriagePage>;
   proposeInboxTriage?: (items:unknown)=>Promise<InboxTriageProposal>;
+  /** S9-2: read-only exact duplicate candidate metadata, not merge authorization. */
+  findDuplicateCandidates?: (kind:DuplicateKind,limit:number)=>Promise<DuplicateCandidateResult>;
   /** Same central tool catalog; preview ONLY, never a write on model calls. */
   previewSectionAction?: (request:SectionActionRequest) => Promise<ChatSectionProposal>;
   /** 9T1: optional host-only bridge to the existing ACL-scoped text-to-photo
