@@ -54,7 +54,7 @@ export function createInboxTriageAccess(
   let approved: number | null = null;
   let activeTurn: string | null = null;
   let remaining = 0;
-  let reading = false;
+  let activeRead: object | null = null;
   const handles = new Map<string, number>();
 
   function clear() {
@@ -62,7 +62,7 @@ export function createInboxTriageAccess(
     approved = null;
     activeTurn = null;
     remaining = 0;
-    reading = false;
+    activeRead = null;
     handles.clear();
   }
   function requireUnlocked() {
@@ -114,9 +114,10 @@ export function createInboxTriageAccess(
       requireTurn(turnId);
       const desired = Math.min(boundedLimit(options.limit), remaining);
       if (desired === 0) return { items: [] };
-      if (reading) throw new Error("inbox_triage_read_in_progress");
+      if (activeRead) throw new Error("inbox_triage_read_in_progress");
       let offset = validCursor(options.cursor);
-      reading = true;
+      const readToken = {};
+      activeRead = readToken;
       try {
       const sections = await repository.listCollections();
       requireTurn(turnId);
@@ -155,7 +156,7 @@ export function createInboxTriageAccess(
       remaining -= items.length;
       requireTurn(turnId);
       return { items, ...(more && remaining > 0 ? {nextCursor: offset} : {}) };
-      } finally { reading = false; }
+      } finally { if (activeRead === readToken) activeRead = null; }
     },
 
     /** A proposal tool must validate BOTH the ID and the version obtained
