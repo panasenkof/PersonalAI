@@ -9,6 +9,8 @@ import { restoredProposal } from "./fact-tool";
 import { validMoveProposal, validMoveReceipt, type ChatMoveProposal, type ChatMoveReceipt } from "./move-proposal";
 import type { InboxTriageApproval } from "./inbox-triage";
 import type { InboxTriageProposal } from "./inbox-triage-proposal";
+import type { VerifiedDuplicateMergeRequest } from "./duplicate-merge-gate";
+import { validDuplicateMergeReceipt, type DuplicateMergeReceipt } from "./duplicate-merge-actions";
 import { validInboxTriageReceipt, type InboxTriageReceipt } from "./inbox-triage-actions";
 import { validSectionProposal, validSectionReceipt, type ChatSectionProposal, type ChatSectionReceipt } from "./section-actions";
 
@@ -44,6 +46,8 @@ export type ChatRow = { id: string; role: "user" | "assistant" | "info"; text: s
   sectionProposal?: ChatSectionProposal; sectionReceipt?: ChatSectionReceipt; inboxApproval?: InboxTriageApproval;
   /** Permission and suggestion cards are in-memory; only the undo receipt survives reload. */
   inboxTriageProposal?: InboxTriageProposal; inboxTriageReceipt?: InboxTriageReceipt;
+  /** Merge candidate authority is never restored; a receipt is only an undo token. */
+  duplicateMergeProposal?: VerifiedDuplicateMergeRequest; duplicateMergeReceipt?: DuplicateMergeReceipt;
   /** A private Inbox result is displayed locally but never replayed to a future model. */
   inboxTriageResult?: boolean; contextChange?: ContextChange };
 const VIA = new Set(["search", "rewrite", "assistant"]);
@@ -180,12 +184,15 @@ export function parseConversation(json: string): SavedConversation | null {
       ? {...r.moveProposal} as ChatMoveProposal : undefined;
     const moveReceipt=r.role==="assistant"&&!moveProposal&&validMoveReceipt(r.moveReceipt)
       ? {...r.moveReceipt} as ChatMoveReceipt : undefined;
+    const duplicateMergeReceipt=r.role==="assistant"&&validDuplicateMergeReceipt(r.duplicateMergeReceipt)
+      ? {...r.duplicateMergeReceipt} as DuplicateMergeReceipt : undefined;
     const inboxTriageReceipt=r.role==="assistant"&&validInboxTriageReceipt(r.inboxTriageReceipt)
       ? {...r.inboxTriageReceipt} as InboxTriageReceipt : undefined;
     return [{ id: r.id, role: r.role, text: r.text, ...(r.error === true && r.role === "info" ? { error: true } : {}), ...(["model","import","prepare"].includes(r.photoAction) ? {photoAction:r.photoAction} : {}), ...(r.attachments?.length ? {attachments:checkedChatAttachments(r.attachments)} : {}), ...(sources?.length ? { sources } : {}), ...(memory?.length ? { memory } : {}), ...(articlePage ? {articlePage} : {}), ...(articleReadReport ? {articleReadReport} : {}), ...(dialogueSummary ? {dialogueSummary} : {}),
       ...(moveProposal?{moveProposal}:{}),...(moveReceipt?{moveReceipt}:{}),
       ...(sectionProposal?{sectionProposal}:{}),...(sectionReceipt?{sectionReceipt}:{}),
       ...(inboxTriageReceipt?{inboxTriageReceipt}:{}),
+      ...(duplicateMergeReceipt?{duplicateMergeReceipt}:{}),
       ...(r.role==="assistant"&&r.inboxTriageResult===true?{inboxTriageResult:true}:{}),
       ...(r.role === "assistant" && parseContextChange(r.contextChange) ? {contextChange:parseContextChange(r.contextChange)} : {}) }];
   });
