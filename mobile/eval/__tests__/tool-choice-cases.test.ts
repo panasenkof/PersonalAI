@@ -1,3 +1,5 @@
+import * as fs from "node:fs";
+import * as path from "node:path";
 import {TOOL_CHOICE_CASES} from "../tool-choice-cases";
 
 test("ARCH-11 corpus: 15 distinct blind tool-selection tasks with the required groups", () => {
@@ -30,4 +32,23 @@ test("ARCH-11 suite covers all required first-tool decisions without exposing ex
   for (const c of TOOL_CHOICE_CASES) {
     expect(c.prompt).not.toContain(c.firstTool || "no_tool");
   }
+});
+
+
+test("ARCH-11 workflow isolates each provider's API key and model configuration", () => {
+  const workflow = fs.readFileSync(path.resolve(__dirname, "../../../.github/workflows/arch3-tool-choice.yml"), "utf8");
+  const keyLine = workflow.split("\n").find(line => line.trim().startsWith("PERSAI_ARCH3_API_KEY:"));
+  const modelLine = workflow.split("\n").find(line => line.trim().startsWith("PERSAI_ARCH3_MODEL:"));
+  expect(keyLine).toBeDefined();
+  expect(modelLine).toBeDefined();
+  // Indexing the secrets context by provider-selected NAME fails closed when a
+  // provider key is absent; the old && secret-value || generic-key leaked keys
+  // across providers because GitHub expressions treat empty secrets as false.
+  expect(keyLine).toContain("secrets[inputs.provider");
+  expect(keyLine).toContain("'PERSAI_ARCH3_OPENAI_API_KEY'");
+  expect(keyLine).toContain("'PERSAI_ARCH3_ANTHROPIC_API_KEY'");
+  expect(keyLine).toContain("'PERSAI_EVAL_LLM_API_KEY'");
+  expect(keyLine).not.toMatch(/&&\s*secrets\./);
+  expect(modelLine).toContain("vars[inputs.provider");
+  expect(modelLine).not.toMatch(/&&\s*vars\./);
 });
