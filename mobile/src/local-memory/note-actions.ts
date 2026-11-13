@@ -220,7 +220,7 @@ export async function applyInboxTriageNotes(
   }
   if (!localMemorySessionUnlocked())
     throw new MemoryConflictError('application_locked');
-  const batch='notes:move:'+Crypto.randomUUID();
+  const batch='notes:inbox_triage:'+Crypto.randomUUID();
   const applied: string[]=[];
   const skipped: string[]=[];
   await withUnlockedTransaction(db,async tx=>{
@@ -288,7 +288,7 @@ export async function applyInboxTriageNotes(
       applied.push(entry.before.id);
     }
   });
-  // undoNotes already supports the notes:move batch journal and checks every
+  // undoNotes supports this distinct triage batch journal and checks every
   // participant's later record_version in one transaction before replay.
   return {batch,applied,skipped};
 }
@@ -297,7 +297,7 @@ export async function undoNotes(db: SQL, batch: string, moveGuard?: ChatMoveGuar
   if(moveGuard && (!/^notes:move:/.test(batch) ||
       moveGuard.fromCollectionId===moveGuard.toCollectionId))
     throw new MemoryConflictError("invalid_move_undo");
-  if (!/^notes:(move|trash|restore|merge|archive|unarchive):/.test(batch)) throw new Error('Неизвестная операция.');
+  if (!/^notes:(move|inbox_triage|trash|restore|merge|archive|unarchive):/.test(batch)) throw new Error('Неизвестная операция.');
   await withUnlockedTransaction(db, async tx => {
     const revisions = await tx.getAllAsync<Row>('SELECT before_json,after_json FROM memory_revisions WHERE reason=? ORDER BY created_at,id', [batch]);
     if (!revisions.length) throw new Error('Операция не найдена.');
@@ -440,7 +440,7 @@ export async function purgeNotes(db: SQL, selection: NoteSelection[], options?: 
 }
 
 export function noteUndoLabel(token: string): string {
-  const labels: Record<string, string> = { move: 'Отменить перенос', trash: 'Отменить удаление', restore: 'Отменить восстановление', merge: 'Отменить объединение', archive: 'Отменить архивирование', unarchive: 'Отменить возврат из архива' };
+  const labels: Record<string, string> = { inbox_triage: 'Отменить разбор Входящих', move: 'Отменить перенос', trash: 'Отменить удаление', restore: 'Отменить восстановление', merge: 'Отменить объединение', archive: 'Отменить архивирование', unarchive: 'Отменить возврат из архива' };
   return labels[token.split(':')[1]] || 'Отменить операцию с записями';
 }
 
