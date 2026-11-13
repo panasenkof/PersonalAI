@@ -22,6 +22,7 @@ import type { ChatArticlePage, ChatArticleReadReport, ChatMemoryRef } from "./co
 import type { ChatMoveProposal, MoveRequest } from "./move-proposal";
 import type { InboxTriageApproval, InboxTriagePage } from "./inbox-triage";
 import type { InboxTriageProposal } from "./inbox-triage-proposal";
+import type { DuplicateCandidatesPage, DuplicateMatchKind } from "../local-memory/agent-catalog";
 import type { SectionActionRequest, ChatSectionProposal } from "./section-actions";
 import type { ContextCandidate, ConversationContext } from "./conversation-context";
 
@@ -60,6 +61,8 @@ export type DirectAgentOptions = {
   requestInboxTriageApproval?: (limit:number)=>InboxTriageApproval;
   listInboxForTriage?: (options:{limit:number;cursor?:number})=>Promise<InboxTriagePage>;
   proposeInboxTriage?: (items:unknown)=>Promise<InboxTriageProposal>;
+  /** S9-2: metadata-only exact duplicates from the existing SQLCipher catalogue. */
+  findDuplicates?: (kind:DuplicateMatchKind,limit:number)=>Promise<DuplicateCandidatesPage>;
   /** Same central tool catalog; preview ONLY, never a write on model calls. */
   previewSectionAction?: (request:SectionActionRequest) => Promise<ChatSectionProposal>;
   /** 9T1: optional host-only bridge to the existing ACL-scoped text-to-photo
