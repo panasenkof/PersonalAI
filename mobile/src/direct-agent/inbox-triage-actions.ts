@@ -13,7 +13,7 @@ export type InboxTriageReceipt = {
 };
 
 const ID=/^[A-Za-z0-9:_-]{1,128}$/;
-const BATCH=/^notes:move:[A-Za-z0-9-]{6,80}$/;
+const BATCH=/^notes:inbox_triage:[A-Za-z0-9-]{6,80}$/;
 
 export function validInboxTriageReceipt(value: unknown): value is InboxTriageReceipt {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
