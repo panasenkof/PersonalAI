@@ -293,7 +293,9 @@ export class DirectChatStore {
             return this.inboxTriage.request(id,limit);
           },
           ...(intent?.inboxApprovalRowId ? {listInboxForTriage: options =>
-            this.inboxTriage.listForTurn(id,inboxTurnId,options,aborter.signal)} : {}),
+            this.inboxTriage.listForTurn(id,inboxTurnId,options,aborter.signal),
+            proposeInboxTriage: proposal => this.inboxTriage.proposeForTurn(
+              id,inboxTurnId,proposal,aborter.signal)} : {}),
         },
         onText, sections, trace, host,
         disposed: () => this.disposed,
