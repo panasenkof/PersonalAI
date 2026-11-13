@@ -18,7 +18,8 @@ import type { MemorySection } from "./fact-tool";
 import { conversationRepository } from "./conversations";
 import type { ChatDraft, ConversationRepository, SavedConversation } from "./conversations";
 import type { DirectAgentSettings } from "./settings";
-import { waitForApplicationSession } from "../local-memory/storage";
+import { waitForApplicationSession, onLocalMemorySessionChange } from "../local-memory/storage";
+import { InboxTriageChatAccess } from "./inbox-triage-chat";
 
 import { rowProposal, rowReceipt } from "./proposals";
 import { buildAgentOptions, prepareAgentDraft, prepareTurnHistory, pendingTurnPatch, articleTurnContext, summarizeWithAgentHost, newConversation, saved, agentTextStream } from "./agent-host";
@@ -48,9 +49,19 @@ export class DirectChatStore {
   private lifetime = new AbortController();
   private writes: Promise<void> = Promise.resolve();
   private repository: ConversationRepository;
+  private readonly inboxTriage: InboxTriageChatAccess;
+  private readonly activeInboxTurns = new Set<string>();
+  private readonly stopInboxSessionWatch: () => void;
   /** `afterSave` runs after an approved record is saved (index words in the background). */
   constructor(private profile: string, repository?: ConversationRepository, private runner = runDirectAgent, private afterSave?: () => void) {
     this.repository = repository || conversationRepository(profile, count => { this.skipped = count; });
+    this.inboxTriage = new InboxTriageChatAccess(profile, () => !this.disposed);
+    this.stopInboxSessionWatch = typeof onLocalMemorySessionChange === "function"
+      ? onLocalMemorySessionChange(unlocked => { if (!unlocked) {
+          this.inboxTriage.revokeAll();
+          for (const id of this.activeInboxTurns) this.requests.get(id)?.abort();
+        } })
+      : () => {};
   }
   getSnapshot = () => this.snapshot;
   /** Re-reads the user's sections; on failure the previous list stays. */
@@ -115,11 +126,19 @@ export class DirectChatStore {
   create() {
     if (!this.snapshot.ready || this.disposed) return;
     const conversation = newConversation();
+    this.inboxTriage.revokeAll();
+    for(const id of this.activeInboxTurns)this.requests.get(id)?.abort();
     this.publish({ conversations: [conversation, ...this.snapshot.conversations], activeId: conversation.id, error: "" });
     void this.persist(conversation).catch(() => {});
   }
   select(id: string) {
-    if (this.snapshot.conversations.some(c => c.id === id)) this.publish({ activeId: id, error: "" });
+    if (this.snapshot.conversations.some(c => c.id === id)) {
+      if (id !== this.snapshot.activeId) {
+        this.inboxTriage.revokeAll();
+        for(const active of this.activeInboxTurns)this.requests.get(active)?.abort();
+      }
+      this.publish({ activeId: id, error: "" });
+    }
   }
   setQuestion(question: string) {
     if (this.snapshot.activeId) this.update(this.snapshot.activeId, { question });
@@ -159,6 +178,7 @@ export class DirectChatStore {
   async remove(id: string) {
     const conversation = this.snapshot.conversations.find(c => c.id === id);
     if (!conversation || conversation.busy || conversation.savingDraft || conversation.deleting) return;
+    this.inboxTriage.revoke(id);
     this.update(id, { deleting: true });
     const work = this.writes.catch(() => {}).then(async () => {
       await waitForApplicationSession(this.lifetime.signal);
@@ -205,7 +225,7 @@ export class DirectChatStore {
    * without consuming the user's unrelated composer draft. */
   async send(settings: DirectAgentSettings, internetPhotoId?:string, documentApprovalKey?:string,
     rerun = false, intent?:{prompt:string;privatePhoto?:ChatAttachment;articleRowId?:string;
-      conversationId:string;preserveDraft:true}) {
+      inboxApprovalRowId?:string;conversationId:string;preserveDraft:true}) {
     const id = this.snapshot.activeId;
     const current = this.snapshot.conversations.find(c => c.id === id);
     if (!id || !current || current.busy || current.deleting || this.disposed ||
@@ -219,6 +239,7 @@ export class DirectChatStore {
     const { prompt, displayPrompt, draftFiles, privatePhoto, attachments, documentPlan } = drafted;
     const trace = diagnosticTrace(this.profile, id, Crypto.randomUUID());
     const startedAt = Date.now();
+    const inboxTurnId = Crypto.randomUUID();
     const aborter = new AbortController();
     this.requests.set(id, aborter);
     const { previousSources, history, taskState } = prepareTurnHistory(
@@ -254,12 +275,26 @@ export class DirectChatStore {
       if(documentPlan && documentPlan.calls>maxRequests)throw new Error("Для полного анализа требуется "+documentPlan.calls+" обращений к модели, но в настройках разрешено "+maxRequests+". Измените лимит перед отправкой.");
       modelStarted = true;
       const { articleSelection, articleContinuation } = articleTurnContext(current, intent?.articleRowId);
+      if (intent?.inboxApprovalRowId) {
+        if (!this.inboxTriage.beginTurn(id,intent.inboxApprovalRowId,inboxTurnId))
+          throw new Error("Разрешение на разбор «Входящих» истекло. Запросите его снова.");
+        this.activeInboxTurns.add(id);
+      }
       const agentOptions = buildAgentOptions({
         profile: this.profile, id, current, settings, maxRequests, prompt, attachments,
         skipLocalMemory: Boolean(internetPhotoId), history: privatePhoto
           ? history.map(turn => ({...turn, attachments: undefined})) : history,
         previousSources, taskState, privatePhoto,
         articleContinuation, articleSelection, signal: aborter.signal,
+        inboxTriage: {
+          requestInboxTriageApproval: limit => {
+            if(aborter.signal.aborted || this.disposed || this.snapshot.activeId !== id)
+              throw new Error("inbox_triage_not_authorized");
+            return this.inboxTriage.request(id,limit);
+          },
+          ...(intent?.inboxApprovalRowId ? {listInboxForTriage: options =>
+            this.inboxTriage.listForTurn(id,inboxTurnId,options,aborter.signal)} : {}),
+        },
         onText, sections, trace, host,
         disposed: () => this.disposed,
         getConversation: () => this.snapshot.conversations.find(c => c.id === id),
@@ -275,6 +310,8 @@ export class DirectChatStore {
         answerChars: result.text.length, sources: result.sources.length, memoryRefs: result.memory?.length || 0 },
         { answer: result.text, sources: result.sources.join("\n") });
       const answerRowId=Crypto.randomUUID();
+      if(result.inboxApproval && !this.inboxTriage.markRow(id,answerRowId,result.inboxApproval))
+        throw new Error("Разрешение на чтение «Входящих» недоступно.");
       const updatedAt=new Date().toISOString();
       // The same in-turn context candidate is checked once against current
       // sections; private web-photo turns do not classify conversation context.
@@ -288,7 +325,7 @@ export class DirectChatStore {
         taskState: mergeTaskReceipts({ ...(result.taskState || c.taskState || taskState), turnStatus: "answered" }, c.taskState),
         rows: [...c.rows,
           ...view.notices.map(text => ({ id: Crypto.randomUUID(), role: "info" as const, text })),
-          { id: answerRowId, ...view.row },
+          { id: answerRowId, ...view.row, ...(intent?.inboxApprovalRowId ? {inboxTriageResult:true} : {}) },
         ],
         ...(view.context ? { context:view.context, title:view.context.topic } : {}),
         updatedAt,
@@ -307,16 +344,20 @@ export class DirectChatStore {
         modelStarted, errorType: (e as Error)?.name || "Error" },
         { error: redactDiagnostic(String((e as Error)?.message || e)).slice(0, 500) });
       const c = this.snapshot.conversations.find(c => c.id === id);
+      this.inboxTriage.revoke(id);
       if (c && !this.disposed) {
         // The store remains responsible for updating this conversation.
         this.update(id, interruptedAssistantPatch({
           conversation:c,taskState,privatePhoto,internetPhotoId:Boolean(internetPhotoId),
-          intentPreserveDraft:Boolean(intent?.preserveDraft),modelStarted,beforeModelError,
+          intentPreserveDraft:Boolean(intent?.preserveDraft),inboxTriageResult:Boolean(intent?.inboxApprovalRowId),
+          modelStarted,beforeModelError,
           prompt,draftFiles,signalAborted:aborter.signal.aborted,latest:getLatest(),error:e,
           newId:Crypto.randomUUID,
         }));
       }
     } finally {
+      this.inboxTriage.endTurn(id,inboxTurnId);
+      this.activeInboxTurns.delete(id);
       trace("turn.finished", { elapsedMs: Date.now() - startedAt });
       this.requests.delete(id);
       cancel();
@@ -383,9 +424,30 @@ export class DirectChatStore {
   /** The same user-click confirmation lifecycle for a move or a section action.
    * The handler calls the EXISTING SQLCipher writer. No model-side mutation.
    * A stale version or an ACL change still fails inside the canonical writer. */
-  async confirmProposal(rowId: string): Promise<void> {
+  async confirmProposal(rowId: string, settings?:DirectAgentSettings): Promise<void> {
     const c = this.snapshot.conversations.find(x => x.id === this.snapshot.activeId);
     const row = c?.rows.find(x => x.id === rowId && x.role === "assistant");
+    if(row?.inboxApproval){
+      if(!c || c.busy || c.deleting || this.disposed) return;
+      if(!settings){this.publish({error:"Сначала подключите модель для разбора «Входящих»."});return;}
+      try{
+        if(!this.inboxTriage.confirm(c.id,rowId,row.inboxApproval))
+          throw new Error("Разрешение устарело. Запросите разбор «Входящих» снова.");
+        const updated=this.update(c.id,{rows:c.rows.map(r=>r.id===rowId
+          ? (({inboxApproval:_discard,...rest})=>rest)(r) : r)});
+        if(!updated)throw new Error("Диалог недоступен.");
+        await this.persist(updated);
+        if(this.snapshot.activeId!==c.id)throw new Error("Диалог изменился.");
+        await this.send(settings,undefined,undefined,false,{
+          prompt:"Прочитай разрешённую пачку «Входящих» и предложи разделы и теги для каждой записи. Пока ничего не сохраняй.",
+          conversationId:c.id,preserveDraft:true,inboxApprovalRowId:rowId,
+        });
+      }catch(e){
+        this.inboxTriage.revoke(c.id);
+        this.publish({error:String((e as Error).message || e)});
+      }
+      return;
+    }
     const selected = row ? rowProposal(row) : undefined;
     if (!c || !selected || c.busy || c.movingRowId || c.deleting || this.disposed) return;
     const { handler, proposal } = selected;
@@ -425,6 +487,13 @@ export class DirectChatStore {
     const c = this.snapshot.conversations.find(x => x.id === this.snapshot.activeId);
     if (!c || c.busy || c.movingRowId || c.deleting || this.disposed) return;
     const row = c.rows.find(r => r.id === rowId && r.role === "assistant");
+    if(row?.inboxApproval){
+      this.inboxTriage.dismiss(c.id,rowId);
+      this.update(c.id,{rows:[...c.rows.map(r=>r.id===rowId
+        ? (({inboxApproval:_discard,...rest})=>rest)(r) : r),
+        {id:Crypto.randomUUID(),role:"info",text:"Разбор «Входящих» отменён. Ничего не прочитано и не отправлено."}]},true);
+      return;
+    }
     const selected = row ? rowProposal(row) : undefined;
     if (!selected) return;
     const rows = c.rows.map(r => r.id === rowId ? selected.handler.withoutProposal(r) : r);
@@ -495,6 +564,7 @@ export class DirectChatStore {
     this.disposed = true;
     this.lifetime.abort();
     for (const request of this.requests.values()) request.abort();
+    this.inboxTriage.revokeAll(); this.activeInboxTurns.clear(); this.stopInboxSessionWatch();
     this.requests.clear(); this.listeners.clear();
   }
 }

@@ -32,6 +32,7 @@ export function assistantRowFromResult(
       ...(result.photoAction ? { photoAction: result.photoAction } : {}),
       ...(result.moveProposal ? { moveProposal: result.moveProposal } : {}),
       ...(result.sectionProposal ? { sectionProposal: result.sectionProposal } : {}),
+      ...(result.inboxApproval ? { inboxApproval: result.inboxApproval } : {}),
       ...(result.articlePage ? { articlePage: result.articlePage } : {}),
       ...(result.articleReadReport ? { articleReadReport: result.articleReadReport } : {}),
       ...(applied?.change ? { contextChange: applied.change } : {}),
@@ -51,6 +52,7 @@ export function interruptedAssistantPatch(input: {
   privatePhoto?: import("./chat-attachments").ChatAttachment;
   internetPhotoId: boolean;
   intentPreserveDraft: boolean;
+  inboxTriageResult?: boolean;
   modelStarted: boolean;
   beforeModelError: string;
   prompt: string;
@@ -62,7 +64,7 @@ export function interruptedAssistantPatch(input: {
 }): Partial<import("./chat-store").LiveConversation> {
   const {
     conversation: c, taskState, privatePhoto, internetPhotoId, intentPreserveDraft,
-    modelStarted, beforeModelError, prompt, draftFiles, signalAborted,
+    modelStarted, beforeModelError, prompt, draftFiles, signalAborted, inboxTriageResult,
     latest, error: e, newId,
   } = input;
         const aborted = signalAborted;
@@ -74,7 +76,8 @@ export function interruptedAssistantPatch(input: {
           ...(!internetPhotoId && !intentPreserveDraft && !modelStarted && !aborted
             ? { question: c.question || prompt, attachments:draftFiles } : {}),
           rows: [...c.rows,
-            ...(partial ? [{ id: newId(), role: "assistant" as const, text: partial }] : []),
+            ...(partial ? [{ id: newId(), role: "assistant" as const, text: partial,
+              ...(inboxTriageResult ? { inboxTriageResult:true } : {}) }] : []),
             { id: errorRowId, role: "info", ...(aborted ? {} : { error: true as const }),
               text: aborted ? (partial ? "Ответ остановлен" : "Запрос остановлен") : !modelStarted ? beforeModelError : String((e as Error).message) }],
         };

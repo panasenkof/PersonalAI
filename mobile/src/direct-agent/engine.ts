@@ -19,6 +19,7 @@ import type { SavedArticleIntent, SavedArticleShortlist } from "./article-select
 import type { MemorySection } from "./fact-tool";
 import type { ChatArticlePage, ChatArticleReadReport, ChatMemoryRef } from "./conversations";
 import type { ChatMoveProposal, MoveRequest } from "./move-proposal";
+import type { InboxTriageApproval, InboxTriagePage } from "./inbox-triage";
 import type { SectionActionRequest, ChatSectionProposal } from "./section-actions";
 import type { ContextCandidate, ConversationContext } from "./conversation-context";
 
@@ -29,7 +30,7 @@ export type AgentTurn = { role: "user" | "assistant"; content: string; attachmen
 export type DirectResult = { text: string; sources: string[]; requests: number; notice?: string;
   memory?: Array<UsedNote | ChatMemoryRef>; photoAction?: "model" | "import" | "prepare";
   taskState?: TaskState; proposalIds?: string[]; articlePage?: ChatArticlePage; articleReadReport?: ChatArticleReadReport;
-  moveProposal?: ChatMoveProposal; sectionProposal?: ChatSectionProposal; contextCandidate?: ContextCandidate; importTags?: string[] };
+  moveProposal?: ChatMoveProposal; sectionProposal?: ChatSectionProposal; inboxApproval?: InboxTriageApproval; contextCandidate?: ContextCandidate; importTags?: string[] };
 
 export type DirectAgentOptions = {
   settings: DirectAgentSettings;
@@ -54,6 +55,8 @@ export type DirectAgentOptions = {
   lookup: (query: string) => Promise<MemorySnippet[]>;
   /** Safe 9T2 read-only proposal; this callback NEVER writes a note. */
   previewMove?: (request:MoveRequest) => Promise<ChatMoveProposal>;
+  requestInboxTriageApproval?: (limit:number)=>InboxTriageApproval;
+  listInboxForTriage?: (options:{limit:number;cursor?:number})=>Promise<InboxTriagePage>;
   /** Same central tool catalog; preview ONLY, never a write on model calls. */
   previewSectionAction?: (request:SectionActionRequest) => Promise<ChatSectionProposal>;
   /** 9T1: optional host-only bridge to the existing ACL-scoped text-to-photo
