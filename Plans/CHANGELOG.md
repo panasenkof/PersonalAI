@@ -4,6 +4,9 @@
 
 Формат новой строки: `дата · что изменилось для пользователя (#PR) · CI / APK / телефон`. Статус проверок для строк ниже смотреть в архивном снимке и в [долге приёмки](PHYSICAL_ACCEPTANCE_DEBT.md).
 
+- 2026-11-13 · ARCH-11: изоляция ключей провайдеров при ручном тестировании на LLM (#517) · CI PASS [43402645674](https://github.com/panasenkof/PersonalAI/actions/runs/43402645674), merge `754664f`; live LLM NOT_RUN, Android physical NOT_RUN (нативный CI PASS)
+
+- 2026-11-13 · ARCH-11: отдельный ручной 15-case тест выбора инструментов на двух LLM, с ограничением платных вызовов и без записи в память (#516) · CI PASS [43389373935](https://github.com/panasenkof/PersonalAI/actions/runs/43389373935); live LLM NOT_RUN, Android NOT_RUN_PHYSICAL (только тестовая инфраструктура)
 - 2026-11-12 · ARCH-3b: сохранён старый текст системного промпта, правила привязаны к активным инструментам (#509) · CI PASS [43226439352](https://github.com/panasenkof/PersonalAI/actions/runs/43226439352); live LLM и физический телефон NOT_RUN, семантика не менялась
 - 2026-11-12 · ARCH-3a: контракт `ToolSpec.guidance`, выдача только активного каталога и карта правил (#507) · CI PASS [43224024987](https://github.com/panasenkof/PersonalAI/actions/runs/43224024987); поведение не менялось
 - 2026-11-12 · ARCH-11: исполнимый сценарий на двух провайдерах и уточнение DIALOGUE_GUIDE (#510) · docs-only; фактическая live-приёмка NOT_RUN

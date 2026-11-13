@@ -104,9 +104,9 @@ function availableSentences(value: string, active: ReadonlySet<string>): string 
   return value.split(". ").map((part, index, parts) =>
     part + (index + 1 < parts.length ? ". " : "")).filter(sentence => {
     const references = (sentence.match(TOOL_WORD) || []).filter(word => TOOL_REFERENCES.has(word));
-    return references.every(word => word === "web_search" || word === "search_web"
-      ? active.has("web_search") || active.has("search_web")
-      : active.has(word));
+    // Two different provider interfaces, NOT aliases. In particular Tavily
+    // offers search_web while native OpenAI Responses offers web_search.
+    return references.every(word => active.has(word));
   }).join("");
 }
 
@@ -133,11 +133,48 @@ export function buildSystemPrompt(input: {
     // Responses built-in web_search (it is also explicitly advertised).
     const text = tool.guidance ||
       (tool.name === "web_search" ? TOOL_GUIDANCE.search_web : "");
-    if (text) pieces.push(availableSentences(text, active));
+    // The historical golden Responses prompt names the native web_search.
+    // Keep its exact bytes as the ARCH-0 fixture, but advertise the real
+    // search_web name to compatible providers when they register that tool.
+    const actualText = tool.name === "search_web"
+      ? text.replace(/\bweb_search\b/g, "search_web") : text;
+    // Legacy prose abbreviated alternatives as "search_local_notes/list_local_notes"
+    // and "workspace_put/list/get/clear". Resolve those to exact advertised names.
+    // Otherwise one disabled option can erase an essential safety instruction.
+    const lookupNames = ["search_local_notes", "list_local_notes"].filter(name => active.has(name));
+    const workspaceNames = ["workspace_put", "workspace_list", "workspace_get", "workspace_clear"]
+      .filter(name => active.has(name));
+    // Provenance discipline is shared by every memory-reading tool, not only
+    // the extracted-source reader. Keep the legacy ARCH-0 literal untouched.
+    const preciseText = actualText.replace(PROVENANCE_CITATIONS, "")
+      .replace("search_local_notes/list_local_notes",
+        lookupNames.length ? lookupNames.join(" или ") : "search_local_notes/list_local_notes")
+      .replace("workspace_put/list/get/clear",
+        workspaceNames.length ? workspaceNames.join(", ") : "workspace_put/list/get/clear");
+    if (preciseText) pieces.push(availableSentences(preciseText, active));
   }
+  // Citation and coverage claims must remain verifiable even when only the
+  // basic memory search is enabled and extracted-source tools are absent.
+  const readsMemory = [
+    "search_local_notes", "read_local_note", "read_local_source_segment",
+    "search_local_source_segments", "list_local_sources",
+    "read_selected_local_articles", "read_selected_article_chunk",
+  ].some(name => active.has(name));
+  if (readsMemory) pieces.push(PROVENANCE_CITATIONS);
   // Dialogue contains tool-specific clauses (including read_web_page and
   // update_task_state); never attach the unfiltered guide to minimal catalog.
-  pieces.push(availableSentences(DIALOGUE_GUIDE, active));
+  // The historical dialogue guide lists BOTH web tool spellings. Never drop
+  // the entire next-step policy just because one provider does not offer one.
+  // Format its choice sentence from this turn's advertised tools; the legacy
+  // literal and ARCH-0 golden snapshots remain unchanged.
+  const choiceNames = ["search_local_notes", "search_web", "web_search", "read_web_page"]
+    .filter(name => active.has(name));
+  const dialogue = DIALOGUE_GUIDE.replace(
+    "Сам выбирай следующий шаг: ответить, search_local_notes, search_web/web_search или read_web_page из доступных инструментов. ",
+    "Сам выбирай следующий шаг: ответить" +
+    (choiceNames.length ? " или использовать " + choiceNames.join(", ") + " из доступных инструментов" : "") + ". ",
+  );
+  pieces.push(availableSentences(dialogue, active));
   if (active.has("draft_memory_fact")) {
     pieces.push(factGuide(input.sections));
   } else if (active.has("set_conversation_context") && input.sections?.length) {
