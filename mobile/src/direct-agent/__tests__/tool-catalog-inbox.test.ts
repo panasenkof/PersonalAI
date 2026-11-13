@@ -35,6 +35,9 @@ test("S9-1b: authorized Inbox read is a single real catalog tool with guarded ar
     items:[{noteId:"n1",expectedVersion:3,excerpt:"Текст"}],nextCursor:1,
   });
   expect(read).toHaveBeenCalledWith(2,undefined);
+  // Consent is one turn only: never persist its private snippets in TaskState evidence.
+  expect(JSON.stringify(catalog.finish().taskState)).not.toContain("Текст");
+  expect(JSON.stringify(catalog.finish().taskState)).not.toContain("n1");
   const second=await catalog.run("list_inbox_for_triage",{limit:1,cursor:1});
   expect(second).toMatchObject({items:[{noteId:"n1"}]});
   expect(second).not.toHaveProperty("nextCursor");

@@ -96,7 +96,8 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
     // as task evidence that a later turn could mistake for a reauthorized read.
     if (outcome !== "state_updated" &&
         canonical !== "selected_article_read_coverage" &&
-        canonical !== "search_local_photos")
+        canonical !== "search_local_photos" &&
+        canonical !== "list_inbox_for_triage")
       observe({ tool: canonical, outcome,
       subject: text(result.proposalId || args?.url || args?.query || args?.title || name),
       excerpt: outcome === "read" ? text(result.content) : outcome === "found" && canonical === "search_web" ? text((result.sources as string[]).join("\n")) : text(JSON.stringify(result)) });
