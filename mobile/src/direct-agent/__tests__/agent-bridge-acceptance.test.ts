@@ -14,6 +14,7 @@ import type { ChatAttachment } from "../chat-attachments";
 jest.mock("../../local-memory/storage",()=>({
   waitForApplicationSession:jest.fn(async()=>{}),withLocalMemoryDatabase:jest.fn(),
   localMemorySessionUnlocked:jest.fn(()=>true),
+  onLocalMemorySessionChange: jest.fn(() => () => {}),
 }));
 jest.mock("../memory",()=>({
   proposableMemorySections:jest.fn().mockResolvedValue([{slug:"notes",name:"Заметки"},

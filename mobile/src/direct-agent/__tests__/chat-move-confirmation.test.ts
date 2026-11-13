@@ -7,6 +7,7 @@ import type { ChatMoveProposal } from "../move-proposal";
 jest.mock("../../local-memory/storage",()=>({
   waitForApplicationSession:jest.fn(async()=>{}),withLocalMemoryDatabase:jest.fn(),
   localMemorySessionUnlocked:jest.fn(()=>true),
+  onLocalMemorySessionChange: jest.fn(() => () => {}),
 }));
 jest.mock("../move-proposal",()=>({
   ...jest.requireActual("../move-proposal"),
