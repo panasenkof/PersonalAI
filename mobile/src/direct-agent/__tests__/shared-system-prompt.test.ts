@@ -141,3 +141,27 @@ test("ARCH-3c3: native web_search and external search_web are distinct registere
   // Neither tool was given authority to read a web page.
   for (const text of [external, native, without]) expect(text).not.toContain("read_web_page");
 });
+
+
+test("ARCH-3c4: dialogue next-step instruction survives for each exact available web tool", () => {
+  const cases: Array<{ names:string[]; absent:string[] }> = [
+    { names: [], absent: ["search_local_notes", "search_web", "web_search", "read_web_page"] },
+    { names: ["search_local_notes"], absent: ["search_web", "web_search", "read_web_page"] },
+    { names: ["search_local_notes", "search_web"], absent: ["web_search", "read_web_page"] },
+    { names: ["search_local_notes", "web_search"], absent: ["search_web", "read_web_page"] },
+    { names: ["read_web_page"], absent: ["search_local_notes", "search_web", "web_search"] },
+  ];
+  for (const {names, absent} of cases) {
+    const prompt = buildSystemPrompt({contextEnabled: false, tools: names.map(name => ({name}))});
+    const sentence = prompt.split("Сам выбирай следующий шаг: ")[1]?.split(". ")[0];
+    expect(sentence).toBeDefined();
+    expect(sentence).toContain("ответить");
+    for (const name of names) expect(sentence).toContain(name);
+    for (const name of absent) {
+      expect(sentence).not.toContain(name);
+      expect(prompt).not.toContain(name);
+    }
+    expect(prompt).toContain("После каждого результата оцени, хватает ли данных");
+    expect(prompt).toContain("Не отправляй личные данные из памяти поисковику");
+  }
+});
