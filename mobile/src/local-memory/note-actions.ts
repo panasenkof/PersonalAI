@@ -5,7 +5,7 @@ import { localMemorySessionUnlocked } from './storage';
 import { indexEntity, memoryText } from './search-index';
 import { MemoryConflictError } from './types';
 import { BULK_PURGE_NEEDS_REVIEW_SQL } from './bulk-purge-eligibility';
-import { noteTagsFromPayload, MAX_NOTE_TAGS } from './note-tags';
+import { noteTagsFromPayload, checkedNoteTags, MAX_NOTE_TAGS } from './note-tags';
 
 type SQL = Pick<SQLiteDatabase, 'getFirstAsync' | 'getAllAsync' | 'runAsync' | 'execAsync'>;
 type Row = Record<string, any>;
@@ -190,6 +190,109 @@ export async function changeNotes(db: SQL, action: NoteAction, selection: NoteSe
   });
   return batch;
 }
+/** S9-1c: the SAME SQLCipher snapshot/write/revision/FTS transaction used by
+ * changeNotes('move'). No second database writer or undo journal.
+ * This function is callable ONLY after the chat card's explicit confirmation.
+ * Versions changed after the preview are skipped; ACL/target changes fail closed.
+ */
+export type InboxTriageWriteRow = {
+  noteId: string; expectedVersion: number;
+  targetSectionSlug: string; tags: string[];
+};
+export type InboxTriageWriteReceipt = {
+  batch: string; applied: string[]; skipped: string[];
+};
+export async function applyInboxTriageNotes(
+  db: SQL, selected: InboxTriageWriteRow[],
+): Promise<InboxTriageWriteReceipt> {
+  if (!Array.isArray(selected) || selected.length < 1 || selected.length > 10 ||
+      new Set(selected.map(row=>row.noteId)).size !== selected.length)
+    throw new MemoryConflictError('invalid_inbox_triage_selection');
+  for (const row of selected) {
+    if (!row || typeof row.noteId !== 'string' ||
+        !/^[A-Za-z0-9:_-]{1,128}$/.test(row.noteId) ||
+        !Number.isSafeInteger(row.expectedVersion) || row.expectedVersion < 1 ||
+        typeof row.targetSectionSlug !== 'string' ||
+        !/^[a-z][a-z0-9_-]{0,63}$/.test(row.targetSectionSlug) ||
+        !Array.isArray(row.tags) || row.tags.length > 5)
+      throw new MemoryConflictError('invalid_inbox_triage_item');
+    checkedNoteTags(row.tags);
+  }
+  if (!localMemorySessionUnlocked())
+    throw new MemoryConflictError('application_locked');
+  const batch='notes:move:'+Crypto.randomUUID();
+  const applied: string[]=[];
+  const skipped: string[]=[];
+  await withUnlockedTransaction(db,async tx=>{
+    if (!localMemorySessionUnlocked())
+      throw new MemoryConflictError('application_locked');
+    const collections=await tx.getAllAsync<{
+      id:string;slug:string;sensitivity:string;parent_id:string|null;
+    }>('SELECT id,slug,sensitivity,parent_id FROM memory_collections');
+    const byId=new Map(collections.map(c=>[c.id,c]));
+    const bySlug=new Map(collections.map(c=>[c.slug,c]));
+    const inbox=bySlug.get('inbox');
+    if (!inbox || inbox.sensitivity!=='sensitive')
+      throw new MemoryConflictError('inbox_acl_changed');
+    const destinations=new Map<string,string>();
+    for (const row of selected) {
+      const dest=bySlug.get(row.targetSectionSlug);
+      if (!dest || dest.slug==='inbox' || dest.slug==='documents')
+        throw new MemoryConflictError('inbox_target_unavailable');
+      const seen=new Set<string>();
+      let ancestor:typeof dest|undefined=dest;
+      while(ancestor){
+        if(seen.has(ancestor.id) || ancestor.sensitivity!=='standard' ||
+           ancestor.slug==='inbox' || ancestor.slug==='documents')
+          throw new MemoryConflictError('inbox_target_acl_changed');
+        seen.add(ancestor.id);
+        if(ancestor.parent_id && !byId.has(ancestor.parent_id))
+          throw new MemoryConflictError('inbox_target_parent_missing');
+        ancestor=ancestor.parent_id?byId.get(ancestor.parent_id):undefined;
+      }
+      destinations.set(row.noteId,dest.id);
+    }
+    const ready:Array<{before:Row;after:Row}>=[];
+    for (const selectedRow of selected) {
+      const before=await snapshot(tx,selectedRow.noteId);
+      if(before.record_version!==selectedRow.expectedVersion){
+        skipped.push(selectedRow.noteId);continue;
+      }
+      // Never move secret notes, non-note records, trashed/archived notes or
+      // a note that moved away from Inbox since the user's preview.
+      if(before.domain!=='notes' || before.record_status!=='active' ||
+         before.collection_id!==inbox.id ||
+         !['inherit','standard','sensitive'].includes(before.sensitivity))
+        throw new MemoryConflictError('inbox_note_acl_changed');
+      const payload=JSON.parse(before.payload_json);
+      const newTags=checkedNoteTags(selectedRow.tags);
+      // Preserve the user's existing tags unless they exceed the canonical
+      // tag budget. Never silently discard manually assigned labels.
+      const merged=[...new Set([...noteTagsFromPayload(payload.tags),...newTags])].sort();
+      if(merged.length>MAX_NOTE_TAGS)
+        throw new MemoryConflictError('inbox_triage_too_many_tags');
+      if(merged.length)payload.tags=merged;
+      else delete payload.tags;
+      ready.push({before,after:{...before,
+        collection_id:destinations.get(selectedRow.noteId),
+        sensitivity:'standard',payload_json:JSON.stringify(payload),
+      }});
+    }
+    const participants=ready.map(entry=>entry.before.id);
+    for(const entry of ready){
+      if(!localMemorySessionUnlocked())
+        throw new MemoryConflictError('application_locked');
+      await write(tx,entry.before,{
+        ...entry.after,batch_participants:participants,
+      },batch);
+      applied.push(entry.before.id);
+    }
+  });
+  // undoNotes already supports the notes:move batch journal and checks every
+  // participant's later record_version in one transaction before replay.
+  return {batch,applied,skipped};
+}
+
 export async function undoNotes(db: SQL, batch: string, moveGuard?: ChatMoveGuard): Promise<void> {
   if(moveGuard && (!/^notes:move:/.test(batch) ||
       moveGuard.fromCollectionId===moveGuard.toCollectionId))
