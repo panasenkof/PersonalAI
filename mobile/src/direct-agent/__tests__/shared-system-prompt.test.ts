@@ -106,3 +106,38 @@ test("ARCH-3c: deterministic prompt for identical tool options across protocols"
   expect(build()).toBe(build());
   expect(build()).toContain("Для темы и раздела ТЕКУЩЕГО диалога");
 });
+
+
+test("ARCH-3c3: no instruction names any tool absent from the active canonical catalog", () => {
+  const minimum = base();
+  const prompt = promptFor(minimum);
+  const available = new Set(createToolCatalog(minimum, [], [], []).definitions.map(item => item.name));
+  const all = createToolCatalog(full(), [], [], []).definitions.map(item => item.name);
+  expect(all.length).toBeGreaterThan(available.size);
+  for (const name of all.filter(item => !available.has(item))) {
+    expect(prompt).not.toContain(name);
+  }
+});
+
+test("ARCH-3c3: native web_search and external search_web are distinct registered tools", () => {
+  // The old Responses literal is intentionally untouched for ARCH-0 snapshots.
+  // The new renderer adapts only model-facing guidance to the actual tool name.
+  const legacyWebText = "Для актуальных фактов используй web_search, если разрешён, и приводите ссылки на источники. ";
+  const external = buildSystemPrompt({
+    contextEnabled: false,
+    tools: [{ name: "search_web", guidance: legacyWebText }],
+  });
+  expect(external).toContain("используй search_web");
+  expect(external).not.toContain("web_search");
+  const native = buildSystemPrompt({
+    contextEnabled: false,
+    tools: [{ name: "web_search" }],
+  });
+  expect(native).toContain("используй web_search");
+  expect(native).not.toContain("search_web");
+  const without = buildSystemPrompt({ contextEnabled: false, tools: [] });
+  expect(without).not.toContain("web_search");
+  expect(without).not.toContain("search_web");
+  // Neither tool was given authority to read a web page.
+  for (const text of [external, native, without]) expect(text).not.toContain("read_web_page");
+});
