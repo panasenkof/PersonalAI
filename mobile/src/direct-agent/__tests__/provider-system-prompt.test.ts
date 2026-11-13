@@ -65,9 +65,13 @@ test("ARCH-3c2: Responses, chat-compatible and Anthropic send IDENTICAL instruct
   expect(compatible.system).toBe(anthropic.system);
   expect(responses.system).toContain("selected_article_read_coverage");
   expect(responses.system).toContain("раздел закреплён пользователем");
+  const expectedNames = responses.body.tools.map((tool: any) => tool.name);
+  // Tool count depends on article cursor / enabled host adapters. Assert
+  // the actual advertised registry, not a fragile hard-coded fixture size.
+  expect(expectedNames).toContain("selected_article_read_coverage");
   for (const item of [responses, compatible, anthropic]) {
-    const tools = item.body.tools;
-    expect(tools).toHaveLength(23);
+    const names = item.body.tools.map((tool: any) => tool.function?.name || tool.name);
+    expect(names).toEqual(expectedNames);
   }
 });
 
