@@ -1,4 +1,4 @@
-import { buildSystemPrompt, responsesSystemPrompt } from "../prompt";
+import { buildSystemPrompt, responsesSystemPrompt, TOOL_GUIDANCE } from "../prompt";
 import { createToolCatalog } from "../tool-catalog";
 import type { DirectAgentOptions } from "../engine";
 import { DEFAULT_SECTIONS } from "../fact-tool";
@@ -168,7 +168,6 @@ test("ARCH-3c4: dialogue next-step instruction survives for each exact available
 
 
 test("ARCH-3c5: optional tool alternatives preserve the verification rules", () => {
-  const {TOOL_GUIDANCE} = require("../prompt");
   const movePrompt = buildSystemPrompt({
     contextEnabled: false,
     tools: [
