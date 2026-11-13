@@ -28,6 +28,11 @@ type Db = Pick<SQLite.SQLiteDatabase, "getAllAsync" | "getFirstAsync">;
 type Row = { id: string; record_version: number; title: string | null;
   updated_at: string; created_at: string; collection_name: string; duplicate_count?: number; publication_day?: string | null };
 type Filter = { where: string; params: (string | number)[] };
+/** Shared SQLCipher scope for all cloud-visible catalogue reads, including S9-2.
+ * The duplicate finder must never widen this predicate to private records. */
+export const STANDARD_ACTIVE_NOTES_SCOPE =
+  "e.record_status='active' AND e.domain='notes' AND c.sensitivity='standard' " +
+  "AND e.sensitivity IN ('standard','inherit')";
 const MATCH_SQL = "EXISTS (SELECT 1 FROM memory_search_fts WHERE " +
   "memory_search_fts.entity_id=e.id AND memory_search_fts MATCH ?)";
 
@@ -57,8 +62,7 @@ function filters(options: AllowedListOptions, cursor: boolean): Filter {
      ((options.publicationFrom || options.publicationBefore) && (options.savedFrom || options.savedBefore)) ||
      (options.unknownPublicationOnly && (!options.linkedOnly || options.publicationFrom || options.publicationBefore)))
     throw new Error("invalid_catalog_publication_window");
-  const where = ["e.record_status='active'", "e.domain='notes'", "c.sensitivity='standard'",
-    "e.sensitivity IN ('standard','inherit')"];
+  const where = [STANDARD_ACTIVE_NOTES_SCOPE];
   const params: (string | number)[] = [];
   if (options.collectionId) {
     if (options.includeDescendants) {
