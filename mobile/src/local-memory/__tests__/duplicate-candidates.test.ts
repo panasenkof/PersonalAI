@@ -44,14 +44,14 @@ test("S9-2a: same text is SHA-256-only locally; model sees metadata, not bodies"
   expect(JSON.stringify(result)).not.toContain("НОВАЯ   заметка");
   expect(JSON.stringify(result)).not.toContain("новая заметка");
   expect(Crypto.digestStringAsync).toHaveBeenCalledWith("SHA-256","text:новая заметка");
-  const sql=(db.getAllAsync.mock as jest.Mock).mock.calls[0][0] as string;
+  const sql=(db.getAllAsync.mock as unknown as jest.Mock).mock.calls[0][0] as string;
   expect(sql).toContain("e.record_status='active'");
   expect(sql).toContain("e.domain='notes'");
   expect(sql).toContain("e.sensitivity IN ('standard','inherit')");
   expect(sql).toContain("c.sensitivity='standard'");
   expect(sql).toContain("WITH RECURSIVE safe");
   expect(sql).toContain("parent_id IS NULL");
-  expect((db.getAllAsync.mock as jest.Mock).mock.calls[0][1]).toEqual([DUPLICATE_SCAN_LIMIT+1]);
+  expect((db.getAllAsync.mock as unknown as jest.Mock).mock.calls[0][1]).toEqual([DUPLICATE_SCAN_LIMIT+1]);
 });
 
 test("S9-2a: exact URL groups use existing source_url and do not include arbitrary note bodies",async()=>{
@@ -69,9 +69,9 @@ test("S9-2a: exact URL groups use existing source_url and do not include arbitra
   expect(result.groups[0].fingerprint).toBe(await Crypto.digestStringAsync(
     Crypto.CryptoDigestAlgorithm.SHA256,"url:https://example.com/article"));
   expect(JSON.stringify(result)).not.toContain("Что-то про статью");
-  expect((db.getAllAsync.mock as jest.Mock).mock.calls[0][0]).toContain("json_extract(e.payload_json,'$.source_url')");
-  expect((db.getAllAsync.mock as jest.Mock).mock.calls[1][0]).toContain(" AND CASE WHEN json_valid");
-  expect((db.getAllAsync.mock as jest.Mock).mock.calls[1][1]).toEqual(["https://example.com/article"]);
+  expect((db.getAllAsync.mock as unknown as jest.Mock).mock.calls[0][0]).toContain("json_extract(e.payload_json,'$.source_url')");
+  expect((db.getAllAsync.mock as unknown as jest.Mock).mock.calls[1][0]).toContain(" AND CASE WHEN json_valid");
+  expect((db.getAllAsync.mock as unknown as jest.Mock).mock.calls[1][1]).toEqual(["https://example.com/article"]);
 });
 
 test("S9-2a: a six-note URL group is shown but cannot be merged as complete",async()=>{
