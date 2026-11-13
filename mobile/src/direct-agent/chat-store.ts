@@ -349,7 +349,8 @@ export class DirectChatStore {
         // The store remains responsible for updating this conversation.
         this.update(id, interruptedAssistantPatch({
           conversation:c,taskState,privatePhoto,internetPhotoId:Boolean(internetPhotoId),
-          intentPreserveDraft:Boolean(intent?.preserveDraft),modelStarted,beforeModelError,
+          intentPreserveDraft:Boolean(intent?.preserveDraft),inboxTriageResult:Boolean(intent?.inboxApprovalRowId),
+          modelStarted,beforeModelError,
           prompt,draftFiles,signalAborted:aborter.signal.aborted,latest:getLatest(),error:e,
           newId:Crypto.randomUUID,
         }));
