@@ -14,16 +14,17 @@ const before={
 };
 const after={...before,collection_id:"projects-id",sensitivity:"standard",record_version:4,
   payload_json:'{"tags":["до","после"]}',batch_participants:["n1"]};
-const sections=[
+type Section = {id:string;slug:string;sensitivity:string;parent_id:string|null};
+const sections:Section[]=[
   {id:"inbox-id",slug:"inbox",sensitivity:"sensitive",parent_id:null},
   {id:"projects-id",slug:"projects",sensitivity:"standard",parent_id:null},
 ];
 const batch="notes:inbox_triage:batch-test";
-function dbFixture(customSections=sections, customAfter=after){
-  const runAsync=jest.fn(async()=>({changes:1}));
+function dbFixture(customSections:Section[]=sections, customAfter=after){
+  const runAsync=jest.fn(async (..._args:any[])=>({changes:1}));
   const getAllAsync=jest.fn(async(sql:string)=>{
     if(sql.includes("FROM memory_revisions"))return [{before_json:JSON.stringify(before),
-      after_json:JSON.stringify(customAfter)}];
+      after_json:JSON.stringify(after)}];
     if(sql.includes("FROM memory_collections"))return customSections;
     if(sql.includes("FROM memory_attachments"))return [];
     throw new Error("unexpected SQL "+sql);
