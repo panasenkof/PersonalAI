@@ -1,5 +1,7 @@
 # PersAI — журнал слитых изменений
 
+- 2026-11-13 · ARCH-6c: завершён перенос SQLCipher-репозитория в canonical modules (#527–#533); фасад `repository.ts` 267 строк, прежние SQL/ACL/CAS/транзакции/backup · финальный PR #533 CI PASS [43438691428](https://github.com/panasenkof/PersonalAI/actions/runs/43438691428), merge `f240825`; physical Android NOT_RUN_PHYSICAL, live LLM NOT_RUN_LIVE_MODEL
+
 - 2026-11-13 · ARCH-6b: chat row/composer/list components вынесены из `HomeScreen` (649 → 500 строк) без изменения поведения (#525) · CI PASS [43421972465](https://github.com/panasenkof/PersonalAI/actions/runs/43421972465), merge `88cde12`; TypeScript/Jest/browser/native emulator PASS, физический телефон NOT_RUN_PHYSICAL, live LLM NOT_RUN_LIVE_MODEL
 
 - 2026-11-13 · ARCH-6a: разделён DirectChatStore на agent-host/agent-result без изменения поведения (#523) · CI PASS [43411869576](https://github.com/panasenkof/PersonalAI/actions/runs/43411869576), merge `5608ac2`; браузер + native emulator PASS, физический телефон NOT_RUN_PHYSICAL, live LLM NOT_RUN_LIVE_MODEL
