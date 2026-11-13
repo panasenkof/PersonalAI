@@ -8,7 +8,7 @@ import { runDirectAgent } from "./engine";
 import { localMemorySessionUnlocked, withLocalMemoryDatabase, waitForApplicationSession, onLocalMemorySessionChange } from "../local-memory/storage";
 import { searchApprovedNotes, readApprovedNote } from "./memory";
 import { searchLocalApprovedSourceSegments, listLocalApprovedSourceSegments, readLocalApprovedSourceSegment } from "../local-memory/source-retrieval";
-import { listAllowedNotes, countAllowedNotes } from "../local-memory/agent-catalog";
+import { listAllowedNotes, countAllowedNotes, findAllowedDuplicateCandidates } from "../local-memory/agent-catalog";
 import { previewMove } from "./move-proposal";
 import { previewSectionAction } from "./section-actions";
 import { searchLocalPhotosFromChat83 } from "../media/vision-chat-search";
@@ -148,6 +148,17 @@ export function buildAgentOptions(input: AgentHostInput): Parameters<typeof runD
     }),
     list: async filters => ({ ...await withLocalMemoryDatabase(profile, db => listAllowedNotes(db, filters)) }),
     count: async filters => ({ ...await withLocalMemoryDatabase(profile, db => countAllowedNotes(db, filters)) }),
+    // One approved standard-note catalogue, no separate search index or
+    // write path. Stop, AppLock, and active profile switches fail closed.
+    findDuplicates: async (kind,limit) => {
+      if(signal.aborted || disposed() || !localMemorySessionUnlocked() ||
+         !getWritableConversation())throw new Error("application_locked");
+      const page=await withLocalMemoryDatabase(profile,db=>
+        findAllowedDuplicateCandidates(db,kind,limit));
+      if(signal.aborted || disposed() || !localMemorySessionUnlocked() ||
+         !getWritableConversation())throw new Error("application_locked");
+      return page;
+    },
     selectArticles: async (intent, cursor) => {
       // Reuse the same SQLCipher reader as the no-model article picker.
       // A mid-call lock, profile suspension or cancellation must not leak its result.
