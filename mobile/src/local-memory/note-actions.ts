@@ -385,6 +385,9 @@ export async function undoNotes(db: SQL, batch: string, moveGuard?: ChatMoveGuar
     }
     const participants = JSON.parse(revisions[0].after_json).batch_participants;
     if (!Array.isArray(participants) || participants.length !== revisions.length) throw new Error('Часть записей удалена навсегда; полная отмена недоступна.');
+    if(mergeGuard && (participants.length!==mergeGuard.noteIds.length ||
+       participants.some((id:string,i:number)=>id!==mergeGuard.noteIds[i])))
+      throw new MemoryConflictError('merge_undo_participants_changed');
     const triage=batch.startsWith('notes:inbox_triage:');
     if(triage){
       if(!localMemorySessionUnlocked() || revisions.length>10 ||
