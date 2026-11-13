@@ -22,3 +22,10 @@ test("private proposal reasons/tags and read arguments do not reach diagnostic f
     arguments:JSON.stringify({query:"hello"}),
   });
 });
+
+test("S9-2a: duplicate source URLs and record IDs are never persisted to diagnostics",()=>{
+  const page={groups:[{sourceUrl:"https://private-link.example",records:[{id:"note-x"}]}]};
+  expect(diagnosticToolResultContent("find_duplicate_candidates",page)).toBeUndefined();
+  expect(diagnosticToolArguments("find_duplicate_candidates",{kind:"same_url",limit:5}))
+    .toBeUndefined();
+});
