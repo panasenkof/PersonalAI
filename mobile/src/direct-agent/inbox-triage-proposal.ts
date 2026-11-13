@@ -11,6 +11,9 @@ export type InboxTriageItem = {
   targetSectionSlug: string;
   tags: string[];
   reason: string;
+  /** Trusted display metadata filled by the on-device approved reader. */
+  displayTitle?: string;
+  targetSectionName?: string;
 };
 export type InboxTriageProposal = { items: InboxTriageItem[] };
 export type InboxTriageValidationContext = {

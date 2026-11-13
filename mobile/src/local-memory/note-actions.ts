@@ -220,7 +220,7 @@ export async function applyInboxTriageNotes(
   }
   if (!localMemorySessionUnlocked())
     throw new MemoryConflictError('application_locked');
-  const batch='notes:move:'+Crypto.randomUUID();
+  const batch='notes:inbox_triage:'+Crypto.randomUUID();
   const applied: string[]=[];
   const skipped: string[]=[];
   await withUnlockedTransaction(db,async tx=>{
@@ -287,8 +287,9 @@ export async function applyInboxTriageNotes(
       },batch);
       applied.push(entry.before.id);
     }
+    if(!localMemorySessionUnlocked())throw new MemoryConflictError('application_locked');
   });
-  // undoNotes already supports the notes:move batch journal and checks every
+  // undoNotes supports this distinct triage batch journal and checks every
   // participant's later record_version in one transaction before replay.
   return {batch,applied,skipped};
 }
@@ -297,7 +298,7 @@ export async function undoNotes(db: SQL, batch: string, moveGuard?: ChatMoveGuar
   if(moveGuard && (!/^notes:move:/.test(batch) ||
       moveGuard.fromCollectionId===moveGuard.toCollectionId))
     throw new MemoryConflictError("invalid_move_undo");
-  if (!/^notes:(move|trash|restore|merge|archive|unarchive):/.test(batch)) throw new Error('Неизвестная операция.');
+  if (!/^notes:(move|inbox_triage|trash|restore|merge|archive|unarchive):/.test(batch)) throw new Error('Неизвестная операция.');
   await withUnlockedTransaction(db, async tx => {
     const revisions = await tx.getAllAsync<Row>('SELECT before_json,after_json FROM memory_revisions WHERE reason=? ORDER BY created_at,id', [batch]);
     if (!revisions.length) throw new Error('Операция не найдена.');
@@ -321,11 +322,56 @@ export async function undoNotes(db: SQL, batch: string, moveGuard?: ChatMoveGuar
     }
     const participants = JSON.parse(revisions[0].after_json).batch_participants;
     if (!Array.isArray(participants) || participants.length !== revisions.length) throw new Error('Часть записей удалена навсегда; полная отмена недоступна.');
+    const triage=batch.startsWith('notes:inbox_triage:');
+    if(triage){
+      if(!localMemorySessionUnlocked() || revisions.length>10 ||
+          new Set(participants).size!==revisions.length)
+        throw new MemoryConflictError('inbox_triage_undo_invalid');
+      // Revalidate the same source and every destination inside the existing
+      // BEGIN IMMEDIATE. An Inbox changed to standard must never receive a
+      // sensitive note silently during Undo.
+      const sections=await tx.getAllAsync<{
+        id:string;slug:string;sensitivity:string;parent_id:string|null;
+      }>('SELECT id,slug,sensitivity,parent_id FROM memory_collections');
+      const byId=new Map(sections.map(c=>[c.id,c]));
+      const inbox=sections.find(c=>c.slug==='inbox');
+      if(!inbox || inbox.sensitivity!=='sensitive')
+        throw new MemoryConflictError('inbox_triage_undo_acl_changed');
+      const revisionIds=new Set<string>();
+      for(const revision of revisions){
+        const before=JSON.parse(revision.before_json) as Row;
+        const after=JSON.parse(revision.after_json) as Row;
+        revisionIds.add(before.id);
+        const target=byId.get(after.collection_id);
+        if(before.id!==after.id || before.collection_id!==inbox.id ||
+           before.domain!=='notes' || after.domain!=='notes' ||
+           before.record_status!=='active'||after.record_status!=='active' ||
+           !['inherit','standard','sensitive'].includes(before.sensitivity) ||
+           after.sensitivity!=='standard' || !target || target.id===inbox.id)
+          throw new MemoryConflictError('inbox_triage_undo_changed');
+        const seen=new Set<string>();
+        let current:typeof target|undefined=target;
+        while(current){
+          if(seen.has(current.id)||current.sensitivity!=='standard'||
+             current.slug==='inbox'||current.slug==='documents')
+            throw new MemoryConflictError('inbox_triage_undo_acl_changed');
+          seen.add(current.id);
+          if(current.parent_id&&!byId.has(current.parent_id))
+            throw new MemoryConflictError('inbox_triage_undo_parent_missing');
+          current=current.parent_id?byId.get(current.parent_id):undefined;
+        }
+      }
+      if(participants.some((id:unknown)=>!revisionIds.has(id as string)))
+        throw new MemoryConflictError('inbox_triage_undo_participants_changed');
+    }
     // Check every version before touching any row. Later edits must never be lost.
     for (const revision of revisions) {
       const expected = JSON.parse(revision.after_json);
       const current = await snapshot(tx, expected.id);
       if (current.record_version !== expected.record_version ||
+          (triage && (!localMemorySessionUnlocked() ||
+            current.collection_id!==expected.collection_id ||
+            current.sensitivity!=='standard' || current.record_status!=='active')) ||
           (moveGuard && (!localMemorySessionUnlocked() || current.collection_id!==moveGuard.toCollectionId ||
             current.record_status!=="active" || !["standard","inherit"].includes(current.sensitivity))))
         throw new MemoryConflictError('stale_memory_version');
@@ -369,6 +415,7 @@ export async function undoNotes(db: SQL, batch: string, moveGuard?: ChatMoveGuar
       }
     }
     for (const revision of revisions) {
+      if(triage&&!localMemorySessionUnlocked())throw new MemoryConflictError('application_locked');
       const before = JSON.parse(revision.before_json), current = await snapshot(tx, before.id);
       for (const id of before.attachmentIds || [])
         await tx.runAsync('UPDATE memory_attachments SET entity_id=? WHERE id=?', [before.id, id]);
@@ -379,6 +426,7 @@ export async function undoNotes(db: SQL, batch: string, moveGuard?: ChatMoveGuar
       }
       await write(tx, current, { ...before }, 'Отмена ' + batch);
     }
+    if(triage&&!localMemorySessionUnlocked())throw new MemoryConflictError('application_locked');
     if (isMerge) {
       // Undo journal ordering is by timestamp/UUID, not participant order.
       // Rebuild the primary only AFTER all source originals returned home.
@@ -440,7 +488,7 @@ export async function purgeNotes(db: SQL, selection: NoteSelection[], options?: 
 }
 
 export function noteUndoLabel(token: string): string {
-  const labels: Record<string, string> = { move: 'Отменить перенос', trash: 'Отменить удаление', restore: 'Отменить восстановление', merge: 'Отменить объединение', archive: 'Отменить архивирование', unarchive: 'Отменить возврат из архива' };
+  const labels: Record<string, string> = { inbox_triage: 'Отменить разбор Входящих', move: 'Отменить перенос', trash: 'Отменить удаление', restore: 'Отменить восстановление', merge: 'Отменить объединение', archive: 'Отменить архивирование', unarchive: 'Отменить возврат из архива' };
   return labels[token.split(':')[1]] || 'Отменить операцию с записями';
 }
 

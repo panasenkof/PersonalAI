@@ -377,7 +377,7 @@ function NebulaHomeContent() {
         onRetryPhoto={() => { if (settings && active?.retryPhoto)
           void store.searchPhotosWithAgent(settings, active.retryPhoto.image, active.id); }}
         onPhotoAction={action => action === "import" ? navigation.navigate("MemoryImport", {source:"photo"}) : navigation.navigate("PhotoSearchSettings")}
-        onConfirmProposal={rowId => { void store.confirmProposal(rowId, settings || undefined); }}
+        onConfirmProposal={(rowId, selectedInboxIds) => { void store.confirmProposal(rowId, settings || undefined, selectedInboxIds); }}
         onDismissProposal={rowId => store.dismissProposal(rowId)}
         onUndoProposal={rowId => { void store.undoProposal(rowId); }}
         onContinueArticles={rowId => { if (settings) void store.continueArticlesWithAgent(settings,rowId); }}

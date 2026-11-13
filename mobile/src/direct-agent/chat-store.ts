@@ -426,7 +426,8 @@ export class DirectChatStore {
   /** The same user-click confirmation lifecycle for a move or a section action.
    * The handler calls the EXISTING SQLCipher writer. No model-side mutation.
    * A stale version or an ACL change still fails inside the canonical writer. */
-  async confirmProposal(rowId: string, settings?:DirectAgentSettings): Promise<void> {
+  async confirmProposal(rowId: string, settings?:DirectAgentSettings,
+    selectedInboxIds?:readonly string[]): Promise<void> {
     const c = this.snapshot.conversations.find(x => x.id === this.snapshot.activeId);
     const row = c?.rows.find(x => x.id === rowId && x.role === "assistant");
     if(row?.inboxApproval){
@@ -455,7 +456,9 @@ export class DirectChatStore {
     const { handler, proposal } = selected;
     this.update(c.id, { movingRowId: rowId });
     try {
-      const receipt = await handler.confirm(this.profile, proposal);
+      const receipt = handler.kind==="inbox_triage"
+        ? await handler.confirm(this.profile, proposal, selectedInboxIds)
+        : await handler.confirm(this.profile, proposal);
       const latest = this.snapshot.conversations.find(x => x.id === c.id);
       if (!latest || this.disposed) return;
       const current = latest.rows.find(r => r.id === rowId);

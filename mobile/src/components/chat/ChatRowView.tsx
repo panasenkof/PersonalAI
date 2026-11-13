@@ -52,7 +52,7 @@ export function ChatRowView({
   onRetryRequest: () => void;
   onRetryPhoto: (rowId: string) => void;
   onPhotoAction: (action: NonNullable<PresentedChatRow["photoAction"]>) => void;
-  onConfirmProposal: (rowId: string) => void;
+  onConfirmProposal: (rowId: string, selectedInboxIds?:readonly string[]) => void;
   onDismissProposal: (rowId: string) => void;
   onUndoProposal: (rowId: string) => void;
   onContinueArticles: (rowId: string) => void;
@@ -106,7 +106,7 @@ export function ChatRowView({
           <ChatProposalCards row={item}
             busy={busy || Boolean(movingRowId)}
             working={movingRowId === item.id}
-            onConfirm={() => onConfirmProposal(item.id)}
+            onConfirm={ids => onConfirmProposal(item.id, ids)}
             onDismiss={() => onDismissProposal(item.id)}
             onUndo={() => onUndoProposal(item.id)}
             onOpenNote={id => onOpenNote(id)} /> : null}

@@ -13,6 +13,7 @@ type Grant = {
   rowId?: string;
   approved: boolean;
   activeTurn?: string;
+  titles: Map<string, string>;
 };
 
 export class InboxTriageChatAccess {
@@ -33,7 +34,7 @@ export class InboxTriageChatAccess {
     this.revoke(conversationId);
     const access = createInboxTriageAccess(conversationId);
     const approval = access.requestApproval(limit);
-    this.grants.set(conversationId, { access, approval, approved: false });
+    this.grants.set(conversationId, { access, approval, approved: false, titles: new Map() });
     return approval;
   }
 
@@ -78,6 +79,7 @@ export class InboxTriageChatAccess {
     if (signal?.aborted || !this.available() || !localMemorySessionUnlocked() ||
         this.grants.get(conversationId) !== grant)
       throw new Error("inbox_triage_not_authorized");
+    for (const item of result.items) grant.titles.set(item.noteId, item.title);
     return result;
   }
 
@@ -93,11 +95,15 @@ export class InboxTriageChatAccess {
       const sections = await new SqliteMemoryRepository(db).listCollections();
       if (signal?.aborted || this.grants.get(conversationId) !== grant ||
           !localMemorySessionUnlocked()) throw new Error("inbox_triage_not_authorized");
-      return validateInboxTriageProposal(raw, {
+      const validated = validateInboxTriageProposal(raw, {
         sections,
         wasReadThisTurn: (noteId, expectedVersion) =>
           grant.access.wasReadThisTurn(turnId, noteId, expectedVersion),
       });
+      return {items:validated.items.map(item => ({...item,
+        displayTitle: grant.titles.get(item.noteId) || "Без названия",
+        targetSectionName:sections.find(c=>c.slug===item.targetSectionSlug)?.name || item.targetSectionSlug,
+      }))};
     });
     if (signal?.aborted || !this.available() || !localMemorySessionUnlocked() ||
         this.grants.get(conversationId) !== grant)
