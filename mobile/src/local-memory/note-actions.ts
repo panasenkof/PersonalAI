@@ -13,6 +13,8 @@ export type NoteSelection = { id: string; record_version: number };
 export type NoteAction = 'move' | 'trash' | 'restore' | 'merge' | 'archive' | 'unarchive';
 /** 9T2: gate in canonical write transaction, not a new writer. */
 export type ChatMoveGuard = {noteId:string;fromCollectionId:string;toCollectionId:string};
+/** S9-2: optional explicit chat confirmation; canonical merge writer owns CAS. */
+export type ChatMergeGuard = {noteIds:string[];keepNoteId:string};
 /** Optional reviewed-cleanup guard, executed by this SAME canonical writer. */
 export type NoteHygieneGuard = { expectedPreferences: Array<{ id:string; preferenceVersion:number }> };
 export function mergeText(notes: { title: string | null; payload: Record<string, unknown> }[]): string {
@@ -41,11 +43,44 @@ async function write(db: SQL, before: Row, after: Row, reason: string) {
   await indexEntity(db, before.id, timestamp);
 }
 /** One atomic operation; metadata and originals remain recoverable. */
-export async function changeNotes(db: SQL, action: NoteAction, selection: NoteSelection[], collectionId?: string, hygiene?: NoteHygieneGuard, moveGuard?: ChatMoveGuard): Promise<string> {
+/** Fail closed if any source lives beneath an unreadable ancestor.
+ * Always invoked inside the existing BEGIN IMMEDIATE SQLCipher transaction. */
+async function assertOrdinaryMergeSources(
+  tx:SQL, rows:Array<{id:string;collection_id:string;sensitivity:string;domain:string;record_status:string}>,
+):Promise<void>{
+  const collections=await tx.getAllAsync<{id:string;slug:string;sensitivity:string;parent_id:string|null}>(
+    'SELECT id,slug,sensitivity,parent_id FROM memory_collections');
+  const byId=new Map(collections.map(c=>[c.id,c]));
+  for(const row of rows){
+    if(row.domain!=='notes'||row.record_status!=='active'||
+       !['standard','inherit'].includes(row.sensitivity))
+      throw new MemoryConflictError('merge_review_acl_changed');
+    const visited=new Set<string>();
+    let section=byId.get(row.collection_id);
+    if(!section)throw new MemoryConflictError('merge_review_acl_changed');
+    while(section){
+      if(visited.has(section.id)||section.sensitivity!=='standard'||
+         section.slug==='inbox'||section.slug==='documents')
+        throw new MemoryConflictError('merge_review_acl_changed');
+      visited.add(section.id);
+      if(section.parent_id && !byId.has(section.parent_id))
+        throw new MemoryConflictError('merge_review_acl_changed');
+      section=section.parent_id?byId.get(section.parent_id):undefined;
+    }
+  }
+}
+export async function changeNotes(db: SQL, action: NoteAction, selection: NoteSelection[], collectionId?: string, hygiene?: NoteHygieneGuard, moveGuard?: ChatMoveGuard, mergeGuard?: ChatMergeGuard): Promise<string> {
   if(moveGuard && (action!=="move" || selection.length!==1 ||
      selection[0].id!==moveGuard.noteId || collectionId!==moveGuard.toCollectionId ||
      moveGuard.fromCollectionId===moveGuard.toCollectionId))
     throw new MemoryConflictError("invalid_confirmed_move");
+  if(mergeGuard && (action!=="merge" || !Array.isArray(mergeGuard.noteIds) ||
+      mergeGuard.noteIds.length<2 || mergeGuard.noteIds.length>5 ||
+      mergeGuard.noteIds[0]!==mergeGuard.keepNoteId ||
+      new Set(mergeGuard.noteIds).size!==mergeGuard.noteIds.length ||
+      selection.length!==mergeGuard.noteIds.length ||
+      selection.some((row,i)=>row.id!==mergeGuard.noteIds[i])))
+    throw new MemoryConflictError("invalid_confirmed_merge");
   if(hygiene){
     if(!['archive','trash'].includes(action) || !Array.isArray(hygiene.expectedPreferences) ||
        hygiene.expectedPreferences.length!==selection.length ||
@@ -57,7 +92,7 @@ export async function changeNotes(db: SQL, action: NoteAction, selection: NoteSe
   if (!selection.length || selection.length > 100 || new Set(selection.map(n => n.id)).size !== selection.length) throw new Error('Выберите от 1 до 100 разных записей.');
   const batch = 'notes:' + action + ':' + Crypto.randomUUID();
   await withUnlockedTransaction(db, async tx => {
-    if((hygiene || moveGuard) && !localMemorySessionUnlocked())
+    if((hygiene || moveGuard || mergeGuard) && !localMemorySessionUnlocked())
       throw new MemoryConflictError('application_locked');
     const rows: Row[] = [];
     for (const selected of selection) {
@@ -101,6 +136,7 @@ export async function changeNotes(db: SQL, action: NoteAction, selection: NoteSe
          !sections.some(row=>row.id===moveGuard.toCollectionId))
         throw new MemoryConflictError("move_review_changed_repeat_preview");
     }
+    if(mergeGuard)await assertOrdinaryMergeSources(tx,rows);
     const levels = await Promise.all(rows.map(r => tx.getFirstAsync<Row>('SELECT sensitivity FROM memory_collections WHERE id=?', [r.collection_id])));
     const effective = rows.map((r, i) => [r.sensitivity, levels[i]?.sensitivity]);
     const mergedSensitivity = effective.some(v => v.includes('secret') || v.includes('unclassified')) ? 'secret' : effective.some(v => v.includes('sensitive')) ? 'sensitive' : 'standard';
@@ -177,10 +213,12 @@ export async function changeNotes(db: SQL, action: NoteAction, selection: NoteSe
         }
       }
       after.payload_json = JSON.stringify(payload);
-      if((hygiene || moveGuard) && !localMemorySessionUnlocked())
+      if((hygiene || moveGuard || mergeGuard) && !localMemorySessionUnlocked())
       throw new MemoryConflictError('application_locked');
       await write(tx, before, after, batch);
     }
+    if(mergeGuard && !localMemorySessionUnlocked())
+      throw new MemoryConflictError('application_locked');
     if (action === 'merge') {
       // The first note was indexed before later originals were moved. Index
       // its final attachment filenames/extractions from the committed owner
