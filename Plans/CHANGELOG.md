@@ -1,5 +1,9 @@
 # PersAI — журнал слитых изменений
 
+- 2026-11-13 · ARCH-4a: общий реестр обработчиков переноса заметки и раздела с прежними квитанциями (#519) · CI PASS [43406101430](https://github.com/panasenkof/PersonalAI/actions/runs/43406101430), merge `3f24960`; телефон NOT_RUN_PHYSICAL
+- 2026-11-13 · ARCH-4b: одни методы confirm/dismiss/undo в DirectChatStore и сохранение старых методов как адаптеров (#520) · CI PASS [43407821487](https://github.com/panasenkof/PersonalAI/actions/runs/43407821487), merge `41cd6d9`; телефон NOT_RUN_PHYSICAL
+- 2026-11-13 · ARCH-4c: единая карточка предложения/квитанции вместо четырёх UI-блоков (#521) · CI PASS [43407209616](https://github.com/panasenkof/PersonalAI/actions/runs/43407209616), merge `c9ba4c0`; Android emulator PASS, реальный телефон NOT_RUN_PHYSICAL
+
 - 2026-11-13 · ARCH-3c: единый системный промпт во всех провайдерах (#514) · CI PASS [43385658508](https://github.com/panasenkof/PersonalAI/actions/runs/43385658508), merge `786d1ba`; live LLM NOT_RUN_LIVE_MODEL, телефон NOT_RUN_PHYSICAL
 - 2026-11-13 · ARCH-3c: точные имена активных инструментов, правила evidence, DIALOGUE_GUIDE (#515) · CI PASS [43404402601](https://github.com/panasenkof/PersonalAI/actions/runs/43404402601), merge `edc3af8`; live LLM NOT_RUN_LIVE_MODEL, телефон NOT_RUN_PHYSICAL
 - 2026-11-13 · ARCH-3: платная двухпровайдерная проверка исключена из обязательной приёмки (#518) · docs-only CI PASS [43405284053](https://github.com/panasenkof/PersonalAI/actions/runs/43405284053), merge `9c01d92`; live LLM не запускалась
