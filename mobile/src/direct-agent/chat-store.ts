@@ -23,8 +23,9 @@ import type { DirectAgentSettings } from "./settings";
 import { waitForApplicationSession, onLocalMemorySessionChange } from "../local-memory/storage";
 import { localPhotoIntent83, searchLocalPhotosFromChat83 } from "../media/vision-chat-search";
 import { selectSavedAiArticles } from "./article-selection";
-import { previewMove, confirmMove, undoMove } from "./move-proposal";
-import { previewSectionAction, confirmSectionAction } from "./section-actions";
+import { previewMove } from "./move-proposal";
+import { previewSectionAction } from "./section-actions";
+import { rowProposal, rowReceipt } from "./proposals";
 import { applyContextCandidate } from "./conversation-context";
 
 /** `streamText` is the answer as it arrives; it is never persisted. */
@@ -611,117 +612,99 @@ export class DirectChatStore {
       ...(c.taskState ? { taskState: recordEvidence(c.taskState, { tool: "draft_memory_fact", outcome: "dismissed", subject: draft.id, excerpt: draft.title }) } : {}),
     }, true);
   }
-  /** Same persisted confirmation lifecycle as a note move; no LLM writer.
-   * A stale/deleted/moved/non-empty folder fails atomically in SQLCipher. */
-  async confirmSectionProposal(rowId:string):Promise<void> {
-    const c=this.snapshot.conversations.find(x=>x.id===this.snapshot.activeId);
-    const row=c?.rows.find(x=>x.id===rowId&&x.role==="assistant"&&x.sectionProposal);
-    if(!c||!row?.sectionProposal||c.busy||c.movingRowId||c.deleting||this.disposed)return;
-    const proposal=row.sectionProposal;
-    this.update(c.id,{movingRowId:rowId});
+  /** The same user-click confirmation lifecycle for a move or a section action.
+   * The handler calls the EXISTING SQLCipher writer. No model-side mutation.
+   * A stale version or an ACL change still fails inside the canonical writer. */
+  async confirmProposal(rowId: string): Promise<void> {
+    const c = this.snapshot.conversations.find(x => x.id === this.snapshot.activeId);
+    const row = c?.rows.find(x => x.id === rowId && x.role === "assistant");
+    const selected = row ? rowProposal(row) : undefined;
+    if (!c || !selected || c.busy || c.movingRowId || c.deleting || this.disposed) return;
+    const { handler, proposal } = selected;
+    this.update(c.id, { movingRowId: rowId });
     try {
-      const receipt=await confirmSectionAction(this.profile,proposal);
-      const latest=this.snapshot.conversations.find(x=>x.id===c.id);
-      if(!latest||this.disposed)return;
-      const rows=latest.rows.map(r=>{
-        if(r.id!==rowId||!r.sectionProposal)return r;
-        const {sectionProposal:_discard,...rest}=r;
-        return {...rest,sectionReceipt:receipt};
+      const receipt = await handler.confirm(this.profile, proposal);
+      const latest = this.snapshot.conversations.find(x => x.id === c.id);
+      if (!latest || this.disposed) return;
+      const current = latest.rows.find(r => r.id === rowId);
+      if (!current || handler.fromRow(current) !== proposal) {
+        // The canonical write may have succeeded. Do not fabricate a receipt
+        // for an unrelated/removed row or claim that memory was untouched.
+        this.publish({ error: "Предложение изменилось во время подтверждения. Проверьте состояние памяти." });
+        return;
+      }
+      const rows = latest.rows.map(r => r.id === rowId ? handler.withReceipt(r, receipt) : r);
+      const affectedSlug = handler.clearedContextSection?.(receipt);
+      const patch = this.update(c.id, {
+        rows: [...rows, {
+          id: Crypto.randomUUID(), role: "info" as const, text: handler.confirmNotice(receipt),
+        }],
+        ...(affectedSlug && latest.context?.sectionSlug === affectedSlug
+          ? { context: { ...latest.context, sectionSlug: null, pinned: false } } : {}),
       });
-      const patch=this.update(c.id,{rows:[...rows,{id:Crypto.randomUUID(),role:"info" as const,
-        text:receipt.kind==="create"
-          ?receipt.verified?"Раздел «"+receipt.name+"» создан.":"Создание записано, но проверка результата не удалась."
-          :receipt.verified?"Пустой раздел «"+receipt.name+"» удалён.":"Удаление записано, но проверка результата не удалась.",
-      }],
-        ...(receipt.kind==="delete" && latest.context?.sectionSlug===receipt.slug
-          ? {context:{...latest.context,sectionSlug:null,pinned:false}} : {}),
-      });
-      if(patch)await this.persist(patch);
-      await this.refreshSections();
+      if (patch) await this.persist(patch);
+      if (handler.refreshSectionsAfterConfirm) await this.refreshSections();
       this.afterSave?.();
-    }catch(error){
-      this.publish({error:memoryErrorMessage(error)+
-        " Действие не подтверждено. Проверьте разделы; при изменении содержимого предложите операцию заново."});
-    }finally{this.update(c.id,{movingRowId:undefined});}
-  }
-  cancelSectionProposal(rowId:string):void {
-    const c=this.snapshot.conversations.find(x=>x.id===this.snapshot.activeId);
-    if(!c||c.busy||c.movingRowId||c.deleting||this.disposed)return;
-    if(!c.rows.some(r=>r.id===rowId&&r.role==="assistant"&&r.sectionProposal))return;
-    this.update(c.id,{rows:[...c.rows.map(r=>{
-      if(r.id!==rowId)return r;
-      const {sectionProposal:_discard,...rest}=r;return rest;
-    }),{id:Crypto.randomUUID(),role:"info" as const,text:"Изменение раздела отменено. Память не изменена."}]},true);
+    } catch (error) {
+      this.publish({ error: memoryErrorMessage(error) + handler.confirmErrorSuffix });
+    } finally {
+      this.update(c.id, { movingRowId: undefined });
+    }
   }
 
-  /** A button, never an LLM tool. Source and target are CAS/ACL-checked by
-   * the canonical SQLCipher note-actions transaction. */
-  async confirmMoveProposal(rowId:string):Promise<void>{
-    const c=this.snapshot.conversations.find(x=>x.id===this.snapshot.activeId);
-    const row=c?.rows.find(x=>x.id===rowId&&x.role==="assistant"&&x.moveProposal);
-    if(!c||!row?.moveProposal||c.busy||c.movingRowId||c.deleting||this.disposed)return;
-    const proposal=row.moveProposal;
-    this.update(c.id,{movingRowId:rowId});
-    try{
-      const receipt=await confirmMove(this.profile,proposal);
-      const latest=this.snapshot.conversations.find(x=>x.id===c.id);
-      if(!latest||this.disposed)return;
-      const rows=latest.rows.map(r=>{
-        if(r.id!==rowId||!r.moveProposal)return r;
-        const {moveProposal:_discard,...rest}=r;
-        return {...rest,moveReceipt:receipt};
-      });
-      const patch=this.update(c.id,{rows:[...rows,{
-        id:Crypto.randomUUID(),role:"info" as const,
-        text:receipt.verified
-          ? "Перенос подтверждён: «"+receipt.title+"» → «"+receipt.toName+"». Доступна отмена."
-          : "Перенос записан, но проверка результата не удалась. Доступна отмена; проверьте запись.",
-      }]});
-      if(patch)await this.persist(patch);
+  /** Cancel changes only the existing SQLCipher conversation snapshot. */
+  dismissProposal(rowId: string): void {
+    const c = this.snapshot.conversations.find(x => x.id === this.snapshot.activeId);
+    if (!c || c.busy || c.movingRowId || c.deleting || this.disposed) return;
+    const row = c.rows.find(r => r.id === rowId && r.role === "assistant");
+    const selected = row ? rowProposal(row) : undefined;
+    if (!selected) return;
+    const rows = c.rows.map(r => r.id === rowId ? selected.handler.withoutProposal(r) : r);
+    this.update(c.id, { rows: [...rows, {
+      id: Crypto.randomUUID(), role: "info" as const,
+      text: selected.handler.dismissNotice,
+    }] }, true);
+  }
+
+  /** Only handlers with a canonical undo operation can undo a stored receipt. */
+  async undoProposal(rowId: string): Promise<void> {
+    const c = this.snapshot.conversations.find(x => x.id === this.snapshot.activeId);
+    const row = c?.rows.find(r => r.id === rowId && r.role === "assistant");
+    const selected = row ? rowReceipt(row) : undefined;
+    if (!c || !selected || !selected.handler.undo ||
+        !selected.handler.presentReceipt(selected.receipt).undoable ||
+        c.busy || c.movingRowId || c.deleting || this.disposed) return;
+    const { handler, receipt } = selected;
+    this.update(c.id, { movingRowId: rowId });
+    try {
+      const reversed = await handler.undo!(this.profile, receipt);
+      const latest = this.snapshot.conversations.find(x => x.id === c.id);
+      if (!latest || this.disposed) return;
+      const current = latest.rows.find(r => r.id === rowId);
+      if (!current || handler.receiptFromRow(current) !== receipt) {
+        this.publish({ error: "Квитанция изменилась во время отмены. Проверьте актуальное состояние записи." });
+        return;
+      }
+      const rows = latest.rows.map(r => r.id === rowId ? handler.withReceipt(r, reversed) : r);
+      const patch = this.update(c.id, { rows: [...rows, {
+        id: Crypto.randomUUID(), role: "info" as const,
+        text: handler.undoNotice ? handler.undoNotice(receipt) : "Операция отменена.",
+      }] });
+      if (patch) await this.persist(patch);
       this.afterSave?.();
-    }catch(error){
-      this.publish({error:memoryErrorMessage(error)+
-        " Проверьте запись и повторите поиск, если её версия или права изменились."});
-    }finally{this.update(c.id,{movingRowId:undefined});}
+    } catch (error) {
+      this.publish({ error: memoryErrorMessage(error) + (handler.undoErrorSuffix || "") });
+    } finally {
+      this.update(c.id, { movingRowId: undefined });
+    }
   }
-  cancelMoveProposal(rowId:string):void{
-    const c=this.snapshot.conversations.find(x=>x.id===this.snapshot.activeId);
-    if(!c||c.busy||c.movingRowId||c.deleting||this.disposed)return;
-    const original=c.rows.find(r=>r.id===rowId&&r.role==="assistant"&&r.moveProposal);
-    if(!original)return;
-    const rows=c.rows.map(r=>{
-      if(r.id!==rowId)return r;
-      const {moveProposal:_discard,...rest}=r;
-      return rest;
-    });
-    this.update(c.id,{rows:[...rows,{
-      id:Crypto.randomUUID(),role:"info",text:"Предложение переноса отменено. Запись не изменена.",
-    }]},true);
-  }
-  async undoConfirmedMove(rowId:string):Promise<void>{
-    const c=this.snapshot.conversations.find(x=>x.id===this.snapshot.activeId);
-    const row=c?.rows.find(r=>r.id===rowId&&r.role==="assistant"&&
-      r.moveReceipt&&!r.moveReceipt.undone);
-    if(!c||!row?.moveReceipt||c.busy||c.movingRowId||c.deleting||this.disposed)return;
-    const receipt=row.moveReceipt;
-    this.update(c.id,{movingRowId:rowId});
-    try{
-      await undoMove(this.profile,receipt);
-      const latest=this.snapshot.conversations.find(x=>x.id===c.id);
-      if(!latest||this.disposed)return;
-      const rows=latest.rows.map(r=>r.id===rowId&&r.moveReceipt
-        ? {...r,moveReceipt:{...r.moveReceipt,undone:true}}:r);
-      const patch=this.update(c.id,{rows:[...rows,{
-        id:Crypto.randomUUID(),role:"info" as const,
-        text:"Перенос отменён. «"+receipt.title+"» возвращена в раздел «"+receipt.fromName+"».",
-      }]});
-      if(patch)await this.persist(patch);
-      this.afterSave?.();
-    }catch(error){
-      this.publish({error:memoryErrorMessage(error)+
-        " Отмена не выполнена; проверьте актуальную версию и доступность разделов."});
-    }finally{this.update(c.id,{movingRowId:undefined});}
-  }
+
+  /** Backward-compatible entry points for existing screens and tests. */
+  async confirmSectionProposal(rowId: string): Promise<void> { return this.confirmProposal(rowId); }
+  cancelSectionProposal(rowId: string): void { this.dismissProposal(rowId); }
+  async confirmMoveProposal(rowId: string): Promise<void> { return this.confirmProposal(rowId); }
+  cancelMoveProposal(rowId: string): void { this.dismissProposal(rowId); }
+  async undoConfirmedMove(rowId: string): Promise<void> { return this.undoProposal(rowId); }
 
   async approve(draft: ChatDraft) {
     const c = this.snapshot.conversations.find(c => c.id === this.snapshot.activeId);

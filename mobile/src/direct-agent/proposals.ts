@@ -30,6 +30,14 @@ export interface ProposalHandler<P, R> {
   undo?(profile: string, receipt: R): Promise<R>;
   withReceipt(row: ChatRow, receipt: R): ChatRow;
   withoutProposal(row: ChatRow): ChatRow;
+  /** The existing exact chat notice/error messages are owned by the handler. */
+  confirmNotice(receipt: R): string;
+  dismissNotice: string;
+  confirmErrorSuffix: string;
+  undoNotice?(receipt: R): string;
+  undoErrorSuffix?: string;
+  refreshSectionsAfterConfirm?: boolean;
+  clearedContextSection?(receipt: R): string | undefined;
 }
 
 const sectionPath = (value: { name: string; parentName: string | null }) =>
@@ -64,6 +72,13 @@ export const moveNoteHandler: ProposalHandler<ChatMoveProposal, ChatMoveReceipt>
     undone: Boolean(receipt.undone),
   }),
   confirm: confirmMove,
+  confirmNotice: receipt => receipt.verified
+    ? "Перенос подтверждён: «" + receipt.title + "» → «" + receipt.toName + "». Доступна отмена."
+    : "Перенос записан, но проверка результата не удалась. Доступна отмена; проверьте запись.",
+  dismissNotice: "Предложение переноса отменено. Запись не изменена.",
+  confirmErrorSuffix: " Проверьте запись и повторите поиск, если её версия или права изменились.",
+  undoNotice: receipt => "Перенос отменён. «" + receipt.title + "» возвращена в раздел «" + receipt.fromName + "».",
+  undoErrorSuffix: " Отмена не выполнена; проверьте актуальную версию и доступность разделов.",
   undo: async (profile, receipt) => {
     await undoMove(profile, receipt);
     return { ...receipt, undone: true };
@@ -102,6 +117,13 @@ export const sectionHandler: ProposalHandler<ChatSectionProposal, ChatSectionRec
     undone: false,
   }),
   confirm: confirmSectionAction,
+  confirmNotice: receipt => receipt.kind === "create"
+    ? receipt.verified ? "Раздел «" + receipt.name + "» создан." : "Создание записано, но проверка результата не удалась."
+    : receipt.verified ? "Пустой раздел «" + receipt.name + "» удалён." : "Удаление записано, но проверка результата не удалась.",
+  dismissNotice: "Изменение раздела отменено. Память не изменена.",
+  confirmErrorSuffix: " Действие не подтверждено. Проверьте разделы; при изменении содержимого предложите операцию заново.",
+  refreshSectionsAfterConfirm: true,
+  clearedContextSection: receipt => receipt.kind === "delete" ? receipt.slug : undefined,
   withReceipt: (row, receipt) => {
     const { sectionProposal: _discard, ...rest } = row;
     return { ...rest, sectionReceipt: receipt };
