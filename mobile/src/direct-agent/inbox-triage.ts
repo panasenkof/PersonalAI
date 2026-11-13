@@ -54,6 +54,7 @@ export function createInboxTriageAccess(
   let approved: number | null = null;
   let activeTurn: string | null = null;
   let remaining = 0;
+  let reading = false;
   const handles = new Map<string, number>();
 
   function clear() {
@@ -61,6 +62,7 @@ export function createInboxTriageAccess(
     approved = null;
     activeTurn = null;
     remaining = 0;
+    reading = false;
     handles.clear();
   }
   function requireUnlocked() {
@@ -112,7 +114,10 @@ export function createInboxTriageAccess(
       requireTurn(turnId);
       const desired = Math.min(boundedLimit(options.limit), remaining);
       if (desired === 0) return { items: [] };
+      if (reading) throw new Error("inbox_triage_read_in_progress");
       let offset = validCursor(options.cursor);
+      reading = true;
+      try {
       const sections = await repository.listCollections();
       requireTurn(turnId);
       const inbox = sections.find(s => s.slug === "inbox");
@@ -133,7 +138,7 @@ export function createInboxTriageAccess(
           offset++;
           scanned++;
           if (note.record_status !== "active" || note.domain !== "notes" ||
-              note.collection_id !== inbox.id) continue;
+              note.collection_id !== inbox.id || note.sensitivity === "secret") continue;
           const title = typeof note.title === "string" && note.title.trim()
             ? note.title.trim().slice(0, 160) : "Без названия";
           items.push({
@@ -150,6 +155,7 @@ export function createInboxTriageAccess(
       remaining -= items.length;
       requireTurn(turnId);
       return { items, ...(more && remaining > 0 ? {nextCursor: offset} : {}) };
+      } finally { reading = false; }
     },
 
     /** A proposal tool must validate BOTH the ID and the version obtained
