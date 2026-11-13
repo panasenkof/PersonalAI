@@ -3,7 +3,6 @@ import { parseConversation, type ConversationRepository, type SavedConversation 
 import type { InboxTriageProposal } from "../inbox-triage-proposal";
 import { applyInboxTriageNotes, undoNotes } from "../../local-memory/note-actions";
 
-const db={};
 jest.mock("../../local-memory/storage",()=>({
   waitForApplicationSession:jest.fn(async()=>{}),
   localMemorySessionUnlocked:jest.fn(()=>true),
@@ -36,7 +35,7 @@ function fixture() {
   const rows=new Map<string,SavedConversation>([["c1",c]]);
   const repo:ConversationRepository={
     load:jest.fn(async()=>[...rows.values()]),
-    save:jest.fn(async value=>{rows.set(value.id,structuredClone(value));}),
+    save:jest.fn(async value=>{rows.set(value.id,JSON.parse(JSON.stringify(value)));}),
     remove:jest.fn(async id=>{rows.delete(id);}),
   };
   return {rows,repo};
