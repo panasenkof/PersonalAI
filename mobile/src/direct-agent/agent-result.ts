@@ -34,6 +34,7 @@ export function assistantRowFromResult(
       ...(result.sectionProposal ? { sectionProposal: result.sectionProposal } : {}),
       ...(result.inboxApproval ? { inboxApproval: result.inboxApproval } : {}),
       ...(result.inboxTriageProposal ? {inboxTriageProposal:result.inboxTriageProposal} : {}),
+      ...(result.duplicateMergeProposal ? {duplicateMergeProposal:result.duplicateMergeProposal} : {}),
       ...(result.articlePage ? { articlePage: result.articlePage } : {}),
       ...(result.articleReadReport ? { articleReadReport: result.articleReadReport } : {}),
       ...(applied?.change ? { contextChange: applied.change } : {}),
