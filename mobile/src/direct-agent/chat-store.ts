@@ -5,7 +5,7 @@ import { mergeTaskReceipts, recordEvidence } from "./task-state";
 
 import { runDirectAgent } from "./engine";
 import { createInboxTriageAccess, type InboxTriageApproval } from "./inbox-triage";
-import { localMemorySessionUnlocked, withLocalMemoryDatabase } from "../local-memory/storage";
+import { localMemorySessionUnlocked, withLocalMemoryDatabase, onLocalMemorySessionChange } from "../local-memory/storage";
 import { SqliteMemoryRepository } from "../local-memory/repository";
 import { runDocumentSynthesis } from "./document-synthesis";
 import type { DialogueSummaryScope } from "./dialogue-summary";
@@ -53,9 +53,13 @@ export class DirectChatStore {
   private repository: ConversationRepository;
   private inboxAccess = new Map<string, ReturnType<typeof createInboxTriageAccess>>();
   private inboxTurn = new Map<string, string>();
+  private unsubscribeInboxLock?: () => void;
   /** `afterSave` runs after an approved record is saved (index words in the background). */
   constructor(private profile: string, repository?: ConversationRepository, private runner = runDirectAgent, private afterSave?: () => void) {
     this.repository = repository || conversationRepository(profile, count => { this.skipped = count; });
+    this.unsubscribeInboxLock = onLocalMemorySessionChange(unlocked => {
+      if (!unlocked) this.revokeInboxTriage();
+    });
   }
   getSnapshot = () => this.snapshot;
   /** Re-reads the user's sections; on failure the previous list stays. */
@@ -258,12 +262,13 @@ export class DirectChatStore {
       (intent && intent.conversationId!==id)) return;
     const inboxTurnId = this.inboxTurn.get(id);
     if (inboxTurnId) this.inboxTurn.delete(id);
+    else if (this.inboxAccess.has(id)) this.revokeInboxTriage();
     const inboxAccess = inboxTurnId ? this.inboxAccess.get(id) : undefined;
     const drafted = prepareAgentDraft({
       current, settings, internetPhotoId, documentApprovalKey, intent,
       report: patch => this.publish(patch),
     });
-    if (!drafted) return;
+    if (!drafted) { if (inboxTurnId) this.revokeInboxTriage(); return; }
     const { prompt, displayPrompt, draftFiles, privatePhoto, attachments, documentPlan } = drafted;
     const trace = diagnosticTrace(this.profile, id, Crypto.randomUUID());
     const startedAt = Date.now();
@@ -550,6 +555,7 @@ export class DirectChatStore {
     finally { this.update(c.id, { savingDraft: undefined }); }
   }
   dispose() {
+    this.unsubscribeInboxLock?.();
     this.revokeInboxTriage();
     this.disposed = true;
     this.lifetime.abort();
