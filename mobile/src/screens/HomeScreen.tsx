@@ -39,11 +39,9 @@ import { NebulaHomeThemeProvider, useTheme } from "../theme";
 import { useDraftNormalization } from "../direct-agent/use-draft-normalization";
 import { prepareAssistantReplyNote } from "../direct-agent/chat-response-note";
 import { planDialogueSummary, type DialogueSummaryScope } from "../direct-agent/dialogue-summary";
-
 export function HomeScreen() {
   return <NebulaHomeThemeProvider><NebulaHomeContent /></NebulaHomeThemeProvider>;
 }
-
 function NebulaHomeContent() {
   const t = useTheme();
   const isFocused = useIsFocused();
