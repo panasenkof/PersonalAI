@@ -1,0 +1,59 @@
+name: ARCH-3 tool choice (15 paid calls, manual only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      live_llm:
+        description: "Explicitly authorize up to 15 paid model calls (no writes)"
+        type: boolean
+        required: true
+        default: false
+      provider:
+        description: "Run separately for two providers to satisfy ARCH-11"
+        type: choice
+        required: true
+        default: openai-compatible
+        options:
+          - openai-compatible
+          - openai
+          - anthropic
+
+permissions:
+  contents: read
+
+jobs:
+  arch3-live:
+    name: Evaluate first tool choice on selected provider
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.live_llm == true }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    env:
+      PERSAI_ARCH3_MANUAL_TRIGGER: ${{ github.event_name }}
+      PERSAI_ARCH3_APPROVED: ${{ inputs.live_llm }}
+      PERSAI_ARCH3_PROVIDER: ${{ inputs.provider }}
+      PERSAI_ARCH3_API_KEY: ${{ inputs.provider == 'openai' && secrets.PERSAI_ARCH3_OPENAI_API_KEY || inputs.provider == 'anthropic' && secrets.PERSAI_ARCH3_ANTHROPIC_API_KEY || secrets.PERSAI_EVAL_LLM_API_KEY }}
+      PERSAI_ARCH3_BASE_URL: ${{ inputs.provider == 'openai' && 'https://api.openai.com/v1' || inputs.provider == 'anthropic' && 'https://api.anthropic.com/v1' || vars.PERSAI_EVAL_LLM_BASE_URL }}
+      PERSAI_ARCH3_MODEL: ${{ inputs.provider == 'openai' && vars.PERSAI_ARCH3_OPENAI_MODEL || inputs.provider == 'anthropic' && vars.PERSAI_ARCH3_ANTHROPIC_MODEL || vars.PERSAI_EVAL_LLM_MODEL }}
+      PERSAI_ARCH3_REPORT_PATH: arch3-live-tool-choice.json
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - name: Install locked JavaScript dependencies (no Android build)
+        run: npm ci --no-audit --no-fund
+      - name: Evaluate 15 first-tool decisions from exact checked-out code
+        run: npm test -- --runInBand --runTestsByPath eval/__tests__/tool-choice-cases.test.ts eval/__tests__/live-tool-choice.test.ts
+      - name: Upload synthetic-data-only provider report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: arch3-tool-choice-${{ inputs.provider }}-${{ github.sha }}
+          path: mobile/arch3-live-tool-choice.json
+          if-no-files-found: ignore
+          retention-days: 14
