@@ -13,6 +13,7 @@ import { articleTools } from "./article-tools";
 import { proposalTools } from "./proposal-tools";
 import { conversationTools } from "./conversation-tools";
 import { inboxTriageTools } from "./inbox-tools";
+import { duplicateTools } from "./duplicate-tools";
 import { createTurnState } from "./turn-state";
 import { text } from "./helpers";
 export type { ToolDefinition, ToolSpec } from "./types";
@@ -32,6 +33,7 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
     ...memory.read,
     ...sourceTools(options,turn),
     ...memory.listing,
+    ...duplicateTools(options),
     ...articleTools(options,turn),
     ...proposals.move,
     // SAME canonical chat ToolSpec registry as memory search, note drafts and moves.
@@ -90,6 +92,7 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
     if (outcome !== "state_updated" &&
         canonical !== "list_inbox_for_triage" && // private text must never be persisted to TaskState
         canonical !== "propose_inbox_triage" && // proposals stay off TaskState
+        canonical !== "find_duplicate_candidates" && // ephemeral handles are not future merge grants
         canonical !== "selected_article_read_coverage" &&
         canonical !== "search_local_photos")
       observe({ tool: canonical, outcome,
