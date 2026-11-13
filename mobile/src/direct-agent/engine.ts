@@ -1,3 +1,4 @@
+import { diagnosticToolResultContent } from "./tool-diagnostics";
 import { chatContent, type ChatAttachment } from "./chat-attachments";
 import type { DirectAgentSettings } from "./settings";
 import { anonymousLocalAllowed, validateBaseUrl, validateModel } from "./settings";
@@ -267,7 +268,7 @@ export async function runDirectAgent(options: DirectAgentOptions): Promise<Direc
         result = { error: "tool_failed_or_unavailable" };
       }
       options.diagnostic?.("llm.tool_result", { name: call.name || "unknown",
-        failed: "error" in result, chars: JSON.stringify(result).length }, call.name === "list_inbox_for_triage" ? undefined : { result: JSON.stringify(result) });
+        failed: "error" in result, chars: JSON.stringify(result).length }, diagnosticToolResultContent(call.name || "", result));
       input.push({ type: "function_call_output", call_id: call.call_id, output: JSON.stringify(result) });
     }
     // Refuse to accidentally omit any extra calls and break the input chain.
