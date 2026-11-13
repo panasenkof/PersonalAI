@@ -172,3 +172,30 @@ export function restrictedSystemPrompt(protocol: "responses" | "compatible", imp
   return importTags
     ? COMPATIBLE_IMPORT_PREFIX + COMPATIBLE_IMPORT_TAIL : COMPATIBLE_CONTEXT_PREFIX;
 }
+
+
+/** ARCH-3c2: one prompt decision for every transport. Restricted import
+ * classification keeps its dedicated protocol prefix and only the actual
+ * active-tool instructions; import tagging remains strictly metadata-only.
+ * This is formatting, never a second tool registry or permission gate.
+ */
+export function buildAgentSystemPrompt(input: {
+  protocol: "responses" | "compatible";
+  contextOnly?: boolean;
+  importTagsEnabled?: boolean;
+  sections?: MemorySection[];
+  context?: ConversationContext;
+  contextEnabled?: boolean;
+  tools: Array<{ name: string; guidance?: string }>;
+}): string {
+  const ordinary = input.contextOnly && input.importTagsEnabled ? "" :
+    buildSystemPrompt({
+      sections: input.sections,
+      context: input.context,
+      contextEnabled: Boolean(input.contextEnabled),
+      tools: input.tools,
+    });
+  return input.contextOnly
+    ? restrictedSystemPrompt(input.protocol, Boolean(input.importTagsEnabled)) + ordinary
+    : ordinary;
+}
