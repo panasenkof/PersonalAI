@@ -17,7 +17,7 @@ test("S9-2b: a complete same-turn group is reordered keep-first and never writte
   const result=verifyDuplicateMergeRequest(request,[group]);
   expect(result).toMatchObject({
     noteIds:["b","a","c"],expectedVersions:[4,2,7],
-    keepNoteId:"b",fingerprint,attachmentCount:4,proposedTagCount:5,
+    keepNoteId:"b",fingerprint,attachmentCount:4,sourceTagEntries:5,
   });
   expect(result.records.map(x=>x.id)).toEqual(["b","a","c"]);
 });
