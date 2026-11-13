@@ -17,9 +17,9 @@ jest.mock("../memory",()=>({
 jest.mock("../agent-preferences",()=>({
   loadModelCallLimit:jest.fn(async()=>4),
 }));
-let seq=0;
+let mockSequence=0;
 jest.mock("expo-crypto",()=>({
-  randomUUID:()=> "inbox-ui-"+String(++seq),
+  randomUUID:()=> "inbox-ui-"+String(++mockSequence),
 }));
 const settings={...defaultDirectPreferences,
   model:"test-model",apiKey:"test-key",allowWeb:true,webSearchKey:"test-key"};
@@ -37,7 +37,7 @@ function repo() {
 }
 
 beforeEach(()=>{
-  seq=0;
+  mockSequence=0;
   jest.clearAllMocks();
   (waitForApplicationSession as jest.Mock).mockResolvedValue(undefined);
 });
