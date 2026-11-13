@@ -5,7 +5,7 @@ import { runCompatibleAgent } from "./compatible";
 import { prepareDirectContext, withData } from "./context";
 import type { UsedNote } from "./context";
 import { createToolCatalog } from "./tool-catalog";
-import { responsesSystemPrompt as systemPrompt, restrictedSystemPrompt } from "./prompt";
+import { buildAgentSystemPrompt } from "./prompt";
 import type { TaskState } from "./task-state";
 import { dialogueHistory } from "./dialogue";
 import { requestModel } from "./request";
@@ -184,19 +184,29 @@ export async function runDirectAgent(options: DirectAgentOptions): Promise<Direc
   const web = await prepareDirectContext(options);
   options.diagnostic?.("agent.context", { chars: web.context.length, notes: web.notes.length,
     used: web.used.length, webSources: web.sources.length, builtinWeb: web.builtinWeb, webFailed: Boolean(web.webError) });
+  // The same authoritative registry both advertises and executes tools.
+  // Build the model's instructions only AFTER its allowed tools are known.
+  const toolSources = [...web.sources];
+  const catalog = createToolCatalog(options, toolSources, web.notes, web.used);
+  const nativeWeb = web.builtinWeb && !options.contextOnly;
+  const systemText = buildAgentSystemPrompt({
+    protocol: "responses",
+    contextOnly: options.contextOnly,
+    importTagsEnabled: options.importTagsEnabled,
+    sections: options.sections,
+    context: options.context,
+    contextEnabled: options.contextClassificationEnabled,
+    tools: [...catalog.guidance, ...(nativeWeb ? [{ name: "web_search" }] : [])],
+  });
+  options.diagnostic?.("agent.prompt", { chars: systemText.length });
   const input: unknown[] = [
-    { role: "system", content: (options.contextOnly
-      ? restrictedSystemPrompt("responses", Boolean(options.importTagsEnabled)) +
-        (options.importTagsEnabled ? "" : systemPrompt(options.sections,options.context,options.contextClassificationEnabled))
-      : systemPrompt(options.sections,options.context,options.contextClassificationEnabled)) },
+    { role: "system", content: systemText },
     ...dialogueHistory(options.history).map(turn => ({role:turn.role, content:chatContent(turn.content, turn.attachments, "responses")})),
     { role: "user", content: chatContent(withData(web.context, prompt), options.attachments, "responses") },
   ];
-  const toolSources = [...web.sources];
-  const catalog = createToolCatalog(options, toolSources, web.notes, web.used);
   const tools: object[] = catalog.definitions.map(t => ({ type: "function", ...t, strict: true }));
-  options.diagnostic?.("agent.tools_available", { names: [...catalog.definitions.map(t => t.name), ...(web.builtinWeb ? ["web_search"] : [])] });
-  if (web.builtinWeb) tools.push({ type: "web_search", search_context_size: "low", external_web_access: true });
+  options.diagnostic?.("agent.tools_available", { names: [...catalog.definitions.map(t => t.name), ...(nativeWeb ? ["web_search"] : [])] });
+  if (nativeWeb) tools.push({ type: "web_search", search_context_size: "low", external_web_access: true });
   const collected = new Set<string>(web.sources);
   const memory = catalog.memory;
   const reasoning = isReasoningModel(settings.model);
