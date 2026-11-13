@@ -54,7 +54,7 @@ export type AgentHostInput = {
   getWritableConversation: () => LiveConversation | undefined;
   update: (patch: Partial<LiveConversation>, save?: boolean) => LiveConversation | undefined;
   persist: (conversation: LiveConversation) => Promise<void>;
-  inboxTriage?: Pick<AgentOptions,"requestInboxTriageApproval"|"listInboxForTriage">;
+  inboxTriage?: Pick<AgentOptions,"requestInboxTriageApproval"|"listInboxForTriage"|"proposeInboxTriage">;
 };
 
 /** Creates the exact same host callbacks that the old send() supplied.
