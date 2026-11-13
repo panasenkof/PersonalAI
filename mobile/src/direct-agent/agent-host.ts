@@ -9,6 +9,7 @@ import { localMemorySessionUnlocked, withLocalMemoryDatabase, waitForApplication
 import { searchApprovedNotes, readApprovedNote } from "./memory";
 import { searchLocalApprovedSourceSegments, listLocalApprovedSourceSegments, readLocalApprovedSourceSegment } from "../local-memory/source-retrieval";
 import { listAllowedNotes, countAllowedNotes } from "../local-memory/agent-catalog";
+import { findDuplicateCandidates } from "../local-memory/duplicate-candidates";
 import { previewMove } from "./move-proposal";
 import { previewSectionAction } from "./section-actions";
 import { searchLocalPhotosFromChat83 } from "../media/vision-chat-search";
@@ -148,6 +149,17 @@ export function buildAgentOptions(input: AgentHostInput): Parameters<typeof runD
     }),
     list: async filters => ({ ...await withLocalMemoryDatabase(profile, db => listAllowedNotes(db, filters)) }),
     count: async filters => ({ ...await withLocalMemoryDatabase(profile, db => countAllowedNotes(db, filters)) }),
+    findDuplicateCandidates: async (kind,limit) => {
+      if(signal.aborted || disposed() || !localMemorySessionUnlocked() ||
+         !Boolean(getWritableConversation()))
+        throw new Error("application_locked");
+      const result=await withLocalMemoryDatabase(profile,
+        db=>findDuplicateCandidates(db,kind,limit,signal));
+      if(signal.aborted || disposed() || !localMemorySessionUnlocked() ||
+         !Boolean(getWritableConversation()))
+        throw new Error("application_locked");
+      return result;
+    },
     selectArticles: async (intent, cursor) => {
       // Reuse the same SQLCipher reader as the no-model article picker.
       // A mid-call lock, profile suspension or cancellation must not leak its result.
