@@ -31,9 +31,11 @@ jobs:
       PERSAI_ARCH3_MANUAL_TRIGGER: ${{ github.event_name }}
       PERSAI_ARCH3_APPROVED: ${{ inputs.live_llm }}
       PERSAI_ARCH3_PROVIDER: ${{ inputs.provider }}
-      PERSAI_ARCH3_API_KEY: ${{ inputs.provider == 'openai' && secrets.PERSAI_ARCH3_OPENAI_API_KEY || inputs.provider == 'anthropic' && secrets.PERSAI_ARCH3_ANTHROPIC_API_KEY || secrets.PERSAI_EVAL_LLM_API_KEY }}
+      # Select the secret NAME first: an absent key must fail closed rather than
+      # fall back to a different provider's credential.
+      PERSAI_ARCH3_API_KEY: ${{ secrets[inputs.provider == 'openai' && 'PERSAI_ARCH3_OPENAI_API_KEY' || inputs.provider == 'anthropic' && 'PERSAI_ARCH3_ANTHROPIC_API_KEY' || 'PERSAI_EVAL_LLM_API_KEY'] }}
       PERSAI_ARCH3_BASE_URL: ${{ inputs.provider == 'openai' && 'https://api.openai.com/v1' || inputs.provider == 'anthropic' && 'https://api.anthropic.com/v1' || vars.PERSAI_EVAL_LLM_BASE_URL }}
-      PERSAI_ARCH3_MODEL: ${{ inputs.provider == 'openai' && vars.PERSAI_ARCH3_OPENAI_MODEL || inputs.provider == 'anthropic' && vars.PERSAI_ARCH3_ANTHROPIC_MODEL || vars.PERSAI_EVAL_LLM_MODEL }}
+      PERSAI_ARCH3_MODEL: ${{ vars[inputs.provider == 'openai' && 'PERSAI_ARCH3_OPENAI_MODEL' || inputs.provider == 'anthropic' && 'PERSAI_ARCH3_ANTHROPIC_MODEL' || 'PERSAI_EVAL_LLM_MODEL'] }}
       PERSAI_ARCH3_REPORT_PATH: arch3-live-tool-choice.json
     defaults:
       run:
