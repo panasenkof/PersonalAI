@@ -17,7 +17,7 @@ const example:DuplicateCandidatesPage={
   }],
 };
 const context=(findDuplicates?:DirectAgentOptions["findDuplicates"]):DirectAgentOptions=>({
-  settings:{...defaultDirectPreferences,apiKey:"test-key",allowWeb:false},
+  settings:{...defaultDirectPreferences,apiKey:"test-key",webSearchKey:"",allowWeb:false},
   prompt:"Найди дубли",history:[],lookup:async()=>[],
   propose:()=>undefined,...(findDuplicates?{findDuplicates}:{}),
 });
