@@ -373,7 +373,7 @@ export async function undoNotes(db: SQL, batch: string, moveGuard?: ChatMoveGuar
       if(new Set(ids).size!==mergeGuard.noteIds.length ||
          mergeGuard.noteIds.some(id=>!ids.includes(id)) ||
          beforeStates.some(row=>row.record_status!=='active') ||
-         afterStates.some(row=>row.id!==beforeStates[afterStates.indexOf(row)]?.id))
+         afterStates.some((row,i)=>row.id!==beforeStates[i]?.id))
         throw new MemoryConflictError('merge_undo_locked_or_changed');
       await assertOrdinaryMergeSources(tx,beforeStates);
       for(const row of afterStates){
