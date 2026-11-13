@@ -308,7 +308,7 @@ export class DirectChatStore {
       if (aborter.signal.aborted) throw new Error("aborted");
       trace("turn.completed", { elapsedMs: Date.now() - startedAt, requests: result.requests,
         answerChars: result.text.length, sources: result.sources.length, memoryRefs: result.memory?.length || 0 },
-        { answer: result.text, sources: result.sources.join("\n") });
+        intent?.inboxApprovalRowId ? undefined : { answer: result.text, sources: result.sources.join("\n") });
       const answerRowId=Crypto.randomUUID();
       if(result.inboxApproval && !this.inboxTriage.markRow(id,answerRowId,result.inboxApproval))
         throw new Error("Разрешение на чтение «Входящих» недоступно.");
