@@ -41,7 +41,7 @@ import { VoiceInput } from "../components/VoiceInput";
 import { showDraftImprove, useVoiceEngine } from "../media/voice-engine";
 import { IconAction } from "../components/IconAction";
 import { ArticleReadSources } from "../components/ArticleReadSources";
-import { ChatProposalCards } from "../components/ProposalCard";
+import { ChatRowView } from "../components/chat/ChatRowView";
 import { PromptInput } from "../components/PromptInput";
 import { NebulaHomeThemeProvider, useTheme } from "../theme";
 import { MarkdownText } from "../components/Markdown";
@@ -52,23 +52,6 @@ import { planDialogueSummary, type DialogueSummaryScope } from "../direct-agent/
 
 export function HomeScreen() {
   return <NebulaHomeThemeProvider><NebulaHomeContent /></NebulaHomeThemeProvider>;
-}
-
-/** A failed turn carries a raw transport tail after "Системное сообщение:".
- * The bubble shows only the human part; the full text stays in diagnostics. */
-function errorHeadline(text: string) {
-  return text.split(/Системное сообщение:/i)[0].trim();
-}
-
-/** One source line: domain first, path muted and truncated by numberOfLines. */
-function sourceParts(url: string) {
-  try {
-    const parsed = new URL(url);
-    const rest = (parsed.pathname === "/" ? "" : parsed.pathname) + (parsed.search ? "?" + parsed.search.slice(1, 40) : "");
-    return { domain: parsed.hostname.replace(/^www\./, ""), rest };
-  } catch {
-    return { domain: url, rest: "" };
-  }
 }
 
 function NebulaHomeContent() {
@@ -413,88 +396,23 @@ function NebulaHomeContent() {
         style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 12 }}>
         {artworkSize > 0 ? <NebulaHomeArtwork size={artworkSize} phase={orbPhase} /> : null}
       </View> : null}
-      renderItem={({ item }) => <View testID={"chat-message-" + item.role} accessibilityLiveRegion={item.streaming ? "polite" : undefined} style={{ alignSelf: item.role === "user" ? "flex-end" : "stretch", backgroundColor: item.role === "user" ? t.userBubble : item.role === "info" ? t.soft : t.panel,
-        borderWidth: item.role === "assistant" ? 1 : 0, borderColor: t.line, borderRadius: 20, padding: 15, gap: 10 }}>
-        {item.role === "assistant" ? <Pressable
-          disabled={Boolean(item.streaming)}
-          delayLongPress={430}
-          accessibilityRole="button"
-          accessibilityLabel="Ответ ИИ. Долгое нажатие: сохранить в заметки"
-          accessibilityHint="Долгое нажатие открывает черновик заметки без отправки в сеть"
-          accessibilityActions={[{ name: "longpress", label: "Сохранить ответ в заметки" }]}
-          onAccessibilityAction={event => {
-            if(event.nativeEvent.actionName === "longpress" && !item.streaming)
-              saveReplyToNotes(item.id);
-          }}
-          onLongPress={() => {if(!item.streaming)saveReplyToNotes(item.id);}}>
-          <MarkdownText text={item.text} style={{ color: t.text, lineHeight: 23 }}
-            articleReadReport={item.articleReadReport}
-            onArticleSourcePress={noteId=>navigation.navigate("MemoryNote",{entityId:noteId})} />
-        </Pressable> :
-        (item.role === "info" && item.error ? <View style={{ gap: 10 }}>
-          <View style={{ flexDirection: "row", gap: 8, alignItems: "flex-start" }}>
-            <Feather name="alert-triangle" size={16} color={t.err} style={{ marginTop: 2 }} />
-            <Text selectable accessibilityRole="alert" style={{ flex: 1, color: t.err, lineHeight: 21 }}>{errorHeadline(item.text)}</Text>
-          </View>
-          {ready && !busy && settings ? <View style={{ alignSelf: "flex-start" }}>
-            <NebulaAction icon="refresh-cw" label="Повторить" size="compact" accessibilityLabel="Повторить последний запрос"
-              onPress={() => void store.retry(settings)} />
-          </View> : null}
-        </View> :
-          <Text selectable style={{ color: item.role === "user" ? t.userText : item.role === "info" ? t.muted : t.text, lineHeight: 23 }}>{item.text}</Text>)}
-        {item.role === "assistant" && !item.streaming && item.contextChange ? <Text
-          testID="chat-context-change" accessibilityRole="text"
-          style={{color:t.secondary,fontSize:12,lineHeight:18}}>{contextChangeLabel(item.contextChange)}</Text> : null}
-        {item.role === "assistant" && !item.streaming && item.text.trim() ? <View style={{ alignSelf: "flex-end", borderWidth: 1, borderColor: t.line, backgroundColor: t.soft, borderRadius: 15 }}>
-          <IconAction compact explainOnTap={false} icon="bookmark" label="Сохранить ответ"
-            accessibilityLabel="Сохранить ответ в заметки" hint="Открыть черновик заметки без нового запроса ИИ"
-            onPress={() => saveReplyToNotes(item.id)} />
-        </View> : null}
-        {active?.retryPhoto?.rowId === item.id && active?.retryPhoto ?
-          <NebulaAction icon="refresh-cw" label="Повторить поиск по фото" size="compact"
-            disabled={busy || !canSend} onPress={() => settings &&
-              void store.searchPhotosWithAgent(settings,active.retryPhoto!.image,active.id)} /> : null}
-        {item.photoAction ? <NebulaAction
-          icon={item.photoAction === "import" ? "plus-circle" : "settings"}
-          label={item.photoAction === "model" ? "Выбрать модель" : item.photoAction === "import" ? "Добавить фото в память" : "Подготовить фото"}
-          onPress={() => item.photoAction === "import" ? navigation.navigate("MemoryImport", {source:"photo"}) : navigation.navigate("PhotoSearchSettings")} /> : null}
-        {item.role === "assistant" && !item.streaming ?
-          <ChatProposalCards row={item}
-            busy={busy || Boolean(active?.movingRowId)}
-            working={active?.movingRowId === item.id}
-            onConfirm={() => void store.confirmProposal(item.id)}
-            onDismiss={() => store.dismissProposal(item.id)}
-            onUndo={() => void store.undoProposal(item.id)}
-            onOpenNote={id => navigation.navigate("MemoryNote", {entityId:id})} /> : null}
-        {item.attachments?.length ? <ChatAttachmentList files={item.attachments}/> : null}
-        {item.memory?.filter(m=>m.photo || !item.articleReadReport?.entries.some(e=>e.id===m.id)).length ?
-          <View style={{ gap: 4 }}><Text style={{ color: t.muted, fontSize: 12 }}>Из памяти</Text>
-          {item.memory.some(m => m.photo) ? <PhotoSearchResults key={item.id} profile={profile} results={item.memory.filter(m=>m.photo)} limit={photoResultCount}
-            onOpen={(result, original) => navigation.navigate("MemoryNote", {entityId:result.id, photoAttachmentId:original ? result.photoAttachmentId : undefined})} /> : null}
-          {item.memory.filter(m=>!m.photo && !item.articleReadReport?.entries.some(e=>e.id===m.id)).map(m => <Pressable key={m.id} accessibilityRole="link" accessibilityLabel={"Открыть запись " + m.title}
-              onPress={() => navigation.navigate("MemoryNote", {entityId:m.id})} style={{minHeight:48,justifyContent:"center"}}>
-              <Text style={{color:t.accent}}>{m.title}<Text style={{color:t.muted,fontSize:12}}>{(m.section ? " · " + m.section : "") + (m.via === "rewrite" ? " · найдено другими словами" : m.via === "assistant" ? " · нашёл помощник" : "")}</Text></Text>
-            </Pressable>)}
-        </View> : null}
-        {item.role === "assistant" && !item.streaming && item.articleReadReport ?
-          <ArticleReadSources report={item.articleReadReport} answerText={item.text}
-            onOpen={noteId=>navigation.navigate("MemoryNote",{entityId:noteId})} /> : null}
-        {item.role === "assistant" && !item.streaming && item.articlePage?.nextCursor ?
-          <View style={{ alignSelf: "flex-start" }}>
-            <NebulaAction icon="chevron-down" label="Показать ещё" size="compact"
-              accessibilityLabel="Показать следующую страницу сохранённых материалов"
-              disabled={busy || !canSend} onPress={() => settings &&
-                void store.continueArticlesWithAgent(settings,item.id)} />
-          </View> : null}
-        {item.sources?.length ? <View style={{ gap: 2 }}><Text style={{ color: t.muted, fontSize: 12 }}>Источники</Text>{item.sources.map(url => {
-          const part = sourceParts(url);
-          return <Pressable key={url} accessibilityRole="link" accessibilityLabel={"Открыть источник " + part.domain}
-            onPress={() => void Linking.openURL(url).catch(() => setNotice("Не удалось открыть ссылку."))}
-            style={{ minHeight: 48, justifyContent: "center" }}>
-            <Text numberOfLines={1} style={{ color: t.accent }}>{part.domain}<Text style={{ color: t.muted }}>{part.rest}</Text></Text>
-          </Pressable>;
-        })}</View> : null}
-      </View>}
+      renderItem={({ item }) => <ChatRowView
+        item={item} t={t} profile={profile} photoResultCount={photoResultCount}
+        ready={ready} busy={busy} canSend={canSend}
+        retryPhoto={active?.retryPhoto} movingRowId={active?.movingRowId}
+        onSaveReply={saveReplyToNotes}
+        onOpenNote={(noteId, photoAttachmentId) => navigation.navigate("MemoryNote",
+          {entityId:noteId, photoAttachmentId})}
+        onRetryRequest={() => { if (settings) void store.retry(settings); }}
+        onRetryPhoto={() => { if (settings && active?.retryPhoto)
+          void store.searchPhotosWithAgent(settings, active.retryPhoto.image, active.id); }}
+        onPhotoAction={action => action === "import" ? navigation.navigate("MemoryImport", {source:"photo"}) : navigation.navigate("PhotoSearchSettings")}
+        onConfirmProposal={rowId => { void store.confirmProposal(rowId); }}
+        onDismissProposal={rowId => store.dismissProposal(rowId)}
+        onUndoProposal={rowId => { void store.undoProposal(rowId); }}
+        onContinueArticles={rowId => { if (settings) void store.continueArticlesWithAgent(settings,rowId); }}
+        onOpenSource={url => { void Linking.openURL(url).catch(() => setNotice("Не удалось открыть ссылку.")); }}
+      />}
       ListFooterComponent={<View style={{ gap: 10 }}>
         {active?.drafts.map(d => <View key={d.id} style={{ backgroundColor: t.panel, borderWidth: 1, borderColor: t.accent, borderRadius: 20, padding: 16, gap: 8 }}>
           <Text style={{ color: t.accent, fontWeight: "700" }}>Запомнить?</Text><Text selectable style={{ color: t.text, fontWeight: "700" }}>{d.title}</Text><Text selectable style={{ color: t.text }}>{d.body}</Text>
