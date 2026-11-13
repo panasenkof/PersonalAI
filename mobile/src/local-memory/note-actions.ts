@@ -46,7 +46,7 @@ async function write(db: SQL, before: Row, after: Row, reason: string) {
 /** Fail closed if any source lives beneath an unreadable ancestor.
  * Always invoked inside the existing BEGIN IMMEDIATE SQLCipher transaction. */
 async function assertOrdinaryMergeSources(
-  tx:SQL, rows:Array<{id:string;collection_id:string;sensitivity:string;domain:string;record_status:string}>,
+  tx:SQL, rows:Row[],
 ):Promise<void>{
   const collections=await tx.getAllAsync<{id:string;slug:string;sensitivity:string;parent_id:string|null}>(
     'SELECT id,slug,sensitivity,parent_id FROM memory_collections');
