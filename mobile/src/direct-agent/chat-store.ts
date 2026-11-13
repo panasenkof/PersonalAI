@@ -13,8 +13,6 @@ import { hostOf } from "./net";
 import { proposableMemorySections, saveApprovedNote } from "./memory";
 import { memoryErrorMessage } from "../local-memory/errors";
 
-
-
 import { DEFAULT_SECTIONS } from "./fact-tool";
 import type { MemorySection } from "./fact-tool";
 import { conversationRepository } from "./conversations";
@@ -22,11 +20,8 @@ import type { ChatDraft, ConversationRepository, SavedConversation } from "./con
 import type { DirectAgentSettings } from "./settings";
 import { waitForApplicationSession } from "../local-memory/storage";
 
-
-
-
 import { rowProposal, rowReceipt } from "./proposals";
-import { buildAgentOptions, prepareAgentDraft, prepareTurnHistory, pendingTurnPatch, articleTurnContext, summarizeWithAgentHost } from "./agent-host";
+import { buildAgentOptions, prepareAgentDraft, prepareTurnHistory, pendingTurnPatch, articleTurnContext, summarizeWithAgentHost, newConversation, saved, agentTextStream } from "./agent-host";
 import { assistantRowFromResult, interruptedAssistantPatch } from "./agent-result";
 
 /** `streamText` is the answer as it arrives; it is never persisted. */
@@ -35,14 +30,6 @@ export type LiveConversation = SavedConversation & { retryPhoto?: {rowId:string;
 /** `notice` is informational (e.g. unreadable old chats), unlike `error`. */
 /** `sections` are the memory sections a proposal can go to, the user's own included. */
 export type ChatSnapshot = { ready: boolean; error: string; notice: string; conversations: LiveConversation[]; activeId: string | null; sections: MemorySection[] };
-const newConversation = (): LiveConversation => {
-  const timestamp = new Date().toISOString();
-  return { id: Crypto.randomUUID(), title: "Новый диалог", createdAt: timestamp, updatedAt: timestamp,
-    rows: [], drafts: [], question: "", busy: false, progress: "" };
-};
-const saved = ({ busy, progress, progressSince, streamText, savingDraft, movingRowId, deleting, retryPhoto, ...conversation }: LiveConversation): SavedConversation =>
-  ({ ...conversation, interrupted: busy });
-
 /** Where a proposal will be saved: its section, the new one, or «Заметки». */
 export function draftSectionName(draft: ChatDraft, sections: MemorySection[]): string {
   if (draft.section) return sections.find(s => s.slug === draft.section)?.name || DEFAULT_SECTIONS.find(s => s.slug === draft.section)?.name || "Заметки";
@@ -246,13 +233,10 @@ export class DirectChatStore {
     const host = hostOf(settings.baseUrl || "https://api.openai.com/v1");
     trace("turn.start", { provider: settings.provider, model: settings.model, host, promptChars: prompt.length,
       historyTurns: history.length, previousSources: previousSources.length, webEnabled: settings.allowWeb }, { prompt });
-      // Repaint at most every 60 ms while tokens arrive.
-    let latest = ""; let paint: ReturnType<typeof setTimeout> | null = null;
-    const onText = (text: string) => {
-      latest = text;
-      if (paint || aborter.signal.aborted) return;
-      paint = setTimeout(() => { paint = null; if (!aborter.signal.aborted) this.update(id, { streamText: latest }); }, 60);
-    };
+    // Repaint at most every 60 ms while tokens arrive.
+    const { onText, getLatest, cancel } = agentTextStream(
+      aborter.signal, text => this.update(id, { streamText: text }),
+    );
     try {
       // Persist the submitted question before spending a model request.
       await this.persist(pending);
@@ -328,14 +312,14 @@ export class DirectChatStore {
         this.update(id, interruptedAssistantPatch({
           conversation:c,taskState,privatePhoto,internetPhotoId:Boolean(internetPhotoId),
           intentPreserveDraft:Boolean(intent?.preserveDraft),modelStarted,beforeModelError,
-          prompt,draftFiles,signalAborted:aborter.signal.aborted,latest,error:e,
+          prompt,draftFiles,signalAborted:aborter.signal.aborted,latest:getLatest(),error:e,
           newId:Crypto.randomUUID,
         }));
       }
     } finally {
       trace("turn.finished", { elapsedMs: Date.now() - startedAt });
       this.requests.delete(id);
-      if (paint) clearTimeout(paint);
+      cancel();
       const final = this.update(id, { busy: false, progress: "", progressSince: undefined, streamText: undefined });
       if (final) await this.persist(final).catch(() => {});
     }

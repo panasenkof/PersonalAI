@@ -14,7 +14,7 @@ import { previewSectionAction } from "./section-actions";
 import { searchLocalPhotosFromChat83 } from "../media/vision-chat-search";
 import { selectSavedAiArticles } from "./article-selection";
 import type { ChatAttachment } from "./chat-attachments";
-import type { ChatArticlePage } from "./conversations";
+import type { ChatArticlePage, SavedConversation } from "./conversations";
 import type { LiveConversation } from "./chat-store";
 import { checkedChatAttachments } from "./chat-attachments";
 import { imageCapability, historyForImageCapability } from "./attachment-capabilities";
@@ -393,4 +393,32 @@ export async function summarizeWithAgentHost(input: {
       const final=update(conversationId,{busy:false,progress:"",progressSince:undefined});
       if(final)await persist(final).catch(()=>{});
     }
+}
+
+/** Unchanged blank-conversation and persisted-snapshot adapters.
+ * Live-only fields never become SQLCipher/backup schema fields. */
+export const newConversation = (): LiveConversation => {
+  const timestamp = new Date().toISOString();
+  return { id: Crypto.randomUUID(), title: "Новый диалог", createdAt: timestamp, updatedAt: timestamp,
+    rows: [], drafts: [], question: "", busy: false, progress: "" };
+};
+export const saved = ({ busy, progress, progressSince, streamText, savingDraft, movingRowId, deleting, retryPhoto, ...conversation }: LiveConversation): SavedConversation =>
+  ({ ...conversation, interrupted: busy });
+
+
+/** Preserve the 60ms streaming throttle and Stop's final partial text.
+ * No timer is created unless the real agent pushes a token. */
+export function agentTextStream(signal: AbortSignal, update: (text: string) => void) {
+  let latest = "";
+  let paint: ReturnType<typeof setTimeout> | null = null;
+  const onText = (text: string) => {
+    latest = text;
+    if (paint || signal.aborted) return;
+    paint = setTimeout(() => { paint = null; if (!signal.aborted) update(latest); }, 60);
+  };
+  return {
+    onText,
+    getLatest: () => latest,
+    cancel: () => { if (paint) clearTimeout(paint); },
+  };
 }
