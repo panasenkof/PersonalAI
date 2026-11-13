@@ -5,10 +5,12 @@
  * ChatRow fields and parseConversation's persisted format are unchanged.
  */
 import type { ChatRow } from "./conversations";
+import type { InboxTriageProposal } from "./inbox-triage-proposal";
+import { confirmInboxTriage, undoInboxTriage, type InboxTriageReceipt } from "./inbox-triage-actions";
 import { confirmMove, undoMove, type ChatMoveProposal, type ChatMoveReceipt } from "./move-proposal";
 import { confirmSectionAction, type ChatSectionProposal, type ChatSectionReceipt } from "./section-actions";
 
-export type ProposalKind = "move_note" | "section";
+export type ProposalKind = "move_note" | "section" | "inbox_triage";
 export type ProposalCardView = {
   heading: string;
   lines: string[];
@@ -26,7 +28,7 @@ export interface ProposalHandler<P, R> {
   receiptFromRow(row: ChatRow): R | undefined;
   present(proposal: P): ProposalCardView;
   presentReceipt(receipt: R): ReceiptView;
-  confirm(profile: string, proposal: P): Promise<R>;
+  confirm(profile: string, proposal: P, selectedIds?: readonly string[]): Promise<R>;
   undo?(profile: string, receipt: R): Promise<R>;
   withReceipt(row: ChatRow, receipt: R): ChatRow;
   withoutProposal(row: ChatRow): ChatRow;
@@ -134,11 +136,55 @@ export const sectionHandler: ProposalHandler<ChatSectionProposal, ChatSectionRec
   },
 };
 
+/** Inbox review reuses the same ARCH-4 lifecycle as move/section.
+ * The row selection is supplied only by the user-facing checkbox card;
+ * no default selection is accepted by the writer adapter. */
+export const inboxTriageHandler: ProposalHandler<InboxTriageProposal,InboxTriageReceipt> = {
+  kind:"inbox_triage",
+  fromRow:row=>row.role==="assistant" ? row.inboxTriageProposal : undefined,
+  receiptFromRow:row=>row.role==="assistant" ? row.inboxTriageReceipt : undefined,
+  present:proposal=>({
+    heading:"Разобрать «Входящие» — выберите записи",
+    lines:proposal.items.map(item=>
+      (item.displayTitle||"Заметка")+" → "+(item.targetSectionName||item.targetSectionSlug)),
+    note:"После переноса выбранные записи станут доступны помощнику. Существующие теги сохранятся. Изменение можно отменить.",
+    confirmLabel:"Применить выбранные",
+    confirmIcon:"check",danger:false,
+  }),
+  presentReceipt:receipt=>({
+    text:(receipt.undone ? "Разбор «Входящих» отменён"
+      : "Разбор «Входящих» завершён") +
+      "\nПеренесено: "+receipt.applied.length+
+      (receipt.skipped.length ? "\nПропущено из-за изменившейся версии: "+receipt.skipped.length : "")+
+      (receipt.undone ? "\nРазделы, теги и уровни доступа восстановлены." : ""),
+    undoable:receipt.applied.length>0&&!receipt.undone,
+    undone:receipt.undone===true,
+  }),
+  confirm:confirmInboxTriage,
+  undo:undoInboxTriage,
+  confirmNotice:receipt=>"Из «Входящих» перенесено: "+receipt.applied.length+
+    (receipt.skipped.length ? ". Пропущено из-за изменения: "+receipt.skipped.length : "")+
+    (receipt.applied.length ? ". Доступна отмена." : ". Записи не изменены."),
+  dismissNotice:"Предложение разбора отклонено. Записи не изменены.",
+  confirmErrorSuffix:" Изменения не подтверждены: проверьте версии, права доступа и разделы.",
+  undoNotice:receipt=>"Разбор отменён: "+receipt.applied.length+
+    " записей возвращены во «Входящие», восстановлены теги и доступ.",
+  undoErrorSuffix:" Отмена не выполнена; проверьте версии записей.",
+  withReceipt:(row,receipt)=>{
+    const {inboxTriageProposal:_proposal,...rest}=row;
+    return {...rest,inboxTriageReceipt:receipt};
+  },
+  withoutProposal:row=>{
+    const {inboxTriageProposal:_proposal,...rest}=row;
+    return rest;
+  },
+};
+
 /** One ordered registry. A malformed historic row that has both proposals
  * renders at most one card, matching the pre-refactor UI's section-first order.
  */
 export const proposalHandlers: ProposalHandler<any, any>[] = [
-  sectionHandler, moveNoteHandler,
+  sectionHandler, inboxTriageHandler, moveNoteHandler,
 ];
 
 export function rowProposal(row: ChatRow):
