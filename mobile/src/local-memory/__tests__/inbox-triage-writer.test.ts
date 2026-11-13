@@ -37,7 +37,7 @@ const suggestion=(id="note1",version=3)=>({
 test("S9-1c3: confirmed move and tags use one canonical revision + FTS",async()=>{
   const db=fakeDb({note1:note("note1",3)});
   const result=await applyInboxTriageNotes(db as never,[suggestion()]);
-  expect(result).toEqual({batch:"notes:move:batch-test",applied:["note1"],skipped:[]});
+  expect(result).toEqual({batch:"notes:inbox_triage:batch-test",applied:["note1"],skipped:[]});
   const update=db.runAsync.mock.calls.find(call=>call[0].includes("UPDATE memory_entities"));
   expect(update).toBeDefined();
   expect(update![1][0]).toBe("projects-id");
