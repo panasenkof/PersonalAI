@@ -138,7 +138,18 @@ export function buildSystemPrompt(input: {
     // search_web name to compatible providers when they register that tool.
     const actualText = tool.name === "search_web"
       ? text.replace(/\bweb_search\b/g, "search_web") : text;
-    if (actualText) pieces.push(availableSentences(actualText, active));
+    // Legacy prose abbreviated alternatives as "search_local_notes/list_local_notes"
+    // and "workspace_put/list/get/clear". Resolve those to exact advertised names.
+    // Otherwise one disabled option can erase an essential safety instruction.
+    const lookupNames = ["search_local_notes", "list_local_notes"].filter(name => active.has(name));
+    const workspaceNames = ["workspace_put", "workspace_list", "workspace_get", "workspace_clear"]
+      .filter(name => active.has(name));
+    const preciseText = actualText
+      .replace("search_local_notes/list_local_notes",
+        lookupNames.length ? lookupNames.join(" или ") : "search_local_notes/list_local_notes")
+      .replace("workspace_put/list/get/clear",
+        workspaceNames.length ? workspaceNames.join(", ") : "workspace_put/list/get/clear");
+    if (preciseText) pieces.push(availableSentences(preciseText, active));
   }
   // Dialogue contains tool-specific clauses (including read_web_page and
   // update_task_state); never attach the unfiltered guide to minimal catalog.
