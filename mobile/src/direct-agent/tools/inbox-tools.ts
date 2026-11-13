@@ -3,13 +3,16 @@
  */
 import type { DirectAgentOptions } from "../engine";
 import type { InboxTriageApproval } from "../inbox-triage";
+import type { InboxTriageProposal } from "../inbox-triage-proposal";
 import type { ToolSpec } from "./types";
 
 export function inboxTriageTools(options: DirectAgentOptions): {
   specs: ToolSpec[];
   approval: () => InboxTriageApproval | undefined;
+  proposal: () => InboxTriageProposal | undefined;
 } {
   let pending: InboxTriageApproval | undefined;
+  let suggestion: InboxTriageProposal | undefined;
   const specs: ToolSpec[] = [];
 
   if (options.requestInboxTriageApproval && !options.skipLocalMemory) specs.push({
@@ -64,5 +67,35 @@ export function inboxTriageTools(options: DirectAgentOptions): {
       result.items.length ? "found":"empty":"failed",
   });
 
-  return {specs,approval:()=>pending};
+  if (options.listInboxForTriage && options.proposeInboxTriage) specs.push({
+    definition: {
+      name: "propose_inbox_triage",
+      description: "После разрешённого чтения «Входящих» предложи разделы и теги для прочитанных заметок. ID и версии копируй только из list_inbox_for_triage этого же хода. Не изменяй заметки: пользователь отдельно выберет и подтвердит перенос.",
+      parameters: {type:"object",properties:{
+        items:{type:"array",minItems:1,maxItems:10,items:{type:"object",properties:{
+          noteId:{type:"string",minLength:1,maxLength:128},
+          expectedVersion:{type:"integer",minimum:1},
+          targetSectionSlug:{type:"string",minLength:1,maxLength:80},
+          tags:{type:"array",maxItems:5,items:{type:"string",maxLength:33}},
+          reason:{type:"string",minLength:5,maxLength:240},
+        },required:["noteId","expectedVersion","targetSectionSlug","tags","reason"],
+          additionalProperties:false}},
+      },required:["items"],additionalProperties:false},
+    },
+    guidance:"Пользователь разрешил чтение только этой пачки. Сначала вызови list_inbox_for_triage, затем propose_inbox_triage с точными ID и версиями из результата. Новые разделы не создавай. Не заявляй, что записи уже перенесены.",
+    effect:"proposal",
+    execute: async args => {
+      if (suggestion) return {error:"inbox_triage_proposal_already_created"};
+      if (Object.keys(args).join(",")!=="items" || !Array.isArray(args.items))
+        return {error:"invalid_inbox_triage_proposal"};
+      const proposed = await options.proposeInboxTriage!(args);
+      suggestion = proposed;
+      return {status:"awaiting_user_confirmation",saved:false,
+        requiresUserTap:true,count:proposed.items.length};
+    },
+    verify:r=>r.status==="awaiting_user_confirmation" &&
+      r.saved===false && r.requiresUserTap===true ? "pending_confirmation" : "failed",
+  });
+
+  return {specs,approval:()=>pending,proposal:()=>suggestion};
 }
