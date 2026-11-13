@@ -7,7 +7,7 @@ const fs=require("node:fs");
 const path=require("node:path");
 const assert=require("node:assert/strict");
 const ROOT=path.resolve(__dirname,"../..");
-function check(workflow,liveTest){
+function check(workflow,liveTest,sharedTransportCode){
   const triggers=workflow.split(/\npermissions:|\njobs:/)[0];
   assert.match(triggers,/\non:\s*\n\s+workflow_dispatch:/,"Manual dispatch is required");
   assert.doesNotMatch(triggers,/^\s*(?:schedule|cron|push|pull_request|workflow_run|workflow_call)\s*:/m,
@@ -44,8 +44,20 @@ function check(workflow,liveTest){
     "Each question must have bounded turns");
   // Jest-Expo replaces global fetch. A paid live test must use a real HTTPS
   // transport, or every mock response silently fails as "HTTP undefined".
-  assert.match(liveTest,/import \{request as httpsRequest\} from "node:https"/,
-    "Live evaluation must import the Node HTTPS client");
+  const directHttps = /import \{request as httpsRequest\} from "node:https"/.test(liveTest);
+  const sharedHttps = /import \{realHttpsTransport\} from "\.\.\/real-https-transport"/.test(liveTest);
+  assert.ok(directHttps || sharedHttps,
+    "Live evaluation must import the Node HTTPS client directly or through the inspected shared transport");
+  if (sharedHttps) {
+    const shared = sharedTransportCode ?? fs.readFileSync(
+      path.join(ROOT, "mobile/eval/real-https-transport.ts"), "utf8");
+    assert.match(shared,/import \{ request as httpsRequest \} from "node:https"/,
+      "Shared live-eval transport must import the Node HTTPS client");
+    assert.match(shared,/httpsRequest\(target,/,
+      "Shared live-eval transport must execute a real HTTPS request");
+    assert.doesNotMatch(shared,/\b(?:globalThis\.)?fetch\s*\(/,
+      "Shared live-eval transport must not use mocked or global fetch");
+  }
   assert.match(liveTest,/return realHttpsTransport\(input,\{\.\.\.init,body:JSON\.stringify\(payload\)\}\)/,
     "Live evaluation must not call the Jest global fetch mock");
   assert.match(liveTest,/if\(e instanceof ModelRequestError\)providerFailed=true;/,
