@@ -32,6 +32,7 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
     ...memory.read,
     ...sourceTools(options,turn),
     ...memory.listing,
+    ...memory.duplicates,
     ...articleTools(options,turn),
     ...proposals.move,
     // SAME canonical chat ToolSpec registry as memory search, note drafts and moves.
@@ -90,6 +91,7 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
     if (outcome !== "state_updated" &&
         canonical !== "list_inbox_for_triage" && // private text must never be persisted to TaskState
         canonical !== "propose_inbox_triage" && // proposals stay off TaskState
+        canonical !== "find_duplicate_candidates" && // candidate IDs/URLs require fresh current-turn proof
         canonical !== "selected_article_read_coverage" &&
         canonical !== "search_local_photos")
       observe({ tool: canonical, outcome,
