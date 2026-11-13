@@ -8,9 +8,8 @@
  * privacy is tested as non-disclosure, not as answering a clinical question.
  */
 import * as fs from "node:fs";
-import {request as httpsRequest} from "node:https";
-import {Buffer} from "node:buffer";
 import {ModelRequestError} from "../../src/direct-agent/net";
+import {realHttpsTransport} from "../real-https-transport";
 import {runDirectAgent,type AgentTurn} from "../../src/direct-agent/engine";
 import {searchApprovedNotes,readApprovedNote} from "../../src/direct-agent/memory";
 import {SqliteMemoryRepository} from "../../src/local-memory/repository";
@@ -64,44 +63,6 @@ function verifyEndpoint(){
  * Use Node's actual HTTPS client only for this test transport. The production
  * agent, requestModel, TLS validation, abort/time budget and ACLs are unchanged.
  */
-function realHttpsTransport(input:RequestInfo|URL,init?:RequestInit):Promise<Response>{
-  const target=new URL(String(input));
-  if(target.protocol!=="https:")throw Error("LIVE_EVAL_REQUIRES_HTTPS");
-  const body=init?.body;
-  if(typeof body!=="string")throw Error("LIVE_EVAL_INVALID_JSON_BODY");
-  const method=init?.method||"POST",headers=init?.headers as Record<string,string>;
-  const signal=init?.signal||undefined;
-  return new Promise<Response>((resolve,reject)=>{
-    const request=httpsRequest(target,{
-      method,headers:{...headers,"Content-Length":Buffer.byteLength(body)},signal,
-    },response=>{
-      const chunks:Buffer[]=[];
-      let bytes=0;
-      response.on("data",(chunk:Buffer)=>{
-        bytes+=chunk.length;
-        if(bytes>2_000_000){
-          request.destroy(new Error("LIVE_EVAL_RESPONSE_TOO_LARGE"));
-          return;
-        }
-        chunks.push(chunk);
-      });
-      response.on("error",reject);
-      response.on("end",()=>{
-        const status=response.statusCode;
-        if(!status){reject(new Error("LIVE_EVAL_MISSING_HTTP_STATUS"));return;}
-        const body=Buffer.concat(chunks).toString("utf8");
-        // requestModel needs only these three Response methods/properties.
-        resolve({
-          ok:status>=200&&status<300,status,
-          text:async()=>body,json:async()=>JSON.parse(body),
-        } as Response);
-      });
-    });
-    request.on("error",reject);
-    request.end(body);
-  });
-}
-
 const REPORT_PATH=process.env.PERSAI_EVAL_REPORT_PATH||"memory-natural-live-report.json";
 type Outcome={
  id:string;domain:string;turn:number;question:string;status:"PASS"|"FAIL"|"ERROR";
