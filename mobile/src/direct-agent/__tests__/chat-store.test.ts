@@ -2,12 +2,12 @@ import { DirectChatStore } from "../chat-store";
 import type { ConversationRepository, SavedConversation } from "../conversations";
 import { defaultDirectPreferences } from "../settings";
 import { saveApprovedNote } from "../memory";
-import { waitForApplicationSession } from "../../local-memory/storage";
+import { waitForApplicationSession, localMemorySessionUnlocked, onLocalMemorySessionChange } from "../../local-memory/storage";
 import { loadModelCallLimit } from "../agent-preferences";
 import { planDocumentSynthesis } from "../document-synthesis";
 import { planDialogueSummary } from "../dialogue-summary";
 
-jest.mock("../../local-memory/storage", () => ({ waitForApplicationSession: jest.fn(async () => {}), withLocalMemoryDatabase: jest.fn(), onLocalMemorySessionChange: jest.fn(() => () => {}) }));
+jest.mock("../../local-memory/storage", () => ({ waitForApplicationSession: jest.fn(async () => {}), withLocalMemoryDatabase: jest.fn(), onLocalMemorySessionChange: jest.fn(() => () => {}), localMemorySessionUnlocked: jest.fn(() => true) }));
 jest.mock("../memory", () => ({ searchApprovedNotes: jest.fn(async () => []), saveApprovedNote: jest.fn(async () => "note") }));
 jest.mock("expo-crypto", () => ({ randomUUID: () => "id-" + Math.random().toString(36).slice(2) }));
 jest.mock("../agent-preferences", () => ({ loadModelCallLimit: jest.fn(async () => 4) }));
@@ -523,5 +523,51 @@ test("one allowed model request keeps ordinary answer available and does not off
   const c=records.get(store.getSnapshot().activeId!)!;
   expect(c.rows.at(-1)?.text).toBe("Ответ в одном обращении");
   expect(c.context).toBeUndefined();
+  store.dispose();
+});
+
+test("S9-1b: Inbox consent sends through existing agent only after direct confirmation and preserves draft",async()=>{
+  const {repo}=repository();const answer=turn();
+  const runner=jest.fn().mockReturnValueOnce(answer.promise).mockResolvedValue({text:"Готово",sources:[],requests:1});
+  const store=new DirectChatStore("guest",repo,runner);await store.initialize();
+  const id=store.getSnapshot().activeId!;
+  store.setQuestion("Не отправлять мой текущий черновик");
+  store.requestInboxTriage(2);
+  expect(store.getSnapshot().inboxApproval).toMatchObject({conversationId:id,limit:2});
+  expect(runner).not.toHaveBeenCalled();
+  store.approveInboxTriage(settings);await started(runner);
+  expect(runner.mock.calls[0][0].inboxRead).toEqual(expect.any(Function));
+  expect(runner.mock.calls[0][0].prompt).toContain("list_inbox_for_triage");
+  expect(store.getSnapshot().inboxApproval).toBeUndefined();
+  expect(store.getSnapshot().conversations[0].question).toBe("Не отправлять мой текущий черновик");
+  answer.resolve({text:"Список для выбора",sources:[],requests:1});
+  for(let i=0;i<30 && store.getSnapshot().conversations[0].busy;i++)await Promise.resolve();
+  expect(store.getSnapshot().conversations[0].busy).toBe(false);
+  await store.checkpoint();
+  store.setQuestion("Обычный запрос");
+  await store.send(settings);
+  expect(runner.mock.calls[1][0].inboxRead).toBeUndefined();
+  store.dispose();
+});
+
+test("S9-1b: AppLock, chat change and explicit cancel invalidate pending permission",async()=>{
+  let change:(unlocked:boolean)=>void=()=>{};
+  (onLocalMemorySessionChange as jest.Mock).mockImplementation(cb=>{change=cb;return jest.fn();});
+  (localMemorySessionUnlocked as jest.Mock).mockReturnValue(true);
+  const {repo}=repository();const runner=jest.fn();
+  const store=new DirectChatStore("guest",repo,runner);await store.initialize();
+  store.requestInboxTriage(10);
+  expect(store.getSnapshot().inboxApproval?.limit).toBe(10);
+  change(false);
+  expect(store.getSnapshot().inboxApproval).toBeUndefined();
+  store.approveInboxTriage(settings);
+  expect(runner).not.toHaveBeenCalled();
+  store.requestInboxTriage(1);
+  store.revokeInboxTriage();
+  store.approveInboxTriage(settings);
+  expect(runner).not.toHaveBeenCalled();
+  store.requestInboxTriage(1);
+  store.create();
+  expect(store.getSnapshot().inboxApproval).toBeUndefined();
   store.dispose();
 });
