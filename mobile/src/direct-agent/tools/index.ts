@@ -1,3 +1,4 @@
+import { diagnosticToolArguments } from "../tool-diagnostics";
 import type { DirectAgentOptions, DirectResult } from "../engine";
 import type { UsedNote } from "../context";
 import type { MemorySnippet } from "../memory";
@@ -68,7 +69,7 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
     if (options.signal?.aborted) throw new Error("Запрос остановлен");
     const canonical = name === "draft_local_note" ? FACT_TOOL_NAME : name;
     const spec = registry.get(canonical);
-    options.diagnostic?.("llm.tool_requested", { name, argumentsChars: JSON.stringify(raw)?.length || 0 }, { arguments: JSON.stringify(raw) || "" });
+    options.diagnostic?.("llm.tool_requested", { name, argumentsChars: JSON.stringify(raw)?.length || 0 }, diagnosticToolArguments(canonical, raw));
     let result: Record<string, unknown>, outcome: ToolOutcome | "state_updated" = "failed";
     const args = raw && typeof raw === "object" && !Array.isArray(raw) ? raw as Record<string, unknown> : null;
     try {
