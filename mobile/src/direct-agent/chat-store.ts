@@ -411,9 +411,30 @@ export class DirectChatStore {
   /** The same user-click confirmation lifecycle for a move or a section action.
    * The handler calls the EXISTING SQLCipher writer. No model-side mutation.
    * A stale version or an ACL change still fails inside the canonical writer. */
-  async confirmProposal(rowId: string): Promise<void> {
+  async confirmProposal(rowId: string, settings?:DirectAgentSettings): Promise<void> {
     const c = this.snapshot.conversations.find(x => x.id === this.snapshot.activeId);
     const row = c?.rows.find(x => x.id === rowId && x.role === "assistant");
+    if(row?.inboxApproval){
+      if(!c || c.busy || c.deleting || this.disposed) return;
+      if(!settings){this.publish({error:"Сначала подключите модель для разбора «Входящих»."});return;}
+      try{
+        if(!this.inboxTriage.confirm(c.id,rowId,row.inboxApproval))
+          throw new Error("Разрешение устарело. Запросите разбор «Входящих» снова.");
+        const updated=this.update(c.id,{rows:c.rows.map(r=>r.id===rowId
+          ? (({inboxApproval:_discard,...rest})=>rest)(r) : r)});
+        if(!updated)throw new Error("Диалог недоступен.");
+        await this.persist(updated);
+        if(this.snapshot.activeId!==c.id)throw new Error("Диалог изменился.");
+        await this.send(settings,undefined,undefined,false,{
+          prompt:"Прочитай разрешённую пачку «Входящих» и предложи разделы и теги для каждой записи. Пока ничего не сохраняй.",
+          conversationId:c.id,preserveDraft:true,inboxApprovalRowId:rowId,
+        });
+      }catch(e){
+        this.inboxTriage.revoke(c.id);
+        this.publish({error:String((e as Error).message || e)});
+      }
+      return;
+    }
     const selected = row ? rowProposal(row) : undefined;
     if (!c || !selected || c.busy || c.movingRowId || c.deleting || this.disposed) return;
     const { handler, proposal } = selected;
@@ -453,6 +474,13 @@ export class DirectChatStore {
     const c = this.snapshot.conversations.find(x => x.id === this.snapshot.activeId);
     if (!c || c.busy || c.movingRowId || c.deleting || this.disposed) return;
     const row = c.rows.find(r => r.id === rowId && r.role === "assistant");
+    if(row?.inboxApproval){
+      this.inboxTriage.dismiss(c.id,rowId);
+      this.update(c.id,{rows:[...c.rows.map(r=>r.id===rowId
+        ? (({inboxApproval:_discard,...rest})=>rest)(r) : r),
+        {id:Crypto.randomUUID(),role:"info",text:"Разбор «Входящих» отменён. Ничего не прочитано и не отправлено."}]},true);
+      return;
+    }
     const selected = row ? rowProposal(row) : undefined;
     if (!selected) return;
     const rows = c.rows.map(r => r.id === rowId ? selected.handler.withoutProposal(r) : r);
