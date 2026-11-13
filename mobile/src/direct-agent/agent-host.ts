@@ -16,6 +16,13 @@ import { selectSavedAiArticles } from "./article-selection";
 import type { ChatAttachment } from "./chat-attachments";
 import type { ChatArticlePage } from "./conversations";
 import type { LiveConversation } from "./chat-store";
+import { checkedChatAttachments } from "./chat-attachments";
+import { imageCapability, historyForImageCapability } from "./attachment-capabilities";
+import { localPhotoIntent83 } from "../media/vision-chat-search";
+import { historyWithoutLargeDocuments, planDocumentSynthesis } from "./document-synthesis";
+import { beginTask } from "./task-state";
+import { webPreference } from "./dialogue";
+import { MAX_USER_PROMPT_CHARS } from "./limits";
 import type { MemorySection } from "./fact-tool";
 
 type AgentOptions = Parameters<typeof runDirectAgent>[0];
@@ -170,4 +177,136 @@ export function buildAgentOptions(input: AgentHostInput): Parameters<typeof runD
     },
   };
 
+}
+
+export type AgentSendIntent = {
+  prompt: string;
+  privatePhoto?: ChatAttachment;
+  articleRowId?: string;
+  conversationId: string;
+  preserveDraft: true;
+};
+
+export type DraftInputs = {
+  current: LiveConversation;
+  settings: AgentOptions["settings"];
+  internetPhotoId?: string;
+  documentApprovalKey?: string;
+  intent?: AgentSendIntent;
+  report: (patch: { notice?: string; error?: string }) => void;
+};
+
+/** Preflight is pure apart from its existing UI notice callback.
+ * Reject before consuming a draft or persisting a user turn. */
+export function prepareAgentDraft(input: DraftInputs) {
+  const { current, settings, internetPhotoId, documentApprovalKey, intent, report } = input;
+    const selected=internetPhotoId ? current.attachments?.find(f=>f.id===internetPhotoId && f.kind==="image") : undefined;
+    if(internetPhotoId && (!selected || !settings.allowWeb))return;
+    const prompt = internetPhotoId
+      ? "Найди в интернете сведения о том, что изображено на приложенной фотографии. Определи объект по фото, затем воспользуйся разрешённым веб-поиском. Ответь по-русски, приведи проверяемые факты и ссылки на реальные источники. Если изображение или поиск недоступны, сообщи об этом, не выдумывай источники."
+      : intent?.prompt || current.question.trim() || "Посмотри приложенные файлы.";
+    const displayPrompt = internetPhotoId ? "Что изображено на фото? Найти информацию в интернете" : prompt;
+    const draftFiles = checkedChatAttachments(internetPhotoId ? [selected!] :
+      intent?.preserveDraft ? [] : current.attachments);
+    const localPhotoMatch=!internetPhotoId&&!intent ? localPhotoIntent83(prompt,draftFiles):null;
+    const imageQueryFiles=localPhotoMatch?.mode==="image"
+      ? draftFiles.filter(f=>f.kind==="image") : [];
+    if(imageQueryFiles.length>1){
+      report({notice:"Для поиска похожих фотографий выберите один снимок."});return;
+    }
+    const privatePhoto=intent?.privatePhoto||imageQueryFiles[0];
+    // The model is responsible for deciding which tool to call. The app only
+    // keeps image bytes out of the provider request for local-photo intents.
+    const attachments=privatePhoto
+      ? draftFiles.filter(f=>f.id!==privatePhoto.id):draftFiles;
+    let documentPlan;
+    try { documentPlan = internetPhotoId ? null : planDocumentSynthesis(attachments,settings.model); }
+    catch(e) { report({error:String((e as Error).message)}); return; }
+    if(documentPlan && documentApprovalKey!==documentPlan.approvalKey) {
+      report({notice:"Для отправки большого документа подтвердите объём и вызовы ИИ в окне отправки."});
+      return;
+    }
+    // All chat messages now run through the model and its allowed tools.
+    // No regex or shortcut may directly answer for photos, saved articles or
+    // a contextual "Покажи ещё".
+    // Recheck the ACTIVE model at the moment of Send (not the model selected
+    // when a draft photo was picked). Refuse known text-only routes before
+    // consuming the draft, persisting a user turn, or making a network call.
+    if (imageCapability(settings,attachments) === "unsupported") {
+      report({ notice:"Выбранная модель «" + settings.model +
+        "» не принимает изображения. Фото осталось в черновике; выберите модель с поддержкой фото или уберите вложение." });
+      return;
+    }
+    if (prompt.length > MAX_USER_PROMPT_CHARS) {
+      report({ error: "Сообщение длиннее 24 000 символов. Разделите его на части: текст не отправлен и не обрезан." });
+      return;
+    }
+
+  return { prompt, displayPrompt, draftFiles, privatePhoto, attachments, documentPlan };
+}
+
+/** The history and task state still derive solely from the encrypted active
+ * conversation. Private photo attachments never enter a cloud model payload. */
+export function prepareTurnHistory(
+  current: LiveConversation, settings: AgentOptions["settings"],
+  prompt: string, internetPhotoId: boolean,
+) {
+    // A one-tap image-to-web query is a standalone purpose. Never transmit
+    // unrelated history images, private drafts or prior conversation selections.
+    const previousSources = internetPhotoId ? [] : [...current.rows].reverse().filter(r => r.role === "assistant" && r.sources?.length).slice(0, 3).flatMap(r => r.sources!).slice(0, 15);
+    const previousHistory = internetPhotoId ? [] : current.rows.filter(r => r.role !== "info").slice(-8)
+      .map(r => ({ role: r.role as "user" | "assistant", content: r.text, ...(r.attachments?.length ? {attachments:r.attachments} : {}) }));
+    // After switching to a model known to be text-only, historical photo
+    // originals stay encrypted in prior turns but are not uploaded again.
+    const history = historyForImageCapability(historyWithoutLargeDocuments(previousHistory),
+      imageCapability(settings,previousHistory.flatMap(r => r.attachments || [])));
+    const previousTaskState = internetPhotoId ? undefined : current.taskState;
+    const taskState = { ...beginTask(previousTaskState, prompt), webPreference: webPreference({ prompt, history, taskState: previousTaskState }) };
+
+  return { previousSources, history, taskState };
+}
+
+/** Builds the original pre-network snapshot, including the one user bubble.
+ * The caller remains the only SQLCipher conversation writer. */
+export function pendingTurnPatch(input: {
+  current: LiveConversation;
+  taskState: NonNullable<AgentOptions["taskState"]>;
+  displayPrompt: string;
+  internetPhotoId?: string;
+  intent?: AgentSendIntent;
+  rerun: boolean;
+  attachments: ChatAttachment[];
+}): Partial<LiveConversation> {
+  const { current, taskState, displayPrompt, internetPhotoId, intent, rerun, attachments } = input;
+    return {
+      taskState, question: (internetPhotoId||intent?.preserveDraft) ? current.question : "",
+      // Camera/selected-photo and article-more actions preserve unrelated
+      // drafts. A local query photo is never persisted as a chat attachment.
+      attachments: internetPhotoId
+        ? (current.attachments || []).filter(file=>file.id!==internetPhotoId)
+        : intent?.privatePhoto
+          ? (current.attachments||[]).filter(file=>file.id!==intent.privatePhoto!.id)
+          : intent?.preserveDraft ? current.attachments : [],
+      busy: true, progress: "Сохраняю вопрос…", updatedAt: new Date().toISOString(),
+      title: current.rows.length ? current.title : displayPrompt.slice(0, 60),
+      // A retry re-runs the same question: the user bubble already exists.
+      rows: rerun ? current.rows : [...current.rows, { id: Crypto.randomUUID(), role: "user", text: displayPrompt, ...(attachments.length ? {attachments} : {}) }],
+    };
+}
+
+/** Prefer the explicit cursor pinned to the clicked article page; never
+ * resurrect an exhausted selection from an older page. */
+export function articleTurnContext(current: LiveConversation, articleRowId?: string) {
+      const articleSelection=[...current.rows].reverse().find(row=>
+        row.role==="assistant" && row.articlePage?.selected?.length)?.articlePage;
+      // Do not reuse an obsolete cursor if a newer article page has already
+      // exhausted the selection. An explicit button can pin its own row.
+      const latestArticleRow=[...current.rows].reverse().find(row=>
+        row.role==="assistant" && row.articlePage);
+      const articleContinuation=(articleRowId
+        ? current.rows.find(row=>row.id===articleRowId &&
+          row.role==="assistant" && row.articlePage?.nextCursor)
+        : latestArticleRow?.articlePage?.nextCursor ? latestArticleRow : undefined)?.articlePage;
+
+  return { articleSelection, articleContinuation };
 }

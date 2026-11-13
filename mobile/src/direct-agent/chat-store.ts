@@ -1,10 +1,10 @@
 import { checkedChatAttachments, MAX_CONVERSATION_FILE_BYTES, type ChatAttachment } from "./chat-attachments";
-import { historyForImageCapability, imageCapability } from "./attachment-capabilities";
+
 import * as Crypto from "expo-crypto";
-import { beginTask, mergeTaskReceipts, recordEvidence } from "./task-state";
-import { webPreference } from "./dialogue";
+import { mergeTaskReceipts, recordEvidence } from "./task-state";
+
 import { runDirectAgent } from "./engine";
-import { historyWithoutLargeDocuments, planDocumentSynthesis, runDocumentSynthesis } from "./document-synthesis";
+import { runDocumentSynthesis } from "./document-synthesis";
 import { planDialogueSummary, runDialogueSummary, type DialogueSummaryScope } from "./dialogue-summary";
 import { diagnosticTrace, redactDiagnostic } from "./diagnostics";
 import { MAX_USER_PROMPT_CHARS } from "./limits";
@@ -21,12 +21,12 @@ import { conversationRepository } from "./conversations";
 import type { ChatDraft, ConversationRepository, SavedConversation } from "./conversations";
 import type { DirectAgentSettings } from "./settings";
 import { waitForApplicationSession, onLocalMemorySessionChange } from "../local-memory/storage";
-import { localPhotoIntent83 } from "../media/vision-chat-search";
+
 
 
 
 import { rowProposal, rowReceipt } from "./proposals";
-import { buildAgentOptions } from "./agent-host";
+import { buildAgentOptions, prepareAgentDraft, prepareTurnHistory, pendingTurnPatch, articleTurnContext } from "./agent-host";
 import { assistantRowFromResult } from "./agent-result";
 
 /** `streamText` is the answer as it arrives; it is never persisted. */
@@ -224,77 +224,23 @@ export class DirectChatStore {
     if (!id || !current || current.busy || current.deleting || this.disposed ||
       (!internetPhotoId && !intent && !current.question.trim() && !current.attachments?.length) ||
       (intent && intent.conversationId!==id)) return;
-    const selected=internetPhotoId ? current.attachments?.find(f=>f.id===internetPhotoId && f.kind==="image") : undefined;
-    if(internetPhotoId && (!selected || !settings.allowWeb))return;
-    const prompt = internetPhotoId
-      ? "Найди в интернете сведения о том, что изображено на приложенной фотографии. Определи объект по фото, затем воспользуйся разрешённым веб-поиском. Ответь по-русски, приведи проверяемые факты и ссылки на реальные источники. Если изображение или поиск недоступны, сообщи об этом, не выдумывай источники."
-      : intent?.prompt || current.question.trim() || "Посмотри приложенные файлы.";
-    const displayPrompt = internetPhotoId ? "Что изображено на фото? Найти информацию в интернете" : prompt;
-    const draftFiles = checkedChatAttachments(internetPhotoId ? [selected!] :
-      intent?.preserveDraft ? [] : current.attachments);
-    const localPhotoMatch=!internetPhotoId&&!intent ? localPhotoIntent83(prompt,draftFiles):null;
-    const imageQueryFiles=localPhotoMatch?.mode==="image"
-      ? draftFiles.filter(f=>f.kind==="image") : [];
-    if(imageQueryFiles.length>1){
-      this.publish({notice:"Для поиска похожих фотографий выберите один снимок."});return;
-    }
-    const privatePhoto=intent?.privatePhoto||imageQueryFiles[0];
-    // The model is responsible for deciding which tool to call. The app only
-    // keeps image bytes out of the provider request for local-photo intents.
-    const attachments=privatePhoto
-      ? draftFiles.filter(f=>f.id!==privatePhoto.id):draftFiles;
-    let documentPlan;
-    try { documentPlan = internetPhotoId ? null : planDocumentSynthesis(attachments,settings.model); }
-    catch(e) { this.publish({error:String((e as Error).message)}); return; }
-    if(documentPlan && documentApprovalKey!==documentPlan.approvalKey) {
-      this.publish({notice:"Для отправки большого документа подтвердите объём и вызовы ИИ в окне отправки."});
-      return;
-    }
-    // All chat messages now run through the model and its allowed tools.
-    // No regex or shortcut may directly answer for photos, saved articles or
-    // a contextual "Покажи ещё".
-    // Recheck the ACTIVE model at the moment of Send (not the model selected
-    // when a draft photo was picked). Refuse known text-only routes before
-    // consuming the draft, persisting a user turn, or making a network call.
-    if (imageCapability(settings,attachments) === "unsupported") {
-      this.publish({ notice:"Выбранная модель «" + settings.model +
-        "» не принимает изображения. Фото осталось в черновике; выберите модель с поддержкой фото или уберите вложение." });
-      return;
-    }
-    if (prompt.length > MAX_USER_PROMPT_CHARS) {
-      this.publish({ error: "Сообщение длиннее 24 000 символов. Разделите его на части: текст не отправлен и не обрезан." });
-      return;
-    }
+    const drafted = prepareAgentDraft({
+      current, settings, internetPhotoId, documentApprovalKey, intent,
+      report: patch => this.publish(patch),
+    });
+    if (!drafted) return;
+    const { prompt, displayPrompt, draftFiles, privatePhoto, attachments, documentPlan } = drafted;
     const trace = diagnosticTrace(this.profile, id, Crypto.randomUUID());
     const startedAt = Date.now();
     const aborter = new AbortController();
     this.requests.set(id, aborter);
-    // A one-tap image-to-web query is a standalone purpose. Never transmit
-    // unrelated history images, private drafts or prior conversation selections.
-    const previousSources = internetPhotoId ? [] : [...current.rows].reverse().filter(r => r.role === "assistant" && r.sources?.length).slice(0, 3).flatMap(r => r.sources!).slice(0, 15);
-    const previousHistory = internetPhotoId ? [] : current.rows.filter(r => r.role !== "info").slice(-8)
-      .map(r => ({ role: r.role as "user" | "assistant", content: r.text, ...(r.attachments?.length ? {attachments:r.attachments} : {}) }));
-    // After switching to a model known to be text-only, historical photo
-    // originals stay encrypted in prior turns but are not uploaded again.
-    const history = historyForImageCapability(historyWithoutLargeDocuments(previousHistory),
-      imageCapability(settings,previousHistory.flatMap(r => r.attachments || [])));
-    const previousTaskState = internetPhotoId ? undefined : current.taskState;
-    const taskState = { ...beginTask(previousTaskState, prompt), webPreference: webPreference({ prompt, history, taskState: previousTaskState }) };
+    const { previousSources, history, taskState } = prepareTurnHistory(
+      current, settings, prompt, Boolean(internetPhotoId),
+    );
     this.publish({ error: "" });
-    const pending = this.update(id, {
-      taskState, question: (internetPhotoId||intent?.preserveDraft) ? current.question : "",
-      // Camera/selected-photo and article-more actions preserve unrelated
-      // drafts. A local query photo is never persisted as a chat attachment.
-      attachments: internetPhotoId
-        ? (current.attachments || []).filter(file=>file.id!==internetPhotoId)
-        : intent?.privatePhoto
-          ? (current.attachments||[]).filter(file=>file.id!==intent.privatePhoto!.id)
-          : intent?.preserveDraft ? current.attachments : [],
-      busy: true, progress: "Сохраняю вопрос…", updatedAt: new Date().toISOString(),
-      title: current.rows.length ? current.title : displayPrompt.slice(0, 60),
-      // A retry re-runs the same question: the user bubble already exists.
-      rows: rerun ? current.rows : [...current.rows, { id: Crypto.randomUUID(), role: "user", text: displayPrompt, ...(attachments.length ? {attachments} : {}) }],
-    })!;
+    const pending = this.update(id, pendingTurnPatch({
+      current, taskState, displayPrompt, internetPhotoId, intent, rerun, attachments,
+    }))!;
     let modelStarted = false;
     let beforeModelError = "Запрос не отправлен: не удалось сохранить историю.";
     const host = hostOf(settings.baseUrl || "https://api.openai.com/v1");
@@ -323,16 +269,7 @@ export class DirectChatStore {
       if (this.disposed || aborter.signal.aborted) throw new Error("aborted");
       if(documentPlan && documentPlan.calls>maxRequests)throw new Error("Для полного анализа требуется "+documentPlan.calls+" обращений к модели, но в настройках разрешено "+maxRequests+". Измените лимит перед отправкой.");
       modelStarted = true;
-      const articleSelection=[...current.rows].reverse().find(row=>
-        row.role==="assistant" && row.articlePage?.selected?.length)?.articlePage;
-      // Do not reuse an obsolete cursor if a newer article page has already
-      // exhausted the selection. An explicit button can pin its own row.
-      const latestArticleRow=[...current.rows].reverse().find(row=>
-        row.role==="assistant" && row.articlePage);
-      const articleContinuation=(intent?.articleRowId
-        ? current.rows.find(row=>row.id===intent.articleRowId &&
-          row.role==="assistant" && row.articlePage?.nextCursor)
-        : latestArticleRow?.articlePage?.nextCursor ? latestArticleRow : undefined)?.articlePage;
+      const { articleSelection, articleContinuation } = articleTurnContext(current, intent?.articleRowId);
       const agentOptions = buildAgentOptions({
         profile: this.profile, id, current, settings, maxRequests, prompt, attachments,
         skipLocalMemory: Boolean(internetPhotoId), history: privatePhoto
