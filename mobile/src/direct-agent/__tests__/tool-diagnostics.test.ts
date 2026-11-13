@@ -1,4 +1,4 @@
-import { diagnosticToolResultContent } from "../tool-diagnostics";
+import { diagnosticToolResultContent, diagnosticToolArguments } from "../tool-diagnostics";
 
 test("approved Inbox content is never copied to diagnostics", () => {
   const sensitive = {items:[{noteId:"n1",excerpt:"СЕКРЕТНЫЙ ТЕКСТ ИЗ ВХОДЯЩИХ"}]};
@@ -11,5 +11,14 @@ test("other tool diagnostics retain existing behavior", () => {
   expect(diagnosticToolResultContent("request_inbox_triage_access",
     {saved:false,contentRead:false})).toEqual({
     result:JSON.stringify({saved:false,contentRead:false}),
+  });
+});
+
+test("private proposal reasons/tags and read arguments do not reach diagnostic files",()=>{
+  const argumentsFromModel={items:[{noteId:"n1",reason:"PRIVATE",tags:["personal"]}]};
+  expect(diagnosticToolArguments("propose_inbox_triage",argumentsFromModel)).toBeUndefined();
+  expect(diagnosticToolArguments("list_inbox_for_triage",{limit:10,cursor:null})).toBeUndefined();
+  expect(diagnosticToolArguments("search_local_notes",{query:"hello"})).toEqual({
+    arguments:JSON.stringify({query:"hello"}),
   });
 });
