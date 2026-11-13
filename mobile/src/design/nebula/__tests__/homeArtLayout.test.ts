@@ -60,7 +60,13 @@ describe("Nebula Home keyboard and visual viewport", () => {
   });
   it("passes keyboard/focus and viewport signals without replacing any chat actions", () => {
     const root = join(__dirname, "..", "..", "..");
-    const home = readFileSync(join(root, "screens", "HomeScreen.tsx"), "utf8") + readFileSync(join(__dirname, "..", "useChatBottomFollow.ts"), "utf8");
+    const home = [
+      "screens/HomeScreen.tsx",
+      "components/chat/ChatRowView.tsx",
+      "components/chat/ChatComposer.tsx",
+      "components/chat/ChatListExtras.tsx",
+    ].map(path => readFileSync(join(root, path), "utf8")).join("\n") +
+      readFileSync(join(__dirname, "..", "useChatBottomFollow.ts"), "utf8");
     const composer = readFileSync(join(root, "components", "PromptInput.tsx"), "utf8");
     expect(home).toContain('Keyboard.addListener("keyboardDidShow"');
     expect(home).toContain('Keyboard.addListener("keyboardDidHide"');

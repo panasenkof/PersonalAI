@@ -59,6 +59,9 @@ describe("Android viewport regressions from real device recordings", () => {
       "design/nebula/ConversationHistorySheet.tsx",
       "components/BottomSheet.tsx",
       "components/PromptInput.tsx",
+      "components/chat/ChatRowView.tsx",
+      "components/chat/ChatComposer.tsx",
+      "components/chat/ChatListExtras.tsx",
     ].map(path => readFileSync(join(root, path), "utf8")).join("\n");
     const selectors = [
       "Сообщение ассистенту", "Очистить сообщение", "Отправить запрос",
