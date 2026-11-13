@@ -1,3 +1,4 @@
+import { diagnosticToolResultContent } from "./tool-diagnostics";
 import { chatContent } from "./chat-attachments";
 import type { DirectAgentOptions, DirectResult } from "./engine";
 import type { DirectAgentSettings } from "./settings";
@@ -111,7 +112,7 @@ export async function runCompatibleAgent(options: DirectAgentOptions): Promise<D
         if (!call.id || typeof call.id !== "string") throw new Error("Некорректный вызов инструмента");
         const toolResult = await catalog.run(call.name, call.input);
         options.diagnostic?.("llm.tool_result", { name: call.name, failed: "error" in toolResult,
-          chars: JSON.stringify(toolResult).length }, call.name === "list_inbox_for_triage" ? undefined : { result: JSON.stringify(toolResult) });
+          chars: JSON.stringify(toolResult).length }, diagnosticToolResultContent(call.name, toolResult));
         results.push({ type: "tool_result", tool_use_id: call.id,
           content: JSON.stringify(toolResult) });
       }
@@ -139,7 +140,7 @@ export async function runCompatibleAgent(options: DirectAgentOptions): Promise<D
         try { args = JSON.parse(call.function.arguments); } catch { args = null; }
         const toolResult = await catalog.run(call.function.name, args);
         options.diagnostic?.("llm.tool_result", { name: call.function.name, failed: "error" in toolResult,
-          chars: JSON.stringify(toolResult).length }, call.function.name === "list_inbox_for_triage" ? undefined : { result: JSON.stringify(toolResult) });
+          chars: JSON.stringify(toolResult).length }, diagnosticToolResultContent(call.function.name, toolResult));
         messages.push({ role: "tool", tool_call_id: call.id,
           content: JSON.stringify(toolResult) });
       }
