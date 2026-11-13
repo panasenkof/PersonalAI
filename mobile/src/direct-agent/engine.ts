@@ -22,6 +22,7 @@ import type { ChatArticlePage, ChatArticleReadReport, ChatMemoryRef } from "./co
 import type { ChatMoveProposal, MoveRequest } from "./move-proposal";
 import type { InboxTriageApproval, InboxTriagePage } from "./inbox-triage";
 import type { InboxTriageProposal } from "./inbox-triage-proposal";
+import type { VerifiedDuplicateMergeRequest } from "./duplicate-merge-gate";
 import type { DuplicateCandidatesPage, DuplicateMatchKind } from "../local-memory/agent-catalog";
 import type { SectionActionRequest, ChatSectionProposal } from "./section-actions";
 import type { ContextCandidate, ConversationContext } from "./conversation-context";
@@ -33,7 +34,7 @@ export type AgentTurn = { role: "user" | "assistant"; content: string; attachmen
 export type DirectResult = { text: string; sources: string[]; requests: number; notice?: string;
   memory?: Array<UsedNote | ChatMemoryRef>; photoAction?: "model" | "import" | "prepare";
   taskState?: TaskState; proposalIds?: string[]; articlePage?: ChatArticlePage; articleReadReport?: ChatArticleReadReport;
-  moveProposal?: ChatMoveProposal; sectionProposal?: ChatSectionProposal; inboxApproval?: InboxTriageApproval; inboxTriageProposal?: InboxTriageProposal; contextCandidate?: ContextCandidate; importTags?: string[] };
+  moveProposal?: ChatMoveProposal; sectionProposal?: ChatSectionProposal; inboxApproval?: InboxTriageApproval; inboxTriageProposal?: InboxTriageProposal; duplicateMergeProposal?: VerifiedDuplicateMergeRequest; contextCandidate?: ContextCandidate; importTags?: string[] };
 
 export type DirectAgentOptions = {
   settings: DirectAgentSettings;
