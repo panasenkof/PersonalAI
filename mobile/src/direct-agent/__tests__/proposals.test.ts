@@ -46,7 +46,7 @@ const assistant = (part: Partial<ChatRow> = {}): ChatRow =>
 beforeEach(() => jest.clearAllMocks());
 
 test("ARCH-4a: one registry and section-first proposal detection; no authorization for user rows", () => {
-  expect(proposalHandlers.map(x => x.kind)).toEqual(["section", "inbox_triage", "move_note"]);
+  expect(proposalHandlers.map(x => x.kind)).toEqual(["section", "inbox_triage", "merge_notes", "move_note"]);
   const row = assistant({ moveProposal: move, sectionProposal: sectionCreate });
   const selected = rowProposal(row);
   expect(selected).toEqual({ handler: sectionHandler, proposal: sectionCreate });
