@@ -144,13 +144,23 @@ export function buildSystemPrompt(input: {
     const lookupNames = ["search_local_notes", "list_local_notes"].filter(name => active.has(name));
     const workspaceNames = ["workspace_put", "workspace_list", "workspace_get", "workspace_clear"]
       .filter(name => active.has(name));
-    const preciseText = actualText
+    // Provenance discipline is shared by every memory-reading tool, not only
+    // the extracted-source reader. Keep the legacy ARCH-0 literal untouched.
+    const preciseText = actualText.replace(PROVENANCE_CITATIONS, "")
       .replace("search_local_notes/list_local_notes",
         lookupNames.length ? lookupNames.join(" или ") : "search_local_notes/list_local_notes")
       .replace("workspace_put/list/get/clear",
         workspaceNames.length ? workspaceNames.join(", ") : "workspace_put/list/get/clear");
     if (preciseText) pieces.push(availableSentences(preciseText, active));
   }
+  // Citation and coverage claims must remain verifiable even when only the
+  // basic memory search is enabled and extracted-source tools are absent.
+  const readsMemory = [
+    "search_local_notes", "read_local_note", "read_local_source_segment",
+    "search_local_source_segments", "list_local_sources",
+    "read_selected_local_articles", "read_selected_article_chunk",
+  ].some(name => active.has(name));
+  if (readsMemory) pieces.push(PROVENANCE_CITATIONS);
   // Dialogue contains tool-specific clauses (including read_web_page and
   // update_task_state); never attach the unfiltered guide to minimal catalog.
   // The historical dialogue guide lists BOTH web tool spellings. Never drop
