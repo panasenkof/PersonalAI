@@ -84,6 +84,13 @@ export function ChatProposalCards({ row, busy, working, onConfirm, onDismiss, on
   const proposed = rowProposal(row);
   const receipt = rowReceipt(row);
   return <>
+    {row.inboxApproval ? <ProposalCard
+      view={{heading:"Разрешить разбор «Входящих»?",
+        lines:[row.inboxApproval.label],
+        note:"После подтверждения выбранной модели будет передано не более "+row.inboxApproval.limit+" записей: заголовок, до 600 символов текста и теги каждой. Без вашего согласия записи не читаются. Сейчас никаких изменений в памяти не выполняется.",
+        confirmLabel:"Разрешить разбор",confirmIcon:"check",danger:false}}
+      busy={busy} working={working} onConfirm={onConfirm} onDismiss={onDismiss}
+      onOpenNote={onOpenNote} /> : null}
     {proposed ? <ProposalCard view={proposed.handler.present(proposed.proposal)}
       busy={busy} working={working} onConfirm={onConfirm}
       onDismiss={onDismiss} onOpenNote={onOpenNote} /> : null}

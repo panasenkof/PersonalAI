@@ -32,6 +32,7 @@ export function assistantRowFromResult(
       ...(result.photoAction ? { photoAction: result.photoAction } : {}),
       ...(result.moveProposal ? { moveProposal: result.moveProposal } : {}),
       ...(result.sectionProposal ? { sectionProposal: result.sectionProposal } : {}),
+      ...(result.inboxApproval ? { inboxApproval: result.inboxApproval } : {}),
       ...(result.articlePage ? { articlePage: result.articlePage } : {}),
       ...(result.articleReadReport ? { articleReadReport: result.articleReadReport } : {}),
       ...(applied?.change ? { contextChange: applied.change } : {}),

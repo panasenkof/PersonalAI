@@ -11,6 +11,7 @@ import { photoTools } from "./photo-tools";
 import { articleTools } from "./article-tools";
 import { proposalTools } from "./proposal-tools";
 import { conversationTools } from "./conversation-tools";
+import { inboxTriageTools } from "./inbox-tools";
 import { createTurnState } from "./turn-state";
 import { text } from "./helpers";
 export type { ToolDefinition, ToolSpec } from "./types";
@@ -22,6 +23,7 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
   const memory = memoryTools(options,turn);
   const proposals = proposalTools(options,turn);
   const conversations = conversationTools(options,turn);
+  const inbox = inboxTriageTools(options);
   const specs: ToolSpec[] = [
     ...(options.contextClassificationEnabled ? [conversations.contextTool] : []),
     memory.search,
@@ -34,6 +36,7 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
     // SAME canonical chat ToolSpec registry as memory search, note drafts and moves.
     // The model never executes a section write: it only stages a card for a user tap.
     ...proposals.section,
+    ...inbox.specs,
     proposals.draft,
     conversations.taskTool,
     ...conversations.workspace,
@@ -53,6 +56,9 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
   // The host must separately authorize transmission before setting contextOnly.
   const activeSpecs = options.contextOnly
     ? options.importTagsEnabled ? [conversations.importMetadataTool] : specs.filter(s => s.definition.name === "set_conversation_context")
+    // An authorized private turn must not advertise web, drafting, memory
+    // search, workspaces, external actions or any other tool.
+    : options.listInboxForTriage ? specs.filter(s => s.definition.name === "list_inbox_for_triage")
     : specs;
   const registry = new Map(activeSpecs.map(s => [s.definition.name, s]));
   emit();
@@ -81,6 +87,7 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
     // A coverage snapshot is valid ONLY for this model turn. Do not persist it
     // as task evidence that a later turn could mistake for a reauthorized read.
     if (outcome !== "state_updated" &&
+        canonical !== "list_inbox_for_triage" && // private text must never be persisted to TaskState
         canonical !== "selected_article_read_coverage" &&
         canonical !== "search_local_photos")
       observe({ tool: canonical, outcome,
@@ -89,7 +96,7 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
     options.diagnostic?.("tool.outcome_verified", { name: canonical, effect: spec?.effect || "unknown", outcome });
     return { ...result, ...(outcome !== "failed" ? { outcome } : {}) };
   }
-  function finish(): Pick<DirectResult, "taskState" | "proposalIds" | "articlePage" | "articleReadReport" | "photoAction" | "moveProposal" | "sectionProposal" | "contextCandidate" | "importTags"> {
+  function finish(): Pick<DirectResult, "taskState" | "proposalIds" | "articlePage" | "articleReadReport" | "photoAction" | "moveProposal" | "sectionProposal" | "inboxApproval" | "contextCandidate" | "importTags"> {
     turn.state = { ...turn.state, turnStatus: "answered" }; emit();
     const selected = !turn.mixedArticleFilters && turn.usedSelectedArticleTool ? selectedArticleHandles() : undefined;
     const checked = selected && articleCoverage.summary(selected);
@@ -119,6 +126,7 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
       ...(!photoMatches.length && turn.photoRecovery ? {photoAction:turn.photoRecovery} : {}),
       ...(turn.movePreview ? {moveProposal:turn.movePreview} : {}),
       ...(turn.sectionPreview ? {sectionProposal:turn.sectionPreview} : {}),
+      ...(inbox.approval() ? {inboxApproval:inbox.approval()} : {}),
       ...(turn.contextCandidate ? {contextCandidate:turn.contextCandidate} : {}),
       ...(turn.importTagsCandidate !== undefined ? {importTags:turn.importTagsCandidate} : {}) };
   }
