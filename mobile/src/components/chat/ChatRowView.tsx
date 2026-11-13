@@ -3,6 +3,7 @@ import Feather from "@expo/vector-icons/Feather";
 import { Pressable, Text, View } from "react-native";
 import type { PresentedChatRow } from "../../design/nebula/chatPresentation";
 import type { LiveConversation } from "../../direct-agent/chat-store";
+import type { DirectAgentSettings } from "../../direct-agent/settings";
 import type { useTheme } from "../../theme";
 import { MarkdownText } from "../Markdown";
 import { NebulaAction } from "../../design/nebula/components";
@@ -32,7 +33,7 @@ function sourceParts(url: string) {
 
 /** One existing bubble; layout and all callbacks remain owned by HomeScreen. */
 export function ChatRowView({
-  item, t, profile, photoResultCount, ready, busy, canSend, retryPhoto, movingRowId,
+  item, t, profile, photoResultCount, ready, busy, canSend, settings, retryPhoto, movingRowId,
   onSaveReply, onOpenNote, onRetryRequest, onRetryPhoto, onPhotoAction,
   onConfirmProposal, onDismissProposal, onUndoProposal, onContinueArticles, onOpenSource,
 }: {
@@ -43,6 +44,7 @@ export function ChatRowView({
   ready: boolean;
   busy: boolean;
   canSend: boolean;
+  settings: DirectAgentSettings | null;
   retryPhoto?: LiveConversation["retryPhoto"];
   movingRowId?: string;
   onSaveReply: (rowId: string) => void;
@@ -114,7 +116,7 @@ export function ChatRowView({
           {item.memory.some(m => m.photo) ? <PhotoSearchResults key={item.id} profile={profile} results={item.memory.filter(m=>m.photo)} limit={photoResultCount}
             onOpen={(result, original) => onOpenNote(result.id, original ? result.photoAttachmentId : undefined)} /> : null}
           {item.memory.filter(m=>!m.photo && !item.articleReadReport?.entries.some(e=>e.id===m.id)).map(m => <Pressable key={m.id} accessibilityRole="link" accessibilityLabel={"Открыть запись " + m.title}
-              onPress={() => navigation.navigate("MemoryNote", {entityId:m.id})} style={{minHeight:48,justifyContent:"center"}}>
+              onPress={() => onOpenNote(m.id)} style={{minHeight:48,justifyContent:"center"}}>
               <Text style={{color:t.accent}}>{m.title}<Text style={{color:t.muted,fontSize:12}}>{(m.section ? " · " + m.section : "") + (m.via === "rewrite" ? " · найдено другими словами" : m.via === "assistant" ? " · нашёл помощник" : "")}</Text></Text>
             </Pressable>)}
         </View> : null}

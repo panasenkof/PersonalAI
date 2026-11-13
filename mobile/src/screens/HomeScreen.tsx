@@ -398,11 +398,11 @@ function NebulaHomeContent() {
       </View> : null}
       renderItem={({ item }) => <ChatRowView
         item={item} t={t} profile={profile} photoResultCount={photoResultCount}
-        ready={ready} busy={busy} canSend={canSend}
+        ready={ready} busy={busy} canSend={canSend} settings={settings}
         retryPhoto={active?.retryPhoto} movingRowId={active?.movingRowId}
         onSaveReply={saveReplyToNotes}
         onOpenNote={(noteId, photoAttachmentId) => navigation.navigate("MemoryNote",
-          {entityId:noteId, photoAttachmentId})}
+          {entityId:noteId, ...(photoAttachmentId ? {photoAttachmentId} : {})})}
         onRetryRequest={() => { if (settings) void store.retry(settings); }}
         onRetryPhoto={() => { if (settings && active?.retryPhoto)
           void store.searchPhotosWithAgent(settings, active.retryPhoto.image, active.id); }}
