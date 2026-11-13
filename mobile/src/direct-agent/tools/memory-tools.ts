@@ -6,7 +6,7 @@ import { queryParameters, text } from "./helpers";
 /** ARCH-2: note search/read/list/count still use the same host ACL readers. */
 export function memoryTools(
   options: DirectAgentOptions, turn: TurnState,
-): {search:ToolSpec;read:ToolSpec[];listing:ToolSpec[]} {
+): {search:ToolSpec;read:ToolSpec[];listing:ToolSpec[];duplicates:ToolSpec[]} {
   const {web, used, readNotes, admitMoveHandle} = turn;
   const searchSpecs:ToolSpec[] = [
     { definition: { name: "search_local_notes", description: "Найти заметки на телефоне по 1–3 ключевым словам. Найденный фрагмент не является полным чтением записи.", parameters: queryParameters }, effect: "read",
@@ -104,5 +104,41 @@ export function memoryTools(
         r.scope === "standard_active_notes" ? "read" as const : "failed" as const,
     }] : []),
   ];
-  return {search:searchSpecs[0],read:readSpecs,listing:listingSpecs};
+  const duplicates:ToolSpec[] = options.findDuplicates && !options.skipLocalMemory ? [{
+    definition:{
+      name:"find_duplicate_candidates",
+      description:"Найти только точные дубли активных обычных заметок на телефоне: одинаковый source_url или SHA-256 нормализованного текста. Возвращает до 10 групп (2–5 записей), версии, названия, количество вложений и тегов; без текстов и без изменения записей. incomplete/partial не являются исчерпывающим результатом. Для объединения понадобится отдельное предложение и подтверждение пользователя.",
+      parameters:{type:"object",properties:{
+        kind:{type:"string",enum:["same_url","same_text"],
+          description:"same_url — точное совпадение адреса; same_text — совпадение текста после нормализации регистра/пробелов"},
+        limit:{type:"integer",minimum:1,maximum:10},
+      },required:["kind","limit"],additionalProperties:false},
+    },
+    effect:"read" as const,
+    execute:async args=>{
+      if(Object.keys(args).sort().join(",")!=="kind,limit" ||
+         (args.kind!=="same_url" && args.kind!=="same_text") ||
+         !Number.isSafeInteger(args.limit) || Number(args.limit)<1 || Number(args.limit)>10)
+        return {error:"invalid_duplicate_candidate_arguments"};
+      if(options.signal?.aborted)throw new Error("aborted");
+      options.status?.("Ищу точные дубли в памяти");
+      const page=await options.findDuplicates!(args.kind as "same_url"|"same_text",args.limit as number);
+      if(options.signal?.aborted)throw new Error("aborted");
+      if(page.scope!=="standard_active_notes" || page.kind!==args.kind ||
+         !Array.isArray(page.groups) || page.groups.length>Number(args.limit) ||
+         page.contentIncluded!==false || typeof page.partial!=="boolean" ||
+         typeof page.hasMoreGroups!=="boolean" ||
+         !Number.isSafeInteger(page.scanned) || page.scanned<0 ||
+         page.groups.some(group=>!group || !Array.isArray(group.records) ||
+           group.records.length<2 || group.records.length>5 ||
+           !Number.isSafeInteger(group.totalCount) ||
+           group.totalCount<group.records.length || typeof group.complete!=="boolean" ||
+           group.complete && group.totalCount!==group.records.length))
+        return {error:"invalid_duplicate_candidate_result"};
+      return page;
+    },
+    verify:r=>Array.isArray(r.groups) && r.scope==="standard_active_notes" ?
+      r.groups.length ? "found" as const : "empty" as const : "failed" as const,
+  }] : [];
+  return {search:searchSpecs[0],read:readSpecs,listing:listingSpecs,duplicates};
 }
