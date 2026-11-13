@@ -6,7 +6,8 @@ import React from "react";
 import Feather from "@expo/vector-icons/Feather";
 import { Pressable, Text, View } from "react-native";
 import { NebulaAction } from "../design/nebula/components";
-import type { ProposalCardView, ProposalKind, ReceiptView } from "../direct-agent/proposals";
+import type { ChatRow } from "../direct-agent/conversations";
+import { rowProposal, rowReceipt, type ProposalCardView, type ProposalKind, type ReceiptView } from "../direct-agent/proposals";
 import { useTheme } from "../theme";
 
 export function ProposalCard({ view, busy, working, onConfirm, onDismiss, onOpenNote }: {
@@ -67,4 +68,26 @@ export function ReceiptLine({ view, kind, busy, working, onUndo }: {
       <NebulaAction icon="rotate-ccw" label={working ? "Отмена…" : "Отменить перенос"}
         size="compact" disabled={busy} onPress={onUndo} /> : null}
   </View>;
+}
+
+
+/** One entry point for both persisted proposal kinds in every assistant row. */
+export function ChatProposalCards({ row, busy, working, onConfirm, onDismiss, onUndo, onOpenNote }: {
+  row: ChatRow;
+  busy: boolean;
+  working: boolean;
+  onConfirm: () => void;
+  onDismiss: () => void;
+  onUndo: () => void;
+  onOpenNote: (id: string) => void;
+}) {
+  const proposed = rowProposal(row);
+  const receipt = rowReceipt(row);
+  return <>
+    {proposed ? <ProposalCard view={proposed.handler.present(proposed.proposal)}
+      busy={busy} working={working} onConfirm={onConfirm}
+      onDismiss={onDismiss} onOpenNote={onOpenNote} /> : null}
+    {receipt ? <ReceiptLine view={receipt.handler.presentReceipt(receipt.receipt)}
+      kind={receipt.handler.kind} busy={busy} working={working} onUndo={onUndo} /> : null}
+  </>;
 }
