@@ -1,6 +1,4 @@
 import { BottomSheet } from "../components/BottomSheet";
-import { ChatAttachmentList } from "../media/ChatAttachmentList";
-import { ChatAttachmentIssues } from "../media/ChatAttachmentIssues";
 import Feather from "@expo/vector-icons/Feather";
 import { useChatAttachments } from "../media/useChatAttachments";
 import { capturePhotoDraft83, discardCameraPhotoDraft83, stageChatImageForNote83 } from "../media/vision-chat-camera";
@@ -9,9 +7,7 @@ import { planDocumentSynthesis } from "../direct-agent/document-synthesis";
 import { loadModelCallLimit } from "../direct-agent/agent-preferences";
 import { imageCapability } from "../direct-agent/attachment-capabilities";
 import type { ChatAttachment } from "../direct-agent/chat-attachments";
-import { PhotoSearchResults } from "../media/PhotoSearchResults";
 import { loadPhotoResultCount, DEFAULT_PHOTO_RESULT_COUNT } from "../media/photo-result-preferences";
-import { PhotoContextActions } from "../media/PhotoContextActions";
 import { memoryErrorMessage } from "../local-memory/errors";
 import { onLocalMemorySessionChange } from "../local-memory/storage";
 import { useFocusEffect, useIsFocused, useNavigation } from "@react-navigation/native";
@@ -22,14 +18,13 @@ import { ActivityIndicator, Alert, FlatList, Image, Keyboard, KeyboardAvoidingVi
 import { useProfile } from "../profile/ProfileContext";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useDirectChat } from "../direct-agent/ChatContext";
-import { contextChangeLabel } from "../direct-agent/conversation-context";
-import { PROVIDER_PRESETS, anonymousLocalAllowed, loadDirectConnections, searchKeyOf } from "../direct-agent/settings";
+import { anonymousLocalAllowed, loadDirectConnections, searchKeyOf } from "../direct-agent/settings";
 import { searchProviderOf } from "../direct-agent/web-search";
 import type { DirectAgentSettings } from "../direct-agent/settings";
 import type { RootStackParams } from "../navigation";
 import { NebulaHomeHeader } from "../design/nebula/NebulaHomeHeader";
 import { ConversationHistorySheet } from "../design/nebula/ConversationHistorySheet";
-import { NebulaHomeArtwork } from "../design/nebula/NebulaHomeArtwork";
+import { ChatDraftFooter, ChatEmptyState } from "../components/chat/ChatListExtras";
 import { nebulaEmptyOrbSize } from "../design/nebula/homeArtLayout";
 import { resolveNebulaHomePhase, resolveNebulaStatus, type NebulaVoicePhase } from "../design/nebula/homePhase";
 import type { CellRendererProps } from "react-native";
@@ -37,40 +32,16 @@ import { presentChatRows, type PresentedChatRow } from "../design/nebula/chatPre
 import { nebulaSpacing, nebulaTouch } from "../design/nebula/tokens";
 import { NebulaAction } from "../design/nebula/components";
 import { useChatBottomFollow } from "../design/nebula/useChatBottomFollow";
-import { VoiceInput } from "../components/VoiceInput";
 import { showDraftImprove, useVoiceEngine } from "../media/voice-engine";
-import { IconAction } from "../components/IconAction";
-import { ArticleReadSources } from "../components/ArticleReadSources";
-import { ChatProposalCards } from "../components/ProposalCard";
-import { PromptInput } from "../components/PromptInput";
+import { ChatRowView } from "../components/chat/ChatRowView";
+import { ChatComposer } from "../components/chat/ChatComposer";
 import { NebulaHomeThemeProvider, useTheme } from "../theme";
-import { MarkdownText } from "../components/Markdown";
-import { KIND_NAMES } from "../direct-agent/fact-tool";
 import { useDraftNormalization } from "../direct-agent/use-draft-normalization";
 import { prepareAssistantReplyNote } from "../direct-agent/chat-response-note";
 import { planDialogueSummary, type DialogueSummaryScope } from "../direct-agent/dialogue-summary";
-
 export function HomeScreen() {
   return <NebulaHomeThemeProvider><NebulaHomeContent /></NebulaHomeThemeProvider>;
 }
-
-/** A failed turn carries a raw transport tail after "Системное сообщение:".
- * The bubble shows only the human part; the full text stays in diagnostics. */
-function errorHeadline(text: string) {
-  return text.split(/Системное сообщение:/i)[0].trim();
-}
-
-/** One source line: domain first, path muted and truncated by numberOfLines. */
-function sourceParts(url: string) {
-  try {
-    const parsed = new URL(url);
-    const rest = (parsed.pathname === "/" ? "" : parsed.pathname) + (parsed.search ? "?" + parsed.search.slice(1, 40) : "");
-    return { domain: parsed.hostname.replace(/^www\./, ""), rest };
-  } catch {
-    return { domain: url, rest: "" };
-  }
-}
-
 function NebulaHomeContent() {
   const t = useTheme();
   const isFocused = useIsFocused();
@@ -393,130 +364,30 @@ function NebulaHomeContent() {
       onContentSizeChange={viewport.onContent}
        onScrollToIndexFailed={viewport.onScrollToIndexFailed}
       contentContainerStyle={{ padding: nebulaSpacing.md, paddingBottom: active?.rows.length ? nebulaTouch.minimum + nebulaSpacing.xxl : nebulaSpacing.md, gap: nebulaSpacing.sm, flexGrow: 1 }}
-      ListEmptyComponent={ready && needsSetup ? <View style={{ flex: 1, justifyContent: "center", gap: 14, paddingVertical: 12 }}>
-        <View style={{ alignItems: "center", gap: 10 }}><NebulaHomeArtwork size={136} phase={orbPhase} />
-          <Text style={{ color: t.text, fontSize: 26, fontWeight: "800", textAlign: "center" }}>Подключите модель</Text>
-          <Text style={{ color: t.muted, lineHeight: 21, textAlign: "center", maxWidth: 340 }}>PersAI работает с моделью, которую выбираете вы. Память и диалоги остаются на телефоне.</Text></View>
-        <View style={{ backgroundColor: t.panel, borderWidth: 1, borderColor: t.line, borderRadius: 18, padding: 16, gap: 6 }}>
-          {["1. Выберите сервис", "2. Вставьте ключ API", "3. Нажмите «Проверить связь» и сохраните", "4. Задайте первый вопрос"].map(step =>
-            <Text key={step} style={{ color: t.text, lineHeight: 22 }}>{step}</Text>)}
-        </View>
-        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>
-          {PROVIDER_PRESETS.slice(0, 4).map(p => <Pressable key={p.id} accessibilityRole="button" accessibilityLabel={"Начать с " + p.name}
-            style={{ flexBasis: "45%", flexGrow: 1, minHeight: 56, justifyContent: "center", backgroundColor: t.panel, borderWidth: 1, borderColor: t.accent, borderRadius: 16, padding: 12 }}
-            onPress={() => openConnections(p.id)}><Text style={{ color: t.accent, fontWeight: "700" }}>{p.name}</Text></Pressable>)}
-        </View>
-        <NebulaAction icon="settings" label="Другие варианты подключения"
-          accessibilityLabel="Другие варианты, включая OpenAI и Anthropic"
-          onPress={() => openConnections()} />
-      </View> : ready && !busy ? <View testID="nebula-home-empty-state"
-        style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 12 }}>
-        {artworkSize > 0 ? <NebulaHomeArtwork size={artworkSize} phase={orbPhase} /> : null}
-      </View> : null}
-      renderItem={({ item }) => <View testID={"chat-message-" + item.role} accessibilityLiveRegion={item.streaming ? "polite" : undefined} style={{ alignSelf: item.role === "user" ? "flex-end" : "stretch", backgroundColor: item.role === "user" ? t.userBubble : item.role === "info" ? t.soft : t.panel,
-        borderWidth: item.role === "assistant" ? 1 : 0, borderColor: t.line, borderRadius: 20, padding: 15, gap: 10 }}>
-        {item.role === "assistant" ? <Pressable
-          disabled={Boolean(item.streaming)}
-          delayLongPress={430}
-          accessibilityRole="button"
-          accessibilityLabel="Ответ ИИ. Долгое нажатие: сохранить в заметки"
-          accessibilityHint="Долгое нажатие открывает черновик заметки без отправки в сеть"
-          accessibilityActions={[{ name: "longpress", label: "Сохранить ответ в заметки" }]}
-          onAccessibilityAction={event => {
-            if(event.nativeEvent.actionName === "longpress" && !item.streaming)
-              saveReplyToNotes(item.id);
-          }}
-          onLongPress={() => {if(!item.streaming)saveReplyToNotes(item.id);}}>
-          <MarkdownText text={item.text} style={{ color: t.text, lineHeight: 23 }}
-            articleReadReport={item.articleReadReport}
-            onArticleSourcePress={noteId=>navigation.navigate("MemoryNote",{entityId:noteId})} />
-        </Pressable> :
-        (item.role === "info" && item.error ? <View style={{ gap: 10 }}>
-          <View style={{ flexDirection: "row", gap: 8, alignItems: "flex-start" }}>
-            <Feather name="alert-triangle" size={16} color={t.err} style={{ marginTop: 2 }} />
-            <Text selectable accessibilityRole="alert" style={{ flex: 1, color: t.err, lineHeight: 21 }}>{errorHeadline(item.text)}</Text>
-          </View>
-          {ready && !busy && settings ? <View style={{ alignSelf: "flex-start" }}>
-            <NebulaAction icon="refresh-cw" label="Повторить" size="compact" accessibilityLabel="Повторить последний запрос"
-              onPress={() => void store.retry(settings)} />
-          </View> : null}
-        </View> :
-          <Text selectable style={{ color: item.role === "user" ? t.userText : item.role === "info" ? t.muted : t.text, lineHeight: 23 }}>{item.text}</Text>)}
-        {item.role === "assistant" && !item.streaming && item.contextChange ? <Text
-          testID="chat-context-change" accessibilityRole="text"
-          style={{color:t.secondary,fontSize:12,lineHeight:18}}>{contextChangeLabel(item.contextChange)}</Text> : null}
-        {item.role === "assistant" && !item.streaming && item.text.trim() ? <View style={{ alignSelf: "flex-end", borderWidth: 1, borderColor: t.line, backgroundColor: t.soft, borderRadius: 15 }}>
-          <IconAction compact explainOnTap={false} icon="bookmark" label="Сохранить ответ"
-            accessibilityLabel="Сохранить ответ в заметки" hint="Открыть черновик заметки без нового запроса ИИ"
-            onPress={() => saveReplyToNotes(item.id)} />
-        </View> : null}
-        {active?.retryPhoto?.rowId === item.id && active?.retryPhoto ?
-          <NebulaAction icon="refresh-cw" label="Повторить поиск по фото" size="compact"
-            disabled={busy || !canSend} onPress={() => settings &&
-              void store.searchPhotosWithAgent(settings,active.retryPhoto!.image,active.id)} /> : null}
-        {item.photoAction ? <NebulaAction
-          icon={item.photoAction === "import" ? "plus-circle" : "settings"}
-          label={item.photoAction === "model" ? "Выбрать модель" : item.photoAction === "import" ? "Добавить фото в память" : "Подготовить фото"}
-          onPress={() => item.photoAction === "import" ? navigation.navigate("MemoryImport", {source:"photo"}) : navigation.navigate("PhotoSearchSettings")} /> : null}
-        {item.role === "assistant" && !item.streaming ?
-          <ChatProposalCards row={item}
-            busy={busy || Boolean(active?.movingRowId)}
-            working={active?.movingRowId === item.id}
-            onConfirm={() => void store.confirmProposal(item.id)}
-            onDismiss={() => store.dismissProposal(item.id)}
-            onUndo={() => void store.undoProposal(item.id)}
-            onOpenNote={id => navigation.navigate("MemoryNote", {entityId:id})} /> : null}
-        {item.attachments?.length ? <ChatAttachmentList files={item.attachments}/> : null}
-        {item.memory?.filter(m=>m.photo || !item.articleReadReport?.entries.some(e=>e.id===m.id)).length ?
-          <View style={{ gap: 4 }}><Text style={{ color: t.muted, fontSize: 12 }}>Из памяти</Text>
-          {item.memory.some(m => m.photo) ? <PhotoSearchResults key={item.id} profile={profile} results={item.memory.filter(m=>m.photo)} limit={photoResultCount}
-            onOpen={(result, original) => navigation.navigate("MemoryNote", {entityId:result.id, photoAttachmentId:original ? result.photoAttachmentId : undefined})} /> : null}
-          {item.memory.filter(m=>!m.photo && !item.articleReadReport?.entries.some(e=>e.id===m.id)).map(m => <Pressable key={m.id} accessibilityRole="link" accessibilityLabel={"Открыть запись " + m.title}
-              onPress={() => navigation.navigate("MemoryNote", {entityId:m.id})} style={{minHeight:48,justifyContent:"center"}}>
-              <Text style={{color:t.accent}}>{m.title}<Text style={{color:t.muted,fontSize:12}}>{(m.section ? " · " + m.section : "") + (m.via === "rewrite" ? " · найдено другими словами" : m.via === "assistant" ? " · нашёл помощник" : "")}</Text></Text>
-            </Pressable>)}
-        </View> : null}
-        {item.role === "assistant" && !item.streaming && item.articleReadReport ?
-          <ArticleReadSources report={item.articleReadReport} answerText={item.text}
-            onOpen={noteId=>navigation.navigate("MemoryNote",{entityId:noteId})} /> : null}
-        {item.role === "assistant" && !item.streaming && item.articlePage?.nextCursor ?
-          <View style={{ alignSelf: "flex-start" }}>
-            <NebulaAction icon="chevron-down" label="Показать ещё" size="compact"
-              accessibilityLabel="Показать следующую страницу сохранённых материалов"
-              disabled={busy || !canSend} onPress={() => settings &&
-                void store.continueArticlesWithAgent(settings,item.id)} />
-          </View> : null}
-        {item.sources?.length ? <View style={{ gap: 2 }}><Text style={{ color: t.muted, fontSize: 12 }}>Источники</Text>{item.sources.map(url => {
-          const part = sourceParts(url);
-          return <Pressable key={url} accessibilityRole="link" accessibilityLabel={"Открыть источник " + part.domain}
-            onPress={() => void Linking.openURL(url).catch(() => setNotice("Не удалось открыть ссылку."))}
-            style={{ minHeight: 48, justifyContent: "center" }}>
-            <Text numberOfLines={1} style={{ color: t.accent }}>{part.domain}<Text style={{ color: t.muted }}>{part.rest}</Text></Text>
-          </Pressable>;
-        })}</View> : null}
-      </View>}
-      ListFooterComponent={<View style={{ gap: 10 }}>
-        {active?.drafts.map(d => <View key={d.id} style={{ backgroundColor: t.panel, borderWidth: 1, borderColor: t.accent, borderRadius: 20, padding: 16, gap: 8 }}>
-          <Text style={{ color: t.accent, fontWeight: "700" }}>Запомнить?</Text><Text selectable style={{ color: t.text, fontWeight: "700" }}>{d.title}</Text><Text selectable style={{ color: t.text }}>{d.body}</Text>
-          {d.kind || d.person || d.date ? <Text style={{ color: t.muted, fontSize: 13 }}>{[d.kind ? KIND_NAMES[d.kind] : "", d.person ? (d.kind === "person" ? "имя: " : "о ком: ") + d.person : "", d.date ? "дата: " + new Date(d.date + "T00:00:00").toLocaleDateString() : ""].filter(Boolean).join(" · ")}</Text> : null}
-          <Text style={{ color: t.muted, fontSize: 12 }}>Раздел</Text>
-          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-            {[...sections.map(x => ({ key: x.slug, slug: x.slug as string | null, name: x.name, label: "Сохранить в раздел " + x.name })),
-              ...(d.newSection && !sections.some(x => x.name.toLowerCase() === d.newSection!.toLowerCase()) ? [{ key: "new", slug: null, name: "+ Новый раздел «" + d.newSection + "»", label: "Создать раздел " + d.newSection + " и сохранить в него" }] : [])]
-              .map(x => { const chosen = x.slug ? (d.section || (d.newSection ? "" : "notes")) === x.slug : !d.section; return <Pressable key={x.key} accessibilityRole="button"
-              accessibilityLabel={x.label} accessibilityState={{ selected: chosen }} aria-selected={chosen} disabled={Boolean(active.savingDraft)} onPress={() => store.setDraftSection(d, x.slug)}
-              style={{ minHeight: 36, paddingHorizontal: 10, justifyContent: "center", borderRadius: 12, borderWidth: 1, borderColor: chosen ? t.accent : t.line, backgroundColor: chosen ? t.soft : t.panel }}>
-              <Text style={{ color: chosen ? t.accent : t.text, fontSize: 13 }}>{x.name}</Text></Pressable>; })}
-          </View>
-          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: nebulaSpacing.sm }}>
-            <NebulaAction icon="check" label={active.savingDraft === d.id ? "Сохранение…" : "Сохранить"}
-              variant="primary" disabled={Boolean(active.savingDraft)} onPress={() => void store.approve(d)} />
-            <NebulaAction icon="x" label="Отклонить" size="compact" disabled={Boolean(active.savingDraft)}
-              onPress={() => store.dismiss(d)} />
-          </View>
-        </View>)}
-
-      </View>}
+      ListEmptyComponent={<ChatEmptyState ready={ready} needsSetup={needsSetup} busy={busy}
+        orbPhase={orbPhase} artworkSize={artworkSize} t={t} onOpenConnections={openConnections} />}
+      renderItem={({ item }) => <ChatRowView
+        item={item} t={t} profile={profile} photoResultCount={photoResultCount}
+        ready={ready} busy={busy} canSend={canSend} settings={settings}
+        retryPhoto={active?.retryPhoto} movingRowId={active?.movingRowId}
+        onSaveReply={saveReplyToNotes}
+        onOpenNote={(noteId, photoAttachmentId) => navigation.navigate("MemoryNote",
+          {entityId:noteId, ...(photoAttachmentId ? {photoAttachmentId} : {})})}
+        onRetryRequest={() => { if (settings) void store.retry(settings); }}
+        onRetryPhoto={() => { if (settings && active?.retryPhoto)
+          void store.searchPhotosWithAgent(settings, active.retryPhoto.image, active.id); }}
+        onPhotoAction={action => action === "import" ? navigation.navigate("MemoryImport", {source:"photo"}) : navigation.navigate("PhotoSearchSettings")}
+        onConfirmProposal={rowId => { void store.confirmProposal(rowId); }}
+        onDismissProposal={rowId => store.dismissProposal(rowId)}
+        onUndoProposal={rowId => { void store.undoProposal(rowId); }}
+        onContinueArticles={rowId => { if (settings) void store.continueArticlesWithAgent(settings,rowId); }}
+        onOpenSource={url => { void Linking.openURL(url).catch(() => setNotice("Не удалось открыть ссылку.")); }}
+      />}
+      ListFooterComponent={<ChatDraftFooter drafts={active?.drafts} sections={sections}
+        savingDraft={active?.savingDraft} t={t}
+        onSetDraftSection={(draft, section) => store.setDraftSection(draft, section)}
+        onApprove={draft => { void store.approve(draft); }}
+        onDismiss={draft => store.dismiss(draft)} />}
     />
     {viewport.showJumpToLatest ? <View pointerEvents="box-none" style={{ position: "absolute", left: 0, right: 0, bottom: nebulaSpacing.sm, zIndex: 4, alignItems: "center" }}>
       <Pressable testID="chat-jump-to-latest" accessibilityRole="button"
@@ -544,63 +415,44 @@ function NebulaHomeContent() {
       <NebulaAction icon="settings" label="Настроить подключение модели"
         accessibilityLabel="Добавьте модель в настройках подключений" onPress={() => openConnections()} />
     </View> : null}
-    <View style={{ zIndex: 3, padding: 10, gap: 5, backgroundColor: t.panel, borderTopWidth: 1, borderColor: t.line }}>
-      {pickingAttachment && audioPreparing ? <View style={{flexDirection:'row',alignItems:'center',gap:12,minHeight:48,paddingHorizontal:6}}>
-        <ActivityIndicator accessibilityLabel="Локальное распознавание аудио"/>
-        <Text accessibilityLiveRegion="polite" style={{color:t.secondary,flex:1}}>Распознаю аудио на телефоне…</Text>
-        <NebulaAction icon="x" label="Отмена" accessibilityLabel="Отменить распознавание аудио"
-          onPress={cancelAttachmentPreparation} />
-      </View> : null}
-      {draftImageSupport === "unsupported" ? <Text accessibilityRole="alert"
-        style={{color:t.accent,fontSize:13,lineHeight:19,paddingHorizontal:6}}>
-        Выбранная модель не принимает фотографии. Фото останется в черновике: выберите другую модель или уберите вложение.
-      </Text> : draftImageSupport === "unverified" ? <Text
-        style={{color:t.muted,fontSize:12,lineHeight:18,paddingHorizontal:6}}>
-        Поддержка фото моделью «{settings?.model}» не подтверждена. Если она не принимает изображения, выберите другую модель. Текстовые вложения продолжат работать.
-      </Text> : null}
-      {failedFiles.length ? <ChatAttachmentIssues issues={failedFiles}
-        disabled={!ready || busy || pickingAttachment || dictating}
-        onReselect={()=>void pickAttachment()} onDismiss={dismissFailure}/> : null}
-      {active?.attachments?.length ? <>
-        <ChatAttachmentList files={active.attachments} disabled={busy || cameraBusy || pickingAttachment}
-          selectedImageId={selectedPhoto?.id} onSelectImage={setSelectedPhotoId}
-          onRemove={id => {try {
-            releaseCameraOriginal(id);
-            setNotice("");
-            store.setAttachments(active.id,active.attachments!.filter(f=>f.id!==id));
-            if(previewPhotoId===id)setPreviewPhotoId(null);
-            if(selectedPhotoId===id)setSelectedPhotoId(null);
-          }catch(e){setNotice((e as Error).message);}}}/>
-        {selectedPhoto ? <PhotoContextActions disabled={busy || cameraBusy || pickingAttachment}
-          onCancel={discardSelectedPhoto}
-          actions={[
-            {id:"internet",label:"В интернете",run:findSelectedOnline},
-            {id:"memory",label:"В моей памяти",run:searchSelectedPhoto},
-            {id:"note",label:"Сохранить заметку",run:()=>void saveSelectedPhotoNote()},
-            {id:"preview",label:"Посмотреть",run:()=>setPreviewPhotoId(selectedPhoto.id)},
-          ]} /> : null}
-      </> : null}
-      <PromptInput value={question} onChange={value => store.setQuestion(value)} onClear={() => { normalization.reset(); setVoiceReset(n => n + 1); }} editable={ready} onFocusChange={setComposerFocused} />
-      <View testID="composer-actions" style={{ zIndex: 1, flexDirection: "row", alignItems: "center", gap: 4 }}>
-        <IconAction compact explainOnTap={false} icon="paperclip" label="Файл" accessibilityLabel="Прикрепить файл к сообщению" hint="JPEG/PNG/WebP, текст, PDF с текстовым слоем и аудио MP3/M4A/WAV/OGG/FLAC/AAC до 20 МБ через скачанный Whisper. Аудио распознаётся только на телефоне; в чат попадёт текст без оригинала. До 3 файлов, PDF до 6 МБ, совокупный текст до 240 000 символов (защита памяти телефона, не предел ИИ). Большие документы анализируются по частям после подтверждения расходов. Файлы не сохраняются как заметки." hintAbove hintAlign="start" disabled={!ready || busy || pickingAttachment || dictating} onPress={() => void pickAttachment()} />
-<IconAction compact icon="camera" label={cameraBusy?"Съёмка…":"Камера"} accessibilityLabel="Сделать снимок"
-          hint="Камера откроется сразу. После съёмки можно спросить ИИ, найти в интернете или памяти, сохранить заметку."
-          hintAbove disabled={!ready || cameraBusy || busy || pickingAttachment || dictating}
-          onPress={() => void captureToDraft()} />
-        <VoiceInput key={`${active?.id}:${voiceReset}`} value={question} onChange={value => { if (store.getSnapshot().activeId === active?.id) store.setQuestion(value); }} disabled={!ready || busy} onError={setNotice} showLabel={false} onBegin={() => { normalization.reset(); setNotice(""); }} onActiveChange={setDictating} onPhaseChange={setVoicePhase} />
-        {showWhisperImprove ? <IconAction compact icon={normalization.busy ? "x" : normalization.normalized ? "rotate-ccw" : "edit-3"}
-          label={normalization.busy ? "Отмена" : normalization.normalized ? "Исходный" : "Улучшить"}
-          accessibilityLabel={normalization.busy ? "Отменить улучшение текста" : normalization.normalized ? "Вернуть исходный текст" : "Улучшить текст"}
-          hint={normalization.busy ? "Отменить улучшение: исходный текст останется." : normalization.normalized ? "Вернуть текст до улучшения. Повторное нажатие снова покажет исправленный вариант без запроса к LLM." : normalization.alternate ? "Показать исправленный вариант без нового запроса к LLM." : "Исправить ошибки и пунктуацию всего черновика через выбранное подключение LLM. Один дополнительный запрос; сообщение не отправляется."}
-          hintAbove hintAlign="center" emphasized={normalization.normalized}
-          disabled={!ready || dictating || (!normalization.busy && (!question.trim() || (!normalization.alternate && !canSend)))}
-          onPress={() => void normalization.toggle(settings)} /> : null}
-        <View style={{ flex: 1, minWidth: 0 }} />
-        <IconAction compact explainOnTap={false} icon={busy ? "square" : "arrow-up"} label={busy ? "Стоп" : "Отправить"} accessibilityLabel={busy ? "Остановить запрос" : "Отправить запрос"}
-          hint={busy ? "Остановить ответ ИИ в этом диалоге." : "Сообщение обрабатывает выбранная LLM, которая при необходимости вызывает локальные инструменты памяти, фото или сохранённых статей."} hintAbove emphasized={!busy}
-          disabled={!busy && (pickingAttachment || !canSend || (!question.trim() && !active?.attachments?.length))} onPress={sendOrStop} />
-      </View>
-    </View>
+    <ChatComposer t={t}
+      pickingAttachment={pickingAttachment} audioPreparing={audioPreparing}
+      draftImageSupport={draftImageSupport} failedFiles={failedFiles}
+      ready={ready} busy={busy} dictating={dictating} cameraBusy={cameraBusy}
+      attachments={active?.attachments} selectedPhoto={selectedPhoto}
+      question={question} activeId={active?.id} voiceReset={voiceReset}
+      showWhisperImprove={showWhisperImprove} normalizationBusy={normalization.busy}
+      normalizationNormalized={Boolean(normalization.normalized)}
+      normalizationAlternate={Boolean(normalization.alternate)}
+      canSend={canSend} settings={settings}
+      onCancelAttachmentPreparation={cancelAttachmentPreparation}
+      onPickAttachment={() => { void pickAttachment(); }}
+      onDismissFailure={dismissFailure}
+      onSelectImage={setSelectedPhotoId}
+      onRemoveAttachment={id => { try {
+        releaseCameraOriginal(id);
+        setNotice("");
+        if (active) store.setAttachments(active.id, active.attachments!.filter(f => f.id !== id));
+        if (previewPhotoId === id) setPreviewPhotoId(null);
+        if (selectedPhotoId === id) setSelectedPhotoId(null);
+      } catch (e) { setNotice((e as Error).message); } }}
+      onCancelSelectedPhoto={discardSelectedPhoto}
+      onFindSelectedOnline={findSelectedOnline}
+      onSearchSelectedPhoto={searchSelectedPhoto}
+      onSaveSelectedPhotoNote={() => { void saveSelectedPhotoNote(); }}
+      onPreviewSelectedPhoto={() => { if (selectedPhoto) setPreviewPhotoId(selectedPhoto.id); }}
+      onQuestionChange={value => store.setQuestion(value)}
+      onClearQuestion={() => { normalization.reset(); setVoiceReset(n => n + 1); }}
+      onFocusChange={setComposerFocused}
+      onCaptureCamera={() => { void captureToDraft(); }}
+      onVoiceChange={value => { if (store.getSnapshot().activeId === active?.id) store.setQuestion(value); }}
+      onVoiceError={setNotice}
+      onVoiceBegin={() => { normalization.reset(); setNotice(""); }}
+      onDictatingChange={setDictating}
+      onVoicePhaseChange={setVoicePhase}
+      onToggleNormalization={() => { void normalization.toggle(settings); }}
+      onSendOrStop={sendOrStop}
+    />
     <Modal visible={Boolean(previewPhoto)} transparent animationType="fade" onRequestClose={()=>setPreviewPhotoId(null)}>
       <View style={{flex:1,backgroundColor:"rgba(0,0,0,0.94)",justifyContent:"center",padding:16,gap:12}}>
         {previewPhoto ? <Image source={{uri:`data:${previewPhoto.mime};base64,${previewPhoto.data}`}}

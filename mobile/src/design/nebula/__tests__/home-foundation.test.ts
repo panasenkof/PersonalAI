@@ -2,7 +2,14 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const root = join(__dirname, "..", "..", "..");
-const home = readFileSync(join(root, "screens", "HomeScreen.tsx"), "utf8");
+// ARCH-6b: the Home screen is now assembled from source-only presentation
+// components. Keep inspecting their real content, not comments in HomeScreen.
+const home = [
+  "screens/HomeScreen.tsx",
+  "components/chat/ChatRowView.tsx",
+  "components/chat/ChatComposer.tsx",
+  "components/chat/ChatListExtras.tsx",
+].map(path => readFileSync(join(root, path), "utf8")).join("\n");
 const header = readFileSync(join(__dirname, "..", "NebulaHomeHeader.tsx"), "utf8");
 const orb = readFileSync(join(__dirname, "..", "NebulaHomeArtwork.tsx"), "utf8");
 const liveOrb = readFileSync(join(__dirname, "..", "NebulaHomeArtwork.native.tsx"), "utf8");
@@ -38,13 +45,16 @@ describe("Nebula Home native B+C screen contracts", () => {
     expect(home).toContain("void store.send(settings)");
     expect(home).toContain('accessibilityLabel="Прикрепить файл к сообщению"');
     // A captured photo remains local until a deliberate action. The memory action calls LLM → on-device photo tool.
-    expect(home).toContain("onPress={() => void captureToDraft()}");
+    expect(home).toContain("onCaptureCamera={() => { void captureToDraft(); }}");
+    expect(home).toContain("onPress={onCaptureCamera}");
     expect(home).toContain("capturePhotoDraft83(controller.signal)");
     expect(home).toContain("store.searchPhotosWithAgent(settings,selectedPhoto,active.id)");
     expect(home).toContain("store.send(settings,id)");
     expect(home).toContain('navigation.navigate("MemoryImport",{source:"photo",initialPhotoUri:staged})');
     // Found media still opens the corresponding memory entry, including after results UI extraction.
-    expect(home).toMatch(/navigation\.navigate\("MemoryNote",\s*\{\s*entityId\s*:\s*(?:m|result)\.id/);
+    expect(home).toContain('onOpenNote(result.id, original ? result.photoAttachmentId : undefined)');
+    expect(home).toContain('onOpenNote(m.id)');
+    expect(home).toContain('navigation.navigate("MemoryNote",');
     expect(home).toContain("needsSetup");
     expect(home).toContain("PROVIDER_PRESETS.slice(0, 4)");
     expect(home).toContain("active?.streamText");

@@ -31,7 +31,12 @@ describe("Nebula Home real chat and dictation status routing", () => {
 
 describe("Native Home integration remains isolated and accessible", () => {
   const base = join(__dirname, "..");
-  const home = readFileSync(join(base, "..", "..", "screens", "HomeScreen.tsx"), "utf8");
+  // ARCH-6b: inspect both halves of the real composed Home UI. Neither
+  // presentation component owns the store or navigation.
+  const home = readFileSync(join(base, "..", "..", "screens", "HomeScreen.tsx"), "utf8") +
+  readFileSync(join(base, "..", "..", "components", "chat", "ChatRowView.tsx"), "utf8") +
+  readFileSync(join(base, "..", "..", "components", "chat", "ChatComposer.tsx"), "utf8") +
+  readFileSync(join(base, "..", "..", "components", "chat", "ChatListExtras.tsx"), "utf8");
   const header = readFileSync(join(base, "NebulaHomeHeader.tsx"), "utf8");
   const native = readFileSync(join(base, "NebulaHomeArtwork.native.tsx"), "utf8");
   const web = readFileSync(join(base, "NebulaHomeArtwork.tsx"), "utf8");
@@ -51,7 +56,8 @@ describe("Native Home integration remains isolated and accessible", () => {
   });
   it("preserves chat actions while listening/finishing/streaming feed orb", () => {
     expect(home).toContain("resolveNebulaHomePhase");
-    expect(home).toContain("onPhaseChange={setVoicePhase}");
+    expect(home).toContain("onVoicePhaseChange={setVoicePhase}");
+    expect(home).toContain("onPhaseChange={onVoicePhaseChange}");
     expect(home).toContain('store.send(settings)');
     expect(home).toContain('store.stop()');
     expect(home).toContain('store.select(c.id)');
@@ -60,13 +66,15 @@ describe("Native Home integration remains isolated and accessible", () => {
     expect(voice).toContain("onActiveChange?.(phase !== \"idle\")");
   });
   it("camera opens directly and shows shared photo actions after capturing", () => {
-    expect(home).toContain('onPress={() => void captureToDraft()}');
+    expect(home).toContain('onCaptureCamera={() => { void captureToDraft(); }}');
+    expect(home).toContain("onPress={onCaptureCamera}");
     expect(home).toContain("await capturePhotoDraft83(controller.signal)");
     const photoActions=readFileSync(join(base, "..", "..", "media", "PhotoContextActions.tsx"), "utf8");
     expect(home).toContain("<PhotoContextActions");
     expect(photoActions).toContain('testID="photo-context-actions"');
     expect(photoActions).toContain('testID="photo-action-cancel"');
-    expect(home).toContain("onCancel={discardSelectedPhoto}");
+    expect(home).toContain("onCancelSelectedPhoto={discardSelectedPhoto}");
+    expect(home).toContain("onCancel={onCancelSelectedPhoto}");
     expect(photoActions).toContain('borderRadius:nebulaRadii.card');
     for(const label of ['В интернете','В моей памяти','Сохранить заметку','Посмотреть']){
       expect(home).toContain('label:"'+label+'"');
