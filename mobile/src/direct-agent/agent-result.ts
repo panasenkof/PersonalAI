@@ -33,6 +33,7 @@ export function assistantRowFromResult(
       ...(result.moveProposal ? { moveProposal: result.moveProposal } : {}),
       ...(result.sectionProposal ? { sectionProposal: result.sectionProposal } : {}),
       ...(result.inboxApproval ? { inboxApproval: result.inboxApproval } : {}),
+      ...(result.inboxTriageProposal ? {inboxTriageProposal:result.inboxTriageProposal} : {}),
       ...(result.articlePage ? { articlePage: result.articlePage } : {}),
       ...(result.articleReadReport ? { articleReadReport: result.articleReadReport } : {}),
       ...(applied?.change ? { contextChange: applied.change } : {}),
