@@ -5,7 +5,7 @@
 export function diagnosticToolResultContent(
   toolName: string, result: unknown,
 ): Record<string, string> | undefined {
-  if (toolName === "list_inbox_for_triage" || toolName === "find_duplicate_candidates") return undefined;
+  if (toolName === "list_inbox_for_triage" || toolName === "find_duplicate_candidates" || toolName === "propose_merge_notes") return undefined;
   return { result: JSON.stringify(result) };
 }
 
@@ -15,7 +15,7 @@ export function diagnosticToolArguments(
   name: string, args: unknown,
 ): Record<string, string> | undefined {
   if (name === "list_inbox_for_triage" || name === "propose_inbox_triage" ||
-      name === "find_duplicate_candidates")
+      name === "find_duplicate_candidates" || name === "propose_merge_notes")
     return undefined;
   return { arguments: JSON.stringify(args) || "" };
 }

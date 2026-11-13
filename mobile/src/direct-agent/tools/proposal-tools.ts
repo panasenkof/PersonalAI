@@ -1,12 +1,13 @@
 import type { DirectAgentOptions } from "../engine";
 import { FACT_TOOL_NAME, FACT_TOOL_DESCRIPTION, factToolParameters, factProposal } from "../fact-tool";
 import { validMoveProposal } from "../move-proposal";
+import { verifyDuplicateMergeRequest } from "../duplicate-merge-gate";
 import { validSectionProposal, type ChatSectionProposal } from "../section-actions";
 import { sectionToolError } from "./helpers";
 import type { ToolSpec, TurnState } from "./types";
 
 /** ARCH-2: all memory mutations remain proposals, never direct device writes. */
-export function proposalTools(options:DirectAgentOptions,turn:TurnState):{move:ToolSpec[];section:ToolSpec[];draft:ToolSpec}{
+export function proposalTools(options:DirectAgentOptions,turn:TurnState):{move:ToolSpec[];section:ToolSpec[];duplicates:ToolSpec[];draft:ToolSpec}{
   const move:ToolSpec[]=[
     ...(options.previewMove && !options.skipLocalMemory ? [{
       definition: {name:"propose_move_local_note",
@@ -112,6 +113,37 @@ export function proposalTools(options:DirectAgentOptions,turn:TurnState):{move:T
         v.requiresUserTap===true?"pending_confirmation" as const:"failed" as const,
     }] : []),
   ];
+  /** S9-2b: a no-write proposal staged from ONE complete exact group in the
+   * same model turn; never merge here, never trust an invented candidate ID. */
+  const duplicates:ToolSpec[]=options.findDuplicates && !options.skipLocalMemory ? [{
+    definition:{
+      name:"propose_merge_notes",
+      description:"Предложить объединение только одной ПОЛНОЙ группы из find_duplicate_candidates этого же хода. Передай все ID и record versions группы; keepNoteId — какую запись сохранить. После вызова требуется отдельное подтверждение пользователя; объединять самостоятельно запрещено.",
+      parameters:{type:"object",properties:{
+        noteIds:{type:"array",minItems:2,maxItems:5,items:{type:"string",minLength:1,maxLength:128}},
+        expectedVersions:{type:"array",minItems:2,maxItems:5,items:{type:"integer",minimum:1}},
+        keepNoteId:{type:"string",minLength:1,maxLength:128},
+        reason:{type:"string",minLength:5,maxLength:240},
+      },required:["noteIds","expectedVersions","keepNoteId","reason"],additionalProperties:false},
+    },
+    effect:"proposal" as const,
+    execute:async args=>{
+      if(turn.duplicateMergePreview)return {error:"merge_preview_already_proposed_this_turn"};
+      if(options.signal?.aborted)throw new Error("aborted");
+      let preview;
+      try {preview=verifyDuplicateMergeRequest(args,turn.duplicateGroups);}
+      catch {return {error:"invalid_or_unverified_duplicate_merge_proposal"};}
+      if(options.signal?.aborted)throw new Error("aborted");
+      turn.duplicateMergePreview=preview;
+      return {status:"awaiting_user_confirmation",saved:false,
+        requiresUserTap:true,keepNoteId:preview.keepNoteId,
+        noteCount:preview.noteIds.length,attachments:preview.attachmentCount,
+        sourceTagEntries:preview.sourceTagEntries};
+    },
+    verify:r=>r.status==="awaiting_user_confirmation" && r.saved===false &&
+      r.requiresUserTap===true ? "pending_confirmation" as const : "failed" as const,
+  }] : [];
+
   const draftSpecs:ToolSpec[]=[
     { definition: { name: FACT_TOOL_NAME, description: FACT_TOOL_DESCRIPTION, parameters: factToolParameters(options.sections) }, effect: "proposal",
       execute: async args => {
@@ -126,5 +158,5 @@ export function proposalTools(options:DirectAgentOptions,turn:TurnState):{move:T
         return { status: "awaiting_user_confirmation", saved: false, ...(proposalId ? { proposalId } : {}) };
       }, verify: r => r.status === "awaiting_user_confirmation" && r.saved === false ? "pending_confirmation" : "failed" },
   ];
-  return {move,section,draft:draftSpecs[0]};
+  return {move,section,duplicates,draft:draftSpecs[0]};
 }

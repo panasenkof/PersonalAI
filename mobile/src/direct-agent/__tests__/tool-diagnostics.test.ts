@@ -29,3 +29,11 @@ test("S9-2a: duplicate source URLs and record IDs are never persisted to diagnos
   expect(diagnosticToolArguments("find_duplicate_candidates",{kind:"same_url",limit:5}))
     .toBeUndefined();
 });
+
+test("S9-2b: unconfirmed merge handles and choices never enter diagnostic content",()=>{
+  const args={noteIds:["n1","n2"],expectedVersions:[1,2],keepNoteId:"n1",reason:"Test reason"};
+  expect(diagnosticToolArguments("propose_merge_notes",args)).toBeUndefined();
+  expect(diagnosticToolResultContent("propose_merge_notes",{
+    status:"awaiting_user_confirmation",keepNoteId:"n1",
+  })).toBeUndefined();
+});

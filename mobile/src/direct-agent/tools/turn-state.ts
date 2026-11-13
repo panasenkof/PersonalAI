@@ -4,6 +4,8 @@ import type { MemorySnippet } from "../memory";
 import type { ChatArticlePage, ChatMemoryRef } from "../conversations";
 import type { ChatMoveProposal } from "../move-proposal";
 import type { ChatSectionProposal } from "../section-actions";
+import type { DuplicateCandidateGroup } from "../../local-memory/agent-catalog";
+import type { VerifiedDuplicateMergeRequest } from "../duplicate-merge-gate";
 import type { ContextCandidate } from "../conversation-context";
 import type { SavedArticleIntent } from "../article-selection";
 import { createArticleReadCoverage } from "../article-read-coverage";
@@ -27,6 +29,8 @@ export function createTurnState(options:DirectAgentOptions,sources:string[],
   }
   notes.forEach(admitMoveHandle);
   let movePreview:ChatMoveProposal|undefined;
+  const duplicateGroups:DuplicateCandidateGroup[]=[];
+  let duplicateMergePreview:VerifiedDuplicateMergeRequest|undefined;
   let sectionPreview:ChatSectionProposal|undefined;
   let contextCandidate:ContextCandidate|undefined;
   let importTagsCandidate:string[]|undefined;
@@ -153,9 +157,11 @@ export function createTurnState(options:DirectAgentOptions,sources:string[],
     return verified;
   };
   return {
-    web,used,moveHandles,admitMoveHandle,articleCoverage,readNotes,
+    web,used,moveHandles,admitMoveHandle,duplicateGroups,articleCoverage,readNotes,
     photoMatches,emit,observe,fingerprint,pending,proposalIds,
     articleClock,articleRequests,readArticleSelection,selectedArticleHandles,verifiedSelectedArticleRead,
+    get duplicateMergePreview(){return duplicateMergePreview;},
+    set duplicateMergePreview(v:VerifiedDuplicateMergeRequest|undefined){duplicateMergePreview=v;},
     get movePreview(){return movePreview;},
     set movePreview(v:ChatMoveProposal|undefined){movePreview=v;},
     get sectionPreview(){return sectionPreview;},
