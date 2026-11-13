@@ -48,12 +48,9 @@ test("S9-2d: unrecognized/corrupt receipt cannot authorize Undo",async()=>{
     {...receipt,noteIds:["a","a"]},
     {...receipt,keepNoteId:"b"},
     {...receipt,mergedCount:2},
-    {...receipt,undone:true},
-  ]){
-    if("undone" in invalid && invalid.undone===true)
-      await expect(undoDuplicateMerge("guest",invalid)).rejects.toThrow();
-    else expect(validDuplicateMergeReceipt(invalid)).toBe(false);
-  }
+  ]) expect(validDuplicateMergeReceipt(invalid)).toBe(false);
+  await expect(undoDuplicateMerge("guest",{...receipt,undone:true as const}))
+    .rejects.toThrow();
   expect(undoNotes).not.toHaveBeenCalled();
 });
 test("S9-2d: Undo routes to existing journal and marks receipt consumed",async()=>{
