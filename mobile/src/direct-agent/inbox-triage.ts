@@ -123,6 +123,7 @@ export function createInboxTriageAccess(
       // Bounded scan skips archived/trashed records without exposing them,
       // while preserving the EXISTING repository's created_at/id ordering.
       while (items.length < desired && scanned < 100) {
+        const pageStart = offset;
         const page = await repository.entities({
           collection_id: inbox.id, domain: "notes", limit: 20, offset,
         });
@@ -143,7 +144,7 @@ export function createInboxTriageAccess(
           handles.set(note.id, note.record_version);
           if (items.length === desired || scanned >= 100) break;
         }
-        more = page.next_offset !== null && scanned < 100;
+        more = (offset < pageStart + page.items.length || page.next_offset !== null) && scanned < 100;
         if (!more || items.length === desired) break;
       }
       remaining -= items.length;
