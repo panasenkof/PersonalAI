@@ -19,7 +19,7 @@ const note=(id:string,version:number)=>({
   title:"Тест",created_at:"2026-11-13T10:00:00.000Z",
 });
 function fakeDb(rows:Record<string,ReturnType<typeof note>>, sections=collections){
-  const runAsync=jest.fn(async()=>({changes:1}));
+  const runAsync=jest.fn(async (..._args:any[])=>({changes:1}));
   const getAllAsync=jest.fn(async(sql:string)=>{
     if(sql.includes("FROM memory_collections"))return sections;
     if(sql.includes("FROM memory_attachments"))return [];
