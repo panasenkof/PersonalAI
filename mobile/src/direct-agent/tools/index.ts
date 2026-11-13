@@ -33,6 +33,7 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
     ...sourceTools(options,turn),
     ...memory.listing,
     ...memory.duplicates,
+    ...proposals.duplicates,
     ...articleTools(options,turn),
     ...proposals.move,
     // SAME canonical chat ToolSpec registry as memory search, note drafts and moves.
@@ -92,6 +93,7 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
         canonical !== "list_inbox_for_triage" && // private text must never be persisted to TaskState
         canonical !== "propose_inbox_triage" && // proposals stay off TaskState
         canonical !== "find_duplicate_candidates" && // candidate IDs/URLs require fresh current-turn proof
+        canonical !== "propose_merge_notes" && // one-turn candidate proposal never enters TaskState
         canonical !== "selected_article_read_coverage" &&
         canonical !== "search_local_photos")
       observe({ tool: canonical, outcome,
@@ -100,7 +102,7 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
     options.diagnostic?.("tool.outcome_verified", { name: canonical, effect: spec?.effect || "unknown", outcome });
     return { ...result, ...(outcome !== "failed" ? { outcome } : {}) };
   }
-  function finish(): Pick<DirectResult, "taskState" | "proposalIds" | "articlePage" | "articleReadReport" | "photoAction" | "moveProposal" | "sectionProposal" | "inboxApproval" | "inboxTriageProposal" | "contextCandidate" | "importTags"> {
+  function finish(): Pick<DirectResult, "taskState" | "proposalIds" | "articlePage" | "articleReadReport" | "photoAction" | "moveProposal" | "sectionProposal" | "inboxApproval" | "inboxTriageProposal" | "duplicateMergeProposal" | "contextCandidate" | "importTags"> {
     turn.state = { ...turn.state, turnStatus: "answered" }; emit();
     const selected = !turn.mixedArticleFilters && turn.usedSelectedArticleTool ? selectedArticleHandles() : undefined;
     const checked = selected && articleCoverage.summary(selected);
@@ -129,6 +131,7 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
       ...(articleReadReport ? {articleReadReport} : {}),
       ...(!photoMatches.length && turn.photoRecovery ? {photoAction:turn.photoRecovery} : {}),
       ...(turn.movePreview ? {moveProposal:turn.movePreview} : {}),
+      ...(turn.duplicateMergePreview ? {duplicateMergeProposal:turn.duplicateMergePreview} : {}),
       ...(turn.sectionPreview ? {sectionProposal:turn.sectionPreview} : {}),
       ...(inbox.approval() ? {inboxApproval:inbox.approval()} : {}),
       ...(inbox.proposal() ? {inboxTriageProposal:inbox.proposal()} : {}),
