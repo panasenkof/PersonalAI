@@ -37,6 +37,22 @@ const goodLive=[
 ].join("\n");
 const guardedLive=[goodLive,"import {request as httpsRequest} from \"node:https\";","return realHttpsTransport(input,{...init,body:JSON.stringify(payload)});","if(e instanceof ModelRequestError)providerFailed=true;"].join("\n");
 test("manual-only paid checkbox and limits accepted",()=>assert.equal(check(guardedWorkflow,guardedLive),true));
+
+test("shared Node HTTPS transport is inspected, not trusted by its import name",()=>{
+  const sharedLive=guardedLive.replace(
+    'import {request as httpsRequest} from "node:https";',
+    'import {realHttpsTransport} from "../real-https-transport";');
+  const realSource=fs.readFileSync(path.join(__dirname,"../eval/real-https-transport.ts"),"utf8");
+  assert.equal(check(guardedWorkflow,sharedLive,realSource),true);
+  assert.throws(()=>check(guardedWorkflow,sharedLive,
+    realSource.replace('import { request as httpsRequest } from "node:https";',
+      'const httpsRequest=globalThis.fetch;')),
+    /Shared live-eval transport must import/);
+  assert.throws(()=>check(guardedWorkflow,sharedLive,
+    realSource+"\nreturn fetch(input);"),
+    /must not use mocked or global fetch/);
+});
+
 test("scheduled, push-triggered or legacy auto LLM eval blocked",()=>{
   assert.throws(()=>check(guardedWorkflow.replace("permissions:","  schedule:\n    - cron: 0 2 * * *\npermissions:"),guardedLive));
   assert.throws(()=>check(guardedWorkflow.replace("permissions:","  push:\n    branches: [main]\npermissions:"),guardedLive));
