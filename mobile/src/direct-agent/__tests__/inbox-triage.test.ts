@@ -145,3 +145,42 @@ test("S9-1a: no Inbox collection means no notes and no forged handles", async ()
   expect(page.items).toEqual([]);
   expect(access.wasReadThisTurn("t","a",3)).toBe(false);
 });
+
+
+test("S9-1a: secret notes remain outside model-visible Inbox even after batch consent", async () => {
+  const access = createInboxTriageAccess("c",()=>true);
+  const reader = repo([
+    note("secret", {sensitivity:"secret"}),
+    note("sensitive", {sensitivity:"sensitive"}),
+  ]);
+  access.requestApproval(2);
+  access.approveFromUserTap("c");
+  access.beginTurn("t");
+  const result = await access.listForTurn("t",reader,{limit:2});
+  expect(result.items.map(x=>x.noteId)).toEqual(["sensitive"]);
+  expect(access.wasReadThisTurn("t","secret",3)).toBe(false);
+  expect(access.wasReadThisTurn("t","sensitive",3)).toBe(true);
+});
+
+test("S9-1a: concurrent reads cannot each consume the same one-turn budget", async () => {
+  let complete: ((value: {items: EntityRecord[];next_offset:null}) => void) | undefined;
+  const readPromise = new Promise<{items:EntityRecord[];next_offset:null}>(resolve => {
+    complete = resolve;
+  });
+  const reader: ReadRepo = {
+    listCollections: jest.fn(async () => [inbox]),
+    entities: jest.fn(() => readPromise),
+  };
+  const access = createInboxTriageAccess("c",()=>true);
+  access.requestApproval(1);
+  access.approveFromUserTap("c");
+  access.beginTurn("t");
+  const first = access.listForTurn("t",reader,{limit:1});
+  // A second read cannot race ahead of the first while it awaits SQLite.
+  await Promise.resolve();
+  await Promise.resolve();
+  await expect(access.listForTurn("t",reader,{limit:1})).rejects.toThrow("inbox_triage_read_in_progress");
+  complete!({items:[note("first")],next_offset:null});
+  expect((await first).items.map(x=>x.noteId)).toEqual(["first"]);
+  expect((await access.listForTurn("t",reader,{limit:1})).items).toEqual([]);
+});
