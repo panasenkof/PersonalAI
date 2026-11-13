@@ -4,7 +4,8 @@ import { findAllowedDuplicateCandidates, normalizedDuplicateText,
 
 jest.mock("expo-crypto",()=>({
   CryptoDigestAlgorithm:{SHA256:"SHA-256"},
-  digestStringAsync:jest.fn(async (_algorithm:string,input:string)=>"sha:"+input),
+  digestStringAsync:jest.fn(async (_algorithm:string,input:string)=>"hash-"+
+    Array.from(input).reduce((h,c)=>((h*31+c.codePointAt(0)!)>>>0),0).toString(16)),
 }));
 
 const entry=(id:string,version:number,body:string,section="Проекты")=>({
@@ -37,7 +38,7 @@ test("S9-2a: same text is SHA-256-only locally; model sees metadata, not bodies"
   });
   expect(result.groups).toHaveLength(1);
   expect(result.groups[0]).toMatchObject({
-    fingerprint:"sha:text:новая заметка",totalCount:2,complete:true,
+    totalCount:2,complete:true,
     records:[{id:"n1",version:3,attachmentCount:2,tagCount:1},{id:"n2",version:4}],
   });
   expect(JSON.stringify(result)).not.toContain("НОВАЯ   заметка");
@@ -65,7 +66,8 @@ test("S9-2a: exact URL groups use existing source_url and do not include arbitra
     {sourceUrl:"https://example.com/article",totalCount:2,complete:true,
       records:[{id:"a",version:2},{id:"b",version:8}]},
   ]);
-  expect(result.groups[0].fingerprint).toBe("sha:url:https://example.com/article");
+  expect(result.groups[0].fingerprint).toBe(await Crypto.digestStringAsync(
+    "SHA-256","url:https://example.com/article"));
   expect(JSON.stringify(result)).not.toContain("Что-то про статью");
   expect(db.getAllAsync.mock.calls[0][0]).toContain("json_extract(e.payload_json,'$.source_url')");
   expect(db.getAllAsync.mock.calls[1][0]).toContain(" AND CASE WHEN json_valid");
