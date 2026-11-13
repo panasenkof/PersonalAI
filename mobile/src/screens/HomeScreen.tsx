@@ -42,7 +42,7 @@ import { showDraftImprove, useVoiceEngine } from "../media/voice-engine";
 import { IconAction } from "../components/IconAction";
 import { ArticleReadSources } from "../components/ArticleReadSources";
 import { ChatRowView } from "../components/chat/ChatRowView";
-import { PromptInput } from "../components/PromptInput";
+import { ChatComposer } from "../components/chat/ChatComposer";
 import { NebulaHomeThemeProvider, useTheme } from "../theme";
 import { MarkdownText } from "../components/Markdown";
 import { KIND_NAMES } from "../direct-agent/fact-tool";
@@ -462,63 +462,44 @@ function NebulaHomeContent() {
       <NebulaAction icon="settings" label="Настроить подключение модели"
         accessibilityLabel="Добавьте модель в настройках подключений" onPress={() => openConnections()} />
     </View> : null}
-    <View style={{ zIndex: 3, padding: 10, gap: 5, backgroundColor: t.panel, borderTopWidth: 1, borderColor: t.line }}>
-      {pickingAttachment && audioPreparing ? <View style={{flexDirection:'row',alignItems:'center',gap:12,minHeight:48,paddingHorizontal:6}}>
-        <ActivityIndicator accessibilityLabel="Локальное распознавание аудио"/>
-        <Text accessibilityLiveRegion="polite" style={{color:t.secondary,flex:1}}>Распознаю аудио на телефоне…</Text>
-        <NebulaAction icon="x" label="Отмена" accessibilityLabel="Отменить распознавание аудио"
-          onPress={cancelAttachmentPreparation} />
-      </View> : null}
-      {draftImageSupport === "unsupported" ? <Text accessibilityRole="alert"
-        style={{color:t.accent,fontSize:13,lineHeight:19,paddingHorizontal:6}}>
-        Выбранная модель не принимает фотографии. Фото останется в черновике: выберите другую модель или уберите вложение.
-      </Text> : draftImageSupport === "unverified" ? <Text
-        style={{color:t.muted,fontSize:12,lineHeight:18,paddingHorizontal:6}}>
-        Поддержка фото моделью «{settings?.model}» не подтверждена. Если она не принимает изображения, выберите другую модель. Текстовые вложения продолжат работать.
-      </Text> : null}
-      {failedFiles.length ? <ChatAttachmentIssues issues={failedFiles}
-        disabled={!ready || busy || pickingAttachment || dictating}
-        onReselect={()=>void pickAttachment()} onDismiss={dismissFailure}/> : null}
-      {active?.attachments?.length ? <>
-        <ChatAttachmentList files={active.attachments} disabled={busy || cameraBusy || pickingAttachment}
-          selectedImageId={selectedPhoto?.id} onSelectImage={setSelectedPhotoId}
-          onRemove={id => {try {
-            releaseCameraOriginal(id);
-            setNotice("");
-            store.setAttachments(active.id,active.attachments!.filter(f=>f.id!==id));
-            if(previewPhotoId===id)setPreviewPhotoId(null);
-            if(selectedPhotoId===id)setSelectedPhotoId(null);
-          }catch(e){setNotice((e as Error).message);}}}/>
-        {selectedPhoto ? <PhotoContextActions disabled={busy || cameraBusy || pickingAttachment}
-          onCancel={discardSelectedPhoto}
-          actions={[
-            {id:"internet",label:"В интернете",run:findSelectedOnline},
-            {id:"memory",label:"В моей памяти",run:searchSelectedPhoto},
-            {id:"note",label:"Сохранить заметку",run:()=>void saveSelectedPhotoNote()},
-            {id:"preview",label:"Посмотреть",run:()=>setPreviewPhotoId(selectedPhoto.id)},
-          ]} /> : null}
-      </> : null}
-      <PromptInput value={question} onChange={value => store.setQuestion(value)} onClear={() => { normalization.reset(); setVoiceReset(n => n + 1); }} editable={ready} onFocusChange={setComposerFocused} />
-      <View testID="composer-actions" style={{ zIndex: 1, flexDirection: "row", alignItems: "center", gap: 4 }}>
-        <IconAction compact explainOnTap={false} icon="paperclip" label="Файл" accessibilityLabel="Прикрепить файл к сообщению" hint="JPEG/PNG/WebP, текст, PDF с текстовым слоем и аудио MP3/M4A/WAV/OGG/FLAC/AAC до 20 МБ через скачанный Whisper. Аудио распознаётся только на телефоне; в чат попадёт текст без оригинала. До 3 файлов, PDF до 6 МБ, совокупный текст до 240 000 символов (защита памяти телефона, не предел ИИ). Большие документы анализируются по частям после подтверждения расходов. Файлы не сохраняются как заметки." hintAbove hintAlign="start" disabled={!ready || busy || pickingAttachment || dictating} onPress={() => void pickAttachment()} />
-<IconAction compact icon="camera" label={cameraBusy?"Съёмка…":"Камера"} accessibilityLabel="Сделать снимок"
-          hint="Камера откроется сразу. После съёмки можно спросить ИИ, найти в интернете или памяти, сохранить заметку."
-          hintAbove disabled={!ready || cameraBusy || busy || pickingAttachment || dictating}
-          onPress={() => void captureToDraft()} />
-        <VoiceInput key={`${active?.id}:${voiceReset}`} value={question} onChange={value => { if (store.getSnapshot().activeId === active?.id) store.setQuestion(value); }} disabled={!ready || busy} onError={setNotice} showLabel={false} onBegin={() => { normalization.reset(); setNotice(""); }} onActiveChange={setDictating} onPhaseChange={setVoicePhase} />
-        {showWhisperImprove ? <IconAction compact icon={normalization.busy ? "x" : normalization.normalized ? "rotate-ccw" : "edit-3"}
-          label={normalization.busy ? "Отмена" : normalization.normalized ? "Исходный" : "Улучшить"}
-          accessibilityLabel={normalization.busy ? "Отменить улучшение текста" : normalization.normalized ? "Вернуть исходный текст" : "Улучшить текст"}
-          hint={normalization.busy ? "Отменить улучшение: исходный текст останется." : normalization.normalized ? "Вернуть текст до улучшения. Повторное нажатие снова покажет исправленный вариант без запроса к LLM." : normalization.alternate ? "Показать исправленный вариант без нового запроса к LLM." : "Исправить ошибки и пунктуацию всего черновика через выбранное подключение LLM. Один дополнительный запрос; сообщение не отправляется."}
-          hintAbove hintAlign="center" emphasized={normalization.normalized}
-          disabled={!ready || dictating || (!normalization.busy && (!question.trim() || (!normalization.alternate && !canSend)))}
-          onPress={() => void normalization.toggle(settings)} /> : null}
-        <View style={{ flex: 1, minWidth: 0 }} />
-        <IconAction compact explainOnTap={false} icon={busy ? "square" : "arrow-up"} label={busy ? "Стоп" : "Отправить"} accessibilityLabel={busy ? "Остановить запрос" : "Отправить запрос"}
-          hint={busy ? "Остановить ответ ИИ в этом диалоге." : "Сообщение обрабатывает выбранная LLM, которая при необходимости вызывает локальные инструменты памяти, фото или сохранённых статей."} hintAbove emphasized={!busy}
-          disabled={!busy && (pickingAttachment || !canSend || (!question.trim() && !active?.attachments?.length))} onPress={sendOrStop} />
-      </View>
-    </View>
+    <ChatComposer t={t}
+      pickingAttachment={pickingAttachment} audioPreparing={audioPreparing}
+      draftImageSupport={draftImageSupport} failedFiles={failedFiles}
+      ready={ready} busy={busy} dictating={dictating} cameraBusy={cameraBusy}
+      attachments={active?.attachments} selectedPhoto={selectedPhoto}
+      question={question} activeId={active?.id} voiceReset={voiceReset}
+      showWhisperImprove={showWhisperImprove} normalizationBusy={normalization.busy}
+      normalizationNormalized={Boolean(normalization.normalized)}
+      normalizationAlternate={Boolean(normalization.alternate)}
+      canSend={canSend} settings={settings}
+      onCancelAttachmentPreparation={cancelAttachmentPreparation}
+      onPickAttachment={() => { void pickAttachment(); }}
+      onDismissFailure={dismissFailure}
+      onSelectImage={setSelectedPhotoId}
+      onRemoveAttachment={id => { try {
+        releaseCameraOriginal(id);
+        setNotice("");
+        if (active) store.setAttachments(active.id, active.attachments!.filter(f => f.id !== id));
+        if (previewPhotoId === id) setPreviewPhotoId(null);
+        if (selectedPhotoId === id) setSelectedPhotoId(null);
+      } catch (e) { setNotice((e as Error).message); } }}
+      onCancelSelectedPhoto={discardSelectedPhoto}
+      onFindSelectedOnline={findSelectedOnline}
+      onSearchSelectedPhoto={searchSelectedPhoto}
+      onSaveSelectedPhotoNote={() => { void saveSelectedPhotoNote(); }}
+      onPreviewSelectedPhoto={() => { if (selectedPhoto) setPreviewPhotoId(selectedPhoto.id); }}
+      onQuestionChange={value => store.setQuestion(value)}
+      onClearQuestion={() => { normalization.reset(); setVoiceReset(n => n + 1); }}
+      onFocusChange={setComposerFocused}
+      onCaptureCamera={() => { void captureToDraft(); }}
+      onVoiceChange={value => { if (store.getSnapshot().activeId === active?.id) store.setQuestion(value); }}
+      onVoiceError={setNotice}
+      onVoiceBegin={() => { normalization.reset(); setNotice(""); }}
+      onDictatingChange={setDictating}
+      onVoicePhaseChange={setVoicePhase}
+      onToggleNormalization={() => { void normalization.toggle(settings); }}
+      onSendOrStop={sendOrStop}
+    />
     <Modal visible={Boolean(previewPhoto)} transparent animationType="fade" onRequestClose={()=>setPreviewPhotoId(null)}>
       <View style={{flex:1,backgroundColor:"rgba(0,0,0,0.94)",justifyContent:"center",padding:16,gap:12}}>
         {previewPhoto ? <Image source={{uri:`data:${previewPhoto.mime};base64,${previewPhoto.data}`}}
