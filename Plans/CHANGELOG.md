@@ -1,5 +1,7 @@
 # PersAI — журнал слитых изменений
 
+- 2026-11-13 · ARCH-6a: разделён DirectChatStore на agent-host/agent-result без изменения поведения (#523) · CI PASS [43411869576](https://github.com/panasenkof/PersonalAI/actions/runs/43411869576), merge `5608ac2`; браузер + native emulator PASS, физический телефон NOT_RUN_PHYSICAL, live LLM NOT_RUN_LIVE_MODEL
+
 - 2026-11-13 · ARCH-4a: общий реестр обработчиков переноса заметки и раздела с прежними квитанциями (#519) · CI PASS [43406101430](https://github.com/panasenkof/PersonalAI/actions/runs/43406101430), merge `3f24960`; телефон NOT_RUN_PHYSICAL
 - 2026-11-13 · ARCH-4b: одни методы confirm/dismiss/undo в DirectChatStore и сохранение старых методов как адаптеров (#520) · CI PASS [43407821487](https://github.com/panasenkof/PersonalAI/actions/runs/43407821487), merge `41cd6d9`; телефон NOT_RUN_PHYSICAL
 - 2026-11-13 · ARCH-4c: единая карточка предложения/квитанции вместо четырёх UI-блоков (#521) · CI PASS [43407209616](https://github.com/panasenkof/PersonalAI/actions/runs/43407209616), merge `c9ba4c0`; Android emulator PASS, реальный телефон NOT_RUN_PHYSICAL
