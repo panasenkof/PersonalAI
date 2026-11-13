@@ -350,7 +350,7 @@ export async function undoNotes(db: SQL, batch: string, moveGuard?: ChatMoveGuar
            after.sensitivity!=='standard' || !target || target.id===inbox.id)
           throw new MemoryConflictError('inbox_triage_undo_changed');
         const seen=new Set<string>();
-        let current=target;
+        let current:typeof target|undefined=target;
         while(current){
           if(seen.has(current.id)||current.sensitivity!=='standard'||
              current.slug==='inbox'||current.slug==='documents')
