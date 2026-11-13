@@ -15,7 +15,8 @@ export type VerifiedDuplicateMergeRequest = DuplicateMergeRequest & {
   fingerprint: string;
   records: DuplicateCandidate[];
   attachmentCount: number;
-  proposedTagCount: number;
+  /** Sum of per-note tag counts, NOT their deduplicated union. */
+  sourceTagEntries: number;
 };
 const NOTE_ID=/^[A-Za-z0-9:_-]{1,128}$/;
 function plainRecord(raw:unknown):raw is Record<string,unknown>{
@@ -63,6 +64,6 @@ export function verifyDuplicateMergeRequest(
     keepNoteId:raw.keepNoteId,reason:raw.reason.trim(),
     fingerprint:group.fingerprint,records,
     attachmentCount:records.reduce((sum,item)=>sum+item.attachmentCount,0),
-    proposedTagCount:records.reduce((sum,item)=>sum+item.tagCount,0),
+    sourceTagEntries:records.reduce((sum,item)=>sum+item.tagCount,0),
   };
 }
