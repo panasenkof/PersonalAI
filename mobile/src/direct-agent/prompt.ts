@@ -142,7 +142,18 @@ export function buildSystemPrompt(input: {
   }
   // Dialogue contains tool-specific clauses (including read_web_page and
   // update_task_state); never attach the unfiltered guide to minimal catalog.
-  pieces.push(availableSentences(DIALOGUE_GUIDE, active));
+  // The historical dialogue guide lists BOTH web tool spellings. Never drop
+  // the entire next-step policy just because one provider does not offer one.
+  // Format its choice sentence from this turn's advertised tools; the legacy
+  // literal and ARCH-0 golden snapshots remain unchanged.
+  const choiceNames = ["search_local_notes", "search_web", "web_search", "read_web_page"]
+    .filter(name => active.has(name));
+  const dialogue = DIALOGUE_GUIDE.replace(
+    "Сам выбирай следующий шаг: ответить, search_local_notes, search_web/web_search или read_web_page из доступных инструментов. ",
+    "Сам выбирай следующий шаг: ответить" +
+    (choiceNames.length ? " или использовать " + choiceNames.join(", ") + " из доступных инструментов" : "") + ". ",
+  );
+  pieces.push(availableSentences(dialogue, active));
   if (active.has("draft_memory_fact")) {
     pieces.push(factGuide(input.sections));
   } else if (active.has("set_conversation_context") && input.sections?.length) {
