@@ -71,6 +71,7 @@ test("S9-1b: LLM consent card awaits tap; only following turn can expose private
     .toBeUndefined();
   expect(store.getSnapshot().conversations[0].rows.at(-1)?.text)
     .toContain("предварительного разбора");
+  expect(store.getSnapshot().conversations[0].rows.at(-1)?.inboxTriageResult).toBe(true);
   expect(parseConversation(JSON.stringify(records.get(id)))?.rows.some(x=>x.inboxApproval))
     .toBe(false);
   store.dispose();
