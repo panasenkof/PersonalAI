@@ -9,6 +9,7 @@ import { localMemorySessionUnlocked, withLocalMemoryDatabase, waitForApplication
 import { searchApprovedNotes, readApprovedNote } from "./memory";
 import { searchLocalApprovedSourceSegments, listLocalApprovedSourceSegments, readLocalApprovedSourceSegment } from "../local-memory/source-retrieval";
 import { listAllowedNotes, countAllowedNotes } from "../local-memory/agent-catalog";
+import type { InboxTriagePage } from "./inbox-triage";
 import { previewMove } from "./move-proposal";
 import { previewSectionAction } from "./section-actions";
 import { searchLocalPhotosFromChat83 } from "../media/vision-chat-search";
@@ -49,6 +50,7 @@ export type AgentHostInput = {
   sections: MemorySection[];
   trace: NonNullable<AgentOptions["diagnostic"]>;
   host: string;
+  inboxRead?: (limit: number,cursor?:number) => Promise<InboxTriagePage>;
   disposed: () => boolean;
   getConversation: () => LiveConversation | undefined;
   getWritableConversation: () => LiveConversation | undefined;
@@ -63,12 +65,13 @@ export function buildAgentOptions(input: AgentHostInput): Parameters<typeof runD
   const {
     profile, id, current, settings, maxRequests, prompt, attachments, skipLocalMemory,
     history, previousSources, taskState, privatePhoto, articleContinuation,
-    articleSelection, signal, onText, sections, trace, host, disposed,
+    articleSelection, signal, onText, sections, trace, host, inboxRead, disposed,
     getConversation, getWritableConversation, update, persist,
   } = input;
   let stage = "";
   return { settings, maxRequests, prompt, attachments, skipLocalMemory:Boolean(skipLocalMemory), history:privatePhoto ? history.map(turn=>({...turn,attachments:undefined})) : history, previousSources, taskState, pendingNotes: skipLocalMemory ? [] : current.drafts,
     photoQueryAvailable:Boolean(privatePhoto),
+    ...(!skipLocalMemory && inboxRead ? {inboxRead} : {}),
     ...(!skipLocalMemory && articleContinuation ? {articleContinuation} : {}),
     ...(!skipLocalMemory && articleSelection ? {articleSelection} : {}),
     // Scratchpad belongs to this unlocked conversation and is serialized by

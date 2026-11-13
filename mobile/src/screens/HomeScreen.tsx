@@ -452,6 +452,10 @@ function NebulaHomeContent() {
       onVoicePhaseChange={setVoicePhase}
       onToggleNormalization={() => { void normalization.toggle(settings); }}
       onSendOrStop={sendOrStop}
+      inboxApproval={store.getSnapshot().inboxApproval}
+      onRequestInbox={() => store.requestInboxTriage(10)}
+      onConfirmInbox={() => { if (settings) store.approveInboxTriage(settings); }}
+      onDismissInbox={() => store.revokeInboxTriage()}
     />
     <Modal visible={Boolean(previewPhoto)} transparent animationType="fade" onRequestClose={()=>setPreviewPhotoId(null)}>
       <View style={{flex:1,backgroundColor:"rgba(0,0,0,0.94)",justifyContent:"center",padding:16,gap:12}}>

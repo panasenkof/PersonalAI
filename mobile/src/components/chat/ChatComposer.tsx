@@ -26,6 +26,7 @@ export function ChatComposer({
   onPreviewSelectedPhoto, onQuestionChange, onClearQuestion,
   onFocusChange, onCaptureCamera, onVoiceChange, onVoiceError, onVoiceBegin,
   onDictatingChange, onVoicePhaseChange, onToggleNormalization, onSendOrStop,
+  inboxApproval, onRequestInbox, onConfirmInbox, onDismissInbox,
 }: {
   t: ReturnType<typeof useTheme>;
   pickingAttachment: boolean;
@@ -68,8 +69,21 @@ export function ChatComposer({
   onVoicePhaseChange: (phase: NebulaVoicePhase) => void;
   onToggleNormalization: () => void;
   onSendOrStop: () => void;
+  inboxApproval?: {conversationId:string;limit:number;label:string};
+  onRequestInbox:()=>void;
+  onConfirmInbox:()=>void;
+  onDismissInbox:()=>void;
 }) {
   return <View style={{ zIndex: 3, padding: 10, gap: 5, backgroundColor: t.panel, borderTopWidth: 1, borderColor: t.line }}>
+      {inboxApproval ? <View style={{borderWidth:1,borderColor:t.line,borderRadius:12,padding:10,gap:8}}>
+        <Text style={{color:t.text,fontWeight:"700"}}>Разрешить разбор «Входящих»?</Text>
+        <Text style={{color:t.secondary,fontSize:13}}>В модель будут отправлены заголовки, теги и до 600 символов текста каждой из максимум {inboxApproval.limit} записей. Разрешение только на один ответ. Записи останутся на месте до отдельного подтверждения переноса.</Text>
+        <View style={{flexDirection:"row",gap:8,flexWrap:"wrap"}}>
+          <NebulaAction icon="check" label="Разрешить разбор" onPress={onConfirmInbox} accessibilityLabel="Разрешить однократное чтение Входящих моделью"/>
+          <NebulaAction icon="x" label="Отмена" onPress={onDismissInbox}/>
+        </View>
+      </View> : <NebulaAction icon="list" size="compact" label="Разобрать «Входящие»" disabled={!ready||busy||!canSend}
+        onPress={onRequestInbox} accessibilityLabel="Запросить разрешение на разбор Входящих"/>}
       {pickingAttachment && audioPreparing ? <View style={{flexDirection:'row',alignItems:'center',gap:12,minHeight:48,paddingHorizontal:6}}>
         <ActivityIndicator accessibilityLabel="Локальное распознавание аудио"/>
         <Text accessibilityLiveRegion="polite" style={{color:t.secondary,flex:1}}>Распознаю аудио на телефоне…</Text>

@@ -4,6 +4,9 @@ import * as Crypto from "expo-crypto";
 import { mergeTaskReceipts, recordEvidence } from "./task-state";
 
 import { runDirectAgent } from "./engine";
+import { createInboxTriageAccess, type InboxTriageApproval } from "./inbox-triage";
+import { localMemorySessionUnlocked, withLocalMemoryDatabase } from "../local-memory/storage";
+import { SqliteMemoryRepository } from "../local-memory/repository";
 import { runDocumentSynthesis } from "./document-synthesis";
 import type { DialogueSummaryScope } from "./dialogue-summary";
 import { diagnosticTrace, redactDiagnostic } from "./diagnostics";
@@ -29,7 +32,7 @@ import { assistantRowFromResult, interruptedAssistantPatch } from "./agent-resul
 export type LiveConversation = SavedConversation & { retryPhoto?: {rowId:string; image:ChatAttachment}; busy: boolean; progress: string; progressSince?: number; streamText?: string; savingDraft?: string; movingRowId?: string; deleting?: boolean };
 /** `notice` is informational (e.g. unreadable old chats), unlike `error`. */
 /** `sections` are the memory sections a proposal can go to, the user's own included. */
-export type ChatSnapshot = { ready: boolean; error: string; notice: string; conversations: LiveConversation[]; activeId: string | null; sections: MemorySection[] };
+export type ChatSnapshot = { ready: boolean; error: string; notice: string; conversations: LiveConversation[]; activeId: string | null; sections: MemorySection[]; inboxApproval?: InboxTriageApproval };
 /** Where a proposal will be saved: its section, the new one, or «Заметки». */
 export function draftSectionName(draft: ChatDraft, sections: MemorySection[]): string {
   if (draft.section) return sections.find(s => s.slug === draft.section)?.name || DEFAULT_SECTIONS.find(s => s.slug === draft.section)?.name || "Заметки";
@@ -48,6 +51,8 @@ export class DirectChatStore {
   private lifetime = new AbortController();
   private writes: Promise<void> = Promise.resolve();
   private repository: ConversationRepository;
+  private inboxAccess = new Map<string, ReturnType<typeof createInboxTriageAccess>>();
+  private inboxTurn = new Map<string, string>();
   /** `afterSave` runs after an approved record is saved (index words in the background). */
   constructor(private profile: string, repository?: ConversationRepository, private runner = runDirectAgent, private afterSave?: () => void) {
     this.repository = repository || conversationRepository(profile, count => { this.skipped = count; });
@@ -113,13 +118,52 @@ export class DirectChatStore {
     } finally { this.initializing = false; }
   }
   create() {
+    this.revokeInboxTriage();
     if (!this.snapshot.ready || this.disposed) return;
     const conversation = newConversation();
     this.publish({ conversations: [conversation, ...this.snapshot.conversations], activeId: conversation.id, error: "" });
     void this.persist(conversation).catch(() => {});
   }
   select(id: string) {
+    if (id !== this.snapshot.activeId) this.revokeInboxTriage();
     if (this.snapshot.conversations.some(c => c.id === id)) this.publish({ activeId: id, error: "" });
+  }
+  /** One visible permission card; no Inbox notes are read by this action. */
+  requestInboxTriage(limit = 10): void {
+    const id = this.snapshot.activeId;
+    const c = this.snapshot.conversations.find(row => row.id === id);
+    if (!id || !c || c.busy || c.deleting || this.disposed || !localMemorySessionUnlocked()) return;
+    this.revokeInboxTriage();
+    const access = createInboxTriageAccess(id);
+    const approval = access.requestApproval(limit);
+    this.inboxAccess.set(id, access);
+    this.publish({inboxApproval: approval});
+  }
+  revokeInboxTriage(): void {
+    for (const access of this.inboxAccess.values()) access.revoke();
+    this.inboxAccess.clear();
+    this.inboxTurn.clear();
+    if (this.snapshot.inboxApproval) this.publish({inboxApproval:undefined});
+  }
+  /** Only the confirm button calls this; sends via the original model loop. */
+  approveInboxTriage(settings: DirectAgentSettings): void {
+    const id = this.snapshot.activeId;
+    const c = this.snapshot.conversations.find(row => row.id === id);
+    const access = id ? this.inboxAccess.get(id) : undefined;
+    if (!id || !c || c.busy || c.deleting || !access ||
+        this.snapshot.inboxApproval?.conversationId !== id || !localMemorySessionUnlocked()) {
+      this.revokeInboxTriage(); return;
+    }
+    if (!access.approveFromUserTap(id)) { this.revokeInboxTriage(); return; }
+    const turnId = Crypto.randomUUID();
+    if (!access.beginTurn(turnId)) { this.revokeInboxTriage(); return; }
+    this.inboxTurn.set(id,turnId);
+    this.publish({inboxApproval:undefined});
+    // Preserve unrelated composer text and attachments. No independent dispatcher.
+    void this.send(settings,undefined,undefined,false,{
+      conversationId:id,preserveDraft:true,
+      prompt:"Разбери до 10 записей из раздела «Входящие». Вызови list_inbox_for_triage. Предложи подходящие обычные разделы и теги. Пока не изменяй записи; нужен отдельный выбор и подтверждение пользователя.",
+    });
   }
   setQuestion(question: string) {
     if (this.snapshot.activeId) this.update(this.snapshot.activeId, { question });
@@ -157,6 +201,7 @@ export class DirectChatStore {
     this.publish({ error: "" });
   }
   async remove(id: string) {
+    if (this.inboxAccess.has(id)) this.revokeInboxTriage();
     const conversation = this.snapshot.conversations.find(c => c.id === id);
     if (!conversation || conversation.busy || conversation.savingDraft || conversation.deleting) return;
     this.update(id, { deleting: true });
@@ -211,6 +256,9 @@ export class DirectChatStore {
     if (!id || !current || current.busy || current.deleting || this.disposed ||
       (!internetPhotoId && !intent && !current.question.trim() && !current.attachments?.length) ||
       (intent && intent.conversationId!==id)) return;
+    const inboxTurnId = this.inboxTurn.get(id);
+    if (inboxTurnId) this.inboxTurn.delete(id);
+    const inboxAccess = inboxTurnId ? this.inboxAccess.get(id) : undefined;
     const drafted = prepareAgentDraft({
       current, settings, internetPhotoId, documentApprovalKey, intent,
       report: patch => this.publish(patch),
@@ -261,6 +309,15 @@ export class DirectChatStore {
         previousSources, taskState, privatePhoto,
         articleContinuation, articleSelection, signal: aborter.signal,
         onText, sections, trace, host,
+        ...(inboxAccess && inboxTurnId && !internetPhotoId ? {inboxRead: async (limit:number,cursor?:number) => {
+          if (aborter.signal.aborted || this.disposed || !localMemorySessionUnlocked())
+            throw new Error("application_locked");
+          const result = await withLocalMemoryDatabase(this.profile, db =>
+            inboxAccess.listForTurn(inboxTurnId,new SqliteMemoryRepository(db),{limit,cursor}));
+          if (aborter.signal.aborted || this.disposed || !localMemorySessionUnlocked())
+            throw new Error("application_locked");
+          return result;
+        }} : {}),
         disposed: () => this.disposed,
         getConversation: () => this.snapshot.conversations.find(c => c.id === id),
         getWritableConversation: () => this.snapshot.conversations.find(c => c.id === id && !c.deleting),
@@ -319,6 +376,7 @@ export class DirectChatStore {
     } finally {
       trace("turn.finished", { elapsedMs: Date.now() - startedAt });
       this.requests.delete(id);
+      if (inboxTurnId) { inboxAccess?.endTurn(inboxTurnId); this.inboxAccess.delete(id); }
       cancel();
       const final = this.update(id, { busy: false, progress: "", progressSince: undefined, streamText: undefined });
       if (final) await this.persist(final).catch(() => {});
@@ -362,7 +420,7 @@ export class DirectChatStore {
       runner:this.runner,
     });
   }
-  stop(id = this.snapshot.activeId) { if (id && this.requests.has(id)) { this.update(id, { progress: "Останавливаю запрос…" }); this.requests.get(id)?.abort(); } }
+  stop(id = this.snapshot.activeId) { if (id && this.inboxAccess.has(id)) this.revokeInboxTriage(); if (id && this.requests.has(id)) { this.update(id, { progress: "Останавливаю запрос…" }); this.requests.get(id)?.abort(); } }
   /** The user moves a proposed note to another section before saving it. */
   /** `section` is an existing slug, or null for the new section the model proposed. */
   setDraftSection(draft: ChatDraft, section: string | null) {
@@ -492,6 +550,7 @@ export class DirectChatStore {
     finally { this.update(c.id, { savingDraft: undefined }); }
   }
   dispose() {
+    this.revokeInboxTriage();
     this.disposed = true;
     this.lifetime.abort();
     for (const request of this.requests.values()) request.abort();

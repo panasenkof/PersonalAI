@@ -29,6 +29,20 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
     ...memory.read,
     ...sourceTools(options,turn),
     ...memory.listing,
+    ...(options.inboxRead && !options.skipLocalMemory ? [{
+      definition: { name:"list_inbox_for_triage",
+        description:"Только после нажатия пользователем «Разрешить разбор». Прочитать максимум 10 активных заметок раздела Входящие: заголовок, версия, первые 600 символов текста и теги. НЕ писать, НЕ переносить, НЕ читать другие закрытые разделы. Для текущего хода только.",
+        parameters:{type:"object",properties:{limit:{type:"integer",minimum:1,maximum:10},cursor:{type:"integer",minimum:0,maximum:100000}},required:["limit"],additionalProperties:false}},
+      effect:"read" as const,
+      execute: async (args:Record<string,unknown>) => {
+        if (Object.keys(args).some(k=>!["limit","cursor"].includes(k)) || !Number.isSafeInteger(args.limit) || (args.limit as number)<1 || (args.limit as number)>10 ||
+          (args.cursor!==undefined && (!Number.isSafeInteger(args.cursor)||(args.cursor as number)<0||(args.cursor as number)>100000)))
+          return {error:"invalid_inbox_triage_args"};
+        const page = await options.inboxRead!(args.limit as number,args.cursor as number|undefined);
+        return {items:page.items,...(page.nextCursor!==undefined?{nextCursor:page.nextCursor}:{})};
+      },
+      verify:(result:Record<string,unknown>)=>Array.isArray(result.items)?"read" as const:"failed" as const,
+    }] : []),
     ...articleTools(options,turn),
     ...proposals.move,
     // SAME canonical chat ToolSpec registry as memory search, note drafts and moves.
