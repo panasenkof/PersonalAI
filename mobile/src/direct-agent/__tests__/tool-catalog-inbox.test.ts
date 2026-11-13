@@ -66,7 +66,7 @@ test("S9-1b: approved turn contains ONLY the private reader, no web/workspace/wr
   const {catalog,opts}=harness({requestInboxTriageApproval:request,listInboxForTriage:read});
   expect(catalog.definitions.map(d=>d.name)).toEqual(["list_inbox_for_triage"]);
   expect(catalog.guidance.map(d=>d.name)).toEqual(["list_inbox_for_triage"]);
-  const result=await catalog.run("list_inbox_for_triage",{limit:2});
+  const result=await catalog.run("list_inbox_for_triage",{limit:2,cursor:null});
   expect(result).toMatchObject({items:[{noteId:"private-id",expectedVersion:4}],outcome:"found"});
   expect(read).toHaveBeenCalledWith({limit:2});
   for(const tool of ["request_inbox_triage_access","draft_memory_fact",
@@ -83,14 +83,17 @@ test("S9-1b: approved turn contains ONLY the private reader, no web/workspace/wr
 test("S9-1b: malformed read args cannot reach canonical private reader", async () => {
   const read=jest.fn(async():Promise<InboxTriagePage>=>({items:[]}));
   const {catalog}=harness({listInboxForTriage:read});
-  for(const bad of [{limit:11},{limit:0},{limit:1,cursor:-1},
-    {limit:1,query:"sensitive"},{limit:2.5},{limit:1,cursor:1.2}]){
+  for(const bad of [{limit:11,cursor:null},{limit:0,cursor:null},{limit:1,cursor:-1},
+    {limit:1,query:"sensitive",cursor:null},{limit:2.5,cursor:null},{limit:1,cursor:1.2},{limit:1}]){
     expect(await catalog.run("list_inbox_for_triage",bad)).toHaveProperty("error");
   }
   expect(read).not.toHaveBeenCalled();
-  expect(await catalog.run("list_inbox_for_triage",{limit:1}))
+  expect(await catalog.run("list_inbox_for_triage",{limit:1,cursor:null}))
     .toMatchObject({items:[],outcome:"empty"});
   expect(read).toHaveBeenCalledTimes(1);
+  const schema=catalog.definitions.find(d=>d.name==="list_inbox_for_triage")!.parameters as any;
+  expect(schema.required).toEqual(["limit","cursor"]);
+  expect(schema.properties.cursor.type).toEqual(["integer","null"]);
 });
 
 test("S9-1b: encrypted reload never restores an expired consent card", () => {
