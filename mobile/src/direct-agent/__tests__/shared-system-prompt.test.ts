@@ -165,3 +165,49 @@ test("ARCH-3c4: dialogue next-step instruction survives for each exact available
     expect(prompt).toContain("Не отправляй личные данные из памяти поисковику");
   }
 });
+
+
+test("ARCH-3c5: optional tool alternatives preserve the verification rules", () => {
+  const {TOOL_GUIDANCE} = require("../prompt");
+  const movePrompt = buildSystemPrompt({
+    contextEnabled: false,
+    tools: [
+      {name: "search_local_notes"},
+      {name: "propose_move_local_note", guidance: TOOL_GUIDANCE.propose_move_local_note},
+    ],
+  });
+  expect(movePrompt).toContain("сначала найди точную запись и версию через search_local_notes");
+  expect(movePrompt).not.toContain("list_local_notes");
+  expect(movePrompt).toContain("не заявляй, что перенос уже сделан");
+
+  const workspacePrompt = buildSystemPrompt({
+    contextEnabled: false,
+    tools: [{name: "workspace_put", guidance: TOOL_GUIDANCE.workspace_put}],
+  });
+  expect(workspacePrompt).toContain("можешь пользоваться workspace_put");
+  expect(workspacePrompt).not.toContain("workspace_list");
+  expect(workspacePrompt).not.toContain("workspace_get");
+  expect(workspacePrompt).not.toContain("workspace_clear");
+  expect(workspacePrompt).toContain("ограниченные рабочие черновики текущей задачи");
+});
+
+test("ARCH-3c5: full shared prompt retains key safety and workflow policies from legacy Responses", () => {
+  const opts = full(), legacy = responsesSystemPrompt(opts.sections);
+  const shared = promptFor(opts);
+  for (const fragment of [
+    "Если выбор неоднозначен, задай короткий уточняющий вопрос",
+    "Сам выбирай следующий шаг",
+    "После каждого результата оцени, хватает ли данных",
+    "Не отправляй личные данные из памяти поисковику",
+    "Не повторяй без изменений неудачный вызов",
+    "не считай отрывок полным документом",
+    "Сохраняй ссылки на точные диапазоны evidence",
+    "не объявляй отсутствие модели/индекса пустым результатом",
+    "Держи там прогресс, сравнения и открытые вопросы",
+    "Запоминай всё важное, что пользователь рассказывает о себе",
+    "coverage=excerpt значит источник прочитан частично",
+  ]) {
+    expect(legacy).toContain(fragment);
+    expect(shared).toContain(fragment);
+  }
+});
