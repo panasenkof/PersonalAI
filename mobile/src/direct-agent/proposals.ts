@@ -9,8 +9,10 @@ import type { InboxTriageProposal } from "./inbox-triage-proposal";
 import { confirmInboxTriage, undoInboxTriage, type InboxTriageReceipt } from "./inbox-triage-actions";
 import { confirmMove, undoMove, type ChatMoveProposal, type ChatMoveReceipt } from "./move-proposal";
 import { confirmSectionAction, type ChatSectionProposal, type ChatSectionReceipt } from "./section-actions";
+import { confirmDuplicateMerge, undoDuplicateMerge, type DuplicateMergeReceipt } from "./duplicate-merge-actions";
+import type { VerifiedDuplicateMergeRequest } from "./duplicate-merge-gate";
 
-export type ProposalKind = "move_note" | "section" | "inbox_triage";
+export type ProposalKind = "move_note" | "section" | "inbox_triage" | "merge_notes";
 export type ProposalCardView = {
   heading: string;
   lines: string[];
@@ -180,11 +182,59 @@ export const inboxTriageHandler: ProposalHandler<InboxTriageProposal,InboxTriage
   },
 };
 
+/** S9-2: model suggests one exact verified group, user taps to authorize.
+ * No novel card framework: existing ARCH-4 receipt/Undo handles the batch. */
+export const duplicateMergeHandler:ProposalHandler<VerifiedDuplicateMergeRequest,DuplicateMergeReceipt>={
+  kind:"merge_notes",
+  fromRow:row=>row.role==="assistant"?row.duplicateMergeProposal:undefined,
+  receiptFromRow:row=>row.role==="assistant"?row.duplicateMergeReceipt:undefined,
+  present:proposal=>{
+    const keep=proposal.records[0];
+    const sources=proposal.records.slice(1);
+    return {
+      heading:"Объединить найденные дубли?",
+      lines:[
+        "Сохранится: "+keep.title+" ("+keep.section+")",
+        ...sources.map(item=>"Объединить с: "+item.title+" ("+item.section+")"),
+        "Вложений в группе: "+proposal.attachmentCount+
+        "; исходных тегов: "+proposal.sourceTagEntries,
+        "Основание: "+proposal.reason,
+      ],
+      note:"Исходные записи можно вернуть отменой. Перед переносом будут снова проверены версии, уровни доступа, связи и лимит 12 уникальных тегов.",
+      confirmLabel:"Объединить "+proposal.noteIds.length+" записи",
+      confirmIcon:"git-merge",danger:false,
+    };
+  },
+  presentReceipt:receipt=>({
+    text:receipt.undone ? "Объединение дублей отменено. Исходные записи и вложения восстановлены."
+      : "Дубли объединены: "+receipt.mergedCount+
+        ". Сохранённая запись и источники доступны в памяти.",
+    undoable:!receipt.undone,
+    undone:receipt.undone===true,
+  }),
+  confirm:confirmDuplicateMerge,
+  undo:undoDuplicateMerge,
+  confirmNotice:receipt=>"Объединено "+receipt.mergedCount+
+    " записей. Исходники и вложения можно вернуть отменой.",
+  dismissNotice:"Объединение дублей отклонено. Записи не изменены.",
+  confirmErrorSuffix:" Объединение не выполнено: проверьте версии, теги, доступ и связанные сведения.",
+  undoNotice:receipt=>"Объединение отменено, восстановлено "+receipt.noteIds.length+" записей.",
+  undoErrorSuffix:" Отмена не выполнена, проверьте версии и вложения.",
+  withReceipt:(row,receipt)=>{
+    const {duplicateMergeProposal:_proposal,...rest}=row;
+    return {...rest,duplicateMergeReceipt:receipt};
+  },
+  withoutProposal:row=>{
+    const {duplicateMergeProposal:_proposal,...rest}=row;
+    return rest;
+  },
+};
+
 /** One ordered registry. A malformed historic row that has both proposals
  * renders at most one card, matching the pre-refactor UI's section-first order.
  */
 export const proposalHandlers: ProposalHandler<any, any>[] = [
-  sectionHandler, inboxTriageHandler, moveNoteHandler,
+  sectionHandler, inboxTriageHandler, duplicateMergeHandler, moveNoteHandler,
 ];
 
 export function rowProposal(row: ChatRow):
