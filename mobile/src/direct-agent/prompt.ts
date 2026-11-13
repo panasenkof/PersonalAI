@@ -104,9 +104,9 @@ function availableSentences(value: string, active: ReadonlySet<string>): string 
   return value.split(". ").map((part, index, parts) =>
     part + (index + 1 < parts.length ? ". " : "")).filter(sentence => {
     const references = (sentence.match(TOOL_WORD) || []).filter(word => TOOL_REFERENCES.has(word));
-    return references.every(word => word === "web_search" || word === "search_web"
-      ? active.has("web_search") || active.has("search_web")
-      : active.has(word));
+    // Two different provider interfaces, NOT aliases. In particular Tavily
+    // offers search_web while native OpenAI Responses offers web_search.
+    return references.every(word => active.has(word));
   }).join("");
 }
 
@@ -133,7 +133,12 @@ export function buildSystemPrompt(input: {
     // Responses built-in web_search (it is also explicitly advertised).
     const text = tool.guidance ||
       (tool.name === "web_search" ? TOOL_GUIDANCE.search_web : "");
-    if (text) pieces.push(availableSentences(text, active));
+    // The historical golden Responses prompt names the native web_search.
+    // Keep its exact bytes as the ARCH-0 fixture, but advertise the real
+    // search_web name to compatible providers when they register that tool.
+    const actualText = tool.name === "search_web"
+      ? text.replace(/\bweb_search\b/g, "search_web") : text;
+    if (actualText) pieces.push(availableSentences(actualText, active));
   }
   // Dialogue contains tool-specific clauses (including read_web_page and
   // update_task_state); never attach the unfiltered guide to minimal catalog.
