@@ -456,7 +456,9 @@ export class DirectChatStore {
     const { handler, proposal } = selected;
     this.update(c.id, { movingRowId: rowId });
     try {
-      const receipt = await handler.confirm(this.profile, proposal, selectedInboxIds);
+      const receipt = handler.kind==="inbox_triage"
+        ? await handler.confirm(this.profile, proposal, selectedInboxIds)
+        : await handler.confirm(this.profile, proposal);
       const latest = this.snapshot.conversations.find(x => x.id === c.id);
       if (!latest || this.disposed) return;
       const current = latest.rows.find(r => r.id === rowId);
