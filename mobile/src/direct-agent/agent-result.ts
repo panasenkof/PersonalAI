@@ -40,3 +40,43 @@ export function assistantRowFromResult(
     ...(applied?.change ? { change: applied.change } : {}),
   };
 }
+
+
+/** Pure failure-row description; the store owns publication and persistence.
+ * ID creation is injected to preserve the original ordering and to make
+ * cancellation/partial-output behavior deterministic in tests. */
+export function interruptedAssistantPatch(input: {
+  conversation: import("./chat-store").LiveConversation;
+  taskState: NonNullable<import("./engine").DirectAgentOptions["taskState"]>;
+  privatePhoto?: import("./chat-attachments").ChatAttachment;
+  internetPhotoId: boolean;
+  intentPreserveDraft: boolean;
+  modelStarted: boolean;
+  beforeModelError: string;
+  prompt: string;
+  draftFiles: import("./chat-attachments").ChatAttachment[];
+  signalAborted: boolean;
+  latest: string;
+  error: unknown;
+  newId: () => string;
+}): Partial<import("./chat-store").LiveConversation> {
+  const {
+    conversation: c, taskState, privatePhoto, internetPhotoId, intentPreserveDraft,
+    modelStarted, beforeModelError, prompt, draftFiles, signalAborted,
+    latest, error: e, newId,
+  } = input;
+        const aborted = signalAborted;
+        const partial = aborted ? latest.trim() : "";
+        const errorRowId=newId();
+        return {
+          retryPhoto:privatePhoto?{rowId:errorRowId,image:privatePhoto}:undefined,
+          taskState: { ...(c.taskState || taskState), turnStatus: "interrupted" },
+          ...(!internetPhotoId && !intentPreserveDraft && !modelStarted && !aborted
+            ? { question: c.question || prompt, attachments:draftFiles } : {}),
+          rows: [...c.rows,
+            ...(partial ? [{ id: newId(), role: "assistant" as const, text: partial }] : []),
+            { id: errorRowId, role: "info", ...(aborted ? {} : { error: true as const }),
+              text: aborted ? (partial ? "Ответ остановлен" : "Запрос остановлен") : !modelStarted ? beforeModelError : String((e as Error).message) }],
+        };
+
+}

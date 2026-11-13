@@ -5,7 +5,7 @@
 import * as Crypto from "expo-crypto";
 import { mergeTaskReceipts } from "./task-state";
 import { runDirectAgent } from "./engine";
-import { localMemorySessionUnlocked, withLocalMemoryDatabase } from "../local-memory/storage";
+import { localMemorySessionUnlocked, withLocalMemoryDatabase, waitForApplicationSession, onLocalMemorySessionChange } from "../local-memory/storage";
 import { searchApprovedNotes, readApprovedNote } from "./memory";
 import { searchLocalApprovedSourceSegments, listLocalApprovedSourceSegments, readLocalApprovedSourceSegment } from "../local-memory/source-retrieval";
 import { listAllowedNotes, countAllowedNotes } from "../local-memory/agent-catalog";
@@ -20,6 +20,8 @@ import { checkedChatAttachments } from "./chat-attachments";
 import { imageCapability, historyForImageCapability } from "./attachment-capabilities";
 import { localPhotoIntent83 } from "../media/vision-chat-search";
 import { historyWithoutLargeDocuments, planDocumentSynthesis } from "./document-synthesis";
+import { planDialogueSummary, runDialogueSummary, type DialogueSummaryScope } from "./dialogue-summary";
+import { loadModelCallLimit } from "./agent-preferences";
 import { beginTask } from "./task-state";
 import { webPreference } from "./dialogue";
 import { MAX_USER_PROMPT_CHARS } from "./limits";
@@ -309,4 +311,86 @@ export function articleTurnContext(current: LiveConversation, articleRowId?: str
         : latestArticleRow?.articlePage?.nextCursor ? latestArticleRow : undefined)?.articlePage;
 
   return { articleSelection, articleContinuation };
+}
+
+/** Identical H-SAVE1b workflow over the same serialized chat writer.
+ * The store injects its live request map and AppLock session; nothing in this
+ * module owns an independent queue, database or cancellation controller. */
+export async function summarizeWithAgentHost(input: {
+  conversationId: string;
+  settings: AgentOptions["settings"];
+  scope: DialogueSummaryScope;
+  approvalKey: string;
+  profile: string;
+  ready: () => boolean;
+  disposed: () => boolean;
+  requestExists: (id: string) => boolean;
+  beginRequest: (id: string, aborter: AbortController) => void;
+  endRequest: (id: string) => void;
+  sessionSignal: AbortSignal;
+  getConversation: (id: string) => LiveConversation | undefined;
+  update: (id: string, patch: Partial<LiveConversation>) => LiveConversation | undefined;
+  persist: (conversation: LiveConversation) => Promise<void>;
+  publishError: (error: string) => void;
+  runner: typeof runDirectAgent;
+}): Promise<{conversationId:string;rowId:string}> {
+  const {
+    conversationId, settings, scope, approvalKey, profile, ready, disposed,
+    requestExists, beginRequest, endRequest, sessionSignal, getConversation,
+    update, persist, publishError, runner,
+  } = input;
+    const current=getConversation(conversationId);
+    if (!ready() || disposed() || !current || current.busy || current.deleting ||
+        requestExists(conversationId))
+      throw new Error("Диалог занят или недоступен. Дождитесь завершения ответа.");
+    const plan=planDialogueSummary(current,scope,settings.model,settings.provider);
+    if (plan.approvalKey!==approvalKey)
+      throw new Error("После подтверждения переписка или модель изменились. Подтвердите диапазон заново.");
+    const maxRequests=await loadModelCallLimit(profile);
+    if (plan.calls>maxRequests)
+      throw new Error("Нужно "+plan.calls+" обращений к модели, разрешено "+maxRequests+". Ничего не отправлено.");
+    const latest=getConversation(conversationId);
+    if (!latest || latest.busy || latest.deleting || requestExists(conversationId) ||
+        planDialogueSummary(latest,scope,settings.model,settings.provider).approvalKey!==approvalKey)
+      throw new Error("Диалог изменился до начала обработки. Повторите подтверждение.");
+    const aborter=new AbortController();
+    beginRequest(conversationId,aborter);
+    // Unlike ordinary visible chat responses, an optional paid whole-history
+    // export stops as soon as AppLock closes; never continue shipping text.
+    const offSession=onLocalMemorySessionChange(unlocked=>{if(!unlocked)aborter.abort();});
+    update(conversationId,{busy:true,progress:"Готовлю итог диалога…",progressSince:Date.now()});
+    try {
+      await waitForApplicationSession(sessionSignal);
+      if(disposed() || aborter.signal.aborted)throw new Error("Создание итога отменено.");
+      const result=await runDialogueSummary({
+        settings, prompt:"Составить итог переписки",history:[],maxRequests,
+        signal:aborter.signal, lookup:async()=>[],propose:()=>undefined,
+        status:progress=>{if(!aborter.signal.aborted)update(conversationId,{progress,progressSince:Date.now()});},
+      },plan,runner);
+      if(disposed() || aborter.signal.aborted)throw new Error("Создание итога отменено.");
+      const beforeSave=getConversation(conversationId);
+      if(!beforeSave || beforeSave.deleting ||
+          planDialogueSummary(beforeSave,scope,settings.model,settings.provider).approvalKey!==approvalKey)
+        throw new Error("История изменилась во время составления итога. Результат не сохранён.");
+      const rowId=Crypto.randomUUID();
+      const createdAt=new Date().toISOString();
+      const rows=[...beforeSave.rows,{id:rowId,role:"assistant" as const,text:result.body,
+        dialogueSummary:{scope:plan.scope,includedRows:plan.includedRows,totalRows:plan.totalRows,
+          omittedAttachments:plan.omittedAttachments,sourceChars:plan.source.length,
+          parts:plan.parts.length,firstRowId:plan.firstRowId,lastRowId:plan.lastRowId,
+          model:settings.model,provider:settings.provider,createdAt}}];
+      // Durability before navigating to a note. Do not create a new writer.
+      await persist({...beforeSave,rows,updatedAt:createdAt});
+      if(disposed() || aborter.signal.aborted)throw new Error("Обработка остановлена. Проверьте историю диалога.");
+      update(conversationId,{rows,updatedAt:createdAt});
+      return {conversationId,rowId};
+    } catch(e) {
+      if(!disposed())publishError((e as Error)?.message||"Не удалось составить итог диалога.");
+      throw e;
+    } finally {
+      offSession();
+      endRequest(conversationId);
+      const final=update(conversationId,{busy:false,progress:"",progressSince:undefined});
+      if(final)await persist(final).catch(()=>{});
+    }
 }
