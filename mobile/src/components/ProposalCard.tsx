@@ -116,7 +116,7 @@ export function ReceiptLine({ view, kind, busy, working, onUndo }: {
     <Text style={{ color: t.text, fontWeight: "700" }}>{heading}</Text>
     {details.map((line, index) => <Text key={index} style={{ color: t.muted }}>{line}</Text>)}
     {view.undoable && !view.undone ?
-      <NebulaAction icon="rotate-ccw" label={working ? "Отмена…" : "Отменить перенос"}
+      <NebulaAction icon="rotate-ccw" label={working ? "Отмена…" : kind==="inbox_triage" ? "Отменить разбор" : "Отменить перенос"}
         size="compact" disabled={busy} onPress={onUndo} /> : null}
   </View>;
 }
