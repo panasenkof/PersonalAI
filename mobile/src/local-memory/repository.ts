@@ -406,11 +406,11 @@ export class SqliteMemoryRepository implements MemoryRepository {
   }
   /** One unchanged unlocked transaction for model index, hints and links. */
   applyIndexEnrichment(snapshot: EnrichmentSnapshot, terms: string[], people: string[], signal?: AbortSignal, metadata?: SearchMetadataSuggestion): Promise<boolean> {
-    return applyIndexEnrichment(this.db,snapshot,terms,people,signal,metadata,{
+    return applyIndexEnrichment(this.db,snapshot,terms,people,{
       lookupEntity: id=>this.entity(id),
       listCollections:()=>this.listCollections(),
       entitiesByAlias:(name,kind)=>this.entitiesByAlias(name,kind),
-    });
+    },signal,metadata);
   }
 
   /** All methods remain inside localMemoryRepository's encrypted profile lease. */

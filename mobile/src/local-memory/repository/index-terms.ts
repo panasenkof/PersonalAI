@@ -55,7 +55,7 @@ export async function setIndexTerms(db:SQL, entityId: string, terms: string[], s
   /** Compare the request snapshot and commit words + inferred links together.
    * The database lease pins the profile. Abort is checked inside the transaction,
    * including after async indexing, so a lock/disable cannot leave half an answer. */
-export async function applyIndexEnrichment(db:SQL, snapshot: EnrichmentSnapshot, terms: string[], people: string[], signal?: AbortSignal, metadata?: SearchMetadataSuggestion, reads: IndexEnrichmentReads): Promise<boolean> {
+export async function applyIndexEnrichment(db:SQL, snapshot: EnrichmentSnapshot, terms: string[], people: string[], reads: IndexEnrichmentReads, signal?: AbortSignal, metadata?: SearchMetadataSuggestion): Promise<boolean> {
     const { lookupEntity, listCollections, entitiesByAlias } = reads;
     const checkCancelled = () => { if (signal?.aborted) throw new Error("Подбор слов остановлен"); };
     let applied = false;
