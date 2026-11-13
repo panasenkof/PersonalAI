@@ -5,6 +5,7 @@
 import { withLocalMemoryDatabase, localMemorySessionUnlocked } from "../local-memory/storage";
 import { SqliteMemoryRepository } from "../local-memory/repository";
 import { createInboxTriageAccess, type InboxTriageApproval, type InboxTriagePage } from "./inbox-triage";
+import { validateInboxTriageProposal, type InboxTriageProposal } from "./inbox-triage-proposal";
 
 type Grant = {
   access: ReturnType<typeof createInboxTriageAccess>;
@@ -78,6 +79,30 @@ export class InboxTriageChatAccess {
         this.grants.get(conversationId) !== grant)
       throw new Error("inbox_triage_not_authorized");
     return result;
+  }
+
+  /** Model may propose only note handles returned in this EXACT authorized turn.
+   * No writes, no new reader and no capability surviving a revoked grant. */
+  async proposeForTurn(conversationId: string, turnId: string, raw: unknown,
+    signal?: AbortSignal): Promise<InboxTriageProposal> {
+    this.ensureAvailable();
+    const grant = this.grants.get(conversationId);
+    if (!grant || !grant.approved || grant.activeTurn !== turnId || signal?.aborted)
+      throw new Error("inbox_triage_not_authorized");
+    const proposal = await withLocalMemoryDatabase(this.profile, async db => {
+      const sections = await new SqliteMemoryRepository(db).listCollections();
+      if (signal?.aborted || this.grants.get(conversationId) !== grant ||
+          !localMemorySessionUnlocked()) throw new Error("inbox_triage_not_authorized");
+      return validateInboxTriageProposal(raw, {
+        sections,
+        wasReadThisTurn: (noteId, expectedVersion) =>
+          grant.access.wasReadThisTurn(turnId, noteId, expectedVersion),
+      });
+    });
+    if (signal?.aborted || !this.available() || !localMemorySessionUnlocked() ||
+        this.grants.get(conversationId) !== grant)
+      throw new Error("inbox_triage_not_authorized");
+    return proposal;
   }
 
   dismiss(conversationId: string, rowId: string): boolean {
