@@ -40,7 +40,8 @@ export function verifyDuplicateMergeRequest(
      raw.reason.trim().length<5 || raw.reason.length>240)
     throw new Error("invalid_duplicate_merge_request");
   const requested=new Map<string,number>();
-  raw.noteIds.forEach((id:string,i:number)=>requested.set(id,raw.expectedVersions[i]));
+  const verifiedVersions=raw.expectedVersions as number[];
+  (raw.noteIds as string[]).forEach((id,i)=>requested.set(id,verifiedVersions[i]));
   const matching=groups.filter(group=>group.complete===true &&
     Number.isSafeInteger(group.totalCount) &&
     group.records.length===group.totalCount &&
