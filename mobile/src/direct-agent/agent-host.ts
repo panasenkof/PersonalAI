@@ -54,6 +54,7 @@ export type AgentHostInput = {
   getWritableConversation: () => LiveConversation | undefined;
   update: (patch: Partial<LiveConversation>, save?: boolean) => LiveConversation | undefined;
   persist: (conversation: LiveConversation) => Promise<void>;
+  inboxTriage?: Pick<AgentOptions,"requestInboxTriageApproval"|"listInboxForTriage">;
 };
 
 /** Creates the exact same host callbacks that the old send() supplied.
@@ -64,10 +65,11 @@ export function buildAgentOptions(input: AgentHostInput): Parameters<typeof runD
     profile, id, current, settings, maxRequests, prompt, attachments, skipLocalMemory,
     history, previousSources, taskState, privatePhoto, articleContinuation,
     articleSelection, signal, onText, sections, trace, host, disposed,
-    getConversation, getWritableConversation, update, persist,
+    getConversation, getWritableConversation, update, persist, inboxTriage,
   } = input;
   let stage = "";
-  return { settings, maxRequests, prompt, attachments, skipLocalMemory:Boolean(skipLocalMemory), history:privatePhoto ? history.map(turn=>({...turn,attachments:undefined})) : history, previousSources, taskState, pendingNotes: skipLocalMemory ? [] : current.drafts,
+  return { settings: inboxTriage?.listInboxForTriage ? {...settings,allowWeb:false} : settings,
+    ...(inboxTriage || {}), maxRequests, prompt, attachments, skipLocalMemory:Boolean(skipLocalMemory), history:privatePhoto ? history.map(turn=>({...turn,attachments:undefined})) : history, previousSources, taskState, pendingNotes: skipLocalMemory ? [] : current.drafts,
     photoQueryAvailable:Boolean(privatePhoto),
     ...(!skipLocalMemory && articleContinuation ? {articleContinuation} : {}),
     ...(!skipLocalMemory && articleSelection ? {articleSelection} : {}),
