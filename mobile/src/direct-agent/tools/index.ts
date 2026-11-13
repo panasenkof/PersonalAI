@@ -58,7 +58,7 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
     ? options.importTagsEnabled ? [conversations.importMetadataTool] : specs.filter(s => s.definition.name === "set_conversation_context")
     // An authorized private turn must not advertise web, drafting, memory
     // search, workspaces, external actions or any other tool.
-    : options.listInboxForTriage ? specs.filter(s => s.definition.name === "list_inbox_for_triage")
+    : options.listInboxForTriage ? specs.filter(s => s.definition.name === "list_inbox_for_triage" || s.definition.name === "propose_inbox_triage")
     : specs;
   const registry = new Map(activeSpecs.map(s => [s.definition.name, s]));
   emit();
@@ -88,6 +88,7 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
     // as task evidence that a later turn could mistake for a reauthorized read.
     if (outcome !== "state_updated" &&
         canonical !== "list_inbox_for_triage" && // private text must never be persisted to TaskState
+        canonical !== "propose_inbox_triage" && // private proposed ids/tags stay off TaskState
         canonical !== "selected_article_read_coverage" &&
         canonical !== "search_local_photos")
       observe({ tool: canonical, outcome,
@@ -96,7 +97,7 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
     options.diagnostic?.("tool.outcome_verified", { name: canonical, effect: spec?.effect || "unknown", outcome });
     return { ...result, ...(outcome !== "failed" ? { outcome } : {}) };
   }
-  function finish(): Pick<DirectResult, "taskState" | "proposalIds" | "articlePage" | "articleReadReport" | "photoAction" | "moveProposal" | "sectionProposal" | "inboxApproval" | "contextCandidate" | "importTags"> {
+  function finish(): Pick<DirectResult, "taskState" | "proposalIds" | "articlePage" | "articleReadReport" | "photoAction" | "moveProposal" | "sectionProposal" | "inboxApproval" | "inboxTriageProposal" | "contextCandidate" | "importTags"> {
     turn.state = { ...turn.state, turnStatus: "answered" }; emit();
     const selected = !turn.mixedArticleFilters && turn.usedSelectedArticleTool ? selectedArticleHandles() : undefined;
     const checked = selected && articleCoverage.summary(selected);
@@ -127,6 +128,7 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
       ...(turn.movePreview ? {moveProposal:turn.movePreview} : {}),
       ...(turn.sectionPreview ? {sectionProposal:turn.sectionPreview} : {}),
       ...(inbox.approval() ? {inboxApproval:inbox.approval()} : {}),
+      ...(inbox.proposal() ? {inboxTriageProposal:inbox.proposal()} : {}),
       ...(turn.contextCandidate ? {contextCandidate:turn.contextCandidate} : {}),
       ...(turn.importTagsCandidate !== undefined ? {importTags:turn.importTagsCandidate} : {}) };
   }
