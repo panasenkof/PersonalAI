@@ -50,13 +50,17 @@ export class DirectChatStore {
   private writes: Promise<void> = Promise.resolve();
   private repository: ConversationRepository;
   private readonly inboxTriage: InboxTriageChatAccess;
+  private readonly activeInboxTurns = new Set<string>();
   private readonly stopInboxSessionWatch: () => void;
   /** `afterSave` runs after an approved record is saved (index words in the background). */
   constructor(private profile: string, repository?: ConversationRepository, private runner = runDirectAgent, private afterSave?: () => void) {
     this.repository = repository || conversationRepository(profile, count => { this.skipped = count; });
     this.inboxTriage = new InboxTriageChatAccess(profile, () => !this.disposed);
     this.stopInboxSessionWatch = typeof onLocalMemorySessionChange === "function"
-      ? onLocalMemorySessionChange(unlocked => { if (!unlocked) this.inboxTriage.revokeAll(); })
+      ? onLocalMemorySessionChange(unlocked => { if (!unlocked) {
+          this.inboxTriage.revokeAll();
+          for (const id of this.activeInboxTurns) this.requests.get(id)?.abort();
+        } })
       : () => {};
   }
   getSnapshot = () => this.snapshot;
@@ -123,12 +127,16 @@ export class DirectChatStore {
     if (!this.snapshot.ready || this.disposed) return;
     const conversation = newConversation();
     this.inboxTriage.revokeAll();
+    for(const id of this.activeInboxTurns)this.requests.get(id)?.abort();
     this.publish({ conversations: [conversation, ...this.snapshot.conversations], activeId: conversation.id, error: "" });
     void this.persist(conversation).catch(() => {});
   }
   select(id: string) {
     if (this.snapshot.conversations.some(c => c.id === id)) {
-      if (id !== this.snapshot.activeId) this.inboxTriage.revokeAll();
+      if (id !== this.snapshot.activeId) {
+        this.inboxTriage.revokeAll();
+        for(const active of this.activeInboxTurns)this.requests.get(active)?.abort();
+      }
       this.publish({ activeId: id, error: "" });
     }
   }
@@ -267,8 +275,11 @@ export class DirectChatStore {
       if(documentPlan && documentPlan.calls>maxRequests)throw new Error("Для полного анализа требуется "+documentPlan.calls+" обращений к модели, но в настройках разрешено "+maxRequests+". Измените лимит перед отправкой.");
       modelStarted = true;
       const { articleSelection, articleContinuation } = articleTurnContext(current, intent?.articleRowId);
-      if (intent?.inboxApprovalRowId && !this.inboxTriage.beginTurn(id,intent.inboxApprovalRowId,inboxTurnId))
-        throw new Error("Разрешение на разбор «Входящих» истекло. Запросите его снова.");
+      if (intent?.inboxApprovalRowId) {
+        if (!this.inboxTriage.beginTurn(id,intent.inboxApprovalRowId,inboxTurnId))
+          throw new Error("Разрешение на разбор «Входящих» истекло. Запросите его снова.");
+        this.activeInboxTurns.add(id);
+      }
       const agentOptions = buildAgentOptions({
         profile: this.profile, id, current, settings, maxRequests, prompt, attachments,
         skipLocalMemory: Boolean(internetPhotoId), history: privatePhoto
@@ -314,7 +325,7 @@ export class DirectChatStore {
         taskState: mergeTaskReceipts({ ...(result.taskState || c.taskState || taskState), turnStatus: "answered" }, c.taskState),
         rows: [...c.rows,
           ...view.notices.map(text => ({ id: Crypto.randomUUID(), role: "info" as const, text })),
-          { id: answerRowId, ...view.row },
+          { id: answerRowId, ...view.row, ...(intent?.inboxApprovalRowId ? {inboxTriageResult:true} : {}) },
         ],
         ...(view.context ? { context:view.context, title:view.context.topic } : {}),
         updatedAt,
@@ -345,6 +356,7 @@ export class DirectChatStore {
       }
     } finally {
       this.inboxTriage.endTurn(id,inboxTurnId);
+      this.activeInboxTurns.delete(id);
       trace("turn.finished", { elapsedMs: Date.now() - startedAt });
       this.requests.delete(id);
       cancel();
@@ -551,7 +563,7 @@ export class DirectChatStore {
     this.disposed = true;
     this.lifetime.abort();
     for (const request of this.requests.values()) request.abort();
-    this.inboxTriage.revokeAll(); this.stopInboxSessionWatch();
+    this.inboxTriage.revokeAll(); this.activeInboxTurns.clear(); this.stopInboxSessionWatch();
     this.requests.clear(); this.listeners.clear();
   }
 }

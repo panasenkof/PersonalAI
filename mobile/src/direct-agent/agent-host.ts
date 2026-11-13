@@ -257,9 +257,13 @@ export function prepareTurnHistory(
 ) {
     // A one-tap image-to-web query is a standalone purpose. Never transmit
     // unrelated history images, private drafts or prior conversation selections.
-    const previousSources = internetPhotoId ? [] : [...current.rows].reverse().filter(r => r.role === "assistant" && r.sources?.length).slice(0, 3).flatMap(r => r.sources!).slice(0, 15);
+    const previousSources = internetPhotoId ? [] : [...current.rows].reverse().filter(r => r.role === "assistant" && !r.inboxTriageResult && r.sources?.length).slice(0, 3).flatMap(r => r.sources!).slice(0, 15);
     const previousHistory = internetPhotoId ? [] : current.rows.filter(r => r.role !== "info").slice(-8)
-      .map(r => ({ role: r.role as "user" | "assistant", content: r.text, ...(r.attachments?.length ? {attachments:r.attachments} : {}) }));
+      .map(r => ({ role: r.role as "user" | "assistant",
+        // Private Inbox summaries stay in encrypted/local UI history only.
+        // The next ordinary turn requires its OWN permission to see them.
+        content: r.inboxTriageResult ? "[Приватный разбор «Входящих» скрыт из истории для модели]" : r.text,
+        ...(r.attachments?.length && !r.inboxTriageResult ? {attachments:r.attachments} : {}) }));
     // After switching to a model known to be text-only, historical photo
     // originals stay encrypted in prior turns but are not uploaded again.
     const history = historyForImageCapability(historyWithoutLargeDocuments(previousHistory),
