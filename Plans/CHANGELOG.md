@@ -1,5 +1,14 @@
 # PersAI — журнал слитых изменений
 
+- 2026-11-13 · S9-1c4: выборочная карточка «Входящих», транзакционный перенос с тегами, квитанция и undo (#544), merge 879f608 · CI PASS [43496235107](https://github.com/panasenkof/PersonalAI/actions/runs/43496235107): TypeScript/Jest/browser/release APK/Android emulator; physical NOT_RUN, live LLM NOT_RUN
+- 2026-11-13 · S9-1c3: единый SQLCipher writer для выбранной пачки «Входящих», теги, версии и журнал Undo (#543), merge 77cd7c3 · CI PASS [43491396279](https://github.com/panasenkof/PersonalAI/actions/runs/43491396279); physical NOT_RUN
+- 2026-11-13 · S9-1c2: структурированное предложение через единый каталог после разового чтения (#542), merge faf6390 · CI PASS [43490764728](https://github.com/panasenkof/PersonalAI/actions/runs/43490764728); live LLM NOT_RUN
+- 2026-11-13 · S9-1 безопасность: закрыт приватный текст «Входящих» в диагностике трёх протоколов (#540), merge 51efe93 · CI PASS [43487879947](https://github.com/panasenkof/PersonalAI/actions/runs/43487879947)
+- 2026-11-13 · S9-1c1: валидация same-turn ID/версии, обычных разделов, тегов и выбора строк (#539), merge 04e9dae · CI PASS [43481501094](https://github.com/panasenkof/PersonalAI/actions/runs/43481501094)
+- 2026-11-13 · S9-1b: исправлена строгая схема cursor чтения для провайдеров (#537), merge eb36a6d · Android physical NOT_RUN
+- 2026-11-13 · S9-1b: карточка однократного согласия в чате, ограниченный private reader через LLM (#535), merge 2255a05 · CI PASS [43447597287](https://github.com/panasenkof/PersonalAI/actions/runs/43447597287); live LLM NOT_RUN
+- 2026-11-13 · S9-1a: одноходовое разрешение и ограниченный SQLCipher reader «Входящих» (#534), merge 1fb5e6f · Android physical NOT_RUN
+
 - 2026-11-13 · ARCH-6c: завершён перенос SQLCipher-репозитория в canonical modules (#527–#533); фасад `repository.ts` 267 строк, прежние SQL/ACL/CAS/транзакции/backup · финальный PR #533 CI PASS [43438691428](https://github.com/panasenkof/PersonalAI/actions/runs/43438691428), merge `f240825`; physical Android NOT_RUN_PHYSICAL, live LLM NOT_RUN_LIVE_MODEL
 
 - 2026-11-13 · ARCH-6b: chat row/composer/list components вынесены из `HomeScreen` (649 → 500 строк) без изменения поведения (#525) · CI PASS [43421972465](https://github.com/panasenkof/PersonalAI/actions/runs/43421972465), merge `88cde12`; TypeScript/Jest/browser/native emulator PASS, физический телефон NOT_RUN_PHYSICAL, live LLM NOT_RUN_LIVE_MODEL
