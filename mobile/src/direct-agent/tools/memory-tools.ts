@@ -135,6 +135,11 @@ export function memoryTools(
            group.totalCount<group.records.length || typeof group.complete!=="boolean" ||
            group.complete && group.totalCount!==group.records.length))
         return {error:"invalid_duplicate_candidate_result"};
+      // Only complete groups can authorize a proposal in this very turn.
+      // A subsequent search invalidates old handles so the model cannot
+      // mix candidate sets from different discovery calls.
+      turn.duplicateGroups.splice(0,turn.duplicateGroups.length,
+        ...page.groups.filter(g=>g.complete===true));
       return page;
     },
     verify:r=>Array.isArray(r.groups) && r.scope==="standard_active_notes" ?
