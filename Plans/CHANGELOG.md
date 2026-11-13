@@ -1,5 +1,9 @@
 # PersAI — журнал слитых изменений
 
+- 2026-11-13 · ARCH-3c: единый системный промпт во всех провайдерах (#514) · CI PASS [43385658508](https://github.com/panasenkof/PersonalAI/actions/runs/43385658508), merge `786d1ba`; live LLM NOT_RUN_LIVE_MODEL, телефон NOT_RUN_PHYSICAL
+- 2026-11-13 · ARCH-3c: точные имена активных инструментов, правила evidence, DIALOGUE_GUIDE (#515) · CI PASS [43404402601](https://github.com/panasenkof/PersonalAI/actions/runs/43404402601), merge `edc3af8`; live LLM NOT_RUN_LIVE_MODEL, телефон NOT_RUN_PHYSICAL
+- 2026-11-13 · ARCH-3: платная двухпровайдерная проверка исключена из обязательной приёмки (#518) · docs-only CI PASS [43405284053](https://github.com/panasenkof/PersonalAI/actions/runs/43405284053), merge `9c01d92`; live LLM не запускалась
+
 Одна строка на изменение в `main`, новые сверху. Источник строк до 11.11.2026 — `git log --first-parent` (с #371; строки #471–#483 добавлены 12.11.2026). Подробности старых пакетов — в [архивном снимке плана](history/PLAN_FULL_2026-11-11.md).
 
 Формат новой строки: `дата · что изменилось для пользователя (#PR) · CI / APK / телефон`. Статус проверок для строк ниже смотреть в архивном снимке и в [долге приёмки](PHYSICAL_ACCEPTANCE_DEBT.md).
