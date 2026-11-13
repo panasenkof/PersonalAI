@@ -27,11 +27,11 @@ test("S9-1b: authorized Inbox read is a single real catalog tool with guarded ar
   }));
   const catalog=createToolCatalog(options({inboxRead:read}),[],[],[]);
   expect(catalog.definitions.filter(d=>d.name==="list_inbox_for_triage")).toHaveLength(1);
-  for (const args of [{},{limit:11},{limit:0},{limit:1,cursor:-1},{limit:1,extra:true},{limit:1.1}]) {
+  for (const args of [{},{limit:11,cursor:null},{limit:0,cursor:null},{limit:1,cursor:-1},{limit:1,cursor:null,extra:true},{limit:1.1,cursor:null},{limit:1}]) {
     expect(await catalog.run("list_inbox_for_triage",args)).toHaveProperty("error","invalid_inbox_triage_args");
   }
   expect(read).not.toHaveBeenCalled();
-  expect(await catalog.run("list_inbox_for_triage",{limit:2})).toMatchObject({
+  expect(await catalog.run("list_inbox_for_triage",{limit:2,cursor:null})).toMatchObject({
     items:[{noteId:"n1",expectedVersion:3,excerpt:"Текст"}],nextCursor:1,
   });
   expect(read).toHaveBeenCalledWith(2,undefined);

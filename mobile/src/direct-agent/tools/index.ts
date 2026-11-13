@@ -32,13 +32,13 @@ export function createToolCatalog(options: DirectAgentOptions, sources: string[]
     ...(options.inboxRead && !options.skipLocalMemory ? [{
       definition: { name:"list_inbox_for_triage",
         description:"Только после нажатия пользователем «Разрешить разбор». Прочитать максимум 10 активных заметок раздела Входящие: заголовок, версия, первые 600 символов текста и теги. НЕ писать, НЕ переносить, НЕ читать другие закрытые разделы. Для текущего хода только.",
-        parameters:{type:"object",properties:{limit:{type:"integer",minimum:1,maximum:10},cursor:{type:"integer",minimum:0,maximum:100000}},required:["limit"],additionalProperties:false}},
+        parameters:{type:"object",properties:{limit:{type:"integer",minimum:1,maximum:10},cursor:{type:["integer","null"],minimum:0,maximum:100000}},required:["limit","cursor"],additionalProperties:false}},
       effect:"read" as const,
       execute: async (args:Record<string,unknown>) => {
-        if (Object.keys(args).some(k=>!["limit","cursor"].includes(k)) || !Number.isSafeInteger(args.limit) || (args.limit as number)<1 || (args.limit as number)>10 ||
-          (args.cursor!==undefined && (!Number.isSafeInteger(args.cursor)||(args.cursor as number)<0||(args.cursor as number)>100000)))
+        if (Object.keys(args).length!==2 || Object.keys(args).some(k=>!["limit","cursor"].includes(k)) || !Number.isSafeInteger(args.limit) || (args.limit as number)<1 || (args.limit as number)>10 ||
+          (args.cursor!==null && (!Number.isSafeInteger(args.cursor)||(args.cursor as number)<0||(args.cursor as number)>100000)))
           return {error:"invalid_inbox_triage_args"};
-        const page = await options.inboxRead!(args.limit as number,args.cursor as number|undefined);
+        const page = await options.inboxRead!(args.limit as number,args.cursor===null?undefined:args.cursor as number);
         return {items:page.items,...(page.nextCursor!==undefined?{nextCursor:page.nextCursor}:{})};
       },
       verify:(result:Record<string,unknown>)=>Array.isArray(result.items)?"read" as const:"failed" as const,
