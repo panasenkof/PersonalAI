@@ -224,6 +224,8 @@ export async function changeNotes(db: SQL, action: NoteAction, selection: NoteSe
       // its final attachment filenames/extractions from the committed owner
       // using the existing indexer in this SAME transaction.
       await indexEntity(tx, rows[0].id);
+      if(mergeGuard&&!localMemorySessionUnlocked())
+        throw new MemoryConflictError('application_locked');
     }
   });
   return batch;
@@ -504,6 +506,8 @@ export async function undoNotes(db: SQL, batch: string, moveGuard?: ChatMoveGuar
       // Rebuild the primary only AFTER all source originals returned home.
       const primary = JSON.parse(revisions[0].after_json).batch_participants[0];
       await indexEntity(tx, primary);
+      if(mergeGuard&&!localMemorySessionUnlocked())
+        throw new MemoryConflictError('application_locked');
     }
   });
 }
