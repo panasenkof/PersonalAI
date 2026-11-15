@@ -265,7 +265,10 @@ jobs:
           PIA_R8_SMOKE: 'true'
         run: |
           npx expo prebuild --platform android --no-install --clean
-          grep -Eq '^android.enableMinifyInReleaseBuilds=true
+          grep -Fq 'android.enableMinifyInReleaseBuilds=true' android/gradle.properties || {
+            echo '::error::R8 smoke build not enabled by Expo build-properties'
+            exit 1
+          }
       - name: Inject opt-in vision runtime into generated Expo APK only
         if: ${{ inputs.vision_expo_gate }}
         env:
