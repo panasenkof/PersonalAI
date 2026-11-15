@@ -58,3 +58,12 @@ NOT_RUN_PHYSICAL. No blanket proof that R8 never strips classes from any
 future third-party library. Add concrete JNI class contracts when upgrading
 a native dependency. CHAT-FIRST: PARTIAL; diagnostics is an explicit
 maintenance action, no new chat dispatcher.
+
+## Discovered in real R8 smoke
+- Initial minified Android build: `BUILD SUCCESSFUL`, but the opt-in vision
+  class-proof gate failed (`VisionInteropApi` missing). R8 optimized away
+  the Java API identity even though the normal non-minified APK included it.
+- Added the narrow `-keep class com.persai.visionsdkprobe.VisionInteropApi { *; }`
+  rule and retained the Expo vision bridge package. Subsequent exact-head
+  minified artifact must pass the same proof before merge; earlier green
+  non-minified artifacts do not count.

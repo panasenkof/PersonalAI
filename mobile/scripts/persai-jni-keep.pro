@@ -7,6 +7,9 @@
 -keep class expo.modules.persaidiagnostics.** { *; }
 -keep class expo.modules.persaipdf.** { *; }
 # Opt-in Kotlin 2.4 vision engine and its JNI-bound runtime.
+# The R8 smoke detected removal of VisionInteropApi (the Kotlin 2.4 AAR Java ABI).
+-keep class com.persai.visionsdkprobe.VisionInteropApi { *; }
+-keep class expo.modules.persaivision.** { *; }
 -keep class com.google.ai.edge.litertlm.** { *; }
 -keep class com.google.mediapipe.tasks.retrieval.** { *; }
 # Existing TDLib JsonClient rule stays in persai-tdlib/android/consumer-rules.pro.

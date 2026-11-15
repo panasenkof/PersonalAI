@@ -29,6 +29,7 @@ test("release signing injection is idempotent and never copies keys into the pro
     assert.equal(guards.split("-keep class org.pytorch.executorch.**").length - 1, 1);
     assert.match(guards, /-keep class org\.pytorch\.executorch\.\*\* \{ \*; \}/);
     assert.match(guards, /-keep class com\.googlecode\.tesseract\.android/);
+    assert.match(guards, /-keep class com\.persai\.visionsdkprobe\.VisionInteropApi/);
     assert.doesNotMatch(injected, /storePassword\s+['"]/);
   } finally {
     fs.rmSync(temp, { recursive: true, force: true });
