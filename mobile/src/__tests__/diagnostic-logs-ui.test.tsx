@@ -3,6 +3,7 @@ import { fireEvent, render, waitFor } from "@testing-library/react-native";
 import { DiagnosticLogsScreen } from "../screens/DiagnosticLogsScreen";
 import { deleteDiagnosticFiles, getDiagnosticSettings, listDiagnosticFiles } from "../direct-agent/diagnostics";
 import { getNebulaVisualMode } from "../design/nebula/visualPreference";
+import { recentAndroidCrashes, shareAndroidCrashReport } from "../direct-agent/android-crash-diagnostics";
 
 let mockProfile = "guest";
 let mockFiles: Array<{ name: string; size: number }> = [];
@@ -28,6 +29,11 @@ jest.mock("../direct-agent/diagnostics", () => ({
   setDiagnosticSettings: jest.fn(),
   shareDiagnosticFile: jest.fn(),
 }));
+jest.mock("../direct-agent/android-crash-diagnostics", () => ({
+  systemCrashDiagnosticsAvailable: jest.fn(() => true),
+  recentAndroidCrashes: jest.fn(() => []),
+  shareAndroidCrashReport: jest.fn(async () => {}),
+}));
 jest.mock("../design/nebula/visualPreference", () => ({
   getNebulaVisualMode: jest.fn(), setNebulaVisualMode: jest.fn(),
 }));
@@ -41,6 +47,7 @@ beforeEach(() => {
   ];
   (getDiagnosticSettings as jest.Mock).mockResolvedValue({ enabled: false, includeContent: false });
   (getNebulaVisualMode as jest.Mock).mockResolvedValue("live");
+  (recentAndroidCrashes as jest.Mock).mockReturnValue([]);
   (listDiagnosticFiles as jest.Mock).mockImplementation(async () => mockFiles);
   (deleteDiagnosticFiles as jest.Mock).mockImplementation(async () => { mockFiles = []; });
 });
@@ -82,4 +89,15 @@ test("switching profile closes a pending destructive confirmation without deleti
   view.rerender(<DiagnosticLogsScreen />);
   await waitFor(() => expect(view.queryByText("Удалить журналы?")).toBeNull());
   expect(deleteDiagnosticFiles).not.toHaveBeenCalled();
+});
+
+test("native crash appears locally but export starts only after explicit sharing", async () => {
+  const crash = { timestamp: 1794751200000, reason: "native", status: 6, importance: 100, description: "SIGABRT" };
+  (recentAndroidCrashes as jest.Mock).mockReturnValue([crash]);
+  const view = render(<DiagnosticLogsScreen />);
+  await waitFor(() => view.getByText("Сбои Android (1)"));
+  expect(shareAndroidCrashReport).not.toHaveBeenCalled();
+  fireEvent.press(view.getByLabelText("Поделиться отчётом Android " + crash.timestamp));
+  await waitFor(() => expect(shareAndroidCrashReport).toHaveBeenCalledTimes(1));
+  expect((shareAndroidCrashReport as jest.Mock).mock.calls[0][0]).toEqual(crash);
 });

@@ -1,6 +1,7 @@
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import Constants from "expo-constants";
 import { ActivityIndicator, Pressable, ScrollView, Switch, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useProfile } from "../profile/ProfileContext";
@@ -13,6 +14,8 @@ import { DEFAULT_DIAGNOSTICS, deleteDiagnosticFiles, getDiagnosticSettings, list
 import type { DiagnosticFile, DiagnosticSettings } from "../direct-agent/diagnostics";
 import { getNebulaVisualMode, setNebulaVisualMode } from "../design/nebula/visualPreference";
 import type { NebulaVisualMode } from "../design/nebula/visualMode";
+import { recentAndroidCrashes, shareAndroidCrashReport, systemCrashDiagnosticsAvailable } from "../direct-agent/android-crash-diagnostics";
+import type { AndroidCrash } from "../direct-agent/android-crash-diagnostics";
 
 /** Temporary QA-only screen. Files are private; nothing is uploaded automatically. */
 export function DiagnosticLogsScreen() {
@@ -22,6 +25,8 @@ export function DiagnosticLogsScreen() {
   const insets = useSafeAreaInsets();
   const [prefs, setPrefs] = useState<DiagnosticSettings>(DEFAULT_DIAGNOSTICS);
   const [logs, setLogs] = useState<DiagnosticFile[]>([]);
+  const [crashes, setCrashes] = useState<AndroidCrash[]>([]);
+  const [crashAvailable, setCrashAvailable] = useState(false);
   const [busy, setBusy] = useState(false);
   const operationPending = useRef(false);
   const [notice, setNotice] = useState("");
@@ -36,7 +41,10 @@ export function DiagnosticLogsScreen() {
     const [settings, files, mode] = await Promise.all([
       getDiagnosticSettings(profile), listDiagnosticFiles(profile), getNebulaVisualMode(),
     ]);
-    setPrefs(settings); setLogs(files); setNebulaMode(mode); setReady(true);
+    setPrefs(settings); setLogs(files); setNebulaMode(mode);
+    const native = systemCrashDiagnosticsAvailable();
+    setCrashAvailable(native); setCrashes(native ? recentAndroidCrashes() : []);
+    setReady(true);
   }, [profile]);
   useFocusEffect(useCallback(() => {
     let current = true;
@@ -44,7 +52,17 @@ export function DiagnosticLogsScreen() {
       void Promise.all([
         getDiagnosticSettings(profile), listDiagnosticFiles(profile), getNebulaVisualMode(),
       ]).then(([settings, files, mode]) => {
-        if (current) { setPrefs(settings); setLogs(files); setNebulaMode(mode); setReady(true); }
+        if (current) {
+          setPrefs(settings); setLogs(files); setNebulaMode(mode);
+          try {
+            const native = systemCrashDiagnosticsAvailable();
+            setCrashAvailable(native); setCrashes(native ? recentAndroidCrashes() : []);
+          } catch {
+            setCrashAvailable(false); setCrashes([]);
+            setNotice("Не удалось получить историю системных сбоев Android.");
+          }
+          setReady(true);
+        }
       }).catch(() => { if (current) { setNotice("Не удалось прочитать диагностику или режим Nebula"); setReady(true); } });
     }
     return () => { current = false; setClearScope(null); };
@@ -96,7 +114,7 @@ export function DiagnosticLogsScreen() {
       <Text style={{ color: t.muted, lineHeight: 20 }}>{detail}</Text>
     </View>;
   return <><ScrollView style={{ flex: 1, backgroundColor: t.bg }} contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 30, gap: 14 }}>
-    <Text style={{ color: t.text, fontSize: 24, fontWeight: "800" }}>Диагностика диалогов</Text>
+    <Text style={{ color: t.text, fontSize: 24, fontWeight: "800" }}>Диагностика PersAI</Text>
     <Text style={{ color: t.muted, lineHeight: 21 }}>Временная функция для тестирования PersAI. Журналы JSONL сохраняются только во внутреннем хранилище приложения. Они не отправляются разработчикам автоматически.</Text>
     <View style={{ gap: 8 }}>
       <Text accessibilityRole="header" style={{ color: t.text, fontSize: 18, fontWeight: "700" }}>Для разработчика</Text>
@@ -128,6 +146,26 @@ export function DiagnosticLogsScreen() {
       "Для детального анализа LLM. Файл может содержать личные сведения из диалога, поэтому включайте только на время воспроизведения ошибки и проверяйте перед отправкой. Ключи маскируются по типовым шаблонам, но полная автоматическая очистка личных данных не гарантируется.",
       prefs.includeContent, !prefs.enabled, includeContent => update({ enabled: true, includeContent }))}
     <Text style={{ color: t.muted, lineHeight: 21 }}>Хранение: до 7 дней, не более 12 файлов примерно по 2 МБ. После отключения уже собранные журналы сохраняются до удаления или истечения срока хранения.</Text>
+    <View style={{ gap: 9 }}>
+      <Text accessibilityRole="header" style={{ color: t.text, fontSize: 20, fontWeight: "700" }}>Сбои Android ({crashes.length})</Text>
+      <Text style={{ color: t.muted, lineHeight: 20 }}>
+        Системная история аварийных завершений и зависаний за последние 7 дней. Записи доступны после повторного запуска PersAI. Ничего не отправляется автоматически.
+      </Text>
+      {!crashAvailable ? <Text style={{ color: t.muted }}>Системная диагностика недоступна в этой сборке или на устройстве.</Text> :
+        crashes.length === 0 ? <Text style={{ color: t.muted }}>Недавних сбоев не обнаружено.</Text> : crashes.map(crash =>
+          <Pressable key={crash.timestamp + "-" + crash.reason} accessibilityRole="button"
+            accessibilityLabel={"Поделиться отчётом Android " + crash.timestamp} disabled={busy}
+            onPress={() => void run(() => withNativeInteraction(() => shareAndroidCrashReport(crash, String(Constants.expoConfig?.extra?.buildSha || ""))))}
+            style={{ ...card, gap: 6 }}>
+            <Text style={{ color: t.secondary, fontWeight: "700" }}>
+              {crash.reason === "native" ? "Нативный сбой" : crash.reason === "anr" ? "Зависание (ANR)" : "Ошибка Java"} · {new Date(crash.timestamp).toLocaleString("ru-RU")}
+            </Text>
+            <Text style={{ color: t.muted }}>Код: {crash.status} · нажмите, чтобы поделиться отчётом</Text>
+          </Pressable>)}
+      <Text style={{ color: t.muted, lineHeight: 19 }}>
+        Отчёт может содержать личные данные. Проверьте получателя перед передачей. Tombstone Android 12+ сохраняется в исходном бинарном формате (Base64).
+      </Text>
+    </View>
     <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 8 }}>
       <Text style={{ color: t.text, fontSize: 20, fontWeight: "700" }}>Журналы ({logs.length})</Text>
       {busy ? <ActivityIndicator color={t.secondary} /> : null}
