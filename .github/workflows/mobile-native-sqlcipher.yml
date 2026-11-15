@@ -369,6 +369,10 @@ jobs:
             echo "::error::Model weights included unexpectedly"; exit 1
           fi
           echo "Expo release APK embeds Kotlin 2.4 engine Java ABI; runtime inference still not proved." >> "$GITHUB_STEP_SUMMARY"
+      - name: Audit JNI critical classes in release APK
+        working-directory: mobile
+        run: python3 scripts/check-apk-jni.py android/app/build/outputs/apk/release/app-release.apk
+
       - name: Save standalone emulator APK
         uses: actions/upload-artifact@v4
         with:

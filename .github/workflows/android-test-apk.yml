@@ -265,6 +265,11 @@ jobs:
             ./gradlew :app:assembleRelease --build-cache --no-configuration-cache --no-daemon --stacktrace
           fi
 
+      - name: Audit JNI critical classes in signed release APK
+        if: steps.changes.outputs.needed == 'true'
+        working-directory: mobile
+        run: python3 scripts/check-apk-jni.py android/app/build/outputs/apk/release/app-release.apk
+
       - name: Verify compiler cache wiring when available
         if: steps.changes.outputs.needed == 'true'
         working-directory: mobile

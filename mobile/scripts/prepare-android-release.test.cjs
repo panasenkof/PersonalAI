@@ -15,7 +15,8 @@ test("release signing injection is idempotent and never copies keys into the pro
     const app = path.join(temp, "android", "app");
     fs.mkdirSync(app, { recursive: true });
     const buildFile = path.join(app, "build.gradle");
-    fs.writeFileSync(buildFile, "android { buildTypes { release { } } }\n");
+    fs.writeFileSync(buildFile, "android { buildTypes { release { proguardFiles 'proguard-rules.pro' } } }\n");
+    fs.writeFileSync(path.join(app, "proguard-rules.pro"), "# Expo default rules\n");
     prepareAndroidRelease(temp);
     prepareAndroidRelease(temp);
     const gradle = fs.readFileSync(buildFile, "utf8");
@@ -23,6 +24,10 @@ test("release signing injection is idempotent and never copies keys into the pro
     const injected = fs.readFileSync(path.join(app, "pia-release-signing.gradle"), "utf8");
     assert.match(injected, /signingConfigs\.piaRelease/);
     assert.match(injected, /PIA_ANDROID_KEYSTORE_PATH/);
+    const guards = fs.readFileSync(path.join(app, "proguard-rules.pro"), "utf8");
+    assert.equal(guards.split("# BEGIN PERSAI JNI GUARD").length - 1, 1);
+    assert.match(guards, /-keep class org\.pytorch\.executorch\.\*\* \{ \*; \}/);
+    assert.match(guards, /-keep class com\.googlecode\.tesseract\.android/);
     assert.doesNotMatch(injected, /storePassword\s+['"]/);
   } finally {
     fs.rmSync(temp, { recursive: true, force: true });

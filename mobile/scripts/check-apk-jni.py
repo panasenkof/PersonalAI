@@ -16,7 +16,7 @@ def u32(data, offset):
 
 
 def dex_classes(data):
-    if len(data) < 112 or not data.startswith(b"dex\\n"):
+    if len(data) < 112 or not data.startswith(b"dex\n"):
         raise ValueError("Invalid DEX file")
     strings = u32(data, 0x3C)
     types = u32(data, 0x44)
@@ -35,7 +35,7 @@ def dex_classes(data):
                 break
         else:
             raise ValueError("Invalid DEX string length")
-        end = data.index(b"\\0", pos)
+        end = data.index(b"\0", pos)
         descriptor = data[pos:end].decode("utf-8")
         if descriptor.startswith("L") and descriptor.endswith(";"):
             result.add(descriptor[1:-1])
@@ -60,13 +60,13 @@ PLATFORM = ("android/", "java/", "javax/", "dalvik/", "kotlin/")
 def inspect_apk(apk):
     with zipfile.ZipFile(apk) as archive:
         names = archive.namelist()
-        dex_names = [n for n in names if re.fullmatch(r"classes\\d*\\.dex", n)]
+        dex_names = [n for n in names if re.fullmatch(r"classes\d*\.dex", n)]
         if not dex_names:
             raise ValueError("APK has no root DEX files")
         classes = set()
         for name in dex_names:
             classes.update(dex_classes(archive.read(name)))
-        libraries = {n.rsplit("/", 1)[-1] for n in names if re.fullmatch(r"lib/[^/]+/[^/]+\\.so", n)}
+        libraries = {n.rsplit("/", 1)[-1] for n in names if re.fullmatch(r"lib/[^/]+/[^/]+\.so", n)}
         required = set(ALWAYS)
         for library, critical in CONDITIONAL.items():
             if library in libraries:
@@ -83,7 +83,7 @@ def inspect_apk(apk):
             if not name.endswith(".so"):
                 continue
             content = archive.read(name)
-            for m in re.finditer(rb"(?<![\\w/$])L?((?:[a-z][a-z0-9_]*/)+[A-Z][\\w$]*)(?![\\w/$])", content):
+            for m in re.finditer(rb"(?<![\w/$])L?((?:[a-z][a-z0-9_]*/)+[A-Z][\w$]*)(?![\w/$])", content):
                 cls = m.group(1).decode("ascii")
                 if cls not in classes and not cls.startswith(PLATFORM) and cls.rsplit("/", 1)[0] in packages:
                     candidates.add(cls)
