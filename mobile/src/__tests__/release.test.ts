@@ -1,7 +1,6 @@
 /** @jest-environment node */
-const configModule: any = {exports:{}};
-require('vm').runInNewContext(require('fs').readFileSync(require('path').resolve(__dirname, '../../app.config.js'), 'utf8'), {module:configModule,process,URL});
-const configure = configModule.exports;
+// Evaluate dynamic app config with its actual local file dependencies (JNI rules).
+const configure = require('../../app.config.js');
 const config=require('../../app.json').expo;
 const saved={...process.env};
 afterEach(()=>{for(const key of ['EAS_BUILD_PROFILE','PIA_IOS_BUNDLE_ID','PIA_ANDROID_PACKAGE']) { if(saved[key] === undefined) delete process.env[key]; else process.env[key] = saved[key]; }});
