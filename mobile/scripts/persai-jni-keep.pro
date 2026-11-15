@@ -2,6 +2,7 @@
 # by expo-build-properties extraProguardRules (app.config.js). Do not use -dontshrink globally.
 # JNI upcalls use names invisible to R8's normal reachability analysis.
 -keep class org.pytorch.executorch.** { *; }
+-keep class com.swmansion.rnexecutorch.** { *; }
 -keep class com.googlecode.tesseract.android.** { *; }
 -keep class expo.modules.persaidiagnostics.** { *; }
 -keep class expo.modules.persaipdf.** { *; }

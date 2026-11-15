@@ -38,7 +38,9 @@ module.exports = ({ config }) => {
   const properties = Array.isArray(previous) ? previous[1] || {} : {};
   const configured = ['expo-build-properties', {
     ...properties,
-    android: { ...(properties.android || {}), extraProguardRules: jniRules },
+    android: { ...(properties.android || {}), extraProguardRules: jniRules,
+      ...(process.env.PIA_R8_SMOKE === 'true' ? { enableMinifyInReleaseBuilds: true } : {}),
+    },
   }];
   if (buildPropertiesIndex >= 0) nativePlugins[buildPropertiesIndex] = configured;
   else nativePlugins.push(configured);

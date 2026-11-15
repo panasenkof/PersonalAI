@@ -105,3 +105,20 @@ test("release fails closed if Expo prebuild omits JNI rules", () => {
     assert.throws(() => prepareAndroidRelease(temp), /did not install PersAI JNI keep rules/);
   } finally { fs.rmSync(temp, { recursive: true, force: true }); }
 });
+
+test("R8 smoke is opt-in and normal releases remain unchanged", () => {
+  const previous = process.env.PIA_R8_SMOKE;
+  try {
+    delete process.env.PIA_R8_SMOKE;
+    const normal = buildAppConfig({ config: { version: "0.3.0", plugins: [], android: {}, ios: {} } });
+    const normalProps = normal.plugins.find(p => Array.isArray(p) && p[0] === "expo-build-properties")[1].android;
+    assert.notEqual(normalProps.enableMinifyInReleaseBuilds, true);
+    process.env.PIA_R8_SMOKE = "true";
+    const smoke = buildAppConfig({ config: { version: "0.3.0", plugins: [], android: {}, ios: {} } });
+    const smokeProps = smoke.plugins.find(p => Array.isArray(p) && p[0] === "expo-build-properties")[1].android;
+    assert.equal(smokeProps.enableMinifyInReleaseBuilds, true);
+  } finally {
+    if (previous === undefined) delete process.env.PIA_R8_SMOKE;
+    else process.env.PIA_R8_SMOKE = previous;
+  }
+});

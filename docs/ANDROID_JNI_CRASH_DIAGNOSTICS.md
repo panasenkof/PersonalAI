@@ -19,7 +19,10 @@ permission, storage migration or changes to SQLCipher/ACL.
 2. Unit: python3 -m unittest mobile/scripts/test_check_apk_jni.py
 3. CI: Expo prebuild -> verify keep rules -> assembleRelease -> inspect exact
    APK DEX class definitions and verify pinned Java/JNI classes. Both PR
-   native CI and signed publication use check-apk-jni.py.
+   native CI and signed publication use check-apk-jni.py. Native PR CI explicitly
+   sets PIA_R8_SMOKE=true, confirms android.enableMinifyInReleaseBuilds=true,
+   builds a minified signed disposable APK, and runs its existing Android smoke.
+   Normal user release APK settings are unchanged until separate acceptance.
 4. Required rules: ExecuTorch Java API, Tesseract Java JNI, app-owned PDF and
    crash-report modules, optional vision packages. TDLib retains its
    dedicated consumer-rules.pro. ONNX check is conditional if the native
@@ -27,9 +30,9 @@ permission, storage migration or changes to SQLCipher/ACL.
 5. Native .so string scan is **advisory** and may have both false positives
    and false negatives. A green static check does not prove native inference.
    Compare exact APK sizes and check actual model loading on device.
-6. R8 enablement is not changed by this PR. The build keeps its existing
-   optimization setting. A separately verified minified APK is required to
-   claim complete R8 runtime acceptance.
+6. R8 is enabled only for CI's disposable QA APK; ordinary published APK
+   retains its existing optimization setting. A green native build + APK gate
+   does not prove a downloaded Whisper model will execute on a physical device.
 
 ## Android device acceptance (not yet executed)
 - Install release PersAI over the existing app, keep backup and signing ID.
