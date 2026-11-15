@@ -7,6 +7,8 @@
 // Android application identity is permanent: changing it detaches the user's
 // encrypted on-device database from future upgrades.
 const PERSAI_ANDROID_PACKAGE = 'com.persai.app';
+const fs = require('node:fs');
+const path = require('node:path');
 
 const withTesseractMaven = (expoConfig) => require('expo/config-plugins').withProjectBuildGradle(expoConfig, mod => {
   // One vetted JitPack dependency. No other repository or binary is fetched
@@ -26,6 +28,22 @@ const withLocalModelCleartext = (expoConfig) => require('expo/config-plugins').w
 module.exports = ({ config }) => {
   // Generate native and JS artwork from the exact approved REF-ICON-A on every Expo build.
   if (typeof require === 'function') require('./scripts/generate-brand.cjs').buildApprovedBrand();
+  // Expo's supported config plugin is the single author of generated R8 rules.
+  // Applies to CI, local prebuild and EAS; no post-prebuild duplicate writer.
+  const jniRules = fs.readFileSync(path.join(__dirname, 'scripts/persai-jni-keep.pro'), 'utf8');
+  const nativePlugins = [...(config.plugins || [])];
+  const buildPropertiesIndex = nativePlugins.findIndex(plugin => plugin === 'expo-build-properties' ||
+    (Array.isArray(plugin) && plugin[0] === 'expo-build-properties'));
+  const previous = buildPropertiesIndex >= 0 ? nativePlugins[buildPropertiesIndex] : null;
+  const properties = Array.isArray(previous) ? previous[1] || {} : {};
+  const configured = ['expo-build-properties', {
+    ...properties,
+    android: { ...(properties.android || {}), extraProguardRules: jniRules,
+      ...(process.env.PIA_R8_SMOKE === 'true' ? { enableMinifyInReleaseBuilds: true } : {}),
+    },
+  }];
+  if (buildPropertiesIndex >= 0) nativePlugins[buildPropertiesIndex] = configured;
+  else nativePlugins.push(configured);
   const androidCiRelease = process.env.PIA_ANDROID_RELEASE === 'true';
   const release = androidCiRelease || ['preview', 'production'].includes(process.env.EAS_BUILD_PROFILE);
   // The former Actions variable is only a compatibility input. Never let it
@@ -64,7 +82,7 @@ module.exports = ({ config }) => {
   }
   return {
     ...config,
-    plugins: [...(config.plugins || []), withLocalModelCleartext, withTesseractMaven],
+    plugins: [...nativePlugins, withLocalModelCleartext, withTesseractMaven],
     ...(androidCiRelease && versionCode ? { version: `${config.version}-test.${versionCode}` } : {}),
     ios: { ...config.ios, ...(process.env.PIA_IOS_BUNDLE_ID ? { bundleIdentifier: process.env.PIA_IOS_BUNDLE_ID } : {}) },
     android: { ...config.android, package: PERSAI_ANDROID_PACKAGE, softwareKeyboardLayoutMode: 'resize', ...(versionCode ? { versionCode } : {}) },

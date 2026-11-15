@@ -1,0 +1,16 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'com.persai'
+version = '1.0.0'
+
+android {
+  namespace 'expo.modules.persaidiagnostics'
+  defaultConfig {
+    minSdkVersion 26
+    versionCode 1
+    versionName '1.0.0'
+  }
+}

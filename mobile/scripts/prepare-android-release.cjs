@@ -17,6 +17,16 @@ function prepareAndroidRelease(root = path.resolve(__dirname, "..")) {
   if (!/\bandroid\s*\{/.test(initial) || !/\bbuildTypes\s*\{/.test(initial)) {
     throw new Error("Unexpected Expo-generated build.gradle; refusing to inject signing.");
   }
+  // Expo build-properties writes this file at prebuild. Validate, never rewrite:
+  // local/EAS/native CI all have exactly one source of truth.
+  const rulesFile = path.join(appDir, "proguard-rules.pro");
+  if (!fs.existsSync(rulesFile) || !initial.includes("proguard-rules.pro")) {
+    throw new Error("Expo-generated release ProGuard configuration missing");
+  }
+  const required = fs.readFileSync(path.join(__dirname, "persai-jni-keep.pro"), "utf8").trim();
+  if (!fs.readFileSync(rulesFile, "utf8").includes(required)) {
+    throw new Error("Expo build-properties did not install PersAI JNI keep rules");
+  }
   fs.copyFileSync(sourceFile, signingFile);
   const directive = 'apply from: "./pia-release-signing.gradle"';
   if (!initial.includes(directive)) {

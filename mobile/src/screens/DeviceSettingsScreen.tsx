@@ -81,8 +81,8 @@ export function DeviceSettingsScreen() {
         onPress={() => navigation.navigate("MemoryBackup")} />
     </NebulaSection>
     <NebulaSection title="Обслуживание">
-      <NebulaSettingRow icon="activity" title="Диагностика диалогов"
-        summary="Журналы работы и разбор ошибок" onPress={() => navigation.navigate("DiagnosticLogs")} />
+      <NebulaSettingRow icon="activity" title="Диагностика и сбои"
+        summary="Диалоги, вылеты Android и отчёты о сбоях" onPress={() => navigation.navigate("DiagnosticLogs")} />
       <Text selectable style={{ color: t.muted, ...nebulaTypography.label }}>
         PersAI {Constants.expoConfig?.version || "—"} · {String(Constants.expoConfig?.extra?.buildSha || "—").slice(0, 7)}
       </Text>

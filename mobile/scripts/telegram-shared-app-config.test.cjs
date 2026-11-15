@@ -9,8 +9,11 @@ function configuration(env){
   const module={exports:{}};
   const context={
     module,exports:module.exports,process:{env},
+    __dirname:path.resolve(__dirname,".."),
     require(name){
       if(name==="./scripts/generate-brand.cjs")return {buildApprovedBrand(){}};
+      if(name==="node:fs")return fs;
+      if(name==="node:path")return path;
       throw new Error("Unexpected dependency "+name);
     },
   };

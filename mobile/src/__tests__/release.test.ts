@@ -1,7 +1,6 @@
 /** @jest-environment node */
-const configModule: any = {exports:{}};
-require('vm').runInNewContext(require('fs').readFileSync(require('path').resolve(__dirname, '../../app.config.js'), 'utf8'), {module:configModule,process,URL});
-const configure = configModule.exports;
+// Evaluate dynamic app config with its actual local file dependencies (JNI rules).
+const configure = require('../../app.config.js');
 const config=require('../../app.json').expo;
 const saved={...process.env};
 afterEach(()=>{for(const key of ['EAS_BUILD_PROFILE','PIA_IOS_BUNDLE_ID','PIA_ANDROID_PACKAGE']) { if(saved[key] === undefined) delete process.env[key]; else process.env[key] = saved[key]; }});
@@ -9,4 +8,14 @@ test('development config pins the published Android identity without a server',(
 test('release requires owned identifiers',()=>{process.env.EAS_BUILD_PROFILE='preview';delete process.env.PIA_IOS_BUNDLE_ID;delete process.env.PIA_ANDROID_PACKAGE;expect(()=>configure({config})).toThrow('PIA_IOS_BUNDLE_ID');});
 test('release uses the pinned Android identity without a server endpoint',()=>{process.env.EAS_BUILD_PROFILE='production';process.env.PIA_IOS_BUNDLE_ID='com.example.pia';process.env.PIA_ANDROID_PACKAGE='com.persai.app';const built=configure({config});expect(built).toMatchObject({ios:{bundleIdentifier:'com.example.pia'},android:{package:'com.persai.app'}});expect(built.extra?.apiBase).toBeUndefined();});
 test('wrong Actions variable cannot change the published Android package',()=>{process.env.PIA_ANDROID_PACKAGE='com.paigent.app';expect(()=>configure({config})).toThrow('PIA_ANDROID_PACKAGE must be com.persai.app');});
-test('Android builds allow http:// to local models through a manifest plugin',()=>{delete process.env.EAS_BUILD_PROFILE;const built=configure({config});expect(built.plugins.some((p:any)=>typeof p==='function')).toBe(true);expect(built.plugins).toEqual(expect.arrayContaining(config.plugins));});
+test('Android builds allow http:// to local models through a manifest plugin',()=>{delete process.env.EAS_BUILD_PROFILE;const built=configure({config});expect(built.plugins.some((p:any)=>typeof p==='function')).toBe(true);expect(built.plugins).toEqual(expect.arrayContaining(config.plugins.filter((p:any)=>!(Array.isArray(p)&&p[0]==='expo-build-properties'))));});
+
+test('all prebuilds get JNI rules through the canonical Expo build-properties plugin',()=>{
+  const built=configure({config});
+  const entry=built.plugins.find((p:any)=>Array.isArray(p)&&p[0]==='expo-build-properties');
+  expect(entry).toBeDefined();
+  expect(entry[1].android.extraProguardRules).toContain('-keep class org.pytorch.executorch.**');
+  expect(entry[1].android.extraProguardRules).toContain('expo.modules.persaidiagnostics');
+  expect(entry[1].android.extraProguardRules).toContain('com.persai.visionsdkprobe.VisionInteropApi');
+  expect(entry[1].android.minSdkVersion).toBe(26);
+});

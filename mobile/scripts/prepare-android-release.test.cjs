@@ -15,7 +15,9 @@ test("release signing injection is idempotent and never copies keys into the pro
     const app = path.join(temp, "android", "app");
     fs.mkdirSync(app, { recursive: true });
     const buildFile = path.join(app, "build.gradle");
-    fs.writeFileSync(buildFile, "android { buildTypes { release { } } }\n");
+    fs.writeFileSync(buildFile, "android { buildTypes { release { proguardFiles 'proguard-rules.pro' } } }\n");
+    fs.writeFileSync(path.join(app, "proguard-rules.pro"), "# Expo default rules\n" +
+      fs.readFileSync(path.join(__dirname, "persai-jni-keep.pro"), "utf8"));
     prepareAndroidRelease(temp);
     prepareAndroidRelease(temp);
     const gradle = fs.readFileSync(buildFile, "utf8");
@@ -23,6 +25,11 @@ test("release signing injection is idempotent and never copies keys into the pro
     const injected = fs.readFileSync(path.join(app, "pia-release-signing.gradle"), "utf8");
     assert.match(injected, /signingConfigs\.piaRelease/);
     assert.match(injected, /PIA_ANDROID_KEYSTORE_PATH/);
+    const guards = fs.readFileSync(path.join(app, "proguard-rules.pro"), "utf8");
+    assert.equal(guards.split("-keep class org.pytorch.executorch.**").length - 1, 1);
+    assert.match(guards, /-keep class org\.pytorch\.executorch\.\*\* \{ \*; \}/);
+    assert.match(guards, /-keep class com\.googlecode\.tesseract\.android/);
+    assert.match(guards, /-keep class com\.persai\.visionsdkprobe\.VisionInteropApi/);
     assert.doesNotMatch(injected, /storePassword\s+['"]/);
   } finally {
     fs.rmSync(temp, { recursive: true, force: true });
@@ -86,5 +93,33 @@ test("published Android ID is pinned across Expo, CI, Maestro and release notes"
   for (const name of ["flows/minimal.yaml", "flows/smoke.yaml", "unlock.yaml"]) {
     const flow = fs.readFileSync(path.join(root, "mobile", ".maestro", name), "utf8");
     assert.match(flow, /^appId: com\.persai\.app\s*$/m);
+  }
+});
+
+test("release fails closed if Expo prebuild omits JNI rules", () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "pia-r8-"));
+  try {
+    const app = path.join(temp, "android", "app");
+    fs.mkdirSync(app, { recursive: true });
+    fs.writeFileSync(path.join(app, "build.gradle"), "android { buildTypes { release { proguardFiles 'proguard-rules.pro' } } }");
+    fs.writeFileSync(path.join(app, "proguard-rules.pro"), "# Missing JNI keep rules");
+    assert.throws(() => prepareAndroidRelease(temp), /did not install PersAI JNI keep rules/);
+  } finally { fs.rmSync(temp, { recursive: true, force: true }); }
+});
+
+test("R8 smoke is opt-in and normal releases remain unchanged", () => {
+  const previous = process.env.PIA_R8_SMOKE;
+  try {
+    delete process.env.PIA_R8_SMOKE;
+    const normal = buildAppConfig({ config: { version: "0.3.0", plugins: [], android: {}, ios: {} } });
+    const normalProps = normal.plugins.find(p => Array.isArray(p) && p[0] === "expo-build-properties")[1].android;
+    assert.notEqual(normalProps.enableMinifyInReleaseBuilds, true);
+    process.env.PIA_R8_SMOKE = "true";
+    const smoke = buildAppConfig({ config: { version: "0.3.0", plugins: [], android: {}, ios: {} } });
+    const smokeProps = smoke.plugins.find(p => Array.isArray(p) && p[0] === "expo-build-properties")[1].android;
+    assert.equal(smokeProps.enableMinifyInReleaseBuilds, true);
+  } finally {
+    if (previous === undefined) delete process.env.PIA_R8_SMOKE;
+    else process.env.PIA_R8_SMOKE = previous;
   }
 });
