@@ -234,7 +234,7 @@ test("loading Telegram topic filters is distinct from importing notes",async()=>
  expect(importSavedTextPage).not.toHaveBeenCalled();
  finish([{id:"17",kind:"savedMessagesTopicTypeMyNotes",isPinned:false,order:"1"}]);
  await waitFor(()=>ui.getByText(/Показано подборок: 1/));
- expect(ui.getByText(/заметки ещё не импортированы/)).toBeTruthy();
+ expect(ui.getByText(/Обновление списка источников не импортирует сообщения/)).toBeTruthy();
  expect(importSavedTextPage).not.toHaveBeenCalled();
  fireEvent.press(ui.getByText("Импортировать последние 20 сообщений"));
  await waitFor(()=>expect(importSavedTextPage).toHaveBeenCalledTimes(1));
