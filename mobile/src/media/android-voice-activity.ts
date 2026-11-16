@@ -1,40 +1,36 @@
-import * as IntentLauncher from "expo-intent-launcher";
+import { requireOptionalNativeModule } from "expo-modules-core";
 
 /**
- * Primary Google/system route on Android: Android resolves a speech Activity
- * and returns recognized text through its result. Avoids direct binding to
- * an OEM RecognitionService that may report ERROR_NO_MATCH.
- *
- * Does not grant any new consent, choose a private package, or use Whisper.
+ * The Google/system Android dialog remains the only Android online ASR route.
+ * A typed PersAI Expo native bridge extracts the recognized string before
+ * crossing into JS. Generic expo-intent-launcher serializes all OEM extras,
+ * including android.app.ActivityOptions classes on Vivo/Android 16, and can
+ * throw fatally on the main thread even if JS wraps it in try/catch.
  */
 export type AndroidVoiceActivityResult =
   | { status: "recognized"; transcript: string }
   | { status: "canceled" }
   | { status: "empty" };
 
-export function parseAndroidVoiceActivityResult(result: {
-  resultCode: number;
-  extra?: object;
-}): AndroidVoiceActivityResult {
-  if (result.resultCode !== -1) return { status: "canceled" };
-  const raw = result.extra && "android.speech.extra.RESULTS" in result.extra
-    ? result.extra["android.speech.extra.RESULTS"] : undefined;
-  const transcript = Array.isArray(raw)
-    ? raw.find((item): item is string => typeof item === "string" && item.trim().length > 0)?.trim()
-    : undefined;
-  return transcript ? { status: "recognized", transcript } : { status: "empty" };
+type NativeVoiceActivity = {
+  launchAsync(): Promise<unknown>;
+};
+
+export function parseAndroidVoiceActivityResult(result: unknown): AndroidVoiceActivityResult {
+  if (!result || typeof result !== "object") throw new Error("invalid_android_voice_activity_result");
+  const row = result as Record<string, unknown>;
+  if (row.status === "canceled") return { status: "canceled" };
+  if (row.status === "empty") return { status: "empty" };
+  if (row.status === "recognized" && typeof row.transcript === "string" &&
+    row.transcript.trim().length > 0) {
+    return { status: "recognized", transcript: row.transcript.trim().slice(0, 16000) };
+  }
+  throw new Error("invalid_android_voice_activity_result");
 }
 
-/** An explicit user-initiated system dialog; no automatic retry loops. */
+/** Explicit tap -> Android system speech dialog -> one native String result. */
 export async function launchAndroidVoiceActivity(): Promise<AndroidVoiceActivityResult> {
-  const result = await IntentLauncher.startActivityAsync("android.speech.action.RECOGNIZE_SPEECH", {
-    extra: {
-      "android.speech.extra.LANGUAGE_MODEL": "free_form",
-      "android.speech.extra.LANGUAGE": "ru-RU",
-      "android.speech.extra.PREFER_OFFLINE": false,
-      "android.speech.extra.MAX_RESULTS": 1,
-    },
-  });
-  return parseAndroidVoiceActivityResult(result);
+  const bridge = requireOptionalNativeModule<NativeVoiceActivity>("PersaiVoiceActivity");
+  if (!bridge) throw new Error("persai_voice_activity_module_unavailable");
+  return parseAndroidVoiceActivityResult(await bridge.launchAsync());
 }
-
