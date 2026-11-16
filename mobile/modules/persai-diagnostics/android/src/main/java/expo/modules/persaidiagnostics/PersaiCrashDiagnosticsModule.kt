@@ -17,6 +17,7 @@ class PersaiCrashDiagnosticsModule : Module() {
   private fun recentCrashes(): List<ApplicationExitInfo> {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return emptyList()
     val context = appContext.reactContext ?: return emptyList()
+    PersaiJavaCrashCapture.install(context)
     val manager = context.getSystemService(ActivityManager::class.java) ?: return emptyList()
     return manager.getHistoricalProcessExitReasons(context.packageName, 0, 32)
       .filter {
@@ -95,7 +96,7 @@ class PersaiCrashDiagnosticsModule : Module() {
         },
         "traceSource" to if (fallback != null) "persai-java-uncaught" else "android-system",
         "traceBase64" to Base64.encodeToString(exported, Base64.NO_WRAP),
-        "traceTruncatedOrUnavailable" to (truncated || exported.isEmpty() || fallback?.truncated == true),
+        "traceTruncatedOrUnavailable" to (if (fallback != null) fallback.truncated else truncated || exported.isEmpty()),
         "traceAvailable" to exported.isNotEmpty()
       )
     }
