@@ -41,6 +41,9 @@ class PersaiCrashDiagnosticsModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("PersaiCrashDiagnostics")
 
+    // Register when the Expo module starts; Java failures after startup are captured.
+    OnCreate { appContext.reactContext?.let { context -> PersaiJavaCrashCapture.install(context) } }
+
     Function("recentCrashes") { limit: Int ->
       recentCrashes().take(limit.coerceIn(1, 10)).map { fields(it) }
     }
@@ -75,12 +78,24 @@ class PersaiCrashDiagnosticsModule : Module() {
         // Exit metadata remains useful if Android purged the global tombstone.
         truncated = true
       }
+      // Java REASON_CRASH rarely includes an Android system trace. For a matching
+      // PID and exit timestamp, use our single private, bounded uncaught stack.
+      val systemBytes = bytes.toByteArray()
+      val fallback = if (systemBytes.isEmpty() && info.reason == ApplicationExitInfo.REASON_CRASH)
+        appContext.reactContext?.let { context -> PersaiJavaCrashCapture.readFor(context, info) }
+        else null
+      val exported = fallback?.bytes ?: systemBytes
       fields(info) + mapOf(
-        "format" to if (info.reason == ApplicationExitInfo.REASON_CRASH_NATIVE &&
-          Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) "android-native-tombstone-protobuf" else "system-trace",
-        "traceBase64" to Base64.encodeToString(bytes.toByteArray(), Base64.NO_WRAP),
-        "traceTruncatedOrUnavailable" to truncated,
-        "traceAvailable" to (bytes.size() > 0)
+        "format" to when {
+          fallback != null -> "java-stack-utf8"
+          info.reason == ApplicationExitInfo.REASON_CRASH_NATIVE &&
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> "android-native-tombstone-protobuf"
+          else -> "system-trace"
+        },
+        "traceSource" to if (fallback != null) "persai-java-uncaught" else "android-system",
+        "traceBase64" to Base64.encodeToString(exported, Base64.NO_WRAP),
+        "traceTruncatedOrUnavailable" to (truncated || exported.isEmpty() || fallback?.truncated == true),
+        "traceAvailable" to exported.isNotEmpty()
       )
     }
   }
