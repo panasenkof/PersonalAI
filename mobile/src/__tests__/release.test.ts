@@ -16,6 +16,7 @@ test('all prebuilds get JNI rules through the canonical Expo build-properties pl
   expect(entry).toBeDefined();
   expect(entry[1].android.extraProguardRules).toContain('-keep class org.pytorch.executorch.**');
   expect(entry[1].android.extraProguardRules).toContain('expo.modules.persaidiagnostics');
+  expect(entry[1].android.extraProguardRules).toContain('expo.modules.persaivoice');
   expect(entry[1].android.extraProguardRules).toContain('com.persai.visionsdkprobe.VisionInteropApi');
   expect(entry[1].android.minSdkVersion).toBe(26);
 });

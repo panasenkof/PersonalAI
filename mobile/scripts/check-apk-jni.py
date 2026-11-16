@@ -45,6 +45,7 @@ def dex_classes(data):
 ALWAYS = {
     "expo/modules/persaidiagnostics/PersaiCrashDiagnosticsModule",
     "expo/modules/persaipdf/PersaiPdfTextModule",
+    "expo/modules/persaivoice/PersaiVoiceActivityModule",
     "com/googlecode/tesseract/android/TessBaseAPI",
 }
 # Unlike a generic heuristic, these are known java counterparts of packaged

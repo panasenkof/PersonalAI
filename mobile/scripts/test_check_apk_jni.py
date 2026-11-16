@@ -60,6 +60,9 @@ class JniAuditTests(unittest.TestCase):
     def test_present(self):
         self.check(CHECK.ALWAYS)
 
+    def test_removed_voice_bridge_class_fails(self):
+        self.check(CHECK.ALWAYS - {"expo/modules/persaivoice/PersaiVoiceActivityModule"}, missing="PersaiVoiceActivityModule")
+
     def test_removed_tesseract_class_fails(self):
         self.check(CHECK.ALWAYS - {"com/googlecode/tesseract/android/TessBaseAPI"}, missing="TessBaseAPI")
 
