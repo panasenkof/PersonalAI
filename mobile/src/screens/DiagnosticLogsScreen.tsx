@@ -149,7 +149,7 @@ export function DiagnosticLogsScreen() {
     <View style={{ gap: 9 }}>
       <Text accessibilityRole="header" style={{ color: t.text, fontSize: 20, fontWeight: "700" }}>Сбои Android ({crashes.length})</Text>
       <Text style={{ color: t.muted, lineHeight: 20 }}>
-        Системная история аварийных завершений и зависаний за последние 7 дней. Записи доступны после повторного запуска PersAI. Ничего не отправляется автоматически.
+        История вылетов и зависаний Android за последние 7 дней. Для новых Java-сбоев приложение также пытается сохранить стек ошибки в приватном хранилище. Доступно после повторного запуска; отправка — только вручную.
       </Text>
       {!crashAvailable ? <Text style={{ color: t.muted }}>Системная диагностика недоступна в этой сборке или на устройстве.</Text> :
         crashes.length === 0 ? <Text style={{ color: t.muted }}>Недавних сбоев не обнаружено.</Text> : crashes.map(crash =>
