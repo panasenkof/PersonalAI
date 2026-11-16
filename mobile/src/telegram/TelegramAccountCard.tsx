@@ -67,7 +67,8 @@ export function TelegramAccountCard({profile,apiConfigured}:{
   // Only a real auth-step change may discard the current keyboard draft.
   function applyAuthState(next:TelegramAccountState){
     const nextStep=stepFor(next);
-    if(activeStep.current!==nextStep){activeStep.current=nextStep;setValue("");}
+    if(activeStep.current!==nextStep){activeStep.current=nextStep;setValue("");setNotice("");}
+    if(next==="authorizationStateReady")setNotice("");
     setState(next);
   }
   useEffect(()=>{
@@ -94,15 +95,15 @@ export function TelegramAccountCard({profile,apiConfigured}:{
       void markTelegramAuthorized(profile).catch(()=>{});
     }
   },[profile,state]);
-  async function run(action:()=>Promise<TelegramAccountState>,message:string,clearOnSuccess=false){
+  async function run(action:()=>Promise<TelegramAccountState>,message:string){
     if(running.current)return;
     const current=version.current;
     running.current=true;setSaving(true);setError("");setNotice("");
     try{
       const next=await action();
       if(version.current===current){
-        applyAuthState(next);setNotice(message);
-        if(clearOnSuccess)setValue("");
+        applyAuthState(next);
+        if(next!=="authorizationStateReady")setNotice(message);
       }
     }catch(e){
       if(version.current===current)setError(telegramAccountError(e));
@@ -152,7 +153,7 @@ export function TelegramAccountCard({profile,apiConfigured}:{
         </Text>:null}
         <NebulaAction icon="check" label="Продолжить вход"
           disabled={saving||!value.trim()}
-          onPress={()=>void run(()=>completeTelegramAuthorization(step,value),"Данные отправлены в Telegram.",true)}/>
+          onPress={()=>void run(()=>completeTelegramAuthorization(step,value),"Данные отправлены в Telegram.")}/>
       </View>:null}
       {[
         "authorizationStateWaitPhoneNumber","authorizationStateWaitCode",
