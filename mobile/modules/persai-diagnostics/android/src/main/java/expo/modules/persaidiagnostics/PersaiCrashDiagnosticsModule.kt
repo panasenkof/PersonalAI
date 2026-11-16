@@ -9,8 +9,9 @@ import expo.modules.kotlin.modules.ModuleDefinition
 import java.io.ByteArrayOutputStream
 
 /**
- * Read-only system exit history. No crash handler, network, background upload,
- * or duplicate log store. Binary tombstones are exported only on explicit tap.
+ * Existing read-only Android exit-history UI, with one app-private Java stack
+ * fallback for system reports without traces. No network/upload or log archive.
+ * Binary tombstones and saved Java stacks are exported only on explicit tap.
  */
 class PersaiCrashDiagnosticsModule : Module() {
   private fun recentCrashes(): List<ApplicationExitInfo> {
