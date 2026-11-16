@@ -140,7 +140,7 @@ export function TelegramSavedImportCard({profile}:{profile:string}){
       const result=await listSavedTopics(profile);
       if(generation.current===version){
         setTopics(result);
-        setTopicsStatus("Показано подборок: "+result.length+". Это только список источников, заметки ещё не импортированы.");
+        setTopicsStatus("Показано подборок: "+result.length+". Обновление списка источников не импортирует сообщения.");
       }
     }catch{
       if(generation.current===version)setError(
