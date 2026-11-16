@@ -101,3 +101,15 @@ test("native crash appears locally but export starts only after explicit sharing
   await waitFor(() => expect(shareAndroidCrashReport).toHaveBeenCalledTimes(1));
   expect((shareAndroidCrashReport as jest.Mock).mock.calls[0][0]).toEqual(crash);
 });
+
+test("Java crashes remain visible and export only upon explicit tap", async () => {
+  const crash = { timestamp: 1794805594441, reason: "java", status: 0, importance: 100, description: "crash" };
+  (recentAndroidCrashes as jest.Mock).mockReturnValue([crash]);
+  const view = render(<DiagnosticLogsScreen />);
+  await waitFor(() => view.getByText("Сбои Android (1)"));
+  expect(view.getByText(/Ошибка Java/)).toBeTruthy();
+  expect(shareAndroidCrashReport).not.toHaveBeenCalled();
+  fireEvent.press(view.getByLabelText("Поделиться отчётом Android " + crash.timestamp));
+  await waitFor(() => expect(shareAndroidCrashReport).toHaveBeenCalledTimes(1));
+  expect((shareAndroidCrashReport as jest.Mock).mock.calls[0][0]).toEqual(crash);
+});
