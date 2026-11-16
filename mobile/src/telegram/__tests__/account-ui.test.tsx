@@ -133,3 +133,18 @@ test("timed-out phone submission does not silently erase the entered number",asy
  await waitFor(()=>ui.getByText(/25 секунд/));
  expect(ui.getByLabelText("Телефон с кодом страны").props.value).toBe("+79161234567");
 });
+
+
+test("successful same-step response does not erase an in-progress 2FA field",async()=>{
+ (tdlibAvailable as jest.Mock).mockReturnValue(true);
+ (tdlibAccountState as jest.Mock).mockReturnValue("authorizationStateWaitPassword");
+ (completeTelegramAuthorization as jest.Mock).mockResolvedValueOnce("authorizationStateWaitPassword");
+ const ui=render(<TelegramAccountCard profile="guest" apiConfigured/>);
+ fireEvent.changeText(ui.getByLabelText("Пароль двухэтапной защиты"),"sample-password");
+ fireEvent.press(ui.getByText("Продолжить вход"));
+ await waitFor(()=>expect(completeTelegramAuthorization).toHaveBeenCalledWith("password","sample-password"));
+ await waitFor(()=>expect(ui.getByLabelText("Пароль двухэтапной защиты").props.editable).toBe(true));
+ expect(ui.getByLabelText("Пароль двухэтапной защиты").props.value).toBe("sample-password");
+ act(()=>onAuth("authorizationStateReady"));
+ await waitFor(()=>expect(ui.queryByText("Данные отправлены в Telegram.")).toBeNull());
+});
