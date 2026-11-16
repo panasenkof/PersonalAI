@@ -6,6 +6,8 @@
 -keep class com.googlecode.tesseract.android.** { *; }
 -keep class expo.modules.persaidiagnostics.** { *; }
 -keep class expo.modules.persaipdf.** { *; }
+# The only system Google ASR Activity result bridge (never serialize OEM extras).
+-keep class expo.modules.persaivoice.** { *; }
 # Opt-in Kotlin 2.4 vision engine and its JNI-bound runtime.
 # The R8 smoke detected removal of VisionInteropApi (the Kotlin 2.4 AAR Java ABI).
 -keep class com.persai.visionsdkprobe.VisionInteropApi { *; }
