@@ -1,44 +1,52 @@
-import * as IntentLauncher from "expo-intent-launcher";
+import { requireOptionalNativeModule } from "expo-modules-core";
 import { launchAndroidVoiceActivity, parseAndroidVoiceActivityResult } from "../media/android-voice-activity";
 
-jest.mock("expo-intent-launcher", () => ({
-  startActivityAsync: jest.fn(),
+jest.mock("expo-modules-core", () => ({
+  requireOptionalNativeModule: jest.fn(),
 }));
+const mockModule = { launchAsync: jest.fn() };
 
-beforeEach(() => { jest.clearAllMocks(); });
-
-test("Android RecognizerIntent returns the first non-empty recognized phrase", () => {
-  expect(parseAndroidVoiceActivityResult({
-    resultCode: -1,
-    extra: { "android.speech.extra.RESULTS": ["  ", "  купить продукты  ", "купить"] },
-  })).toEqual({ status: "recognized", transcript: "купить продукты" });
+beforeEach(() => {
+  jest.clearAllMocks();
+  (requireOptionalNativeModule as jest.Mock).mockReturnValue(mockModule);
 });
 
-test("canceled Activity is not treated as no speech and never reads returned extras", () => {
+test("typed Android RecognizerIntent returns only a recognized Russian phrase", () => {
   expect(parseAndroidVoiceActivityResult({
-    resultCode: 0,
-    extra: { "android.speech.extra.RESULTS": ["не должен сохраниться"] },
-  })).toEqual({ status: "canceled" });
+    status: "recognized", transcript: "  привет  ",
+  })).toEqual({ status: "recognized", transcript: "привет" });
 });
 
-test("missing or malformed result cannot inject text into the user's draft", () => {
-  for (const extra of [undefined, {}, { "android.speech.extra.RESULTS": "text" },
-    { "android.speech.extra.RESULTS": [42, null, " "] }]) {
-    expect(parseAndroidVoiceActivityResult({ resultCode: -1, extra })).toEqual({ status: "empty" });
+test("canceled system dialog cannot write to a draft", () => {
+  expect(parseAndroidVoiceActivityResult({ status: "canceled", transcript: "ignore" }))
+    .toEqual({ status: "canceled" });
+});
+
+test("empty recognition does not invent a transcript", () => {
+  expect(parseAndroidVoiceActivityResult({ status: "empty", transcript: "" }))
+    .toEqual({ status: "empty" });
+});
+
+test("malformed or OEM extras cannot inject data into a draft", () => {
+  for (const data of [undefined, null, {}, { status: "recognized", transcript: 12 },
+    { status: "recognized", transcript: "" }, { status: "other", transcript: "bad" }]) {
+    expect(() => parseAndroidVoiceActivityResult(data)).toThrow("invalid_android_voice_activity_result");
   }
 });
 
-test("Google system dictation opens Android implicit recognition Activity with Russian and online mode", async () => {
-  (IntentLauncher.startActivityAsync as jest.Mock).mockResolvedValue({
-    resultCode: -1, extra: { "android.speech.extra.RESULTS": ["Привет"] },
-  });
+test("Google system dictation invokes PersAI's typed native result bridge, not generic expo-intent-launcher", async () => {
+  mockModule.launchAsync.mockResolvedValue({ status: "recognized", transcript: "Привет" });
   expect(await launchAndroidVoiceActivity()).toEqual({ status: "recognized", transcript: "Привет" });
-  expect(IntentLauncher.startActivityAsync).toHaveBeenCalledWith("android.speech.action.RECOGNIZE_SPEECH", {
-    extra: {
-      "android.speech.extra.LANGUAGE_MODEL": "free_form",
-      "android.speech.extra.LANGUAGE": "ru-RU",
-      "android.speech.extra.PREFER_OFFLINE": false,
-      "android.speech.extra.MAX_RESULTS": 1,
-    },
-  });
+  expect(requireOptionalNativeModule).toHaveBeenCalledWith("PersaiVoiceActivity");
+  expect(mockModule.launchAsync).toHaveBeenCalledTimes(1);
+});
+
+test("missing native bridge is a recoverable JS error instead of a silent ASR fallback", async () => {
+  (requireOptionalNativeModule as jest.Mock).mockReturnValue(null);
+  await expect(launchAndroidVoiceActivity()).rejects.toThrow("persai_voice_activity_module_unavailable");
+});
+
+test("native recognition rejection propagates as a recoverable error", async () => {
+  mockModule.launchAsync.mockRejectedValue(new Error("E_VOICE_RESULT"));
+  await expect(launchAndroidVoiceActivity()).rejects.toThrow("E_VOICE_RESULT");
 });
