@@ -2,6 +2,7 @@ import { requireOptionalNativeModule } from "expo-modules-core";
 import { launchAndroidVoiceActivity, parseAndroidVoiceActivityResult } from "../media/android-voice-activity";
 
 jest.mock("expo-modules-core", () => ({
+  ...jest.requireActual("expo-modules-core"),
   requireOptionalNativeModule: jest.fn(),
 }));
 const mockModule = { launchAsync: jest.fn() };
