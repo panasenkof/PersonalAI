@@ -26,6 +26,8 @@ export function TelegramSavedImportCard({profile}:{profile:string}){
   const [historyStatus,setHistoryStatus]=useState("");
   const [historyLoaded,setHistoryLoaded]=useState(false);
   const [topics,setTopics]=useState<TelegramSavedTopic[]|null>(null);
+  const [topicsLoading,setTopicsLoading]=useState(false);
+  const [topicsStatus,setTopicsStatus]=useState("");
   const [selectedTopic,setSelectedTopic]=useState<TelegramSavedTopic|null>(null);
   const running=useRef(false),generation=useRef(0);
   const activeImport=useRef<AbortController|null>(null);
@@ -46,7 +48,7 @@ export function TelegramSavedImportCard({profile}:{profile:string}){
     }).catch(()=>{
       if(generation.current===version){setHistoryLoaded(true);setError("Не удалось прочитать позицию импорта Telegram.");}
     });
-    setTopics(null);setSelectedTopic(null);
+    setTopics(null);setSelectedTopic(null);setTopicsLoading(false);setTopicsStatus("");
     return()=>{
       generation.current++;
       activeImport.current?.abort();
@@ -132,17 +134,20 @@ export function TelegramSavedImportCard({profile}:{profile:string}){
   }
   async function showTopics(){
     if(running.current)return;
-    running.current=true;setBusy(true);setError("");
+    running.current=true;setBusy(true);setTopicsLoading(true);setTopicsStatus("");setError("");
     const version=generation.current;
     try{
       const result=await listSavedTopics(profile);
-      if(generation.current===version)setTopics(result);
+      if(generation.current===version){
+        setTopics(result);
+        setTopicsStatus("Показано подборок: "+result.length+". Это только список источников, заметки ещё не импортированы.");
+      }
     }catch{
       if(generation.current===version)setError(
         "Не удалось получить подборки Telegram. Проверьте вход и попробуйте ещё раз.");
     }finally{
       running.current=false;
-      if(generation.current===version)setBusy(false);
+      if(generation.current===version){setBusy(false);setTopicsLoading(false);}
     }
   }
   function chooseTopic(value:TelegramSavedTopic|null){
@@ -179,6 +184,12 @@ export function TelegramSavedImportCard({profile}:{profile:string}){
     </Text>
     <NebulaAction icon="layers" label={topics===null?"Показать подборки":"Загрузить ещё подборки"}
       disabled={busy} onPress={()=>void showTopics()}/>
+    {topicsLoading?<Text accessibilityLiveRegion="polite" style={{color:t.muted,...nebulaTypography.label}}>
+      Получаю список подборок Telegram…
+    </Text>:null}
+    {topicsStatus?<Text accessibilityLiveRegion="polite" style={{color:t.muted,...nebulaTypography.label}}>
+      {topicsStatus}
+    </Text>:null}
     {topics!==null?<View style={{gap:nebulaSpacing.xs}}>
       <Text style={{color:t.muted,...nebulaTypography.label}}>
         Telegram группирует пересылки по источнику — это не разделы PersAI.
@@ -191,6 +202,24 @@ export function TelegramSavedImportCard({profile}:{profile:string}){
       </Text>
       {topics.map(topic=><NebulaAction key={topic.id} size="compact" icon="folder"
         label={(selectedTopic?.id===topic.id?"● ":"○ ")+topicLabel(topic)} disabled={busy} onPress={()=>chooseTopic(topic)}/>)}
+    </View>:null}
+    <Text style={{color:t.muted,...nebulaTypography.label}}>
+      Чтобы сохранить сообщения в PersAI, нажмите одну из кнопок импорта ниже.
+      Просмотр и выбор подборок сами по себе ничего не сохраняют.
+    </Text>
+    {busy?<View style={{gap:nebulaSpacing.xs}}>
+      <Text accessibilityLiveRegion="polite" style={{color:t.muted}}>
+        {cancelRequested
+          ? "Останавливаю после текущего запроса TDLib…"
+          : fullRunning
+          ? "Импортирую историю с сохранением позиции после каждой страницы…"
+          : "Читаю «Избранное» и сохраняю оригиналы…"}
+      </Text>
+      {!cancelRequested?<NebulaAction icon="x" size="compact"
+        label={fullRunning?"Остановить":"Отменить импорт Telegram"} onPress={()=>{
+          activeImport.current?.abort();
+          setCancelRequested(true);
+        }}/>:null}
     </View>:null}
     <NebulaAction icon="layers" label="Импортировать всю историю"
       disabled={busy||!historyLoaded} onPress={()=>void importFullHistory(false)}/>
@@ -221,20 +250,6 @@ export function TelegramSavedImportCard({profile}:{profile:string}){
       {result.pendingAlbum?" Альбом из "+result.pendingAlbum+" элементов ожидает завершения. Повторите импорт позже — эти файлы не пропущены.":""}
       {done?" Больше сообщений в этом диапазоне нет.":""}
     </Text>:null}
-    {busy?<View style={{gap:nebulaSpacing.xs}}>
-      <Text accessibilityLiveRegion="polite" style={{color:t.muted}}>
-        {cancelRequested
-          ? "Останавливаю после текущего запроса TDLib…"
-          : fullRunning
-          ? "Импортирую историю с сохранением позиции после каждой страницы…"
-          : "Читаю «Избранное» и сохраняю оригиналы…"}
-      </Text>
-      {!cancelRequested?<NebulaAction icon="x" size="compact"
-        label={fullRunning?"Остановить":"Отменить импорт Telegram"} onPress={()=>{
-          activeImport.current?.abort();
-          setCancelRequested(true);
-        }}/>:null}
-    </View>:null}
     {error?<Text accessibilityRole="alert" style={{color:t.err}}>{error}</Text>:null}
   </View>;
 }
