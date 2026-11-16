@@ -22,23 +22,19 @@ internal object PersaiJavaCrashCapture {
   private const val FILENAME = "persai-pending-java-crash.txt"
   private const val TEMP_FILENAME = "persai-pending-java-crash.tmp"
   private const val MAX_STACK_CHARS = 32_768
-  private const val MAX_FILE_BYTES = 80_000
+  private const val MAX_FILE_BYTES = 120_000
   private const val RETENTION_MS = 7L * 24 * 60 * 60 * 1000
   private const val MATCH_WINDOW_MS = 120_000L
 
   internal data class CapturedStack(val bytes: ByteArray, val truncated: Boolean)
-  private var installed = false
-
   @Synchronized
   fun install(context: Context) {
-    if (installed) return
+    // A framework may replace its default handler after module initialization.
+    // Recheck the live handler when Diagnostics is opened; do not stack our own
+    // wrapper repeatedly when it is already the current default.
     val current = Thread.getDefaultUncaughtExceptionHandler()
-    if (current is RecordingHandler) {
-      installed = true
-      return
-    }
+    if (current is RecordingHandler) return
     Thread.setDefaultUncaughtExceptionHandler(RecordingHandler(context.applicationContext, current))
-    installed = true
   }
 
   private class RecordingHandler(
