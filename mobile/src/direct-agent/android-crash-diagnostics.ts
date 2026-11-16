@@ -56,8 +56,9 @@ export async function shareAndroidCrashReport(crash: AndroidCrash, buildSha?: st
       (report as { timestamp?: unknown }).timestamp !== checked.timestamp) {
     throw new Error("invalid_system_crash_report");
   }
-  // Keep raw system trace as opaque base64. On Android 12+ it is protobuf,
-  // not a text stack trace; recipients can decode it with Android tooling.
+  // Keep native tombstone protobuf and Java-uncaught UTF-8 fallback as opaque
+  // Base64. The native report identifies the source and format; never assume
+  // Android provides Java stacks via ApplicationExitInfo.traceInputStream.
   const raw = report as Record<string, unknown>;
   if (typeof raw.traceBase64 !== "string" || raw.traceBase64.length > 350000) {
     throw new Error("invalid_system_crash_trace");

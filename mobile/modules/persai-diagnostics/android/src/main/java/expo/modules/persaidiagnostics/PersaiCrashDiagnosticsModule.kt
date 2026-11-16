@@ -9,13 +9,15 @@ import expo.modules.kotlin.modules.ModuleDefinition
 import java.io.ByteArrayOutputStream
 
 /**
- * Read-only system exit history. No crash handler, network, background upload,
- * or duplicate log store. Binary tombstones are exported only on explicit tap.
+ * Existing read-only Android exit-history UI, with one app-private Java stack
+ * fallback for system reports without traces. No network/upload or log archive.
+ * Binary tombstones and saved Java stacks are exported only on explicit tap.
  */
 class PersaiCrashDiagnosticsModule : Module() {
   private fun recentCrashes(): List<ApplicationExitInfo> {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return emptyList()
     val context = appContext.reactContext ?: return emptyList()
+    PersaiJavaCrashCapture.install(context)
     val manager = context.getSystemService(ActivityManager::class.java) ?: return emptyList()
     return manager.getHistoricalProcessExitReasons(context.packageName, 0, 32)
       .filter {
@@ -40,6 +42,9 @@ class PersaiCrashDiagnosticsModule : Module() {
 
   override fun definition() = ModuleDefinition {
     Name("PersaiCrashDiagnostics")
+
+    // Register when the Expo module starts; Java failures after startup are captured.
+    OnCreate { appContext.reactContext?.let { context -> PersaiJavaCrashCapture.install(context) } }
 
     Function("recentCrashes") { limit: Int ->
       recentCrashes().take(limit.coerceIn(1, 10)).map { fields(it) }
@@ -75,12 +80,24 @@ class PersaiCrashDiagnosticsModule : Module() {
         // Exit metadata remains useful if Android purged the global tombstone.
         truncated = true
       }
+      // Java REASON_CRASH rarely includes an Android system trace. For a matching
+      // PID and exit timestamp, use our single private, bounded uncaught stack.
+      val systemBytes = bytes.toByteArray()
+      val fallback = if (systemBytes.isEmpty() && info.reason == ApplicationExitInfo.REASON_CRASH)
+        appContext.reactContext?.let { context -> PersaiJavaCrashCapture.readFor(context, info) }
+        else null
+      val exported = fallback?.bytes ?: systemBytes
       fields(info) + mapOf(
-        "format" to if (info.reason == ApplicationExitInfo.REASON_CRASH_NATIVE &&
-          Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) "android-native-tombstone-protobuf" else "system-trace",
-        "traceBase64" to Base64.encodeToString(bytes.toByteArray(), Base64.NO_WRAP),
-        "traceTruncatedOrUnavailable" to truncated,
-        "traceAvailable" to (bytes.size() > 0)
+        "format" to when {
+          fallback != null -> "java-stack-utf8"
+          info.reason == ApplicationExitInfo.REASON_CRASH_NATIVE &&
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> "android-native-tombstone-protobuf"
+          else -> "system-trace"
+        },
+        "traceSource" to if (fallback != null) "persai-java-uncaught" else "android-system",
+        "traceBase64" to Base64.encodeToString(exported, Base64.NO_WRAP),
+        "traceTruncatedOrUnavailable" to (if (fallback != null) fallback.truncated else truncated || exported.isEmpty()),
+        "traceAvailable" to exported.isNotEmpty()
       )
     }
   }

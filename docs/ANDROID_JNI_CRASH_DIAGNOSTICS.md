@@ -67,3 +67,62 @@ maintenance action, no new chat dispatcher.
   rule and retained the Expo vision bridge package. Subsequent exact-head
   minified artifact must pass the same proof before merge; earlier green
   non-minified artifacts do not count.
+
+## Java crash trace follow-up (16 Nov 2026)
+
+Three actual `ApplicationExitInfo` exports from signed build
+`439f60f510e0faf6e8aa9e1a317a2cff50a60d34` were reviewed:
+
+- 2026-11-11 20:46:33 MSK — `REASON_CRASH`, no trace.
+- 2026-11-16 08:04:19 MSK — `REASON_CRASH`, no trace.
+- 2026-11-16 08:06:34 MSK — `REASON_CRASH`, no trace (the reporter
+  confirmed this one happened after enabling the diagnostic switches).
+
+None contains an exception class, stack, cause or evidence of R8/JNI removal.
+The opt-in `DiagnosticLogsScreen` switches control chat JSONL instrumentation
+and cannot recover a Java fatal exception once the process dies.
+
+Android documents `ApplicationExitInfo.getTraceInputStream()` as typically
+available for ANR, and on API 31+ for native crash tombstones, **not** as a
+reliable Java stack source. Empty traces in all three reports are therefore
+expected and cannot establish the crash root cause.
+
+### New fallback capture, preserving original diagnostics design
+
+- The **existing** `PersaiCrashDiagnostics` Expo module registers a
+  bounded uncaught-Java handler on module initialization; it always delegates
+  the original exception to Android's previous default handler.
+- Stores **one pending stack only** (up to 32,768 UTF-16 characters) inside
+  `noBackupFilesDir`; atomic replace, bounded size, seven-day expiry, no
+  analytics, no background upload, no extra UI and no long-running archive.
+  This file may contain private data and is shared only when the user taps
+  the existing Android crash report row.
+- On report export, only for Java `REASON_CRASH` and if the Android system
+  trace is empty, matches the saved stack to `ApplicationExitInfo` by
+  **process PID and timestamp** (within two minutes). A matched stack is
+  exported as UTF-8 bytes in `traceBase64`, with
+  `format: "java-stack-utf8"` and `traceSource: "persai-java-uncaught"`.
+  `traceAvailable` is accurate; absent native/system traces are flagged
+  as unavailable rather than incorrectly reported untruncated.
+- Android ANR traces and native protobuf tombstones remain untouched.
+  If the crash occurs before module setup, during hard termination, if
+  filesystem write fails, or a different handler bypasses the chain,
+  fallback can still be unavailable. Past three crashes cannot be
+  recovered retroactively.
+
+### Acceptance requirements for next signed APK (physical device)
+
+1. Verify unchanged app ID, backup/data retention, no automatic telemetry,
+   correct native R8 keep rules and CI APK JNI class audit.
+2. In a **disposable QA build**, trigger an intentionally controlled Java
+   exception after the module initialized. Restart and confirm the matching
+   `ApplicationExitInfo` report exports a nonempty Java stack with
+   `format: java-stack-utf8`, exact matching PID and provenance. Confirm
+   original uncaught exception handling still terminates the process.
+3. Verify crash row export requires explicit user action and does not
+   attach stale/other-process stacks; verify bounded size and seven-day
+   retention, native tombstones and ANR traces.
+4. On the real phone, reproduce only the normal user flow that actually
+   crashes (do not inject an artificial crash). Attach the **new** JSON
+   containing `traceBase64`, and check `format` and `traceSource`.
+   Older empty reports from build `439f60f` are not diagnostic enough.
