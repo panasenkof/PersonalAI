@@ -17,6 +17,10 @@
 
 Read canonical full Russian wording in [PLAN.md](PLAN.md#обязательное-правило-реализации-каждого-этапа-и-пакета-решение-владельца-06112026) and gates in [docs/DEVELOPMENT_GATES.md](docs/DEVELOPMENT_GATES.md). Apply this cycle to each future step, not only UI PRs.
 
+## External engineering references (reference only, 17 November 2026)
+
+For substantial agent architecture, UI, native Android, migration, and verification work, consult the **relevant** entries in [external engineering references](docs/references/README.md). The requested [Claude Code verification article and PersAI-specific mapping](docs/references/VERIFICATION_GUIDANCE.md) cover E2E, property-based, differential checks and evidence independence. Do not read all references for trivial changes. **These are recommendations, not a second roadmap, a change to the owner's six-step delivery cycle, or a replacement for actual CI, APK and physical QA evidence.** Existing PLAN.md, OpenSpec, approved owner decisions, privacy and architecture gates retain priority.
+
 ## Current product direction and archive policy (owner decision 06 November 2026)
 
 - **Step 8 CLOSED at owner's request.** №73 is code-closed, but physical PASS is limited to documented Android runs. By owner decision 12 November 2026, the current order is targeted QA-9 → ARCH-0…ARCH-4 → ARCH-6 → S9-1/S9-2 → stages 10–12; Telegram physical acceptance and ARCH-7 are deferred until PersAIApp API registration. The sole authoritative queue is PLAN.md §2. The completed step-8 work does not imply new physical PASS. Address newly reproduced regressions only; do not re-run historical acceptance as a new development stage.

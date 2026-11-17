@@ -40,6 +40,8 @@ npx expo start                       # только интерфейс; памя
 
 Перед раздачей сборки пройдите [приёмку на телефоне](docs/DEVICE_QA.md): автоматические проверки имитируют биометрию, SQLCipher и системные окна.
 
+Дополнительные инженерные источники: [внешние рекомендации OpenAI, Anthropic, Google и Android Developers](docs/references/README.md) и [применение статьи Claude Code о верификации к PersAI](docs/references/VERIFICATION_GUIDANCE.md). Это справочные материалы; обязательные правила разработки остаются в [AGENTS.md](AGENTS.md) и [docs/DEVELOPMENT_GATES.md](docs/DEVELOPMENT_GATES.md).
+
 ## План
 
 Текущий план, статус пунктов и следующие шаги — в [PLAN.md](PLAN.md). Подробные пояснения к пунктам плана (разбор источников, проектные решения, требования и задачи) — в [Plans/ASSISTANT_FEATURES.md](Plans/ASSISTANT_FEATURES.md). Требования к тому, что приложение умеет, и подробности реализуемых изменений — в [openspec/](openspec/) (формат [OpenSpec](https://github.com/Fission-AI/OpenSpec)). Каждый PR обновляет план.
