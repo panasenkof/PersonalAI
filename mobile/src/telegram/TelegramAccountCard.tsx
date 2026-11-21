@@ -63,17 +63,26 @@ export function TelegramAccountCard({profile,apiConfigured}:{
   const [saving,setSaving]=useState(false),[confirmLogout,setConfirmLogout]=useState(false);
   const [authorizedBefore,setAuthorizedBefore]=useState(false);
   const [error,setError]=useState(""),[notice,setNotice]=useState("");
-  const running=useRef(false),version=useRef(0);
+  const running=useRef(false),version=useRef(0),activeStep=useRef<Step|null>(null);
+  // Only a real auth-step change may discard the current keyboard draft.
+  function applyAuthState(next:TelegramAccountState){
+    const nextStep=stepFor(next);
+    if(activeStep.current!==nextStep){activeStep.current=nextStep;setValue("");setNotice("");}
+    if(next==="authorizationStateReady")setNotice("");
+    setState(next);
+  }
   useEffect(()=>{
     const current=++version.current;
     const supported=tdlibAvailable();
-    setNativeAvailable(supported);setState(tdlibAccountState());
+    const initialState=tdlibAccountState();
+    activeStep.current=stepFor(initialState);
+    setNativeAvailable(supported);setState(initialState);
     setValue("");setError("");setNotice("");setAuthorizedBefore(false);
     void wasTelegramAuthorized(profile).then(value=>{
       if(current===version.current)setAuthorizedBefore(value);
     }).catch(()=>{});
     const unsubscribe=observeTelegramAccountState(next=>{
-      if(current===version.current){setState(next);setValue("");setError("");}
+      if(current===version.current){applyAuthState(next);setError("");}
     });
     const lock=onLocalMemorySessionChange(unlocked=>{
       if(!unlocked && current===version.current){setValue("");setConfirmLogout(false);}
@@ -92,12 +101,15 @@ export function TelegramAccountCard({profile,apiConfigured}:{
     running.current=true;setSaving(true);setError("");setNotice("");
     try{
       const next=await action();
-      if(version.current===current){setState(next);setNotice(message);}
+      if(version.current===current){
+        applyAuthState(next);
+        if(next!=="authorizationStateReady")setNotice(message);
+      }
     }catch(e){
       if(version.current===current)setError(telegramAccountError(e));
     }finally{
       running.current=false;
-      if(version.current===current){setSaving(false);setValue("");}
+      if(version.current===current)setSaving(false);
     }
   }
   const step=stepFor(state);
@@ -129,7 +141,7 @@ export function TelegramAccountCard({profile,apiConfigured}:{
       </Text>:null}
       {step?<View style={{gap:nebulaSpacing.sm}}>
         <Text style={{color:t.text,...nebulaTypography.label}}>{labelFor[step]}</Text>
-        <TextInput accessibilityLabel={labelFor[step]} value={value}
+        <TextInput key={step} accessibilityLabel={labelFor[step]} value={value}
           onChangeText={setValue} editable={!saving}
           keyboardType={step==="phone"?"phone-pad":step==="email"?"email-address":
             step==="password"||step==="emailCode"?"default":"number-pad"}

@@ -223,3 +223,20 @@ test("checkpoint for another selected topic cannot be resumed from all Saved",as
   await waitFor(()=>expect(loadSavedHistoryCheckpoint).toHaveBeenCalledWith("guest"));
   expect(ui.queryByText("Продолжить с места остановки")).toBeNull();
 });
+
+
+test("loading Telegram topic filters is distinct from importing notes",async()=>{
+ let finish!:(topics:Array<{id:string;kind:string;isPinned:boolean;order:string}>)=>void;
+ (listSavedTopics as jest.Mock).mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
+ const ui=render(<TelegramSavedImportCard profile="guest"/>);
+ fireEvent.press(ui.getByText("Показать подборки"));
+ expect(ui.getByText("Получаю список подборок Telegram…")).toBeTruthy();
+ expect(importSavedTextPage).not.toHaveBeenCalled();
+ finish([{id:"17",kind:"savedMessagesTopicTypeMyNotes",isPinned:false,order:"1"}]);
+ await waitFor(()=>ui.getByText(/Показано подборок: 1/));
+ expect(ui.getByText(/Обновление списка источников не импортирует сообщения/)).toBeTruthy();
+ expect(importSavedTextPage).not.toHaveBeenCalled();
+ fireEvent.press(ui.getByText("Импортировать последние 20 сообщений"));
+ await waitFor(()=>expect(importSavedTextPage).toHaveBeenCalledTimes(1));
+ await waitFor(()=>ui.getByText(/Сохранено: 2/));
+});
